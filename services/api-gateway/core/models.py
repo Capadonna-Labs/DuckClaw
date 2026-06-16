@@ -20,6 +20,10 @@ class ChatRequest(BaseModel):
     # Nota: dejamos `message` por defecto para tolerar payloads parciales de integraciones
     # (evita errores 422 si falta el campo).
     message: str = Field("", description="Mensaje del usuario")
+    user_incoming: str | None = Field(
+        None,
+        description="Texto original del usuario cuando message incluye contexto inyectado.",
+    )
     chat_id: str | None = Field(
         None,
         description="ID del chat o grupo (thread_id); alias: session_id, thread_id, chatId",

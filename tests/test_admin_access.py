@@ -171,6 +171,7 @@ def test_seed_idempotent(gateway_db: Path) -> None:
 def test_admin_login_seeds_default_when_table_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_redis
 ) -> None:
+    from duckclaw import db_write_queue
     from duckclaw.gateway_db import GATEWAY_DB_ENV_KEYS
     from gateway_import import load_gateway_app
 
@@ -187,6 +188,16 @@ def test_admin_login_seeds_default_when_table_empty(
     finally:
         con.close()
 
+    command_types: list[str] = []
+    real_enqueue = db_write_queue.enqueue_typed_command
+
+    def spy_enqueue(command, *, db_path: str, user_id: str, queue_name: str = "duckdb_write_queue") -> str:
+        command_types.append(command.command_type)
+        return real_enqueue(command, db_path=db_path, user_id=user_id, queue_name=queue_name)
+
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
+    monkeypatch.setattr(db_write_queue, "enqueue_typed_command", spy_enqueue)
+
     client = TestClient(load_gateway_app())
     client.app.state.redis = session_redis
     r = client.post(
@@ -195,9 +206,15 @@ def test_admin_login_seeds_default_when_table_empty(
     )
     assert r.status_code == 200
     assert r.json()["user"]["email"] == "admin@duckclaw.local"
+    assert "upsert_console_user" in command_types
 
 
-def test_admin_login_ok(gateway_admin_client: TestClient, gateway_db: Path) -> None:
+def test_admin_login_ok(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     r = gateway_admin_client.post(
         "/api/v1/admin/auth/login",
         json={"email": "admin@test.local", "password": "secret123"},
@@ -209,7 +226,12 @@ def test_admin_login_ok(gateway_admin_client: TestClient, gateway_db: Path) -> N
     assert "session" in r.cookies
 
 
-def test_admin_login_fail(gateway_admin_client: TestClient, gateway_db: Path) -> None:
+def test_admin_login_fail(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     r = gateway_admin_client.post(
         "/api/v1/admin/auth/login",
         json={"email": "admin@test.local", "password": "wrongpass1"},

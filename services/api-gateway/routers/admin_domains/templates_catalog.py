@@ -2,8 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
+
+from duckclaw import db_write_queue
+from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.write_commands import (
+    DeactivateCatalogWorkerCommand,
+    HardDeleteCatalogWorkerCommand,
+    ReactivateCatalogWorkerCommand,
+    UpdateCatalogWorkerFileCommand,
+)
 
 router = APIRouter(prefix="/templates", tags=["admin-templates"])
 
@@ -21,6 +30,37 @@ class VaultBindingPutBody(BaseModel):
 class TemplateCreateBody(BaseModel):
     id: str = Field(..., min_length=1, max_length=64)
     source_template: str = Field(default="industries/business_standard")
+
+
+def _problem(status_code: int, title: str, detail: str) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={"type": "about:blank", "title": title, "status": status_code, "detail": detail},
+    )
+
+
+def _template_worker_id(worker_id: str) -> str:
+    wid = (worker_id or "").strip()
+    if not wid:
+        raise _problem(400, "worker_id requerido", "templates")
+    if wid == "default" or wid in {"entry_router", "manager_router"}:
+        raise _problem(403, "Plantilla protegida", wid)
+    return wid
+
+
+def _enqueue_template_catalog_command(command: Any) -> str:
+    task_id = db_write_queue.enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
+    command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
+    if command_status and command_status.status == "failed":
+        detail = command_status.detail or "template catalog write failed"
+        raise _problem(400, "Mutación de template rechazada por DB-writer", detail)
+    return task_id
+
+
+def _admin_audit(action: str, resource: str, detail: str, *, actor: str, task_id: str) -> None:
+    from routers import admin as admin_router
+
+    admin_router._admin_audit(action, resource, detail, actor=actor, meta={"task_id": task_id})
 
 
 def require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
@@ -67,14 +107,27 @@ async def put_template_file(
     body: FileWriteBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._put_template_file_impl(
-        worker_id=worker_id,
+    wid = _template_worker_id(worker_id)
+    command = UpdateCatalogWorkerFileCommand(
+        actor_email=actor,
+        worker_id=wid,
         file_path=file_path,
-        body=body,
-        actor=actor,
+        content=body.content,
     )
+    task_id = _enqueue_template_catalog_command(command)
+    _admin_audit(
+        "template.file.put",
+        f"templates/{wid}",
+        file_path,
+        actor=actor,
+        task_id=task_id,
+    )
+    return {
+        "ok": True,
+        "path": file_path,
+        "source": "catalog",
+        "task_id": task_id,
+    }
 
 
 @router.get("/{worker_id}/vault-options", dependencies=[Depends(require_admin_key)])
@@ -133,9 +186,17 @@ async def delete_template(
     worker_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._delete_template_impl(worker_id=worker_id, actor=actor)
+    wid = _template_worker_id(worker_id)
+    command = DeactivateCatalogWorkerCommand(actor_email=actor, worker_id=wid)
+    task_id = _enqueue_template_catalog_command(command)
+    _admin_audit(
+        "template.delete",
+        f"templates/{wid}",
+        "catalog_deactivate",
+        actor=actor,
+        task_id=task_id,
+    )
+    return {"ok": True, "id": wid, "action": "deactivated", "task_id": task_id}
 
 
 @router.post("/{worker_id}/reactivate", dependencies=[Depends(require_admin_key)])
@@ -143,9 +204,17 @@ async def reactivate_template(
     worker_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._reactivate_template_impl(worker_id=worker_id, actor=actor)
+    wid = _template_worker_id(worker_id)
+    command = ReactivateCatalogWorkerCommand(actor_email=actor, worker_id=wid)
+    task_id = _enqueue_template_catalog_command(command)
+    _admin_audit(
+        "template.reactivate",
+        f"templates/{wid}",
+        "catalog_reactivate",
+        actor=actor,
+        task_id=task_id,
+    )
+    return {"ok": True, "id": wid, "action": "reactivated", "task_id": task_id}
 
 
 @router.delete("/{worker_id}/hard-delete", dependencies=[Depends(require_admin_key)])
@@ -153,9 +222,17 @@ async def hard_delete_template(
     worker_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._hard_delete_template_impl(worker_id=worker_id, actor=actor)
+    wid = _template_worker_id(worker_id)
+    command = HardDeleteCatalogWorkerCommand(actor_email=actor, worker_id=wid)
+    task_id = _enqueue_template_catalog_command(command)
+    _admin_audit(
+        "template.hard_delete",
+        f"templates/{wid}",
+        "catalog_hard_delete",
+        actor=actor,
+        task_id=task_id,
+    )
+    return {"ok": True, "id": wid, "hard_deleted": True, "task_id": task_id}
 
 
 @router.post("/{worker_id}/validate", dependencies=[Depends(require_admin_key)])

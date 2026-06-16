@@ -22,9 +22,9 @@ SANDBOX_TOOL_NAMES = frozenset(
 STORAGE_IDENTITY_REQUEST = re.compile(
     r"\b("
     r"get_db_path|"
-    r"(nombre|ruta|path|archivo)\s+(de\s+)?(la\s+)?(db|duckdb|base\s+de\s+datos)|"
-    r"(qu[eé]|cu[aá]l)\s+(db|duckdb|base\s+de\s+datos)\s+(usas|usa|est[aá]s\s+usando|est[aá]\s+usando)|"
-    r"(db|duckdb|base\s+de\s+datos)\s+(en\s+uso|actual|activa)"
+    r"(nombre|ruta|path|archivo)\s+(de\s+|del\s+|de\s+la\s+|de\s+el\s+)?(db|bd|duckdb|base\s+de\s+datos)|"
+    r"(qu[eé]|cu[aá]l)\s+(db|bd|duckdb|base\s+de\s+datos)\s+(usas|usa|est[aá]s\s+usando|est[aá]\s+usando)|"
+    r"(db|bd|duckdb|base\s+de\s+datos)\s+(en\s+uso|actual|activa)"
     r")\b",
     re.IGNORECASE,
 )
@@ -37,6 +37,13 @@ SANDBOX_INTENT_REQUEST = re.compile(
     r")\b|https?://",
     re.IGNORECASE,
 )
+
+
+def tool_surface_intent_text(user_incoming: str | None, incoming: str | None) -> str:
+    """Return the user-authored turn text used for tool surface decisions."""
+
+    original = (user_incoming or "").strip()
+    return original or (incoming or "").strip()
 
 
 def explicit_storage_identity_request(text: str | None) -> bool:
@@ -56,8 +63,9 @@ def should_hide_storage_identity_tools(
     text = intent_text or incoming or ""
     if explicit_storage_identity_request(text):
         return False
-    if explicit_storage_request(text):
-        return False
+    # Keep the dependency in the signature so callers pass their DB-intent owner,
+    # but storage identity is narrower than general DB/schema intent.
+    del explicit_storage_request
     return True
 
 

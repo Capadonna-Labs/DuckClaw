@@ -22,8 +22,10 @@ from duckclaw.commands.chat_state import (
     _get_global_config as _get_global_config,
     _set_global_config as _set_global_config,
     _skip_runtime_ddl as _skip_runtime_ddl,
+    forget_chat_state_via_typed_command as forget_chat_state_via_typed_command,
     get_chat_state as get_chat_state,
     set_chat_state as set_chat_state,
+    set_chat_state_via_typed_command as set_chat_state_via_typed_command,
 )
 from duckclaw.commands.audit import (
     execute_audit as execute_audit,
@@ -887,23 +889,12 @@ def execute_skills_list(db: Any, chat_id: Any, args: str) -> str:
         return f"Error: {e}."
 
 
-def execute_forget(db: Any, chat_id: Any) -> str:
+def execute_forget(db: Any, chat_id: Any, *, tenant_id: Any = None) -> str:
     """/forget: borra historial de la conversación y reinicia estado."""
-    try:
-        cid = int(chat_id)
-        # Telegram: chat_id is numeric, use telegram_conversation
-        db.execute(f"DELETE FROM telegram_conversation WHERE chat_id = {cid}")
-    except (TypeError, ValueError):
-        # API gateway: session_id is string (e.g. "default"), use api_conversation
-        sid = str(chat_id).replace("'", "''")[:256]
-        try:
-            db.execute(f"DELETE FROM api_conversation WHERE session_id = '{sid}'")
-        except Exception:
-            pass  # Table may not exist if only Telegram used
-    try:
-        set_chat_state(db, chat_id, "last_audit", "")
-    except Exception:
-        pass
+    tid = str(tenant_id or "default").strip() or "default"
+    ok, err = forget_chat_state_via_typed_command(db, chat_id, tenant_id=tid)
+    if not ok:
+        return f"No se pudo borrar historial: {err}"
     if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() == "true":
         try:
             import langsmith
@@ -915,14 +906,37 @@ def execute_forget(db: Any, chat_id: Any) -> str:
 
 
 
-def execute_context_toggle(db: Any, chat_id: Any, on_off: str) -> str:
+def execute_context_toggle(
+    db: Any,
+    chat_id: Any,
+    on_off: str,
+    *,
+    tenant_id: Any = None,
+) -> str:
     """/context on|off: activa o desactiva inyección de memoria a largo plazo."""
+    tid = str(tenant_id or "default").strip() or "default"
     v = (on_off or "").strip().lower()
     if v in ("on", "1", "true", "sí", "si"):
-        set_chat_state(db, chat_id, "use_rag", "true")
+        ok, err = set_chat_state_via_typed_command(
+            db,
+            chat_id,
+            "use_rag",
+            "true",
+            tenant_id=tid,
+        )
+        if not ok:
+            return f"No se pudo actualizar contexto largo: {err}"
         return "✅ Contexto largo activado (más mensajes en historial)."
     if v in ("off", "0", "false"):
-        set_chat_state(db, chat_id, "use_rag", "false")
+        ok, err = set_chat_state_via_typed_command(
+            db,
+            chat_id,
+            "use_rag",
+            "false",
+            tenant_id=tid,
+        )
+        if not ok:
+            return f"No se pudo actualizar contexto largo: {err}"
         return "✅ Contexto largo desactivado (solo historial reciente)."
     current = get_chat_state(db, chat_id, "use_rag")
     return (
@@ -1181,9 +1195,9 @@ def _dispatch_fly_command(
     if name == "skills":
         return execute_skills_list(db, chat_id, args)
     if name == "forget":
-        return execute_forget(db, chat_id)
+        return execute_forget(db, chat_id, tenant_id=tenant_id)
     if name == "context":
-        return execute_context_toggle(db, chat_id, args)
+        return execute_context_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name == "comfyui":
         return execute_comfyui_provider(db, chat_id, args)
     if name in ("sandbox", "sandox"):

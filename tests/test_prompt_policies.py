@@ -98,6 +98,42 @@ def test_prompt_policy_resolver_fails_when_active_policy_missing() -> None:
         PromptPolicyResolver(db=con).load("directive", "tool_choice_generic")
 
 
+def test_prompt_policy_health_reports_missing_active_requirements() -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies.health import (
+        PromptPolicyRequirement,
+        missing_prompt_policies,
+    )
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    _seed_policy(con, "system_prompt", "present_worker", "contenido activo")
+    _seed_policy(
+        con,
+        "capability",
+        "inactive_capability",
+        "contenido inactivo",
+        status="inactive",
+        active=False,
+    )
+
+    missing = missing_prompt_policies(
+        con,
+        [
+            PromptPolicyRequirement("system_prompts", "present_worker", "catalog"),
+            PromptPolicyRequirement("capabilities", "inactive_capability", "manager"),
+            PromptPolicyRequirement("capability", "generic_worker", "manager"),
+        ],
+    )
+
+    assert missing == [
+        PromptPolicyRequirement("capability", "inactive_capability", "manager"),
+        PromptPolicyRequirement("capability", "generic_worker", "manager"),
+    ]
+
+
 def test_prompt_policy_registry_tables_exist() -> None:
     import duckdb
 

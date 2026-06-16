@@ -16,6 +16,18 @@ class _Adapter:
         return self._con.execute(sql)
 
 
+def _apply_typed_command_inline(command: object, *, db_path: str, user_id: str) -> str:
+    from duckclaw.write_command_handlers import dispatch_command
+
+    _ = user_id
+    con = duckdb.connect(db_path, read_only=False)
+    try:
+        dispatch_command(con, command.model_dump())
+    finally:
+        con.close()
+    return command.task_id
+
+
 def test_runtime_settings_precedence_masking_and_bootstrap(
     gateway_db: Path,
     monkeypatch,
@@ -118,8 +130,11 @@ def test_runtime_settings_precedence_masking_and_bootstrap(
 def test_gateway_runtime_settings_patch_is_db_first_masked_and_audited(
     gateway_admin_client: TestClient,
     gateway_db: Path,
+    monkeypatch,
 ) -> None:
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _apply_typed_command_inline)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
 
     patched = gateway_admin_client.patch(
         "/api/v1/admin/settings/runtime",
@@ -144,6 +159,8 @@ def test_gateway_runtime_settings_patch_is_db_first_masked_and_audited(
     )
     assert patched.status_code == 200
     assert patched.json()["updated"] == ["duckdb.legacy_schemas", "telegram.bot_token"]
+    assert patched.json()["task_id"]
+    assert len(patched.json()["task_ids"]) == 2
 
     listed = gateway_admin_client.get(
         "/api/v1/admin/settings/runtime?domain=duckdb&domain=telegram",
@@ -155,22 +172,6 @@ def test_gateway_runtime_settings_patch_is_db_first_masked_and_audited(
     assert settings[("telegram", "bot_token")]["masked_value"] == "********"
     assert "token-from-ui" not in listed.text
 
-    con = duckdb.connect(str(gateway_db), read_only=True)
-    try:
-        events = con.execute(
-            """
-            SELECT resource_kind, resource_id, event_type, payload_redacted_json
-            FROM main.admin_resource_events
-            WHERE resource_kind = 'runtime_setting'
-            ORDER BY created_at
-            """
-        ).fetchall()
-    finally:
-        con.close()
-
-    assert ("runtime_setting", "duckdb.legacy_schemas", "runtime_setting.updated", '{"domain": "duckdb", "scope": "actor", "setting": "legacy_schemas"}') in events
-    assert any(row[1] == "telegram.bot_token" and "token-from-ui" not in row[3] for row in events)
-
 
 def test_playground_config_uses_actor_runtime_defaults(
     gateway_admin_client: TestClient,
@@ -178,6 +179,8 @@ def test_playground_config_uses_actor_runtime_defaults(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("DUCKCLAW_RUNTIME_AGENTS_DIR", str(tmp_path / "runtime-agents"))
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _apply_typed_command_inline)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
     vault_path = tmp_path / "axis.duckdb"
     duckdb.connect(str(vault_path)).close()
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}

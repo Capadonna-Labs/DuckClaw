@@ -331,7 +331,9 @@ def test_orchestrator_draft_does_not_hardcode_fake_skill_suggestions(
 def test_orchestrator_confirm_creates_project_workers_context_and_assignments(
     gateway_db: Path,
     gateway_admin_client,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     draft = {
         "project": {"name": "Soporte Tickets", "description": "Atiende casos con datos de soporte"},
         "workers": [
@@ -355,6 +357,7 @@ def test_orchestrator_confirm_creates_project_workers_context_and_assignments(
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is True
+    assert payload["task_id"]
     assert payload["project"]["name"] == "Soporte Tickets"
     assert payload["created"]["workers"][0]["worker_id"] == "ticket-support-agent"
 
@@ -499,10 +502,12 @@ def test_projects_attach_agents_and_list_only_actor_workspace(gateway_db: Path) 
 def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
     gateway_admin_client,
     gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import create_worker
 
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
     db = DuckClaw(str(gateway_db), read_only=False, engine="python")
     try:
@@ -521,6 +526,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
         json={"name": "Operación AXIS", "description": "Proyecto DB-first"},
     )
     assert created.status_code == 200
+    assert created.json()["task_id"]
     project = created.json()["project"]
     project_id = project["project_id"]
 
@@ -530,6 +536,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
         json={"worker_id": "axis-radar", "role": "coordinator", "sort_order": 10},
     )
     assert assigned.status_code == 200
+    assert assigned.json()["task_id"]
     assert assigned.json()["agent"]["worker_id"] == "axis-radar"
     assert assigned.json()["agent"]["role"] == "coordinator"
 
@@ -550,6 +557,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
         headers=headers,
     )
     assert removed.status_code == 200
+    assert removed.json()["task_id"]
 
     listed_after = gateway_admin_client.get(
         f"/api/v1/admin/workspace/projects/{project_id}/agents",
@@ -562,7 +570,10 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
         headers=headers,
     )
     assert deleted.status_code == 200
-    assert deleted.json() == {"ok": True, "hard_deleted": True, "project_id": project_id}
+    assert deleted.json()["ok"] is True
+    assert deleted.json()["hard_deleted"] is True
+    assert deleted.json()["project_id"] == project_id
+    assert deleted.json()["task_id"]
 
     projects_after = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
     assert projects_after.status_code == 200
@@ -597,7 +608,9 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
 def test_gateway_workspace_projects_support_search_sort_and_pagination(
     gateway_admin_client,
     gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
     names = ["FastAPI Academy", "Ticket Support", "FastAPI RAG"]
     for name in names:
@@ -635,7 +648,9 @@ def test_gateway_workspace_projects_support_search_sort_and_pagination(
 def test_gateway_workspace_projects_can_deactivate_reactivate_and_hard_delete(
     gateway_admin_client,
     gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
     created = gateway_admin_client.post(
         "/api/v1/admin/workspace/projects",
@@ -650,6 +665,7 @@ def test_gateway_workspace_projects_can_deactivate_reactivate_and_hard_delete(
         headers=headers,
     )
     assert deactivated.status_code == 200
+    assert deactivated.json()["task_id"]
     assert deactivated.json()["project"]["status"] == "inactive"
 
     active_list = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
@@ -671,6 +687,7 @@ def test_gateway_workspace_projects_can_deactivate_reactivate_and_hard_delete(
         headers=headers,
     )
     assert reactivated.status_code == 200
+    assert reactivated.json()["task_id"]
     assert reactivated.json()["project"]["status"] == "active"
 
     active_after = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
@@ -681,13 +698,17 @@ def test_gateway_workspace_projects_can_deactivate_reactivate_and_hard_delete(
         headers=headers,
     )
     assert deactivated_again.status_code == 200
+    assert deactivated_again.json()["task_id"]
 
     deleted = gateway_admin_client.delete(
         f"/api/v1/admin/workspace/projects/{project_id}",
         headers=headers,
     )
     assert deleted.status_code == 200
-    assert deleted.json() == {"ok": True, "hard_deleted": True, "project_id": project_id}
+    assert deleted.json()["ok"] is True
+    assert deleted.json()["hard_deleted"] is True
+    assert deleted.json()["project_id"] == project_id
+    assert deleted.json()["task_id"]
 
     con = duckdb.connect(str(gateway_db), read_only=True)
     try:
@@ -811,6 +832,7 @@ def test_gateway_templates_lists_default_and_actor_catalog_not_all_filesystem_te
 def test_gateway_templates_can_list_and_reactivate_inactive_catalog_worker(
     gateway_admin_client,
     gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import create_worker, deactivate_visible_worker_for_actor
@@ -841,6 +863,7 @@ def test_gateway_templates_can_list_and_reactivate_inactive_catalog_worker(
     templates = {item["id"]: item for item in with_inactive.json()["templates"]}
     assert templates["ejemplo"]["active"] is False
     assert templates["ejemplo"]["status"] == "inactive"
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
 
     reactivated = gateway_admin_client.post(
         "/api/v1/admin/templates/ejemplo/reactivate",
@@ -856,6 +879,7 @@ def test_gateway_templates_can_list_and_reactivate_inactive_catalog_worker(
 def test_gateway_templates_can_hard_delete_catalog_worker_relations(
     gateway_admin_client,
     gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import (
@@ -926,13 +950,17 @@ def test_gateway_templates_can_hard_delete_catalog_worker_relations(
         worker_uid = worker["worker_uid"]
     finally:
         db.close()
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
 
     deleted = gateway_admin_client.delete(
         "/api/v1/admin/templates/delete-me/hard-delete",
         headers=headers,
     )
     assert deleted.status_code == 200
-    assert deleted.json() == {"ok": True, "id": "delete-me", "hard_deleted": True}
+    assert deleted.json()["ok"] is True
+    assert deleted.json()["id"] == "delete-me"
+    assert deleted.json()["hard_deleted"] is True
+    assert deleted.json()["task_id"]
 
     con = duckdb.connect(str(gateway_db), read_only=True)
     try:

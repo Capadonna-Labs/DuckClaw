@@ -58,6 +58,7 @@ from duckclaw.forge.rag.tool_policy import (
 from duckclaw.workers.tool_surface_policy import (
     should_hide_sandbox_tools,
     should_hide_storage_identity_tools,
+    tool_surface_intent_text,
     without_privileged_mutation_tools,
     without_sandbox_tools,
     without_storage_identity_tools,
@@ -1608,13 +1609,7 @@ def build_worker_graph(
                     if isinstance(m, HumanMessage) and getattr(m, "content", None):
                         incoming = (str(m.content) or "").strip()
                         break
-            _user_incoming_raw = (state.get("user_incoming") or "").strip()
-            _intent_incoming = (
-                _user_incoming_raw
-                if _user_incoming_raw
-                and incoming_is_manager_planned_guardrail_task(incoming)
-                else incoming
-            )
+            _intent_incoming = tool_surface_intent_text(state.get("user_incoming"), incoming)
             telegram_context_summarize_directive = (
                 "[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]" in (incoming or "")
                 or "[SYSTEM_DIRECTIVE: SUMMARIZE_STORED_CONTEXT]" in (incoming or "")
@@ -2173,14 +2168,17 @@ def build_worker_graph(
             if forced_name == "auto":
                 _bind_base_identity = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
                 _auto_tools = list(_bind_base_identity)
+                _auto_before = [str(getattr(t, "name", "") or "") for t in _auto_tools]
                 _auto_tools = without_privileged_mutation_tools(_auto_tools)
-                if should_hide_sandbox_tools(incoming, _intent_incoming):
+                _hide_sandbox = should_hide_sandbox_tools(incoming, _intent_incoming)
+                if _hide_sandbox:
                     _auto_tools = without_sandbox_tools(_auto_tools)
-                if should_hide_storage_identity_tools(
+                _hide_storage_identity = should_hide_storage_identity_tools(
                     incoming,
                     _intent_incoming,
                     explicit_storage_request=explicit_duckdb_schema_request,
-                ):
+                )
+                if _hide_storage_identity:
                     _auto_tools = without_storage_identity_tools(_auto_tools)
                 if _reddit_share_mcp_exhausted:
                     _auto_tools = [

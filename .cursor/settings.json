@@ -1,14 +1,5 @@
 {
   "plugins": {
-    "redis-development": {
-      "enabled": true
-    },
-    "huggingface-skills": {
-      "enabled": true
-    },
-    "notion-workspace": {
-      "enabled": true
-    },
     "browse": {
       "enabled": true
     },

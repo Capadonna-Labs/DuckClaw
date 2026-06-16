@@ -73,6 +73,20 @@ export interface PromptPolicy {
   updated_at?: string;
 }
 
+export interface PromptPolicyRequirement {
+  policy_type: string;
+  policy_name: string;
+  source: string;
+}
+
+export interface PromptPolicyHealth {
+  ok: boolean;
+  checked_count: number;
+  missing_count: number;
+  requirements: PromptPolicyRequirement[];
+  missing: PromptPolicyRequirement[];
+}
+
 export interface PromptPolicyUpsertInput {
   policy_type: string;
   policy_name: string;
@@ -422,6 +436,8 @@ export const adminService = {
       `/prompt-policies/${encodeURIComponent(policyType)}/${encodeURIComponent(policyName)}?version=${encodeURIComponent(String(version))}`,
       { method: 'DELETE' }
     ),
+
+  getPromptPolicyHealth: () => adminFetch<PromptPolicyHealth>('/prompt-policies/health'),
 
   getOverviewMetrics: (params?: OverviewMetricsParams) => {
     const qs = new URLSearchParams();
@@ -1491,6 +1507,7 @@ export const adminService = {
   confirmManagedWorkspaceDraft: (draft: ManagedWorkspaceDraft) =>
     adminFetch<{
       ok: boolean;
+      task_id: string;
       project: {
         project_id: string;
         tenant_id: string;

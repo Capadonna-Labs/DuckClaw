@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Optional, Protocol
 
+from duckclaw import db_write_queue
 from duckclaw.commands.chat_state import (
+    _skip_runtime_ddl,
     get_chat_state,
     get_global_config as _get_global_config,
     set_chat_state,
+    set_chat_state_via_typed_command,
     set_global_config as _set_global_config,
 )
 from duckclaw.guardrails.loader import load_guardrail
+from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
 
 
 class TeamAdminChecker(Protocol):
@@ -43,7 +48,38 @@ def get_team_templates(db: Any, chat_id: Any) -> list:
 
 def set_team_templates(db: Any, chat_id: Any, template_ids: list) -> None:
     """Define los templates del equipo para este chat. Lista vacía = usar todos."""
-    set_chat_state(db, chat_id, "team_templates", json.dumps([str(x).strip() for x in template_ids]))
+    set_team_templates_for_tenant(
+        db,
+        chat_id,
+        template_ids,
+        tenant_id="default",
+        actor_email="",
+    )
+
+
+def set_team_templates_for_tenant(
+    db: Any,
+    chat_id: Any,
+    template_ids: list,
+    *,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> None:
+    """Persist chat team templates directly or through the typed DB-writer queue."""
+    value = json.dumps([str(x).strip() for x in template_ids])
+    if not _skip_runtime_ddl(db):
+        set_chat_state(db, chat_id, "team_templates", value)
+        return
+    ok, err = set_chat_state_via_typed_command(
+        db,
+        chat_id,
+        "team_templates",
+        value,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    )
+    if not ok:
+        raise RuntimeError(err or "typed team_templates write failed")
 
 
 def _tenant_team_config_key(tenant_id: Any) -> str:
@@ -63,11 +99,86 @@ def get_tenant_team_templates(db: Any, tenant_id: Any) -> list:
         return []
 
 
-def set_tenant_team_templates(db: Any, tenant_id: Any, template_ids: list) -> None:
+def _release_ro_handle_for_writer(db: Any) -> tuple[bool, Any]:
+    release = getattr(db, "release_file_handle_for_external_writer", None)
+    suspend = getattr(db, "suspend_readonly_file_handle", None)
+    resume = getattr(db, "resume_readonly_file_handle", None)
+    if callable(release):
+        release()
+        return bool(callable(resume)), resume
+    if callable(suspend) and callable(resume):
+        suspend()
+        return True, resume
+    return False, resume
+
+
+def _enqueue_tenant_team_templates_command(
+    db: Any,
+    tenant_id: str,
+    template_ids: list,
+    *,
+    actor_email: str = "",
+) -> tuple[bool, str]:
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+    try:
+        target_db_path = str(Path(raw_path).expanduser().resolve())
+    except OSError:
+        target_db_path = raw_path
+
+    command = UpsertAgentConfigEntriesCommand(
+        tenant_id=tenant_id,
+        actor_email=actor_email or f"tenant:{tenant_id}",
+        entries={
+            _tenant_team_config_key(tenant_id)[:128]: json.dumps(
+                [str(x).strip() for x in template_ids]
+            )[:16384]
+        },
+    )
+    released_ro, resume = _release_ro_handle_for_writer(db)
+    try:
+        task_id = db_write_queue.enqueue_typed_command(
+            command,
+            db_path=target_db_path,
+            user_id=tenant_id or "default",
+        )
+        status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=30.0)
+        if status is None:
+            return False, "timeout esperando db-writer"
+        if status.status != "success":
+            return False, (status.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro and callable(resume):
+            try:
+                resume()
+            except Exception:
+                pass
+
+
+def set_tenant_team_templates(
+    db: Any,
+    tenant_id: Any,
+    template_ids: list,
+    *,
+    actor_email: str = "",
+) -> None:
     """Persiste el equipo default del tenant en agent_config."""
+    tid = str(tenant_id or "default").strip() or "default"
+    if _skip_runtime_ddl(db):
+        ok, err = _enqueue_tenant_team_templates_command(
+            db,
+            tid,
+            template_ids,
+            actor_email=actor_email,
+        )
+        if not ok:
+            raise RuntimeError(err or "typed tenant team_templates write failed")
+        return
     _set_global_config(
         db,
-        _tenant_team_config_key(tenant_id),
+        _tenant_team_config_key(tid),
         json.dumps([str(x).strip() for x in template_ids]),
     )
 
@@ -140,7 +251,12 @@ def _sync_tenant_team_if_admin(
         return
     if not _team_admin_checker(db, tenant_id=tid, requester_id=rid):
         return
-    set_tenant_team_templates(db, tid, template_ids)
+    set_tenant_team_templates(
+        db,
+        tid,
+        template_ids,
+        actor_email=f"chat:{rid}",
+    )
 
 
 def _resolve_template_id(available: list, user_input: str) -> Optional[str]:
@@ -189,7 +305,13 @@ def execute_team(
         new_team = [x for x in current if (x or "").strip().lower() != canonical.lower()]
         if len(new_team) == len(current):
             return f"'{canonical}' no está en el equipo. Equipo actual: {', '.join(current) or 'todos'}"
-        set_team_templates(db, chat_id, new_team)
+        set_team_templates_for_tenant(
+            db,
+            chat_id,
+            new_team,
+            tenant_id=tid,
+            actor_email=f"chat:{str(chat_id or 'default').strip() or 'default'}",
+        )
         _sync_tenant_team_if_admin(
             db, tenant_id=tid, requester_id=requester_id, template_ids=new_team
         )
@@ -211,7 +333,13 @@ def execute_team(
         for c in valid:
             if not any((x or "").strip().lower() == c.lower() for x in current):
                 current.append(c)
-        set_team_templates(db, chat_id, current)
+        set_team_templates_for_tenant(
+            db,
+            chat_id,
+            current,
+            tenant_id=tid,
+            actor_email=f"chat:{str(chat_id or 'default').strip() or 'default'}",
+        )
         _sync_tenant_team_if_admin(
             db, tenant_id=tid, requester_id=requester_id, template_ids=current
         )
@@ -227,6 +355,12 @@ def execute_team(
             invalid.append(i)
     if invalid:
         return f"Templates no encontrados: {', '.join(invalid)}. Disponibles: {', '.join(all_templates)}"
-    set_team_templates(db, chat_id, valid)
+    set_team_templates_for_tenant(
+        db,
+        chat_id,
+        valid,
+        tenant_id=tid,
+        actor_email=f"chat:{str(chat_id or 'default').strip() or 'default'}",
+    )
     _sync_tenant_team_if_admin(db, tenant_id=tid, requester_id=requester_id, template_ids=valid)
     return f"✅ Equipo de este chat: {', '.join(valid)}. El manager delegará solo a estos."

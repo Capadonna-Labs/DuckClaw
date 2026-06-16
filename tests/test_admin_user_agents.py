@@ -15,6 +15,18 @@ class _Adapter:
         return self._con.execute(sql)
 
 
+def _apply_typed_command_inline(command: object, *, db_path: str, user_id: str) -> str:
+    from duckclaw.write_command_handlers import dispatch_command
+
+    _ = user_id
+    con = duckdb.connect(db_path, read_only=False)
+    try:
+        dispatch_command(con, command.model_dump())
+    finally:
+        con.close()
+    return command.task_id
+
+
 def test_user_agents_are_tenant_scoped_and_include_default(
     gateway_db: Path, tmp_path: Path, monkeypatch
 ) -> None:
@@ -83,6 +95,8 @@ def test_user_agent_endpoint_creates_runtime_agent_and_playground_lists_it(
     gateway_admin_client, tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setenv("DUCKCLAW_RUNTIME_AGENTS_DIR", str(tmp_path / "runtime-agents"))
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _apply_typed_command_inline)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
 
     created = gateway_admin_client.post(
@@ -98,10 +112,12 @@ def test_user_agent_endpoint_creates_runtime_agent_and_playground_lists_it(
         },
     )
     assert created.status_code == 200
-    row = created.json()["agent"]
+    payload = created.json()
+    assert payload["task_id"]
+    row = payload["agent"]
     assert row["worker_id"] == "sales_bot"
-    assert row["manifest_path"].startswith(str(tmp_path / "runtime-agents"))
-    assert "packages/agents/src/duckclaw/forge/templates" not in row["manifest_path"]
+    assert row["manifest_path"].startswith("db://admin_worker_catalog/")
+    assert not (tmp_path / "runtime-agents").exists()
 
     cfg = gateway_admin_client.get("/api/v1/admin/playground/config", headers=headers)
     assert cfg.status_code == 200

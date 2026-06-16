@@ -8,6 +8,9 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
+from duckclaw import db_write_queue
+from duckclaw.write_commands import DropLegacyDuckDbObjectsCommand
+
 router = APIRouter(prefix="/duckdb", tags=["admin-duckdb"])
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -166,7 +169,7 @@ def _duckdb_actor_scope(actor: str | None, vault_uid: str) -> dict[str, str]:
             from core.admin_identity import open_gateway_db
             from duckclaw.admin_user_profiles import ensure_profile_for_user
 
-            with open_gateway_db(read_only=False) as db:
+            with open_gateway_db(read_only=True) as db:
                 profile = ensure_profile_for_user(db, email=actor_email)
             tenant_id = str(profile.get("tenant_id") or tenant_id)
         except Exception:
@@ -202,33 +205,6 @@ def _duckdb_readonly_session(vault_path: str | None, *, actor: str | None = None
         vault_uid = _default_vault_user_id()
     con = connect_readonly(path)
     return con, path, _duckdb_actor_scope(actor, vault_uid)
-
-
-def _duckdb_writable_session(vault_path: str | None, *, actor: str):
-    import duckdb
-
-    from core.admin_duckdb_readonly import resolve_vault_path
-    from core.admin_identity import (
-        resolve_actor_default_vault_path,
-        validate_vault_path_for_actor,
-        vault_user_id_for_actor,
-    )
-
-    raw_vp = (vault_path or "").strip()
-    if raw_vp:
-        if actor and actor != "admin-ui":
-            path = validate_vault_path_for_actor(actor, raw_vp)
-            vault_uid = vault_user_id_for_actor(actor)
-        else:
-            path = resolve_vault_path(raw_vp)
-            vault_uid = _default_vault_user_id()
-    elif actor:
-        path, vault_uid = resolve_actor_default_vault_path(actor)
-    else:
-        path = resolve_vault_path(vault_path)
-        vault_uid = _default_vault_user_id()
-    scope = _duckdb_actor_scope(actor, vault_uid)
-    return duckdb.connect(path, read_only=False), path, scope
 
 
 @router.get("/tables", dependencies=[Depends(require_admin_key)])
@@ -344,45 +320,40 @@ async def duckdb_drop_legacy_schemas(
     if body.confirm != _DROP_LEGACY_SCHEMAS_CONFIRM:
         raise _problem(400, "Confirmación requerida", _DROP_LEGACY_SCHEMAS_CONFIRM)
     try:
-        con, resolved, scope = _duckdb_writable_session(body.vault_path, actor=actor)
+        con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
         raise _problem(403, "Vault no autorizado", str(exc)) from exc
-    candidates = _duckdb_explorer_legacy_schema_names(
-        tenant_id=scope["tenant_id"],
-        actor_email=scope["actor_email"],
-    )
-    main_table_candidates = _duckdb_explorer_legacy_main_table_names(
-        tenant_id=scope["tenant_id"],
-        actor_email=scope["actor_email"],
-    )
-    requested = []
-    for raw in body.schemas:
-        schema = (raw or "").strip().lower()
-        if not schema:
-            continue
-        if schema not in candidates:
-            con.close()
-            raise _problem(400, "Schema no permitido para cleanup legacy", schema)
-        requested.append(schema)
-    requested = sorted(set(requested))
-    requested_main_tables = []
-    for raw in body.main_tables:
-        table = (raw or "").strip().lower()
-        if not table:
-            continue
-        if table not in main_table_candidates:
-            con.close()
-            raise _problem(400, "Tabla main no permitida para cleanup legacy", table)
-        requested_main_tables.append(table)
-    requested_main_tables = sorted(set(requested_main_tables))
-    if not requested and not requested_main_tables:
-        con.close()
-        raise _problem(400, "cleanup vacío", "Selecciona al menos un schema o tabla main legacy")
-    dropped: list[str] = []
-    dropped_main_tables: list[str] = []
     try:
+        candidates = _duckdb_explorer_legacy_schema_names(
+            tenant_id=scope["tenant_id"],
+            actor_email=scope["actor_email"],
+        )
+        main_table_candidates = _duckdb_explorer_legacy_main_table_names(
+            tenant_id=scope["tenant_id"],
+            actor_email=scope["actor_email"],
+        )
+        requested = []
+        for raw in body.schemas:
+            schema = (raw or "").strip().lower()
+            if not schema:
+                continue
+            if schema not in candidates:
+                raise _problem(400, "Schema no permitido para cleanup legacy", schema)
+            requested.append(schema)
+        requested = sorted(set(requested))
+        requested_main_tables = []
+        for raw in body.main_tables:
+            table = (raw or "").strip().lower()
+            if not table:
+                continue
+            if table not in main_table_candidates:
+                raise _problem(400, "Tabla main no permitida para cleanup legacy", table)
+            requested_main_tables.append(table)
+        requested_main_tables = sorted(set(requested_main_tables))
+        if not requested and not requested_main_tables:
+            raise _problem(400, "cleanup vacío", "Selecciona al menos un schema o tabla main legacy")
         existing = {
             str(row[0]).lower()
             for row in con.execute(
@@ -395,43 +366,43 @@ async def duckdb_drop_legacy_schemas(
                 "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
             ).fetchall()
         }
-        con.execute("BEGIN TRANSACTION")
-        try:
-            for table in requested_main_tables:
-                if table not in existing_main_tables:
-                    continue
-                con.execute(f"DROP TABLE main.{_quote_duckdb_ident(table)}")
-                dropped_main_tables.append(table)
-            for schema in requested:
-                if schema not in existing:
-                    continue
-                con.execute(f"DROP SCHEMA {_quote_duckdb_ident(schema)} CASCADE")
-                dropped.append(schema)
-            con.execute("COMMIT")
-        except Exception:
-            con.execute("ROLLBACK")
-            raise
-        _admin_audit(
-            "duckdb.legacy_schema.drop",
-            resolved,
-            ",".join(dropped + [f"main.{table}" for table in dropped_main_tables]),
-            actor=actor,
-            meta={
-                "tenant_id": scope["tenant_id"],
-                "schemas": dropped,
-                "main_tables": dropped_main_tables,
-            },
-        )
-        return {
-            "ok": True,
-            "vault_path": resolved,
-            "vault_user_id": scope["vault_user_id"],
-            "tenant_id": scope["tenant_id"],
-            "dropped": dropped,
-            "dropped_main_tables": dropped_main_tables,
-        }
     finally:
         con.close()
+    dropped = [schema for schema in requested if schema in existing]
+    dropped_main_tables = [table for table in requested_main_tables if table in existing_main_tables]
+    command = DropLegacyDuckDbObjectsCommand(
+        tenant_id=scope["tenant_id"],
+        actor_email=scope["actor_email"],
+        user_id=scope["vault_user_id"],
+        db_path=resolved,
+        schemas=dropped,
+        main_tables=dropped_main_tables,
+    )
+    task_id = db_write_queue.enqueue_typed_command(command, db_path=resolved, user_id=scope["vault_user_id"])
+    command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
+    if command_status and command_status.status == "failed":
+        raise _problem(400, "Cleanup legacy rechazado por DB-writer", command_status.detail or task_id)
+    _admin_audit(
+        "duckdb.legacy_schema.drop",
+        resolved,
+        ",".join(dropped + [f"main.{table}" for table in dropped_main_tables]),
+        actor=actor,
+        meta={
+            "tenant_id": scope["tenant_id"],
+            "schemas": dropped,
+            "main_tables": dropped_main_tables,
+            "task_id": task_id,
+        },
+    )
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "vault_path": resolved,
+        "vault_user_id": scope["vault_user_id"],
+        "tenant_id": scope["tenant_id"],
+        "dropped": dropped,
+        "dropped_main_tables": dropped_main_tables,
+    }
 
 
 @router.get("/pgq-graph", dependencies=[Depends(require_admin_key)])

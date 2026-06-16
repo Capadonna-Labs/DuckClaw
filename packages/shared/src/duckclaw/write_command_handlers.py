@@ -24,9 +24,27 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import uuid
 from typing import Any
 from pathlib import Path
+
+from duckclaw.admin_user_profiles import ensure_profile_for_user
+from duckclaw.admin_worker_catalog import sanitize_catalog_worker_id
+from duckclaw.write_handlers.access import (
+    _apply_delete_authorized_user,
+    _apply_delete_shared_db_grant,
+    _apply_upsert_authorized_user,
+    _apply_upsert_shared_db_grant,
+)
+from duckclaw.write_handlers.runtime import (
+    _apply_append_task_audit,
+    _apply_delete_agent_config_entries,
+    _apply_forget_chat_state,
+    _apply_upsert_agent_config_entries,
+    _apply_upsert_runtime_setting,
+    _ensure_task_audit_log_table,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -42,16 +60,36 @@ def dispatch_command(conn: Any, payload: dict) -> None:
 
     handlers = {
         "upsert_worker": _apply_upsert_worker,
+        "upsert_user_agent": _apply_upsert_user_agent,
+        "upsert_catalog_skill": _apply_upsert_catalog_skill,
+        "deactivate_catalog_skill": _apply_deactivate_catalog_skill,
         "deactivate_worker": _apply_deactivate_worker,
+        "update_catalog_worker_file": _apply_update_catalog_worker_file,
+        "deactivate_catalog_worker": _apply_deactivate_catalog_worker,
+        "reactivate_catalog_worker": _apply_reactivate_catalog_worker,
+        "hard_delete_catalog_worker": _apply_hard_delete_catalog_worker,
+        "import_templates_to_catalog": _apply_import_templates_to_catalog,
+        "upsert_worker_context": _apply_upsert_worker_context,
+        "reorder_worker_contexts": _apply_reorder_worker_contexts,
+        "deactivate_worker_context": _apply_deactivate_worker_context,
         "upsert_worker_capability": _apply_upsert_worker_capability,
         "create_project": _apply_create_project,
         "add_project_member": _apply_add_project_member,
         "assign_agent_to_project": _apply_assign_agent_to_project,
+        "set_project_status": _apply_set_project_status,
+        "delete_project": _apply_delete_project,
+        "detach_agent_from_project": _apply_detach_agent_from_project,
+        "confirm_workspace_managed_draft": _apply_confirm_workspace_managed_draft,
         "upsert_runtime_setting": _apply_upsert_runtime_setting,
         "upsert_agent_config_entries": _apply_upsert_agent_config_entries,
+        "delete_agent_config_entries": _apply_delete_agent_config_entries,
+        "forget_chat_state": _apply_forget_chat_state,
         "append_task_audit": _apply_append_task_audit,
         "upsert_console_user": _apply_upsert_console_user,
         "deactivate_console_user": _apply_deactivate_console_user,
+        "record_admin_login_failure": _apply_record_admin_login_failure,
+        "clear_admin_login_failures": _apply_clear_admin_login_failures,
+        "update_console_user_password_hash": _apply_update_console_user_password_hash,
         "upsert_authorized_user": _apply_upsert_authorized_user,
         "delete_authorized_user": _apply_delete_authorized_user,
         "upsert_shared_db_grant": _apply_upsert_shared_db_grant,
@@ -64,21 +102,13 @@ def dispatch_command(conn: Any, payload: dict) -> None:
         "deactivate_knowledge_source": _apply_deactivate_knowledge_source,
         "upsert_prompt_policy": _apply_upsert_prompt_policy,
         "deactivate_prompt_policy": _apply_deactivate_prompt_policy,
+        "drop_legacy_duckdb_objects": _apply_drop_legacy_duckdb_objects,
     }
     handler = handlers.get(command_type)
     if handler is None:
         raise ValueError(f"Unknown command_type: {command_type}")
 
     handler(conn, payload)
-
-
-def _resolve_worker_uid(conn: Any, worker_id: str, tenant_id: str) -> str | None:
-    row = conn.execute(
-        "SELECT worker_uid FROM main.admin_worker_catalog "
-        "WHERE worker_id = ? AND tenant_id = ?",
-        [worker_id, tenant_id],
-    ).fetchone()
-    return str(row[0]) if row else None
 
 
 def _require_project_exists(conn: Any, project_id: str) -> str:
@@ -91,6 +121,41 @@ def _require_project_exists(conn: Any, project_id: str) -> str:
         raise ValueError(f"Project not found: {project_id}")
     if not row[1] or str(row[2] or "").strip() == "archived":
         raise ValueError(f"Project is not active: {project_id}")
+    return str(row[0])
+
+
+def _require_project_access(
+    conn: Any,
+    *,
+    project_id: str,
+    tenant_id: str,
+    actor_email: str,
+    require_owner: bool = False,
+) -> str:
+    """Validate project tenant and actor authorization. Returns project tenant_id."""
+    actor = str(actor_email or "system").strip().lower() or "system"
+    row = conn.execute(
+        """
+        SELECT p.tenant_id, p.owner_email, p.active, p.status, m.email
+        FROM main.admin_projects p
+        LEFT JOIN main.admin_project_members m
+          ON m.project_id = p.project_id AND lower(m.email) = lower(?)
+        WHERE p.project_id = ?
+          AND p.tenant_id = ?
+        LIMIT 1
+        """,
+        [actor, project_id, tenant_id],
+    ).fetchone()
+    if not row:
+        raise ValueError(f"Project not found: {project_id}")
+    if not row[2] or str(row[3] or "").strip() == "archived":
+        raise ValueError(f"Project is not active: {project_id}")
+    is_owner = str(row[1] or "").strip().lower() == actor
+    is_member = bool(row[4])
+    if require_owner and not is_owner:
+        raise ValueError(f"Project owner required: {project_id}")
+    if not require_owner and not (is_owner or is_member):
+        raise ValueError(f"Project access denied: {project_id}")
     return str(row[0])
 
 
@@ -107,189 +172,12 @@ def _require_worker_exists(conn: Any, worker_uid: str) -> str | None:
     return str(row[0])
 
 
-def _apply_upsert_worker(conn: Any, payload: dict) -> None:
-    worker_id = str(payload["worker_id"])
-    display_name = str(payload.get("display_name", worker_id))
-    tenant_id = str(payload.get("tenant_id", "default"))
-    owner = str(payload.get("actor_email", "system"))
-    source_kind = str(payload.get("source_kind", "runtime"))
-    source_tpl = str(payload.get("source_template_id", "default"))
-    visibility = str(payload.get("visibility", "private"))
-    existing_uid = _resolve_worker_uid(conn, worker_id, tenant_id)
-
-    if existing_uid:
-        conn.execute(
-            "UPDATE main.admin_worker_catalog "
-            "SET display_name = ?, source_kind = ?, source_template_id = ?, "
-            "visibility = ?, updated_at = CURRENT_TIMESTAMP "
-            "WHERE worker_id = ? AND tenant_id = ?",
-            [display_name, source_kind, source_tpl, visibility, worker_id, tenant_id],
-        )
-    else:
-        wuid = str(payload.get("worker_uid", f"wrk_{uuid.uuid4().hex}"))
-        conn.execute(
-            "INSERT INTO main.admin_worker_catalog "
-            "(worker_uid, tenant_id, owner_email, worker_id, display_name, "
-            "source_kind, source_template_id, visibility, active) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, true)",
-            [wuid, tenant_id, owner, worker_id, display_name, source_kind, source_tpl, visibility],
-        )
-        existing_uid = wuid
-
-    # Version the snapshot if provided
-    manifest = payload.get("manifest_snapshot")
-    files = payload.get("files_snapshot")
-    if manifest or files:
-        import json as _json
-        row = conn.execute(
-            "SELECT COALESCE(MAX(version), 0) FROM main.admin_worker_versions "
-            "WHERE worker_uid = ?", [existing_uid],
-        ).fetchone()
-        next_ver = (int(row[0]) if row[0] is not None else 0) + 1
-        conn.execute(
-            "INSERT INTO main.admin_worker_versions "
-            "(worker_uid, version, manifest_snapshot_json, files_snapshot_json, created_by) "
-            "VALUES (?, ?, ?, ?, ?)",
-            [
-                existing_uid, next_ver,
-                _json.dumps(manifest or {}, default=str, ensure_ascii=False),
-                _json.dumps(files or {}, default=str, ensure_ascii=False),
-                owner,
-            ],
-        )
-
-    # Insert system_prompt as a context if provided
-    system_prompt = str(payload.get("system_prompt", "")).strip()
-    if system_prompt:
-        import uuid as _uuid
-        cid = f"ctx_{_uuid.uuid4().hex[:16]}"
-        conn.execute(
-            "INSERT OR REPLACE INTO main.admin_worker_contexts "
-            "(context_id, worker_uid, title, content_md) VALUES (?, ?, 'system_prompt', ?)",
-            [cid, existing_uid, system_prompt],
-        )
-
-
-def _apply_deactivate_worker(conn: Any, payload: dict) -> None:
-    worker_id = str(payload["worker_id"])
-    tenant_id = str(payload.get("tenant_id", "default"))
-    conn.execute(
-        "UPDATE main.admin_worker_catalog "
-        "SET active = false, status = 'inactive', updated_at = CURRENT_TIMESTAMP "
-        "WHERE worker_id = ? AND tenant_id = ?",
-        [worker_id, tenant_id],
-    )
-
-
-def _stable_capability_id(name: str) -> str:
-    digest = hashlib.sha256(name.encode("utf-8")).hexdigest()
-    return f"cap_{digest[:24]}"
-
-
-def _normalize_capability_token(raw: Any, *, field: str, max_len: int = 128) -> str:
-    value = str(raw or "").strip()
-    if not value:
-        raise ValueError(f"{field} required")
-    if len(value) > max_len:
-        raise ValueError(f"{field} too long")
-    return value
-
-
-def _json_payload(raw: Any, *, max_len: int = 8192) -> str:
-    value = json.dumps(raw if isinstance(raw, dict) else {}, ensure_ascii=False, default=str)
-    if len(value) > max_len:
-        raise ValueError("JSON payload too large")
-    return value
-
-
-def _apply_upsert_worker_capability(conn: Any, payload: dict) -> None:
-    tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
-    worker_id = _normalize_capability_token(payload.get("worker_id"), field="worker_id")
-    capability_name = _normalize_capability_token(payload.get("capability_name"), field="capability_name")
-    kind = _normalize_capability_token(payload.get("kind") or "runtime_policy", field="kind", max_len=64)
-    provider = _normalize_capability_token(payload.get("provider") or "duckclaw", field="provider")
-    permission = _normalize_capability_token(payload.get("permission") or "use", field="permission", max_len=32)
-    description = str(payload.get("description") or "").strip()[:1024]
-    risk_level = str(payload.get("risk_level") or "low").strip()[:32] or "low"
-    requires_secret = bool(payload.get("requires_secret", False))
-    requires_network = bool(payload.get("requires_network", False))
-    schema_json = _json_payload(payload.get("capability_schema") or payload.get("schema"))
-    config_json = _json_payload(payload.get("config"))
-    policy_json = _json_payload(payload.get("policy"))
-
-    worker_uid = _resolve_worker_uid(conn, worker_id, tenant_id)
-    if not worker_uid:
-        raise ValueError(f"Worker not found: {worker_id}")
-
-    existing_capability = conn.execute(
-        "SELECT capability_id FROM main.admin_capabilities WHERE name = ?",
-        [capability_name],
-    ).fetchone()
-    capability_id = str(existing_capability[0]) if existing_capability else _stable_capability_id(capability_name)
-    if existing_capability:
-        conn.execute(
-            "UPDATE main.admin_capabilities "
-            "SET kind = ?, provider = ?, description = ?, schema_json = ?, "
-            "risk_level = ?, requires_secret = ?, requires_network = ?, active = true, "
-            "updated_at = CURRENT_TIMESTAMP "
-            "WHERE capability_id = ?",
-            [
-                kind,
-                provider,
-                description,
-                schema_json,
-                risk_level,
-                requires_secret,
-                requires_network,
-                capability_id,
-            ],
-        )
-    else:
-        conn.execute(
-            "INSERT INTO main.admin_capabilities "
-            "(capability_id, name, kind, provider, description, schema_json, "
-            "risk_level, requires_secret, requires_network, active) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, true)",
-            [
-                capability_id,
-                capability_name,
-                kind,
-                provider,
-                description,
-                schema_json,
-                risk_level,
-                requires_secret,
-                requires_network,
-            ],
-        )
-
-    existing_grant = conn.execute(
-        "SELECT capability_id FROM main.admin_worker_capabilities "
-        "WHERE worker_uid = ? AND capability_id = ?",
-        [worker_uid, capability_id],
-    ).fetchone()
-    if existing_grant:
-        conn.execute(
-            "UPDATE main.admin_worker_capabilities "
-            "SET permission = ?, config_json = ?, policy_json = ?, enabled = true, "
-            "updated_at = CURRENT_TIMESTAMP "
-            "WHERE worker_uid = ? AND capability_id = ?",
-            [permission, config_json, policy_json, worker_uid, capability_id],
-        )
-    else:
-        conn.execute(
-            "INSERT INTO main.admin_worker_capabilities "
-            "(worker_uid, capability_id, permission, config_json, policy_json, enabled) "
-            "VALUES (?, ?, ?, ?, ?, true)",
-            [worker_uid, capability_id, permission, config_json, policy_json],
-        )
-
-
 def _apply_create_project(conn: Any, payload: dict) -> None:
     project_id = str(payload["project_id"])
     name = str(payload["name"])
     desc = str(payload.get("description", ""))
-    tenant_id = str(payload.get("tenant_id", "default"))
+    visibility = str(payload.get("visibility", "private"))
+    tenant_id = str(payload.get("tenant_id") or _require_project_exists(conn, project_id))
     owner = str(payload.get("actor_email", "system"))
 
     existing = conn.execute(
@@ -300,16 +188,23 @@ def _apply_create_project(conn: Any, payload: dict) -> None:
     if existing:
         conn.execute(
             "UPDATE main.admin_projects "
-            "SET name = ?, description = ?, updated_at = CURRENT_TIMESTAMP "
+            "SET name = ?, description = ?, visibility = ?, updated_at = CURRENT_TIMESTAMP "
             "WHERE project_id = ?",
-            [name, desc, project_id],
+            [name, desc, visibility, project_id],
         )
     else:
         conn.execute(
             "INSERT INTO main.admin_projects "
-            "(project_id, tenant_id, owner_email, name, description, status, active) "
-            "VALUES (?, ?, ?, ?, ?, 'active', true)",
-            [project_id, tenant_id, owner, name, desc],
+            "(project_id, tenant_id, owner_email, name, description, visibility, status, active) "
+            "VALUES (?, ?, ?, ?, ?, ?, 'active', true)",
+            [project_id, tenant_id, owner, name, desc, visibility],
+        )
+        conn.execute(
+            "INSERT INTO main.admin_project_members "
+            "(project_id, email, role, assigned_by) VALUES (?, ?, 'owner', ?) "
+            "ON CONFLICT (project_id, email) DO UPDATE SET "
+            "role = EXCLUDED.role, assigned_by = EXCLUDED.assigned_by, updated_at = now()",
+            [project_id, owner, owner],
         )
 
     # Assign agents if provided
@@ -337,189 +232,254 @@ def _apply_create_project(conn: Any, payload: dict) -> None:
                 )
 
 
-def _normalize_authorized_user_role(raw: Any) -> str:
-    role = str(raw or "user").strip().lower()
-    if role not in {"admin", "user"}:
-        raise ValueError(f"Invalid authorized user role: {raw}")
-    return role
+def _managed_draft_actor_tenant(conn: Any, payload: dict) -> tuple[str, str]:
+    actor = str(payload.get("actor_email") or "system").strip().lower() or "system"
+    requested_tenant = str(payload.get("tenant_id") or "").strip()
+    if "@" not in actor:
+        return actor, requested_tenant or "default"
+    profile = ensure_profile_for_user(conn, email=actor)
+    tenant_id = str(profile.get("tenant_id") or "").strip()
+    if requested_tenant and tenant_id and requested_tenant != tenant_id:
+        raise ValueError(f"Tenant mismatch for actor: {actor}")
+    return str(profile.get("email") or actor), tenant_id or requested_tenant or "default"
 
 
-def _apply_upsert_authorized_user(conn: Any, payload: dict) -> None:
-    tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
-    user_id = str(payload.get("user_id") or "").strip()
-    username = str(payload.get("username") or "Usuario").strip() or "Usuario"
-    role = _normalize_authorized_user_role(payload.get("role"))
-    if not user_id:
-        raise ValueError("user_id required")
+def _managed_draft_worker_id(raw: Any) -> str:
+    worker_id = sanitize_catalog_worker_id(str(raw or "")).replace("_", "-").strip("-")
+    if not worker_id:
+        raise ValueError("worker_id required")
+    return worker_id[:64]
 
-    conn.execute(
-        """
-        INSERT INTO main.authorized_users (tenant_id, user_id, username, role)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT (tenant_id, user_id) DO UPDATE SET
-          username = EXCLUDED.username,
-          role = EXCLUDED.role,
-          added_at = now()
-        """,
-        [tenant_id, user_id, username[:128], role],
+
+def _managed_draft_available_skill_names(raw: Any) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    names: list[str] = []
+    for item in raw:
+        if not isinstance(item, dict) or not bool(item.get("available")):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            names.append(name[:128])
+    return names
+
+
+def _managed_draft_json(value: Any) -> str:
+    return json.dumps(value or {}, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _managed_draft_snapshot_exists(
+    conn: Any,
+    *,
+    worker_uid: str,
+    manifest_snapshot: dict[str, Any],
+    files_snapshot: dict[str, str],
+    change_note: str,
+) -> bool:
+    expected_manifest = _managed_draft_json(manifest_snapshot)
+    expected_files = _managed_draft_json(files_snapshot)
+    rows = conn.execute(
+        "SELECT manifest_snapshot_json, files_snapshot_json, change_note "
+        "FROM main.admin_worker_versions WHERE worker_uid = ?",
+        [worker_uid],
+    ).fetchall()
+    return any(
+        _managed_draft_json(json.loads(str(row[0] or "{}"))) == expected_manifest
+        and _managed_draft_json(json.loads(str(row[1] or "{}"))) == expected_files
+        and str(row[2] or "") == change_note
+        for row in rows
     )
 
 
-def _apply_delete_authorized_user(conn: Any, payload: dict) -> None:
-    tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
-    user_id = str(payload.get("user_id") or "").strip()
-    if not user_id:
-        raise ValueError("user_id required")
-
-    conn.execute(
-        "DELETE FROM main.authorized_users WHERE lower(tenant_id)=lower(?) AND user_id=?",
-        [tenant_id, user_id],
-    )
-
-
-def _normalize_shared_resource_key(raw: Any) -> str:
-    from duckclaw.shared_db_grants import validate_resource_key
-
-    resource_key = str(raw or "").strip().lower()
-    if not resource_key or not validate_resource_key(resource_key):
-        raise ValueError("Invalid shared resource_key")
-    return resource_key
-
-
-def _apply_upsert_shared_db_grant(conn: Any, payload: dict) -> None:
-    tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
-    user_id = str(payload.get("user_id") or "").strip()
-    resource_key = _normalize_shared_resource_key(payload.get("resource_key"))
-    if not user_id:
-        raise ValueError("user_id required")
-
-    conn.execute(
-        """
-        INSERT INTO main.user_shared_db_access (tenant_id, user_id, resource_key)
-        VALUES (?, ?, ?)
-        ON CONFLICT (tenant_id, user_id, resource_key) DO UPDATE SET
-          created_at = now()
-        """,
-        [tenant_id, user_id, resource_key],
-    )
-
-
-def _apply_delete_shared_db_grant(conn: Any, payload: dict) -> None:
-    tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
-    user_id = str(payload.get("user_id") or "").strip()
-    resource_key = _normalize_shared_resource_key(payload.get("resource_key"))
-    if not user_id:
-        raise ValueError("user_id required")
-
-    conn.execute(
-        "DELETE FROM main.user_shared_db_access "
-        "WHERE tenant_id = ? AND user_id = ? AND resource_key = ?",
-        [tenant_id, user_id, resource_key],
-    )
-
-
-def _apply_upsert_runtime_setting(conn: Any, payload: dict) -> None:
-    domain = str(payload["domain"])
-    key = str(payload["key"])
-    value = str(payload["value"])
-    value_kind = str(payload.get("value_kind", "string"))
-    secret = bool(payload.get("secret", False))
-    tenant_id = str(payload.get("tenant_id", "default"))
-    actor = str(payload.get("actor_email", "system"))
-
-    existing = conn.execute(
-        "SELECT setting_id FROM main.admin_runtime_settings "
-        "WHERE tenant_id = ? AND actor_email = ? AND domain = ? AND key = ?",
-        [tenant_id, actor, domain, key],
-    ).fetchone()
-
+def _ensure_managed_draft_project(conn: Any, payload: dict, *, actor: str, tenant_id: str) -> None:
+    project_id = str(payload.get("project_id") or "").strip()
+    if not project_id:
+        raise ValueError("project_id required")
+    existing = conn.execute("SELECT project_id FROM main.admin_projects WHERE project_id = ?", [project_id]).fetchone()
     if existing:
         conn.execute(
-            "UPDATE main.admin_runtime_settings "
-            "SET value_text = ?, value_kind = ?, secret = ?, updated_at = CURRENT_TIMESTAMP "
-            "WHERE setting_id = ?",
-            [value, value_kind, secret, existing[0]],
+            "UPDATE main.admin_projects "
+            "SET name = ?, description = ?, visibility = 'private', active = true, "
+            "status = 'active', updated_at = CURRENT_TIMESTAMP "
+            "WHERE project_id = ? AND tenant_id = ?",
+            [str(payload.get("project_name") or "Proyecto"), str(payload.get("project_description") or ""), project_id, tenant_id],
         )
     else:
-        setting_id = f"set_{uuid.uuid4().hex[:16]}"
         conn.execute(
-            "INSERT INTO main.admin_runtime_settings "
-            "(setting_id, tenant_id, actor_email, domain, key, value_text, value_kind, secret) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            [setting_id, tenant_id, actor, domain, key, value, value_kind, secret],
+            "INSERT INTO main.admin_projects "
+            "(project_id, tenant_id, owner_email, name, description, visibility, status, active) "
+            "VALUES (?, ?, ?, ?, ?, 'private', 'active', true)",
+            [project_id, tenant_id, actor, str(payload.get("project_name") or "Proyecto"), str(payload.get("project_description") or "")],
         )
-
-
-def _apply_upsert_agent_config_entries(conn: Any, payload: dict) -> None:
-    entries = payload.get("entries") or {}
-    if not isinstance(entries, dict) or not entries:
-        raise ValueError("entries required")
-
-    for raw_key, raw_value in entries.items():
-        key = str(raw_key or "").strip()[:128]
-        if not key:
-            raise ValueError("agent_config entry key required")
-        value = str(raw_value or "")[:16384]
-        conn.execute(
-            """
-            INSERT INTO agent_config (key, value)
-            VALUES (?, ?)
-            ON CONFLICT (key) DO UPDATE SET
-              value = EXCLUDED.value,
-              updated_at = now()
-            """,
-            [key, value],
-        )
-
-
-_TASK_AUDIT_TABLE_DDL = """
-CREATE TABLE IF NOT EXISTS main.task_audit_log (
-    task_id VARCHAR PRIMARY KEY,
-    tenant_id VARCHAR NOT NULL,
-    worker_id VARCHAR,
-    query_prefix VARCHAR,
-    status VARCHAR NOT NULL,
-    duration_ms INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    plan_title VARCHAR
-)
-"""
-
-
-def _ensure_task_audit_log_table(conn: Any) -> None:
-    conn.execute(_TASK_AUDIT_TABLE_DDL)
-    try:
-        conn.execute("ALTER TABLE main.task_audit_log ADD COLUMN plan_title VARCHAR")
-    except Exception:
-        pass
-
-
-def _normalize_task_audit_status(raw: Any) -> str:
-    status = str(raw or "SUCCESS").strip().upper()
-    allowed = {"SUCCESS", "FAILED", "PROACTIVE_MESSAGE_SENT", "SECURITY_VIOLATION_ATTEMPT"}
-    return status if status in allowed else "SUCCESS"
-
-
-def _apply_append_task_audit(conn: Any, payload: dict) -> None:
-    _ensure_task_audit_log_table(conn)
-    audit_task_id = str(payload.get("audit_task_id") or payload.get("task_id") or "").strip()
-    if not audit_task_id:
-        raise ValueError("audit_task_id required")
-    tenant_id = str(payload.get("tenant_id") or "default").strip()[:128] or "default"
-    worker_id = str(payload.get("worker_id") or "").strip()[:64]
-    query_prefix = str(payload.get("query_prefix") or "")[:256]
-    status = _normalize_task_audit_status(payload.get("status"))
-    duration_ms = max(0, int(payload.get("duration_ms") or 0))
-    plan_title = str(payload.get("plan_title") or "")[:256]
     conn.execute(
-        """
-        INSERT INTO main.task_audit_log
-        (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT (task_id) DO NOTHING
-        """,
-        [audit_task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title],
+        "INSERT INTO main.admin_project_members (project_id, email, role, assigned_by) "
+        "VALUES (?, ?, 'owner', ?) ON CONFLICT (project_id, email) DO UPDATE SET "
+        "role = EXCLUDED.role, assigned_by = EXCLUDED.assigned_by, updated_at = now()",
+        [project_id, actor, actor],
     )
+
+
+def _upsert_managed_draft_worker(
+    conn: Any,
+    *,
+    tenant_id: str,
+    actor: str,
+    worker_id: str,
+    display_name: str,
+    source_kind: str,
+) -> str:
+    existing_uid = _resolve_worker_uid(conn, worker_id, tenant_id)
+    if existing_uid:
+        conn.execute(
+            "UPDATE main.admin_worker_catalog "
+            "SET display_name = ?, source_kind = ?, source_template_id = 'default', "
+            "visibility = 'private', status = 'active', active = true, updated_at = CURRENT_TIMESTAMP "
+            "WHERE worker_uid = ?",
+            [display_name, source_kind, existing_uid],
+        )
+        return existing_uid
+    worker_uid = f"wrk_{uuid.uuid4().hex}"
+    conn.execute(
+        "INSERT INTO main.admin_worker_catalog "
+        "(worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, "
+        "source_template_id, visibility, status, active) "
+        "VALUES (?, ?, ?, ?, ?, ?, 'default', 'private', 'active', true)",
+        [worker_uid, tenant_id, actor, worker_id, display_name, source_kind],
+    )
+    return worker_uid
+
+
+def _ensure_managed_draft_version(
+    conn: Any,
+    *,
+    worker_uid: str,
+    actor: str,
+    manifest_snapshot: dict[str, Any],
+    files_snapshot: dict[str, str],
+    change_note: str,
+) -> None:
+    if _managed_draft_snapshot_exists(
+        conn,
+        worker_uid=worker_uid,
+        manifest_snapshot=manifest_snapshot,
+        files_snapshot=files_snapshot,
+        change_note=change_note,
+    ):
+        return
+    row = conn.execute(
+        "SELECT COALESCE(MAX(version), 0) + 1 FROM main.admin_worker_versions WHERE worker_uid = ?",
+        [worker_uid],
+    ).fetchone()
+    next_version = int(row[0] or 1) if row else 1
+    conn.execute(
+        "INSERT INTO main.admin_worker_versions "
+        "(worker_uid, version, manifest_snapshot_json, files_snapshot_json, created_by, change_note) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [worker_uid, next_version, _managed_draft_json(manifest_snapshot), _managed_draft_json(files_snapshot), actor, change_note],
+    )
+
+
+def _ensure_managed_draft_context(
+    conn: Any,
+    *,
+    worker_uid: str,
+    title: str,
+    content_md: str,
+) -> None:
+    if not content_md.strip():
+        return
+    existing = conn.execute(
+        "SELECT context_id FROM main.admin_worker_contexts "
+        "WHERE worker_uid = ? AND title = ? AND active = true LIMIT 1",
+        [worker_uid, title],
+    ).fetchone()
+    if existing:
+        conn.execute(
+            "UPDATE main.admin_worker_contexts "
+            "SET content_md = ?, sort_order = 0, updated_at = CURRENT_TIMESTAMP WHERE context_id = ?",
+            [content_md, existing[0]],
+        )
+        return
+    conn.execute(
+        "INSERT INTO main.admin_worker_contexts (context_id, worker_uid, title, content_md, sort_order, active) "
+        "VALUES (?, ?, ?, ?, 0, true)",
+        [f"ctx_{uuid.uuid4().hex}", worker_uid, title, content_md],
+    )
+
+
+def _assign_managed_draft_agent(
+    conn: Any,
+    *,
+    project_id: str,
+    worker_uid: str,
+    role: str,
+    sort_order: int,
+) -> None:
+    conn.execute(
+        "INSERT INTO main.admin_project_agents (project_id, worker_uid, role, sort_order, active) "
+        "VALUES (?, ?, ?, ?, true) ON CONFLICT (project_id, worker_uid) DO UPDATE SET "
+        "role = EXCLUDED.role, sort_order = EXCLUDED.sort_order, active = true, updated_at = now()",
+        [project_id, worker_uid, role, sort_order],
+    )
+
+
+def _apply_confirm_workspace_managed_draft(conn: Any, payload: dict) -> None:
+    actor, tenant_id = _managed_draft_actor_tenant(conn, payload)
+    project_id = str(payload.get("project_id") or "").strip()
+    source_kind = str(payload.get("source_kind") or "managed_draft").strip()[:64] or "managed_draft"
+    change_note = str(payload.get("change_note") or "Created from DB-first managed draft").strip()[:256]
+    context_title = str(payload.get("context_title") or "Contexto compartido").strip()[:160]
+    shared_context = str(payload.get("shared_context") or "")
+    skill_names = _managed_draft_available_skill_names(payload.get("suggested_skills"))
+    _ensure_managed_draft_project(conn, payload, actor=actor, tenant_id=tenant_id)
+    seen_workers: set[str] = set()
+    for index, worker in enumerate(payload.get("workers") or []):
+        if not isinstance(worker, dict):
+            continue
+        worker_id = _managed_draft_worker_id(worker.get("worker_id"))
+        if worker_id in seen_workers:
+            continue
+        seen_workers.add(worker_id)
+        display_name = str(worker.get("display_name") or worker_id).strip()[:128] or worker_id
+        worker_uid = _upsert_managed_draft_worker(
+            conn,
+            tenant_id=tenant_id,
+            actor=actor,
+            worker_id=worker_id,
+            display_name=display_name,
+            source_kind=source_kind,
+        )
+        manifest_snapshot = {
+            "id": worker_id,
+            "name": display_name,
+            "description": str(payload.get("project_description") or ""),
+            "skills": skill_names,
+        }
+        files_snapshot = {
+            "system_prompt.md": str(worker.get("system_prompt") or ""),
+            "soul.md": shared_context,
+        }
+        _ensure_managed_draft_version(
+            conn,
+            worker_uid=worker_uid,
+            actor=actor,
+            manifest_snapshot=manifest_snapshot,
+            files_snapshot=files_snapshot,
+            change_note=change_note,
+        )
+        _ensure_managed_draft_context(
+            conn,
+            worker_uid=worker_uid,
+            title=context_title,
+            content_md=shared_context,
+        )
+        _assign_managed_draft_agent(
+            conn,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            role=str(worker.get("role") or "member").strip()[:64] or "member",
+            sort_order=index,
+        )
 
 
 def _apply_upsert_console_user(conn: Any, payload: dict) -> None:
@@ -545,6 +505,46 @@ def _apply_deactivate_console_user(conn: Any, payload: dict) -> None:
     ok = deactivate_console_user(conn, email=email)
     if not ok:
         raise ValueError(f"Console user not found: {email}")
+
+
+def _apply_record_admin_login_failure(conn: Any, payload: dict) -> None:
+    from duckclaw.admin_console_users import record_login_failure
+
+    email = str(payload.get("email") or "").strip()
+    if not email:
+        raise ValueError("email required")
+    record_login_failure(conn, email)
+
+
+def _apply_clear_admin_login_failures(conn: Any, payload: dict) -> None:
+    from duckclaw.admin_console_users import clear_login_failures
+
+    email = str(payload.get("email") or "").strip()
+    if not email:
+        raise ValueError("email required")
+    clear_login_failures(conn, email)
+
+
+def _apply_update_console_user_password_hash(conn: Any, payload: dict) -> None:
+    from duckclaw.admin_console_users import update_console_user_password_hash
+
+    email = str(payload.get("email") or "").strip()
+    password_hash = str(payload.get("password_hash") or "").strip()
+    hash_algo = str(payload.get("hash_algo") or "argon2id").strip()
+    hash_params = payload.get("hash_params")
+    if not email:
+        raise ValueError("email required")
+    if not password_hash:
+        raise ValueError("password_hash required")
+    if not isinstance(hash_params, dict):
+        hash_params = {}
+    update_console_user_password_hash(
+        conn,
+        email=email,
+        password_hash=password_hash,
+        hash_algo=hash_algo,
+        hash_params=hash_params,
+    )
 
 
 def _kanban_tags_json(raw: Any) -> str:
@@ -753,6 +753,51 @@ def _apply_deactivate_prompt_policy(conn: Any, payload: dict) -> None:
         "WHERE policy_type = ? AND policy_name = ?" + version_clause,
         params,
     )
+
+
+def _quote_duckdb_ident(value: str) -> str:
+    ident = (value or "").strip()
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ident):
+        raise ValueError(f"Invalid DuckDB identifier: {value}")
+    return '"' + ident.replace('"', '""') + '"'
+
+
+def _dedupe_lowered(values: Any) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for raw in list(values or []):
+        value = str(raw or "").strip().lower()
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        deduped.append(value)
+    return deduped
+
+
+def _apply_drop_legacy_duckdb_objects(conn: Any, payload: dict) -> None:
+    schemas = _dedupe_lowered(payload.get("schemas"))
+    main_tables = _dedupe_lowered(payload.get("main_tables"))
+    if not schemas and not main_tables:
+        raise ValueError("No legacy DuckDB objects requested")
+
+    existing_schemas = {
+        str(row[0]).lower()
+        for row in conn.execute("SELECT schema_name FROM information_schema.schemata").fetchall()
+    }
+    existing_main_tables = {
+        str(row[0]).lower()
+        for row in conn.execute(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+        ).fetchall()
+    }
+
+    for table in main_tables:
+        if table in existing_main_tables:
+            conn.execute(f"DROP TABLE main.{_quote_duckdb_ident(table)}")
+
+    for schema in schemas:
+        if schema in existing_schemas:
+            conn.execute(f"DROP SCHEMA {_quote_duckdb_ident(schema)} CASCADE")
 
 
 def _require_knowledge_source(conn: Any, source_id: str) -> dict[str, Any]:
@@ -1057,8 +1102,15 @@ def _apply_assign_agent_to_project(conn: Any, payload: dict) -> None:
     worker_uid = str(payload["worker_uid"])
     role = str(payload.get("role", "member"))
     sort_order = int(payload.get("sort_order", 0))
+    tenant_id = str(payload.get("tenant_id") or _require_project_exists(conn, project_id))
+    actor_email = str(payload.get("actor_email", "system"))
 
-    project_tenant = _require_project_exists(conn, project_id)
+    project_tenant = _require_project_access(
+        conn,
+        project_id=project_id,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    )
     worker_tenant = _require_worker_exists(conn, worker_uid)
     if worker_tenant != project_tenant:
         raise ValueError(
@@ -1073,7 +1125,7 @@ def _apply_assign_agent_to_project(conn: Any, payload: dict) -> None:
 
     if existing:
         conn.execute(
-            "UPDATE main.admin_project_agents SET role = ?, sort_order = ?, "
+            "UPDATE main.admin_project_agents SET role = ?, sort_order = ?, active = true, "
             "updated_at = CURRENT_TIMESTAMP "
             "WHERE project_id = ? AND worker_uid = ?",
             [role, sort_order, project_id, worker_uid],
@@ -1084,3 +1136,96 @@ def _apply_assign_agent_to_project(conn: Any, payload: dict) -> None:
             "(project_id, worker_uid, role, sort_order) VALUES (?, ?, ?, ?)",
             [project_id, worker_uid, role, sort_order],
         )
+
+
+def _apply_set_project_status(conn: Any, payload: dict) -> None:
+    project_id = str(payload["project_id"])
+    tenant_id = str(payload.get("tenant_id") or _require_project_exists(conn, project_id))
+    actor_email = str(payload.get("actor_email", "system"))
+    status = str(payload.get("status", "")).strip().lower()
+    if status not in {"active", "inactive"}:
+        raise ValueError(f"Invalid project status: {status}")
+    _require_project_access(
+        conn,
+        project_id=project_id,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+        require_owner=True,
+    )
+    conn.execute(
+        "UPDATE main.admin_projects "
+        "SET status = ?, active = true, updated_at = CURRENT_TIMESTAMP "
+        "WHERE project_id = ? AND tenant_id = ?",
+        [status, project_id, tenant_id],
+    )
+
+
+def _apply_delete_project(conn: Any, payload: dict) -> None:
+    project_id = str(payload["project_id"])
+    tenant_id = str(payload.get("tenant_id") or _require_project_exists(conn, project_id))
+    actor_email = str(payload.get("actor_email", "system"))
+    _require_project_access(
+        conn,
+        project_id=project_id,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+        require_owner=True,
+    )
+    conn.execute(
+        "DELETE FROM main.admin_project_agents WHERE project_id = ?",
+        [project_id],
+    )
+    conn.execute(
+        "DELETE FROM main.admin_project_members WHERE project_id = ?",
+        [project_id],
+    )
+    conn.execute(
+        "DELETE FROM main.admin_projects WHERE project_id = ? AND tenant_id = ?",
+        [project_id, tenant_id],
+    )
+
+
+def _apply_detach_agent_from_project(conn: Any, payload: dict) -> None:
+    project_id = str(payload["project_id"])
+    worker_uid = str(payload["worker_uid"])
+    tenant_id = str(payload.get("tenant_id") or _require_project_exists(conn, project_id))
+    actor_email = str(payload.get("actor_email", "system"))
+    project_tenant = _require_project_access(
+        conn,
+        project_id=project_id,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    )
+    worker_tenant = _require_worker_exists(conn, worker_uid)
+    if worker_tenant != project_tenant:
+        raise ValueError(
+            f"Worker tenant mismatch: project={project_tenant} worker={worker_tenant}"
+        )
+    conn.execute(
+        "UPDATE main.admin_project_agents "
+        "SET active = false, updated_at = CURRENT_TIMESTAMP "
+        "WHERE project_id = ? AND worker_uid = ?",
+        [project_id, worker_uid],
+    )
+
+
+# Canonical worker/catalog handlers live in duckclaw.write_handlers.workers.
+# Keep these legacy names exported from this module for existing callers while
+# making dispatch resolve to the SOA owner at call time.
+from duckclaw.write_handlers.workers import (  # noqa: E402
+    _apply_deactivate_catalog_skill,
+    _apply_deactivate_catalog_worker,
+    _apply_deactivate_worker,
+    _apply_deactivate_worker_context,
+    _apply_hard_delete_catalog_worker,
+    _apply_import_templates_to_catalog,
+    _apply_reactivate_catalog_worker,
+    _apply_reorder_worker_contexts,
+    _apply_update_catalog_worker_file,
+    _apply_upsert_catalog_skill,
+    _apply_upsert_user_agent,
+    _apply_upsert_worker,
+    _apply_upsert_worker_capability,
+    _apply_upsert_worker_context,
+    _resolve_worker_uid,
+)

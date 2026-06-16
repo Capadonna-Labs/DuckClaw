@@ -12,26 +12,45 @@ _HEADERS = {"X-Admin-Key": "test-admin-key"}
 
 @pytest.fixture
 def gateway_with_agent_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from duckclaw.schema_migrations import run_pending_migrations
+
     dbf = tmp_path / "gw.duckdb"
     con = duckdb.connect(str(dbf))
-    con.execute(
-        """
-        CREATE TABLE agent_config (
-            key VARCHAR PRIMARY KEY,
-            value TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    try:
+        run_pending_migrations(con)
+        con.execute(
+            """
+            CREATE TABLE IF NOT EXISTS agent_config (
+                key VARCHAR PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
         )
-        """
-    )
-    con.close()
+    finally:
+        con.close()
     monkeypatch.setenv("DUCKCLAW_GATEWAY_DB_PATH", str(dbf))
     return dbf
+
+
+def _apply_typed_command_inline(command: object, *, db_path: str, user_id: str) -> str:
+    from duckclaw.write_command_handlers import dispatch_command
+
+    _ = user_id
+    con = duckdb.connect(db_path, read_only=False)
+    try:
+        dispatch_command(con, command.model_dump())
+    finally:
+        con.close()
+    return command.task_id
 
 
 def test_playground_set_model_provider(
     admin_client: TestClient, gateway_with_agent_config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key")
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _apply_typed_command_inline)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
     r = admin_client.put(
         "/api/v1/admin/playground/model",
         headers=_HEADERS,
@@ -40,14 +59,29 @@ def test_playground_set_model_provider(
     assert r.status_code == 200
     data = r.json()
     assert data["ok"] is True
+    assert data["task_id"]
+    assert len(data["task_ids"]) >= 3
     assert data["llm"]["provider"] == "deepseek"
     assert any(c["id"] == "deepseek" and c.get("active") for c in data["catalog"])
+    con = duckdb.connect(str(gateway_with_agent_config), read_only=True)
+    try:
+        runtime_rows = con.execute(
+            "SELECT domain, key, value_text FROM main.admin_runtime_settings "
+            "WHERE actor_email = 'chat:admin-conv-test' ORDER BY key"
+        ).fetchall()
+        agent_config_rows = con.execute("SELECT key, value FROM agent_config ORDER BY key").fetchall()
+    finally:
+        con.close()
+    assert ("runtime.session", "llm_provider", "deepseek") in runtime_rows
+    assert not any(str(row[0]).startswith("chat_admin-conv-test_llm_") for row in agent_config_rows)
 
 
 def test_playground_config_reflects_chat_override(
     admin_client: TestClient, gateway_with_agent_config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "mlx")
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _apply_typed_command_inline)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
     admin_client.put(
         "/api/v1/admin/playground/model",
         headers=_HEADERS,

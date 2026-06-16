@@ -346,6 +346,37 @@ def _can_apply_team_command_on_existing_rw(db: Any, target_db_path: str) -> bool
         return False
 
 
+def _release_ro_handles_for_external_writer(*handles: Any) -> list[Callable[[], None]]:
+    resumes: list[Callable[[], None]] = []
+    seen: set[int] = set()
+    for handle in handles:
+        if handle is None:
+            continue
+        ident = id(handle)
+        if ident in seen:
+            continue
+        seen.add(ident)
+        if getattr(handle, "_read_only", False) is not True:
+            continue
+        release = getattr(handle, "release_file_handle_for_external_writer", None)
+        suspend = getattr(handle, "suspend_readonly_file_handle", None)
+        resume = getattr(handle, "resume_readonly_file_handle", None)
+        if not callable(resume):
+            resume = getattr(handle, "resume_file_handle", None)
+        try:
+            if callable(release):
+                release()
+                if callable(resume):
+                    resumes.append(resume)
+            elif callable(suspend):
+                suspend()
+                if callable(resume):
+                    resumes.append(resume)
+        except Exception:
+            continue
+    return resumes
+
+
 def _enqueue_team_access_command(db: Any, acl_db: Any, command: Any, *, requester_id: str) -> str:
     target_db_path = _db_path_for_team_access_write(acl_db, db)
     if not target_db_path:
@@ -363,38 +394,46 @@ def _enqueue_team_access_command(db: Any, acl_db: Any, command: Any, *, requeste
             return str(getattr(command, "task_id", "") or "")
     except Exception:
         raise
+    resumes = _release_ro_handles_for_external_writer(db, acl_db)
     try:
-        from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync  # noqa: PLC0415
+        try:
+            from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync  # noqa: PLC0415
 
-        task_id = enqueue_typed_command(
-            command,
-            db_path=target_db_path,
-            user_id=str(requester_id or "default").strip() or "default",
-        )
-    except Exception as exc:
-        if not _can_apply_team_command_on_existing_rw(db, target_db_path):
-            raise
-        _audit_team_whitelist_rw(
-            "typed_command_inline_existing_rw",
-            command_type=getattr(command, "command_type", ""),
-            reason=type(exc).__name__,
-        )
-        _dispatch_authorized_user_command_inline(db, command)
-        return str(getattr(command, "task_id", "") or "")
-
-    status = poll_task_status_sync(task_id, timeout_sec=0.25, interval_sec=0.05)
-    if status is None:
-        if _can_apply_team_command_on_existing_rw(db, target_db_path):
+            task_id = enqueue_typed_command(
+                command,
+                db_path=target_db_path,
+                user_id=str(requester_id or "default").strip() or "default",
+            )
+        except Exception as exc:
+            if not _can_apply_team_command_on_existing_rw(db, target_db_path):
+                raise
             _audit_team_whitelist_rw(
                 "typed_command_inline_existing_rw",
                 command_type=getattr(command, "command_type", ""),
-                reason="writer_status_timeout",
+                reason=type(exc).__name__,
             )
             _dispatch_authorized_user_command_inline(db, command)
+            return str(getattr(command, "task_id", "") or "")
+
+        status = poll_task_status_sync(task_id, timeout_sec=0.25, interval_sec=0.05)
+        if status is None:
+            if _can_apply_team_command_on_existing_rw(db, target_db_path):
+                _audit_team_whitelist_rw(
+                    "typed_command_inline_existing_rw",
+                    command_type=getattr(command, "command_type", ""),
+                    reason="writer_status_timeout",
+                )
+                _dispatch_authorized_user_command_inline(db, command)
+            return task_id
+        if status.status == "failed":
+            raise RuntimeError(status.detail or "db-writer rejected team access command")
         return task_id
-    if status.status == "failed":
-        raise RuntimeError(status.detail or "db-writer rejected team access command")
-    return task_id
+    finally:
+        for resume in reversed(resumes):
+            try:
+                resume()
+            except Exception:
+                pass
 
 
 def _enqueue_authorized_user_command(db: Any, acl_db: Any, command: Any, *, requester_id: str) -> str:

@@ -117,24 +117,16 @@ def _absolute_vault_path(vault_path: str) -> str:
     return abs_path
 
 
-async def _enqueue_agent_config_write(*, db_path: str, sql: str) -> None:
-    import redis.asyncio as aioredis
-    from duckclaw.runtime_env import resolve_redis_url
+def _enqueue_runtime_config_command(command: Any, *, db_path: str, actor: str) -> str:
+    from core.admin_identity import vault_user_id_for_actor
+    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
 
-    r = aioredis.from_url(resolve_redis_url(), decode_responses=True)
-    try:
-        payload = json.dumps(
-            {
-                "query": sql,
-                "params": [],
-                "user_id": "admin-ui",
-                "db_path": db_path,
-                "tenant_id": "admin",
-            }
-        )
-        await r.lpush("duckdb_write_queue", payload)
-    finally:
-        await r.aclose()
+    user_id = vault_user_id_for_actor(actor)
+    task_id = enqueue_typed_command(command, db_path=db_path, user_id=user_id)
+    command_status = poll_task_status_sync(task_id, timeout_sec=0.5)
+    if command_status and command_status.status == "failed":
+        raise ValueError(command_status.detail or "runtime config write failed")
+    return task_id
 
 
 @router.get("/vaults", dependencies=[Depends(require_admin_key)])
@@ -193,15 +185,16 @@ async def put_runtime_config(
     body: RuntimeConfigPutBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
+    from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
+
     abs_path = _absolute_vault_path(body.vault_path)
     full_key = _full_agent_config_key(body.chat_id, body.key)
-    key_esc = full_key.replace("'", "''")
-    val_esc = body.value.replace("'", "''")[:8000]
-    sql = (
-        f"INSERT INTO agent_config (key, value) VALUES ('{key_esc}', '{val_esc}') "
-        f"ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()"
+    command = UpsertAgentConfigEntriesCommand(
+        tenant_id="default",
+        actor_email=actor,
+        entries={full_key: body.value[:8000]},
     )
-    await _enqueue_agent_config_write(db_path=abs_path, sql=sql)
+    task_id = _enqueue_runtime_config_command(command, db_path=abs_path, actor=actor)
     _admin_audit(
         "runtime.config.put",
         body.vault_path,
@@ -209,7 +202,7 @@ async def put_runtime_config(
         actor=actor,
         meta={"chat_id": body.chat_id},
     )
-    return {"ok": True, "queued": True, "full_key": full_key}
+    return {"ok": True, "queued": True, "full_key": full_key, "task_id": task_id}
 
 
 @router.delete("/config", dependencies=[Depends(require_admin_key)])
@@ -219,11 +212,16 @@ async def delete_runtime_config(
     key: str = Query(...),
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
+    from duckclaw.write_commands import DeleteAgentConfigEntriesCommand
+
     abs_path = _absolute_vault_path(vault_path)
     full_key = _full_agent_config_key(chat_id, key)
-    key_esc = full_key.replace("'", "''")
-    sql = f"DELETE FROM agent_config WHERE key = '{key_esc}'"
-    await _enqueue_agent_config_write(db_path=abs_path, sql=sql)
+    command = DeleteAgentConfigEntriesCommand(
+        tenant_id="default",
+        actor_email=actor,
+        keys=[full_key],
+    )
+    task_id = _enqueue_runtime_config_command(command, db_path=abs_path, actor=actor)
     _admin_audit(
         "runtime.config.delete",
         vault_path,
@@ -231,4 +229,4 @@ async def delete_runtime_config(
         actor=actor,
         meta={"chat_id": chat_id},
     )
-    return {"ok": True, "queued": True, "full_key": full_key}
+    return {"ok": True, "queued": True, "full_key": full_key, "task_id": task_id}

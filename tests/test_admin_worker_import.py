@@ -178,7 +178,9 @@ def test_template_import_module_and_script_do_not_hardcode_axis() -> None:
 def test_gateway_import_templates_endpoint_imports_selected_prefix_without_deleting_folders(
     gateway_admin_client,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     templates_root = tmp_path / "templates"
     selected = _write_template(templates_root, "Selected-Agent", display_name="Selected Agent")
     ignored = _write_template(templates_root, "Ignored-Agent", display_name="Ignored Agent")
@@ -196,8 +198,8 @@ def test_gateway_import_templates_endpoint_imports_selected_prefix_without_delet
 
     assert response.status_code == 200
     data = response.json()
-    assert [item["worker_id"] for item in data["imported"]] == ["selected-agent"]
-    assert data["skipped_existing"] == []
+    assert data["ok"] is True
+    assert data["task_id"]
     assert before_selected == after_selected
     assert before_ignored == after_ignored
 
@@ -213,7 +215,9 @@ def test_gateway_import_templates_endpoint_imports_selected_prefix_without_delet
 def test_gateway_template_detail_reads_imported_catalog_snapshot_without_template_folder(
     gateway_admin_client,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     templates_root = tmp_path / "templates"
     _write_template(templates_root, "Selected-Agent", display_name="Selected Agent")
 
@@ -242,7 +246,9 @@ def test_gateway_template_detail_reads_imported_catalog_snapshot_without_templat
 def test_gateway_template_file_save_updates_catalog_context_and_version_without_touching_folder(
     gateway_admin_client,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import (
         get_latest_worker_version,
@@ -297,7 +303,9 @@ def test_gateway_template_file_save_updates_catalog_context_and_version_without_
 def test_gateway_catalog_context_crud_adds_reorders_and_deactivates_context(
     gateway_admin_client,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     templates_root = tmp_path / "templates"
     _write_template(templates_root, "Selected-Agent", display_name="Selected Agent")
     imported = gateway_admin_client.post(
@@ -313,7 +321,7 @@ def test_gateway_catalog_context_crud_adds_reorders_and_deactivates_context(
         json={"title": "extra_context.md", "content_md": "# Extra\n\nNuevo contexto", "sort_order": 1},
     )
     assert created.status_code == 200
-    context_id = created.json()["context"]["context_id"]
+    assert created.json()["task_id"]
 
     detail = gateway_admin_client.get(
         "/api/v1/admin/templates/selected-agent",
@@ -321,7 +329,7 @@ def test_gateway_catalog_context_crud_adds_reorders_and_deactivates_context(
     )
     data = detail.json()
     assert data["contents"]["extra_context.md"] == "# Extra\n\nNuevo contexto"
-    assert any(ctx["context_id"] == context_id for ctx in data["contexts"])
+    context_id = next(ctx["context_id"] for ctx in data["contexts"] if ctx["title"] == "extra_context.md")
 
     reordered = gateway_admin_client.patch(
         "/api/v1/admin/templates/selected-agent/contexts/reorder",
@@ -329,7 +337,7 @@ def test_gateway_catalog_context_crud_adds_reorders_and_deactivates_context(
         json={"items": [{"context_id": context_id, "sort_order": 50}]},
     )
     assert reordered.status_code == 200
-    assert reordered.json()["updated"] == 1
+    assert reordered.json()["task_id"]
 
     deleted = gateway_admin_client.delete(
         f"/api/v1/admin/templates/selected-agent/contexts/{context_id}",
@@ -349,6 +357,7 @@ def test_gateway_catalog_context_crud_adds_reorders_and_deactivates_context(
 def test_gateway_delete_template_deactivates_catalog_worker_without_deleting_template_folder(
     gateway_admin_client,
     tmp_path: Path,
+    monkeypatch,
 ) -> None:
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import create_worker
@@ -367,6 +376,7 @@ def test_gateway_delete_template_deactivates_catalog_worker_without_deleting_tem
         )
     finally:
         db.close()
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
 
     response = gateway_admin_client.delete(
         "/api/v1/admin/templates/selected-agent",

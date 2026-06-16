@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
+
+from duckclaw import db_write_queue
+from duckclaw.write_commands import ForgetChatStateCommand, UpsertAgentConfigEntriesCommand
 
 _PREFIX = "chat_"
 _AGENT_CONFIG_TABLE = "agent_config"
@@ -62,6 +66,138 @@ def set_chat_state(db: Any, chat_id: Any, key: str, value: str) -> None:
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
         """
     )
+
+
+def forget_chat_state(db: Any, chat_id: Any) -> None:
+    """Delete legacy conversation rows and audited state for one chat/session."""
+    if _skip_runtime_ddl(db):
+        return
+    try:
+        cid = int(chat_id)
+        db.execute(f"DELETE FROM telegram_conversation WHERE chat_id = {cid}")
+    except (TypeError, ValueError):
+        sid = str(chat_id).replace("'", "''")[:256]
+        try:
+            db.execute(f"DELETE FROM api_conversation WHERE session_id = '{sid}'")
+        except Exception:
+            pass
+    try:
+        _ensure_agent_config(db)
+        key = _chat_key(chat_id, "last_audit").replace("'", "''")[:128]
+        db.execute(f"DELETE FROM {_AGENT_CONFIG_TABLE} WHERE key = '{key}'")
+    except Exception:
+        pass
+
+
+def _release_ro_handle_for_writer(db: Any) -> tuple[bool, Any]:
+    release = getattr(db, "release_file_handle_for_external_writer", None)
+    suspend = getattr(db, "suspend_readonly_file_handle", None)
+    resume = getattr(db, "resume_readonly_file_handle", None)
+    if callable(release):
+        release()
+        return bool(callable(resume)), resume
+    if callable(suspend) and callable(resume):
+        suspend()
+        return True, resume
+    return False, resume
+
+
+def set_chat_state_via_typed_command(
+    db: Any,
+    chat_id: Any,
+    key: str,
+    value: str,
+    *,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> tuple[bool, str]:
+    """Write chat-scoped agent_config directly or through the typed DB-writer queue."""
+    if not _skip_runtime_ddl(db):
+        set_chat_state(db, chat_id, key, value)
+        return True, ""
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+    try:
+        target_db_path = str(Path(raw_path).expanduser().resolve())
+    except OSError:
+        target_db_path = raw_path
+
+    chat_actor = actor_email or f"chat:{str(chat_id or 'default').strip() or 'default'}"
+    command = UpsertAgentConfigEntriesCommand(
+        tenant_id=str(tenant_id or "default").strip() or "default",
+        actor_email=chat_actor,
+        entries={_chat_key(chat_id, key)[:128]: str(value)[:16384]},
+    )
+
+    released_ro, resume = _release_ro_handle_for_writer(db)
+    try:
+        task_id = db_write_queue.enqueue_typed_command(
+            command,
+            db_path=target_db_path,
+            user_id=str(chat_id or "default").strip() or "default",
+        )
+        status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=30.0)
+        if status is None:
+            return False, "timeout esperando db-writer"
+        if status.status != "success":
+            return False, (status.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro and callable(resume):
+            try:
+                resume()
+            except Exception:
+                pass
+
+
+def forget_chat_state_via_typed_command(
+    db: Any,
+    chat_id: Any,
+    *,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> tuple[bool, str]:
+    """Delete chat/session state directly or through the typed DB-writer queue."""
+    if not _skip_runtime_ddl(db):
+        forget_chat_state(db, chat_id)
+        return True, ""
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+    try:
+        target_db_path = str(Path(raw_path).expanduser().resolve())
+    except OSError:
+        target_db_path = raw_path
+
+    chat_actor = actor_email or f"chat:{str(chat_id or 'default').strip() or 'default'}"
+    command = ForgetChatStateCommand(
+        tenant_id=str(tenant_id or "default").strip() or "default",
+        actor_email=chat_actor,
+        chat_id=str(chat_id or "default").strip() or "default",
+    )
+
+    released_ro, resume = _release_ro_handle_for_writer(db)
+    try:
+        task_id = db_write_queue.enqueue_typed_command(
+            command,
+            db_path=target_db_path,
+            user_id=str(chat_id or "default").strip() or "default",
+        )
+        status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=30.0)
+        if status is None:
+            return False, "timeout esperando db-writer"
+        if status.status != "success":
+            return False, (status.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro and callable(resume):
+            try:
+                resume()
+            except Exception:
+                pass
 
 
 def get_global_config(db: Any, key: str) -> str:

@@ -681,6 +681,7 @@ async def _ainvoke(
     *,
     tenant_id: str = "default",
     user_id: str | None = None,
+    user_incoming: str | None = None,
     username: str | None = None,
     vault_db_path: str | None = None,
     shared_db_path: str | None = None,
@@ -697,10 +698,11 @@ async def _ainvoke(
     # `input` primero: LangSmith suele usar esta clave para la columna **Input** en la tabla Runs
     # (convención LangChain). `incoming` sigue siendo la fuente de verdad en el grafo.
     _tok = (outbound_telegram_bot_token or "").strip() or None
+    _state_user_incoming = (user_incoming or message or "").strip()
     state: dict[str, Any] = {
         "input": message,
         "incoming": message,
-        "user_incoming": message,
+        "user_incoming": _state_user_incoming,
         "history": history or [],
         "chat_id": chat_id,
         "tenant_id": tenant_id,
@@ -794,6 +796,7 @@ async def ainvoke_manager_ephemeral(
     *,
     tenant_id: str = "default",
     user_id: str | None = None,
+    user_incoming: str | None = None,
     username: str | None = None,
     vault_db_path: str | None = None,
     shared_db_path: str | None = None,
@@ -817,6 +820,7 @@ async def ainvoke_manager_ephemeral(
             chat_id,
             tenant_id=tenant_id,
             user_id=user_id,
+            user_incoming=user_incoming,
             username=username,
             vault_db_path=vault_db_path,
             shared_db_path=shared_db_path,

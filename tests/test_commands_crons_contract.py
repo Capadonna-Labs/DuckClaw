@@ -2,6 +2,11 @@ from __future__ import annotations
 
 import importlib
 import inspect
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
 
 from duckclaw.graphs import on_the_fly_commands
 
@@ -67,6 +72,78 @@ def test_crons_remote_schedule_clears_use_typed_db_writer_only() -> None:
     assert "enqueue_duckdb_write_sync" not in source
     assert "UpsertAgentConfigEntriesCommand" in source
     assert "enqueue_typed_command" in source
+
+
+def test_crons_delta_with_read_only_handle_queues_typed_agent_config_command(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw.commands.chat_state import _chat_key
+    from duckclaw.db_write_queue import DbWriteTaskStatus
+
+    crons = importlib.import_module(CANONICAL_MODULE)
+    captured: list[Any] = []
+
+    class ReadOnlyDb:
+        _read_only = True
+
+        def __init__(self, db_path: Path) -> None:
+            self._path = str(db_path)
+            self.released = 0
+            self.resumed = 0
+            self.direct_writes: list[str] = []
+
+        def execute(self, sql: str) -> None:
+            self.direct_writes.append(sql)
+            raise AssertionError(f"read-only /crons must not execute SQL directly: {sql}")
+
+        def query(self, _sql: str) -> list[dict[str, str]]:
+            return []
+
+        def release_file_handle_for_external_writer(self) -> None:
+            self.released += 1
+
+        def resume_readonly_file_handle(self) -> None:
+            self.resumed += 1
+
+    def fake_enqueue(command: Any, *, db_path: str, user_id: str) -> str:
+        captured.append((command, db_path, user_id))
+        return command.task_id
+
+    monkeypatch.setattr(
+        "harness_core.targets.load_homeostasis_manifest",
+        lambda *_args, **_kwargs: SimpleNamespace(goals=[]),
+    )
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue)
+    monkeypatch.setattr(
+        "duckclaw.db_write_queue.poll_task_status_sync",
+        lambda *_args, **_kwargs: DbWriteTaskStatus(status="success"),
+    )
+
+    db_path = tmp_path / "vault.duckdb"
+    db = ReadOnlyDb(db_path)
+    out = crons.execute_crons_schedule(db, "chat1", "--delta 1h", tenant_id="tenant-a")
+
+    merged_entries: dict[str, str] = {}
+    primary_db_path = str(db_path.resolve())
+    primary_commands = 0
+    for command, target_db_path, user_id in captured:
+        assert command.command_type == "upsert_agent_config_entries"
+        if target_db_path == primary_db_path:
+            primary_commands += 1
+            assert command.tenant_id == "tenant-a"
+            assert command.actor_email == "chat:chat1"
+            assert user_id == "chat1"
+        merged_entries.update(command.entries)
+
+    assert "Revisión proactiva cada" in out
+    assert primary_commands >= 1
+    assert merged_entries[_chat_key("chat1", "goals_delta_seconds")] == "3600"
+    assert merged_entries[_chat_key("chat1", "goals_proactive_tenant_id")] == "tenant-a"
+    assert merged_entries[_chat_key("chat1", "goals_cron_wall")] == ""
+    assert db.direct_writes == []
+    assert db.released >= 1
+    assert db.resumed == db.released
 
 
 def test_on_the_fly_crons_imports_remain_compatible() -> None:

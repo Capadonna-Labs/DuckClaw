@@ -9,6 +9,7 @@ import re
 import time
 from typing import Any, Optional
 
+from duckclaw import db_write_queue
 from duckclaw.commands.chat_state import (
     _PREFIX,
     _chat_key,
@@ -19,6 +20,7 @@ from duckclaw.runtime.scheduling.cron_wall_schedule import (
     format_cron_wall_human,
     parse_cron_wall_tokens,
 )
+from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
 
 _CRONS_DEBUG_LOG = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log"
 
@@ -310,21 +312,99 @@ def chat_id_from_goals_cron_wall_key(key: str) -> Optional[str]:
     return key[len(_PREFIX) : -len(suf)] or None
 
 
-def _apply_interval_only_clear(conn: Any, chat_id: Any) -> None:
+def _release_ro_handle_for_writer(db: Any) -> tuple[bool, Any]:
+    release = getattr(db, "release_file_handle_for_external_writer", None)
+    suspend = getattr(db, "suspend_readonly_file_handle", None)
+    resume = getattr(db, "resume_readonly_file_handle", None)
+    if callable(release):
+        release()
+        return bool(callable(resume)), resume
+    if callable(suspend) and callable(resume):
+        suspend()
+        return True, resume
+    return False, resume
+
+
+def _set_chat_state_entries(
+    db: Any,
+    chat_id: Any,
+    suffix_values: dict[str, Any],
+    *,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> tuple[bool, str]:
+    """Persist chat-scoped ``agent_config`` entries directly or through the typed writer."""
+    entries = {
+        _chat_key(chat_id, suffix)[:128]: str(value)[:16384]
+        for suffix, value in suffix_values.items()
+        if str(suffix or "").strip()
+    }
+    if not entries:
+        return True, ""
+
+    if not bool(getattr(db, "_read_only", False)):
+        for suffix, value in suffix_values.items():
+            set_chat_state(db, chat_id, suffix, str(value))
+        return True, ""
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return False, "Ruta de bóveda no resuelta"
+    try:
+        target_db_path = str(Path(raw_path).expanduser().resolve())
+    except OSError:
+        target_db_path = raw_path
+
+    chat_actor = actor_email or f"chat:{str(chat_id or 'default').strip() or 'default'}"
+    command = UpsertAgentConfigEntriesCommand(
+        tenant_id=str(tenant_id or "default").strip() or "default",
+        actor_email=chat_actor,
+        entries=entries,
+    )
+    released_ro, resume = _release_ro_handle_for_writer(db)
+    try:
+        task_id = db_write_queue.enqueue_typed_command(
+            command,
+            db_path=target_db_path,
+            user_id=str(chat_id or "default").strip() or "default",
+        )
+        status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=30.0)
+        if status is None:
+            return False, "timeout esperando db-writer"
+        if status.status != "success":
+            return False, (status.detail or "db-writer failed")[:500]
+        return True, ""
+    finally:
+        if released_ro and callable(resume):
+            try:
+                resume()
+            except Exception:
+                pass
+
+
+def _apply_interval_only_clear(
+    conn: Any,
+    chat_id: Any,
+    *,
+    tenant_id: str = "default",
+) -> str:
     """Quita solo programación por intervalo (--delta); no toca ``goals_cron_wall`` ni last_fire."""
-    set_chat_state(conn, chat_id, _GOALS_DELTA_SECONDS_KEY, "0")
-    set_chat_state(conn, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, "")
-    set_chat_state(conn, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
+    updates: dict[str, Any] = {
+        _GOALS_DELTA_SECONDS_KEY: "0",
+        _GOALS_PROACTIVE_ANCHOR_KEY: "",
+        _GOALS_DELTA_ANCHOR_LEGACY_KEY: "",
+    }
     try:
         raw_m = (get_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
-        if not raw_m:
-            return
-        m = json.loads(raw_m)
-        if isinstance(m, dict) and str(m.get("trigger") or "").lower() == "goals_cli":
-            set_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY, "")
+        if raw_m:
+            m = json.loads(raw_m)
+            if isinstance(m, dict) and str(m.get("trigger") or "").lower() == "goals_cli":
+                updates[_GOALS_DELTA_META_KEY] = ""
     except Exception:
         pass
-    set_chat_state(conn, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY, "")
+    updates[_GOALS_PROACTIVE_NOTIFY_KEY] = ""
+    ok, err = _set_chat_state_entries(conn, chat_id, updates, tenant_id=tenant_id)
+    return "" if ok else err
 
 
 def _enqueue_agent_config_entries_remote(
@@ -333,9 +413,6 @@ def _enqueue_agent_config_entries_remote(
     suffix_values: dict[str, Any],
 ) -> None:
     """Queue chat-scoped agent_config upserts for a remote DuckDB file."""
-    from duckclaw.db_write_queue import enqueue_typed_command
-    from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
-
     entries = {
         _chat_key(chat_id, suffix): str(value)[:16384]
         for suffix, value in suffix_values.items()
@@ -348,7 +425,7 @@ def _enqueue_agent_config_entries_remote(
     except OSError:
         target = str(db_path)
 
-    enqueue_typed_command(
+    db_write_queue.enqueue_typed_command(
         UpsertAgentConfigEntriesCommand(
             tenant_id="default",
             actor_email="system",
@@ -359,9 +436,11 @@ def _enqueue_agent_config_entries_remote(
     )
 
 
-def clear_interval_schedule_only(db: Any, chat_id: Any) -> None:
+def clear_interval_schedule_only(db: Any, chat_id: Any, *, tenant_id: str = "default") -> str:
     """``/crons --delta off``: intervalo y meta goals_cli; conserva horario de reloj y tenant."""
-    _apply_interval_only_clear(db, chat_id)
+    err = _apply_interval_only_clear(db, chat_id, tenant_id=tenant_id)
+    if err:
+        return err
 
     primary_resolved = ""
     try:
@@ -395,6 +474,7 @@ def clear_interval_schedule_only(db: Any, chat_id: Any) -> None:
             )
         except Exception:
             continue
+    return ""
 
 
 def _goals_cron_wall_listing_note(db: Any, chat_id: Any) -> str:
@@ -414,9 +494,16 @@ def _goals_cron_wall_listing_note(db: Any, chat_id: Any) -> str:
     )
 
 
-def clear_goals_cron_wall_storage(db: Any, chat_id: Any) -> None:
+def clear_goals_cron_wall_storage(db: Any, chat_id: Any, *, tenant_id: str = "default") -> str:
     """Borra horario de reloj en esta conexión y bóvedas hermanas (misma lógica que clear delta)."""
-    set_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY, "")
+    ok, err = _set_chat_state_entries(
+        db,
+        chat_id,
+        {_GOALS_CRON_WALL_KEY: ""},
+        tenant_id=tenant_id,
+    )
+    if not ok:
+        return err
 
     primary_resolved = ""
     try:
@@ -444,9 +531,10 @@ def clear_goals_cron_wall_storage(db: Any, chat_id: Any) -> None:
             )
         except Exception:
             continue
+    return ""
 
 
-def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
+def clear_goals_proactive_schedule(db: Any, chat_id: Any, *, tenant_id: str = "default") -> str:
     """
     Apaga el programador ``/crons --delta`` en el hub y en las bóvedas del **mismo** usuario que
     ``db._path`` (``.../private/<uid>/*.duckdb``), más el hub vía ``get_gateway_db_path``. El
@@ -454,16 +542,22 @@ def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
     DuckDB del árbol ``private`` al hacer ``off`` competía por bloqueos con db-writer.
     """
 
-    def _apply_clear(conn: Any) -> None:
-        set_chat_state(conn, chat_id, _GOALS_DELTA_SECONDS_KEY, "0")
-        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_PROACTIVE_TENANT_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_DELTA_META_KEY, "")
-        set_chat_state(conn, chat_id, _GOALS_CRON_WALL_KEY, "")
-
-    _apply_clear(db)
+    ok, err = _set_chat_state_entries(
+        db,
+        chat_id,
+        {
+            _GOALS_DELTA_SECONDS_KEY: "0",
+            _GOALS_PROACTIVE_LAST_FIRE_KEY: "",
+            _GOALS_PROACTIVE_ANCHOR_KEY: "",
+            _GOALS_PROACTIVE_TENANT_KEY: "",
+            _GOALS_DELTA_ANCHOR_LEGACY_KEY: "",
+            _GOALS_DELTA_META_KEY: "",
+            _GOALS_CRON_WALL_KEY: "",
+        },
+        tenant_id=tenant_id,
+    )
+    if not ok:
+        return err
 
     primary_resolved = ""
     try:
@@ -504,6 +598,7 @@ def clear_goals_proactive_schedule(db: Any, chat_id: Any) -> None:
             paths_touched.append(_rp or _p)
         except Exception:
             continue
+    return ""
 
 
 def _goal_title_for_crons(goal: dict, fallback_key: str) -> str:
@@ -575,11 +670,13 @@ def execute_crons_schedule(
         if err:
             return err
         if secs == 0:
-            clear_interval_schedule_only(db, chat_id)
+            persist_err = clear_interval_schedule_only(db, chat_id, tenant_id=tid)
+            if persist_err:
+                return f"No se pudo guardar: {persist_err}"
             return "Intervalo de revisión desactivado (/crons --delta off). Horario de reloj (--timestamp) no se modifica."
-        clear_goals_cron_wall_storage(db, chat_id)
-        set_chat_state(db, chat_id, _GOALS_DELTA_SECONDS_KEY, str(secs))
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid)
+        persist_err = clear_goals_cron_wall_storage(db, chat_id, tenant_id=tid)
+        if persist_err:
+            return f"No se pudo guardar: {persist_err}"
         from duckclaw.forge.homeostasis.goals_alignment import (
             normalize_jitter_ratio,
             normalize_notify_channel,
@@ -587,26 +684,32 @@ def execute_crons_schedule(
         )
 
         notify_ch = normalize_notify_channel(str(sched_opts.get("notify") or ""))
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY, notify_ch)
         mode = normalize_proactive_mode(str(sched_opts.get("mode") or ""))
         jitter_ratio = normalize_jitter_ratio(sched_opts.get("jitter"))
         # Cooldown starts now so the first tick waits ~secs (not the next 45s gateway poll).
         _fire_anchor = str(time.time())
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY, _fire_anchor)
         _anchor_now = _fire_anchor
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_ANCHOR_KEY, _anchor_now)
-        set_chat_state(db, chat_id, _GOALS_DELTA_ANCHOR_LEGACY_KEY, _anchor_now)
         meta_obj: dict[str, Any] = {
             "trigger": "goals_cli",
             "mode": mode,
             "jitter_ratio": jitter_ratio,
         }
-        set_chat_state(
+        ok, persist_err = _set_chat_state_entries(
             db,
             chat_id,
-            _GOALS_DELTA_META_KEY,
-            json.dumps(meta_obj, ensure_ascii=False),
+            {
+                _GOALS_DELTA_SECONDS_KEY: str(secs),
+                _GOALS_PROACTIVE_TENANT_KEY: tid,
+                _GOALS_PROACTIVE_NOTIFY_KEY: notify_ch,
+                _GOALS_PROACTIVE_LAST_FIRE_KEY: _fire_anchor,
+                _GOALS_PROACTIVE_ANCHOR_KEY: _anchor_now,
+                _GOALS_DELTA_ANCHOR_LEGACY_KEY: _anchor_now,
+                _GOALS_DELTA_META_KEY: json.dumps(meta_obj, ensure_ascii=False),
+            },
+            tenant_id=tid,
         )
+        if not ok:
+            return f"No se pudo guardar: {persist_err}"
         human = format_goals_delta_interval_human(secs)
         _crons_debug_log(
             "commands/crons.py:execute_crons_schedule",
@@ -641,39 +744,36 @@ def execute_crons_schedule(
                 "Exclusivo con /crons --delta: al activar uno se desactiva el otro."
             )
         if rest[0].lower() == "off":
-            clear_goals_cron_wall_storage(db, chat_id)
+            persist_err = clear_goals_cron_wall_storage(db, chat_id, tenant_id=tid)
+            if persist_err:
+                return f"No se pudo guardar: {persist_err}"
             return "Horario de reloj desactivado (/crons --timestamp off)."
         spec, terr = parse_cron_wall_tokens(rest)
         if terr or not spec:
             return terr or "No se pudo interpretar --timestamp."
-        clear_interval_schedule_only(db, chat_id)
-        set_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY, json.dumps(spec, ensure_ascii=False))
-        set_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY, tid)
+        persist_err = clear_interval_schedule_only(db, chat_id, tenant_id=tid)
+        if persist_err:
+            return f"No se pudo guardar: {persist_err}"
         mraw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+        wall_updates: dict[str, Any] = {
+            _GOALS_CRON_WALL_KEY: json.dumps(spec, ensure_ascii=False),
+            _GOALS_PROACTIVE_TENANT_KEY: tid,
+        }
         try:
             if not mraw:
-                set_chat_state(
-                    db,
-                    chat_id,
-                    _GOALS_DELTA_META_KEY,
-                    json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
-                )
+                wall_updates[_GOALS_DELTA_META_KEY] = json.dumps({"trigger": "goals_wall"}, ensure_ascii=False)
             else:
                 mobj = json.loads(mraw)
                 if not isinstance(mobj, dict) or str(mobj.get("trigger") or "").lower() != "goals_wall":
-                    set_chat_state(
-                        db,
-                        chat_id,
-                        _GOALS_DELTA_META_KEY,
-                        json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
+                    wall_updates[_GOALS_DELTA_META_KEY] = json.dumps(
+                        {"trigger": "goals_wall"},
+                        ensure_ascii=False,
                     )
         except Exception:
-            set_chat_state(
-                db,
-                chat_id,
-                _GOALS_DELTA_META_KEY,
-                json.dumps({"trigger": "goals_wall"}, ensure_ascii=False),
-            )
+            wall_updates[_GOALS_DELTA_META_KEY] = json.dumps({"trigger": "goals_wall"}, ensure_ascii=False)
+        ok, persist_err = _set_chat_state_entries(db, chat_id, wall_updates, tenant_id=tid)
+        if not ok:
+            return f"No se pudo guardar: {persist_err}"
         return (
             f"Programación por reloj guardada. {format_cron_wall_human(spec)} "
             "Usa /crons para listar. /crons --timestamp off para cancelar."
@@ -702,7 +802,9 @@ def execute_crons_schedule(
                     f"No hay revisión por intervalo activa (cron-id `{CRON_SCHEDULE_ID_DELTA}`). "
                     "Ejecuta /crons para ver el listado."
                 )
-            clear_interval_schedule_only(db, chat_id)
+            persist_err = clear_interval_schedule_only(db, chat_id, tenant_id=tid)
+            if persist_err:
+                return f"No se pudo guardar: {persist_err}"
             return (
                 "Programación por intervalo eliminada (/crons --rm "
                 f"{CRON_SCHEDULE_ID_DELTA}). Horario de reloj (--timestamp) no se modifica."
@@ -713,7 +815,9 @@ def execute_crons_schedule(
                 f"No hay horario de reloj activo (cron-id `{CRON_SCHEDULE_ID_WALL}`). "
                 "Ejecuta /crons para ver el listado."
             )
-        clear_goals_cron_wall_storage(db, chat_id)
+        persist_err = clear_goals_cron_wall_storage(db, chat_id, tenant_id=tid)
+        if persist_err:
+            return f"No se pudo guardar: {persist_err}"
         return (
             f"Horario de reloj eliminado (/crons --rm {CRON_SCHEDULE_ID_WALL}). "
             "El intervalo (/crons --delta) no se modifica."

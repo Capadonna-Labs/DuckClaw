@@ -43,6 +43,50 @@ def test_admin_health_ok(admin_client: TestClient):
     assert "workers_count" in data
 
 
+def test_admin_prompt_policy_health_reports_missing_db_first_requirements(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+) -> None:
+    import duckdb
+
+    from tests.test_prompt_policies import _seed_policy
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        _seed_policy(con, "system_prompt", "present-worker", "contenido activo")
+        _seed_policy(
+            con,
+            "system_prompt",
+            "inactive-worker",
+            "contenido inactivo",
+            status="inactive",
+            active=False,
+        )
+    finally:
+        con.close()
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/prompt-policies/health",
+        headers={"X-Admin-Key": "test-admin-key"},
+        params=[
+            ("worker_id", "present-worker"),
+            ("worker_id", "missing-worker"),
+            ("worker_id", "inactive-worker"),
+        ],
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is False
+    assert data["checked_count"] == 4
+    assert data["missing_count"] == 3
+    assert data["missing"] == [
+        {"policy_type": "capability", "policy_name": "generic_worker", "source": "framework"},
+        {"policy_type": "system_prompt", "policy_name": "inactive-worker", "source": "worker"},
+        {"policy_type": "system_prompt", "policy_name": "missing-worker", "source": "worker"},
+    ]
+
+
 def test_list_templates(admin_client: TestClient):
     r = admin_client.get(
         "/api/v1/admin/templates",
@@ -50,6 +94,57 @@ def test_list_templates(admin_client: TestClient):
     )
     assert r.status_code == 200
     assert "templates" in r.json()
+
+
+def test_template_file_mutator_enqueues_typed_command(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import duckdb
+
+    from duckclaw.write_command_handlers import dispatch_command
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        dispatch_command(con, {
+            "command_type": "upsert_worker",
+            "command_version": 1,
+            "task_id": "task-seed-template-worker",
+            "tenant_id": "default",
+            "actor_email": "admin@test.local",
+            "worker_id": "support-helper",
+            "display_name": "Support Helper",
+            "source_kind": "runtime",
+        })
+    finally:
+        con.close()
+
+    captured: dict[str, object] = {}
+
+    def _fake_enqueue(command, *, db_path: str, user_id: str, queue_name: str = "duckdb_write_queue") -> str:
+        captured["command"] = command
+        captured["db_path"] = db_path
+        captured["user_id"] = user_id
+        captured["queue_name"] = queue_name
+        return "task-template-file-command"
+
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _fake_enqueue)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *_args, **_kwargs: None)
+
+    response = gateway_admin_client.put(
+        "/api/v1/admin/templates/support-helper/files/system_prompt.md",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
+        json={"content": "Atiende solicitudes usando contexto local."},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["task_id"] == "task-template-file-command"
+    command = captured["command"]
+    assert getattr(command, "command_type") == "update_catalog_worker_file"
+    assert getattr(command, "worker_id") == "support-helper"
+    assert getattr(command, "file_path") == "system_prompt.md"
+    assert getattr(command, "content") == "Atiende solicitudes usando contexto local."
 
 
 def test_fly_commands(admin_client: TestClient):
@@ -149,7 +244,9 @@ def test_catalog_skills_global_are_scoped_to_authenticated_db_skills(
 
 def test_create_catalog_skill_for_authenticated_actor(
     gateway_admin_client: TestClient,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     response = gateway_admin_client.post(
         "/api/v1/admin/catalog/skills",
         headers={
@@ -164,7 +261,9 @@ def test_create_catalog_skill_for_authenticated_actor(
         },
     )
     assert response.status_code == 200
-    created = response.json()["skill"]
+    payload = response.json()
+    assert payload["task_id"]
+    created = payload["skill"]
     assert created["id"] == "customer_lookup"
     assert created["path"] == "db://skills/customer_lookup.py"
     assert created["scope"] == "catalog"
@@ -178,6 +277,36 @@ def test_create_catalog_skill_for_authenticated_actor(
     )
     assert listed.status_code == 200
     assert created in listed.json()["global"]
+
+
+def test_deactivate_catalog_skill_for_authenticated_actor(
+    gateway_admin_client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
+    headers = {
+        "X-Admin-Key": "test-admin-key",
+        "X-Duckclaw-Actor": "admin@test.local",
+    }
+    created = gateway_admin_client.post(
+        "/api/v1/admin/catalog/skills",
+        headers=headers,
+        json={
+            "name": "temporary_lookup",
+            "description": "Skill temporal.",
+            "skill_type": "python",
+            "implementation_ref": "db://skills/temporary_lookup.py",
+        },
+    )
+    assert created.status_code == 200
+
+    deleted = gateway_admin_client.delete("/api/v1/admin/catalog/skills/temporary_lookup", headers=headers)
+
+    assert deleted.status_code == 200
+    assert deleted.json()["task_id"]
+    listed = gateway_admin_client.get("/api/v1/admin/catalog/skills", headers=headers)
+    assert listed.status_code == 200
+    assert all(item["id"] != "temporary_lookup" for item in listed.json()["global"])
 
 
 def test_catalog_skills_local_are_scoped_to_authenticated_catalog_workers(
@@ -561,6 +690,10 @@ def test_normalize_pm2_gateway_restart_interrupted(admin_client: TestClient):
 def test_telegram_routes_get_and_put(
     admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
+    import duckdb
+
+    from duckclaw.write_command_handlers import dispatch_command
+
     env_file = tmp_path / ".env"
     compact_line = "mybot:tok1:/api/v1/telegram/mybot:Worker-A:TenantA"
     env_file.write_text(
@@ -572,6 +705,17 @@ def test_telegram_routes_get_and_put(
     import routers.admin as admin_router
 
     monkeypatch.setattr(admin_router, "_env_file", lambda: env_file)
+
+    def fake_enqueue(command: object, *, db_path: str, user_id: str) -> str:
+        _ = user_id
+        con = duckdb.connect(db_path, read_only=False)
+        try:
+            dispatch_command(con, command.model_dump())
+        finally:
+            con.close()
+        return command.task_id
+
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue)
 
     r = admin_client.get(
         "/api/v1/admin/telegram/routes",
@@ -609,6 +753,7 @@ def test_telegram_routes_get_and_put(
     assert r2.status_code == 200
     assert r2.json().get("route_count") == 2
     assert r2.json().get("source") == "db"
+    assert r2.json().get("task_id")
     saved = env_file.read_text(encoding="utf-8")
     assert "other:tok_other:/api/v1/telegram/other:Worker-B:TenantB" not in saved
     assert "mybot:tok1:/api/v1/telegram/mybot:Worker-A:TenantA" in saved
@@ -1186,7 +1331,8 @@ def test_admin_conversations_crud(admin_client: TestClient):
     assert not any(c.get("session_id") == sid for c in convs_after)
 
 
-def test_workspace_project_detail_endpoint(admin_client: TestClient):
+def test_workspace_project_detail_endpoint(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
     created = admin_client.post(
         "/api/v1/admin/workspace/projects",
@@ -1194,6 +1340,7 @@ def test_workspace_project_detail_endpoint(admin_client: TestClient):
         json={"name": "Detalle Proyecto", "description": "Proyecto DB-first"},
     )
     assert created.status_code == 200
+    assert created.json()["task_id"]
     project_id = created.json()["project"]["project_id"]
 
     detail = admin_client.get(
@@ -1369,6 +1516,7 @@ def test_admin_auth_login_smoke(
         monkeypatch.setenv(key, str(gw))
     monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "test-admin-key")
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(Path(__file__).resolve().parent.parent))
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     con = __import__("duckdb").connect(str(gw))
     try:
         class _A:

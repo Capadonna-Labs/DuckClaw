@@ -648,6 +648,30 @@ class TestCommandHandlers:
         assert "BEGIN TRANSACTION" not in source
         assert "COMMIT" not in source
 
+    def test_workspace_write_handlers_live_in_domain_module(self) -> None:
+        from duckclaw import write_command_handlers
+        from duckclaw.write_handlers import workspace as workspace_handlers
+
+        handler_names = (
+            "_apply_create_project",
+            "_apply_add_project_member",
+            "_apply_assign_agent_to_project",
+            "_apply_set_project_status",
+            "_apply_delete_project",
+            "_apply_detach_agent_from_project",
+            "_apply_confirm_workspace_managed_draft",
+        )
+
+        for name in handler_names:
+            exported = getattr(write_command_handlers, name)
+            canonical = getattr(workspace_handlers, name)
+            assert exported is canonical
+            assert canonical.__module__ == "duckclaw.write_handlers.workspace"
+
+        source = inspect.getsource(workspace_handlers)
+        assert "BEGIN TRANSACTION" not in source
+        assert "COMMIT" not in source
+
     def test_upsert_worker_inserts(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import _apply_upsert_worker
 

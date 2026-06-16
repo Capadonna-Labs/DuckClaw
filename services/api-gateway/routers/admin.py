@@ -1997,6 +1997,9 @@ def admin_code_decision_reject(
         class _DbShim:
             _path = resolved
 
+            def query(self, q: str, params: tuple = ()):
+                return con.execute(q, params).fetchdf().to_dict(orient="records")
+
         from duckclaw.capadonna_plugin import capadonna_missing_message, reject_capadonna_code_decision
 
         result = reject_capadonna_code_decision(

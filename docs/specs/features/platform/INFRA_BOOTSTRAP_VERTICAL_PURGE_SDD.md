@@ -60,3 +60,19 @@ uv run pytest tests/test_forge_legacy_cleanup.py -q
 uv run pytest -q
 cd ~/Desktop/Capadonna-Driller/workers/duckclaw && pytest -q
 ```
+
+---
+
+# Hito 2 — Infra Bootstrap
+
+**Estado:** implementado en core (`duckclaw.gateway.settings`, `verify_schema_integrity`, `duckclaw-migrate`, `duckclaw-healthcheck`, lifespan fail-fast).
+
+**Docs:** [`docs/architecture/infra-bootstrap.md`](../../../architecture/infra-bootstrap.md)
+
+## Criterios de aceptación Hito 2
+
+- Gateway no arranca sin Redis + schema migrada + secretos prod (salvo `DUCKCLAW_DEV_MODE=1`).
+- `duckclaw-migrate` y `duckclaw-healthcheck` operativos (entry points en `duckclaw-shared`).
+- Cero `redis.config_set` / `docker` administrativo en lifespan gateway.
+- Wheel unificado (Fase A3) **diferido** — solo entry points + shared importable.
+

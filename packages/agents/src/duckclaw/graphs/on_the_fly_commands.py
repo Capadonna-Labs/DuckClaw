@@ -385,56 +385,14 @@ def set_chat_state_via_vault(
     *,
     tenant_id: str = "default",
 ) -> tuple[bool, str]:
-    """Persist chat-scoped command state through DB-writer when the current handle is read-only."""
-    if not _skip_runtime_ddl(db):
-        set_chat_state(db, chat_id, key_suffix, value)
-        return True, ""
-
-    raw_path = str(getattr(db, "_path", "") or "").strip()
-    if not raw_path or raw_path == ":memory:":
-        return False, "Ruta de bóveda no resuelta"
-
-    try:
-        from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
-    except Exception as exc:
-        return False, f"cola DuckDB no disponible: {exc}"
-
-    released_ro = False
-    try:
-        release = getattr(db, "release_file_handle_for_external_writer", None)
-        resume = getattr(db, "resume_readonly_file_handle", None)
-        suspend = getattr(db, "suspend_readonly_file_handle", None)
-        if callable(release):
-            release()
-            released_ro = bool(callable(resume))
-        elif callable(suspend) and callable(resume):
-            suspend()
-            released_ro = True
-
-        query = (
-            "INSERT INTO agent_config (key, value) VALUES (?, ?) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP"
-        )
-        task_id = enqueue_duckdb_write_sync(
-            db_path=str(Path(raw_path).expanduser().resolve()),
-            query=query,
-            params=[_chat_key(chat_id, key_suffix)[:240], str(value)[:16384]],
-            user_id=str(chat_id),
-            tenant_id=str(tenant_id or "default").strip() or "default",
-        )
-        status = poll_task_status_sync(task_id, timeout_sec=30.0)
-        if status is None:
-            return False, "timeout esperando db-writer"
-        if status.status != "success":
-            return False, (status.detail or "db-writer failed")[:500]
-        return True, ""
-    finally:
-        if released_ro:
-            try:
-                if callable(resume):
-                    resume()
-            except Exception:
-                pass
+    """Persist chat-scoped command state through the typed DB-writer path."""
+    return set_chat_state_via_typed_command(
+        db,
+        chat_id,
+        key_suffix,
+        value,
+        tenant_id=str(tenant_id or "default").strip() or "default",
+    )
 
 
 def _persist_meditate_chat_state(
@@ -946,7 +904,13 @@ def execute_context_toggle(
     )
 
 
-def execute_comfyui_provider(db: Any, chat_id: Any, args: str) -> str:
+def execute_comfyui_provider(
+    db: Any,
+    chat_id: Any,
+    args: str,
+    *,
+    tenant_id: Any = "default",
+) -> str:
     """/comfyui --provider local|fal: motor de generacion visual por chat."""
     from duckclaw.forge.skills.visual_provider import (
         default_visual_provider,
@@ -961,7 +925,15 @@ def execute_comfyui_provider(db: Any, chat_id: Any, args: str) -> str:
         val = raw
     val = val.strip().lower()
     if val in ("local", "fal"):
-        set_chat_state(db, chat_id, "comfyui_provider", val)
+        ok, err = set_chat_state_via_typed_command(
+            db,
+            chat_id,
+            "comfyui_provider",
+            val,
+            tenant_id=str(tenant_id or "default").strip() or "default",
+        )
+        if not ok:
+            return f"No se pudo actualizar proveedor visual: {err}"
         return (
             f"Proveedor visual establecido en '{val}' para esta sesion.\n"
             + provider_status_message(val)  # type: ignore[arg-type]
@@ -1199,7 +1171,7 @@ def _dispatch_fly_command(
     if name == "context":
         return execute_context_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name == "comfyui":
-        return execute_comfyui_provider(db, chat_id, args)
+        return execute_comfyui_provider(db, chat_id, args, tenant_id=tenant_id)
     if name in ("sandbox", "sandox"):
         return execute_sandbox_toggle(db, chat_id, args, tenant_id=tenant_id)
     if name in ("internet", "red", "network"):

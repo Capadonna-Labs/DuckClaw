@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 GATEWAY_ROOT = Path("services/api-gateway")
+DB_FIRST_CORE_REFACTOR_DOC = Path("docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md")
 
 
 def _py_files() -> list[Path]:
@@ -18,6 +19,12 @@ def _function_name_before(source: str, offset: int) -> str:
         return "<module>"
     match = matches[-1]
     return str(match.group(1) or match.group(2))
+
+
+def _fly_command_set(source: str, name: str) -> set[str]:
+    match = re.search(rf"^{name}\s*=\s*frozenset\(\s*\((.*?)\)\s*\)", source, re.MULTILINE | re.DOTALL)
+    assert match is not None
+    return set(re.findall(r'"([^"]+)"', match.group(1)))
 
 
 def test_gateway_structured_writes_have_explicit_read_write_allowlist() -> None:
@@ -43,9 +50,7 @@ def test_gateway_manual_transactions_have_explicit_allowlist() -> None:
 
 
 def test_gateway_duckclaw_read_write_is_limited_to_explicit_runtime_compat() -> None:
-    allowed = {
-        ("services/api-gateway/core/fly_command_invocation.py", "_open_legacy_fly_duckclaw_rw"),
-    }
+    allowed: set[tuple[str, str]] = set()
     found: set[tuple[str, str]] = set()
     pattern = re.compile(r"DuckClaw\([^)]*read_only=False", re.DOTALL)
     for path in _py_files():
@@ -62,8 +67,8 @@ def test_gateway_main_delegates_legacy_fly_rw_exception_to_owner() -> None:
 
     assert "invoke_legacy_fly_command" in main
     assert "DuckClaw(" not in main
-    assert "DB-first runtime compat allowlist: legacy slash/fly commands" in fly_owner
-    assert "DuckClaw(vault_db_path, read_only=False" in fly_owner
+    assert "DuckClaw(vault_db_path, read_only=True" in fly_owner
+    assert "read_only=False" not in fly_owner
 
 
 def test_gateway_fly_rw_exception_excludes_read_only_safe_commands() -> None:
@@ -73,11 +78,35 @@ def test_gateway_fly_rw_exception_excludes_read_only_safe_commands() -> None:
     assert '"context"' in fly_owner
     assert '"workers"' in fly_owner
     assert '"forget"' in fly_owner
+    assert '"comfyui"' in fly_owner
+    assert '"goals"' in fly_owner
+    assert '"meditate"' in fly_owner
+    assert '"reject-code"' in fly_owner
+    assert '"reject_code"' in fly_owner
+    assert '"resolve-uncertainty"' in fly_owner
+    assert '"resolve_uncertainty"' in fly_owner
     assert "LEGACY_RW_FLY_COMMANDS" in fly_owner
     legacy_rw_segment = fly_owner.split("LEGACY_RW_FLY_COMMANDS", 1)[1].split(")", 1)[0]
     assert '"context"' not in legacy_rw_segment
     assert '"workers"' not in legacy_rw_segment
     assert '"forget"' not in legacy_rw_segment
+    assert '"comfyui"' not in legacy_rw_segment
+    assert '"goals"' not in legacy_rw_segment
+    assert '"meditate"' not in legacy_rw_segment
+    assert '"reject-code"' not in legacy_rw_segment
+    assert '"reject_code"' not in legacy_rw_segment
+    assert '"resolve-uncertainty"' not in legacy_rw_segment
+    assert '"resolve_uncertainty"' not in legacy_rw_segment
+
+
+def test_gateway_fly_rw_exception_lists_only_current_pending_commands() -> None:
+    fly_owner = (GATEWAY_ROOT / "core" / "fly_command_invocation.py").read_text(encoding="utf-8")
+    docs = DB_FIRST_CORE_REFACTOR_DOC.read_text(encoding="utf-8")
+    pending_legacy_rw: set[str] = set()
+
+    assert _fly_command_set(fly_owner, "LEGACY_RW_FLY_COMMANDS") == pending_legacy_rw
+    assert pending_legacy_rw.isdisjoint(_fly_command_set(fly_owner, "READ_ONLY_SAFE_FLY_COMMANDS"))
+    assert "Estado actual de `LEGACY_RW_FLY_COMMANDS`: ninguno." in docs
 
 
 def test_gateway_raw_query_payloads_are_limited_to_compat_enqueue() -> None:

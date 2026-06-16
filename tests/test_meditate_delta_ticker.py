@@ -9,6 +9,7 @@ import pytest
 
 from duckclaw.graphs.on_the_fly_commands import (
     _format_meditate_cycle_summary,
+    _chat_key,
     _resolve_meditate_vault_user_id,
     chat_id_from_meditate_delta_config_key,
     clear_meditate_schedule,
@@ -89,6 +90,72 @@ def test_execute_meditate_schedule_ok(monkeypatch: pytest.MonkeyPatch) -> None:
     assert float(get_chat_state(db, "5", "meditate_last_fire_epoch") or "0") > 0
     clear_meditate_schedule(db, "5")
     assert get_chat_state(db, "5", "meditate_delta_seconds") == "0"
+
+
+def test_execute_meditate_delta_with_read_only_handle_queues_typed_commands(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw.db_write_queue import DbWriteTaskStatus
+
+    captured = []
+
+    class ReadOnlyDb:
+        _read_only = True
+
+        def __init__(self) -> None:
+            self._path = str(tmp_path / "vault.duckdb")
+            self.released = 0
+            self.resumed = 0
+            self.direct_writes: list[str] = []
+
+        def execute(self, sql: str) -> None:
+            self.direct_writes.append(sql)
+            raise AssertionError(f"read-only /meditate must not execute SQL directly: {sql}")
+
+        def query(self, sql: str):
+            if _chat_key("5", "worker_id") in sql:
+                return json.dumps([{"value": "analytics-worker"}])
+            return json.dumps([])
+
+        def release_file_handle_for_external_writer(self) -> None:
+            self.released += 1
+
+        def resume_readonly_file_handle(self) -> None:
+            self.resumed += 1
+
+    def fake_enqueue(command, *, db_path: str, user_id: str) -> str:
+        captured.append((command, db_path, user_id))
+        return command.task_id
+
+    monkeypatch.setattr(
+        "duckclaw.graphs.on_the_fly_commands.invoke_meditate_cycle_for_chat",
+        lambda *_a, **_k: {"status": "completed"},
+    )
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue)
+    monkeypatch.setattr(
+        "duckclaw.db_write_queue.poll_task_status_sync",
+        lambda *_a, **_k: DbWriteTaskStatus(status="success"),
+    )
+
+    db = ReadOnlyDb()
+    msg = execute_meditate(db, "5", "--delta 4h", tenant_id="analytics")
+
+    merged_entries: dict[str, str] = {}
+    for command, _db_path, user_id in captured:
+        assert command.command_type == "upsert_agent_config_entries"
+        assert command.tenant_id == "analytics"
+        assert command.actor_email == "chat:5"
+        assert user_id == "5"
+        merged_entries.update(command.entries)
+    assert "Meditate infra cada ~4h" in msg
+    assert merged_entries[_chat_key("5", "meditate_delta_seconds")] == "14400"
+    assert merged_entries[_chat_key("5", "meditate_tenant_id")] == "analytics"
+    assert merged_entries[_chat_key("5", "meditate_worker_id")] == "analytics-worker"
+    assert float(merged_entries[_chat_key("5", "meditate_last_fire_epoch")]) > 0
+    assert db.direct_writes == []
+    assert db.released >= 1
+    assert db.resumed == db.released
 
 
 def test_format_meditate_cycle_summary_alignment_message() -> None:

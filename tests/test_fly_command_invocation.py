@@ -15,6 +15,7 @@ if str(_GATEWAY_DIR) not in sys.path:
 
 MIGRATED_READ_ONLY_FLY_COMMANDS = (
     "audit",
+    "comfyui",
     "crons",
     "heartbeat",
     "health",
@@ -27,6 +28,10 @@ MIGRATED_READ_ONLY_FLY_COMMANDS = (
     "prompt",
     "provider",
     "red",
+    "reject-code",
+    "reject_code",
+    "resolve-uncertainty",
+    "resolve_uncertainty",
     "sandbox",
     "sandox",
     "setup",
@@ -162,6 +167,59 @@ def test_db_first_fly_command_batch_opens_read_only_duckclaw(
 
     assert response is not None
     assert response["response"] == f"{command_name} ok"
+    assert opened == [(str(vault_path), True, "python")]
+
+
+def test_unlisted_fly_command_defaults_to_read_only_duckclaw(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from core import fly_command_invocation
+
+    opened: list[tuple[str, bool, str]] = []
+
+    class FakeDuckClaw:
+        def __init__(self, db_path: str, *, read_only: bool, engine: str) -> None:
+            self._path = db_path
+            self._read_only = read_only
+            opened.append((db_path, read_only, engine))
+
+        def close(self) -> None:
+            pass
+
+    def fake_handle_command(
+        db: Any,
+        chat_id: Any,
+        text: str,
+        **_kwargs: Any,
+    ) -> None:
+        assert chat_id == "chat1"
+        assert text == "/unknown-command"
+        assert getattr(db, "_read_only", False) is True
+        return None
+
+    monkeypatch.setattr(fly_command_invocation, "DuckClaw", FakeDuckClaw)
+    monkeypatch.setattr(fly_command_invocation, "handle_command", fake_handle_command)
+    monkeypatch.setattr(fly_command_invocation, "_attach_fly_charts", lambda *_args, **_kwargs: None)
+
+    vault_path = tmp_path / "vault.duckdb"
+    response = asyncio.run(
+        fly_command_invocation.invoke_legacy_fly_command(
+            message="/unknown-command",
+            session_id="chat1",
+            worker_id="manager",
+            tenant_id="tenant-a",
+            vault_db_path=str(vault_path),
+            vault_user_id="user-a",
+            requester_id="requester-a",
+            username="ana",
+            delivery_context=SimpleNamespace(channel="http", outbound_bot_token=""),
+            resolve_telegram_bot_token=lambda: "",
+            persist_admin_fly_charts=lambda *_args: [],
+        )
+    )
+
+    assert response is None
     assert opened == [(str(vault_path), True, "python")]
 
 

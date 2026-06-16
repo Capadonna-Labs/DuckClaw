@@ -21,13 +21,9 @@ Usage::
 """
 from __future__ import annotations
 
-import hashlib
 import json
-import logging
-import re
 import uuid
 from typing import Any
-from pathlib import Path
 
 from duckclaw.write_handlers.admin_auth import (
     _apply_clear_admin_login_failures,
@@ -46,6 +42,7 @@ from duckclaw.write_handlers.kanban import (
     _apply_delete_kanban_card,
     _apply_upsert_kanban_card,
 )
+from duckclaw.write_handlers.duckdb_maintenance import _apply_drop_legacy_duckdb_objects
 from duckclaw.write_handlers.prompt_policies import (
     _apply_deactivate_prompt_policy,
     _apply_upsert_prompt_policy,
@@ -58,10 +55,6 @@ from duckclaw.write_handlers.runtime import (
     _apply_upsert_runtime_setting,
     _ensure_task_audit_log_table,
 )
-
-_log = logging.getLogger(__name__)
-
-
 def dispatch_command(conn: Any, payload: dict) -> None:
     """Route command_type to the appropriate handler.
 
@@ -127,51 +120,6 @@ def dispatch_command(conn: Any, payload: dict) -> None:
 def _json_metadata(raw: Any) -> str:
     data = raw if isinstance(raw, dict) else {}
     return json.dumps(data, ensure_ascii=False, default=str)
-
-
-def _quote_duckdb_ident(value: str) -> str:
-    ident = (value or "").strip()
-    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ident):
-        raise ValueError(f"Invalid DuckDB identifier: {value}")
-    return '"' + ident.replace('"', '""') + '"'
-
-
-def _dedupe_lowered(values: Any) -> list[str]:
-    deduped: list[str] = []
-    seen: set[str] = set()
-    for raw in list(values or []):
-        value = str(raw or "").strip().lower()
-        if not value or value in seen:
-            continue
-        seen.add(value)
-        deduped.append(value)
-    return deduped
-
-
-def _apply_drop_legacy_duckdb_objects(conn: Any, payload: dict) -> None:
-    schemas = _dedupe_lowered(payload.get("schemas"))
-    main_tables = _dedupe_lowered(payload.get("main_tables"))
-    if not schemas and not main_tables:
-        raise ValueError("No legacy DuckDB objects requested")
-
-    existing_schemas = {
-        str(row[0]).lower()
-        for row in conn.execute("SELECT schema_name FROM information_schema.schemata").fetchall()
-    }
-    existing_main_tables = {
-        str(row[0]).lower()
-        for row in conn.execute(
-            "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
-        ).fetchall()
-    }
-
-    for table in main_tables:
-        if table in existing_main_tables:
-            conn.execute(f"DROP TABLE main.{_quote_duckdb_ident(table)}")
-
-    for schema in schemas:
-        if schema in existing_schemas:
-            conn.execute(f"DROP SCHEMA {_quote_duckdb_ident(schema)} CASCADE")
 
 
 def _require_knowledge_source(conn: Any, source_id: str) -> dict[str, Any]:

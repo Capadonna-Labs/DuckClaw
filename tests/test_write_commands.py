@@ -732,6 +732,19 @@ class TestCommandHandlers:
         assert "BEGIN TRANSACTION" not in source
         assert "COMMIT" not in source
 
+    def test_duckdb_maintenance_write_handlers_live_in_domain_module(self) -> None:
+        from duckclaw import write_command_handlers
+        from duckclaw.write_handlers import duckdb_maintenance as maintenance_handlers
+
+        exported = getattr(write_command_handlers, "_apply_drop_legacy_duckdb_objects")
+        canonical = getattr(maintenance_handlers, "_apply_drop_legacy_duckdb_objects")
+        assert exported is canonical
+        assert canonical.__module__ == "duckclaw.write_handlers.duckdb_maintenance"
+
+        source = inspect.getsource(maintenance_handlers)
+        assert "BEGIN TRANSACTION" not in source
+        assert "COMMIT" not in source
+
     def test_upsert_worker_inserts(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import _apply_upsert_worker
 

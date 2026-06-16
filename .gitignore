@@ -75,6 +75,7 @@ logs/
 # Local IDE / agent config (Cursor rules, skills, plans)
 .agents/
 .cursor/
+debug_sft.log
 
 # Tests deprecados (quant-trader, CFD, MOC, IBKR): locales; requieren .env/broker
 tests/deprecated/

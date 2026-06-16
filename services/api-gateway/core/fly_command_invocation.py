@@ -28,9 +28,11 @@ _log = logging.getLogger("duckclaw.gateway")
 READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
     (
         "audit",
+        "comfyui",
         "context",
         "crons",
         "forget",
+        "goals",
         "heartbeat",
         "health",
         "history",
@@ -40,8 +42,13 @@ READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
         "models",
         "network",
         "prompt",
+        "meditate",
         "provider",
         "red",
+        "reject-code",
+        "reject_code",
+        "resolve-uncertainty",
+        "resolve_uncertainty",
         "sandbox",
         "sandox",
         "setup",
@@ -52,17 +59,7 @@ READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
         "workers",
     )
 )
-LEGACY_RW_FLY_COMMANDS = frozenset(
-    (
-        "comfyui",
-        "goals",
-        "meditate",
-        "reject-code",
-        "reject_code",
-        "resolve-uncertainty",
-        "resolve_uncertainty",
-    )
-)
+LEGACY_RW_FLY_COMMANDS = frozenset(())
 
 
 def _truncate_fly_log(text: str, max_len: int = 200) -> str:
@@ -70,19 +67,9 @@ def _truncate_fly_log(text: str, max_len: int = 200) -> str:
     return value if len(value) <= max_len else value[:max_len] + "..."
 
 
-def _open_legacy_fly_duckclaw_rw(vault_db_path: str) -> DuckClaw:
-    # DB-first runtime compat allowlist: legacy slash/fly commands still route
-    # through on_the_fly_commands handlers that synchronously mutate chat state.
-    # Do not add new gateway writers here; retire this helper after those commands
-    # accept read-only handles plus typed DB-writer commands.
-    return DuckClaw(vault_db_path, read_only=False, engine="python")
-
-
 def _open_fly_duckclaw(vault_db_path: str, message: str) -> DuckClaw:
-    name, _args = parse_command(message)
-    if name in READ_ONLY_SAFE_FLY_COMMANDS:
-        return DuckClaw(vault_db_path, read_only=True, engine="python")
-    return _open_legacy_fly_duckclaw_rw(vault_db_path)
+    _name, _args = parse_command(message)
+    return DuckClaw(vault_db_path, read_only=True, engine="python")
 
 
 def _audit_fly_vault_resolution(vault_db_path: str, fly_engine: str) -> None:

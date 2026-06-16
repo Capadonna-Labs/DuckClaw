@@ -72,8 +72,9 @@ logs/
 !apps/duckclaw-admin/src/app/api/admin/ops/logs/
 !apps/duckclaw-admin/src/app/api/admin/ops/logs/stream/
 !apps/duckclaw-admin/src/app/api/admin/ops/logs/stream/route.ts
-.cursor/debug-*.log
-debug_sft.log
+# Local IDE / agent config (Cursor rules, skills, plans)
+.agents/
+.cursor/
 
 # Tests deprecados (quant-trader, CFD, MOC, IBKR): locales; requieren .env/broker
 tests/deprecated/

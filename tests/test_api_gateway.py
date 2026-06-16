@@ -370,7 +370,7 @@ def test_pm2_json_lists_gateways_with_explicit_db_path(
 def test_dedicated_gateway_vault_matches_pm2_db_path(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Evita que fly/manager abran finanzdb1 cuando el proceso es un gateway con DB propia."""
+    """Evita que fly/manager abran hubdb1 cuando el proceso es un gateway con DB propia."""
     from duckclaw.pm2_gateway_db import clear_pm2_gateway_db_cache
 
     dbf = tmp_path / "dedicated.duckdb"

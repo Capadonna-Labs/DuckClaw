@@ -33,13 +33,13 @@ def test_team_add_persists_with_ro_get_db_facade(
         "chat_ro",
         "/team --add 999 other admin",
         requester_id=owner_user_id,
-        tenant_id="Finanzas",
+        tenant_id="Orchestrator",
     )
     assert reply and "Añadido" in reply
 
     raw = fly.query(
         "SELECT user_id, role FROM main.authorized_users "
-        "WHERE lower(tenant_id)=lower('Finanzas') AND user_id='999' LIMIT 1"
+        "WHERE lower(tenant_id)=lower('Orchestrator') AND user_id='999' LIMIT 1"
     )
     parsed: Any = json.loads(raw) if isinstance(raw, str) else raw
     assert parsed and str(parsed[0].get("user_id")) == "999"
@@ -66,13 +66,13 @@ def test_team_add_name_before_numeric_telegram_id(
         "chat_ro",
         "/team --add Rosas 8320614991 user",
         requester_id=owner_user_id,
-        tenant_id="Finanzas",
+        tenant_id="Orchestrator",
     )
     assert reply and "Añadido" in reply
 
     raw = fly.query(
         "SELECT user_id, username FROM main.authorized_users "
-        "WHERE lower(tenant_id)=lower('Finanzas') AND user_id='8320614991' LIMIT 1"
+        "WHERE lower(tenant_id)=lower('Orchestrator') AND user_id='8320614991' LIMIT 1"
     )
     parsed: Any = json.loads(raw) if isinstance(raw, str) else raw
     assert parsed and str(parsed[0].get("user_id")) == "8320614991"

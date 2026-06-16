@@ -1960,15 +1960,17 @@ def admin_code_decision_approve(
             def query(self, q: str, params: tuple = ()):
                 return con.execute(q, params).fetchdf().to_dict(orient="records")
 
-        from duckclaw.forge.code_decision_service import approve_code_decision
+        from duckclaw.capadonna_plugin import approve_capadonna_code_decision, capadonna_missing_message
 
-        result = approve_code_decision(
+        result = approve_capadonna_code_decision(
             _DbShim(),
             decision_id=body.decision_id.strip(),
             tenant_id=tid,
             user_id=uid,
             chat_id=(body.chat_id or "").strip(),
         )
+        if result is None:
+            raise _problem(503, "Extensión no configurada", capadonna_missing_message())
         if result.get("error"):
             raise _problem(400, "Aprobación fallida", str(result["error"]))
         return result
@@ -1995,15 +1997,18 @@ def admin_code_decision_reject(
         class _DbShim:
             _path = resolved
 
-        from duckclaw.forge.code_decision_service import reject_code_decision
+        from duckclaw.capadonna_plugin import capadonna_missing_message, reject_capadonna_code_decision
 
-        return reject_code_decision(
+        result = reject_capadonna_code_decision(
             _DbShim(),
             decision_id=body.decision_id.strip(),
             tenant_id=tid,
             user_id=uid,
             rationale=body.rationale,
         )
+        if result is None:
+            raise _problem(503, "Extensión no configurada", capadonna_missing_message())
+        return result
     finally:
         con.close()
 

@@ -5,7 +5,7 @@ def test_worker_reply_formatting_strips_echoed_instance_headers() -> None:
     from duckclaw.manager.worker_reply_formatting import _strip_leading_subagent_instance_headers
 
     assert (
-        _strip_leading_subagent_instance_headers("finanz 2\nJob-Hunter 1\nResultado final")
+        _strip_leading_subagent_instance_headers("platform-orchestrator 2\nJob-Hunter 1\nResultado final")
         == "Resultado final"
     )
 

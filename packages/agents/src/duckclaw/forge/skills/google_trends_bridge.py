@@ -1,7 +1,7 @@
 """
 Google Trends MCP Bridge — stdio hacia google-trends-mcp (PyPI, pytrends).
 
-Spec: specs/features/quant/QUANT_GOOGLE_TRENDS_MCP.md
+Spec: Capadonna-Driller extension (Google Trends bridge).
 Requiere: pip/uv instalar google-trends-mcp (extra google-trends); el ejecutable
           google-trends-mcp en el PATH del venv del gateway (recomendado).
 """

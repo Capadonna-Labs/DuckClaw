@@ -10,8 +10,8 @@ import pytest
 def test_normalize_vault_binding_private() -> None:
     from duckclaw.vaults import normalize_vault_binding
 
-    out = normalize_vault_binding({"scope": "private", "vault_id": "quant_traderdb1"})
-    assert out == {"scope": "private", "vault_id": "quant_traderdb1"}
+    out = normalize_vault_binding({"scope": "private", "vault_id": "ui-designerdb1"})
+    assert out == {"scope": "private", "vault_id": "ui-designerdb1"}
 
 
 def test_normalize_vault_binding_shared_rejects_traversal() -> None:

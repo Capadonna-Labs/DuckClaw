@@ -34,7 +34,7 @@ def test_resolve_yaml_allow_chat_false_forces_deny(monkeypatch: pytest.MonkeyPat
         "duckclaw.forge.schema.load_security_policy",
         lambda _wid, worker_dir=None: base,
     )
-    eff, meta = resolve_sandbox_network_policy("finanz", "false")
+    eff, meta = resolve_sandbox_network_policy("platform-orchestrator", "false")
     assert meta["toggle_available"] is True
     assert meta["effective"] == "deny"
     assert eff.network.default == "deny"
@@ -50,7 +50,7 @@ def test_resolve_yaml_allow_chat_true_keeps_allow(monkeypatch: pytest.MonkeyPatc
         "duckclaw.forge.schema.load_security_policy",
         lambda _wid, worker_dir=None: base,
     )
-    eff, meta = resolve_sandbox_network_policy("finanz", "true")
+    eff, meta = resolve_sandbox_network_policy("platform-orchestrator", "true")
     assert meta["effective"] == "allow"
     assert eff.network.default == "allow"
 
@@ -65,7 +65,7 @@ def test_resolve_yaml_allow_empty_uses_yaml(monkeypatch: pytest.MonkeyPatch) -> 
         "duckclaw.forge.schema.load_security_policy",
         lambda _wid, worker_dir=None: base,
     )
-    eff, meta = resolve_sandbox_network_policy("finanz", None)
+    eff, meta = resolve_sandbox_network_policy("platform-orchestrator", None)
     assert meta["effective"] == "allow"
     assert eff.network.default == "allow"
 

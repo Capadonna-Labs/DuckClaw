@@ -28,7 +28,7 @@ Tras cambiar la clave: `pm2 restart DuckClaw-Gateway --update-env`.
 
 Instalación day-zero vía [`scripts/deploy/spawn-install.sh`](../../../scripts/deploy/spawn-install.sh). Plantilla raíz: [`config/.env.spawn.example`](../../../config/.env.spawn.example). Spec: [`SPAWN_GENERIC_DEPLOY.md`](../../../specs/features/platform/SPAWN_GENERIC_DEPLOY.md).
 
-- `DUCKCLAW_SPAWN_PROFILE=1` — perfil sin multiplex workers ni esquemas quant/finanz.
+- `DUCKCLAW_SPAWN_PROFILE=1` — perfil sin multiplex workers ni esquemas de producto vertical.
 - PM2: `config/ecosystem.spawn.config.cjs` (procesos `duckclaw-gateway`, `duckclaw-admin-ui`).
 - El instalador genera `apps/duckclaw-admin/.env.local` con `DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000`.
 

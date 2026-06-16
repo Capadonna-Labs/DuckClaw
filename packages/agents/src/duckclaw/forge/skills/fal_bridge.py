@@ -92,22 +92,18 @@ def _usage_db(duckclaw_db: Any) -> Any:
 
 
 def _tool_context() -> dict[str, str]:
-    from duckclaw.capadonna_plugin import load_capadonna_lib
+    from duckclaw.capadonna_plugin import (
+        capadonna_tool_chat_id,
+        capadonna_tool_tenant_id,
+        capadonna_tool_user_id,
+        capadonna_tool_worker_id,
+    )
 
-    _qtc = load_capadonna_lib("quant_tool_context")
-    tenant_id = _qtc.get_quant_tool_tenant_id() if _qtc is not None else "default"
-    user_id = _qtc.get_quant_tool_user_id() if _qtc is not None else "default"
-    chat_id = _qtc.get_quant_tool_chat_id() if _qtc is not None else ""
-    worker_id = ""
-    if _qtc is not None:
-        _gw = getattr(_qtc, "get_quant_tool_worker_id", None)
-        if callable(_gw):
-            worker_id = str(_gw() or "")
     return {
-        "tenant_id": tenant_id or "default",
-        "user_id": user_id or "default",
-        "chat_id": chat_id or "",
-        "worker_id": worker_id or "",
+        "tenant_id": capadonna_tool_tenant_id() or "default",
+        "user_id": capadonna_tool_user_id() or "default",
+        "chat_id": capadonna_tool_chat_id() or "",
+        "worker_id": capadonna_tool_worker_id() or "",
     }
 
 

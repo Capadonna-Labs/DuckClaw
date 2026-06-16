@@ -24,7 +24,7 @@ def _effective_telegram_bot_token(repo_root: Path, draft: SovereignDraft) -> str
     kv = merged_root_and_proposed_flat_env(repo_root)
     from duckclaw.integrations.telegram.telegram_agent_token import resolve_telegram_token_from_flat_env
 
-    wid = (getattr(draft, "default_worker_id", None) or "finanz").strip()
+    wid = (getattr(draft, "default_worker_id", None) or "default").strip()
     return resolve_telegram_token_from_flat_env(kv, wid)
 
 

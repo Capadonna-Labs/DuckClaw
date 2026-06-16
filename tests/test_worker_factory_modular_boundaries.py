@@ -304,7 +304,8 @@ def test_factory_has_no_job_hunter_vertical_policy() -> None:
 
 
 def test_factory_has_no_inline_quant_policy() -> None:
-    assert Path("packages/agents/src/duckclaw/quant/runtime_policy.py").exists()
+    assert not Path("packages/agents/src/duckclaw/quant/runtime_policy.py").exists()
+    assert not Path("packages/agents/src/duckclaw/finance/runtime_policy.py").exists()
 
     names = _factory_function_names()
     leaked = {

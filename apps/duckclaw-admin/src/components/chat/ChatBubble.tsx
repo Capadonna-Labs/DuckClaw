@@ -360,7 +360,7 @@ export function ThinkingDots({ size = 'md', className = '' }: ThinkingDotsProps)
 
 export type ThinkingBubbleProps = {
   startedAt: number;
-  /** Worker activo en el selector (p. ej. finanz, Quant-Trader). */
+  /** Worker activo en el selector (p. ej. platform-orchestrator, ui-designer). */
   workerId?: string;
   /** Instancia swarm 1..n; la base siempre es 1. */
   swarmSlot?: number;

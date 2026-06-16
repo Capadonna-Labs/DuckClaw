@@ -112,6 +112,17 @@ def start_db_writer():
     return proc
 
 
+def ensure_gateway_schema() -> None:
+    """Apply gateway migrations so lifespan schema check passes (Hito 2 fail-fast)."""
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.schema_migrations import migrate_gateway_database
+
+    db_path = get_gateway_db_path()
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    migrate_gateway_database(db_path, seed_admin=False)
+    print(f"[pipeline] Gateway schema migrated: {db_path}")
+
+
 def start_api_gateway():
     """Arranca el microservicio services/api-gateway con uvicorn en segundo plano."""
     if not (API_GATEWAY_DIR / "main.py").exists():
@@ -119,7 +130,9 @@ def start_api_gateway():
     env = os.environ.copy()
     env["PYTHONPATH"] = str(REPO_ROOT)  # repo root para imports duckclaw
     env["DUCKCLAW_TAILSCALE_AUTH_KEY"] = ""  # integración sin auth (spec 04)
+    env["DUCKCLAW_DEV_MODE"] = "1"  # Hito 2: skip prod secret gate in CI/local pipeline
     env.setdefault("REDIS_URL", REDIS_URL)
+    env.setdefault("DUCKDB_PATH", str(REPO_ROOT / "db" / "duckclaw.duckdb"))
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "8000", "--app-dir", str(API_GATEWAY_DIR)],
         cwd=REPO_ROOT,
@@ -321,14 +334,25 @@ def test_full_pipeline_e2e() -> None:
     Solo se ejecuta si RUN_SINGLETON_PIPELINE_INTEGRATION=1.
     """
     os.chdir(REPO_ROOT)
-    assert ensure_redis(), "Redis must be running (e.g. docker run -d -p 6379:6379 redis:7-alpine)"
     (REPO_ROOT / "db").mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("DUCKDB_PATH", str(REPO_ROOT / "db" / "duckclaw.duckdb"))
+    os.environ.setdefault("DUCKCLAW_DEV_MODE", "1")
+    assert ensure_redis(), "Redis must be running (e.g. docker run -d -p 6379:6379 redis:7-alpine)"
+    ensure_gateway_schema()
     db_writer_proc = start_db_writer()
     assert db_writer_proc is not None
     gateway_proc = start_api_gateway()
     assert gateway_proc is not None
     try:
-        assert wait_health(GATEWAY_BASE, timeout=15.0), "Gateway /health did not respond"
+        if not wait_health(GATEWAY_BASE, timeout=15.0):
+            if gateway_proc.stdout is not None:
+                try:
+                    out = gateway_proc.stdout.read()
+                    if out:
+                        print("[pipeline] Gateway stdout/stderr:\n", out)
+                except Exception:
+                    pass
+            pytest.fail("Gateway /health did not respond")
         assert post_write(), "POST /api/v1/db/write failed"
         time.sleep(3)
     finally:

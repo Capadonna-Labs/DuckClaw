@@ -118,7 +118,6 @@ DB_FIRST_DDL_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/adf_validator.py": "validator creates isolated test/validation tables",
     "packages/agents/src/duckclaw/commands/chat_state.py": "legacy chat command agent_config bootstrap split from graph god file",
     "packages/agents/src/duckclaw/forge/rag/catalog.py": "derived RAG catalog bootstrap DDL",
-    "packages/agents/src/duckclaw/forge/skills/quant_cfd_bridge.py": "quant control-plane table bootstrap",
     "packages/agents/src/duckclaw/graphs/graph_rag.py": "graph memory bootstrap DDL",
     "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py": "chat command control-plane bootstrap",
     "packages/agents/src/duckclaw/graphs/telegram_bot.py": "telegram runtime bootstrap",
@@ -130,7 +129,6 @@ DB_FIRST_DDL_ALLOWLIST_REASONS = {
     "services/api-gateway/routers/admin_domains/runtime_config.py": "authorized admin runtime config bootstrap",
     "services/db-writer/context_injection_handler.py": "DB-writer context command schema",
     "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate command schema",
-    "services/db-writer/quant_state_delta_handler.py": "DB-writer quant command schema",
     "services/db-writer/reports_state_delta_handler.py": "DB-writer reports command schema",
     "services/db-writer/visual_state_delta_handler.py": "DB-writer visual command schema",
 }
@@ -138,7 +136,6 @@ DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 
 DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/graphs/graph_server.py": "legacy graph command handler awaiting DB-writer migration",
-    "packages/agents/src/duckclaw/forge/code_decision_service.py": "authorized code decision control-plane mutations",
     "services/api-gateway/core/fly_command_invocation.py": "legacy slash/fly command bridge pending typed-command migration",
     "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
     "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",
@@ -147,7 +144,6 @@ DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "services/db-writer/context_injection_handler.py": "DB-writer context mutations",
     "services/db-writer/main.py": "singleton DB-writer",
     "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate mutations",
-    "services/db-writer/quant_state_delta_handler.py": "DB-writer quant mutations",
     "services/db-writer/reports_state_delta_handler.py": "DB-writer reports mutations",
     "services/db-writer/visual_state_delta_handler.py": "DB-writer visual mutations",
 }
@@ -204,33 +200,7 @@ REMOVED_DOMAIN_VERTICAL_MARKERS_RE = re.compile(
     r")(?![a-z0-9])"
 )
 DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
-    "packages/agents/src/duckclaw/capadonna_plugin.py": "external Capadonna compatibility; not part of this cut unless vertical tokens appear in core",
-    "packages/agents/src/duckclaw/finance/__init__.py": "pending domain package removal after factory cut",
-    "packages/agents/src/duckclaw/finance/runtime_policy.py": "pending domain package removal after factory cut",
-    "packages/agents/src/duckclaw/forge/code_decision_service.py": "pending domain-specific control-plane extraction",
-    "packages/agents/src/duckclaw/forge/skills/comfyui_bridge.py": "pending visual bridge context genericization",
-    "packages/agents/src/duckclaw/forge/skills/edge_bridge.py": "pending state-delta queue genericization",
-    "packages/agents/src/duckclaw/forge/skills/fal_bridge.py": "Capadonna bridge pending generic context rename",
-    "packages/agents/src/duckclaw/forge/skills/google_trends_bridge.py": "pending market-specific bridge extraction",
-    "packages/agents/src/duckclaw/forge/skills/reddit_bridge.py": "pending spec comment cleanup",
-    "packages/agents/src/duckclaw/forge/skills/reports_state_delta.py": "pending shared writer utility extraction",
-    "packages/agents/src/duckclaw/forge/skills/visual_state_delta.py": "pending shared writer utility extraction",
-    "packages/agents/src/duckclaw/forge/team_env.py": "pending legacy env example cleanup",
-    "packages/agents/src/duckclaw/graphs/agent_resilience.py": "pending generic tool-pressure policy",
-    "packages/agents/src/duckclaw/graphs/dreamer_job.py": "pending domain-specific dreamer extraction",
-    "packages/agents/src/duckclaw/graphs/router.py": "pending retail intent language cleanup",
-    "packages/agents/src/duckclaw/quant/__init__.py": "pending domain package removal after factory cut",
-    "packages/agents/src/duckclaw/quant/runtime_policy.py": "pending domain package removal after factory cut",
-    "packages/agents/src/duckclaw/workers/field_reflection.py": "pending field reflection naming cleanup",
-    "packages/agents/src/duckclaw/workers/loader.py": "pending worker metadata naming cleanup",
-    "packages/agents/src/duckclaw/workers/manifest.py": "pending capability schema rename",
-    "packages/agents/src/duckclaw/workers/run_worker.py": "pending CLI example cleanup",
-    "packages/agents/src/duckclaw/workers/tool_invocation_policy.py": "pending capability policy rename",
-    "services/api-gateway/routers/admin.py": "pending admin quant diagnostics removal",
-    "services/api-gateway/routers/admin_domains/visual_assets.py": "pending Capadonna context genericization",
-    "services/api-gateway/routers/telegram_inbound_webhook.py": "pending auto-execution text genericization",
-    "services/db-writer/quant_state_delta_handler.py": "domain-specific writer handler; disabled from core loop in this cut",
-    "services/db-writer/models/quant_state_delta.py": "domain-specific writer DTO; disabled from core loop in this cut",
+    "packages/agents/src/duckclaw/capadonna_plugin.py": "external Capadonna compatibility facade",
 }
 DOMAIN_VERTICAL_RUNTIME_ALLOWLIST = frozenset(DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS)
 ON_THE_FLY_COMMAND_GRAPH = (

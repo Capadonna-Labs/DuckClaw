@@ -55,10 +55,10 @@ def test_telegram_webhook_post_deploy_message_uses_public_base() -> None:
     d = SovereignDraft(
         gateway_port=8000,
         gateway_pm2_name="Finanz-Gateway",
-        telegram_webhook_public_base_url="https://finanz.example.test",
+        telegram_webhook_public_base_url="https://platform-orchestrator.example.test",
     )
     msg = telegram_webhook_post_deploy_message(d)
-    assert "https://finanz.example.test/api/v1/telegram/webhook" in msg
+    assert "https://platform-orchestrator.example.test/api/v1/telegram/webhook" in msg
     assert "Finanz-Gateway" in msg
     assert "8000" in msg
 
@@ -531,8 +531,8 @@ def test_default_worker_id_hint_from_repo_env(tmp_path: Path) -> None:
 
     root = tmp_path / "repo"
     root.mkdir()
-    (root / ".env").write_text("DUCKCLAW_DEFAULT_WORKER_ID=finanz\n", encoding="utf-8")
-    assert m.load_default_worker_id_hint_from_repo_env(root) == "finanz"
+    (root / ".env").write_text("DUCKCLAW_DEFAULT_WORKER_ID=platform-orchestrator\n", encoding="utf-8")
+    assert m.load_default_worker_id_hint_from_repo_env(root) == "platform-orchestrator"
 
 
 def test_duck_mascot_frames_and_states() -> None:

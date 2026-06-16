@@ -227,7 +227,7 @@ export default function CustomReportsPage() {
           <h2 className="text-lg font-semibold">Diseñador de Reportes</h2>
           <p className="text-xs text-slate-400">
             Agentes <code className="text-slate-300">ui_designer</code> o{' '}
-            <code className="text-slate-300">quant-trader</code> — publican HTML con{' '}
+            <code className="text-slate-300">ui-designer</code> — publican HTML con{' '}
             <code className="text-slate-300">publish_custom_report</code>.
           </p>
         </div>

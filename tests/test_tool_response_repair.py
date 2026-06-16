@@ -44,7 +44,7 @@ def test_tool_response_repair_has_no_domain_vertical_markers() -> None:
         "market_worker_tool_repair",
         "market",
         "quant",
-        "finanz",
+        "platform-orchestrator",
         "finance",
         "trader",
         "pqrsd",

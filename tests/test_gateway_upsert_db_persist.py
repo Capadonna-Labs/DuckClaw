@@ -14,7 +14,7 @@ def test_upsert_preserves_db_path_when_incoming_env_differs() -> None:
             "env": {
                 "DUCKCLAW_GATEWAY_DB_PATH": "/vault/primary.duckdb",
                 "DUCKCLAW_SHARED_DB_PATH": "/shared/cat.duckdb",
-                "DUCKDB_PATH": "/vault/finanz.duckdb",
+                "DUCKDB_PATH": "/vault/platform-orchestrator.duckdb",
                 "FOO": "1",
             },
         }
@@ -34,7 +34,7 @@ def test_upsert_preserves_db_path_when_incoming_env_differs() -> None:
     env = out[0]["env"]
     assert env["DUCKCLAW_GATEWAY_DB_PATH"] == "/vault/primary.duckdb"
     assert env["DUCKCLAW_SHARED_DB_PATH"] == "/shared/cat.duckdb"
-    assert env["DUCKDB_PATH"] == "/vault/finanz.duckdb"
+    assert env["DUCKDB_PATH"] == "/vault/platform-orchestrator.duckdb"
     assert env["BAR"] == "2"
     assert env["FOO"] == "1"
 

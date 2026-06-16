@@ -1,5 +1,5 @@
 """
-Sleep-time Dreamer: Light (RO DuckDB) → REM (MLX + fallback API) → Deep (quant state deltas).
+Sleep-time Dreamer: Light (RO DuckDB) → REM (MLX + fallback API) → Deep (Capadonna state deltas).
 
 Ejecutar vía PM2 (02:00 COT) o manualmente con ``uv run ... dreamer_job.py``.
 """
@@ -58,7 +58,7 @@ def _golden_dataset_resolved() -> Path:
 
 
 def assert_redis_available_or_exit() -> None:
-    """Sin Redis / cola quant no se encola nada: fallo rápido al inicio."""
+    """Sin Redis / cola de extensión no se encola nada: fallo rápido al inicio."""
     url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
     if not url:
         _log.error("REDIS_URL / DUCKCLAW_REDIS_URL ausente; abortando dreamer.")
@@ -130,7 +130,7 @@ def resolve_target_db_path() -> str:
     """
     DuckDB donde el writer aplica deltas (``SEMANTIC_MEMORY_UPSERT``, etc.).
 
-    Suele ser el vault Quant u otro archivo explícito; no tiene por qué coincidir
+    Suele ser el vault de producto u otro archivo explícito; no tiene por qué coincidir
     con el .duckdb donde Telegram escribió ``telegram_conversation``.
     """
     from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
@@ -372,7 +372,7 @@ def emit_memory_deltas(
     target_db_path: str,
 ) -> bool:
     """Devuelve True si al menos un LPUSH tuvo éxito cuando hay insights con contenido."""
-    from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
+    from duckclaw.capadonna_plugin import push_capadonna_state_delta_sync
 
     if not insights:
         return True
@@ -391,7 +391,7 @@ def emit_memory_deltas(
                 "source": "dreamer_job",
             },
         }
-        ok = push_quant_state_delta_sync(payload)
+        ok = push_capadonna_state_delta_sync(payload)
         _log.info("SEMANTIC_MEMORY_UPSERT topic=%r ok=%s", it.get("topic"), ok)
         if ok:
             any_ok = True
@@ -439,7 +439,7 @@ def compact_old_history(
     *,
     days: int = 7,
 ) -> bool:
-    from duckclaw.forge.skills.quant_state_delta import push_quant_state_delta_sync
+    from duckclaw.capadonna_plugin import push_capadonna_state_delta_sync
 
     payload = {
         "tenant_id": tenant_id,
@@ -452,7 +452,7 @@ def compact_old_history(
             "days": int(days),
         },
     }
-    ok = push_quant_state_delta_sync(payload)
+    ok = push_capadonna_state_delta_sync(payload)
     _log.info("CONVERSATION_COMPACTION days=%s ok=%s", days, ok)
     return ok
 

@@ -8,14 +8,11 @@ import os
 from contextvars import ContextVar
 from typing import Any
 
-try:
-    from duckclaw.forge.skills.quant_state_delta import _release_ro_vault_for_remote_writer
-except ImportError:
-    _release_ro_vault_for_remote_writer = None
+from duckclaw.state_delta_vault import release_ro_vault_for_remote_writer
 
 _log = logging.getLogger(__name__)
 
-# Hub RO del manager (finanzdb1, etc.) durante delegación visual: libera lock para db-writer.
+# Hub RO del manager durante delegación visual: libera lock para db-writer.
 _visual_hub_db_for_writer: ContextVar[Any] = ContextVar("duckclaw_visual_hub_db_for_writer", default=None)
 
 
@@ -42,10 +39,9 @@ def push_visual_state_delta_sync(payload: dict[str, Any], *, duckclaw_db: Any | 
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
 
     hub_db = get_visual_state_delta_hub_db()
-    if _release_ro_vault_for_remote_writer is not None:
-        if hub_db is not None:
-            _release_ro_vault_for_remote_writer(payload, hub_db)
-        _release_ro_vault_for_remote_writer(payload, duckclaw_db)
+    if hub_db is not None:
+        release_ro_vault_for_remote_writer(payload, hub_db)
+    release_ro_vault_for_remote_writer(payload, duckclaw_db)
 
     if spawn_inline_writes_enabled():
         try:

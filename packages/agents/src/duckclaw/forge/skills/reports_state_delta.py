@@ -7,10 +7,7 @@ import logging
 import os
 from typing import Any
 
-try:
-    from duckclaw.forge.skills.quant_state_delta import _release_ro_vault_for_remote_writer
-except ImportError:
-    _release_ro_vault_for_remote_writer = None
+from duckclaw.state_delta_vault import release_ro_vault_for_remote_writer
 
 _log = logging.getLogger(__name__)
 
@@ -25,8 +22,7 @@ def push_reports_state_delta_sync(payload: dict[str, Any], *, duckclaw_db: Any |
     from duckclaw.spawn_inline_delta import apply_reports_state_delta_message_sync
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
 
-    if _release_ro_vault_for_remote_writer is not None:
-        _release_ro_vault_for_remote_writer(payload, duckclaw_db)
+    release_ro_vault_for_remote_writer(payload, duckclaw_db)
 
     if spawn_inline_writes_enabled():
         try:

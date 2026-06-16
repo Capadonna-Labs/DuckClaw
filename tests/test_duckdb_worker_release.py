@@ -28,12 +28,12 @@ def test_release_file_handle_for_external_writer_closes_rw_python(tmp_path: Path
 def test_release_worker_db_handle_closes_and_pops_cache(tmp_path: Path) -> None:
     from duckclaw.graphs import manager_graph as mg
 
-    path = str(tmp_path / "finanz.duckdb")
+    path = str(tmp_path / "platform-orchestrator.duckdb")
     duckdb.connect(path).close()
     wdb = DuckClaw(path, read_only=False, engine="python")
     graph = MagicMock()
     graph._worker_db = wdb
-    key = "t::finanz::" + path
+    key = "t::platform-orchestrator::" + path
     mg._worker_graph_cache[key] = graph
     assert mg.worker_graph_cache_entry_count() == 1
     assert mg._release_worker_db_handle(graph, cache_key=key) is True

@@ -99,7 +99,7 @@ def classify_exception_for_replan(exc: BaseException, duckdb_config_clash: bool)
 
 def resilience_escalation_wants_read_sql(incoming: str, plan_attempt_index: int) -> bool:
     """
-    Híbrido: en reintentos del manager, fuerza lectura SQL en Finanz ante consultas de datos locales.
+    Híbrido: en reintentos del manager, fuerza lectura SQL ante consultas de datos locales.
     """
     if plan_attempt_index < 1:
         return False
@@ -114,7 +114,7 @@ def resilience_escalation_wants_read_sql(incoming: str, plan_attempt_index: int)
             "duckdb",
             "tabla",
             "datos",
-            "finanz",
+            "accounts",
             "extracto",
             "movimiento",
         )

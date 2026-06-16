@@ -446,7 +446,7 @@ class TestWriteCommands:
         from duckclaw.write_commands import DeleteAuthorizedUserCommand, UpsertAuthorizedUserCommand
 
         upsert = UpsertAuthorizedUserCommand(
-            tenant_id="Finanzas",
+            tenant_id="Orchestrator",
             actor_email="telegram:1",
             user_id="3",
             username="user3",
@@ -454,19 +454,19 @@ class TestWriteCommands:
         )
         raw_upsert = json.loads(upsert.to_redis_payload())
         assert raw_upsert["command_type"] == "upsert_authorized_user"
-        assert raw_upsert["tenant_id"] == "Finanzas"
+        assert raw_upsert["tenant_id"] == "Orchestrator"
         assert raw_upsert["user_id"] == "3"
         assert raw_upsert["username"] == "user3"
         assert raw_upsert["role"] == "admin"
 
         delete = DeleteAuthorizedUserCommand(
-            tenant_id="Finanzas",
+            tenant_id="Orchestrator",
             actor_email="telegram:1",
             user_id="3",
         )
         raw_delete = json.loads(delete.to_redis_payload())
         assert raw_delete["command_type"] == "delete_authorized_user"
-        assert raw_delete["tenant_id"] == "Finanzas"
+        assert raw_delete["tenant_id"] == "Orchestrator"
         assert raw_delete["user_id"] == "3"
 
     def test_console_user_commands_roundtrip(self) -> None:
@@ -532,7 +532,7 @@ class TestWriteCommands:
         )
 
         shared_upsert = UpsertSharedDbGrantCommand(
-            tenant_id="Finanzas",
+            tenant_id="Orchestrator",
             actor_email="telegram:1",
             user_id="77",
             resource_key="default",
@@ -542,7 +542,7 @@ class TestWriteCommands:
         assert raw_shared_upsert["resource_key"] == "default"
 
         shared_delete = DeleteSharedDbGrantCommand(
-            tenant_id="Finanzas",
+            tenant_id="Orchestrator",
             actor_email="telegram:1",
             user_id="77",
             resource_key="default",
@@ -1390,7 +1390,7 @@ class TestCommandHandlers:
         con = db_with_migrations
         dispatch_command(con, {
             "command_type": "upsert_authorized_user",
-            "tenant_id": "Finanzas",
+            "tenant_id": "Orchestrator",
             "actor_email": "telegram:1",
             "user_id": "3",
             "username": "user3",
@@ -1398,13 +1398,13 @@ class TestCommandHandlers:
         })
         row = con.execute(
             "SELECT username, role FROM main.authorized_users "
-            "WHERE tenant_id = 'Finanzas' AND user_id = '3'"
+            "WHERE tenant_id = 'Orchestrator' AND user_id = '3'"
         ).fetchone()
         assert row == ("user3", "admin")
 
         dispatch_command(con, {
             "command_type": "upsert_authorized_user",
-            "tenant_id": "Finanzas",
+            "tenant_id": "Orchestrator",
             "actor_email": "telegram:1",
             "user_id": "3",
             "username": "renamed",
@@ -1412,19 +1412,19 @@ class TestCommandHandlers:
         })
         row = con.execute(
             "SELECT username, role FROM main.authorized_users "
-            "WHERE tenant_id = 'Finanzas' AND user_id = '3'"
+            "WHERE tenant_id = 'Orchestrator' AND user_id = '3'"
         ).fetchone()
         assert row == ("renamed", "user")
 
         dispatch_command(con, {
             "command_type": "delete_authorized_user",
-            "tenant_id": "Finanzas",
+            "tenant_id": "Orchestrator",
             "actor_email": "telegram:1",
             "user_id": "3",
         })
         deleted = con.execute(
             "SELECT user_id FROM main.authorized_users "
-            "WHERE tenant_id = 'Finanzas' AND user_id = '3'"
+            "WHERE tenant_id = 'Orchestrator' AND user_id = '3'"
         ).fetchone()
         assert deleted is None
 
@@ -1455,27 +1455,27 @@ class TestCommandHandlers:
         con = db_with_migrations
         dispatch_command(con, {
             "command_type": "upsert_shared_db_grant",
-            "tenant_id": "Finanzas",
+            "tenant_id": "Orchestrator",
             "actor_email": "telegram:1",
             "user_id": "77",
             "resource_key": "default",
         })
         row = con.execute(
             "SELECT resource_key FROM main.user_shared_db_access "
-            "WHERE tenant_id = 'Finanzas' AND user_id = '77'"
+            "WHERE tenant_id = 'Orchestrator' AND user_id = '77'"
         ).fetchone()
         assert row == ("default",)
 
         dispatch_command(con, {
             "command_type": "delete_shared_db_grant",
-            "tenant_id": "Finanzas",
+            "tenant_id": "Orchestrator",
             "actor_email": "telegram:1",
             "user_id": "77",
             "resource_key": "default",
         })
         deleted = con.execute(
             "SELECT resource_key FROM main.user_shared_db_access "
-            "WHERE tenant_id = 'Finanzas' AND user_id = '77'"
+            "WHERE tenant_id = 'Orchestrator' AND user_id = '77'"
         ).fetchone()
         assert deleted is None
 

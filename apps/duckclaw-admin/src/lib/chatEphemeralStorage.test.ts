@@ -45,19 +45,19 @@ assert.equal(
   'done'
 );
 
-assert.ok(workerMatches('QuantTraderWorker', 'quant-trader'));
-assert.ok(workerMatches('finanz', 'FinanzWorker'));
+assert.ok(workerMatches('UiDesignerWorker', 'ui-designer'));
+assert.ok(workerMatches('platform-orchestrator', 'PlatformOrchestratorWorker'));
 
-const finanzHb: ChatMsg = {
+const orchestratorHb: ChatMsg = {
   ...toolA,
-  workerId: 'finanz',
+  workerId: 'platform-orchestrator',
   toolName: 'list_categories',
 };
-const quantHb: ChatMsg = {
+const designerHb: ChatMsg = {
   ...toolB,
-  workerId: 'QuantTraderWorker',
+  workerId: 'UiDesignerWorker',
 };
-const filtered = filterEphemeralForWorker([finanzHb, quantHb], 'QuantTraderWorker');
+const filtered = filterEphemeralForWorker([orchestratorHb, designerHb], 'UiDesignerWorker');
 assert.equal(filtered.length, 1);
 assert.equal(filtered[0]?.toolName, 'fetch_market_data');
 

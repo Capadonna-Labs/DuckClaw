@@ -433,7 +433,7 @@ def _html_from_tool_payload(payload: dict) -> str | None:
     return None
 
 
-def _parse_portfolio_slices_from_ibkr_text(text: str) -> list[dict[str, float | str]]:
+def _parse_portfolio_slices_from_tool_text(text: str) -> list[dict[str, float | str]]:
     raw = str(text or "")
     slices: list[dict[str, float | str]] = []
     for m in re.finditer(
@@ -464,7 +464,7 @@ def _build_portfolio_pie_html(slices: list[dict[str, float | str]], *, title: st
     data = slices or [{"label": "Sin posiciones", "value": 1.0}]
     labels = json.dumps([str(d["label"]) for d in data], ensure_ascii=False)
     values = json.dumps([float(d["value"]) for d in data])
-    safe_title = (title or "Portfolio IBKR").replace("<", "").replace(">", "")
+    safe_title = (title or "Portfolio").replace("<", "").replace(">", "")
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -509,11 +509,12 @@ def _portfolio_pie_html_from_messages(messages: list | None) -> str | None:
     for msg in reversed(messages):
         if not isinstance(msg, ToolMessage):
             continue
-        if (getattr(msg, "name", "") or "") != "get_ibkr_portfolio":
+        tool_name = (getattr(msg, "name", "") or "").strip().lower()
+        if "portfolio" not in tool_name:
             continue
         body = str(getattr(msg, "content", "") or "")
-        slices = _parse_portfolio_slices_from_ibkr_text(body)
-        return _build_portfolio_pie_html(slices, title="Portfolio IBKR — distribución")
+        slices = _parse_portfolio_slices_from_tool_text(body)
+        return _build_portfolio_pie_html(slices, title="Portfolio — distribución")
     return None
 
 

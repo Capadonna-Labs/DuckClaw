@@ -6,7 +6,7 @@ from duckclaw.workers.template_registry import resolve_template_id, resolve_temp
 
 
 def test_maestro_alias_resolves_to_axis_maestro() -> None:
-    all_ids = ["default", "default", "finanz"]
+    all_ids = ["default", "default", "platform-orchestrator"]
     assert resolve_template_id(all_ids, "default") == "default"
     assert resolve_template_id_global("default") == "default"
 

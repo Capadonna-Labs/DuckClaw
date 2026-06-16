@@ -691,6 +691,28 @@ class TestCommandHandlers:
         assert "BEGIN TRANSACTION" not in source
         assert "COMMIT" not in source
 
+    def test_admin_auth_write_handlers_live_in_domain_module(self) -> None:
+        from duckclaw import write_command_handlers
+        from duckclaw.write_handlers import admin_auth as admin_auth_handlers
+
+        handler_names = (
+            "_apply_upsert_console_user",
+            "_apply_deactivate_console_user",
+            "_apply_record_admin_login_failure",
+            "_apply_clear_admin_login_failures",
+            "_apply_update_console_user_password_hash",
+        )
+
+        for name in handler_names:
+            exported = getattr(write_command_handlers, name)
+            canonical = getattr(admin_auth_handlers, name)
+            assert exported is canonical
+            assert canonical.__module__ == "duckclaw.write_handlers.admin_auth"
+
+        source = inspect.getsource(admin_auth_handlers)
+        assert "BEGIN TRANSACTION" not in source
+        assert "COMMIT" not in source
+
     def test_upsert_worker_inserts(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import _apply_upsert_worker
 

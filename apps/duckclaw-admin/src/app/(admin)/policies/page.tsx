@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { adminService, type PromptPolicy } from '@/services/adminService';
+import { adminService, type PromptPolicy, type PromptPolicyHealth } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
 
 const MANAGED_DRAFT_POLICY_TYPE = 'manager_task';
@@ -30,6 +30,8 @@ export default function PromptPoliciesPage() {
   const [deactivatingVersion, setDeactivatingVersion] = useState<number | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [health, setHealth] = useState<PromptPolicyHealth | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
 
   const nextVersion = useMemo(() => latestVersion(policies) + 1, [policies]);
 
@@ -51,9 +53,23 @@ export default function PromptPoliciesPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  const loadHealth = useCallback(() => {
+    setHealthError(null);
+    adminService
+      .getPromptPolicyHealth()
+      .then(setHealth)
+      .catch((e) => setHealthError(e instanceof Error ? e.message : 'No se pudo auditar prompt policies'));
+  }, []);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadHealth();
+  }, [load, loadHealth]);
+
+  const reloadAll = () => {
+    load();
+    loadHealth();
+  };
 
   const save = async () => {
     if (!canWrite || saving) return;
@@ -152,7 +168,7 @@ export default function PromptPoliciesPage() {
             </div>
             <button
               type="button"
-              onClick={load}
+              onClick={reloadAll}
               className="rounded-xl border border-gov-blue-200 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
             >
               Recargar
@@ -188,10 +204,58 @@ export default function PromptPoliciesPage() {
           </div>
         </div>
 
-        <aside className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-          <p className="text-xs font-black uppercase tracking-wide text-gov-gray-500 dark:text-dark-muted">
-            Versiones
-          </p>
+        <aside className="space-y-4">
+          <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-black uppercase tracking-wide text-gov-gray-500 dark:text-dark-muted">
+                Health de policies
+              </p>
+              <button
+                type="button"
+                onClick={loadHealth}
+                className="rounded-xl border border-gov-blue-200 px-3 py-1.5 text-[11px] font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
+              >
+                Auditar
+              </button>
+            </div>
+            {healthError ? (
+              <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{healthError}</p>
+            ) : health ? (
+              <div className="mt-3 space-y-3 text-sm">
+                <p
+                  className={
+                    health.ok
+                      ? 'rounded-xl bg-green-50 px-3 py-2 font-bold text-green-700'
+                      : 'rounded-xl bg-amber-50 px-3 py-2 font-bold text-amber-800'
+                  }
+                >
+                  {health.ok
+                    ? `OK: ${health.checked_count} requirements activos`
+                    : `${health.missing_count} de ${health.checked_count} requirements faltan`}
+                </p>
+                {health.missing_count > 0 && (
+                  <div className="space-y-2">
+                    {health.missing.slice(0, 8).map((item) => (
+                      <p
+                        key={`${item.policy_type}:${item.policy_name}:${item.source}`}
+                        className="break-all rounded-xl border border-amber-200 px-3 py-2 font-mono text-xs text-amber-900 dark:border-amber-900 dark:text-amber-200"
+                      >
+                        {item.policy_type}/{item.policy_name}
+                        <span className="block pt-1 font-sans text-[11px] opacity-70">{item.source}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-gov-gray-500 dark:text-dark-muted">Auditando requirements...</p>
+            )}
+          </section>
+
+          <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
+            <p className="text-xs font-black uppercase tracking-wide text-gov-gray-500 dark:text-dark-muted">
+              Versiones
+            </p>
           <div className="mt-3 space-y-2">
             {policies.length === 0 && (
               <p className="text-sm text-gov-gray-500 dark:text-dark-muted">Sin versiones registradas.</p>
@@ -225,6 +289,7 @@ export default function PromptPoliciesPage() {
               </div>
             ))}
           </div>
+          </section>
         </aside>
       </section>
     </div>

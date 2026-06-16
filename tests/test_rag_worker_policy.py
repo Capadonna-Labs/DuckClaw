@@ -13,6 +13,7 @@ from duckclaw.forge.rag.tool_policy import (
 from duckclaw.workers.tool_surface_policy import (
     should_hide_sandbox_tools,
     should_hide_storage_identity_tools,
+    tool_surface_intent_text,
     without_sandbox_tools,
     without_privileged_mutation_tools,
     without_storage_identity_tools,
@@ -86,6 +87,32 @@ def test_explicit_db_identity_request_keeps_get_db_path_available() -> None:
         "cuál es la ruta del duckdb?",
         "cuál es la ruta del duckdb?",
         explicit_storage_request=lambda text: "duckdb" in text.lower(),
+    )
+    assert not should_hide_storage_identity_tools(
+        "[PROJECT_CONTEXT]\nbase de datos interna\n[/PROJECT_CONTEXT]\nque BD usas",
+        "que BD usas",
+        explicit_storage_request=lambda text: "duckdb" in text.lower(),
+    )
+
+
+def test_tool_surface_intent_prefers_original_user_text_over_injected_context() -> None:
+    injected_context = (
+        "[PROJECT_CONTEXT]\n"
+        "Nombre: AWS EXPERT\n"
+        "DuckDB: /private/project.duckdb\n"
+        "[/PROJECT_CONTEXT]\n"
+        "hola"
+    )
+
+    assert tool_surface_intent_text("hola", injected_context) == "hola"
+    assert tool_surface_intent_text("", injected_context) == injected_context
+
+
+def test_schema_request_still_hides_storage_identity_tools() -> None:
+    assert should_hide_storage_identity_tools(
+        "qué tablas hay en la base?",
+        "qué tablas hay en la base?",
+        explicit_storage_request=lambda text: "tablas" in text.lower(),
     )
 
 

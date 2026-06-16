@@ -8,6 +8,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.fixture(autouse=True)
+def _admin_auth_inline_writes(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
+
+
 def _login(client: TestClient, email: str = "admin@test.local", password: str = "secret123"):
     return client.post("/api/v1/admin/auth/login", json={"email": email, "password": password})
 
@@ -23,6 +28,50 @@ def test_login_sets_cookies_and_user_payload(gateway_admin_client: TestClient) -
     assert data["user"]["profile"]["default_worker_id"] == "default"
     assert "session" in r.cookies
     assert "csrf_token" in r.cookies
+
+
+def test_login_success_clears_failures_with_typed_command(
+    gateway_admin_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw import db_write_queue
+
+    command_types: list[str] = []
+    real_enqueue = db_write_queue.enqueue_typed_command
+
+    def spy_enqueue(command, *, db_path: str, user_id: str, queue_name: str = "duckdb_write_queue") -> str:
+        command_types.append(command.command_type)
+        return real_enqueue(command, db_path=db_path, user_id=user_id, queue_name=queue_name)
+
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
+    monkeypatch.setattr(db_write_queue, "enqueue_typed_command", spy_enqueue)
+
+    r = _login(gateway_admin_client)
+
+    assert r.status_code == 200
+    assert "clear_admin_login_failures" in command_types
+
+
+def test_login_failure_records_failure_with_typed_command(
+    gateway_admin_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw import db_write_queue
+
+    command_types: list[str] = []
+    real_enqueue = db_write_queue.enqueue_typed_command
+
+    def spy_enqueue(command, *, db_path: str, user_id: str, queue_name: str = "duckdb_write_queue") -> str:
+        command_types.append(command.command_type)
+        return real_enqueue(command, db_path=db_path, user_id=user_id, queue_name=queue_name)
+
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
+    monkeypatch.setattr(db_write_queue, "enqueue_typed_command", spy_enqueue)
+
+    r = _login(gateway_admin_client, password="wrongpass1")
+
+    assert r.status_code == 401
+    assert "record_admin_login_failure" in command_types
 
 
 def test_me_refreshes_session_ttl(

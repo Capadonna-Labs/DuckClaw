@@ -139,7 +139,7 @@ DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/graphs/graph_server.py": "legacy graph command handler awaiting DB-writer migration",
     "packages/agents/src/duckclaw/forge/code_decision_service.py": "authorized code decision control-plane mutations",
-    "services/api-gateway/main.py": "authorized command-plane bridge",
+    "services/api-gateway/core/fly_command_invocation.py": "legacy slash/fly command bridge pending typed-command migration",
     "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
     "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",
     "services/api-gateway/routers/admin_domains/duckdb_explorer.py": "authorized admin DuckDB maintenance mutators",

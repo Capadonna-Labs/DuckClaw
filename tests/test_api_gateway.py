@@ -253,6 +253,7 @@ def test_forget_command_via_api_succeeds(
 ) -> None:
     """POST /forget with session_id='default' succeeds (fix for API gateway bug)."""
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", owner_user_id)
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     r = client.post(
         "/api/v1/agent/default/chat",
         json={

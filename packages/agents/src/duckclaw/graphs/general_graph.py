@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
@@ -14,11 +13,18 @@ from duckclaw.graphs.tool_catalog import (
     DEFAULT_GENERAL_SYSTEM_PROMPT,
     default_general_tool_names,
 )
+from duckclaw.workers.tool_surface_policy import (
+    should_hide_sandbox_tools,
+    should_hide_storage_identity_tools,
+    without_privileged_mutation_tools,
+    without_sandbox_tools,
+    without_storage_identity_tools,
+)
 
 
 _DB_INTENT_RE = re.compile(
-    r"\b(sql|tabla|tablas|schema|esquema|columna|columnas|base de datos|db|"
-    r"ventas|vendedor|clientes|productos|pedidos|orders|seller|count|cu[aá]nt[ao]s?)\b",
+    r"\b(sql|read_sql|inspect_schema|tabla|tablas|tables?|schema|esquema|"
+    r"columna|columnas|base de datos|db|duckdb|query|consulta|count)\b",
     re.IGNORECASE,
 )
 
@@ -33,11 +39,42 @@ def _needs_db_tool(incoming: str) -> bool:
     text = (incoming or "").strip()
     if not text:
         return False
-    return bool(_DB_INTENT_RE.search(text)) or "?" in text
+    return bool(_DB_INTENT_RE.search(text))
 
 
 def _needs_sandbox_tool(incoming: str) -> bool:
     return bool(_SANDBOX_INTENT_RE.search(incoming or ""))
+
+
+def _general_auto_bind_tools(tools: list[Any], incoming: str) -> list[Any]:
+    """Apply framework-level tool surface gates to the legacy general graph."""
+
+    auto_tools = list(tools or [])
+    auto_tools = without_privileged_mutation_tools(auto_tools)
+    if should_hide_sandbox_tools(incoming, incoming):
+        auto_tools = without_sandbox_tools(auto_tools)
+    if should_hide_storage_identity_tools(
+        incoming,
+        incoming,
+        explicit_storage_request=_needs_db_tool,
+    ):
+        auto_tools = without_storage_identity_tools(auto_tools)
+    return auto_tools
+
+
+def _general_db_bind_tools(tools: list[Any], incoming: str) -> list[Any]:
+    """Tools allowed when the legacy general graph requires a DB tool."""
+
+    db_tools = list(tools or [])
+    db_tools = without_privileged_mutation_tools(db_tools)
+    db_tools = without_sandbox_tools(db_tools)
+    if should_hide_storage_identity_tools(
+        incoming,
+        incoming,
+        explicit_storage_request=_needs_db_tool,
+    ):
+        db_tools = without_storage_identity_tools(db_tools)
+    return db_tools
 
 
 def _format_incoming_with_identity(state: dict) -> str:
@@ -189,8 +226,7 @@ def build_general_graph(
 
     from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default
 
-    llm_with_tools = bind_tools_with_parallel_default(llm, tools)
-    llm_with_required_tool = bind_tools_with_parallel_default(llm, tools, tool_choice="required")
+    llm_with_tools = bind_tools_with_parallel_default(llm, _general_auto_bind_tools(tools, ""))
     tools_by_name = {t.name: t for t in tools}
 
     def prepare_node(state: dict) -> dict:
@@ -218,13 +254,23 @@ def build_general_graph(
                 llm, tools, tool_choice={"type": "function", "function": {"name": "run_sandbox"}}
             )
         elif _needs_db_tool(incoming):
-            llm_runner = llm_with_required_tool
+            llm_runner = bind_tools_with_parallel_default(
+                llm,
+                _general_db_bind_tools(tools, incoming),
+                tool_choice="required",
+            )
         else:
-            llm_runner = llm_with_tools
+            llm_runner = bind_tools_with_parallel_default(
+                llm,
+                _general_auto_bind_tools(tools, incoming),
+            )
         try:
             resp = llm_runner.invoke(state["messages"])
         except Exception:
-            resp = llm_with_tools.invoke(state["messages"])
+            resp = bind_tools_with_parallel_default(
+                llm,
+                _general_auto_bind_tools(tools, incoming),
+            ).invoke(state["messages"])
         return {"messages": state["messages"] + [resp]}
 
     def tools_node(state: dict) -> dict:

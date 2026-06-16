@@ -1,0 +1,254 @@
+"""Legacy slash/fly command invocation for chat entrypoints."""
+
+from __future__ import annotations
+
+import asyncio
+import gc
+import logging
+import os
+import time
+from pathlib import Path
+from typing import Any, Callable
+
+from core.sandbox_figure_b64 import decode_sandbox_figure_base64, decode_valid_sandbox_image_bytes
+from core.telegram_media_upload import send_sandbox_chart_to_telegram_sync
+from duckclaw import DuckClaw
+from duckclaw.channels import GatewayDeliveryContext
+from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+from duckclaw.graphs.on_the_fly_commands import handle_command, parse_command, pop_all_fly_outbound_charts
+from duckclaw.manager.graph import clear_worker_graph_cache, worker_graph_cache_entry_count
+from duckclaw.utils.logger import format_chat_id_for_terminal
+
+ResolveTelegramBotToken = Callable[[], str]
+PersistAdminFlyCharts = Callable[[str, list[str]], list[str]]
+
+_log = logging.getLogger("duckclaw.gateway")
+
+READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
+    (
+        "audit",
+        "context",
+        "crons",
+        "forget",
+        "heartbeat",
+        "health",
+        "history",
+        "internet",
+        "llm",
+        "model",
+        "models",
+        "network",
+        "prompt",
+        "provider",
+        "red",
+        "sandbox",
+        "sandox",
+        "setup",
+        "system",
+        "system_prompt",
+        "team",
+        "vault",
+        "workers",
+    )
+)
+LEGACY_RW_FLY_COMMANDS = frozenset(
+    (
+        "comfyui",
+        "goals",
+        "meditate",
+        "reject-code",
+        "reject_code",
+        "resolve-uncertainty",
+        "resolve_uncertainty",
+    )
+)
+
+
+def _truncate_fly_log(text: str, max_len: int = 200) -> str:
+    value = (text or "").strip()
+    return value if len(value) <= max_len else value[:max_len] + "..."
+
+
+def _open_legacy_fly_duckclaw_rw(vault_db_path: str) -> DuckClaw:
+    # DB-first runtime compat allowlist: legacy slash/fly commands still route
+    # through on_the_fly_commands handlers that synchronously mutate chat state.
+    # Do not add new gateway writers here; retire this helper after those commands
+    # accept read-only handles plus typed DB-writer commands.
+    return DuckClaw(vault_db_path, read_only=False, engine="python")
+
+
+def _open_fly_duckclaw(vault_db_path: str, message: str) -> DuckClaw:
+    name, _args = parse_command(message)
+    if name in READ_ONLY_SAFE_FLY_COMMANDS:
+        return DuckClaw(vault_db_path, read_only=True, engine="python")
+    return _open_legacy_fly_duckclaw_rw(vault_db_path)
+
+
+def _audit_fly_vault_resolution(vault_db_path: str, fly_engine: str) -> None:
+    if (os.environ.get("DUCKCLAW_TEAM_WHITELIST_DEBUG") or "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        return
+    try:
+        gateway_path = str(Path(get_gateway_db_path()).resolve())
+        vault_path = (
+            str(Path(vault_db_path).resolve())
+            if vault_db_path and vault_db_path != ":memory:"
+            else (vault_db_path or "")
+        )
+        same_file = bool(
+            vault_path
+            and gateway_path
+            and Path(vault_path).resolve() == Path(gateway_path).resolve()
+        )
+        _log.info(
+            "fly_team_audit vault_resolved=%r gateway_resolved=%r same_file=%s fly_engine=%s",
+            vault_path[-96:] if len(vault_path) > 96 else vault_path,
+            gateway_path[-96:] if len(gateway_path) > 96 else gateway_path,
+            same_file,
+            fly_engine,
+        )
+    except OSError as exc:
+        _log.info("fly_team_audit path_compare_error=%s", exc)
+
+
+def _clear_cached_worker_handles_for_fly() -> None:
+    try:
+        cache_entries = worker_graph_cache_entry_count()
+        clear_worker_graph_cache()
+        gc.collect()
+        if _log.isEnabledFor(logging.DEBUG):
+            _log.debug("fly cleared worker graph cache entries=%s", cache_entries)
+    except Exception:
+        if _log.isEnabledFor(logging.DEBUG):
+            _log.debug("fly worker graph cache clear skipped", exc_info=True)
+
+
+async def _attach_fly_charts(
+    fly_response: dict[str, Any],
+    *,
+    session_id: str,
+    tenant_id: str,
+    delivery_context: GatewayDeliveryContext,
+    resolve_telegram_bot_token: ResolveTelegramBotToken,
+    persist_admin_fly_charts: PersistAdminFlyCharts,
+) -> None:
+    loop = asyncio.get_running_loop()
+    token = (
+        ((delivery_context.outbound_bot_token or "").strip() or resolve_telegram_bot_token()).strip()
+        if (delivery_context.channel or "telegram").strip().lower() == "telegram"
+        else ""
+    )
+    admin_ui = is_admin_ui_chat_session(session_id)
+    fly_charts, fly_chart_names = pop_all_fly_outbound_charts(session_id)
+    if token:
+        chart_sent = False
+        for photo_b64 in fly_charts:
+            png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
+            if not png_bytes:
+                png_bytes = decode_sandbox_figure_base64(photo_b64)
+            if not png_bytes:
+                continue
+            ok = await loop.run_in_executor(
+                None,
+                lambda b=png_bytes: send_sandbox_chart_to_telegram_sync(
+                    bot_token=token,
+                    chat_id=str(session_id),
+                    image_bytes=b,
+                ),
+            )
+            chart_sent = chart_sent or bool(ok)
+        fly_response["chart_sent"] = chart_sent
+    if admin_ui and fly_charts:
+        fly_response["fly_charts_b64"] = fly_charts
+        if fly_chart_names:
+            fly_response["fly_chart_names"] = fly_chart_names[: len(fly_charts)]
+        artifact_ids = persist_admin_fly_charts(tenant_id, fly_charts)
+        if artifact_ids:
+            fly_response["fly_chart_artifact_ids"] = artifact_ids
+            fly_response["artifact_tenant_id"] = tenant_id
+        if not artifact_ids:
+            fly_response["figure_base64"] = fly_charts[0]
+
+
+async def invoke_legacy_fly_command(
+    *,
+    message: str,
+    session_id: str,
+    worker_id: str,
+    tenant_id: str,
+    vault_db_path: str,
+    vault_user_id: str,
+    requester_id: str,
+    username: str,
+    delivery_context: GatewayDeliveryContext,
+    resolve_telegram_bot_token: ResolveTelegramBotToken,
+    persist_admin_fly_charts: PersistAdminFlyCharts,
+) -> dict[str, Any] | None:
+    """Invoke legacy slash/fly commands and return a chat response if handled."""
+    if not (message or "").strip().startswith("/"):
+        return None
+
+    fly_db = None
+    cmd_reply: str | None = None
+    elapsed_ms = 0
+    try:
+        vpath = (vault_db_path or "").strip()
+        Path(vpath).parent.mkdir(parents=True, exist_ok=True)
+        fly_engine = "python"
+        _audit_fly_vault_resolution(vpath, fly_engine)
+        _clear_cached_worker_handles_for_fly()
+        fly_db = _open_fly_duckclaw(vpath, message)
+        started_at = time.monotonic()
+        cmd_reply = handle_command(
+            fly_db,
+            session_id,
+            message,
+            requester_id=requester_id,
+            tenant_id=tenant_id,
+            vault_user_id=vault_user_id,
+            username=username,
+            entry_worker_id=worker_id,
+        )
+        elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    except Exception as exc:
+        _log.error("fly command failed chat=%s: %s", format_chat_id_for_terminal(session_id), exc)
+    finally:
+        if fly_db is not None:
+            try:
+                fly_db.close()
+            except Exception:
+                pass
+
+    if cmd_reply is None:
+        return None
+
+    fly_response: dict[str, Any] = {
+        "response": cmd_reply,
+        "session_id": session_id,
+        "worker_id": worker_id,
+        "elapsed_ms": elapsed_ms,
+    }
+    try:
+        await _attach_fly_charts(
+            fly_response,
+            session_id=session_id,
+            tenant_id=tenant_id,
+            delivery_context=delivery_context,
+            resolve_telegram_bot_token=resolve_telegram_bot_token,
+            persist_admin_fly_charts=persist_admin_fly_charts,
+        )
+    except Exception as exc:
+        if _log.isEnabledFor(logging.DEBUG):
+            _log.debug("fly chart attach failed: %s", exc)
+    if _log.isEnabledFor(logging.DEBUG):
+        _log.debug(
+            "fly (backup) chat=%s: %s",
+            format_chat_id_for_terminal(session_id),
+            _truncate_fly_log(cmd_reply),
+        )
+    return fly_response

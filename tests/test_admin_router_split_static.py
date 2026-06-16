@@ -70,6 +70,49 @@ def test_admin_runtime_config_routes_live_in_domain_module() -> None:
     assert '@router.delete("/config", dependencies=[Depends(require_admin_key)])' in runtime_config
 
 
+def test_runtime_settings_mutators_use_typed_write_commands() -> None:
+    db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+
+    patch_segment = db_first.split('async def patch_runtime_settings(', 1)[1].split(
+        '@router.get("/knowledge/sources"',
+        1,
+    )[0]
+    telegram_helper_segment = admin.split(
+        "def _upsert_telegram_webhook_routes_runtime_setting(",
+        1,
+    )[1].split("\n\ndef _mcp_port_runtime_setting", 1)[0]
+    telegram_put_segment = admin.split('async def put_telegram_routes(', 1)[1].split(
+        "\n\n\nasync def _admin_auth_login_impl",
+        1,
+    )[0]
+
+    assert "open_gateway_db(read_only=False)" not in patch_segment
+    assert "upsert_runtime_setting(" not in patch_segment
+    assert "enqueue_typed_command" in patch_segment
+    assert "UpsertRuntimeSettingCommand" in patch_segment
+    assert '"task_id"' in patch_segment
+
+    assert "open_gateway_db(read_only=False)" not in telegram_helper_segment
+    assert "upsert_runtime_setting(" not in telegram_helper_segment
+    assert "enqueue_typed_command" in telegram_helper_segment
+    assert "UpsertRuntimeSettingCommand" in telegram_helper_segment
+    assert '"task_id"' in telegram_put_segment
+
+
+def test_runtime_config_routes_do_not_enqueue_raw_sql() -> None:
+    runtime_config = Path("services/api-gateway/routers/admin_domains/runtime_config.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "_enqueue_agent_config_write" not in runtime_config
+    assert '"query"' not in runtime_config
+    assert "INSERT INTO agent_config" not in runtime_config
+    assert "DELETE FROM agent_config" not in runtime_config
+    assert "UpsertAgentConfigEntriesCommand" in runtime_config
+    assert "DeleteAgentConfigEntriesCommand" in runtime_config
+
+
 def test_admin_access_management_routes_live_in_domain_module() -> None:
     admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
     access_management = Path("services/api-gateway/routers/admin_domains/access_management.py").read_text(
@@ -171,6 +214,26 @@ def test_admin_playground_chat_routes_live_in_domain_module() -> None:
     assert '@router.post("/conversations/reindex", dependencies=[Depends(require_admin_key)])' in playground_chat
 
 
+def test_playground_model_settings_use_runtime_setting_commands_only() -> None:
+    playground_chat = Path(
+        "services/api-gateway/routers/admin_domains/playground_chat.py"
+    ).read_text(encoding="utf-8")
+    segment = playground_chat.split('async def playground_set_model(', 1)[1].split(
+        "\n\ndef _project_context_message(",
+        1,
+    )[0]
+
+    assert "open_gateway_db(read_only=False)" not in segment
+    assert "DuckClaw(gw, read_only=False" not in segment
+    assert "DuckClaw(vault_path, read_only=False" not in segment
+    assert "execute_model(" not in segment
+    assert "UpsertRuntimeSettingCommand" in segment
+    assert "RUNTIME_SESSION_DOMAIN" in segment
+    assert "runtime_session_actor" in segment
+    assert "enqueue_typed_command" in segment
+    assert "task_id" in segment
+
+
 def test_admin_visual_assets_routes_live_in_domain_module() -> None:
     admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
     visual_assets = Path(
@@ -208,3 +271,307 @@ def test_admin_kanban_runtime_routes_live_in_domain_module() -> None:
     assert 'router = APIRouter(prefix="/kanban", tags=["admin-kanban-runtime"])' in kanban_runtime
     assert '@router.get("/worker-states", dependencies=[Depends(require_admin_key)])' in kanban_runtime
     assert '@router.get("/swarm-slots", dependencies=[Depends(require_admin_key)])' in kanban_runtime
+
+
+def test_admin_kanban_card_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    kanban = Path("services/api-gateway/routers/admin_domains/kanban.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from routers.admin_domains.kanban import router as kanban_router" in admin
+    assert "router.include_router(kanban_router)" in admin
+    assert "class KanbanCreateBody" not in db_first
+    assert "class KanbanUpdateBody" not in db_first
+    assert "def _kanban_db_status" not in db_first
+    assert "def _kanban_tags" not in db_first
+    assert "def _kanban_card_from_row" not in db_first
+    assert "def _kanban_existing_card" not in db_first
+    assert "def _enqueue_kanban_command" not in db_first
+    assert '@router.get("/kanban"' not in db_first
+    assert '@router.post("/kanban"' not in db_first
+    assert '@router.patch("/kanban"' not in db_first
+    assert '@router.delete("/kanban"' not in db_first
+    assert 'router = APIRouter(prefix="/kanban", tags=["admin-kanban"])' in kanban
+    assert '@router.get("", dependencies=[Depends(require_admin_key)])' in kanban
+    assert '@router.post("", dependencies=[Depends(require_admin_key)])' in kanban
+    assert '@router.patch("", dependencies=[Depends(require_admin_key)])' in kanban
+    assert '@router.delete("", dependencies=[Depends(require_admin_key)])' in kanban
+
+
+def test_admin_kanban_card_router_does_not_write_profiles_directly() -> None:
+    kanban = Path("services/api-gateway/routers/admin_domains/kanban.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "open_gateway_db(read_only=False)" not in kanban
+    assert kanban.count("open_gateway_db(read_only=True)") == 4
+
+
+def test_admin_prompt_policy_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    prompt_policies = Path(
+        "services/api-gateway/routers/admin_domains/prompt_policies.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.prompt_policies import router as prompt_policies_router" in admin
+    assert "router.include_router(prompt_policies_router)" in admin
+    assert "class PromptPolicyUpsertBody" not in db_first
+    assert "def _normalize_prompt_policy_type" not in db_first
+    assert "def _normalize_prompt_policy_status" not in db_first
+    assert "def _prompt_policy_id" not in db_first
+    assert "def _prompt_policy_row" not in db_first
+    assert "def _prompt_policy_requirement_row" not in db_first
+    assert "def _enqueue_prompt_policy_command" not in db_first
+    assert '@router.get("/prompt-policies"' not in db_first
+    assert '@router.get("/prompt-policies/health"' not in db_first
+    assert '@router.put("/prompt-policies"' not in db_first
+    assert '@router.delete("/prompt-policies/{policy_type}/{policy_name}"' not in db_first
+    assert 'router = APIRouter(prefix="/prompt-policies", tags=["admin-prompt-policies"])' in prompt_policies
+    assert '@router.get("", dependencies=[Depends(require_admin_key)])' in prompt_policies
+    assert '@router.get("/health", dependencies=[Depends(require_admin_key)])' in prompt_policies
+    assert '@router.put("", dependencies=[Depends(require_admin_key)])' in prompt_policies
+    assert '@router.delete("/{policy_type}/{policy_name}", dependencies=[Depends(require_admin_key)])' in prompt_policies
+
+
+def test_admin_template_context_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    template_contexts = Path(
+        "services/api-gateway/routers/admin_domains/template_contexts.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.template_contexts import router as template_contexts_router" in admin
+    assert "router.include_router(template_contexts_router)" in admin
+    assert "class TemplateImportBody" not in db_first
+    assert "class TemplateContextBody" not in db_first
+    assert "class ContextReorderBody" not in db_first
+    assert '@router.post("/templates/import"' not in db_first
+    assert '@router.post("/templates/{worker_id}/contexts"' not in db_first
+    assert '@router.patch("/templates/{worker_id}/contexts/reorder"' not in db_first
+    assert '@router.delete("/templates/{worker_id}/contexts/{context_id}"' not in db_first
+    assert 'router = APIRouter(tags=["admin-template-contexts"])' in template_contexts
+    assert '@router.post("/templates/import", dependencies=[Depends(require_admin_key)])' in template_contexts
+    assert '@router.post("/templates/{worker_id}/contexts", dependencies=[Depends(require_admin_key)])' in template_contexts
+    assert '@router.patch("/templates/{worker_id}/contexts/reorder", dependencies=[Depends(require_admin_key)])' in template_contexts
+    assert '@router.delete("/templates/{worker_id}/contexts/{context_id}", dependencies=[Depends(require_admin_key)])' in template_contexts
+    assert "open_gateway_db(read_only=False)" not in template_contexts
+    assert "task_id" in template_contexts
+
+
+def test_admin_workspace_project_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    workspace_projects = Path(
+        "services/api-gateway/routers/admin_domains/workspace_projects.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.workspace_projects import router as workspace_projects_router" in admin
+    assert "router.include_router(workspace_projects_router)" in admin
+    assert "class WorkspaceProjectBody" not in db_first
+    assert "class ProjectAgentBody" not in db_first
+    assert '@router.get("/workspace/projects"' not in db_first
+    assert '@router.post("/workspace/projects"' not in db_first
+    assert '@router.get("/workspace/projects/{project_id}"' not in db_first
+    assert '@router.delete("/workspace/projects/{project_id}"' not in db_first
+    assert '@router.post("/workspace/projects/{project_id}/deactivate"' not in db_first
+    assert '@router.post("/workspace/projects/{project_id}/reactivate"' not in db_first
+    assert '@router.get("/workspace/projects/{project_id}/agents"' not in db_first
+    assert '@router.post("/workspace/projects/{project_id}/agents"' not in db_first
+    assert '@router.delete("/workspace/projects/{project_id}/agents/{worker_id}"' not in db_first
+    assert 'router = APIRouter(tags=["admin-workspace-projects"])' in workspace_projects
+    assert '@router.get("/workspace/projects", dependencies=[Depends(require_admin_key)])' in workspace_projects
+    assert '@router.post("/workspace/projects", dependencies=[Depends(require_admin_key)])' in workspace_projects
+    assert '@router.get("/workspace/projects/{project_id}", dependencies=[Depends(require_admin_key)])' in workspace_projects
+    assert '@router.delete("/workspace/projects/{project_id}", dependencies=[Depends(require_admin_key)])' in workspace_projects
+    assert (
+        '@router.post("/workspace/projects/{project_id}/deactivate", dependencies=[Depends(require_admin_key)])'
+        in workspace_projects
+    )
+    assert (
+        '@router.post("/workspace/projects/{project_id}/reactivate", dependencies=[Depends(require_admin_key)])'
+        in workspace_projects
+    )
+    assert (
+        '@router.get("/workspace/projects/{project_id}/agents", dependencies=[Depends(require_admin_key)])'
+        in workspace_projects
+    )
+    assert (
+        '@router.post("/workspace/projects/{project_id}/agents", dependencies=[Depends(require_admin_key)])'
+        in workspace_projects
+    )
+    assert (
+        '@router.delete("/workspace/projects/{project_id}/agents/{worker_id}", dependencies=[Depends(require_admin_key)])'
+        in workspace_projects
+    )
+
+
+def test_workspace_project_router_uses_typed_commands_only() -> None:
+    workspace_projects = Path(
+        "services/api-gateway/routers/admin_domains/workspace_projects.py"
+    ).read_text(encoding="utf-8")
+
+    assert "open_gateway_db(read_only=False)" not in workspace_projects
+    assert "BEGIN TRANSACTION" not in workspace_projects
+    assert "enqueue_typed_command" in workspace_projects
+    assert "CreateProjectCommand" in workspace_projects
+    assert "SetProjectStatusCommand" in workspace_projects
+    assert "DeleteProjectCommand" in workspace_projects
+    assert "AssignAgentToProjectCommand" in workspace_projects
+    assert "DetachAgentFromProjectCommand" in workspace_projects
+    assert "task_id" in workspace_projects
+
+
+def test_managed_workspace_draft_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    managed_draft = Path(
+        "services/api-gateway/routers/admin_domains/workspace_managed_draft.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.workspace_managed_draft import router as workspace_managed_draft_router" in admin
+    assert "router.include_router(workspace_managed_draft_router)" in admin
+    assert "class WorkspaceManagedDraftBody" not in db_first
+    assert "class WorkspaceManagedDraftConfirmBody" not in db_first
+    assert "def _workspace_managed_draft_policy" not in db_first
+    assert "def _workspace_managed_fallback_draft" not in db_first
+    assert "def _workspace_managed_model_draft_or_fallback" not in db_first
+    assert "def _workspace_managed_skill_suggestions" not in db_first
+    assert '@router.post("/workspace/orchestrator/draft"' not in db_first
+    assert '@router.post("/workspace/orchestrator/confirm"' not in db_first
+    assert 'router = APIRouter(tags=["admin-workspace-managed-draft"])' in managed_draft
+    assert '@router.post("/workspace/orchestrator/draft", dependencies=[Depends(require_admin_key)])' in managed_draft
+    assert '@router.post("/workspace/orchestrator/confirm", dependencies=[Depends(require_admin_key)])' in managed_draft
+    assert "WorkspaceManagedDraft" in managed_draft
+
+
+def test_managed_workspace_draft_router_uses_typed_commands_only() -> None:
+    managed_draft = Path(
+        "services/api-gateway/routers/admin_domains/workspace_managed_draft.py"
+    ).read_text(encoding="utf-8")
+
+    assert "open_gateway_db(read_only=False)" not in managed_draft
+    assert "BEGIN TRANSACTION" not in managed_draft
+    assert "enqueue_typed_command" in managed_draft
+    assert "ConfirmWorkspaceManagedDraftCommand" in managed_draft
+    assert "task_id" in managed_draft
+
+
+def test_admin_user_agent_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    user_agents_path = Path("services/api-gateway/routers/admin_domains/user_agents.py")
+
+    assert user_agents_path.exists()
+    user_agents = user_agents_path.read_text(encoding="utf-8")
+    assert "from routers.admin_domains.user_agents import router as user_agents_router" in admin
+    assert "router.include_router(user_agents_router)" in admin
+    assert "class UserAgentCreateBody" not in db_first
+    assert "create_user_agent" not in db_first
+    assert '@router.post("/user-agents"' not in db_first
+    assert 'router = APIRouter(tags=["admin-user-agents"])' in user_agents
+    assert '@router.post("/user-agents", dependencies=[Depends(require_admin_key)])' in user_agents
+
+
+def test_admin_user_agent_router_uses_typed_commands_only() -> None:
+    user_agents_path = Path("services/api-gateway/routers/admin_domains/user_agents.py")
+
+    assert user_agents_path.exists()
+    user_agents = user_agents_path.read_text(encoding="utf-8")
+
+    assert "open_gateway_db(read_only=False)" not in user_agents
+    assert "BEGIN TRANSACTION" not in user_agents
+    assert "enqueue_typed_command" in user_agents
+    assert "UpsertUserAgentCommand" in user_agents
+    assert "task_id" in user_agents
+
+
+def test_catalog_skill_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    catalog_skills_path = Path("services/api-gateway/routers/admin_domains/catalog_skills.py")
+
+    assert catalog_skills_path.exists()
+    catalog_skills = catalog_skills_path.read_text(encoding="utf-8")
+    assert "from routers.admin_domains.catalog_skills import router as catalog_skills_router" in admin
+    assert "router.include_router(catalog_skills_router)" in admin
+    assert "class CatalogSkillCreateBody" not in admin
+    assert "create_catalog_skill" not in admin
+    assert '@router.get("/catalog/skills"' not in admin
+    assert '@router.post("/catalog/skills"' not in admin
+    assert 'router = APIRouter(prefix="/catalog", tags=["admin-catalog-skills"])' in catalog_skills
+    assert '@router.get("/skills", dependencies=[Depends(require_admin_key)])' in catalog_skills
+    assert '@router.post("/skills", dependencies=[Depends(require_admin_key)])' in catalog_skills
+    assert '@router.delete("/skills/{name}", dependencies=[Depends(require_admin_key)])' in catalog_skills
+
+
+def test_catalog_skill_router_uses_typed_commands_only() -> None:
+    catalog_skills_path = Path("services/api-gateway/routers/admin_domains/catalog_skills.py")
+
+    assert catalog_skills_path.exists()
+    catalog_skills = catalog_skills_path.read_text(encoding="utf-8")
+
+    assert "open_gateway_db(read_only=False)" not in catalog_skills
+    assert "BEGIN TRANSACTION" not in catalog_skills
+    assert "enqueue_typed_command" in catalog_skills
+    assert "UpsertCatalogSkillCommand" in catalog_skills
+    assert "DeactivateCatalogSkillCommand" in catalog_skills
+    assert "task_id" in catalog_skills
+
+
+def test_template_catalog_router_uses_typed_commands_for_mutators() -> None:
+    templates = Path("services/api-gateway/routers/admin_domains/templates_catalog.py").read_text(
+        encoding="utf-8"
+    )
+
+    for handler_name in (
+        "put_template_file",
+        "delete_template",
+        "reactivate_template",
+        "hard_delete_template",
+    ):
+        segment = templates.split(f"async def {handler_name}(", 1)[1].split("\n\n@", 1)[0]
+        assert "admin_router._" not in segment
+        assert "open_gateway_db(read_only=False)" not in segment
+        assert "BEGIN TRANSACTION" not in segment
+        assert "_enqueue_template_catalog_command" in segment
+        assert "task_id" in segment
+
+    assert "enqueue_typed_command" in templates
+    assert "UpdateCatalogWorkerFileCommand" in templates
+    assert "DeactivateCatalogWorkerCommand" in templates
+    assert "ReactivateCatalogWorkerCommand" in templates
+    assert "HardDeleteCatalogWorkerCommand" in templates
+
+
+def test_admin_template_helpers_no_longer_own_structured_writes() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    helper_block = admin.split("async def _put_template_file_impl(", 1)[1].split(
+        "\n\nasync def _validate_template_impl",
+        1,
+    )[0]
+
+    assert "open_gateway_db(read_only=False)" not in helper_block
+    assert "BEGIN TRANSACTION" not in helper_block
+    assert "update_catalog_worker_file(" not in helper_block
+    assert "deactivate_visible_worker_for_actor(" not in helper_block
+    assert "reactivate_visible_worker_for_actor(" not in helper_block
+    assert "hard_delete_visible_worker_for_actor(" not in helper_block
+
+
+def test_duckdb_legacy_cleanup_router_uses_typed_command() -> None:
+    explorer = Path("services/api-gateway/routers/admin_domains/duckdb_explorer.py").read_text(
+        encoding="utf-8"
+    )
+    segment = explorer.split("async def duckdb_drop_legacy_schemas(", 1)[1].split(
+        "\n\n@router.get(\"/pgq-graph\"",
+        1,
+    )[0]
+
+    assert "_duckdb_writable_session" not in segment
+    assert "duckdb.connect" not in segment
+    assert "BEGIN TRANSACTION" not in segment
+    assert "DropLegacyDuckDbObjectsCommand" in segment
+    assert "enqueue_typed_command" in segment
+    assert "task_id" in segment

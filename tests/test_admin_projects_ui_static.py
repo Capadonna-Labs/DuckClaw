@@ -10,6 +10,12 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
     workspace = Path("packages/shared/src/duckclaw/admin_workspace.py").read_text(encoding="utf-8")
     db_first_router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    workspace_router = Path(
+        "services/api-gateway/routers/admin_domains/workspace_projects.py"
+    ).read_text(encoding="utf-8")
+    managed_draft_router = Path(
+        "services/api-gateway/routers/admin_domains/workspace_managed_draft.py"
+    ).read_text(encoding="utf-8")
     bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
 
     assert "<FolderKanban size={28} /> Proyectos" in page
@@ -49,9 +55,14 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     assert "project=${encodeURIComponent(project.project_id)}" in table
     assert "Se eliminará definitivamente de la tabla de proyectos" in page
     assert 'window.confirm(\n      `Eliminar definitivamente "${project.name}"?' not in page
-    assert '@router.post("/workspace/orchestrator/draft"' in db_first_router
+    assert '@router.post("/workspace/orchestrator/draft"' not in db_first_router
+    assert '@router.post("/workspace/orchestrator/draft"' in managed_draft_router
     assert "workspace/orchestrator/" in bff_proxy
     assert "gateway_stale" in bff_proxy
+    assert '@router.get("/workspace/projects"' in workspace_router
+    assert '@router.post("/workspace/projects"' in workspace_router
+    assert '@router.get("/workspace/projects"' not in db_first_router
+    assert '@router.post("/workspace/projects"' not in db_first_router
 
 
 def test_admin_service_exposes_paginated_workspace_projects_contract() -> None:
@@ -102,7 +113,10 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     table = Path("apps/duckclaw-admin/src/components/projects/ProjectsTable.tsx").read_text(encoding="utf-8")
     detail_page = Path("apps/duckclaw-admin/src/app/(admin)/projects/[projectId]/page.tsx")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
-    router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    workspace_router = Path(
+        "services/api-gateway/routers/admin_domains/workspace_projects.py"
+    ).read_text(encoding="utf-8")
+    db_first_router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
     bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
 
     assert detail_page.exists()
@@ -125,9 +139,10 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     assert "listKnowledgeSources:" in service
     assert "createKnowledgeSource:" in service
     assert "searchKnowledge:" in service
-    assert '@router.get("/workspace/projects/{project_id}"' in router
-    assert '@router.get("/knowledge/sources"' in router
-    assert '@router.post("/knowledge/search"' in router
+    assert '@router.get("/workspace/projects/{project_id}"' in workspace_router
+    assert '@router.get("/workspace/projects/{project_id}"' not in db_first_router
+    assert '@router.get("/knowledge/sources"' in db_first_router
+    assert '@router.post("/knowledge/search"' in db_first_router
     assert "projectDetailFallbackFromList" in bff_proxy
     assert "res.status === 405" in bff_proxy
 
@@ -170,7 +185,9 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
     sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
     page_path = Path("apps/duckclaw-admin/src/app/(admin)/policies/page.tsx")
-    router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    prompt_policy_router = Path(
+        "services/api-gateway/routers/admin_domains/prompt_policies.py"
+    ).read_text(encoding="utf-8")
     migrations = Path("packages/shared/src/duckclaw/schema_migrations.py").read_text(encoding="utf-8")
 
     assert page_path.exists()
@@ -178,21 +195,31 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
     assert "{ href: '/policies', label: 'Prompt policies'" in nav
     assert "'/policies': ClipboardList" in sidebar
     assert "PromptPolicy" in service
+    assert "PromptPolicyHealth" in service
     assert "listPromptPolicies:" in service
+    assert "getPromptPolicyHealth:" in service
     assert "upsertPromptPolicy:" in service
     assert "deactivatePromptPolicy:" in service
+    assert "'/prompt-policies/health'" in service
     assert "`/prompt-policies${promptPoliciesQueryString(params)}`" in service
     assert "'/prompt-policies'" in service
     assert "method: 'DELETE'" in service
     assert "?version=${encodeURIComponent(String(version))}" in service
-    assert "@router.get(\"/prompt-policies\"" in router
-    assert "@router.put(\"/prompt-policies\"" in router
-    assert "@router.delete(\"/prompt-policies/{policy_type}/{policy_name}\"" in router
-    assert "DeactivatePromptPolicyCommand" in router
+    assert '@router.get("", dependencies=[Depends(require_admin_key)])' in prompt_policy_router
+    assert '@router.get("/health", dependencies=[Depends(require_admin_key)])' in prompt_policy_router
+    assert '@router.put("", dependencies=[Depends(require_admin_key)])' in prompt_policy_router
+    assert (
+        '@router.delete("/{policy_type}/{policy_name}", dependencies=[Depends(require_admin_key)])'
+        in prompt_policy_router
+    )
+    assert "DeactivatePromptPolicyCommand" in prompt_policy_router
     assert "MANAGED_DRAFT_POLICY_TYPE = 'manager_task'" in page
     assert "MANAGED_DRAFT_POLICY_NAME = 'admin_workspace_managed_draft'" in page
     assert "JSON.parse(content)" in page
     assert "Guardar nueva versión" in page
+    assert "Health de policies" in page
+    assert "getPromptPolicyHealth()" in page
+    assert "missing_count" in page
     assert "adminService.upsertPromptPolicy" in page
     assert "adminService.deactivatePromptPolicy" in page
     assert "Desactivar versión" in page
@@ -269,6 +296,7 @@ def test_managed_workspace_draft_copy_and_symbols_avoid_orchestrator_product_nam
         Path("apps/duckclaw-admin/src/services/adminService.ts"),
         Path("services/api-gateway/routers/admin.py"),
         Path("services/api-gateway/routers/admin_db_first.py"),
+        Path("services/api-gateway/routers/admin_domains/workspace_managed_draft.py"),
     ]
     forbidden = (
         "Platform Orchestrator",

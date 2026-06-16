@@ -38,6 +38,76 @@ def test_general_graph_uses_tool_catalog_for_runtime_defaults() -> None:
     assert "_DEFAULT_TOOLS" not in text
     assert "DEFAULT_GENERAL_SYSTEM_PROMPT" in text
     assert "default_general_tool_names" in text
+    assert "from duckclaw.workers.tool_surface_policy import" in text
+    assert "_general_auto_bind_tools(" in text
+    assert "_general_db_bind_tools(" in text
+    assert "without_privileged_mutation_tools(auto_tools)" in text
+    assert "without_storage_identity_tools(auto_tools)" in text
+    assert "without_sandbox_tools(auto_tools)" in text
+
+
+def test_general_graph_db_intent_is_not_any_question_or_vertical_example() -> None:
+    from duckclaw.graphs.general_graph import _needs_db_tool
+
+    assert not _needs_db_tool("hola?")
+    assert not _needs_db_tool("qué puedes hacer?")
+    assert _needs_db_tool("qué tablas hay en la base?")
+    assert _needs_db_tool("usa read_sql para consultar la tabla")
+
+    text = GENERAL_GRAPH.read_text(encoding="utf-8").lower()
+    for marker in ("ventas", "vendedor", "clientes", "productos", "pedidos", "seller"):
+        assert marker not in text
+
+
+def test_general_graph_auto_bind_hides_sensitive_tools() -> None:
+    from dataclasses import dataclass
+
+    from duckclaw.graphs.general_graph import _general_auto_bind_tools, _general_db_bind_tools
+
+    @dataclass(frozen=True)
+    class ToolStub:
+        name: str
+
+    tools = [
+        ToolStub("read_sql"),
+        ToolStub("admin_sql"),
+        ToolStub("inspect_schema"),
+        ToolStub("get_db_path"),
+        ToolStub("run_sandbox"),
+        ToolStub("search_knowledge"),
+    ]
+
+    assert [tool.name for tool in _general_auto_bind_tools(tools, "hola")] == [
+        "read_sql",
+        "inspect_schema",
+        "search_knowledge",
+    ]
+    assert "get_db_path" in [
+        tool.name
+        for tool in _general_auto_bind_tools(
+            tools,
+            "qué base de datos estás usando?",
+        )
+    ]
+    assert "run_sandbox" in [
+        tool.name
+        for tool in _general_auto_bind_tools(
+            tools,
+            "ejecuta este código python",
+        )
+    ]
+    assert [tool.name for tool in _general_db_bind_tools(tools, "qué tablas hay?")] == [
+        "read_sql",
+        "inspect_schema",
+        "search_knowledge",
+    ]
+    assert "get_db_path" in [
+        tool.name
+        for tool in _general_db_bind_tools(
+            tools,
+            "qué base de datos estás usando?",
+        )
+    ]
 
 
 def test_chat_heartbeat_sql_tools_are_catalog_alias() -> None:

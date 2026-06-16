@@ -86,3 +86,37 @@ def test_runtime_config_get_returns_global_and_chat_rows(
         "scope": "chat",
     }
     assert "chat_other_model" not in rows
+
+
+def test_patch_runtime_settings_returns_task_id(
+    gateway_admin_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[object] = []
+
+    def fake_enqueue(command: object, *, db_path: str, user_id: str) -> str:
+        captured.append(command)
+        return "task-runtime-1"
+
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
+
+    response = gateway_admin_client.patch(
+        "/api/v1/admin/settings/runtime",
+        headers=_ADMIN_HEADERS,
+        json={
+            "settings": [
+                {
+                    "domain": "duckdb",
+                    "key": "legacy_schemas",
+                    "value": "cleanup_schema",
+                    "scope": "tenant",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["task_id"] == "task-runtime-1"
+    assert response.json()["updated"] == ["duckdb.legacy_schemas"]
+    assert captured

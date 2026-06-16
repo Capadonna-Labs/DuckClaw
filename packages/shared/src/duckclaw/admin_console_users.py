@@ -160,6 +160,17 @@ def _update_password_hash(
     )
 
 
+def update_console_user_password_hash(
+    db: Any,
+    *,
+    email: str,
+    password_hash: str,
+    hash_algo: str,
+    hash_params: dict[str, int],
+) -> None:
+    _update_password_hash(db, email, password_hash, hash_algo, hash_params)
+
+
 def record_login_failure(db: Any, email: str) -> int:
     ensure_admin_console_users_table(db)
     em_sql = _sql_lit(_normalize_email(email), 256)
@@ -206,6 +217,46 @@ def authenticate_console_user(db: Any, *, email: str, password: str) -> Optional
     pub = _row_to_public(row)
     pub["id"] = f"user-{pub['email']}"
     return pub
+
+
+def console_users_seed_required(db: Any) -> bool:
+    """Return true when login bootstrap should seed the first console user."""
+    try:
+        return count_console_users(db) == 0
+    except Exception as exc:
+        detail = str(exc).lower()
+        if "admin_console_users" in detail and ("does not exist" in detail or "not found" in detail):
+            return True
+        raise
+
+
+def authenticate_console_user_readonly(
+    db: Any, *, email: str, password: str
+) -> tuple[Optional[dict[str, Any]], dict[str, Any] | None]:
+    """Verify credentials without writing; return public user and optional hash migration."""
+    from duckclaw.admin_auth_crypto import verify_and_migrate
+
+    row = get_by_email(db, email)
+    if not row or not row.get("active", True):
+        return None, None
+
+    password_update: dict[str, Any] = {}
+
+    def _capture_update(em: str, pwd_hash: str, algo: str, params: dict[str, int]) -> None:
+        password_update.update(
+            {
+                "email": em,
+                "password_hash": pwd_hash,
+                "hash_algo": algo,
+                "hash_params": params,
+            }
+        )
+
+    if not verify_and_migrate(email, password, row, _capture_update):
+        return None, None
+    pub = _row_to_public(row)
+    pub["id"] = f"user-{pub['email']}"
+    return pub, password_update or None
 
 
 def upsert_console_user(

@@ -1,6 +1,7 @@
 """Tests for typed write commands and idempotency (phase-2)."""
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
@@ -84,16 +85,207 @@ class TestWriteCommands:
         assert raw["command_type"] == "create_project"
         assert raw["project_id"] == "p1"
 
+    def test_workspace_project_mutation_commands_roundtrip(self) -> None:
+        from duckclaw.write_commands import (
+            DeleteProjectCommand,
+            DetachAgentFromProjectCommand,
+            SetProjectStatusCommand,
+        )
+
+        status_cmd = SetProjectStatusCommand(
+            project_id="p1",
+            status="inactive",
+            actor_email="owner@d.local",
+        )
+        delete_cmd = DeleteProjectCommand(project_id="p1", actor_email="owner@d.local")
+        detach_cmd = DetachAgentFromProjectCommand(
+            project_id="p1",
+            worker_uid="wrk_1",
+            actor_email="owner@d.local",
+        )
+
+        assert json.loads(status_cmd.to_redis_payload())["command_type"] == "set_project_status"
+        assert json.loads(status_cmd.to_redis_payload())["status"] == "inactive"
+        assert json.loads(delete_cmd.to_redis_payload())["command_type"] == "delete_project"
+        assert json.loads(detach_cmd.to_redis_payload())["command_type"] == "detach_agent_from_project"
+        assert json.loads(detach_cmd.to_redis_payload())["worker_uid"] == "wrk_1"
+
+    def test_confirm_workspace_managed_draft_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import ConfirmWorkspaceManagedDraftCommand
+
+        cmd = ConfirmWorkspaceManagedDraftCommand(
+            task_id="task-managed-confirm-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            project_id="prj_managed_1",
+            project_name="Soporte Tickets",
+            project_description="Atiende casos con datos de soporte",
+            workers=[
+                {
+                    "worker_id": "ticket-support-agent",
+                    "display_name": "Ticket Support Agent",
+                    "role": "member",
+                    "system_prompt": "Ayuda a resolver casos usando contexto de soporte.",
+                }
+            ],
+            shared_context="# Contexto soporte",
+            suggested_skills=[{"name": "ticket_lookup", "available": True}],
+            source_kind="managed_draft",
+            context_title="Contexto compartido",
+            change_note="Created from DB-first managed draft",
+        )
+
+        raw = json.loads(cmd.to_redis_payload())
+
+        assert raw["command_type"] == "confirm_workspace_managed_draft"
+        assert raw["task_id"] == "task-managed-confirm-1"
+        assert raw["project_id"] == "prj_managed_1"
+        assert raw["workers"][0]["worker_id"] == "ticket-support-agent"
+        assert raw["source_kind"] == "managed_draft"
+
+    def test_upsert_user_agent_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import UpsertUserAgentCommand
+
+        cmd = UpsertUserAgentCommand(
+            task_id="task-user-agent-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            worker_uid="wrk_user_agent_1",
+            worker_id="sales_bot",
+            display_name="Sales Bot",
+            source_template_id="default",
+            system_prompt="Ayuda con ventas consultivas.",
+            description="Agente creado desde la consola admin.",
+            skills=["read_knowledge"],
+        )
+
+        raw = json.loads(cmd.to_redis_payload())
+
+        assert raw["command_type"] == "upsert_user_agent"
+        assert raw["task_id"] == "task-user-agent-1"
+        assert raw["worker_uid"] == "wrk_user_agent_1"
+        assert raw["worker_id"] == "sales_bot"
+        assert raw["skills"] == ["read_knowledge"]
+
+    def test_catalog_skill_commands_roundtrip(self) -> None:
+        from duckclaw.write_commands import DeactivateCatalogSkillCommand, UpsertCatalogSkillCommand
+
+        upsert = UpsertCatalogSkillCommand(
+            task_id="task-skill-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            name="customer_lookup",
+            description="Consulta datos de clientes desde una API controlada.",
+            skill_type="python",
+            implementation_ref="db://skills/customer_lookup.py",
+            visibility="private",
+        )
+        deactivate = DeactivateCatalogSkillCommand(
+            task_id="task-skill-delete-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            name="customer_lookup",
+        )
+
+        raw_upsert = json.loads(upsert.to_redis_payload())
+        raw_deactivate = json.loads(deactivate.to_redis_payload())
+
+        assert raw_upsert["command_type"] == "upsert_catalog_skill"
+        assert raw_upsert["name"] == "customer_lookup"
+        assert raw_upsert["implementation_ref"] == "db://skills/customer_lookup.py"
+        assert raw_upsert["visibility"] == "private"
+        assert raw_deactivate["command_type"] == "deactivate_catalog_skill"
+        assert raw_deactivate["name"] == "customer_lookup"
+
+    def test_template_catalog_mutation_commands_roundtrip(self) -> None:
+        from duckclaw.write_commands import (
+            DeactivateCatalogWorkerCommand,
+            HardDeleteCatalogWorkerCommand,
+            ReactivateCatalogWorkerCommand,
+            UpdateCatalogWorkerFileCommand,
+        )
+
+        update_file = UpdateCatalogWorkerFileCommand(
+            task_id="task-template-file-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            worker_id="sales-helper",
+            file_path="system_prompt.md",
+            content="Ayuda al equipo con respuestas trazables.",
+        )
+        deactivate = DeactivateCatalogWorkerCommand(
+            task_id="task-template-delete-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            worker_id="sales-helper",
+        )
+        reactivate = ReactivateCatalogWorkerCommand(
+            task_id="task-template-reactivate-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            worker_id="sales-helper",
+        )
+        hard_delete = HardDeleteCatalogWorkerCommand(
+            task_id="task-template-hard-delete-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            worker_id="sales-helper",
+        )
+
+        raw_update = json.loads(update_file.to_redis_payload())
+        raw_deactivate = json.loads(deactivate.to_redis_payload())
+        raw_reactivate = json.loads(reactivate.to_redis_payload())
+        raw_hard_delete = json.loads(hard_delete.to_redis_payload())
+
+        assert raw_update["command_type"] == "update_catalog_worker_file"
+        assert raw_update["worker_id"] == "sales-helper"
+        assert raw_update["file_path"] == "system_prompt.md"
+        assert raw_update["content"] == "Ayuda al equipo con respuestas trazables."
+        assert raw_deactivate["command_type"] == "deactivate_catalog_worker"
+        assert raw_reactivate["command_type"] == "reactivate_catalog_worker"
+        assert raw_hard_delete["command_type"] == "hard_delete_catalog_worker"
+
+    def test_drop_legacy_duckdb_objects_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import DropLegacyDuckDbObjectsCommand
+
+        command = DropLegacyDuckDbObjectsCommand(
+            task_id="task-drop-legacy-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            user_id="owner123",
+            db_path="/tmp/axis.duckdb",
+            schemas=["cleanup_schema"],
+            main_tables=["archived_default_orders"],
+        )
+
+        raw = json.loads(command.to_redis_payload())
+
+        assert raw["command_type"] == "drop_legacy_duckdb_objects"
+        assert raw["user_id"] == "owner123"
+        assert raw["db_path"] == "/tmp/axis.duckdb"
+        assert raw["schemas"] == ["cleanup_schema"]
+        assert raw["main_tables"] == ["archived_default_orders"]
+
     def test_upsert_runtime_setting_roundtrip(self) -> None:
         from duckclaw.write_commands import UpsertRuntimeSettingCommand
 
         cmd = UpsertRuntimeSettingCommand(
-            domain="telegram", key="webhook_url",
-            value="https://example.com",
+            tenant_id="global",
+            actor_email="admin@test.local",
+            domain="telegram",
+            key="webhook_routes",
+            value="",
+            value_kind="json",
+            value_json={"routes": []},
+            secret=True,
         )
         raw = json.loads(cmd.to_redis_payload())
         assert raw["command_type"] == "upsert_runtime_setting"
         assert raw["domain"] == "telegram"
+        assert raw["tenant_id"] == "global"
+        assert raw["actor_email"] == "admin@test.local"
+        assert raw["value_json"] == {"routes": []}
+        assert raw["secret"] is True
 
     def test_upsert_agent_config_entries_command_roundtrip(self) -> None:
         from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
@@ -111,6 +303,42 @@ class TestWriteCommands:
 
         assert raw["command_type"] == "upsert_agent_config_entries"
         assert raw["entries"]["chat_42_goals_delta_seconds"] == "0"
+
+    def test_delete_agent_config_entries_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import DeleteAgentConfigEntriesCommand
+
+        cmd = DeleteAgentConfigEntriesCommand(
+            tenant_id="tenant-a",
+            actor_email="system",
+            keys=["chat_42_goals_delta_seconds", "chat_42_goals_cron_wall"],
+        )
+
+        raw = json.loads(cmd.to_redis_payload())
+
+        assert raw["command_type"] == "delete_agent_config_entries"
+        assert raw["keys"] == ["chat_42_goals_delta_seconds", "chat_42_goals_cron_wall"]
+
+    def test_forget_chat_state_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import ForgetChatStateCommand
+
+        telegram_cmd = ForgetChatStateCommand(
+            tenant_id="tenant-a",
+            actor_email="chat:12345",
+            chat_id="12345",
+        )
+        api_cmd = ForgetChatStateCommand(
+            tenant_id="tenant-a",
+            actor_email="chat:default",
+            chat_id="default",
+        )
+
+        raw_telegram = json.loads(telegram_cmd.to_redis_payload())
+        raw_api = json.loads(api_cmd.to_redis_payload())
+
+        assert raw_telegram["command_type"] == "forget_chat_state"
+        assert raw_telegram["chat_id"] == "12345"
+        assert raw_api["command_type"] == "forget_chat_state"
+        assert raw_api["chat_id"] == "default"
 
     def test_kanban_commands_roundtrip(self) -> None:
         from duckclaw.write_commands import DeleteKanbanCardCommand, UpsertKanbanCardCommand
@@ -242,7 +470,13 @@ class TestWriteCommands:
         assert raw_delete["user_id"] == "3"
 
     def test_console_user_commands_roundtrip(self) -> None:
-        from duckclaw.write_commands import DeactivateConsoleUserCommand, UpsertConsoleUserCommand
+        from duckclaw.write_commands import (
+            ClearAdminLoginFailuresCommand,
+            DeactivateConsoleUserCommand,
+            RecordAdminLoginFailureCommand,
+            UpdateConsoleUserPasswordHashCommand,
+            UpsertConsoleUserCommand,
+        )
 
         upsert = UpsertConsoleUserCommand(
             actor_email="admin@test.local",
@@ -266,6 +500,30 @@ class TestWriteCommands:
         raw_deactivate = json.loads(deactivate.to_redis_payload())
         assert raw_deactivate["command_type"] == "deactivate_console_user"
         assert raw_deactivate["email"] == "viewer@test.local"
+
+        failure = RecordAdminLoginFailureCommand(
+            actor_email="admin@test.local",
+            email="viewer@test.local",
+        )
+        clear = ClearAdminLoginFailuresCommand(
+            actor_email="admin@test.local",
+            email="viewer@test.local",
+        )
+        password_hash = UpdateConsoleUserPasswordHashCommand(
+            actor_email="admin@test.local",
+            email="viewer@test.local",
+            password_hash="$argon2id$v=19$m=65536,t=2,p=4$abc$def",
+            hash_algo="argon2id",
+            hash_params={"time_cost": 2, "memory_cost": 65536, "parallelism": 4},
+        )
+        raw_failure = json.loads(failure.to_redis_payload())
+        raw_clear = json.loads(clear.to_redis_payload())
+        raw_password_hash = json.loads(password_hash.to_redis_payload())
+        assert raw_failure["command_type"] == "record_admin_login_failure"
+        assert raw_clear["command_type"] == "clear_admin_login_failures"
+        assert raw_password_hash["command_type"] == "update_console_user_password_hash"
+        assert raw_password_hash["hash_algo"] == "argon2id"
+        assert raw_password_hash["hash_params"]["memory_cost"] == 65536
 
     def test_shared_access_commands_roundtrip_without_war_room_core(self) -> None:
         from duckclaw.write_commands import (
@@ -314,6 +572,81 @@ class TestWriteCommands:
 
 class TestCommandHandlers:
     """Test that typed commands produce expected DB changes."""
+
+    def test_runtime_write_handlers_live_in_domain_module(self) -> None:
+        from duckclaw import write_command_handlers
+        from duckclaw.write_handlers import runtime as runtime_handlers
+
+        handler_names = (
+            "_apply_upsert_runtime_setting",
+            "_apply_upsert_agent_config_entries",
+            "_apply_delete_agent_config_entries",
+            "_apply_forget_chat_state",
+            "_ensure_task_audit_log_table",
+            "_apply_append_task_audit",
+        )
+
+        for name in handler_names:
+            exported = getattr(write_command_handlers, name)
+            canonical = getattr(runtime_handlers, name)
+            assert exported is canonical
+            assert canonical.__module__ == "duckclaw.write_handlers.runtime"
+
+        source = inspect.getsource(runtime_handlers)
+        assert "BEGIN TRANSACTION" not in source
+        assert "COMMIT" not in source
+
+    def test_access_write_handlers_live_in_domain_module(self) -> None:
+        from duckclaw import write_command_handlers
+        from duckclaw.write_handlers import access as access_handlers
+
+        handler_names = (
+            "_apply_upsert_authorized_user",
+            "_apply_delete_authorized_user",
+            "_apply_upsert_shared_db_grant",
+            "_apply_delete_shared_db_grant",
+        )
+
+        for name in handler_names:
+            exported = getattr(write_command_handlers, name)
+            canonical = getattr(access_handlers, name)
+            assert exported is canonical
+            assert canonical.__module__ == "duckclaw.write_handlers.access"
+
+        source = inspect.getsource(access_handlers)
+        assert "BEGIN TRANSACTION" not in source
+        assert "COMMIT" not in source
+
+    def test_worker_catalog_write_handlers_live_in_domain_module(self) -> None:
+        from duckclaw import write_command_handlers
+        from duckclaw.write_handlers import workers as worker_handlers
+
+        handler_names = (
+            "_apply_upsert_worker",
+            "_apply_upsert_user_agent",
+            "_apply_upsert_catalog_skill",
+            "_apply_deactivate_catalog_skill",
+            "_apply_deactivate_worker",
+            "_apply_update_catalog_worker_file",
+            "_apply_deactivate_catalog_worker",
+            "_apply_reactivate_catalog_worker",
+            "_apply_hard_delete_catalog_worker",
+            "_apply_import_templates_to_catalog",
+            "_apply_upsert_worker_context",
+            "_apply_reorder_worker_contexts",
+            "_apply_deactivate_worker_context",
+            "_apply_upsert_worker_capability",
+        )
+
+        for name in handler_names:
+            exported = getattr(write_command_handlers, name)
+            canonical = getattr(worker_handlers, name)
+            assert exported is canonical
+            assert canonical.__module__ == "duckclaw.write_handlers.workers"
+
+        source = inspect.getsource(worker_handlers)
+        assert "BEGIN TRANSACTION" not in source
+        assert "COMMIT" not in source
 
     def test_upsert_worker_inserts(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import _apply_upsert_worker
@@ -413,6 +746,30 @@ class TestCommandHandlers:
         assert rows[1][0] == "bob@d.local"
         assert rows[1][1] == "light"
 
+    def test_upsert_runtime_setting_preserves_json_value(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "upsert_runtime_setting",
+            "domain": "duckdb",
+            "key": "legacy_schemas",
+            "value": "",
+            "value_kind": "json",
+            "value_json": ["cleanup_schema"],
+            "tenant_id": "default",
+            "actor_email": "",
+        })
+
+        row = con.execute(
+            "SELECT value_text, value_json, value_kind FROM main.admin_runtime_settings "
+            "WHERE domain = 'duckdb' AND key = 'legacy_schemas'"
+        ).fetchone()
+
+        assert row[0] == ""
+        assert json.loads(row[1]) == ["cleanup_schema"]
+        assert row[2] == "json"
+
     def test_console_user_commands_apply_and_deactivate(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import dispatch_command
 
@@ -457,6 +814,62 @@ class TestCommandHandlers:
             "SELECT active FROM main.admin_console_users WHERE email = 'ops@test.local'"
         ).fetchone()
         assert active == (False,)
+
+    def test_admin_auth_state_commands_apply_idempotently(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "upsert_console_user",
+            "actor_email": "admin@test.local",
+            "email": "auth-state@test.local",
+            "nombre": "Auth State",
+            "rol": "admin",
+            "password": "auth-pass-123",
+            "initials": "AS",
+            "active": True,
+        })
+
+        failure_payload = {
+            "command_type": "record_admin_login_failure",
+            "actor_email": "admin@test.local",
+            "email": "auth-state@test.local",
+        }
+        dispatch_command(con, failure_payload)
+        dispatch_command(con, failure_payload)
+        failed = con.execute(
+            "SELECT failed_login_count, last_failed_at IS NOT NULL "
+            "FROM main.admin_console_users WHERE email = 'auth-state@test.local'"
+        ).fetchone()
+        assert failed == (2, True)
+
+        password_payload = {
+            "command_type": "update_console_user_password_hash",
+            "actor_email": "admin@test.local",
+            "email": "auth-state@test.local",
+            "password_hash": "$argon2id$v=19$m=65536,t=2,p=4$abc$def",
+            "hash_algo": "argon2id",
+            "hash_params": {"time_cost": 2, "memory_cost": 65536, "parallelism": 4},
+        }
+        dispatch_command(con, password_payload)
+        dispatch_command(con, password_payload)
+        updated = con.execute(
+            "SELECT password_hash, hash_algo, failed_login_count, last_failed_at "
+            "FROM main.admin_console_users WHERE email = 'auth-state@test.local'"
+        ).fetchone()
+        assert updated == ("$argon2id$v=19$m=65536,t=2,p=4$abc$def", "argon2id", 0, None)
+
+        dispatch_command(con, failure_payload)
+        dispatch_command(con, {
+            "command_type": "clear_admin_login_failures",
+            "actor_email": "admin@test.local",
+            "email": "auth-state@test.local",
+        })
+        cleared = con.execute(
+            "SELECT failed_login_count, last_failed_at "
+            "FROM main.admin_console_users WHERE email = 'auth-state@test.local'"
+        ).fetchone()
+        assert cleared == (0, None)
 
     def test_upsert_kanban_card_inserts_updates_and_records_events(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import _apply_upsert_kanban_card
@@ -647,6 +1060,95 @@ class TestCommandHandlers:
             ("chat_42_goals_delta_seconds", "0"),
         ]
 
+    def test_agent_config_entries_handler_deletes_idempotently(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        con.execute(
+            "CREATE TABLE agent_config ("
+            "key VARCHAR PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        dispatch_command(con, {
+            "command_type": "upsert_agent_config_entries",
+            "entries": {
+                "chat_42_goals_delta_seconds": "120",
+                "chat_42_goals_cron_wall": '{"kind":"daily"}',
+            },
+        })
+
+        payload = {
+            "command_type": "delete_agent_config_entries",
+            "keys": ["chat_42_goals_delta_seconds", "chat_42_goals_delta_seconds"],
+        }
+        dispatch_command(con, payload)
+        dispatch_command(con, payload)
+
+        rows = con.execute("SELECT key, value FROM agent_config ORDER BY key").fetchall()
+
+        assert rows == [("chat_42_goals_cron_wall", '{"kind":"daily"}')]
+
+    def test_forget_chat_state_handler_deletes_conversations_and_audit_idempotently(
+        self,
+        db_with_migrations,
+    ) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS telegram_conversation ("
+            "chat_id BIGINT, role TEXT, content TEXT, received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS api_conversation ("
+            "session_id VARCHAR, worker_id VARCHAR, role VARCHAR, content TEXT, "
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS agent_config ("
+            "key VARCHAR PRIMARY KEY, value TEXT, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+        )
+        con.execute("INSERT INTO telegram_conversation (chat_id, role, content) VALUES (12345, 'user', 'hola')")
+        con.execute(
+            "INSERT INTO api_conversation (session_id, worker_id, role, content) "
+            "VALUES ('default', 'manager', 'user', 'hola')"
+        )
+        con.execute("INSERT INTO agent_config (key, value) VALUES ('chat_12345_last_audit', '{\"latency_ms\": 1}')")
+        con.execute("INSERT INTO agent_config (key, value) VALUES ('chat_default_last_audit', '{\"latency_ms\": 2}')")
+
+        telegram_payload = {
+            "command_type": "forget_chat_state",
+            "tenant_id": "tenant-a",
+            "actor_email": "chat:12345",
+            "chat_id": "12345",
+        }
+        api_payload = {
+            "command_type": "forget_chat_state",
+            "tenant_id": "tenant-a",
+            "actor_email": "chat:default",
+            "chat_id": "default",
+        }
+
+        dispatch_command(con, telegram_payload)
+        dispatch_command(con, telegram_payload)
+        dispatch_command(con, api_payload)
+        dispatch_command(con, api_payload)
+
+        telegram_count = con.execute(
+            "SELECT count(*) FROM telegram_conversation WHERE chat_id = 12345"
+        ).fetchone()[0]
+        api_count = con.execute(
+            "SELECT count(*) FROM api_conversation WHERE session_id = 'default'"
+        ).fetchone()[0]
+        audit_rows = con.execute(
+            "SELECT key, value FROM agent_config "
+            "WHERE key IN ('chat_12345_last_audit', 'chat_default_last_audit') "
+            "ORDER BY key"
+        ).fetchall()
+
+        assert telegram_count == 0
+        assert api_count == 0
+        assert audit_rows == []
+
     def test_prompt_policy_handler_upserts_updates_and_deactivates(self, db_with_migrations) -> None:
         from duckclaw.prompt_policies import PromptPolicyResolver
         from duckclaw.write_command_handlers import (
@@ -708,6 +1210,61 @@ class TestCommandHandlers:
         assert inactive == (False, "inactive")
         with pytest.raises(FileNotFoundError, match="active prompt policy not found"):
             PromptPolicyResolver(db=con).load("system_prompt", "rag_turn")
+
+    def test_worker_context_handlers_create_reorder_and_deactivate(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "upsert_worker",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_id": "context-worker",
+            "display_name": "Context Worker",
+        })
+        worker_uid = con.execute(
+            "SELECT worker_uid FROM main.admin_worker_catalog "
+            "WHERE tenant_id = 'default' AND worker_id = 'context-worker'"
+        ).fetchone()[0]
+
+        dispatch_command(con, {
+            "command_type": "upsert_worker_context",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_uid": worker_uid,
+            "title": "notes.md",
+            "content_md": "# Notes",
+            "sort_order": 30,
+        })
+        context_id = con.execute(
+            "SELECT context_id FROM main.admin_worker_contexts "
+            "WHERE worker_uid = ? AND title = 'notes.md' AND active = true",
+            [worker_uid],
+        ).fetchone()[0]
+
+        dispatch_command(con, {
+            "command_type": "reorder_worker_contexts",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_uid": worker_uid,
+            "items": [{"context_id": context_id, "sort_order": 5}],
+        })
+        assert con.execute(
+            "SELECT sort_order FROM main.admin_worker_contexts WHERE context_id = ?",
+            [context_id],
+        ).fetchone()[0] == 5
+
+        dispatch_command(con, {
+            "command_type": "deactivate_worker_context",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_uid": worker_uid,
+            "context_id": context_id,
+        })
+        assert con.execute(
+            "SELECT active FROM main.admin_worker_contexts WHERE context_id = ?",
+            [context_id],
+        ).fetchone()[0] is False
 
     def test_authorized_user_handlers_upsert_and_delete(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import dispatch_command
@@ -1072,6 +1629,444 @@ class TestCommandHandlers:
                 "project_id": "orphan-proj",
                 "worker_uid": "nonexistent-uid",
             })
+
+    def test_project_status_handler_is_idempotent_and_tenant_scoped(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import _apply_create_project, _apply_set_project_status
+
+        con = db_with_migrations
+        _apply_create_project(con, {
+            "project_id": "status-proj",
+            "name": "Status Project",
+            "tenant_id": "tenant-a",
+            "actor_email": "owner@d.local",
+        })
+
+        payload = {
+            "command_type": "set_project_status",
+            "project_id": "status-proj",
+            "tenant_id": "tenant-a",
+            "actor_email": "owner@d.local",
+            "status": "inactive",
+        }
+        _apply_set_project_status(con, payload)
+        _apply_set_project_status(con, payload)
+
+        row = con.execute(
+            "SELECT status, active FROM main.admin_projects WHERE project_id = 'status-proj'",
+        ).fetchone()
+        assert row == ("inactive", True)
+        with pytest.raises(ValueError, match="Project not found"):
+            _apply_set_project_status(con, {**payload, "tenant_id": "tenant-b", "status": "active"})
+
+    def test_delete_project_handler_removes_project_relations_for_tenant(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import (
+            _apply_create_project,
+            _apply_delete_project,
+            _apply_upsert_worker,
+            _apply_assign_agent_to_project,
+        )
+
+        con = db_with_migrations
+        _apply_create_project(con, {
+            "project_id": "delete-proj",
+            "name": "Delete Project",
+            "tenant_id": "tenant-a",
+            "actor_email": "owner@d.local",
+        })
+        _apply_upsert_worker(con, {
+            "worker_id": "delete-worker",
+            "display_name": "Delete Worker",
+            "tenant_id": "tenant-a",
+        })
+        worker_uid = con.execute(
+            "SELECT worker_uid FROM main.admin_worker_catalog WHERE worker_id = 'delete-worker'",
+        ).fetchone()[0]
+        _apply_assign_agent_to_project(con, {
+            "project_id": "delete-proj",
+            "worker_uid": worker_uid,
+            "tenant_id": "tenant-a",
+            "actor_email": "owner@d.local",
+        })
+
+        _apply_delete_project(con, {
+            "command_type": "delete_project",
+            "project_id": "delete-proj",
+            "tenant_id": "tenant-a",
+            "actor_email": "owner@d.local",
+        })
+
+        assert con.execute(
+            "SELECT COUNT(*) FROM main.admin_projects WHERE project_id = 'delete-proj'",
+        ).fetchone()[0] == 0
+        assert con.execute(
+            "SELECT COUNT(*) FROM main.admin_project_agents WHERE project_id = 'delete-proj'",
+        ).fetchone()[0] == 0
+        assert con.execute(
+            "SELECT COUNT(*) FROM main.admin_project_members WHERE project_id = 'delete-proj'",
+        ).fetchone()[0] == 0
+        assert con.execute(
+            "SELECT COUNT(*) FROM main.admin_worker_catalog WHERE worker_uid = ?",
+            [worker_uid],
+        ).fetchone()[0] == 1
+
+    def test_detach_agent_handler_soft_deactivates_assignment_for_tenant(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import (
+            _apply_assign_agent_to_project,
+            _apply_create_project,
+            _apply_detach_agent_from_project,
+            _apply_upsert_worker,
+        )
+
+        con = db_with_migrations
+        _apply_create_project(con, {
+            "project_id": "detach-proj",
+            "name": "Detach Project",
+            "tenant_id": "tenant-a",
+        })
+        _apply_upsert_worker(con, {
+            "worker_id": "detach-worker",
+            "display_name": "Detach Worker",
+            "tenant_id": "tenant-a",
+        })
+        worker_uid = con.execute(
+            "SELECT worker_uid FROM main.admin_worker_catalog WHERE worker_id = 'detach-worker'",
+        ).fetchone()[0]
+        _apply_assign_agent_to_project(con, {
+            "project_id": "detach-proj",
+            "worker_uid": worker_uid,
+        })
+
+        payload = {
+            "command_type": "detach_agent_from_project",
+            "project_id": "detach-proj",
+            "worker_uid": worker_uid,
+            "tenant_id": "tenant-a",
+        }
+        _apply_detach_agent_from_project(con, payload)
+        _apply_detach_agent_from_project(con, payload)
+
+        row = con.execute(
+            "SELECT active FROM main.admin_project_agents "
+            "WHERE project_id = 'detach-proj' AND worker_uid = ?",
+            [worker_uid],
+        ).fetchone()
+        assert row == (False,)
+
+    def test_confirm_workspace_managed_draft_handler_is_idempotent(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        payload = {
+            "command_type": "confirm_workspace_managed_draft",
+            "command_version": 1,
+            "task_id": "task-managed-confirm-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "project_id": "prj_managed_1",
+            "project_name": "Soporte Tickets",
+            "project_description": "Atiende casos con datos de soporte",
+            "workers": [
+                {
+                    "worker_id": "ticket-support-agent",
+                    "display_name": "Ticket Support Agent",
+                    "role": "member",
+                    "system_prompt": "Ayuda a resolver casos usando contexto de soporte.",
+                }
+            ],
+            "shared_context": "# Contexto soporte\nUsar tono claro.",
+            "suggested_skills": [{"name": "ticket_lookup", "reason": "consulta tickets", "available": True}],
+            "source_kind": "managed_draft",
+            "context_title": "Contexto compartido",
+            "change_note": "Created from DB-first managed draft",
+        }
+
+        dispatch_command(con, payload)
+        dispatch_command(con, payload)
+
+        counts = {
+            "projects": con.execute(
+                "SELECT COUNT(*) FROM main.admin_projects WHERE project_id = 'prj_managed_1'"
+            ).fetchone()[0],
+            "workers": con.execute(
+                "SELECT COUNT(*) FROM main.admin_worker_catalog "
+                "WHERE tenant_id = 'default' AND worker_id = 'ticket-support-agent'"
+            ).fetchone()[0],
+            "versions": con.execute(
+                "SELECT COUNT(*) FROM main.admin_worker_versions v "
+                "JOIN main.admin_worker_catalog w ON w.worker_uid = v.worker_uid "
+                "WHERE w.worker_id = 'ticket-support-agent'"
+            ).fetchone()[0],
+            "contexts": con.execute(
+                "SELECT COUNT(*) FROM main.admin_worker_contexts c "
+                "JOIN main.admin_worker_catalog w ON w.worker_uid = c.worker_uid "
+                "WHERE w.worker_id = 'ticket-support-agent' AND c.title = 'Contexto compartido'"
+            ).fetchone()[0],
+            "assignments": con.execute(
+                "SELECT COUNT(*) FROM main.admin_project_agents pa "
+                "JOIN main.admin_worker_catalog w ON w.worker_uid = pa.worker_uid "
+                "WHERE pa.project_id = 'prj_managed_1' AND w.worker_id = 'ticket-support-agent'"
+            ).fetchone()[0],
+        }
+        row = con.execute(
+            "SELECT p.name, wc.worker_id, pa.role, pa.sort_order "
+            "FROM main.admin_projects p "
+            "JOIN main.admin_project_agents pa ON pa.project_id = p.project_id "
+            "JOIN main.admin_worker_catalog wc ON wc.worker_uid = pa.worker_uid "
+            "WHERE p.project_id = 'prj_managed_1'"
+        ).fetchone()
+        files_snapshot = con.execute(
+            "SELECT v.files_snapshot_json FROM main.admin_worker_versions v "
+            "JOIN main.admin_worker_catalog w ON w.worker_uid = v.worker_uid "
+            "WHERE w.worker_id = 'ticket-support-agent'"
+        ).fetchone()[0]
+
+        assert counts == {
+            "projects": 1,
+            "workers": 1,
+            "versions": 1,
+            "contexts": 1,
+            "assignments": 1,
+        }
+        assert row == ("Soporte Tickets", "ticket-support-agent", "member", 0)
+        assert json.loads(files_snapshot)["system_prompt.md"].startswith("Ayuda a resolver")
+
+    def test_upsert_user_agent_handler_is_db_first_and_idempotent(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        payload = {
+            "command_type": "upsert_user_agent",
+            "command_version": 1,
+            "task_id": "task-user-agent-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_uid": "wrk_user_agent_1",
+            "worker_id": "sales_bot",
+            "display_name": "Sales Bot",
+            "source_template_id": "default",
+            "system_prompt": "Ayuda con ventas consultivas.",
+            "description": "Agente creado desde consola admin.",
+            "skills": ["read_knowledge"],
+        }
+
+        dispatch_command(con, payload)
+        dispatch_command(con, payload)
+
+        worker = con.execute(
+            "SELECT worker_uid, owner_email, display_name, source_kind, source_template_id "
+            "FROM main.admin_worker_catalog WHERE tenant_id = 'default' AND worker_id = 'sales_bot'"
+        ).fetchone()
+        user_agent = con.execute(
+            "SELECT owner_email, display_name, source_template_id, manifest_path "
+            "FROM main.admin_user_agents WHERE tenant_id = 'default' AND worker_id = 'sales_bot'"
+        ).fetchone()
+        counts = {
+            "workers": con.execute(
+                "SELECT COUNT(*) FROM main.admin_worker_catalog "
+                "WHERE tenant_id = 'default' AND worker_id = 'sales_bot'"
+            ).fetchone()[0],
+            "user_agents": con.execute(
+                "SELECT COUNT(*) FROM main.admin_user_agents "
+                "WHERE tenant_id = 'default' AND worker_id = 'sales_bot'"
+            ).fetchone()[0],
+            "versions": con.execute(
+                "SELECT COUNT(*) FROM main.admin_worker_versions WHERE worker_uid = 'wrk_user_agent_1'"
+            ).fetchone()[0],
+            "contexts": con.execute(
+                "SELECT COUNT(*) FROM main.admin_worker_contexts "
+                "WHERE worker_uid = 'wrk_user_agent_1' AND title = 'system_prompt'"
+            ).fetchone()[0],
+        }
+        files_snapshot = con.execute(
+            "SELECT files_snapshot_json FROM main.admin_worker_versions WHERE worker_uid = 'wrk_user_agent_1'"
+        ).fetchone()[0]
+
+        assert worker == ("wrk_user_agent_1", "test@d.local", "Sales Bot", "runtime", "default")
+        assert user_agent == (
+            "test@d.local",
+            "Sales Bot",
+            "default",
+            "db://admin_worker_catalog/wrk_user_agent_1/manifest.json",
+        )
+        assert counts == {"workers": 1, "user_agents": 1, "versions": 1, "contexts": 1}
+        assert json.loads(files_snapshot)["manifest.json"].startswith("{")
+
+    def test_catalog_skill_handler_upserts_and_deactivates_idempotently(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        payload = {
+            "command_type": "upsert_catalog_skill",
+            "command_version": 1,
+            "task_id": "task-skill-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "name": "customer_lookup",
+            "description": "Consulta datos de clientes desde una API controlada.",
+            "skill_type": "python",
+            "implementation_ref": "db://skills/customer_lookup.py",
+            "visibility": "private",
+        }
+
+        dispatch_command(con, payload)
+        dispatch_command(con, {**payload, "description": "Actualizada", "visibility": "public"})
+
+        row = con.execute(
+            "SELECT name, description, skill_type, implementation_ref, owner_email, tenant_id, "
+            "visibility, active FROM main.admin_skills WHERE name = 'customer_lookup'"
+        ).fetchone()
+        count = con.execute(
+            "SELECT COUNT(*) FROM main.admin_skills WHERE name = 'customer_lookup'"
+        ).fetchone()[0]
+
+        assert row == (
+            "customer_lookup",
+            "Actualizada",
+            "python",
+            "db://skills/customer_lookup.py",
+            "test@d.local",
+            "default",
+            "public",
+            True,
+        )
+        assert count == 1
+
+        delete_payload = {
+            "command_type": "deactivate_catalog_skill",
+            "command_version": 1,
+            "task_id": "task-skill-delete-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "name": "customer_lookup",
+        }
+        dispatch_command(con, delete_payload)
+        dispatch_command(con, delete_payload)
+
+        assert con.execute(
+            "SELECT active FROM main.admin_skills WHERE name = 'customer_lookup'"
+        ).fetchone()[0] is False
+
+    def test_template_catalog_handlers_mutate_actor_owned_worker(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "upsert_worker",
+            "command_version": 1,
+            "task_id": "task-worker-template-owner",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_id": "sales-helper",
+            "display_name": "Sales Helper",
+            "source_kind": "runtime",
+        })
+        worker_uid = con.execute(
+            "SELECT worker_uid FROM main.admin_worker_catalog WHERE worker_id = 'sales-helper'"
+        ).fetchone()[0]
+
+        dispatch_command(con, {
+            "command_type": "update_catalog_worker_file",
+            "command_version": 1,
+            "task_id": "task-template-file-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_id": "sales-helper",
+            "file_path": "system_prompt.md",
+            "content": "Responde con evidencia local.",
+        })
+
+        version_row = con.execute(
+            "SELECT files_snapshot_json FROM main.admin_worker_versions "
+            "WHERE worker_uid = ? ORDER BY version DESC LIMIT 1",
+            [worker_uid],
+        ).fetchone()
+        context_row = con.execute(
+            "SELECT content_md FROM main.admin_worker_contexts "
+            "WHERE worker_uid = ? AND title = 'system_prompt.md' AND active = true",
+            [worker_uid],
+        ).fetchone()
+
+        assert json.loads(version_row[0])["system_prompt.md"] == "Responde con evidencia local."
+        assert context_row[0] == "Responde con evidencia local."
+
+        dispatch_command(con, {
+            "command_type": "deactivate_catalog_worker",
+            "command_version": 1,
+            "task_id": "task-template-delete-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_id": "sales-helper",
+        })
+        assert con.execute(
+            "SELECT active, status FROM main.admin_worker_catalog WHERE worker_uid = ?",
+            [worker_uid],
+        ).fetchone() == (False, "inactive")
+
+        dispatch_command(con, {
+            "command_type": "reactivate_catalog_worker",
+            "command_version": 1,
+            "task_id": "task-template-reactivate-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_id": "sales-helper",
+        })
+        assert con.execute(
+            "SELECT active, status FROM main.admin_worker_catalog WHERE worker_uid = ?",
+            [worker_uid],
+        ).fetchone() == (True, "active")
+
+        dispatch_command(con, {
+            "command_type": "hard_delete_catalog_worker",
+            "command_version": 1,
+            "task_id": "task-template-hard-delete-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "worker_id": "sales-helper",
+        })
+        assert con.execute(
+            "SELECT COUNT(*) FROM main.admin_worker_catalog WHERE worker_uid = ?",
+            [worker_uid],
+        ).fetchone()[0] == 0
+        assert con.execute(
+            "SELECT COUNT(*) FROM main.admin_worker_contexts WHERE worker_uid = ?",
+            [worker_uid],
+        ).fetchone()[0] == 0
+
+    def test_drop_legacy_duckdb_objects_handler_drops_requested_objects(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        con.execute("CREATE SCHEMA cleanup_schema")
+        con.execute("CREATE TABLE cleanup_schema.legacy_table (id INTEGER)")
+        con.execute("CREATE TABLE main.archived_default_orders (id INTEGER)")
+        con.execute("CREATE TABLE main.keep_me (id INTEGER)")
+
+        dispatch_command(con, {
+            "command_type": "drop_legacy_duckdb_objects",
+            "command_version": 1,
+            "task_id": "task-drop-legacy-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "user_id": "default",
+            "db_path": "",
+            "schemas": ["cleanup_schema"],
+            "main_tables": ["archived_default_orders"],
+        })
+
+        schemas = {
+            row[0]
+            for row in con.execute("SELECT schema_name FROM information_schema.schemata").fetchall()
+        }
+        main_tables = {
+            row[0]
+            for row in con.execute(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
+            ).fetchall()
+        }
+
+        assert "cleanup_schema" not in schemas
+        assert "archived_default_orders" not in main_tables
+        assert "keep_me" in main_tables
 
 
 class TestEnqueueTypedCommand:

@@ -14,7 +14,9 @@ from pydantic import BaseModel, Field, field_validator
 
 from routers.admin_domains.access_management import router as access_management_router
 from routers.admin_domains.auth import router as auth_router
+from routers.admin_domains.catalog_skills import router as catalog_skills_router
 from routers.admin_domains.duckdb_explorer import router as duckdb_explorer_router
+from routers.admin_domains.kanban import router as kanban_router
 from routers.admin_domains.kanban_runtime import router as kanban_runtime_router
 from routers.admin_domains.playground_chat import (
     _open_playground_vault_db,
@@ -24,21 +26,33 @@ from routers.admin_domains.playground_chat import (
     _playground_vault_db_path,
 )
 from routers.admin_domains.playground_chat import router as playground_chat_router
+from routers.admin_domains.prompt_policies import router as prompt_policies_router
 from routers.admin_domains.runtime_config import router as runtime_config_router
 from routers.admin_domains.sandbox_sessions import router as sandbox_sessions_router
+from routers.admin_domains.template_contexts import router as template_contexts_router
 from routers.admin_domains.templates_catalog import router as templates_catalog_router
+from routers.admin_domains.user_agents import router as user_agents_router
 from routers.admin_domains.visual_assets import router as visual_assets_router
+from routers.admin_domains.workspace_managed_draft import router as workspace_managed_draft_router
+from routers.admin_domains.workspace_projects import router as workspace_projects_router
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 router.include_router(access_management_router)
 router.include_router(auth_router)
+router.include_router(catalog_skills_router)
 router.include_router(duckdb_explorer_router)
+router.include_router(kanban_router)
 router.include_router(kanban_runtime_router)
 router.include_router(playground_chat_router)
+router.include_router(prompt_policies_router)
 router.include_router(runtime_config_router)
 router.include_router(sandbox_sessions_router)
+router.include_router(template_contexts_router)
 router.include_router(templates_catalog_router)
+router.include_router(user_agents_router)
 router.include_router(visual_assets_router)
+router.include_router(workspace_managed_draft_router)
+router.include_router(workspace_projects_router)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _EDITABLE_SUFFIXES = frozenset({".yaml", ".yml", ".md", ".sql", ".py", ".txt", ".json"})
@@ -88,22 +102,23 @@ def _telegram_webhook_routes_runtime_setting() -> dict[str, Any]:
         return {"value": raw_env, "source": "env" if raw_env else "default"}
 
 
-def _upsert_telegram_webhook_routes_runtime_setting(serialized: str, *, actor: str) -> None:
-    from core.admin_identity import open_gateway_db
-    from duckclaw.admin_runtime_settings import upsert_runtime_setting
+def _upsert_telegram_webhook_routes_runtime_setting(serialized: str, *, actor: str) -> str:
+    from duckclaw.db_write_queue import enqueue_typed_command
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.write_commands import UpsertRuntimeSettingCommand
 
-    with open_gateway_db(read_only=False) as db:
-        upsert_runtime_setting(
-            db,
-            tenant_id="global",
-            actor_email="",
-            domain=_TELEGRAM_WEBHOOK_ROUTES_DOMAIN,
-            key=_TELEGRAM_WEBHOOK_ROUTES_KEY,
-            value_text=serialized,
-            value_kind="string",
-            secret=True,
-            updated_by=actor,
-        )
+    command = UpsertRuntimeSettingCommand(
+        tenant_id="global",
+        actor_email="",
+        domain=_TELEGRAM_WEBHOOK_ROUTES_DOMAIN,
+        key=_TELEGRAM_WEBHOOK_ROUTES_KEY,
+        value=serialized,
+        value_kind="string",
+        secret=True,
+        updated_by=actor,
+    )
+    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
+    return task_id
 
 
 def _mcp_port_runtime_setting() -> dict[str, str]:
@@ -780,7 +795,7 @@ async def _list_templates_impl(
 ) -> dict[str, Any]:
     from core.admin_identity import list_templates_payload, open_gateway_db
 
-    with open_gateway_db(read_only=False) as db:
+    with open_gateway_db(read_only=True) as db:
         items = list_templates_payload(db, actor_email=actor, include_inactive=include_inactive)
     return {"templates": items}
 
@@ -807,25 +822,11 @@ async def _put_template_file_impl(
     body: FileWriteBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    from core.admin_identity import is_catalog_managed_worker, open_gateway_db
-    from duckclaw.admin_worker_catalog import get_visible_worker_for_actor, update_catalog_worker_file
-
-    wid = worker_id.strip()
-    if wid in _PROTECTED_TEMPLATE_IDS or wid == "default":
-        raise _problem(403, "Plantilla protegida", wid)
-    with open_gateway_db(read_only=False) as db:
-        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
-        if not is_catalog_managed_worker(worker):
-            raise _problem(404, "Worker no visible en catálogo DB-first", wid)
-        result = update_catalog_worker_file(
-            db,
-            worker_uid=worker["worker_uid"],
-            file_path=file_path,
-            content=body.content,
-            actor_email=actor,
-        )
-    _admin_audit("template.file.put", f"templates/{worker_id}", file_path, actor=actor)
-    return {"ok": True, "path": file_path, "source": "catalog", **result}
+    raise _problem(
+        410,
+        "Mutación legacy de template retirada",
+        "Usa routers.admin_domains.templates_catalog y comandos tipados DB-first.",
+    )
 
 
 def _default_vault_user_id(vault_user_id: str | None = None) -> str:
@@ -1043,64 +1044,33 @@ async def _delete_template_impl(
     worker_id: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    from core.admin_identity import is_catalog_managed_worker, open_gateway_db
-    from duckclaw.admin_worker_catalog import deactivate_visible_worker_for_actor, get_visible_worker_for_actor
-
-    wid = worker_id.strip()
-    if wid == "default" or wid in _PROTECTED_TEMPLATE_IDS:
-        raise _problem(403, "Plantilla protegida", wid)
-    with open_gateway_db(read_only=False) as db:
-        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
-        if is_catalog_managed_worker(worker):
-            deactivate_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
-            _admin_audit("template.delete", f"templates/{wid}", "catalog_deactivate", actor=actor)
-            return {"ok": True, "id": wid, "action": "deactivated"}
-    raise _problem(404, "Plantilla no encontrada en catálogo", wid)
+    raise _problem(
+        410,
+        "Mutación legacy de template retirada",
+        "Usa routers.admin_domains.templates_catalog y comandos tipados DB-first.",
+    )
 
 
 async def _reactivate_template_impl(
     worker_id: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    from core.admin_identity import open_gateway_db
-    from duckclaw.admin_worker_catalog import reactivate_visible_worker_for_actor
-
-    wid = worker_id.strip()
-    if wid in _PROTECTED_TEMPLATE_IDS:
-        raise _problem(403, "Plantilla protegida", wid)
-    with open_gateway_db(read_only=False) as db:
-        worker = reactivate_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
-    if not worker:
-        raise _problem(404, "Worker inactivo no encontrado en catálogo", wid)
-    _admin_audit("template.reactivate", f"templates/{wid}", "catalog_reactivate", actor=actor)
-    return {"ok": True, "id": wid, "action": "reactivated"}
+    raise _problem(
+        410,
+        "Mutación legacy de template retirada",
+        "Usa routers.admin_domains.templates_catalog y comandos tipados DB-first.",
+    )
 
 
 async def _hard_delete_template_impl(
     worker_id: str,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
-    from core.admin_identity import open_gateway_db
-    from duckclaw.admin_worker_catalog import hard_delete_visible_worker_for_actor
-
-    wid = worker_id.strip()
-    if wid == "default" or wid in _PROTECTED_TEMPLATE_IDS:
-        raise _problem(403, "Plantilla protegida", wid)
-    with open_gateway_db(read_only=False) as db:
-        db.execute("BEGIN TRANSACTION")
-        try:
-            worker = hard_delete_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
-            if not worker:
-                db.execute("ROLLBACK")
-                raise _problem(404, "Worker no encontrado en catálogo", wid)
-            db.execute("COMMIT")
-        except HTTPException:
-            raise
-        except Exception:
-            db.execute("ROLLBACK")
-            raise
-    _admin_audit("template.hard_delete", f"templates/{wid}", "catalog_hard_delete", actor=actor)
-    return {"ok": True, "id": wid, "hard_deleted": True}
+    raise _problem(
+        410,
+        "Mutación legacy de template retirada",
+        "Usa routers.admin_domains.templates_catalog y comandos tipados DB-first.",
+    )
 
 
 async def _validate_template_impl(worker_id: str) -> dict[str, Any]:
@@ -1248,11 +1218,12 @@ async def put_telegram_routes(
     except ValueError as exc:
         raise _problem(400, "Rutas inválidas", str(exc)) from exc
 
-    _upsert_telegram_webhook_routes_runtime_setting(serialized, actor=actor)
+    task_id = _upsert_telegram_webhook_routes_runtime_setting(serialized, actor=actor)
     _admin_audit("telegram.routes.put", "telegram.webhook_routes", f"{len(built)} rutas", actor=actor)
     return {
         "ok": True,
         "updated": ["telegram.webhook_routes"],
+        "task_id": task_id,
         "source": "db",
         "route_count": len(built),
         "restart_hint": "Reinicia DuckClaw-Gateway para registrar rutas dinámicas DB-first",
@@ -1272,12 +1243,19 @@ async def _admin_auth_login_impl(body: Any, request: Request, response: Response
         set_auth_cookies,
     )
     from duckclaw import DuckClaw
+    from duckclaw import db_write_queue
     from duckclaw.admin_console_users import (
-        authenticate_console_user,
-        record_login_failure,
-        seed_admin_console_users_if_empty,
+        authenticate_console_user_readonly,
+        console_users_seed_required,
+        default_seed_users,
     )
     from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.write_commands import (
+        ClearAdminLoginFailuresCommand,
+        RecordAdminLoginFailureCommand,
+        UpdateConsoleUserPasswordHashCommand,
+        UpsertConsoleUserCommand,
+    )
 
     redis_client = getattr(request.app.state, "redis", None)
     ip = client_ip(request)
@@ -1291,22 +1269,83 @@ async def _admin_auth_login_impl(body: Any, request: Request, response: Response
 
     from core.admin_identity import attach_profile_to_console_user, console_user_public
 
-    db = DuckClaw(gw, read_only=False, engine="python")
-    user: dict[str, Any] | None = None
+    def _enqueue_auth_command(command: Any) -> str:
+        task_id = db_write_queue.enqueue_typed_command(command, db_path=gw, user_id="default")
+        command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
+        if command_status and command_status.status == "failed":
+            raise RuntimeError(command_status.detail or "admin auth write failed")
+        return task_id
+
+    db = DuckClaw(gw, read_only=True, engine="python")
+    should_seed = False
     try:
-        seed_admin_console_users_if_empty(db)
-        user = authenticate_console_user(db, email=body.email, password=body.password)
-        if not user:
-            record_login_failure(db, body.email)
-            if redis_client is not None:
-                await record_email_failure(redis_client, body.email)
-        else:
+        should_seed = console_users_seed_required(db)
+    finally:
+        db.close()
+
+    if should_seed:
+        for seed_user in default_seed_users():
+            _enqueue_auth_command(
+                UpsertConsoleUserCommand(
+                    tenant_id="default",
+                    actor_email="system",
+                    email=seed_user["email"],
+                    nombre=seed_user.get("nombre") or seed_user["email"],
+                    rol=seed_user.get("rol") or "user",
+                    password=seed_user.get("password") or "",
+                    initials=seed_user.get("initials") or "",
+                    active=True,
+                )
+            )
+
+    db = DuckClaw(gw, read_only=True, engine="python")
+    user: dict[str, Any] | None = None
+    password_update: dict[str, Any] | None = None
+    try:
+        user, password_update = authenticate_console_user_readonly(
+            db, email=body.email, password=body.password
+        )
+        if user:
             user = attach_profile_to_console_user(db, user)
     finally:
         db.close()
 
     if not user:
+        try:
+            _enqueue_auth_command(
+                RecordAdminLoginFailureCommand(
+                    tenant_id="default",
+                    actor_email="system",
+                    email=body.email,
+                )
+            )
+        except RuntimeError as exc:
+            raise _problem(503, "DB-writer rechazó fallo de login", str(exc)) from exc
+        if redis_client is not None:
+            await record_email_failure(redis_client, body.email)
         raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    try:
+        if password_update:
+            _enqueue_auth_command(
+                UpdateConsoleUserPasswordHashCommand(
+                    tenant_id="default",
+                    actor_email=str(user.get("email") or "system"),
+                    email=str(password_update.get("email") or body.email),
+                    password_hash=str(password_update.get("password_hash") or ""),
+                    hash_algo=str(password_update.get("hash_algo") or "argon2id"),
+                    hash_params=dict(password_update.get("hash_params") or {}),
+                )
+            )
+        _enqueue_auth_command(
+            ClearAdminLoginFailuresCommand(
+                tenant_id="default",
+                actor_email=str(user.get("email") or "system"),
+                email=body.email,
+            )
+        )
+    except RuntimeError as exc:
+        raise _problem(503, "DB-writer rechazó estado de login", str(exc)) from exc
 
     if redis_client is None:
         raise _problem(503, "Redis no disponible para sesiones", "redis")
@@ -1346,141 +1385,6 @@ async def list_fly_commands() -> dict[str, Any]:
         for cmd, desc in load_guardrail_pipe_table("fly_commands", "help_entries")
     ]
     return {"header": header, "commands": entries}
-
-
-class CatalogSkillCreateBody(BaseModel):
-    name: str = Field(..., min_length=2, max_length=128)
-    description: str = Field(default="", max_length=1024)
-    skill_type: str = Field(default="python", max_length=64)
-    implementation_ref: str = Field(..., min_length=3, max_length=512)
-    visibility: str = Field(default="private", max_length=32)
-
-    @field_validator("name")
-    @classmethod
-    def _valid_skill_name(cls, value: str) -> str:
-        name = (value or "").strip()
-        if not re.fullmatch(r"[a-zA-Z][a-zA-Z0-9_.-]{1,127}", name):
-            raise ValueError("name debe iniciar con letra y usar letras, números, _, . o -")
-        return name
-
-    @field_validator("visibility")
-    @classmethod
-    def _valid_visibility(cls, value: str) -> str:
-        visibility = (value or "private").strip().lower()
-        if visibility not in {"private", "public"}:
-            raise ValueError("visibility debe ser private o public")
-        return visibility
-
-
-@router.get("/catalog/skills", dependencies=[Depends(_require_admin_key)])
-async def catalog_skills(actor: str = Depends(_actor_from_header)) -> dict[str, Any]:
-    global_skills: list[dict[str, str]] = []
-    template_skills: list[dict[str, str]] = []
-    actor_email = (actor or "").strip().lower()
-    from duckclaw.gateway_db import get_gateway_db_path
-
-    gw = (get_gateway_db_path() or "").strip()
-    if actor_email and "@" in actor_email and gw and os.path.isfile(gw):
-        from duckclaw import DuckClaw
-        from duckclaw.admin_user_profiles import ensure_profile_for_user
-        from duckclaw.admin_worker_catalog import (
-            ensure_admin_worker_catalog_schema,
-            get_latest_worker_version,
-            list_visible_workers_for_actor,
-        )
-
-        db = DuckClaw(gw, read_only=False, engine="python")
-        try:
-            ensure_admin_worker_catalog_schema(db)
-            profile = ensure_profile_for_user(db, email=actor_email)
-            skill_rows = db.execute(
-                """
-                SELECT name, implementation_ref
-                FROM main.admin_skills
-                WHERE active = true
-                  AND tenant_id = ?
-                  AND (owner_email = ? OR visibility = 'public')
-                ORDER BY name
-                """,
-                [profile["tenant_id"], profile["email"]],
-            )
-            global_skills = [
-                {
-                    "id": str(name or ""),
-                    "path": str(implementation_ref or ""),
-                    "scope": "catalog",
-                }
-                for name, implementation_ref in skill_rows
-                if str(name or "").strip()
-            ]
-            workers = list_visible_workers_for_actor(db, actor_email=actor_email)
-            for worker in workers:
-                worker_uid = str(worker.get("worker_uid") or "").strip()
-                worker_id = str(worker.get("worker_id") or worker.get("id") or "").strip()
-                if not worker_uid or worker_id == "default":
-                    continue
-                latest = get_latest_worker_version(db, worker_uid=worker_uid) or {}
-                files = latest.get("files_snapshot") if isinstance(latest, dict) else {}
-                if not isinstance(files, dict):
-                    continue
-                for rel in sorted(str(path).replace("\\", "/").lstrip("/") for path in files):
-                    if not rel.startswith("skills/") or not rel.endswith(".py"):
-                        continue
-                    name = Path(rel).name
-                    if name.startswith("_"):
-                        continue
-                    template_skills.append(
-                        {
-                            "id": Path(name).stem,
-                            "worker_id": worker_id,
-                            "path": f"db://admin_worker_catalog/{worker_uid}/{rel}",
-                            "scope": "catalog",
-                        }
-                    )
-        finally:
-            db.close()
-    return {"global": global_skills, "template_local": template_skills}
-
-
-@router.post("/catalog/skills", dependencies=[Depends(_require_admin_key)])
-async def create_catalog_skill(
-    body: CatalogSkillCreateBody,
-    actor: str = Depends(_actor_from_header),
-) -> dict[str, Any]:
-    actor_email = (actor or "").strip().lower()
-    if "@" not in actor_email:
-        raise _problem(401, "Actor autenticado requerido", actor or "")
-    from duckclaw import DuckClaw
-    from duckclaw.admin_user_profiles import ensure_profile_for_user
-    from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema, register_skill
-    from duckclaw.gateway_db import get_gateway_db_path
-
-    gw = (get_gateway_db_path() or "").strip()
-    if not gw or not os.path.isfile(gw):
-        raise _problem(503, "Gateway DuckDB no disponible", "gateway_db")
-    db = DuckClaw(gw, read_only=False, engine="python")
-    try:
-        ensure_admin_worker_catalog_schema(db)
-        profile = ensure_profile_for_user(db, email=actor_email)
-        skill = register_skill(
-            db,
-            name=body.name,
-            skill_type=body.skill_type,
-            implementation_ref=body.implementation_ref,
-            description=body.description,
-            owner_email=profile["email"],
-            tenant_id=profile["tenant_id"],
-            visibility=body.visibility,
-        )
-    finally:
-        db.close()
-    dto = {
-        "id": skill["name"],
-        "path": skill["implementation_ref"],
-        "scope": "catalog",
-    }
-    _admin_audit("catalog.skill.create", dto["id"], dto["path"], actor=actor)
-    return {"ok": True, "skill": dto}
 
 
 @router.get("/catalog/source-preview", dependencies=[Depends(_require_admin_key)])

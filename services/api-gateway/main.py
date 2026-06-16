@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from functools import partial
 from pathlib import Path
-from typing import Any, Literal, Optional
+from typing import Any, Optional
 from urllib import request as _url_request
 from urllib.error import URLError
 
@@ -39,6 +39,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 import redis.asyncio as redis
 
+from core.fly_command_invocation import invoke_legacy_fly_command
 from core.sandbox_figure_b64 import decode_sandbox_figure_base64, decode_valid_sandbox_image_bytes
 from core.telegram_media_upload import send_sandbox_chart_to_telegram_sync
 
@@ -51,6 +52,7 @@ from core.chat_history import (
     redis_save_chat_history,
 )
 from core.models import ChatRequest
+from routers.db_write_compat import router as db_write_compat_router
 from duckclaw.utils.telegram_markdown_v2 import escape_telegram_html, llm_markdown_to_telegram_html, plain_subchunks_for_telegram_html
 from duckclaw.vaults import resolve_active_vault, validate_user_db_path, vault_scope_id_for_tenant
 from duckclaw.integrations.telegram.telegram_agent_token import (
@@ -1865,6 +1867,7 @@ async def _invoke_chat(
             dc = replace(dc, **_patch)
 
     message = (payload.message or "").strip()
+    user_incoming = (getattr(payload, "user_incoming", None) or message or "").strip()
     session_id = (session_id or "default").strip() or "default"
     from duckclaw.graphs.chat_cancel import ChatCancelledError, clear_chat_cancel
 
@@ -2007,144 +2010,25 @@ async def _invoke_chat(
         raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
     # Concurrencia: por defecto un mensaje por chat_id (Redis lock). Opcional: paralelo (ver _maybe_chat_lock).
-    # Fly (/team, /vault, /workers): si la bóveda es el mismo archivo que get_gateway_db_path(), usar motor
-    # Python (mismo que GatewayDbEphemeralReadonly); si no, DuckClaw nativo en RW. Evita que /team --add
-    # escriba vía C++ y /team lea vía duckdb Python sin ver las filas.
+    # Slash/fly commands heredados se delegan al owner auditado de compatibilidad RW.
     _skip_lock = bool(getattr(payload, "skip_session_lock", None) or False)
     async with _maybe_chat_lock_for_request(session_id, _skip_lock):
         if msg_stripped.startswith("/"):
-            cmd_reply: str | None = None
-            fly_db = None
-            _fly_elapsed_ms = 0
-            try:
-                from duckclaw import DuckClaw
-                from duckclaw.graphs.on_the_fly_commands import handle_command
-
-                vpath = (vault_db_path or "").strip()
-                Path(vpath).parent.mkdir(parents=True, exist_ok=True)
-                # Siempre motor Python RW para fly: el worker puede haber abierto el mismo .duckdb
-                # con el bridge nativo; mezclar nativo + Python o RO + RW en un PID provoca
-                # «different configuration» en DuckDB.
-                _fly_engine: Literal["auto", "python"] = "python"
-                if (os.environ.get("DUCKCLAW_TEAM_WHITELIST_DEBUG") or "").strip().lower() in (
-                    "1",
-                    "true",
-                    "yes",
-                    "on",
-                ):
-                    try:
-                        _gw_abs = str(Path(get_gateway_db_path()).resolve())
-                        _v_abs = (
-                            str(Path(vpath).resolve())
-                            if vpath and vpath != ":memory:"
-                            else (vpath or "")
-                        )
-                        _same = bool(
-                            _v_abs
-                            and _gw_abs
-                            and Path(_v_abs).resolve() == Path(_gw_abs).resolve()
-                        )
-                        _gateway_log.info(
-                            "fly_team_audit vault_resolved=%r gateway_resolved=%r same_file=%s fly_engine=%s",
-                            _v_abs[-96:] if len(_v_abs) > 96 else _v_abs,
-                            _gw_abs[-96:] if len(_gw_abs) > 96 else _gw_abs,
-                            _same,
-                            _fly_engine,
-                        )
-                    except OSError as _audit_exc:
-                        _gateway_log.info("fly_team_audit path_compare_error=%s", _audit_exc)
-                # Libera handles DuckDB del worker cacheado (misma bóveda) antes de abrir fly RW.
-                try:
-                    from duckclaw.manager.graph import (
-                        clear_worker_graph_cache,
-                        worker_graph_cache_entry_count,
-                    )
-
-                    _fly_cache_n = worker_graph_cache_entry_count()
-                    clear_worker_graph_cache()
-                    import gc as _gc
-
-                    _gc.collect()
-                except Exception:
-                    _fly_cache_n = -1
-                fly_db = DuckClaw(vpath, read_only=False, engine=_fly_engine)
-                _fly_t0 = time.monotonic()
-                cmd_reply = handle_command(
-                    fly_db,
-                    session_id,
-                    message,
-                    requester_id=user_id,
-                    tenant_id=tenant_id,
-                    vault_user_id=vault_user_id,
-                    username=username,
-                    entry_worker_id=worker_id,
-                )
-                _fly_elapsed_ms = int((time.monotonic() - _fly_t0) * 1000)
-            except Exception as exc:
-                _gateway_log.error("fly command failed chat=%s: %s", format_chat_id_for_terminal(session_id), exc)
-            finally:
-                if fly_db is not None:
-                    try:
-                        fly_db.close()
-                    except Exception:
-                        pass
-            if cmd_reply is not None:
-                chart_sent = False
-                fly_resp: dict[str, Any] = {
-                    "response": cmd_reply,
-                    "session_id": session_id,
-                    "worker_id": worker_id,
-                    "elapsed_ms": _fly_elapsed_ms,
-                }
-                try:
-                    from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
-                    from duckclaw.graphs.on_the_fly_commands import pop_all_fly_outbound_charts
-
-                    loop = asyncio.get_running_loop()
-                    token = (
-                        ((dc.outbound_bot_token or "").strip() or _effective_telegram_bot_token()).strip()
-                        if (dc.channel or "telegram").strip().lower() == "telegram"
-                        else ""
-                    )
-                    admin_ui = is_admin_ui_chat_session(session_id)
-                    fly_charts, fly_chart_names = pop_all_fly_outbound_charts(session_id)
-                    if token:
-                        for photo_b64 in fly_charts:
-                            png_bytes = decode_valid_sandbox_image_bytes(photo_b64)
-                            if not png_bytes:
-                                png_bytes = decode_sandbox_figure_base64(photo_b64)
-                            if not png_bytes:
-                                continue
-                            ok = await loop.run_in_executor(
-                                None,
-                                lambda b=png_bytes: send_sandbox_chart_to_telegram_sync(
-                                    bot_token=token,
-                                    chat_id=str(session_id),
-                                    image_bytes=b,
-                                ),
-                            )
-                            chart_sent = chart_sent or bool(ok)
-                    if admin_ui and fly_charts:
-                        fly_resp["fly_charts_b64"] = fly_charts
-                        if fly_chart_names:
-                            fly_resp["fly_chart_names"] = fly_chart_names[: len(fly_charts)]
-                        artifact_ids = _persist_admin_fly_charts(tenant_id, fly_charts)
-                        if artifact_ids:
-                            fly_resp["fly_chart_artifact_ids"] = artifact_ids
-                            fly_resp["artifact_tenant_id"] = tenant_id
-                        # Inline b64 solo si no hay artifacts (fallback UI legacy)
-                        if not artifact_ids:
-                            fly_resp["figure_base64"] = fly_charts[0]
-                except Exception as exc:
-                    if _gateway_log.isEnabledFor(logging.DEBUG):
-                        _gateway_log.debug("fly chart attach failed: %s", exc)
-                if _gateway_log.isEnabledFor(logging.DEBUG):
-                    _gateway_log.debug(
-                        "fly (backup) chat=%s: %s",
-                        format_chat_id_for_terminal(session_id),
-                        _truncate_log(cmd_reply),
-                    )
-                return fly_resp
+            fly_response = await invoke_legacy_fly_command(
+                message=message,
+                session_id=session_id,
+                worker_id=worker_id,
+                tenant_id=tenant_id,
+                vault_db_path=vault_db_path,
+                vault_user_id=vault_user_id,
+                requester_id=user_id,
+                username=username,
+                delivery_context=dc,
+                resolve_telegram_bot_token=_effective_telegram_bot_token,
+                persist_admin_fly_charts=_persist_admin_fly_charts,
+            )
+            if fly_response is not None:
+                return fly_response
 
         try:
             from duckclaw.graphs.graph_server import _ensure_llm_config
@@ -2181,6 +2065,7 @@ async def _invoke_chat(
                     tenant_id=tenant_id,
                     user_id=vault_user_id,
                     username=username,
+                    user_incoming=user_incoming,
                     vault_db_path=vault_db_path,
                     shared_db_path=shared_db_path,
                     is_system_prompt=is_system_prompt,
@@ -2524,77 +2409,6 @@ async def _invoke_chat(
     return out_resp
 
 
-# ── Escrituras DuckDB (encolar en Redis) ──────────────────────────────────────
-
-class WriteRequest(BaseModel):
-    query: str = Field(..., description="Consulta SQL parametrizada")
-    params: list = Field(default_factory=list, description="Parámetros para la consulta")
-    tenant_id: str = Field(default="default", description="ID del tenant")
-    user_id: str | None = Field(default=None, description="ID del usuario dueño de la bóveda")
-    db_path: str | None = Field(default=None, description="Ruta DuckDB destino (bóveda activa)")
-
-
-class EnqueueResponse(BaseModel):
-    status: str
-    task_id: str
-
-
-@app.post("/api/v1/db/write", response_model=EnqueueResponse, status_code=status.HTTP_202_ACCEPTED)
-async def enqueue_write(req: WriteRequest):
-    """Encola escrituras para el DB Writer (evita bloqueos en DuckDB)."""
-    if req.query.strip().upper().startswith("SELECT"):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
-            detail="Las consultas SELECT deben ejecutarse directamente, no encolarse.",
-        )
-    task_id = str(uuid.uuid4())
-    user_id = (req.user_id or "").strip() or "default"
-    db_path = (req.db_path or "").strip()
-    tid = (req.tenant_id or "").strip() or None
-    if db_path and not validate_user_db_path(user_id, db_path, tenant_id=tid):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="db_path inválido para el usuario.",
-        )
-    if db_path:
-        from core.gateway_acl_db import get_gateway_acl_duckdb
-        from duckclaw.shared_db_grants import path_is_under_shared_tree, user_may_access_shared_path
-
-        if path_is_under_shared_tree(db_path) and not user_may_access_shared_path(
-            get_gateway_acl_duckdb()[0],
-            tenant_id=str(tid or "default").strip() or "default",
-            user_id=user_id,
-            shared_db_path=db_path,
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Sin permiso para escribir en esta base de datos compartida.",
-            )
-    if not db_path:
-        _ded = _dedicated_gateway_vault_db_path()
-        if _ded:
-            db_path = _ded
-        else:
-            _t_eff = str(tid or "default").strip() or "default"
-            _, db_path = resolve_active_vault(user_id, vault_scope_id_for_tenant(_t_eff))
-    payload = {
-        "task_id": task_id,
-        "tenant_id": req.tenant_id,
-        "user_id": user_id,
-        "db_path": db_path,
-        "query": req.query,
-        "params": req.params,
-    }
-    try:
-        await app.state.redis.lpush("duckdb_write_queue", json.dumps(payload))
-        return EnqueueResponse(status="enqueued", task_id=task_id)
-    except redis.RedisError as e:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Error conectando al broker de mensajes: {str(e)}",
-        )
-
-
 class ReadRequest(BaseModel):
     query: str = Field(..., description="Consulta SQL SELECT parametrizada")
     params: list = Field(default_factory=list, description="Parámetros para la consulta")
@@ -2603,8 +2417,8 @@ class ReadRequest(BaseModel):
     db_path: str | None = Field(default=None, description="Ruta DuckDB (solo lectura)")
 
 
-def _resolve_db_path_for_vault(req: WriteRequest | ReadRequest) -> str:
-    """Resuelve db_path con la misma lógica que enqueue_write (sin encolar)."""
+def _resolve_db_path_for_vault(req: ReadRequest) -> str:
+    """Resuelve db_path para consultas read-only internas."""
     user_id = (req.user_id or "").strip() or "default"
     db_path = (req.db_path or "").strip()
     tid = (req.tenant_id or "").strip() or None
@@ -2673,6 +2487,10 @@ async def db_read(req: ReadRequest) -> dict[str, Any]:
             detail=str(e),
         ) from e
     return {"rows": rows}
+
+
+# ── Routers Gateway ───────────────────────────────────────────────────────────
+app.include_router(db_write_compat_router)
 
 
 # ── Telegram inbound webhook (integración nativa) ────────────────────────────

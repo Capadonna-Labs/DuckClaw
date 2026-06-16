@@ -195,6 +195,7 @@ def test_duckdb_legacy_schema_cleanup_requires_confirmation_and_drops_schema(
     monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
     monkeypatch.setenv("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", "cleanup_schema")
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
 
     listed = gateway_admin_client.get(
         "/api/v1/admin/duckdb/legacy-schemas",
@@ -252,6 +253,7 @@ def test_duckdb_legacy_cleanup_detects_and_drops_configured_main_tables(
         "DUCKCLAW_ADMIN_DUCKDB_LEGACY_MAIN_TABLES",
         "archived_default_orders,archived_default_products",
     )
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"}
 
     listed = gateway_admin_client.get(
@@ -305,6 +307,17 @@ def test_duckdb_legacy_schemas_can_be_configured_db_first(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from duckclaw.write_command_handlers import dispatch_command
+
+    def fake_enqueue(command: object, *, db_path: str, user_id: str) -> str:
+        _ = user_id
+        gateway_con = duckdb.connect(db_path, read_only=False)
+        try:
+            dispatch_command(gateway_con, command.model_dump())
+        finally:
+            gateway_con.close()
+        return command.task_id
+
     repo_root = tmp_path / "repo"
     user_dir = repo_root / "db" / "private" / "owner123"
     user_dir.mkdir(parents=True)
@@ -317,6 +330,8 @@ def test_duckdb_legacy_schemas_can_be_configured_db_first(
     monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
     monkeypatch.delenv("DUCKCLAW_ADMIN_DUCKDB_LEGACY_SCHEMAS", raising=False)
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"}
 
     configured = gateway_admin_client.patch(

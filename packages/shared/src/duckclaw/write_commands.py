@@ -45,11 +45,107 @@ class UpsertWorkerCommand(WriteCommand):
     files_snapshot: dict[str, str] = Field(default_factory=dict)
 
 
+class UpsertUserAgentCommand(WriteCommand):
+    """Create or update an admin-owned runtime agent without filesystem writes."""
+
+    command_type: Literal["upsert_user_agent"] = "upsert_user_agent"
+    worker_uid: str = ""
+    worker_id: str
+    display_name: str
+    source_template_id: str = "default"
+    system_prompt: str = ""
+    description: str = ""
+    skills: list[str] = Field(default_factory=list)
+
+
+class UpsertCatalogSkillCommand(WriteCommand):
+    """Create or update one admin catalog skill through the singleton writer."""
+
+    command_type: Literal["upsert_catalog_skill"] = "upsert_catalog_skill"
+    name: str = Field(..., min_length=2, max_length=128)
+    description: str = Field(default="", max_length=1024)
+    skill_type: str = Field(default="python", max_length=64)
+    implementation_ref: str = Field(..., min_length=3, max_length=512)
+    visibility: Literal["private", "public"] = "private"
+
+
+class DeactivateCatalogSkillCommand(WriteCommand):
+    """Soft-delete one admin catalog skill by tenant, owner and name."""
+
+    command_type: Literal["deactivate_catalog_skill"] = "deactivate_catalog_skill"
+    name: str = Field(..., min_length=2, max_length=128)
+
+
 class DeactivateWorkerCommand(WriteCommand):
     """Soft-delete a worker from the catalog."""
 
     command_type: Literal["deactivate_worker"] = "deactivate_worker"
     worker_id: str
+
+
+class UpdateCatalogWorkerFileCommand(WriteCommand):
+    """Update one DB-backed catalog worker file snapshot through the writer."""
+
+    command_type: Literal["update_catalog_worker_file"] = "update_catalog_worker_file"
+    worker_id: str
+    file_path: str
+    content: str = ""
+
+
+class DeactivateCatalogWorkerCommand(WriteCommand):
+    """Soft-delete an actor-owned catalog worker through the writer."""
+
+    command_type: Literal["deactivate_catalog_worker"] = "deactivate_catalog_worker"
+    worker_id: str
+
+
+class ReactivateCatalogWorkerCommand(WriteCommand):
+    """Reactivate an actor-owned catalog worker through the writer."""
+
+    command_type: Literal["reactivate_catalog_worker"] = "reactivate_catalog_worker"
+    worker_id: str
+
+
+class HardDeleteCatalogWorkerCommand(WriteCommand):
+    """Physically remove an actor-owned catalog worker and scoped relations."""
+
+    command_type: Literal["hard_delete_catalog_worker"] = "hard_delete_catalog_worker"
+    worker_id: str
+
+
+class ImportTemplatesToCatalogCommand(WriteCommand):
+    """Import filesystem worker templates into the DB catalog."""
+
+    command_type: Literal["import_templates_to_catalog"] = "import_templates_to_catalog"
+    templates_root: str
+    include_prefixes: list[str] = Field(default_factory=list)
+    include_template_ids: list[str] = Field(default_factory=list)
+
+
+class UpsertWorkerContextCommand(WriteCommand):
+    """Create a DB-first context row for an existing catalog worker."""
+
+    command_type: Literal["upsert_worker_context"] = "upsert_worker_context"
+    worker_uid: str
+    title: str
+    content_md: str = ""
+    sort_order: int = 0
+
+
+class ReorderWorkerContextsCommand(WriteCommand):
+    """Update context ordering for one catalog worker."""
+
+    command_type: Literal["reorder_worker_contexts"] = "reorder_worker_contexts"
+    worker_uid: str
+    items: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class DeactivateWorkerContextCommand(WriteCommand):
+    """Soft-delete one DB-first worker context."""
+
+    command_type: Literal["deactivate_worker_context"] = "deactivate_worker_context"
+    worker_uid: str
+    context_id: str
 
 
 class UpsertWorkerCapabilityCommand(WriteCommand):
@@ -81,6 +177,7 @@ class CreateProjectCommand(WriteCommand):
     project_id: str
     name: str
     description: str = ""
+    visibility: str = "private"
     agent_worker_uids: list[str] = Field(default_factory=list)
 
 
@@ -103,6 +200,44 @@ class AssignAgentToProjectCommand(WriteCommand):
     sort_order: int = 0
 
 
+class SetProjectStatusCommand(WriteCommand):
+    """Set a reversible workspace project status."""
+
+    command_type: Literal["set_project_status"] = "set_project_status"
+    project_id: str
+    status: Literal["active", "inactive"]
+
+
+class DeleteProjectCommand(WriteCommand):
+    """Hard-delete a workspace project and project-only relations."""
+
+    command_type: Literal["delete_project"] = "delete_project"
+    project_id: str
+
+
+class DetachAgentFromProjectCommand(WriteCommand):
+    """Soft-detach a catalog worker from a workspace project."""
+
+    command_type: Literal["detach_agent_from_project"] = "detach_agent_from_project"
+    project_id: str
+    worker_uid: str
+
+
+class ConfirmWorkspaceManagedDraftCommand(WriteCommand):
+    """Confirm one managed workspace draft as one DB-writer transaction."""
+
+    command_type: Literal["confirm_workspace_managed_draft"] = "confirm_workspace_managed_draft"
+    project_id: str
+    project_name: str
+    project_description: str = ""
+    workers: list[dict[str, Any]] = Field(default_factory=list)
+    shared_context: str = ""
+    suggested_skills: list[dict[str, Any]] = Field(default_factory=list)
+    source_kind: str = "managed_draft"
+    context_title: str = "Contexto compartido"
+    change_note: str = "Created from DB-first managed draft"
+
+
 # ---------------------------------------------------------------------------
 # Runtime settings commands
 # ---------------------------------------------------------------------------
@@ -114,8 +249,10 @@ class UpsertRuntimeSettingCommand(WriteCommand):
     domain: str
     key: str
     value: str
+    value_json: Any | None = None
     value_kind: str = "string"
     secret: bool = False
+    updated_by: str = ""
 
 
 class UpsertAgentConfigEntriesCommand(WriteCommand):
@@ -123,6 +260,20 @@ class UpsertAgentConfigEntriesCommand(WriteCommand):
 
     command_type: Literal["upsert_agent_config_entries"] = "upsert_agent_config_entries"
     entries: dict[str, str]
+
+
+class DeleteAgentConfigEntriesCommand(WriteCommand):
+    """Delete legacy agent_config entries through the singleton writer."""
+
+    command_type: Literal["delete_agent_config_entries"] = "delete_agent_config_entries"
+    keys: list[str]
+
+
+class ForgetChatStateCommand(WriteCommand):
+    """Delete one chat/session conversation history and audited chat state."""
+
+    command_type: Literal["forget_chat_state"] = "forget_chat_state"
+    chat_id: str
 
 
 class AppendTaskAuditCommand(WriteCommand):
@@ -158,6 +309,30 @@ class DeactivateConsoleUserCommand(WriteCommand):
 
     command_type: Literal["deactivate_console_user"] = "deactivate_console_user"
     email: str
+
+
+class RecordAdminLoginFailureCommand(WriteCommand):
+    """Increment failed login tracking for one admin console user."""
+
+    command_type: Literal["record_admin_login_failure"] = "record_admin_login_failure"
+    email: str
+
+
+class ClearAdminLoginFailuresCommand(WriteCommand):
+    """Clear failed login tracking after a successful admin login."""
+
+    command_type: Literal["clear_admin_login_failures"] = "clear_admin_login_failures"
+    email: str
+
+
+class UpdateConsoleUserPasswordHashCommand(WriteCommand):
+    """Persist a verified password hash migration for one console user."""
+
+    command_type: Literal["update_console_user_password_hash"] = "update_console_user_password_hash"
+    email: str
+    password_hash: str
+    hash_algo: Literal["argon2id", "pbkdf2_sha256"] = "argon2id"
+    hash_params: dict[str, Any] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +476,20 @@ class DeactivatePromptPolicyCommand(WriteCommand):
     policy_type: PromptPolicyType
     policy_name: str
     version: int | None = None
+
+
+# ---------------------------------------------------------------------------
+# DuckDB admin maintenance commands
+# ---------------------------------------------------------------------------
+
+class DropLegacyDuckDbObjectsCommand(WriteCommand):
+    """Drop explicitly selected legacy DuckDB schemas or main tables."""
+
+    command_type: Literal["drop_legacy_duckdb_objects"] = "drop_legacy_duckdb_objects"
+    user_id: str = "default"
+    db_path: str = ""
+    schemas: list[str] = Field(default_factory=list)
+    main_tables: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

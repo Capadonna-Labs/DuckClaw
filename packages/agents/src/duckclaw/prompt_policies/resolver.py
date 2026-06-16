@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 
-def _normalize_policy_type(policy_type: str) -> str:
+def normalize_policy_type(policy_type: str) -> str:
     value = (policy_type or "").strip().lower()
     aliases = {
         "capabilities": "capability",
@@ -15,6 +15,9 @@ def _normalize_policy_type(policy_type: str) -> str:
         "system_prompts": "system_prompt",
     }
     return aliases.get(value, value)
+
+
+_normalize_policy_type = normalize_policy_type
 
 
 @dataclass(frozen=True)

@@ -4,8 +4,11 @@ import ast
 import importlib
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 from duckclaw.graphs import on_the_fly_commands
+from duckclaw.write_commands import UpsertAuthorizedUserCommand
 
 
 CANONICAL_MODULE = "duckclaw.commands.team_access"
@@ -102,3 +105,79 @@ def test_normal_team_whitelist_mutations_do_not_use_rw_connection_helper() -> No
     assert "_upsert_authorized_user" not in called_names
     assert "_delete_authorized_user" not in called_names
     assert "_try_duckdb_checkpoint_rw" not in called_names
+
+
+class _ReadOnlyTeamAccessDb:
+    def __init__(self, db_path: Path) -> None:
+        self._path = str(db_path)
+        self._read_only = True
+        self.released = 0
+        self.resumed = 0
+
+    def execute(self, sql: str) -> None:
+        raise AssertionError(f"read-only /team must not execute SQL directly: {sql}")
+
+    def query(self, sql: str) -> str:
+        if "SELECT role FROM main.authorized_users" in sql:
+            return '[{"role": "admin"}]'
+        if "SELECT user_id, username, role FROM main.authorized_users" in sql:
+            return '[{"user_id": "1", "username": "admin", "role": "admin"}]'
+        return "[]"
+
+    def release_file_handle_for_external_writer(self) -> None:
+        self.released += 1
+
+    def resume_readonly_file_handle(self) -> None:
+        self.resumed += 1
+
+
+def test_team_add_with_read_only_handle_queues_typed_command_and_releases_handle(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    team_access = importlib.import_module(CANONICAL_MODULE)
+    db = _ReadOnlyTeamAccessDb(tmp_path / "gateway.duckdb")
+    queued: list[tuple[UpsertAuthorizedUserCommand, str, str]] = []
+
+    def fake_enqueue_typed_command(
+        command: Any,
+        *,
+        db_path: str,
+        user_id: str = "default",
+        queue_name: str = "duckdb_write_queue",
+    ) -> str:
+        assert queue_name == "duckdb_write_queue"
+        assert isinstance(command, UpsertAuthorizedUserCommand)
+        queued.append((command, db_path, user_id))
+        return command.task_id
+
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue_typed_command)
+    monkeypatch.setattr(
+        "duckclaw.db_write_queue.poll_task_status_sync",
+        lambda _task_id, **_kwargs: SimpleNamespace(status="success", detail=""),
+    )
+
+    original_provider = getattr(team_access, "_team_access_acl_db_provider")
+    team_access.configure_team_access_acl_db_provider(None)
+    try:
+        out = team_access.execute_team_whitelist(
+            db,
+            "tenant-ro",
+            "1",
+            "--add 2 beta admin",
+        )
+    finally:
+        team_access.configure_team_access_acl_db_provider(original_provider)
+
+    assert out == "✅ Añadido [@beta](tg://user?id=2) (role=admin) al tenant 'tenant-ro'."
+    assert len(queued) == 1
+    command, target_db_path, user_id = queued[0]
+    assert target_db_path == str((tmp_path / "gateway.duckdb").resolve())
+    assert user_id == "1"
+    assert command.tenant_id == "tenant-ro"
+    assert command.actor_email == "telegram:1"
+    assert command.user_id == "2"
+    assert command.username == "beta"
+    assert command.role == "admin"
+    assert db.released == 1
+    assert db.resumed == 1

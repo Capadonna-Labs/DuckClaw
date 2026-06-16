@@ -672,6 +672,25 @@ class TestCommandHandlers:
         assert "BEGIN TRANSACTION" not in source
         assert "COMMIT" not in source
 
+    def test_kanban_write_handlers_live_in_domain_module(self) -> None:
+        from duckclaw import write_command_handlers
+        from duckclaw.write_handlers import kanban as kanban_handlers
+
+        handler_names = (
+            "_apply_upsert_kanban_card",
+            "_apply_delete_kanban_card",
+        )
+
+        for name in handler_names:
+            exported = getattr(write_command_handlers, name)
+            canonical = getattr(kanban_handlers, name)
+            assert exported is canonical
+            assert canonical.__module__ == "duckclaw.write_handlers.kanban"
+
+        source = inspect.getsource(kanban_handlers)
+        assert "BEGIN TRANSACTION" not in source
+        assert "COMMIT" not in source
+
     def test_upsert_worker_inserts(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import _apply_upsert_worker
 

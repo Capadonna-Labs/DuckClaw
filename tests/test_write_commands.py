@@ -745,6 +745,27 @@ class TestCommandHandlers:
         assert "BEGIN TRANSACTION" not in source
         assert "COMMIT" not in source
 
+    def test_knowledge_write_handlers_live_in_domain_module(self) -> None:
+        from duckclaw import write_command_handlers
+        from duckclaw.write_handlers import knowledge as knowledge_handlers
+
+        handler_names = (
+            "_apply_create_knowledge_source",
+            "_apply_upsert_knowledge_document",
+            "_apply_upsert_knowledge_chunks",
+            "_apply_deactivate_knowledge_source",
+        )
+
+        for name in handler_names:
+            exported = getattr(write_command_handlers, name)
+            canonical = getattr(knowledge_handlers, name)
+            assert exported is canonical
+            assert canonical.__module__ == "duckclaw.write_handlers.knowledge"
+
+        source = inspect.getsource(knowledge_handlers)
+        assert "BEGIN TRANSACTION" not in source
+        assert "COMMIT" not in source
+
     def test_upsert_worker_inserts(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import _apply_upsert_worker
 

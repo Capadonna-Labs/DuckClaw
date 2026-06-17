@@ -89,7 +89,7 @@ class AgentAssembler:
     ) -> Any:
         """Construye y retorna el LangGraph compilado según el tipo de spec. Para workers, db/llm pueden ser None si db_path está en overrides."""
         t = (self.spec.get("type") or "general").strip().lower()
-        if t in {"general", "retail"}:
+        if t == "general":
             return self._build_general(db, llm, **overrides)
         if t == "entry_router":
             return self._build_router(

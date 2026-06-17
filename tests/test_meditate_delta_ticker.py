@@ -46,7 +46,7 @@ def test_chat_id_from_meditate_delta_config_key() -> None:
 def test_resolve_meditate_vault_user_id_private_folder(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory,
 ) -> None:
-    monkeypatch.setenv("CAPADONNA_DRILLER_ROOT", str(tmp_path))
+    monkeypatch.setenv("DUCKCLAW_EXTENSION_ROOT", str(tmp_path))
     vault = tmp_path / "db" / "private" / "1726618406" / "analyticsdb1.duckdb"
     vault.parent.mkdir(parents=True)
     vault.touch()

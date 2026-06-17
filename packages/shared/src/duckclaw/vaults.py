@@ -62,15 +62,19 @@ def db_root() -> Path:
     """
     Directorio ``db/`` del monorepo o de un checkout de extensión externa.
 
-    Prioridad: ``DUCKCLAW_EXTENSION_ROOT`` (nombre canónico para checkout externo con
-    vaults reales, p. ej. Capadonna-Driller), luego ``CAPADONNA_DRILLER_ROOT`` (alias
-    legacy del mismo checkout), luego ``DUCKCLAW_REPO_ROOT`` (monorepo DuckClaw). Si
-    ninguno está definido, ``db/`` relativo al cwd (legacy).
+    Prioridad: ``DUCKCLAW_EXTENSION_ROOT`` (checkout externo con vaults reales),
+    luego ``DUCKCLAW_REPO_ROOT`` (monorepo DuckClaw). Si ninguno está definido,
+    ``db/`` relativo al cwd (legacy).
     """
-    for key in ("DUCKCLAW_EXTENSION_ROOT", "CAPADONNA_DRILLER_ROOT", "DUCKCLAW_REPO_ROOT"):
-        env_root = (os.environ.get(key) or "").strip()
-        if env_root:
-            return (Path(env_root).expanduser().resolve() / "db")
+    ext_root = (os.environ.get("DUCKCLAW_EXTENSION_ROOT") or "").strip()
+    if not ext_root:
+        # Legacy alias — solo lectura; preferir DUCKCLAW_EXTENSION_ROOT.
+        ext_root = (os.environ.get("CAPADONNA_DRILLER_ROOT") or "").strip()
+    if ext_root:
+        return (Path(ext_root).expanduser().resolve() / "db")
+    repo_root = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
+    if repo_root:
+        return (Path(repo_root).expanduser().resolve() / "db")
     return Path("db").resolve()
 
 

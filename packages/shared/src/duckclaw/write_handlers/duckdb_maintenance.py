@@ -48,3 +48,8 @@ def _apply_drop_legacy_duckdb_objects(conn: Any, payload: dict) -> None:
     for schema in schemas:
         if schema in existing_schemas:
             conn.execute(f"DROP SCHEMA {_quote_duckdb_ident(schema)} CASCADE")
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("drop_legacy_duckdb_objects", _apply_drop_legacy_duckdb_objects)

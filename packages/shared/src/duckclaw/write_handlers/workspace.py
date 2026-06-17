@@ -530,3 +530,14 @@ def _apply_detach_agent_from_project(conn: Any, payload: dict) -> None:
         "WHERE project_id = ? AND worker_uid = ?",
         [project_id, worker_uid],
     )
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("create_project", _apply_create_project)
+register_handler("add_project_member", _apply_add_project_member)
+register_handler("assign_agent_to_project", _apply_assign_agent_to_project)
+register_handler("set_project_status", _apply_set_project_status)
+register_handler("delete_project", _apply_delete_project)
+register_handler("detach_agent_from_project", _apply_detach_agent_from_project)
+register_handler("confirm_workspace_managed_draft", _apply_confirm_workspace_managed_draft)

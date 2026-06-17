@@ -278,3 +278,11 @@ def _apply_deactivate_knowledge_source(conn: Any, payload: dict) -> None:
         "SET active = false, updated_at = CURRENT_TIMESTAMP WHERE source_id = ?",
         [source_id],
     )
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("create_knowledge_source", _apply_create_knowledge_source)
+register_handler("upsert_knowledge_document", _apply_upsert_knowledge_document)
+register_handler("upsert_knowledge_chunks", _apply_upsert_knowledge_chunks)
+register_handler("deactivate_knowledge_source", _apply_deactivate_knowledge_source)

@@ -5,7 +5,7 @@ from typing import Any
 
 from langchain_core.messages import ToolMessage
 
-from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+from duckclaw.workers.reddit_formatters import format_reddit_mcp_reply_if_applicable
 
 TRUNCATED_BY_SIZE_MARKER = "\n…[truncado por tamaño]"
 

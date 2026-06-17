@@ -71,7 +71,7 @@ async def finalize_chat_response(
     except Exception:
         pass
     try:
-        from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+        from duckclaw.workers.reddit_formatters import format_reddit_mcp_reply_if_applicable
 
         reply_text = format_reddit_mcp_reply_if_applicable(reply_text or "")
     except Exception:

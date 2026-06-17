@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Optional
 
@@ -22,6 +23,7 @@ from duckclaw.workers.factory_agent_node_helpers import (
     _spec_logical_worker_id,
 )
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
+from duckclaw.workers.factory_set_reply_tool_cap import maybe_reply_for_tool_cap_exhausted
 from duckclaw.workers.factory_sandbox_notify import _heartbeat_elapsed_sec
 from duckclaw.workers.visual_evidence_policy import visual_evidence_max_retries as _visual_evidence_max_retries
 
@@ -43,7 +45,7 @@ def make_set_reply_node(ctx: WorkerGraphContext):
     from duckclaw.integrations.llm_providers import extract_embedded_tool_invokes
 
     def set_reply(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+        from duckclaw.workers.reddit_formatters import format_reddit_mcp_reply_if_applicable
         from duckclaw.utils import format_tool_reply
         from duckclaw.egress.user_reply_nl_synthesis import (
             incoming_has_context_summarize_directive,
@@ -94,10 +96,24 @@ def make_set_reply_node(ctx: WorkerGraphContext):
             )
 
         msgs = state.get("messages") or []
+        _inc_for_ctx = (state.get("incoming") or state.get("input") or "").strip()
+        _cap_reply, _cap_msgs = maybe_reply_for_tool_cap_exhausted(
+            state, ctx, list(msgs), _inc_for_ctx, spec
+        )
+        if _cap_reply is not None:
+            msgs = _cap_msgs if _cap_msgs is not None else msgs
+            reply = sanitize_worker_reply_text(_cap_reply)
+            suppress_egress = bool(state.get("suppress_subagent_egress"))
+            if suppress_egress:
+                out = {**state, "reply": "", "internal_reply": reply, "messages": msgs}
+            else:
+                out = {**state, "reply": reply, "internal_reply": reply, "messages": msgs}
+            out.update(_identity_fields(state))
+            return out
+
         last = msgs[-1] if msgs else None
         reply = lc_message_content_to_text(last) if last else ""
         reply = sanitize_worker_reply_phase1(reply)
-        _inc_for_ctx = (state.get("incoming") or state.get("input") or "").strip()
         reply = replace_bare_wrong_summarize_stored_echo(reply, incoming=_inc_for_ctx)
         reply = replace_bare_summarize_image_on_vlm_gateway_down(reply, incoming=_inc_for_ctx)
         reply = repair_summarize_new_context_egress(reply, incoming=_inc_for_ctx)

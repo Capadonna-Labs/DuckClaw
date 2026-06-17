@@ -34,7 +34,7 @@ pm2 start config/ecosystem.mcp.config.cjs
 pm2 save
 pm2 restart DuckClaw-Gateway --update-env   # tras cambiar .env
 
-# MLX texto local (opcional)
+# MLX texto local (opcional; alias: config/ecosystem.config.cjs)
 pm2 start config/ecosystem.mlx.config.cjs
 ```
 

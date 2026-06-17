@@ -94,3 +94,9 @@ def _apply_resolve_uncertainty_event(conn: Any, payload: dict) -> None:
         """,
         [resolved_by, event_id],
     )
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("update_code_decision_status", _apply_update_code_decision_status)
+register_handler("resolve_uncertainty_event", _apply_resolve_uncertainty_event)

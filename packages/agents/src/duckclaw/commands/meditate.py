@@ -273,7 +273,7 @@ def invoke_meditate_cycle_for_chat(
     from harness_core.states.meditate_state import DomainGoal
     from harness_core.targets import load_homeostasis_manifest, manifest_goals_as_dicts
 
-    from duckclaw.forge.homeostasis.goals_alignment import refresh_goals_list_observations
+    from duckclaw.homeostasis.goals_alignment import refresh_goals_list_observations
 
     vault = str(Path(getattr(db, "_path", "") or "").expanduser().resolve())
     if not vault:

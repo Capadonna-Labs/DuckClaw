@@ -27,7 +27,7 @@ import redis.asyncio as redis
 from duckclaw import DuckClaw
 from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
 from duckclaw.db_write_queue import enqueue_duckdb_write_sync
-from duckclaw.forge.homeostasis import BeliefRegistry, HomeostasisManager
+from duckclaw.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths
 from duckclaw.runtime.scheduling.cron_wall_schedule import wall_once_expired, wall_schedule_should_fire
 from duckclaw.commands.goals import get_manager_goals
@@ -392,7 +392,7 @@ async def _run_goals_proactive_tick_one_db(
                         meta = maybe_meta
                 except Exception:
                     meta = {}
-            from duckclaw.forge.homeostasis.goals_alignment import normalize_jitter_ratio
+            from duckclaw.homeostasis.goals_alignment import normalize_jitter_ratio
 
             jitter_ratio = normalize_jitter_ratio(meta.get("jitter_ratio"))
             effective_delta = float(delta_s) * (
@@ -407,7 +407,7 @@ async def _run_goals_proactive_tick_one_db(
                 continue
             notify_channel = ""
             message = ""
-            from duckclaw.forge.homeostasis.goals_alignment import (
+            from duckclaw.homeostasis.goals_alignment import (
                 assess_goals_alignment,
                 build_alignment_nudge_system_event,
                 normalize_notify_channel,
@@ -448,7 +448,7 @@ async def _run_goals_proactive_tick_one_db(
                 message = build_goals_proactive_system_event_message(goals)
 
             if not notify_channel:
-                from duckclaw.forge.homeostasis.goals_alignment import normalize_notify_channel
+                from duckclaw.homeostasis.goals_alignment import normalize_notify_channel
 
                 notify_channel = normalize_notify_channel(
                     get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)

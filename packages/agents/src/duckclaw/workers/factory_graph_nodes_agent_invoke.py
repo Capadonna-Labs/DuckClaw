@@ -130,7 +130,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             is_latest_game,
             forced_name,
         )
-        from duckclaw.utils.formatters import sanitize_reddit_tool_messages_for_llm
+        from duckclaw.workers.reddit_formatters import sanitize_reddit_tool_messages_for_llm
 
         _msg_list = sanitize_reddit_tool_messages_for_llm(list(state["messages"]))
         if not _worker_use_heuristic_first_tool(spec):
@@ -159,7 +159,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 if isinstance(_rm, ToolMessage) and str(getattr(_rm, "name", "") or "").startswith(
                     "reddit_"
                 ):
-                    from duckclaw.utils.formatters import build_reddit_llm_context_block
+                    from duckclaw.workers.reddit_formatters import build_reddit_llm_context_block
 
                     _reddit_ctx_block = build_reddit_llm_context_block(str(_rm.content or ""))
                     break

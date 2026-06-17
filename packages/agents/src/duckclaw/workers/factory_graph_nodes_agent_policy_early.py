@@ -102,7 +102,7 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                 )
                 if _is_goals_tick_msg:
                     try:
-                        from duckclaw.forge.homeostasis.goals_alignment import (
+                        from duckclaw.homeostasis.goals_alignment import (
                             alignment_review_phrase_in_text,
                             pick_nudge_opener,
                         )

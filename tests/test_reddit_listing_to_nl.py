@@ -1,10 +1,10 @@
-"""format_reddit_mcp_json_to_nl: JSON de mcp-reddit → Markdown legible (duckclaw.utils.formatters)."""
+"""format_reddit_mcp_json_to_nl: JSON de mcp-reddit → Markdown legible (duckclaw.workers.reddit_formatters)."""
 
 import json
 
 from langchain_core.messages import HumanMessage, ToolMessage
 
-from duckclaw.utils.formatters import (
+from duckclaw.workers.reddit_formatters import (
     REDDIT_MCP_LLM_MAX_POSTS,
     build_reddit_llm_context_block,
     format_reddit_mcp_json_to_nl,

@@ -38,7 +38,7 @@ DOTENV_OVERRIDE_KEYS: frozenset[str] = frozenset(
         "DUCKCLAW_LLM_PROVIDER",
         "DUCKCLAW_LLM_MODEL",
         "DUCKCLAW_LLM_BASE_URL",
-        "CAPADONNA_SSH_HOST",
+        "DUCKCLAW_REMOTE_SSH_HOST",
         # GitHub MCP: .env gana sobre snapshot PM2 (evita drift DuckClaw vs Capadonna-Driller).
         "GITHUB_OWNER",
         "GITHUB_REPO",

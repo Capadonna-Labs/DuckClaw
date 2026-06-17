@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
 from duckclaw.commands.chat_state import _get_global_config, get_chat_state
-from duckclaw.prompt_policies import PromptPolicyResolver
+from duckclaw.prompt_policies.system_prompt import resolve_effective_system_prompt
 from duckclaw.runtime_session_settings import (
     RUNTIME_SESSION_DOMAIN,
     resolve_session_runtime_setting,
@@ -155,17 +155,22 @@ def _set_system_prompt_policy(
                 pass
 
 
-def get_effective_system_prompt(db: Any, worker_id: Optional[str] = None) -> str:
+def get_effective_system_prompt(
+    db: Any,
+    worker_id: Optional[str] = None,
+    *,
+    tenant_id: Optional[str] = None,
+) -> str:
     """
     Return the DB-first effective system prompt for a worker.
     """
     policy_name = _system_prompt_policy_name(worker_id)
-    try:
-        return PromptPolicyResolver(db=db).load("system_prompt", policy_name)
-    except FileNotFoundError:
-        return _system_prompt_fallback(policy_name)
-    except Exception:
-        return _system_prompt_fallback(policy_name)
+    return resolve_effective_system_prompt(
+        db,
+        worker_id=policy_name,
+        tenant_id=tenant_id,
+        filesystem_fallback=_system_prompt_fallback(policy_name),
+    )
 
 
 _PROVIDERS = ("mlx", "ollama", "openai", "anthropic", "deepseek", "groq", "gemini", "openrouter", "or")

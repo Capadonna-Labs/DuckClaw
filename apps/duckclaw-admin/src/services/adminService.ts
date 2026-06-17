@@ -439,6 +439,12 @@ export const adminService = {
 
   getPromptPolicyHealth: () => adminFetch<PromptPolicyHealth>('/prompt-policies/health'),
 
+  restoreFrameworkPolicies: () =>
+    adminFetch<{ ok: boolean; applied: string[]; pack: string }>(
+      '/prompt-policies/restore-framework',
+      { method: 'POST' }
+    ),
+
   getOverviewMetrics: (params?: OverviewMetricsParams) => {
     const qs = new URLSearchParams();
     if (params?.usage_days != null) qs.set('usage_days', String(params.usage_days));

@@ -83,6 +83,14 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
             "SELECT COUNT(*) FROM main.admin_worker_versions WHERE worker_uid = ?",
             [axis_worker["worker_uid"]],
         ).fetchone()[0]
+        policy_row = con.execute(
+            """
+            SELECT content
+            FROM main.prompt_policy_registry
+            WHERE policy_type = 'system_prompt' AND policy_name = 'bi-analyst' AND active = true
+            LIMIT 1
+            """
+        ).fetchone()
     finally:
         con.close()
 
@@ -96,6 +104,8 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
     assert [context["title"] for context in contexts] == ["domain_closure.md", "system_prompt.md"]
     assert {capability["name"] for capability in capabilities} == {"CAP-CODER-001", "CAP-CODER-002"}
     assert version_count == 1
+    assert policy_row is not None
+    assert "Sistema" in str(policy_row[0])
     assert before_axis_files == after_axis_files
     assert before_other_files == after_other_files
 

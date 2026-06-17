@@ -61,8 +61,32 @@ def list_worker_picks(
     *,
     db: object = None,
     tenant_id: str = "default",
+    actor_email: str = "",
 ) -> list[WorkerPick]:
-    """Lista plantillas con manifest; usa registry duckclaw si está en PYTHONPATH."""
+    """Lista workers del catálogo DuckDB; fallback a plantillas forge si no hay DB."""
+
+    import os
+
+    email = (actor_email or os.environ.get("DUCKCLAW_ADMIN_EMAIL") or "").strip()
+    if db is not None and email and "@" in email:
+        try:
+            from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
+
+            rows = list_visible_workers_for_actor(db, actor_email=email)
+            picks: list[WorkerPick] = []
+            seen: set[str] = set()
+            for row in rows:
+                wid = str(row.get("id") or row.get("worker_id") or "").strip()
+                if not wid or wid in seen:
+                    continue
+                seen.add(wid)
+                label = str(row.get("display_name") or row.get("name") or wid).strip()
+                picks.append(WorkerPick(worker_id=wid, label=label))
+            if picks:
+                return picks
+        except Exception:
+            pass
+
     templates_dir = _templates_dir(repo_root)
     if templates_dir is None:
         return []
@@ -109,7 +133,7 @@ def format_worker_picker_block(
     extra = len(picks) - max_lines
     if extra > 0:
         lines.append(f"  [dim]… y {extra} más (escribe el id exacto)[/]")
-    lines.append("[dim]Número, id o alias · Enter = sugerido[/]")
+    lines.append("[dim]Tab · número · id · /worker <id>[/]")
     return "\n".join(lines)
 
 
@@ -156,7 +180,7 @@ def suggest_default_worker_id(
     picks: list[WorkerPick],
     current: str,
     *,
-    prefer: tuple[str, ...] = ("default", "BI-Analyst", "platform-orchestrator"),
+    prefer: tuple[str, ...] = ("default", "axis-maestro", "platform-orchestrator"),
 ) -> str:
     """Mantiene el borrador si es válido; si no, elige el primer preferido presente."""
     cur = (current or "").strip()

@@ -1,9 +1,17 @@
-"""DB-first prompt policy resolver."""
+"""DB-first prompt policy resolver with framework airbag (capa 0)."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any
+
+from duckclaw.prompt_policies.framework_fallbacks import (
+    framework_fallback_content,
+    is_framework_policy_key,
+)
+
+_log = logging.getLogger(__name__)
 
 
 def normalize_policy_type(policy_type: str) -> str:
@@ -22,7 +30,7 @@ _normalize_policy_type = normalize_policy_type
 
 @dataclass(frozen=True)
 class PromptPolicyResolver:
-    """Resolve prompt policies from ``main.prompt_policy_registry`` only."""
+    """Resolve prompt policies: DB (capa 1/2) → framework airbag (capa 0) → worker inherit."""
 
     db: Any | None = None
 
@@ -32,10 +40,10 @@ class PromptPolicyResolver:
         if not normalized_type or not name:
             raise FileNotFoundError("prompt policy requires type and name")
 
-        content = self._load_from_db(normalized_type, name)
+        content = self._resolve(normalized_type, name)
         if not content:
-            raise RuntimeError(
-                "active prompt policy has empty content in main.prompt_policy_registry: "
+            raise FileNotFoundError(
+                "active prompt policy not found in main.prompt_policy_registry: "
                 f"{normalized_type}/{name}"
             )
         return content
@@ -43,7 +51,37 @@ class PromptPolicyResolver:
     def format(self, policy_type: str, policy_name: str, **kwargs: str) -> str:
         return self.load(policy_type, policy_name).format(**kwargs)
 
-    def _load_from_db(self, policy_type: str, policy_name: str) -> str:
+    def _resolve(self, policy_type: str, policy_name: str, *, _inherit_default: bool = True) -> str:
+        content = self._try_load_from_db(policy_type, policy_name)
+        if content:
+            return content
+
+        if is_framework_policy_key(policy_type, policy_name):
+            fallback = framework_fallback_content(policy_type, policy_name)
+            if fallback:
+                _log.warning(
+                    "degraded_framework_policy: using capa 0 fallback for %s/%s",
+                    policy_type,
+                    policy_name,
+                )
+                return fallback
+
+        if (
+            _inherit_default
+            and policy_type == "system_prompt"
+            and policy_name not in ("", "default")
+        ):
+            inherited = self._resolve("system_prompt", "default", _inherit_default=False)
+            if inherited:
+                _log.warning(
+                    "inherited_system_prompt: %s inherits system_prompt/default",
+                    policy_name,
+                )
+                return inherited
+
+        return ""
+
+    def _try_load_from_db(self, policy_type: str, policy_name: str) -> str:
         if self.db is None:
             raise RuntimeError(
                 "PromptPolicyResolver requires a DuckDB connection; "
@@ -70,13 +108,17 @@ class PromptPolicyResolver:
                 f"before resolving prompt policy {policy_type}/{policy_name}"
             ) from exc
         if not row:
-            raise FileNotFoundError(
-                "active prompt policy not found in main.prompt_policy_registry: "
+            return ""
+        if isinstance(row, dict):
+            content = str(row.get("content") or "").strip()
+        else:
+            content = str(row[0] or "").strip()
+        if not content:
+            raise RuntimeError(
+                "active prompt policy has empty content in main.prompt_policy_registry: "
                 f"{policy_type}/{policy_name}"
             )
-        if isinstance(row, dict):
-            return str(row.get("content") or "").strip()
-        return str(row[0] or "").strip()
+        return content
 
     @staticmethod
     def _first_row(result: Any) -> Any | None:

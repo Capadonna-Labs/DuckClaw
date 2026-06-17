@@ -44,6 +44,7 @@ def build_greeting_shortcut_node(
             _reply_policy_db = _agent_config_db_for_vault(db, _vault_path_reply or None)
             reply = _capabilities_fast_reply_text(
                 assigned,
+                tenant_id=tenant_id,
                 coordinator_id=coord,
                 delegation_pool=pool,
                 prompt_policies=PromptPolicyResolver(_reply_policy_db),
@@ -51,7 +52,7 @@ def build_greeting_shortcut_node(
             _audit_title = "Capacidades (respuesta directa)"
         else:
             log_sys(_obs, "Saludo: respuesta directa (sin plan ni subagente)")
-            reply = _greeting_fast_reply_text(assigned)
+            reply = _greeting_fast_reply_text(assigned, tenant_id=tenant_id)
             _audit_title = "Saludo directo"
         _append_task_audit_safely(
             append_task_audit,

@@ -28,6 +28,9 @@ duckclaw-healthcheck = "duckclaw.cli.healthcheck:main"
 where = ["src"]
 include = ["duckclaw*"]
 
+[tool.setuptools.package-data]
+"duckclaw" = ["seeds/*.json"]
+
 [tool.setuptools.package-dir]
 "" = "src"
 

@@ -61,7 +61,12 @@ def test_prompt_policy_resolver_formats_capabilities_from_db_only() -> None:
 
     resolver = PromptPolicyResolver(db=con)
 
-    formatted = resolver.format("capabilities", "generic_worker", worker_id="ciberseguridad-agent")
+    formatted = resolver.format(
+        "capabilities",
+        "generic_worker",
+        worker_id="ciberseguridad-agent",
+        tenant_id="default",
+    )
     assert "ciberseguridad-agent" in formatted
 
 
@@ -163,7 +168,84 @@ def test_framework_capability_policies_are_seeded_by_migrations() -> None:
     assert "{worker_id}" in resolver.load("capability", "generic_worker")
     assert "{coord}" in resolver.load("capability", "axis_coordinator")
     assert resolver.load("capability", "default_fallback")
-    assert "DuckDB" in resolver.load("system_prompt", "default")
+    default_prompt = resolver.load("system_prompt", "default")
+    assert "## IDENTITY" in default_prompt
+    assert "DuckClaw" in default_prompt
+    assert "{tenant_id}" in default_prompt
+
+
+def test_framework_fallback_used_when_db_row_missing() -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies import PromptPolicyResolver
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    con.execute(
+        """
+        UPDATE main.prompt_policy_registry
+        SET active = false, status = 'inactive'
+        WHERE policy_type = 'capability' AND policy_name = 'generic_worker'
+        """
+    )
+
+    content = PromptPolicyResolver(db=con).load("capability", "generic_worker")
+    assert "{worker_id}" in content
+    assert "DuckClaw" in content
+
+
+def test_system_prompt_worker_inherits_default_when_missing() -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies import PromptPolicyResolver
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+
+    inherited = PromptPolicyResolver(db=con).load("system_prompt", "axis-maestro")
+    default = PromptPolicyResolver(db=con).load("system_prompt", "default")
+    assert inherited == default
+
+
+def test_framework_pack_keys_match_requirements() -> None:
+    from duckclaw.prompt_policies.framework_fallbacks import list_framework_fallback_keys
+    from duckclaw.prompt_policies.health import FRAMEWORK_PROMPT_POLICY_REQUIREMENTS
+
+    required = {
+        (policy_type, policy_name)
+        for policy_type, policy_name, _source in FRAMEWORK_PROMPT_POLICY_REQUIREMENTS
+    }
+    assert list_framework_fallback_keys() == frozenset(required)
+
+
+def test_migration_021_upgrades_framework_pack_content() -> None:
+    import duckdb
+
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+
+    row = con.execute(
+        """
+        SELECT content, metadata_json, version
+        FROM main.prompt_policy_registry
+        WHERE policy_type = 'system_prompt'
+          AND policy_name = 'default'
+          AND active = true
+        ORDER BY version DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    assert row is not None
+    content = row[0]
+    metadata = row[1]
+    version = row[2]
+    assert version >= 2
+    assert "## IDENTITY" in content
+    assert "framework_policy_pack_v1" in metadata
 
 
 def test_managed_workspace_draft_policy_is_seeded_by_migrations() -> None:

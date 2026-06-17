@@ -116,6 +116,34 @@ def cmd_doctor(
         if not _emit("Migraciones", False, str(exc)[:160]):
             critical_ok = False
 
+    if db_path:
+        try:
+            import duckdb
+
+            from duckops.policy_health import check_framework_prompt_policies
+
+            con = duckdb.connect(db_path, read_only=True)
+            try:
+                policy_health = check_framework_prompt_policies(con)
+            finally:
+                con.close()
+            policy_ok = policy_health.ok
+            if not _emit(
+                "Policies framework",
+                policy_ok,
+                policy_health.summary(),
+            ):
+                critical_ok = False
+            elif policy_health.degraded:
+                _emit(
+                    "Policies airbag",
+                    True,
+                    "capa 0 activa — ejecuta duckclaw-migrate para materializar en DB",
+                )
+        except Exception as exc:
+            if not _emit("Policies framework", False, str(exc)[:160]):
+                critical_ok = False
+
     admin_key = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
     key_ok = is_admin_key_valid(admin_key)
     _emit(

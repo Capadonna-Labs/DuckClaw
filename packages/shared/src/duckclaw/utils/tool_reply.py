@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 
@@ -27,6 +28,16 @@ def looks_like_tabular_account_rows_json(text: str) -> bool:
         if "currency" not in row and "updated_at" not in row:
             return False
     return True
+
+
+def friendly_query_error(error_message: str) -> str | None:
+    """Si el error de DuckDB incluye 'Did you mean', devuelve un mensaje corto; si no, None."""
+    if not error_message or "Did you mean" not in error_message:
+        return None
+    m = re.search(r'Did you mean\s+"([^"]+)"\s*\?', error_message)
+    if m:
+        return f"La tabla no existe. ¿Quisiste decir: {m.group(1)}?"
+    return "La tabla no existe. Revisa el nombre."
 
 
 def format_tool_reply(raw: Any) -> str:

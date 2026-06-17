@@ -67,6 +67,8 @@ Cada bot debe usar `secret_token` distinto en `setWebhook` cuando se usa routing
 
 Opcionales: `CHAT_PARALLEL_INVOCATIONS`, `DUCKCLAW_HEARTBEAT_WEBHOOK_URL`, `HEARTBEAT_PLAN_TITLE_INLINE_MAX`.
 
+**Artefactos del sandbox:** el Strix sandbox escribe en `/workspace/output` dentro del contenedor; el host los copia a `output/sandbox/default/` (relativo al CWD del gateway). Ese directorio está gitignored (`output/`) y se recrea en cada ejecución — no versionar. El bot adjunta PNG/Excel/MD desde rutas bajo `output/` cuando la respuesta del agente las cita.
+
 ---
 
 ## Comandos fly útiles

@@ -18,6 +18,7 @@ Define cómo los agentes interactúan con el entorno: investigación autónoma, 
 - **Imagen**: `ghcr.io/usestrix/strix-sandbox` (o derivado con pandas, duckdb). Red aislada, `--cap-drop=ALL`, límites cgroups.
 - **Flujo seguro**: Host ejecuta `SELECT` aprobado → exporta a `/tmp/session_id/data.parquet` → montaje solo lectura en contenedor (`/workspace/data`); salida en `/workspace/output`.
 - **StrixSandboxRunner**: provisioning por `session_id`, envío de `script_content`, timeout, captura stdout/stderr, recuperación de artefactos. Bucle de auto-corrección: si exit code ≠ 0, agente analiza error y reescribe código.
+- **Artefactos en host (`output/sandbox/default/`)**: tras cada ejecución, el manager copia los ficheros de `/workspace/output` del contenedor a `output/sandbox/default/` (CWD del proceso). El árbol `output/` está en `.gitignore`; se recrea en cada run (no commitear). Telegram y el bot polling resuelven rutas bajo `output/sandbox/default/` para adjuntar PNG/Excel/MD.
 - Auditoría: cada ejecución registrada (latencia, evidencia) en DuckDB.
 
 ### GitHub MCP

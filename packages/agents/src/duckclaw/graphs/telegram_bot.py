@@ -50,8 +50,111 @@ def _load_dotenv() -> None:
             except Exception:
                 pass
             break
-_DEFAULT_SYSTEM_PROMPT = "Eres el asistente de Lumi Store, una tienda online. Tienes acceso a una base de datos. Responde de forma breve y clara."
+_DEFAULT_SYSTEM_PROMPT = (
+    "Eres un asistente DuckClaw con acceso a DuckDB (SQL, PGQ, VSS). "
+    "Responde de forma breve y clara; prioriza datos de la base antes de suposiciones."
+)
 _DEFAULT_FRAMEWORK = "langgraph"
+
+_ARTIFACT_SEARCH_DIRS = ("output/sandbox/default", "output")
+
+
+def _truncate_at_break(text: str, max_len: int = 600) -> str:
+    if not text or len(text) <= max_len:
+        return text
+    s = text[: max_len + 1]
+    for sep in ("\n\n", ".\n", "\n", ". ", " "):
+        idx = s.rfind(sep)
+        if idx > max_len // 2:
+            return text[: idx + len(sep)].strip()
+    return text[:max_len].strip()
+
+
+def _artifact_search_bases() -> tuple[Path, ...]:
+    cwd = Path.cwd()
+    return (cwd,)
+
+
+def _resolve_artifact_path(raw: str, *, extensions: tuple[str, ...]) -> str | None:
+    m_clean = (raw or "").strip()
+    if not m_clean:
+        return None
+    p = Path(m_clean)
+    if p.is_absolute() and p.is_file() and p.suffix.lower() in extensions:
+        return str(p.resolve())
+    fname = p.name
+    for base in _artifact_search_bases():
+        for sub in _ARTIFACT_SEARCH_DIRS:
+            candidate = (base / sub / fname).resolve()
+            if candidate.is_file() and candidate.suffix.lower() in extensions:
+                return str(candidate)
+        candidate = (base / m_clean).resolve()
+        if candidate.is_file() and candidate.suffix.lower() in extensions:
+            return str(candidate)
+    return None
+
+
+def _extract_paths_by_extension(text: str, extensions: tuple[str, ...]) -> list[str]:
+    if not (text or "").strip():
+        return []
+    ext_pat = "|".join(re.escape(e.lstrip(".")) for e in extensions)
+    pattern = rf"([^\s`\"'<>]+\.(?:{ext_pat}))"
+    seen: set[str] = set()
+    found: list[str] = []
+    for match in re.findall(pattern, text, re.IGNORECASE):
+        resolved = _resolve_artifact_path(match, extensions=extensions)
+        if resolved and resolved not in seen:
+            seen.add(resolved)
+            found.append(resolved)
+    return found
+
+
+def _extract_image_paths(text: str) -> list[str]:
+    return _extract_paths_by_extension(text, (".png", ".jpg", ".jpeg", ".webp"))
+
+
+def _extract_excel_paths(text: str) -> list[str]:
+    return _extract_paths_by_extension(text, (".xlsx",))
+
+
+def _is_export_hashed_md(filename: str) -> bool:
+    name = Path(filename).stem
+    return bool(re.match(r"^export_[a-f0-9]{8}$", name, re.I))
+
+
+def _extract_markdown_paths(text: str) -> list[str]:
+    paths = _extract_paths_by_extension(text, (".md",))
+    return [p for p in paths if not _is_export_hashed_md(p)]
+
+
+def _strip_paths_from_reply(text: str) -> str:
+    if not (text or "").strip():
+        return text or ""
+    s = re.sub(
+        r"\s*[.;]?\s*(?:El gráfico|La gráfica|El diagrama|La imagen)\s+(?:ha\s+sido\s+)?guardad[oa]\s+en:\s*[^\n]+",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(r"\s*[.;]?\s*El archivo\s+se\s+ha\s+guardado\s+en:\s*[^\n]+", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*[.;]?\s*Archivo\s+(?:Excel|Markdown)?\s*guardado:\s*[^\n]+", "", s, flags=re.IGNORECASE)
+    path_kw = ("guardado en", "guardada en", "se ha guardado", "saved in", "saved to", "ruta:", "path:")
+    lines = []
+    for line in s.split("\n"):
+        low = line.strip().lower()
+        if "/workspace/output/" in low:
+            continue
+        if any(k in low for k in path_kw):
+            continue
+        if any(ext in low for ext in (".png", ".jpg", ".jpeg", ".webp", ".xlsx", ".md")) and ("/" in line or "\\" in line):
+            continue
+        lines.append(line)
+    return re.sub(r"\s{2,}", " ", "\n".join(lines).strip()).strip()
+
+
+def _caption_for_photo(text: str, image_paths: list[str]) -> str:
+    del image_paths
+    return _truncate_at_break(_strip_paths_from_reply(text), 600)
 
 
 def _log(msg: str) -> None:
@@ -63,7 +166,7 @@ def _normalize_reply(reply: str) -> str:
     """Strip EOT tokens; hide raw tool-call JSON and error JSON so they never reach Telegram or logs."""
     import json
     from duckclaw.integrations.llm_providers import sanitize_worker_reply_text
-    from duckclaw.utils import friendly_query_error
+    from duckclaw.utils.tool_reply import friendly_query_error
 
     s = sanitize_worker_reply_text(str(reply or ""))
     # If graph returned raw tool-call JSON (e.g. Slayer-8B text output), don't send to user
@@ -86,9 +189,13 @@ def _normalize_reply(reply: str) -> str:
 
 
 def _format_reply_for_telegram(reply: str, max_len: int = 800) -> str:
-    """Formatea la respuesta con emojis y HTML para Telegram."""
-    from duckclaw.utils.format import format_for_telegram
-    return format_for_telegram(reply, max_len=max_len) if reply else ""
+    """Convierte markdown del agente a HTML seguro para Telegram."""
+    from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
+
+    if not reply:
+        return ""
+    html = llm_markdown_to_telegram_html(reply.strip())
+    return _truncate_at_break(html, max_len) if len(html) > max_len else html
 
 
 def _persist_conversation(db: Any, chat_id: Any, role: str, content: str) -> None:
@@ -480,36 +587,27 @@ def _run_bot() -> None:
             except Exception:
                 pass
             reply_for_user = reply
-            try:
-                from duckclaw.utils.format import strip_paths_from_reply
-                reply_for_user = strip_paths_from_reply(reply) or reply
-            except Exception:
-                pass
+            reply_for_user = _strip_paths_from_reply(reply) or reply
             text_to_send = _format_reply_for_telegram(reply_for_user, max_len=3500) or "Sin respuesta."
             image_paths = []
             excel_paths = []
             markdown_paths = []
-            try:
-                from duckclaw.utils.format import extract_image_paths, extract_excel_paths, extract_markdown_paths
-                image_paths = extract_image_paths(reply)
-                excel_paths = extract_excel_paths(reply)
-                markdown_paths = extract_markdown_paths(reply)
-                if image_paths:
-                    _log(f"🖼️ Enviando {len(image_paths)} imagen(es) a Telegram")
-                if excel_paths:
-                    _log(f"📎 Enviando {len(excel_paths)} archivo(s) Excel a Telegram")
-                if markdown_paths:
-                    _log(f"📄 Enviando {len(markdown_paths)} archivo(s) Markdown a Telegram")
-            except Exception as e:
-                _log(f"🖼️ Error extrayendo archivos: {e}")
+            image_paths = _extract_image_paths(reply)
+            excel_paths = _extract_excel_paths(reply)
+            markdown_paths = _extract_markdown_paths(reply)
+            if image_paths:
+                _log(f"🖼️ Enviando {len(image_paths)} imagen(es) a Telegram")
+            if excel_paths:
+                _log(f"📎 Enviando {len(excel_paths)} archivo(s) Excel a Telegram")
+            if markdown_paths:
+                _log(f"📄 Enviando {len(markdown_paths)} archivo(s) Markdown a Telegram")
             # Log lo que realmente se envía (para que coincida con Telegram)
             _log_preview = (text_to_send or "")[:200].replace("\n", " ")
             if len(text_to_send or "") > 200:
                 _log_preview += "…"
             if image_paths:
                 try:
-                    from duckclaw.utils.format import caption_for_photo as _cap
-                    caption_preview = _cap(reply, image_paths)
+                    caption_preview = _caption_for_photo(reply, image_paths)
                     caption_preview = _format_reply_for_telegram(caption_preview or "📊 Gráfica generada", max_len=600)
                     _log(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): [imagen] {caption_preview[:120]}")
                 except Exception:
@@ -574,7 +672,6 @@ def _run_bot() -> None:
                     if doc_paths:
                         caption = _format_reply_for_telegram(reply_for_user, max_len=900) or "📎 Archivo generado"
                         if len(caption) > 1024:
-                            from duckclaw.utils.format import _truncate_at_break
                             caption = _truncate_at_break(caption, 900)
                         for doc_path in doc_paths:
                             with open(doc_path, "rb") as f:
@@ -588,13 +685,11 @@ def _run_bot() -> None:
                     if send_images and image_paths and not report_md_only:
                         # Solo insights, sin aviso de guardado ni rutas
                         try:
-                            from duckclaw.utils.format import caption_for_photo as _cap
-                            caption_raw = _cap(reply, image_paths)
+                            caption_raw = _caption_for_photo(reply, image_paths)
                             caption = _format_reply_for_telegram(caption_raw) if caption_raw else "📊 Gráfica generada"
                         except Exception:
                             caption = "📊 Gráfica generada"
                         if len(caption) > 1024:
-                            from duckclaw.utils.format import _truncate_at_break
                             caption = _truncate_at_break(caption, 900)
                         if len(image_paths) == 1:
                             with open(image_paths[0], "rb") as f:

@@ -18,6 +18,7 @@ from routers.admin_domains.catalog_skills import router as catalog_skills_router
 from routers.admin_domains.duckdb_explorer import router as duckdb_explorer_router
 from routers.admin_domains.kanban import router as kanban_router
 from routers.admin_domains.kanban_runtime import router as kanban_runtime_router
+from routers.admin_domains.ops import router as ops_router
 from routers.admin_domains.playground_chat import (
     _open_playground_vault_db,
     _pick_playground_worker,
@@ -43,6 +44,7 @@ router.include_router(catalog_skills_router)
 router.include_router(duckdb_explorer_router)
 router.include_router(kanban_router)
 router.include_router(kanban_runtime_router)
+router.include_router(ops_router)
 router.include_router(playground_chat_router)
 router.include_router(prompt_policies_router)
 router.include_router(runtime_config_router)
@@ -1564,131 +1566,6 @@ async def catalog_mcp() -> dict[str, Any]:
     }
 
 
-_OPS_ALLOWLIST: dict[str, list[str]] = {
-    "pm2_list": ["pm2", "list"],
-    "pm2_status": ["pm2", "status"],
-    "pm2_restart_gateway": ["pm2", "restart", "DuckClaw-Gateway", "--update-env"],
-    "pm2_restart_db_writer": ["pm2", "restart", "DuckClaw-DB-Writer", "--update-env"],
-    "pm2_start_db_writer": ["pm2", "start", "config/ecosystem.db-writer.config.cjs", "--update-env"],
-    "pm2_start_gateway": [
-        "pm2",
-        "start",
-        "config/ecosystem.api.config.cjs",
-        "--only",
-        "DuckClaw-Gateway",
-        "--update-env",
-    ],
-    "pm2_logs_gateway": ["pm2", "logs", "DuckClaw-Gateway", "--lines", "40", "--nostream"],
-    "pm2_start_mcp": ["pm2", "start", "config/ecosystem.mcp.config.cjs"],
-    "pm2_restart_mcp": ["pm2", "restart", "DuckClaw-MCP", "--update-env"],
-    "pm2_logs_mcp": ["pm2", "logs", "DuckClaw-MCP", "--lines", "40", "--nostream"],
-    "pm2_start_comfyui": ["pm2", "start", "config/ecosystem.comfyui.config.cjs", "--update-env"],
-    "pm2_restart_comfyui": ["pm2", "restart", "ComfyUI", "--update-env"],
-    "pm2_logs_comfyui": ["pm2", "logs", "ComfyUI", "--lines", "40", "--nostream"],
-    "doctor": ["uv", "run", "python", "scripts/doctor.py"],
-    "bootstrap_dbs": ["uv", "run", "python", "scripts/bootstrap_dbs.py"],
-}
-
-
-@router.get("/ops/commands", dependencies=[Depends(_require_admin_key)])
-async def list_ops_commands() -> dict[str, Any]:
-    labels = {
-        "pm2_list": "PM2 — listar procesos",
-        "pm2_status": "PM2 — estado",
-        "pm2_restart_gateway": "Reiniciar DuckClaw-Gateway",
-        "pm2_restart_db_writer": "Reiniciar DuckClaw-DB-Writer",
-        "pm2_start_db_writer": "Iniciar DuckClaw-DB-Writer",
-        "pm2_start_gateway": "Iniciar DuckClaw-Gateway",
-        "pm2_logs_gateway": "Últimas líneas log Gateway",
-        "pm2_start_mcp": "Iniciar DuckClaw-MCP (ecosystem.mcp.config.cjs)",
-        "pm2_restart_mcp": "Reiniciar DuckClaw-MCP",
-        "pm2_logs_mcp": "Últimas líneas log MCP",
-        "pm2_start_comfyui": "Iniciar ComfyUI (ecosystem.comfyui.config.cjs)",
-        "pm2_restart_comfyui": "Reiniciar ComfyUI",
-        "pm2_logs_comfyui": "Últimas líneas log ComfyUI",
-        "doctor": "Diagnóstico local (doctor.py)",
-        "bootstrap_dbs": "Bootstrap DuckDB (tablas agent_config, etc.)",
-    }
-    return {
-        "commands": [
-            {"id": k, "label": labels.get(k, k), "argv": v}
-            for k, v in _OPS_ALLOWLIST.items()
-        ]
-    }
-
-
-class OpsRunBody(BaseModel):
-    op_id: str
-
-
-def _pm2_restart_interrupted(op_id: str, exit_code: int, stdout: str) -> bool:
-    """PM2 reinició el gateway y mató el proceso que ejecutaba el comando (SIGINT → -2)."""
-    if exit_code != -2:
-        return False
-    if "Applying action restartProcessId" not in stdout:
-        return False
-    if op_id == "pm2_restart_gateway":
-        return "DuckClaw-Gateway" in stdout
-    return False
-
-
-def _normalize_ops_result(op_id: str, result: dict[str, Any]) -> dict[str, Any]:
-    exit_code = int(result.get("exit_code") or 1)
-    stdout = str(result.get("stdout") or "")
-    if _pm2_restart_interrupted(op_id, exit_code, stdout):
-        return {**result, "exit_code": 0}
-    return result
-
-
-@router.post("/ops/run", dependencies=[Depends(_require_admin_key)])
-async def run_ops_command(
-    body: OpsRunBody,
-    actor: str = Depends(_actor_from_header),
-) -> dict[str, Any]:
-    import asyncio
-    import subprocess
-
-    op_id = (body.op_id or "").strip()
-    argv = _OPS_ALLOWLIST.get(op_id)
-    if not argv:
-        raise _problem(400, "Comando no permitido", op_id)
-
-    def _run() -> dict[str, Any]:
-        proc = subprocess.run(
-            argv,
-            cwd=str(_repo_root()),
-            capture_output=True,
-            text=True,
-            timeout=90,
-        )
-        return {
-            "exit_code": proc.returncode,
-            "stdout": (proc.stdout or "")[-12000:],
-            "stderr": (proc.stderr or "")[-8000:],
-        }
-
-    try:
-        result = await asyncio.to_thread(_run)
-    except subprocess.TimeoutExpired:
-        raise _problem(408, "Timeout ejecutando comando", op_id) from None
-    except Exception as exc:
-        raise _problem(500, "Error ejecutando comando", str(exc)) from exc
-
-    result = _normalize_ops_result(op_id, result)
-    if op_id in ("pm2_start_comfyui", "pm2_restart_comfyui") and result.get("exit_code") == 0:
-        import asyncio
-        import time
-
-        from duckclaw.forge.skills.comfyui_bridge import clear_all_comfy_generations, reset_comfyui_runtime
-
-        clear_all_comfy_generations()
-        await asyncio.sleep(6)
-        comfy_reset = await asyncio.to_thread(reset_comfyui_runtime)
-        result["comfyui_reset"] = comfy_reset
-    _admin_audit("ops.run", op_id, " ".join(argv), actor=actor, meta=result)
-    return {"ok": result.get("exit_code") == 0, "op_id": op_id, **result}
-
-
 @router.post("/projects", dependencies=[Depends(_require_admin_key)])
 async def create_project(
     body: ProjectCreateBody,
@@ -1954,23 +1831,20 @@ def admin_code_decision_approve(
         tid = (body.tenant_id or "default").strip() or "default"
         uid = (body.user_id or actor or tid).strip() or tid
 
-        class _DbShim:
-            _path = resolved
+        from duckclaw import DuckClaw
+        from duckclaw.hitl.code_decision_service import approve_code_decision
 
-            def query(self, q: str, params: tuple = ()):
-                return con.execute(q, params).fetchdf().to_dict(orient="records")
-
-        from duckclaw.capadonna_plugin import approve_capadonna_code_decision, capadonna_missing_message
-
-        result = approve_capadonna_code_decision(
-            _DbShim(),
-            decision_id=body.decision_id.strip(),
-            tenant_id=tid,
-            user_id=uid,
-            chat_id=(body.chat_id or "").strip(),
-        )
-        if result is None:
-            raise _problem(503, "Extensión no configurada", capadonna_missing_message())
+        duck = DuckClaw(resolved, read_only=True)
+        try:
+            result = approve_code_decision(
+                duck,
+                decision_id=body.decision_id.strip(),
+                tenant_id=tid,
+                user_id=uid,
+                chat_id=(body.chat_id or "").strip(),
+            )
+        finally:
+            duck.close()
         if result.get("error"):
             raise _problem(400, "Aprobación fallida", str(result["error"]))
         return result
@@ -1994,23 +1868,22 @@ def admin_code_decision_reject(
         tid = (body.tenant_id or "default").strip() or "default"
         uid = (body.user_id or actor or tid).strip() or tid
 
-        class _DbShim:
-            _path = resolved
+        from duckclaw import DuckClaw
+        from duckclaw.hitl.code_decision_service import reject_code_decision
 
-            def query(self, q: str, params: tuple = ()):
-                return con.execute(q, params).fetchdf().to_dict(orient="records")
-
-        from duckclaw.capadonna_plugin import capadonna_missing_message, reject_capadonna_code_decision
-
-        result = reject_capadonna_code_decision(
-            _DbShim(),
-            decision_id=body.decision_id.strip(),
-            tenant_id=tid,
-            user_id=uid,
-            rationale=body.rationale,
-        )
-        if result is None:
-            raise _problem(503, "Extensión no configurada", capadonna_missing_message())
+        duck = DuckClaw(resolved, read_only=True)
+        try:
+            result = reject_code_decision(
+                duck,
+                decision_id=body.decision_id.strip(),
+                tenant_id=tid,
+                user_id=uid,
+                rationale=body.rationale,
+            )
+        finally:
+            duck.close()
+        if result.get("error"):
+            raise _problem(400, "Rechazo fallido", str(result["error"]))
         return result
     finally:
         con.close()
@@ -2108,25 +1981,20 @@ def admin_resolve_uncertainty_event(
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
     """Resuelve un evento PENDING_HITL (equivalente a /resolve_uncertainty)."""
+    con = None
     try:
         con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
         raise _problem(403, "Vault no autorizado", str(exc)) from exc
-    finally:
-        con.close()
     try:
-        from duckclaw.capadonna_plugin import load_capadonna_lib
-
-        bridge = load_capadonna_lib("epistemic_humility_bridge")
-        if bridge is None:
-            raise _problem(503, "Plugin epistémico no disponible", "CAPADONNA_DRILLER_ROOT")
         from duckclaw import DuckClaw
+        from duckclaw.hitl.uncertainty_service import resolve_uncertainty_event
 
         duck = DuckClaw(resolved, read_only=True)
         try:
-            result = bridge.resolve_uncertainty_event(
+            result = resolve_uncertainty_event(
                 duck,
                 event_id=body.event_id.strip(),
                 tenant_id=(scope or {}).get("tenant_id") or "default",
@@ -2141,6 +2009,9 @@ def admin_resolve_uncertainty_event(
         raise
     except Exception as exc:
         raise _problem(500, "Error resolviendo incertidumbre", str(exc)) from exc
+    finally:
+        if con is not None:
+            con.close()
 
 
 from routers.admin_db_first import router as _admin_db_first_router  # noqa: E402

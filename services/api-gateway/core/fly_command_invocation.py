@@ -27,6 +27,8 @@ _log = logging.getLogger("duckclaw.gateway")
 
 READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
     (
+        "approve-code",
+        "approve_code",
         "audit",
         "comfyui",
         "context",

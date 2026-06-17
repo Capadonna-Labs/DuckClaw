@@ -560,6 +560,23 @@ def test_admin_template_helpers_no_longer_own_structured_writes() -> None:
     assert "hard_delete_visible_worker_for_actor(" not in helper_block
 
 
+def test_admin_ops_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    ops = Path("services/api-gateway/routers/admin_domains/ops.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.ops import router as ops_router" in admin
+    assert "router.include_router(ops_router)" in admin
+    assert "class OpsRunBody" not in admin
+    assert "_OPS_ALLOWLIST" not in admin
+    assert "def _pm2_restart_interrupted" not in admin
+    assert "def _normalize_ops_result" not in admin
+    assert '@router.get("/ops/commands"' not in admin
+    assert '@router.post("/ops/run"' not in admin
+    assert 'router = APIRouter(prefix="/ops", tags=["admin-ops"])' in ops
+    assert '@router.get("/commands", dependencies=[Depends(require_admin_key)])' in ops
+    assert '@router.post("/run", dependencies=[Depends(require_admin_key)])' in ops
+
+
 def test_duckdb_legacy_cleanup_router_uses_typed_command() -> None:
     explorer = Path("services/api-gateway/routers/admin_domains/duckdb_explorer.py").read_text(
         encoding="utf-8"

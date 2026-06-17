@@ -83,6 +83,8 @@ def test_gateway_fly_rw_exception_excludes_read_only_safe_commands() -> None:
     assert '"meditate"' in fly_owner
     assert '"reject-code"' in fly_owner
     assert '"reject_code"' in fly_owner
+    assert '"approve-code"' in fly_owner
+    assert '"approve_code"' in fly_owner
     assert '"resolve-uncertainty"' in fly_owner
     assert '"resolve_uncertainty"' in fly_owner
     assert "LEGACY_RW_FLY_COMMANDS" in fly_owner
@@ -107,6 +109,13 @@ def test_gateway_fly_rw_exception_lists_only_current_pending_commands() -> None:
     assert _fly_command_set(fly_owner, "LEGACY_RW_FLY_COMMANDS") == pending_legacy_rw
     assert pending_legacy_rw.isdisjoint(_fly_command_set(fly_owner, "READ_ONLY_SAFE_FLY_COMMANDS"))
     assert "Estado actual de `LEGACY_RW_FLY_COMMANDS`: ninguno." in docs
+
+
+def test_db_first_core_refactor_doc_has_no_merge_conflict_markers() -> None:
+    docs = DB_FIRST_CORE_REFACTOR_DOC.read_text(encoding="utf-8")
+
+    for marker in ("<<<<<<<", "=======", ">>>>>>>"):
+        assert marker not in docs, f"unresolved merge marker {marker!r} in {DB_FIRST_CORE_REFACTOR_DOC}"
 
 
 def test_gateway_raw_query_payloads_are_limited_to_compat_enqueue() -> None:
@@ -136,6 +145,31 @@ def test_gateway_main_no_longer_owns_legacy_raw_query_enqueue() -> None:
     assert "db_write_compat_router" in main
 
 
+def test_gateway_main_delegates_lifespan_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    lifespan_owner = (GATEWAY_ROOT / "core" / "lifespan.py").read_text(encoding="utf-8")
+
+    assert "from core.lifespan import lifespan" in main
+    assert "async def lifespan" not in main
+    assert "assert_gateway_startup_ready" not in main
+    assert "async def lifespan" in lifespan_owner
+    assert "assert_gateway_startup_ready" in lifespan_owner
+
+
+def test_gateway_main_delegates_health_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    health_owner = (GATEWAY_ROOT / "core" / "health.py").read_text(encoding="utf-8")
+
+    assert "from core.health import router as health_router" in main
+    assert "app.include_router(health_router)" in main
+    assert "async def root()" not in main
+    assert "async def health()" not in main
+    assert "async def system_health()" not in main
+    assert "_telegram_path_route_count" not in main
+    assert '@router.get("/health")' in health_owner
+    assert "async def system_health" in health_owner
+
+
 def test_admin_domains_do_not_call_legacy_raw_write_queue() -> None:
     offenders = []
     for path in sorted((GATEWAY_ROOT / "routers" / "admin_domains").rglob("*.py")):
@@ -143,4 +177,13 @@ def test_admin_domains_do_not_call_legacy_raw_write_queue() -> None:
         if "enqueue_duckdb_write_sync" in source:
             offenders.append(path.as_posix())
 
+    assert offenders == []
+
+
+def test_gateway_core_has_no_capadonna_plugin_imports() -> None:
+    offenders: list[str] = []
+    for path in _py_files():
+        source = path.read_text(encoding="utf-8")
+        if "duckclaw.capadonna_plugin" in source or "capadonna_plugin" in source:
+            offenders.append(path.as_posix())
     assert offenders == []

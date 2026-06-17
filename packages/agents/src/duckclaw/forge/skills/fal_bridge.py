@@ -92,19 +92,9 @@ def _usage_db(duckclaw_db: Any) -> Any:
 
 
 def _tool_context() -> dict[str, str]:
-    from duckclaw.capadonna_plugin import (
-        capadonna_tool_chat_id,
-        capadonna_tool_tenant_id,
-        capadonna_tool_user_id,
-        capadonna_tool_worker_id,
-    )
+    from duckclaw.runtime_tool_context import merge_tool_context
 
-    return {
-        "tenant_id": capadonna_tool_tenant_id() or "default",
-        "user_id": capadonna_tool_user_id() or "default",
-        "chat_id": capadonna_tool_chat_id() or "",
-        "worker_id": capadonna_tool_worker_id() or "",
-    }
+    return merge_tool_context()
 
 
 def _state_delta_base() -> dict[str, str]:

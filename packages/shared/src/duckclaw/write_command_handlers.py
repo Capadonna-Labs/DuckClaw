@@ -47,6 +47,10 @@ from duckclaw.write_handlers.knowledge import (
     _apply_upsert_knowledge_document,
 )
 from duckclaw.write_handlers.duckdb_maintenance import _apply_drop_legacy_duckdb_objects
+from duckclaw.write_handlers.hitl import (
+    _apply_resolve_uncertainty_event,
+    _apply_update_code_decision_status,
+)
 from duckclaw.write_handlers.prompt_policies import (
     _apply_deactivate_prompt_policy,
     _apply_upsert_prompt_policy,
@@ -113,6 +117,8 @@ def dispatch_command(conn: Any, payload: dict) -> None:
         "upsert_prompt_policy": _apply_upsert_prompt_policy,
         "deactivate_prompt_policy": _apply_deactivate_prompt_policy,
         "drop_legacy_duckdb_objects": _apply_drop_legacy_duckdb_objects,
+        "update_code_decision_status": _apply_update_code_decision_status,
+        "resolve_uncertainty_event": _apply_resolve_uncertainty_event,
     }
     handler = handlers.get(command_type)
     if handler is None:

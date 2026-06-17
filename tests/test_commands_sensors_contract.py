@@ -9,7 +9,7 @@ from duckclaw.graphs import on_the_fly_commands
 CANONICAL_MODULE = "duckclaw.commands.sensors"
 SENSORS_EXPORTS = (
     "_ssh_reach_icon",
-    "_capadonna_lake_status_lines",
+    "_lake_ssh_status_lines",
     "_sensor_line_bullet",
     "_browser_sandbox_sensor_lines",
     "execute_sensors",

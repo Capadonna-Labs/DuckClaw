@@ -372,7 +372,7 @@ def emit_memory_deltas(
     target_db_path: str,
 ) -> bool:
     """Devuelve True si al menos un LPUSH tuvo éxito cuando hay insights con contenido."""
-    from duckclaw.capadonna_plugin import push_capadonna_state_delta_sync
+    from duckclaw.state_delta_enqueue import push_extension_state_delta_sync
 
     if not insights:
         return True
@@ -391,7 +391,7 @@ def emit_memory_deltas(
                 "source": "dreamer_job",
             },
         }
-        ok = push_capadonna_state_delta_sync(payload)
+        ok = push_extension_state_delta_sync(payload)
         _log.info("SEMANTIC_MEMORY_UPSERT topic=%r ok=%s", it.get("topic"), ok)
         if ok:
             any_ok = True
@@ -439,7 +439,7 @@ def compact_old_history(
     *,
     days: int = 7,
 ) -> bool:
-    from duckclaw.capadonna_plugin import push_capadonna_state_delta_sync
+    from duckclaw.state_delta_enqueue import push_extension_state_delta_sync
 
     payload = {
         "tenant_id": tenant_id,
@@ -452,7 +452,7 @@ def compact_old_history(
             "days": int(days),
         },
     }
-    ok = push_capadonna_state_delta_sync(payload)
+    ok = push_extension_state_delta_sync(payload)
     _log.info("CONVERSATION_COMPACTION days=%s ok=%s", days, ok)
     return ok
 

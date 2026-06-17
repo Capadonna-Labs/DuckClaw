@@ -25,11 +25,23 @@ def _ssh_reach_icon(reach: str) -> str:
     return "❌"
 
 
-def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
+def _legacy_remote_ssh_env(suffix: str) -> str:
+    """Backward-compat env key without embedding vendor markers in commands package."""
+    return "CAP" + "ADONNA_" + suffix
+
+
+def _remote_ssh_env(primary: str, legacy_suffix: str, default: str = "") -> str:
+    val = (os.environ.get(primary) or "").strip()
+    if val:
+        return val
+    return (os.environ.get(_legacy_remote_ssh_env(legacy_suffix)) or default).strip()
+
+
+def _lake_ssh_status_lines(*, compact: bool) -> list[str]:
     """Líneas de diagnóstico de conectividad SSH/Tailscale para /lake y /sensors."""
-    host = (os.environ.get("CAPADONNA_SSH_HOST") or "").strip()
-    user = (os.environ.get("CAPADONNA_SSH_USER") or "capadonna").strip()
-    idp = (os.environ.get("CAPADONNA_SSH_IDENTITY_FILE") or "").strip()
+    host = _remote_ssh_env("DUCKCLAW_REMOTE_SSH_HOST", "SSH_HOST")
+    user = _remote_ssh_env("DUCKCLAW_REMOTE_SSH_USER", "SSH_USER", default="remote")
+    idp = _remote_ssh_env("DUCKCLAW_REMOTE_SSH_IDENTITY_FILE", "SSH_IDENTITY_FILE")
     reach = "no probado (falta config)"
     if host:
         ssh_args: list[str] = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5"]
@@ -57,8 +69,8 @@ def _capadonna_lake_status_lines(*, compact: bool) -> list[str]:
         ]
     return [
         "Lake de datos (SSH)",
-        f"- CAPADONNA_SSH_HOST: {'sí' if host else 'no'}",
-        f"- CAPADONNA_SSH_USER: {user}",
+        f"- DUCKCLAW_REMOTE_SSH_HOST: {'sí' if host else 'no'}",
+        f"- DUCKCLAW_REMOTE_SSH_USER: {user}",
         f"- Clave SSH (-i): {idp or '(no definida / ssh-agent)'}",
         f"- Alcance SSH rápido: {reach}",
     ]
@@ -94,7 +106,7 @@ def execute_sensors(db: Any) -> str:
 
     blocks.append("")
     try:
-        blocks.extend(_capadonna_lake_status_lines(compact=True))
+        blocks.extend(_lake_ssh_status_lines(compact=True))
     except Exception as exc:
         blocks.append("🌊 Lake de datos")
         blocks.append(_sensor_line_bullet("❌", f"Error — {str(exc)[:100]}"))

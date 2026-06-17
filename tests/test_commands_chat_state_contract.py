@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib
 import inspect
 from pathlib import Path
 from typing import Any
@@ -9,11 +10,19 @@ import pytest
 from duckclaw.commands import chat_state
 from duckclaw.graphs import on_the_fly_commands
 
+CANONICAL_MODULE = "duckclaw.commands.chat_state"
+CHAT_STATE_FUNCTION_EXPORTS = (
+    "get_chat_state",
+    "set_chat_state",
+    "_ensure_agent_config",
+    "execute_forget",
+    "execute_context_toggle",
+)
+
 
 def test_chat_state_ownership_lives_outside_graphs() -> None:
-    assert chat_state.get_chat_state.__module__ == "duckclaw.commands.chat_state"
-    assert chat_state.set_chat_state.__module__ == "duckclaw.commands.chat_state"
-    assert chat_state._ensure_agent_config.__module__ == "duckclaw.commands.chat_state"
+    for name in CHAT_STATE_FUNCTION_EXPORTS:
+        assert getattr(chat_state, name).__module__ == CANONICAL_MODULE
 
     source = inspect.getsource(chat_state)
     assert "duckclaw.graphs.on_the_fly_commands" not in source
@@ -26,6 +35,8 @@ def test_on_the_fly_chat_state_imports_remain_compatible() -> None:
     assert on_the_fly_commands._ensure_agent_config is chat_state._ensure_agent_config
     assert on_the_fly_commands._chat_key is chat_state._chat_key
     assert on_the_fly_commands._skip_runtime_ddl is chat_state._skip_runtime_ddl
+    assert on_the_fly_commands.execute_forget is chat_state.execute_forget
+    assert on_the_fly_commands.execute_context_toggle is chat_state.execute_context_toggle
 
 
 def test_context_toggle_with_read_only_handle_uses_typed_agent_config_command(
@@ -70,7 +81,7 @@ def test_context_toggle_with_read_only_handle_uses_typed_agent_config_command(
     )
 
     db = ReadOnlyDb(tmp_path / "vault.duckdb")
-    out = on_the_fly_commands.execute_context_toggle(
+    out = chat_state.execute_context_toggle(
         db,
         "chat1",
         "on",
@@ -87,4 +98,3 @@ def test_context_toggle_with_read_only_handle_uses_typed_agent_config_command(
     assert captured["user_id"] == "chat1"
     assert db.released is True
     assert db.resumed is True
-

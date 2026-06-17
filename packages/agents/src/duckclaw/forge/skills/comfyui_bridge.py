@@ -696,24 +696,19 @@ def _visual_state_delta_target_db_path() -> str:
 
 
 def _state_delta_base() -> dict[str, str]:
-    from duckclaw.capadonna_plugin import capadonna_tool_tenant_id, capadonna_tool_user_id
+    from duckclaw.runtime_tool_context import merge_tool_context
 
-    tenant_id = capadonna_tool_tenant_id()
-    user_id = capadonna_tool_user_id()
-
-    return {
-        "tenant_id": tenant_id or "default",
-        "user_id": user_id or "default",
-        "target_db_path": _visual_state_delta_target_db_path(),
-    }
+    ctx = merge_tool_context()
+    ctx["target_db_path"] = _visual_state_delta_target_db_path()
+    return ctx
 
 
 def configure_visual_generation_context(*, tenant_id: str, user_id: str) -> None:
     """Best-effort context bridge for visual generation state deltas."""
     try:
-        from duckclaw.capadonna_plugin import set_capadonna_tool_context
+        from duckclaw.runtime_tool_context import set_tool_context
 
-        set_capadonna_tool_context(tenant_id=tenant_id, user_id=user_id)
+        set_tool_context(tenant_id=tenant_id, user_id=user_id)
     except Exception:
         return
 
@@ -743,9 +738,9 @@ def _generate_visual_asset_impl(
     template_name = str(cfg.get("template") or "comfy_default").strip() or "comfy_default"
     timeout_sec = _coerce_comfy_timeout_sec(cfg.get("timeout_sec"))
     client_id = str(uuid.uuid4())
-    from duckclaw.capadonna_plugin import capadonna_tool_chat_id
+    from duckclaw.runtime_tool_context import tool_chat_id
 
-    chat_id = capadonna_tool_chat_id()
+    chat_id = tool_chat_id()
 
     try:
         workflow, meta = load_workflow_template(template_name)
@@ -914,9 +909,9 @@ def _edit_visual_asset_impl(
     den = _default_img2img_denoise() if denoise is None else float(denoise)
     timeout_sec = _comfy_timeout_sec()
     client_id = str(uuid.uuid4())
-    from duckclaw.capadonna_plugin import capadonna_tool_chat_id
+    from duckclaw.runtime_tool_context import tool_chat_id
 
-    chat_id = capadonna_tool_chat_id()
+    chat_id = tool_chat_id()
 
     try:
         uploaded_name = upload_image_to_comfy(src, base_url)

@@ -24,6 +24,8 @@
 /setup|Config key=value
 /approve|Aprobar última acción
 /reject|Rechazar última acción
-/approve-code <uuid>|HITL: aprueba code_decision y crea PR (requiere Capadonna-Driller); alias /approve_code
-/reject-code <uuid> [razón]|Rechaza code_decision propuesta (requiere Capadonna-Driller)
-/lake|Estado del túnel SSH Capadonna (env + prueba rápida)
+/approve-code <uuid>|HITL: aprueba code_decision y crea PR vía GitHub MCP; alias /approve_code
+/reject-code <uuid> [razón]|Rechaza code_decision PENDING_HITL en main.code_decisions
+/uncertainty --status|Lista eventos PENDING_HITL en main.agent_uncertainty_log
+/resolve-uncertainty <uuid>|Resuelve evento de incertidumbre HITL; alias /resolve_uncertainty
+/lake|Estado del túnel SSH remoto (env DUCKCLAW_REMOTE_SSH_* + prueba rápida)

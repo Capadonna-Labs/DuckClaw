@@ -220,11 +220,11 @@ def test_state_delta_base_uses_gateway_hub_not_worker_vault(monkeypatch: pytest.
         lambda: hub,
     )
     monkeypatch.setattr(
-        "duckclaw.capadonna_plugin.capadonna_tool_tenant_id",
+        "duckclaw.runtime_tool_context.tool_tenant_id",
         lambda: "Cuantitativo",
     )
     monkeypatch.setattr(
-        "duckclaw.capadonna_plugin.capadonna_tool_user_id",
+        "duckclaw.runtime_tool_context.tool_user_id",
         lambda: "1726618406",
     )
     base = _state_delta_base()

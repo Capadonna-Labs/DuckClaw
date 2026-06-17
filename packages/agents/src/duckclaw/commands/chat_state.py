@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -229,4 +230,61 @@ def set_global_config(db: Any, key: str, value: str) -> None:
 
 _get_global_config = get_global_config
 _set_global_config = set_global_config
+
+
+def execute_forget(db: Any, chat_id: Any, *, tenant_id: Any = None) -> str:
+    """/forget: borra historial de la conversación y reinicia estado."""
+    tid = str(tenant_id or "default").strip() or "default"
+    ok, err = forget_chat_state_via_typed_command(db, chat_id, tenant_id=tid)
+    if not ok:
+        return f"No se pudo borrar historial: {err}"
+    if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() == "true":
+        try:
+            import langsmith
+
+            # Log evento Habeas Data (opcional: run_id no disponible aquí)
+            pass
+        except Exception:
+            pass
+    return "✅ Historial borrado."
+
+
+def execute_context_toggle(
+    db: Any,
+    chat_id: Any,
+    on_off: str,
+    *,
+    tenant_id: Any = None,
+) -> str:
+    """/context on|off: activa o desactiva inyección de memoria a largo plazo."""
+    tid = str(tenant_id or "default").strip() or "default"
+    v = (on_off or "").strip().lower()
+    if v in ("on", "1", "true", "sí", "si"):
+        ok, err = set_chat_state_via_typed_command(
+            db,
+            chat_id,
+            "use_rag",
+            "true",
+            tenant_id=tid,
+        )
+        if not ok:
+            return f"No se pudo actualizar contexto largo: {err}"
+        return "✅ Contexto largo activado (más mensajes en historial)."
+    if v in ("off", "0", "false"):
+        ok, err = set_chat_state_via_typed_command(
+            db,
+            chat_id,
+            "use_rag",
+            "false",
+            tenant_id=tid,
+        )
+        if not ok:
+            return f"No se pudo actualizar contexto largo: {err}"
+        return "✅ Contexto largo desactivado (solo historial reciente)."
+    current = get_chat_state(db, chat_id, "use_rag")
+    return (
+        "Uso: `/context on` | `/context off` | `/context --add` [texto o pie de foto en imagen/álbum] | "
+        "`/context --summary` (`--summarize`)\n"
+        f"Estado actual (historial largo): {'on' if current != 'false' else 'off'}."
+    )
 

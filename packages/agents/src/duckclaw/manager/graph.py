@@ -320,12 +320,7 @@ def _is_entry_route_system_event(text: str) -> bool:
     True si el inbound debe ejecutarse en ``entry_worker_id`` (worker de la ruta HTTP),
     sin que el manager lo reasigne (p. ej. eventos de ruta explícita hacia el worker de entrada).
     """
-    t = (text or "").strip()
-    if _is_goals_proactive_system_event(t):
-        return True
-    if not t.startswith("[SYSTEM_EVENT:"):
-        return False
-    return '"type":"TRADING_TICK"' in t or '"type": "TRADING_TICK"' in t
+    return _is_goals_proactive_system_event(text)
 
 
 def _user_demands_tool_evidence_from_db(text_lower: str) -> bool:

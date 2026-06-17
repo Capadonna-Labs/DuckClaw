@@ -2260,9 +2260,7 @@ def _run_section(
                 console.print(f"[red]Error al desplegar el servicio o generar la unidad systemd: {e}[/]")
                 console.print("[yellow]Módulo duckclaw.ops no disponible. Instala el paquete y vuelve a intentar.[/]")
         llm_is_mlx = (state.get("llm_provider") or "").strip().lower() == "mlx"
-        start_mlx = repo_root / "duckclaw" / "mlx" / "start_mlx.sh"
-        if not start_mlx.is_file():
-            start_mlx = repo_root / "mlx" / "start_mlx.sh"
+        start_mlx = repo_root / "packages" / "agents" / "train" / "scripts" / "serve" / "start_mlx.sh"
         if llm_is_mlx and start_mlx.is_file():
             use_pm2_inference = deploy_provider == "pm2" or (
                 deploy_provider == "auto" and platform.system() != "Windows"
@@ -2277,9 +2275,9 @@ def _run_section(
                         cwd=str(repo_root),
                         start_new_session=True,
                     )
-                    console.print("[dim]Ejecutando duckclaw/mlx/start_mlx.sh en segundo plano.[/]")
+                    console.print("[dim]Ejecutando packages/agents/train/scripts/serve/start_mlx.sh en segundo plano.[/]")
                 except Exception as e:
-                    console.print(f"[yellow]No se pudo ejecutar duckclaw/mlx/start_mlx.sh: {e}[/]")
+                    console.print(f"[yellow]No se pudo ejecutar start_mlx.sh: {e}[/]")
         # API Gateway (PM2): ofrecer aquí si hay PM2 y el bot ya estaba o acaba de desplegarse (antes de "arrancar ahora").
         # Así no depende de responder "no" a arrancar el bot ni de terminar el polling en primer plano.
         if shutil.which("pm2") and (service_exists or deploy_yes):

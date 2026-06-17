@@ -6,8 +6,10 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel
+
+from routers.admin_domains.admin_common import admin_audit, problem, require_admin_key as _require_admin_key_impl
 
 router = APIRouter(prefix="/ops", tags=["admin-ops"])
 
@@ -44,9 +46,7 @@ class OpsRunBody(BaseModel):
 
 
 def require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
-    from routers import admin as admin_router
-
-    admin_router._require_admin_key(x_admin_key)
+    _require_admin_key_impl(x_admin_key)
 
 
 def actor_from_header(x_actor: str | None = Header(None, alias="X-Duckclaw-Actor")) -> str:
@@ -64,11 +64,8 @@ def _repo_root() -> Path:
     return Path(raw) if raw else _REPO_ROOT
 
 
-def _problem(status_code: int, title: str, detail: str) -> HTTPException:
-    return HTTPException(
-        status_code=status_code,
-        detail={"type": "about:blank", "title": title, "status": status_code, "detail": detail},
-    )
+def _problem(status_code: int, title: str, detail: str):
+    return problem(status_code, title, detail)
 
 
 def _admin_audit(
@@ -79,9 +76,7 @@ def _admin_audit(
     actor: str = "admin-ui",
     meta: dict[str, Any] | None = None,
 ) -> None:
-    from routers import admin as admin_router
-
-    admin_router._admin_audit(action, resource, detail, actor=actor, meta=meta)
+    admin_audit(action, resource, detail, actor=actor, meta=meta)
 
 
 def _pm2_restart_interrupted(op_id: str, exit_code: int, stdout: str) -> bool:

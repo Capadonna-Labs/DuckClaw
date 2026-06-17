@@ -72,20 +72,17 @@ def test_admin_runtime_config_routes_live_in_domain_module() -> None:
 
 def test_runtime_settings_mutators_use_typed_write_commands() -> None:
     db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
-    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    telegram = Path("services/api-gateway/routers/admin_domains/telegram_routes.py").read_text(encoding="utf-8")
 
     patch_segment = db_first.split('async def patch_runtime_settings(', 1)[1].split(
         '@router.get("/knowledge/sources"',
         1,
     )[0]
-    telegram_helper_segment = admin.split(
-        "def _upsert_telegram_webhook_routes_runtime_setting(",
+    telegram_helper_segment = telegram.split(
+        "def upsert_telegram_webhook_routes_runtime_setting(",
         1,
-    )[1].split("\n\ndef _mcp_port_runtime_setting", 1)[0]
-    telegram_put_segment = admin.split('async def put_telegram_routes(', 1)[1].split(
-        "\n\n\nasync def _admin_auth_login_impl",
-        1,
-    )[0]
+    )[1].split("\n\ndef get_telegram_routes", 1)[0]
+    telegram_put_segment = telegram.split("async def put_telegram_routes(", 1)[1]
 
     assert "open_gateway_db(read_only=False)" not in patch_segment
     assert "upsert_runtime_setting(" not in patch_segment
@@ -547,17 +544,39 @@ def test_template_catalog_router_uses_typed_commands_for_mutators() -> None:
 
 def test_admin_template_helpers_no_longer_own_structured_writes() -> None:
     admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
-    helper_block = admin.split("async def _put_template_file_impl(", 1)[1].split(
-        "\n\nasync def _validate_template_impl",
+    lifecycle = Path("services/api-gateway/routers/admin_domains/template_lifecycle.py").read_text(
+        encoding="utf-8"
+    )
+    helper_block = lifecycle.split("async def put_template_file_impl(", 1)[1].split(
+        "\n\nasync def validate_template_impl",
         1,
     )[0]
 
+    assert "async def _put_template_file_impl(" not in admin
+    assert "async def put_template_file_impl(" not in admin
     assert "open_gateway_db(read_only=False)" not in helper_block
     assert "BEGIN TRANSACTION" not in helper_block
     assert "update_catalog_worker_file(" not in helper_block
     assert "deactivate_visible_worker_for_actor(" not in helper_block
     assert "reactivate_visible_worker_for_actor(" not in helper_block
     assert "hard_delete_visible_worker_for_actor(" not in helper_block
+
+
+def test_admin_audit_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    audit = Path("services/api-gateway/routers/admin_domains/audit.py").read_text(encoding="utf-8")
+    common = Path("services/api-gateway/routers/admin_domains/admin_common.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.audit import router as audit_router" in admin
+    assert "router.include_router(audit_router)" in admin
+    assert '@router.get("/audit"' not in admin
+    assert "async def get_admin_audit" not in admin
+    assert "def admin_audit(" in common
+    assert "def audit_log_path(" in common
+    assert 'router = APIRouter(prefix="/audit", tags=["admin-audit"])' in audit
+    assert '@router.get("", dependencies=[Depends(require_admin_key)])' in audit
+    assert "async def get_admin_audit" in audit
+    assert "def _load_audit_entries" in audit
 
 
 def test_admin_ops_routes_live_in_domain_module() -> None:
@@ -577,6 +596,24 @@ def test_admin_ops_routes_live_in_domain_module() -> None:
     assert '@router.post("/run", dependencies=[Depends(require_admin_key)])' in ops
 
 
+def test_admin_overview_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    overview = Path("services/api-gateway/routers/admin_domains/overview.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.overview import router as overview_router" in admin
+    assert "router.include_router(overview_router)" in admin
+    assert "from routers.admin_domains.overview import overview_usage_metrics as _overview_usage_metrics" in admin
+    assert '@router.get("/health"' not in admin
+    assert '@router.get("/overview/metrics"' not in admin
+    assert "def _gateway_db_query_rows" not in admin
+    assert "def _overview_usage_metrics" not in admin
+    assert 'router = APIRouter(tags=["admin-overview"])' in overview
+    assert '@router.get("/health", dependencies=[Depends(require_admin_key)])' in overview
+    assert '@router.get("/overview/metrics", dependencies=[Depends(require_admin_key)])' in overview
+    assert "def overview_usage_metrics(" in overview
+    assert "def gateway_db_query_rows(" in overview
+
+
 def test_duckdb_legacy_cleanup_router_uses_typed_command() -> None:
     explorer = Path("services/api-gateway/routers/admin_domains/duckdb_explorer.py").read_text(
         encoding="utf-8"
@@ -592,3 +629,103 @@ def test_duckdb_legacy_cleanup_router_uses_typed_command() -> None:
     assert "DropLegacyDuckDbObjectsCommand" in segment
     assert "enqueue_typed_command" in segment
     assert "task_id" in segment
+
+
+def test_admin_common_hosts_shared_helpers() -> None:
+    common = Path("services/api-gateway/routers/admin_domains/admin_common.py").read_text(encoding="utf-8")
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+
+    assert "def admin_audit(" in common
+    assert "def audit_log_path(" in common
+    assert "def require_admin_key(" in common
+    assert "def problem(" in common
+    assert "def actor_from_header(" in common
+    assert "from routers.admin_domains.admin_common import" in admin
+    assert "def _admin_audit(" not in admin
+    assert "def _audit_log_path(" not in admin
+
+
+def test_admin_env_config_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    env_config = Path("services/api-gateway/routers/admin_domains/env_config.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.env_config import router as env_config_router" in admin
+    assert "router.include_router(env_config_router)" in admin
+    assert '@router.get("/env"' not in admin
+    assert '@router.patch("/env"' not in admin
+    assert '@router.get("/env", dependencies=[Depends(require_admin_key)])' in env_config
+    assert '@router.patch("/env", dependencies=[Depends(require_admin_key)])' in env_config
+    assert "def merge_env_lines(" in env_config
+
+
+def test_admin_telegram_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    telegram = Path("services/api-gateway/routers/admin_domains/telegram_routes.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.telegram_routes import router as telegram_routes_router" in admin
+    assert "router.include_router(telegram_routes_router)" in admin
+    assert '@router.get("/telegram/routes"' not in admin
+    assert '@router.put("/telegram/routes"' not in admin
+    assert 'router = APIRouter(prefix="/telegram", tags=["admin-telegram-routes"])' in telegram
+    assert '@router.get("/routes", dependencies=[Depends(require_admin_key)])' in telegram
+    assert '@router.put("/routes", dependencies=[Depends(require_admin_key)])' in telegram
+
+
+def test_admin_catalog_meta_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    catalog_meta = Path("services/api-gateway/routers/admin_domains/catalog_meta.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.catalog_meta import router as catalog_meta_router" in admin
+    assert "router.include_router(catalog_meta_router)" in admin
+    assert '@router.get("/catalog/mcp"' not in admin
+    assert '@router.get("/catalog/industries"' not in admin
+    assert '@router.get("/catalog/topologies"' not in admin
+    assert '@router.get("/catalog/source-preview"' not in admin
+    assert 'router = APIRouter(prefix="/catalog", tags=["admin-catalog-meta"])' in catalog_meta
+    assert '@router.get("/mcp", dependencies=[Depends(require_admin_key)])' in catalog_meta
+    assert '@router.get("/industries", dependencies=[Depends(require_admin_key)])' in catalog_meta
+    assert '@router.get("/topologies", dependencies=[Depends(require_admin_key)])' in catalog_meta
+    assert '@router.get("/source-preview", dependencies=[Depends(require_admin_key)])' in catalog_meta
+
+
+def test_admin_forge_projects_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    forge_projects = Path("services/api-gateway/routers/admin_domains/forge_projects.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.forge_projects import router as forge_projects_router" in admin
+    assert "router.include_router(forge_projects_router)" in admin
+    assert '@router.get("/forge-projects"' not in admin
+    assert '@router.post("/forge-projects"' not in admin
+    assert 'router = APIRouter(prefix="/forge-projects", tags=["admin-forge-projects"])' in forge_projects
+    assert '@router.get("", dependencies=[Depends(require_admin_key)])' in forge_projects
+    assert '@router.post("", dependencies=[Depends(require_admin_key)])' in forge_projects
+
+
+def test_admin_hitl_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    hitl = Path("services/api-gateway/routers/admin_domains/hitl_admin.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.hitl_admin import router as hitl_admin_router" in admin
+    assert "router.include_router(hitl_admin_router)" in admin
+    assert '@router.post("/code/approve"' not in admin
+    assert '@router.post("/code/reject"' not in admin
+    assert '@router.get("/code/decisions"' not in admin
+    assert '@router.get("/uncertainty/events"' not in admin
+    assert '@router.post("/uncertainty/resolve"' not in admin
+    assert '@router.get("/meditate/status"' not in admin
+    assert '@router.post("/meditate/tick"' not in admin
+    assert 'router = APIRouter(tags=["admin-hitl"])' in hitl
+    assert "duckclaw.hitl.code_decision_service" in hitl
+    assert "duckclaw.hitl.uncertainty_service" in hitl
+    assert "capadonna" not in hitl
+
+
+def test_admin_fly_commands_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    fly_commands = Path("services/api-gateway/routers/admin_domains/fly_commands_catalog.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.fly_commands_catalog import router as fly_commands_catalog_router" in admin
+    assert "router.include_router(fly_commands_catalog_router)" in admin
+    assert '@router.get("/fly-commands"' not in admin
+    assert 'router = APIRouter(tags=["admin-fly-commands"])' in fly_commands
+    assert '@router.get("/fly-commands", dependencies=[Depends(require_admin_key)])' in fly_commands

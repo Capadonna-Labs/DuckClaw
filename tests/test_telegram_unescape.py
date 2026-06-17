@@ -8,10 +8,8 @@ import pytest
 
 from env_ids import TELEGRAM_TEST_USER_ID
 
-from duckclaw.graphs.on_the_fly_commands import (
-    execute_tasks,
-    unescape_telegram_markdown_v2_layers,
-)
+from duckclaw.commands.fly_misc import execute_tasks
+from duckclaw.utils.telegram_markdown_v2 import unescape_telegram_markdown_v2_layers
 from duckclaw.utils.telegram_markdown_v2 import escape_telegram_markdown_v2 as _telegram_safe
 
 

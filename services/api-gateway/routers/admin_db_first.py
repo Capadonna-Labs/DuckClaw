@@ -11,7 +11,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from routers.admin import _actor_from_header, _admin_audit, _problem, _require_admin_key
+from routers.admin_domains.admin_common import (
+    actor_from_header as _actor_from_header,
+    admin_audit as _admin_audit,
+    problem as _problem,
+    require_admin_key as _require_admin_key,
+)
 router = APIRouter(tags=["admin-db-first"])
 
 

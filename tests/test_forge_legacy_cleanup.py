@@ -1037,3 +1037,29 @@ def test_hitl_command_module_has_no_capadonna_or_driller_imports() -> None:
     ]
 
     assert offenders == []
+
+
+CAPADONNA_PLUGIN_PATH = (
+    REPO_ROOT
+    / "packages"
+    / "agents"
+    / "src"
+    / "duckclaw"
+    / "capadonna_plugin.py"
+)
+
+
+def test_capadonna_plugin_file_is_absent_from_monorepo() -> None:
+    assert not CAPADONNA_PLUGIN_PATH.exists(), (
+        f"legacy vertical facade must not return to monorepo: {CAPADONNA_PLUGIN_PATH}"
+    )
+
+
+GATEWAY_MAIN_PATH = REPO_ROOT / "services" / "api-gateway" / "main.py"
+
+
+def test_gateway_main_has_no_bi_analyst_worker_reply_branch() -> None:
+    """Telegram insight beautify must be content-driven, not hardcoded to BI-Analyst worker."""
+    source = GATEWAY_MAIN_PATH.read_text(encoding="utf-8", errors="ignore")
+    assert '== "BI-Analyst"' not in source
+    assert "_beautify_bi_analyst" not in source

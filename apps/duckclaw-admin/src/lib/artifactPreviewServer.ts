@@ -3,10 +3,12 @@ import { readFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { repoRoot } from '@/lib/localOps';
 
-/** Misma prioridad que ``vaults.db_root()`` en el gateway (Capadonna antes que monorepo). */
+/** Misma prioridad que ``vaults.db_root()`` en el gateway (extensión externa antes que monorepo). */
 export function resolveProductDbRoot(): string {
-  const capadonnaRoot = process.env.CAPADONNA_DRILLER_ROOT?.trim();
-  if (capadonnaRoot) return capadonnaRoot;
+  const extensionRoot =
+    process.env.DUCKCLAW_EXTENSION_ROOT?.trim() ||
+    process.env.CAPADONNA_DRILLER_ROOT?.trim();
+  if (extensionRoot) return extensionRoot;
   return repoRoot();
 }
 

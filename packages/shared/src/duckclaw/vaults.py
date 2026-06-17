@@ -60,13 +60,14 @@ def _initial_vault_id_for_scoped_bootstrap() -> str:
 
 def db_root() -> Path:
     """
-    Directorio `db/` del monorepo.
+    Directorio ``db/`` del monorepo o de un checkout de extensión externa.
 
-    Prioridad: ``CAPADONNA_DRILLER_ROOT`` (producto Capadonna-Driller con vaults reales),
-    luego ``DUCKCLAW_REPO_ROOT`` (monorepo DuckClaw). Si ninguno está definido, ``db/``
-    relativo al cwd (legacy).
+    Prioridad: ``DUCKCLAW_EXTENSION_ROOT`` (nombre canónico para checkout externo con
+    vaults reales, p. ej. Capadonna-Driller), luego ``CAPADONNA_DRILLER_ROOT`` (alias
+    legacy del mismo checkout), luego ``DUCKCLAW_REPO_ROOT`` (monorepo DuckClaw). Si
+    ninguno está definido, ``db/`` relativo al cwd (legacy).
     """
-    for key in ("CAPADONNA_DRILLER_ROOT", "DUCKCLAW_REPO_ROOT"):
+    for key in ("DUCKCLAW_EXTENSION_ROOT", "CAPADONNA_DRILLER_ROOT", "DUCKCLAW_REPO_ROOT"):
         env_root = (os.environ.get(key) or "").strip()
         if env_root:
             return (Path(env_root).expanduser().resolve() / "db")

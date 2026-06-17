@@ -149,17 +149,19 @@ def test_chat_request_username_coerces_dict_to_str() -> None:
 def test_chat_parallel_invocations_env() -> None:
     import os
 
+    from core.chat_locks import chat_parallel_invocations_enabled
+
     prev_d = os.environ.get("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS")
     prev_c = os.environ.get("CHAT_PARALLEL_INVOCATIONS")
     try:
         os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = ""
         os.environ.pop("CHAT_PARALLEL_INVOCATIONS", None)
-        assert gateway_main._chat_parallel_invocations_enabled() is False
+        assert chat_parallel_invocations_enabled() is False
         os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = "true"
-        assert gateway_main._chat_parallel_invocations_enabled() is True
+        assert chat_parallel_invocations_enabled() is True
         os.environ["DUCKCLAW_CHAT_PARALLEL_INVOCATIONS"] = ""
         os.environ["CHAT_PARALLEL_INVOCATIONS"] = "true"
-        assert gateway_main._chat_parallel_invocations_enabled() is True
+        assert chat_parallel_invocations_enabled() is True
     finally:
         if prev_d is None:
             os.environ.pop("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS", None)
@@ -325,23 +327,27 @@ def test_effective_tenant_uses_db_first_runtime_setting(
 
 
 def test_split_plain_text_for_telegram_reply() -> None:
-    assert gateway_main._split_plain_text_for_telegram_reply("", 80) == [""]
+    from core.telegram_chunking import split_plain_text_for_telegram_reply
+
+    assert split_plain_text_for_telegram_reply("", 80) == [""]
     raw = "a" * 200
     # el splitter impone mínimo 64 caracteres por trozo
-    parts = gateway_main._split_plain_text_for_telegram_reply(raw, 80)
+    parts = split_plain_text_for_telegram_reply(raw, 80)
     assert "".join(parts) == raw
     assert all(len(p) <= 80 for p in parts)
     with_nl = "l1\n" + "b" * 30 + "\nl3"
-    p2 = gateway_main._split_plain_text_for_telegram_reply(with_nl, 80)
+    p2 = split_plain_text_for_telegram_reply(with_nl, 80)
     assert "".join(p2) == with_nl
 
 
 def test_plain_subchunks_for_telegram_budget_splits_when_escape_grows() -> None:
+    from core.telegram_chunking import plain_subchunks_for_telegram_budget
+
     def fake_safe(s: str) -> str:
         # longitud artificial >> límite Telegram para forzar subdivisión
         return "x" * (len(s) * 1100)
 
-    tiny = gateway_main._plain_subchunks_for_telegram_budget("abcd", fake_safe)
+    tiny = plain_subchunks_for_telegram_budget("abcd", fake_safe)
     assert len(tiny) > 1
     assert "".join(tiny) == "abcd"
 

@@ -1,5 +1,5 @@
 """
-Sleep-time Dreamer: Light (RO DuckDB) → REM (MLX + fallback API) → Deep (Capadonna state deltas).
+Sleep-time Dreamer: Light (RO DuckDB) → REM (MLX + fallback API) → Deep (transversal state deltas vía DB-writer).
 
 Ejecutar vía PM2 (02:00 COT) o manualmente con ``uv run ... dreamer_job.py``.
 """

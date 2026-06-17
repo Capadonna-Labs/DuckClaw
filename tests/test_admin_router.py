@@ -702,9 +702,9 @@ def test_telegram_routes_get_and_put(
     )
     monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", compact_line)
 
-    import routers.admin as admin_router
+    import routers.admin_domains.env_config as env_config_module
 
-    monkeypatch.setattr(admin_router, "_env_file", lambda: env_file)
+    monkeypatch.setattr(env_config_module, "env_file", lambda: env_file)
 
     def fake_enqueue(command: object, *, db_path: str, user_id: str) -> str:
         _ = user_id

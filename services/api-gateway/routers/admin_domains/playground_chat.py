@@ -5,8 +5,6 @@ import logging
 import os
 import re
 import time
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, status
@@ -19,76 +17,20 @@ from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
 from duckclaw.runtime_session_settings import RUNTIME_SESSION_DOMAIN, runtime_session_actor
 from duckclaw.write_commands import UpsertRuntimeSettingCommand
+from routers.admin_domains.admin_common import (
+    actor_from_header,
+    admin_audit,
+    problem,
+    repo_root,
+    require_admin_key,
+)
+from routers.admin_domains.env_config import env_file
 
 router = APIRouter(tags=["admin-playground-chat"])
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
 
-
-def _repo_root() -> Path:
-    raw = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
-    return Path(raw) if raw else _REPO_ROOT
-
-
-def _env_file() -> Path:
-    return _repo_root() / ".env"
-
-
-def require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
-    expected = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
-    if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="DUCKCLAW_ADMIN_API_KEY no configurada en el gateway",
-        )
-    if (x_admin_key or "").strip() != expected:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin key inválida")
-
-
-def actor_from_header(x_actor: str | None = Header(None, alias="X-Duckclaw-Actor")) -> str:
-    raw = (x_actor or "").strip()[:128]
-    if raw and raw != "admin-ui":
-        return raw
-    admin_email = os.environ.get("DUCKCLAW_ADMIN_EMAIL", "").strip()
-    if admin_email and "@" in admin_email:
-        return admin_email[:128]
-    return raw or "admin-ui"
-
-
-def _problem(status_code: int, title: str, detail: str) -> HTTPException:
-    return HTTPException(
-        status_code=status_code,
-        detail={"type": "about:blank", "title": title, "status": status_code, "detail": detail},
-    )
-
-
-def _audit_log_path() -> Path:
-    path = _repo_root() / ".duckclaw" / "admin-audit.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _admin_audit(
-    action: str,
-    resource: str,
-    detail: str,
-    *,
-    actor: str = "admin-ui",
-    meta: dict[str, Any] | None = None,
-) -> None:
-    entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "actor": (actor or "admin-ui")[:128],
-        "action": action[:64],
-        "resource": resource[:256],
-        "detail": detail[:2000],
-        "meta": meta or {},
-    }
-    try:
-        with _audit_log_path().open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+def _repo_root():
+    return repo_root()
 
 
 def _gateway_effective_tenant_id(request_tenant: str | None) -> str:
@@ -864,7 +806,7 @@ async def playground_config(
         "config_chat_id": eff_chat,
         "workers": workers_payload["workers"],
         "workers_invalid": workers_payload["workers_invalid"],
-        "env_path": str(_env_file()),
+        "env_path": str(env_file()),
         "effective_tenant_id": eff_tenant,
         "telegram_user_id": (profile.get("telegram_user_id") or team_ctx.get("telegram_user_id") or ""),
         "team_chat_id": team_ctx.get("team_chat_id"),
@@ -914,7 +856,7 @@ async def playground_set_vault(
         if not os.path.isabs(abs_path):
             abs_path = str(_repo_root() / abs_path.lstrip("/"))
         if not os.path.isfile(abs_path):
-            raise _problem(404, "Vault no encontrado", raw_path)
+            raise problem(404, "Vault no encontrado", raw_path)
         stored = raw_path
     else:
         stored = ""
@@ -967,7 +909,7 @@ async def playground_set_worker(
     tenant_id = _gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
     worker_id = re.sub(r"[^a-zA-Z0-9_-]", "", (body.worker_id or "").strip())
     if not worker_id:
-        raise _problem(400, "worker_id inválido", body.worker_id)
+        raise problem(400, "worker_id inválido", body.worker_id)
 
     redis_client = getattr(request.app.state, "redis", None)
     meta = await get_conversation_meta(redis_client, tenant_id, chat_id)
@@ -1004,14 +946,14 @@ async def playground_set_model(
     if prov in ("or", "router"):
         prov = "openrouter"
     if prov not in _PROVIDERS:
-        raise _problem(
+        raise problem(
             400,
             "Proveedor inválido",
             f"Válidos: {', '.join(_PROVIDERS)}",
         )
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
-        raise _problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
+        raise problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
     chat_id = body.chat_id.strip()
     if prov == "mlx":
         default_model = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
@@ -1041,9 +983,9 @@ async def playground_set_model(
             task_id = db_write_queue.enqueue_typed_command(command, db_path=gw, user_id="default")
             command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5)
         except Exception as exc:
-            raise _problem(400, "No se pudo actualizar el modelo", str(exc)) from exc
+            raise problem(400, "No se pudo actualizar el modelo", str(exc)) from exc
         if command_status and command_status.status == "failed":
-            raise _problem(
+            raise problem(
                 400,
                 "No se pudo actualizar el modelo",
                 command_status.detail or "runtime setting write failed",
@@ -1164,13 +1106,13 @@ async def playground_chat(
                             project_id=project_id,
                         )
                 except PermissionError as exc:
-                    raise _problem(403, str(exc), wid) from exc
+                    raise problem(403, str(exc), wid) from exc
     except FileNotFoundError:
         pass
     msg = (body.message or "").strip()
     original_user_message = msg
     if not msg and not body.images:
-        raise _problem(400, "message o images requeridos", "")
+        raise problem(400, "message o images requeridos", "")
     eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
     if body.images:
         from core.comfyui_inbound import ingest_admin_visual_edit_inbound, should_route_comfyui_edit
@@ -1186,9 +1128,9 @@ async def playground_chat(
                     mime_type=first_image.mime_type,
                 )
             except ValueError as exc:
-                raise _problem(400, str(exc), "images") from exc
+                raise problem(400, str(exc), "images") from exc
             except Exception as exc:
-                raise _problem(502, "Error preparando imagen para edición", str(exc)) from exc
+                raise problem(502, "Error preparando imagen para edición", str(exc)) from exc
         else:
             try:
                 msg = await enrich_message_with_admin_images(
@@ -1196,11 +1138,11 @@ async def playground_chat(
                     [img.model_dump() for img in body.images],
                 )
             except ValueError as exc:
-                raise _problem(400, str(exc), "images") from exc
+                raise problem(400, str(exc), "images") from exc
             except Exception as exc:
-                raise _problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
+                raise problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
     if not msg:
-        raise _problem(400, "message vacío tras VLM", body.message)
+        raise problem(400, "message vacío tras VLM", body.message)
     team_ctx = _playground_team_context(
         telegram_user_id=profile.get("telegram_user_id") or body.telegram_user_id,
         tenant_id=eff_tenant,
@@ -1214,18 +1156,18 @@ async def playground_chat(
     explicit_team = _playground_worker_explicitly_in_team(team_ctx, wid)
     team_allowed = _playground_worker_allowed_in_team(team_ctx, wid)
     if wid != "default" and not catalog_allowed:
-        raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+        raise problem(403, "Worker no asignado al catálogo del actor", wid)
     if not catalog_allowed:
         if db_first_console:
             if (team_ctx.get("team_source") or "") == "all":
-                raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+                raise problem(403, "Worker no asignado al catálogo del actor", wid)
             if not explicit_team:
-                raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+                raise problem(403, "Worker no asignado al catálogo del actor", wid)
         elif not team_allowed:
-            raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+            raise problem(403, "Worker no asignado al catálogo del actor", wid)
     session_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
     if body.images:
-        _admin_audit(
+        admin_audit(
             "playground.chat.images",
             session_id,
             f"count={len(body.images)}",
@@ -1302,7 +1244,7 @@ async def playground_chat(
             delivery_context=delivery_context,
         )
     except Exception as exc:
-        raise _problem(500, "Error en playground chat", str(exc)) from exc
+        raise problem(500, "Error en playground chat", str(exc)) from exc
 
     if isinstance(result, dict):
         visual = gateway_main._admin_visual_fields_from_invoke_result(
@@ -1344,14 +1286,14 @@ async def playground_voice(
     from core.stt_ingest import SensoryUnavailable as SttDown, process_audio_bytes
 
     if not sensory_enabled():
-        raise _problem(503, "DUCKCLAW_SENSORY_BASE_URL no configurado", "sensory")
+        raise problem(503, "DUCKCLAW_SENSORY_BASE_URL no configurado", "sensory")
 
     try:
         audio_bytes = base64.b64decode((body.audio_base64 or "").strip(), validate=False)
     except Exception as exc:
-        raise _problem(400, "audio_base64 inválido", str(exc)) from exc
+        raise problem(400, "audio_base64 inválido", str(exc)) from exc
     if not audio_bytes:
-        raise _problem(400, "audio vacío", "")
+        raise problem(400, "audio vacío", "")
 
     t_stt = time.perf_counter()
     try:
@@ -1361,7 +1303,7 @@ async def playground_voice(
             language_hint=body.language_hint,
         )
     except SttDown as exc:
-        raise _problem(503, "STT no disponible", str(exc)) from exc
+        raise problem(503, "STT no disponible", str(exc)) from exc
     finally:
         del audio_bytes
     stt_ms = (time.perf_counter() - t_stt) * 1000.0
@@ -1407,14 +1349,14 @@ async def playground_voice(
                             project_id=project_id,
                         )
                 except PermissionError as exc:
-                    raise _problem(403, str(exc), wid) from exc
+                    raise problem(403, str(exc), wid) from exc
     except FileNotFoundError:
         pass
 
     eff_tenant = str(profile.get("tenant_id") or "").strip() or _gateway_effective_tenant_id("default")
     team_ctx = _playground_team_context(tenant_id=eff_tenant, chat_id=body.chat_id)
     if wid != "default" and not catalog_allowed:
-        raise _problem(403, "Worker no asignado al catálogo del actor", wid)
+        raise problem(403, "Worker no asignado al catálogo del actor", wid)
 
     session_id = (body.chat_id or "admin-playground").strip() or "admin-playground"
     owner_uid = str(team_ctx.get("telegram_user_id") or "").strip()
@@ -1458,7 +1400,7 @@ async def playground_voice(
             delivery_context=delivery_context,
         )
     except Exception as exc:
-        raise _problem(500, "Error en playground voice (agente)", str(exc)) from exc
+        raise problem(500, "Error en playground voice (agente)", str(exc)) from exc
 
     if isinstance(result, dict):
         reply = str(result.get("response") or result.get("reply") or "").strip()
@@ -1514,7 +1456,7 @@ async def playground_chat_cancel(body: PlaygroundChatCancelBody) -> dict[str, An
     """Marca interrupción cooperativa para un chat admin en curso (Redis + grafo)."""
     session_id = (body.chat_id or "").strip()
     if not session_id:
-        raise _problem(400, "chat_id vacío", body.chat_id)
+        raise problem(400, "chat_id vacío", body.chat_id)
     from duckclaw.graphs.chat_cancel import request_chat_cancel
 
     ok = request_chat_cancel(session_id)
@@ -1638,11 +1580,11 @@ async def admin_get_conversation(
     tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
     sid = (session_id or "").strip()
     if not sid:
-        raise _problem(400, "session_id vacío", session_id)
+        raise problem(400, "session_id vacío", session_id)
     redis_client = getattr(request.app.state, "redis", None)
     resolved_tid, meta, messages = await resolve_conversation_view(redis_client, tid, sid)
     if meta is None and not messages:
-        raise _problem(404, "Conversación no encontrada", sid)
+        raise problem(404, "Conversación no encontrada", sid)
     out: dict[str, Any] = {
         "tenant_id": resolved_tid,
         "session_id": sid,
@@ -1666,11 +1608,11 @@ async def admin_patch_conversation(
     sid = (session_id or "").strip()
     title = (body.title or "").strip()
     if not sid or not title:
-        raise _problem(400, "session_id y title requeridos", sid)
+        raise problem(400, "session_id y title requeridos", sid)
     redis_client = getattr(request.app.state, "redis", None)
     meta = await patch_conversation_title(redis_client, tid, sid, title)
     if meta is None:
-        raise _problem(404, "Conversación no encontrada", sid)
+        raise problem(404, "Conversación no encontrada", sid)
     return meta.model_dump()
 
 
@@ -1685,11 +1627,11 @@ async def admin_delete_conversation(
     tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
     sid = (session_id or "").strip()
     if not sid:
-        raise _problem(400, "session_id vacío", session_id)
+        raise problem(400, "session_id vacío", session_id)
     redis_client = getattr(request.app.state, "redis", None)
     deleted_tid = await delete_conversation_merged(redis_client, tid, sid)
     if deleted_tid is None:
-        raise _problem(404, "Conversación no encontrada", sid)
+        raise problem(404, "Conversación no encontrada", sid)
     return {"ok": True, "hard_deleted": True, "session_id": sid, "tenant_id": deleted_tid}
 
 

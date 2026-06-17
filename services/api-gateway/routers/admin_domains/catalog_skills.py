@@ -3,11 +3,10 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field, field_validator
 
 from core.admin_identity import effective_actor_email, open_gateway_db
@@ -16,6 +15,7 @@ from duckclaw.admin_worker_catalog import get_latest_worker_version, list_visibl
 from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.write_commands import DeactivateCatalogSkillCommand, UpsertCatalogSkillCommand
+from routers.admin_domains.admin_common import actor_from_header, admin_audit, problem, require_admin_key
 
 router = APIRouter(prefix="/catalog", tags=["admin-catalog-skills"])
 
@@ -44,68 +44,6 @@ class CatalogSkillCreateBody(BaseModel):
         return visibility
 
 
-def require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
-    expected = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
-    if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="DUCKCLAW_ADMIN_API_KEY no configurada en el gateway",
-        )
-    if (x_admin_key or "").strip() != expected:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Admin key inválida")
-
-
-def actor_from_header(x_actor: str | None = Header(None, alias="X-Duckclaw-Actor")) -> str:
-    raw = (x_actor or "").strip()[:128]
-    if raw and raw != "admin-ui":
-        return raw
-    admin_email = os.environ.get("DUCKCLAW_ADMIN_EMAIL", "").strip()
-    if admin_email and "@" in admin_email:
-        return admin_email[:128]
-    return raw or "admin-ui"
-
-
-def _repo_root() -> Path:
-    raw = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
-    return Path(raw) if raw else Path(__file__).resolve().parents[4]
-
-
-def _audit_log_path() -> Path:
-    path = _repo_root() / ".duckclaw" / "admin-audit.jsonl"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    return path
-
-
-def _admin_audit(
-    action: str,
-    resource: str,
-    detail: str,
-    *,
-    actor: str = "admin-ui",
-    meta: dict[str, Any] | None = None,
-) -> None:
-    entry = {
-        "ts": datetime.now(timezone.utc).isoformat(),
-        "actor": actor,
-        "action": action,
-        "resource": resource,
-        "detail": detail,
-        "meta": meta or {},
-    }
-    try:
-        with _audit_log_path().open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-def _problem(status_code: int, title: str, detail: str) -> HTTPException:
-    return HTTPException(
-        status_code=status_code,
-        detail={"type": "about:blank", "title": title, "status": status_code, "detail": detail},
-    )
-
-
 def _fetchall(result: Any) -> list[Any]:
     if hasattr(result, "fetchall"):
         return list(result.fetchall())
@@ -117,7 +55,7 @@ def _fetchall(result: Any) -> list[Any]:
 def _actor_profile(actor: str) -> dict[str, Any]:
     actor_email = effective_actor_email(actor)
     if "@" not in actor_email:
-        raise _problem(401, "Actor autenticado requerido", actor or "")
+        raise problem(401, "Actor autenticado requerido", actor or "")
     with open_gateway_db(read_only=True) as db:
         return ensure_profile_for_user(db, email=actor_email)
 
@@ -207,9 +145,9 @@ async def create_catalog_skill(
     try:
         task_id = _enqueue_catalog_skill_command(command)
     except ValueError as exc:
-        raise _problem(400, str(exc), body.name) from exc
+        raise problem(400, str(exc), body.name) from exc
     dto = _skill_dto(body.name, body.implementation_ref)
-    _admin_audit("catalog.skill.upsert", dto["id"], dto["path"], actor=actor)
+    admin_audit("catalog.skill.upsert", dto["id"], dto["path"], actor=actor)
     return {"ok": True, "task_id": task_id, "skill": dto}
 
 
@@ -227,6 +165,6 @@ async def deactivate_catalog_skill(
     try:
         task_id = _enqueue_catalog_skill_command(command)
     except ValueError as exc:
-        raise _problem(400, str(exc), name) from exc
-    _admin_audit("catalog.skill.deactivate", name, "", actor=actor)
+        raise problem(400, str(exc), name) from exc
+    admin_audit("catalog.skill.deactivate", name, "", actor=actor)
     return {"ok": True, "task_id": task_id, "id": name}

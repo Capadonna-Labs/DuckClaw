@@ -83,3 +83,60 @@ def test_up_orchestrates_when_configured(tmp_path: Path, monkeypatch) -> None:
     result = runner.invoke(app, ["up", "--no-prompt", "--no-browser", "-C", str(tmp_path)])
     assert result.exit_code == 0, result.output
     assert calls == ["bootstrap", "migrate", "serve", "smoke"]
+
+
+def test_up_migrate_failure_exits_and_tries_rollback(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "api_gateways_pm2.json").write_text(
+        '{"apps":[{"name":"DuckClaw-Gateway"}]}',
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        "DUCKCLAW_ADMIN_EMAIL=a@b.co\n"
+        "DUCKCLAW_ADMIN_PASSWORD=longpass99\n"
+        "DUCKCLAW_ADMIN_API_KEY=real-key-abc\n",
+        encoding="utf-8",
+    )
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "duckops.prerequisites.ensure_development_prerequisites",
+        lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        "duckops.commands.up._create_gateway_db_backup",
+        lambda *_a, **_k: ("db/duckclaw.duckdb", "db/backup.bak"),
+    )
+    monkeypatch.setattr("duckops.commands.up._run_migrate", lambda *_a, **_k: False)
+    monkeypatch.setattr(
+        "duckops.commands.up._rollback_gateway_db",
+        lambda *_a, **_k: calls.append("rollback") or True,
+    )
+
+    result = runner.invoke(app, ["up", "--no-prompt", "--no-browser", "-C", str(tmp_path)])
+    assert result.exit_code == 1
+    assert calls == ["rollback"]
+
+
+def test_up_can_run_only_rollback(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "config").mkdir()
+    (tmp_path / "config" / "api_gateways_pm2.json").write_text(
+        '{"apps":[{"name":"DuckClaw-Gateway"}]}',
+        encoding="utf-8",
+    )
+    (tmp_path / ".env").write_text(
+        "DUCKCLAW_ADMIN_EMAIL=a@b.co\n"
+        "DUCKCLAW_ADMIN_PASSWORD=longpass99\n"
+        "DUCKCLAW_ADMIN_API_KEY=real-key-abc\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "duckops.prerequisites.ensure_development_prerequisites",
+        lambda *_a, **_k: True,
+    )
+    monkeypatch.setattr(
+        "duckops.commands.up._rollback_gateway_db",
+        lambda *_a, **_k: True,
+    )
+
+    result = runner.invoke(app, ["up", "--rollback-migration", "-C", str(tmp_path)])
+    assert result.exit_code == 0, result.output

@@ -1,22 +1,22 @@
-"""Layout estilo Gemini para ``duckops init --chat``."""
+"""Layout estilo OpenCode para ``duckops init --chat``."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from rich.console import Console
-from rich.panel import Panel
-from rich.rule import Rule
+from rich.console import Console, Group
 from rich.text import Text
 
-from duckops import __version__ as DUCKOPS_VERSION
 from duckops.sovereign.duckdb_health import audit_duckdb, duckdb_chrome_summary
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.wizard_theme import DUCK_ACCENT, DUCK_ACCENT_ALT
+from duckops.sovereign.tui_chat_columns import render_intro_columns
+from duckops.sovereign.tui_chat_sidebar import TuiChatSidebarState
 
 
-def _banner_text() -> Text:
-    """Título blocky inspirado en Gemini CLI."""
+def duckclaw_banner_text() -> Text:
+    """Título blocky DUCK + subtítulo CLAW · Playground."""
+
     lines = [
         " ██████╗ ██╗   ██╗ ██████╗██╗  ██╗",
         " ██╔══██╗██║   ██║██╔════╝██║ ██╔╝",
@@ -43,45 +43,29 @@ def render_chat_intro(
     repo_root: Path,
     draft: SovereignDraft,
     worker_id: str,
+    sidebar_state: TuiChatSidebarState,
 ) -> None:
-    """Pantalla inicial: banner, tips, contexto y pie (estilo Gemini)."""
+    """Intro compacta: tips a la izquierda, contexto persistente a la derecha."""
+
     console.print()
-    console.print(_banner_text())
-    console.print()
-    console.print("[bold]Primeros pasos[/]")
-    console.print("  1. Escribe un mensaje o usa [cyan]/workers[/] para cambiar agente.")
-    console.print("  2. Sé concreto para mejores respuestas del playground.")
-    console.print("  3. [cyan]/help[/] · [cyan]/worker <id>[/] · [cyan]/web[/] · [cyan]/quit[/]")
-    console.print()
+    left = Group(
+        duckclaw_banner_text(),
+        Text(""),
+        Text.from_markup(
+            "[bold]Atajos[/]\n"
+            "  [cyan]Tab[/] — siguiente agente del catálogo DB\n"
+            "  [cyan]/new[/] · [cyan]/retry[/] · [cyan]/workers[/] · [cyan]/web[/] · [cyan]/quit[/]"
+        ),
+        Text(""),
+        Text.from_markup(
+            "[dim]Al enviar el primer mensaje el banner desaparece. "
+            "El panel [magenta]Context[/] sigue a la derecha en cada turno.[/]"
+        ),
+    )
     duck = audit_duckdb(repo_root, draft, quick=True)
-    duck_line = duckdb_chrome_summary(duck)
-    console.print(
-        Panel(
-            f"[dim]1[/] DuckDB activa · {duck_line}\n"
-            f"[dim]Tenant[/] [bold]{tenant_id}[/] · "
-            f"[dim]Worker[/] [bold]{worker_id}[/] · "
-            f"[dim]Gateway[/] [cyan]{base_url}[/]",
-            border_style="dim",
-            padding=(0, 1),
-        )
-    )
-    console.print()
-    console.print(
-        Panel(
-            Text(" Escribe tu mensaje ", style="dim"),
-            title="[magenta]*[/]",
-            title_align="left",
-            border_style="magenta",
-            padding=(0, 1),
-        )
-    )
-    console.print(Rule(style="dim"))
-    console.print(
-        f"  [cyan]{repo_root}[/]  "
-        f"[dim]·[/]  [magenta]playground local[/]  "
-        f"[dim]·[/]  DuckClaw v{DUCKOPS_VERSION}",
-        style="dim",
-    )
-    console.print()
-
-
+    sidebar_state.duck_line = duckdb_chrome_summary(duck)
+    sidebar_state.gateway_url = base_url
+    sidebar_state.worker_id = worker_id
+    sidebar_state.tenant_id = tenant_id
+    sidebar_state.repo_label = str(repo_root)
+    render_intro_columns(console, left=left, sidebar_state=sidebar_state)

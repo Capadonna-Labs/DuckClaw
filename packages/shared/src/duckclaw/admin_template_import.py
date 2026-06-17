@@ -202,6 +202,16 @@ def import_templates_to_catalog(
                 permission="use",
             )
 
+        from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
+
+        sync_worker_system_prompt_policy(
+            db,
+            worker_id=worker_id,
+            files=files,
+            actor_email=profile["email"],
+            worker_uid=str(worker.get("worker_uid") or ""),
+        )
+
         imported.append({"worker_id": worker_id, "worker_uid": worker["worker_uid"], "template_dir": str(template_dir)})
 
     return {"imported": imported, "skipped_existing": skipped_existing, "skipped": skipped}

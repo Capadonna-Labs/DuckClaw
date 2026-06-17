@@ -7,6 +7,10 @@ from types import SimpleNamespace
 
 
 def _seed_prompt_policy(con, policy_type: str, policy_name: str, content: str) -> None:
+    con.execute(
+        "DELETE FROM main.prompt_policy_registry WHERE policy_type = ? AND policy_name = ?",
+        [policy_type, policy_name],
+    )
     checksum = hashlib.sha256(content.encode("utf-8")).hexdigest()
     con.execute(
         """
@@ -91,6 +95,29 @@ def test_capabilities_fast_reply_uses_prompt_policy_resolver_db_first() -> None:
         "custom-worker",
         prompt_policies=PromptPolicyResolver(con),
     ) == "DB capability for custom-worker"
+
+
+def test_capabilities_fast_reply_formats_tenant_id_placeholder() -> None:
+    import duckdb
+
+    from duckclaw.manager.fast_replies import _capabilities_fast_reply_text
+    from duckclaw.prompt_policies import PromptPolicyResolver
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    _seed_prompt_policy(
+        con,
+        "capability",
+        "generic_worker",
+        "Worker {worker_id} in tenant {tenant_id}",
+    )
+
+    assert _capabilities_fast_reply_text(
+        "axis-maestro",
+        tenant_id="acme",
+        prompt_policies=PromptPolicyResolver(con),
+    ) == "Worker axis-maestro in tenant acme"
 
 
 def test_manager_graph_capabilities_shortcut_uses_prompt_policy_resolver_db_first(monkeypatch) -> None:

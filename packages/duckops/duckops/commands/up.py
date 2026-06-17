@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 import typer
@@ -38,6 +41,76 @@ def _run_migrate(repo: Path, print_fn) -> bool:
         check=False,
     )
     return proc.returncode == 0
+
+
+def _backup_dir(repo: Path) -> Path:
+    return repo / ".duckops" / "migrate-backups"
+
+
+def _backup_manifest_path(repo: Path) -> Path:
+    return _backup_dir(repo) / "last_backup.json"
+
+
+def _resolve_gateway_db_path() -> str:
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    return (get_gateway_db_path() or "").strip()
+
+
+def _create_gateway_db_backup(repo: Path, print_fn) -> tuple[str, str]:
+    db_path = _resolve_gateway_db_path()
+    if not db_path:
+        print_fn("No se resolvió DUCKDB del gateway; backup de migración omitido.")
+        return "", ""
+    source = Path(db_path).expanduser()
+    if not source.is_file():
+        print_fn(f"Gateway DB no existe aún ({source}); backup omitido.")
+        return str(source), ""
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_root = _backup_dir(repo)
+    backup_root.mkdir(parents=True, exist_ok=True)
+    backup_path = backup_root / f"{source.stem}.pre_migrate_{stamp}.duckdb.bak"
+    shutil.copy2(source, backup_path)
+    _backup_manifest_path(repo).write_text(
+        json.dumps(
+            {
+                "db_path": str(source.resolve()),
+                "backup_path": str(backup_path.resolve()),
+                "created_at": stamp,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    print_fn(f"Backup migración: {backup_path}")
+    return str(source.resolve()), str(backup_path.resolve())
+
+
+def _rollback_gateway_db(repo: Path, print_fn) -> bool:
+    manifest = _backup_manifest_path(repo)
+    if not manifest.is_file():
+        print_fn("No existe backup registrado para rollback.")
+        return False
+    try:
+        payload = json.loads(manifest.read_text(encoding="utf-8"))
+    except Exception:
+        print_fn("Manifest de backup inválido; rollback cancelado.")
+        return False
+    db_path = str(payload.get("db_path") or "").strip()
+    backup_path = str(payload.get("backup_path") or "").strip()
+    if not db_path or not backup_path:
+        print_fn("Manifest incompleto; rollback cancelado.")
+        return False
+    source = Path(backup_path).expanduser()
+    target = Path(db_path).expanduser()
+    if not source.is_file():
+        print_fn(f"Backup no encontrado: {source}")
+        return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    print_fn(f"Rollback aplicado: {source} -> {target}")
+    return True
 
 
 def _which_uv() -> str | None:
@@ -127,6 +200,16 @@ def cmd_up(
         "--no-prompt",
         help="No preguntar al final; salir tras el resumen (CI/scripts).",
     ),
+    migrate: bool = typer.Option(
+        True,
+        "--migrate/--no-migrate",
+        help="Aplicar migraciones DuckDB durante up (default: sí).",
+    ),
+    rollback_migration: bool = typer.Option(
+        False,
+        "--rollback-migration",
+        help="Restaurar último backup pre-migración y salir.",
+    ),
 ) -> None:
     """
     Un solo comando para el día 0:
@@ -184,10 +267,26 @@ def cmd_up(
 
     _load_dotenv(root)
 
+    if rollback_migration:
+        typer.secho("[ROLLBACK] Restaurando último backup de migración", fg=typer.colors.BLUE, bold=True)
+        if _rollback_gateway_db(root, typer.echo):
+            typer.secho("Rollback completado.", fg=typer.colors.GREEN)
+            raise typer.Exit(0)
+        typer.secho("Rollback no aplicado.", fg=typer.colors.RED)
+        raise typer.Exit(1)
+
     # —— 3/6 Migrate ——
     typer.secho("[3/6] Migraciones DuckDB", fg=typer.colors.BLUE, bold=True)
-    if not _run_migrate(root, typer.echo):
-        typer.secho("migrate falló; revisa el log.", fg=typer.colors.YELLOW)
+    if migrate:
+        _db_path, backup = _create_gateway_db_backup(root, typer.echo)
+        if not _run_migrate(root, typer.echo):
+            typer.secho("migrate falló; intentando rollback automático…", fg=typer.colors.YELLOW)
+            rolled_back = _rollback_gateway_db(root, typer.echo) if backup else False
+            detail = "rollback aplicado" if rolled_back else "rollback no disponible"
+            typer.secho(f"migrate falló ({detail}).", fg=typer.colors.RED)
+            raise typer.Exit(1)
+    else:
+        typer.secho("Migraciones omitidas (--no-migrate).", fg=typer.colors.YELLOW)
     typer.echo("")
 
     # —— 4/6 Stack ——

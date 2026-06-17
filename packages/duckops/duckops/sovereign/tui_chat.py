@@ -22,9 +22,12 @@ from duckops.admin_dev_server import (
 )
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.materialize import load_draft_json
+from duckops.sovereign.tui_chat_columns import render_chat_turn, render_input_chrome
+from duckops.sovereign.tui_chat_keys import WorkerTabCycle, build_chat_key_bindings
 from duckops.sovereign.tui_chat_layout import render_chat_intro
+from duckops.sovereign.tui_chat_sidebar import TuiChatSidebarState
+from duckops.sovereign.tui_chat_status import resolve_tui_llm_label
 from duckops.sovereign.tui_shell import TuiShell
-from duckops.sovereign.wizard_theme import DUCK_ACCENT, PANEL_BORDER, panel_title
 from duckops.sovereign.duckdb_health import open_repo_duckdb_readonly
 from duckops.sovereign.workers_catalog import (
     list_worker_picks,
@@ -40,6 +43,7 @@ class GatewayChatConfig:
     tenant_id: str
     telegram_user_id: str
     default_worker_id: str
+    chat_id: str = "sovereign-tui-chat"
 
 
 def _parse_env_file(path: Path) -> dict[str, str]:
@@ -139,7 +143,7 @@ class PlaygroundChatClient:
             "worker_id": worker_id,
             "message": message,
             "tenant_id": self.config.tenant_id,
-            "chat_id": "sovereign-tui-chat",
+            "chat_id": self.config.chat_id,
             "stream": stream,
         }
         if self.config.telegram_user_id:
@@ -190,10 +194,101 @@ class PlaygroundChatClient:
 
 def _help_text() -> str:
     return (
-        "Comandos: /workers · /worker <id> · /web · /quit\n"
-        "/web abre la consola Playground en el navegador (gateway + admin activos).\n"
-        "Escribe un mensaje para hablar con el agente seleccionado."
+        "Comandos: /workers · /worker <id> · Tab ciclar · /new · /retry · /status · /web · /quit\n"
+        "/new abre sesión nueva (chat_id distinto).\n"
+        "/retry reenvía el último mensaje.\n"
+        "/status refresca el panel Context (derecha).\n"
+        "/web abre la consola Playground en el navegador."
     )
+
+
+def _build_sidebar_state(
+    *,
+    cfg: GatewayChatConfig,
+    repo_root: Path,
+    shell_draft: SovereignDraft,
+    picks: list[Any],
+    llm_label: str,
+    policy_health: Any,
+    last_usage: Any = None,
+    turn_count: int = 0,
+) -> TuiChatSidebarState:
+    from duckops.sovereign.duckdb_health import audit_duckdb, duckdb_chrome_summary
+
+    duck = audit_duckdb(repo_root, shell_draft, quick=True)
+    return TuiChatSidebarState(
+        worker_id=cfg.default_worker_id,
+        tenant_id=cfg.tenant_id,
+        llm_label=llm_label,
+        gateway_url=cfg.base_url,
+        duck_line=duckdb_chrome_summary(duck),
+        policy_summary=policy_health.summary(),
+        policy_ok=policy_health.ok,
+        policy_degraded=policy_health.degraded,
+        worker_picks=picks,
+        last_usage=last_usage,
+        turn_count=turn_count,
+        chat_id=cfg.chat_id,
+        repo_label=str(repo_root),
+    )
+
+
+def _policy_preflight_health(repo_root: Path) -> tuple[bool, Any]:
+    """Comprueba policies framework; retorna (continuar, health)."""
+
+    from duckops.policy_health import check_framework_prompt_policies
+    from duckops.sovereign.duckdb_health import open_repo_duckdb_readonly
+
+    shell_draft = _draft_from_dotenv(
+        repo_root,
+        load_gateway_chat_config(repo_root),
+    )
+    db = open_repo_duckdb_readonly(repo_root, shell_draft)
+    if db is None:
+        from duckops.policy_health import FrameworkPolicyHealth
+
+        return True, FrameworkPolicyHealth(ok=True, degraded_keys=(), missing_keys=())
+    try:
+        return True, check_framework_prompt_policies(db)
+    finally:
+        if hasattr(db, "close"):
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+def _run_policy_preflight(repo_root: Path, console: Console) -> tuple[bool, Any]:
+    _, health = _policy_preflight_health(repo_root)
+    if not health.ok:
+        console.print(
+            Panel(
+                f"{health.summary()}\n\n"
+                "[dim]Ejecuta: uv run duckclaw-migrate[/]",
+                title="[red]Policies framework[/]",
+                border_style="red",
+                padding=(0, 1),
+            )
+        )
+        return False, health
+    if health.degraded:
+        console.print(
+            Panel(
+                f"{health.summary()}\n\n"
+                "[dim]El chat arrancará con airbag capa 0. "
+                "Recomendado: uv run duckclaw-migrate[/]",
+                title="[yellow]Policies degradadas[/]",
+                border_style="yellow",
+                padding=(0, 1),
+            )
+        )
+    return True, health
+
+
+def _new_chat_id() -> str:
+    import uuid
+
+    return f"sovereign-tui-{uuid.uuid4().hex[:8]}"
 
 
 def _format_http_chat_error(exc: httpx.HTTPStatusError) -> str:
@@ -246,8 +341,14 @@ def run_tui_chat(
     shell.note("Modo chat TUI")
 
     db = open_repo_duckdb_readonly(repo_root, shell_draft)
+    admin_email = (_parse_env_file(repo_root / ".env").get("DUCKCLAW_ADMIN_EMAIL") or "").strip()
     try:
-        picks = list_worker_picks(repo_root, db=db, tenant_id=cfg.tenant_id)
+        picks = list_worker_picks(
+            repo_root,
+            db=db,
+            tenant_id=cfg.tenant_id,
+            actor_email=admin_email,
+        )
     finally:
         if db is not None and hasattr(db, "close"):
             try:
@@ -262,6 +363,21 @@ def run_tui_chat(
         tenant_id=cfg.tenant_id,
         telegram_user_id=cfg.telegram_user_id,
         default_worker_id=worker_id,
+        chat_id="sovereign-tui-chat",
+    )
+
+    llm_label = resolve_tui_llm_label(repo_root)
+    preflight_ok, policy_health = _run_policy_preflight(repo_root, console)
+    if not preflight_ok:
+        return 1
+
+    sidebar = _build_sidebar_state(
+        cfg=cfg,
+        repo_root=repo_root,
+        shell_draft=shell_draft,
+        picks=picks,
+        llm_label=llm_label,
+        policy_health=policy_health,
     )
 
     render_chat_intro(
@@ -271,12 +387,54 @@ def run_tui_chat(
         repo_root=repo_root,
         draft=shell_draft,
         worker_id=worker_id,
+        sidebar_state=sidebar,
     )
+    console.print()
 
     client = PlaygroundChatClient(cfg)
-    session = PromptSession()
+    last_usage: Any = None
+    last_user_message = ""
+    turn_count = 0
+    tab_cycle = WorkerTabCycle(picks=picks)
+    if picks:
+        for i, pick in enumerate(picks):
+            if pick.worker_id == worker_id:
+                tab_cycle.index = i
+                break
+
+    def _set_active_worker(new_worker_id: str) -> None:
+        nonlocal worker_id, cfg, client, sidebar
+        worker_id = new_worker_id
+        cfg = GatewayChatConfig(
+            base_url=cfg.base_url,
+            admin_key=cfg.admin_key,
+            tenant_id=cfg.tenant_id,
+            telegram_user_id=cfg.telegram_user_id,
+            default_worker_id=worker_id,
+            chat_id=cfg.chat_id,
+        )
+        client = PlaygroundChatClient(cfg)
+        sidebar = _build_sidebar_state(
+            cfg=cfg,
+            repo_root=repo_root,
+            shell_draft=shell_draft,
+            picks=picks,
+            llm_label=llm_label,
+            policy_health=policy_health,
+            last_usage=last_usage,
+            turn_count=turn_count,
+        )
+
+    session = PromptSession(key_bindings=build_chat_key_bindings(tab_cycle, on_worker_change=_set_active_worker))
+    conversation_started = False
 
     while True:
+        render_input_chrome(
+            console,
+            llm_label=llm_label,
+            worker_id=worker_id,
+            tenant_id=cfg.tenant_id,
+        )
         try:
             raw = session.prompt("› ", default="")
         except (EOFError, KeyboardInterrupt):
@@ -292,6 +450,42 @@ def run_tui_chat(
         if low in ("/quit", "/salir", "/q"):
             console.print("[dim]Hasta luego.[/]")
             return 0
+        if low in ("/new", "/nuevo"):
+            cfg = GatewayChatConfig(
+                base_url=cfg.base_url,
+                admin_key=cfg.admin_key,
+                tenant_id=cfg.tenant_id,
+                telegram_user_id=cfg.telegram_user_id,
+                default_worker_id=worker_id,
+                chat_id=_new_chat_id(),
+            )
+            client = PlaygroundChatClient(cfg)
+            last_usage = None
+            last_user_message = ""
+            turn_count = 0
+            sidebar = _build_sidebar_state(
+                cfg=cfg,
+                repo_root=repo_root,
+                shell_draft=shell_draft,
+                picks=picks,
+                llm_label=llm_label,
+                policy_health=policy_health,
+            )
+            console.print(f"[green]Nueva sesión:[/] {cfg.chat_id}")
+            render_chat_turn(
+                console,
+                user_line="(sesión reiniciada)",
+                reply="Historial limpio en gateway. Escribe tu primer mensaje.",
+                agent_title="Sistema",
+                sidebar_state=sidebar,
+            )
+            continue
+        if low in ("/retry", "/reintentar"):
+            if not last_user_message:
+                console.print("[yellow]No hay mensaje previo para reintentar.[/]")
+                continue
+            line = last_user_message
+            low = line.lower()
         if low in ("/web", "/ui", "/browser", "/navegador"):
             if ensure_admin_web_ready(repo_root, print_fn=lambda m: console.print(m)):
                 console.print(f"[green]Consola web:[/] {admin_login_url(repo_root)}")
@@ -304,34 +498,49 @@ def run_tui_chat(
             continue
         if low == "/workers":
             if not picks:
-                console.print("[yellow]No hay plantillas en forge/templates.[/]")
+                console.print("[yellow]No hay workers en el catálogo.[/]")
                 continue
             for p in picks:
                 mark = " ← activo" if p.worker_id == worker_id else ""
                 console.print(f"  [bold]{p.worker_id}[/] — {p.label}{mark}")
             continue
+        if low == "/status":
+            sidebar = _build_sidebar_state(
+                cfg=cfg,
+                repo_root=repo_root,
+                shell_draft=shell_draft,
+                picks=picks,
+                llm_label=llm_label,
+                policy_health=policy_health,
+                last_usage=last_usage,
+                turn_count=turn_count,
+            )
+            render_chat_turn(
+                console,
+                user_line="(status)",
+                reply="Panel Context actualizado.",
+                agent_title="Sistema",
+                sidebar_state=sidebar,
+            )
+            continue
         if low.startswith("/worker"):
             parts = line.split(maxsplit=1)
             if len(parts) < 2 or not parts[1].strip():
-                console.print("[yellow]Uso: /worker <id>[/]")
+                console.print("[yellow]Uso: /worker <id>[/] · o pulsa [cyan]Tab[/] para ciclar")
                 continue
             resolved = resolve_worker_choice(parts[1].strip(), picks, repo_root)
             if not resolved:
                 console.print(f"[yellow]Worker desconocido:[/] {parts[1].strip()}")
                 continue
-            worker_id = resolved
-            cfg = GatewayChatConfig(
-                base_url=cfg.base_url,
-                admin_key=cfg.admin_key,
-                tenant_id=cfg.tenant_id,
-                telegram_user_id=cfg.telegram_user_id,
-                default_worker_id=worker_id,
-            )
-            client = PlaygroundChatClient(cfg)
+            _set_active_worker(resolved)
+            for i, pick in enumerate(picks):
+                if pick.worker_id == worker_id:
+                    tab_cycle.index = i
+                    break
             console.print(f"[green]Worker activo:[/] {worker_id}")
             continue
 
-        console.print(Panel(line, title="Tú", border_style="dim", padding=(0, 1)))
+        last_user_message = line
         try:
             result = client.post_chat(line, worker_id=worker_id, stream=use_stream)
         except httpx.HTTPStatusError as exc:
@@ -349,16 +558,37 @@ def run_tui_chat(
             continue
 
         reply = str(result.get("response") or result.get("reply") or "").strip()
+        last_usage = result.get("usage_tokens")
+        turn_count += 1
         assigned = result.get("assigned_worker_id")
         title = f"Agente ({worker_id})"
         if assigned and assigned != worker_id:
             title += f" → {assigned}"
-        console.print(
-            Panel(
-                reply or "[dim](sin respuesta)[/]",
-                title=title,
-                border_style=DUCK_ACCENT,
-                padding=(0, 1),
-            )
+        sidebar = _build_sidebar_state(
+            cfg=GatewayChatConfig(
+                base_url=cfg.base_url,
+                admin_key=cfg.admin_key,
+                tenant_id=cfg.tenant_id,
+                telegram_user_id=cfg.telegram_user_id,
+                default_worker_id=assigned or worker_id,
+                chat_id=cfg.chat_id,
+            ),
+            repo_root=repo_root,
+            shell_draft=shell_draft,
+            picks=picks,
+            llm_label=llm_label,
+            policy_health=policy_health,
+            last_usage=last_usage,
+            turn_count=turn_count,
+        )
+        if not conversation_started:
+            console.clear()
+            conversation_started = True
+        render_chat_turn(
+            console,
+            user_line=line,
+            reply=reply,
+            agent_title=title,
+            sidebar_state=sidebar,
         )
         shell.note(f"Chat · {worker_id}")

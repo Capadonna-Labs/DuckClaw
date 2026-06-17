@@ -25,16 +25,20 @@ def _manager_capabilities_fast_path_ok(incoming: str) -> bool:
     return _is_capabilities_smalltalk(raw)
 
 
-def _greeting_fast_reply_text(worker_id: str | None) -> str:
-    worker = (worker_id or "").strip()
-    if worker:
-        return f"Hola. Aquí {worker}. ¿En qué puedo ayudarte?"
-    return "Hola. ¿En qué puedo ayudarte?"
+def _greeting_fast_reply_text(
+    worker_id: str | None,
+    *,
+    tenant_id: str | None = None,
+) -> str:
+    worker = (worker_id or "default").strip() or "default"
+    _ = tenant_id
+    return f"Hola. Soy DuckClaw, agente **{worker}**. ¿En qué puedo ayudarte?"
 
 
 def _capabilities_fast_reply_text(
     worker_id: str | None,
     *,
+    tenant_id: str | None = None,
     coordinator_id: str | None = None,
     delegation_pool: list[str] | None = None,
     prompt_policies: PromptPolicyResolver | None = None,
@@ -50,8 +54,14 @@ def _capabilities_fast_reply_text(
         lines = "\n".join(f"- {worker}" for worker in pool)
         return prompt_policies.format("capability", "axis_coordinator", coord=coord, lines=lines)
     worker = (worker_id or "").strip()
+    tenant = (tenant_id or "default").strip() or "default"
     if worker:
-        return prompt_policies.format("capability", "generic_worker", worker_id=worker)
+        return prompt_policies.format(
+            "capability",
+            "generic_worker",
+            worker_id=worker,
+            tenant_id=tenant,
+        )
     return prompt_policies.load("capability", "default_fallback")
 
 

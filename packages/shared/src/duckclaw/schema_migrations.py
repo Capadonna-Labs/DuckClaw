@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from typing import Any
+from typing import Any, Callable
 
 _log = logging.getLogger(__name__)
+
+MigrationHook = Callable[[Any], None]
 
 # ---------------------------------------------------------------------------
 # Runner
@@ -100,6 +102,9 @@ def run_pending_migrations(db: Any) -> list[str]:
                 sql = stmt.strip()
                 if sql:
                     db.execute(sql)
+            hook = _MIGRATION_HOOKS.get(version)
+            if hook is not None:
+                hook(db)
             db.execute(
                 "INSERT INTO main.schema_migrations (version, name, checksum) "
                 "VALUES (?, ?, ?)",
@@ -1095,6 +1100,21 @@ _M020_FRAMEWORK_CAPABILITY_POLICIES = [
     """,
 ]
 
+_M021_FRAMEWORK_POLICY_PACK = [
+    "SELECT 1 AS framework_policy_pack_v1_noop",
+]
+
+
+def _migration_021_apply_framework_policy_pack(db: Any) -> None:
+    from duckclaw.framework_policy_pack import apply_framework_policy_pack
+
+    apply_framework_policy_pack(db)
+
+
+_MIGRATION_HOOKS: dict[int, MigrationHook] = {
+    21: _migration_021_apply_framework_policy_pack,
+}
+
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "initial_core", _M001_INITIAL_CORE),
     (2, "worker_versions", _M002_WORKER_VERSIONS),
@@ -1116,4 +1136,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (18, "authorized_users", _M018_AUTHORIZED_USERS),
     (19, "managed_workspace_draft_policy", _M019_MANAGED_WORKSPACE_DRAFT_POLICY),
     (20, "framework_capability_policies", _M020_FRAMEWORK_CAPABILITY_POLICIES),
+    (21, "framework_policy_pack_v1", _M021_FRAMEWORK_POLICY_PACK),
 ]

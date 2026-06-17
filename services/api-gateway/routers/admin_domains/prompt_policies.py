@@ -310,3 +310,29 @@ async def deactivate_prompt_policy(
         "policy_name": name,
         "version": version,
     }
+
+
+@router.post("/restore-framework", dependencies=[Depends(require_admin_key)])
+async def restore_framework_policies(
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    """Re-aplica ``framework_policy_pack_v1`` sin tocar ``system_prompt/<worker>``."""
+
+    from core.admin_identity import open_gateway_db
+    from duckclaw.framework_policy_pack import apply_framework_policy_pack
+
+    try:
+        with open_gateway_db(read_only=False) as db:
+            applied = apply_framework_policy_pack(db, force=True)
+    except Exception as exc:
+        raise _problem(
+            500,
+            "No se pudo restaurar framework pack",
+            str(exc)[:240],
+        ) from exc
+    return {
+        "ok": True,
+        "applied": applied,
+        "actor": actor,
+        "pack": "framework_policy_pack_v1",
+    }

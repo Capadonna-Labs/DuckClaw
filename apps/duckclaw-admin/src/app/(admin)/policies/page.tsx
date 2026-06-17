@@ -6,6 +6,10 @@ import { useAuthStore } from '@/store/authStore';
 
 const MANAGED_DRAFT_POLICY_TYPE = 'manager_task';
 const MANAGED_DRAFT_POLICY_NAME = 'admin_workspace_managed_draft';
+const FRAMEWORK_POLICY_TYPE = 'system_prompt';
+const FRAMEWORK_POLICY_NAME = 'default';
+
+type PolicyTab = 'workspace' | 'framework';
 
 function prettyJson(raw: string): string {
   try {
@@ -32,8 +36,38 @@ export default function PromptPoliciesPage() {
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<PromptPolicyHealth | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<PolicyTab>('framework');
+  const [frameworkPolicies, setFrameworkPolicies] = useState<PromptPolicy[]>([]);
+  const [frameworkContent, setFrameworkContent] = useState('');
+  const [restoringFramework, setRestoringFramework] = useState(false);
 
   const nextVersion = useMemo(() => latestVersion(policies) + 1, [policies]);
+
+  const loadFramework = useCallback(() => {
+    adminService
+      .listPromptPolicies({
+        policy_type: 'capability',
+        include_inactive: true,
+      })
+      .then((rows) => {
+        const frameworkRows = rows.filter((row) =>
+          ['generic_worker', 'axis_coordinator', 'default_fallback'].includes(row.policy_name)
+        );
+        return adminService
+          .listPromptPolicies({
+            policy_type: FRAMEWORK_POLICY_TYPE,
+            policy_name: FRAMEWORK_POLICY_NAME,
+            include_inactive: true,
+          })
+          .then((systemRows) => {
+            const merged = [...systemRows, ...frameworkRows];
+            setFrameworkPolicies(merged);
+            const activeDefault = systemRows.find((row) => row.active) ?? systemRows[0];
+            setFrameworkContent(activeDefault?.content ?? '');
+          });
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : 'No se pudo cargar framework pack'));
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -63,12 +97,34 @@ export default function PromptPoliciesPage() {
 
   useEffect(() => {
     load();
+    loadFramework();
     loadHealth();
-  }, [load, loadHealth]);
+  }, [load, loadFramework, loadHealth]);
 
   const reloadAll = () => {
     load();
+    loadFramework();
     loadHealth();
+  };
+
+  const restoreFramework = async () => {
+    if (!canWrite || restoringFramework) return;
+    const confirmed = window.confirm(
+      'Restaurar framework_policy_pack_v1 desde el repo. No modifica system_prompt/<worker>. ¿Continuar?'
+    );
+    if (!confirmed) return;
+    setRestoringFramework(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await adminService.restoreFrameworkPolicies();
+      setMessage(`Framework restaurado: ${result.applied.join(', ') || 'sin cambios'}`);
+      reloadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo restaurar framework');
+    } finally {
+      setRestoringFramework(false);
+    }
   };
 
   const save = async () => {
@@ -155,6 +211,105 @@ export default function PromptPoliciesPage() {
       {error && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
       {message && <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{message}</p>}
 
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setActiveTab('framework')}
+          className={`rounded-xl px-4 py-2 text-sm font-black ${
+            activeTab === 'framework'
+              ? 'bg-gov-blue-700 text-white'
+              : 'border border-gov-blue-200 text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan'
+          }`}
+        >
+          Framework pack
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('workspace')}
+          className={`rounded-xl px-4 py-2 text-sm font-black ${
+            activeTab === 'workspace'
+              ? 'bg-gov-blue-700 text-white'
+              : 'border border-gov-blue-200 text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan'
+          }`}
+        >
+          Workspace draft
+        </button>
+      </div>
+
+      {activeTab === 'framework' ? (
+        <section className="grid gap-4 lg:grid-cols-[1fr_280px]">
+          <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wide text-gov-gray-500 dark:text-dark-muted">
+                  Framework pack v1
+                </p>
+                <p className="mt-1 font-mono text-sm text-gov-gray-900 dark:text-dark-text">
+                  system_prompt/default + capability/*
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={reloadAll}
+                  className="rounded-xl border border-gov-blue-200 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
+                >
+                  Recargar
+                </button>
+                <button
+                  type="button"
+                  onClick={restoreFramework}
+                  disabled={!canWrite || restoringFramework}
+                  className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-black text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {restoringFramework ? 'Restaurando...' : 'Restaurar defaults'}
+                </button>
+              </div>
+            </div>
+            <textarea
+              value={frameworkContent}
+              readOnly
+              spellCheck={false}
+              className="min-h-[420px] w-full rounded-2xl border border-gov-blue-100 bg-gov-gray-50 p-4 font-mono text-xs leading-5 text-gov-gray-800 outline-none dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
+              aria-label="system_prompt/default activo"
+            />
+            <p className="mt-3 text-xs text-gov-gray-500 dark:text-dark-muted">
+              Vista de lectura del prompt base. Restaurar re-aplica el JSON del repo sin tocar policies por worker.
+            </p>
+            <div className="mt-4 space-y-2">
+              {frameworkPolicies.map((policy) => (
+                <p
+                  key={policy.policy_id}
+                  className="rounded-xl border border-gov-blue-50 px-3 py-2 font-mono text-xs dark:border-dark-border"
+                >
+                  {policy.policy_type}/{policy.policy_name} v{policy.version}{' '}
+                  {policy.active ? '· activa' : '· inactiva'}
+                </p>
+              ))}
+            </div>
+          </div>
+          <aside className="space-y-4">
+            <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
+              <p className="text-xs font-black uppercase tracking-wide text-gov-gray-500 dark:text-dark-muted">
+                Health de policies
+              </p>
+              {healthError ? (
+                <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{healthError}</p>
+              ) : health ? (
+                <p
+                  className={`mt-3 rounded-xl px-3 py-2 text-sm font-bold ${
+                    health.ok ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-800'
+                  }`}
+                >
+                  {health.ok
+                    ? `OK: ${health.checked_count} requirements`
+                    : `${health.missing_count} missing de ${health.checked_count}`}
+                </p>
+              ) : null}
+            </section>
+          </aside>
+        </section>
+      ) : (
       <section className="grid gap-4 lg:grid-cols-[1fr_280px]">
         <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -292,6 +447,7 @@ export default function PromptPoliciesPage() {
           </section>
         </aside>
       </section>
+      )}
     </div>
   );
 }

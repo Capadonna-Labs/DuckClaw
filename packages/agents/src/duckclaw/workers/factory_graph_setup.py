@@ -26,7 +26,8 @@ from duckclaw.workers.factory_graph_agent_bind import build_agent_llm_bind
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.factory_tool_builder import _build_worker_tools
 from duckclaw.workers.identity import load_worker_runtime_policy
-from duckclaw.workers.loader import append_domain_closure_block, load_system_prompt
+from duckclaw.prompt_policies.system_prompt import resolve_effective_system_prompt_for_worker
+from duckclaw.workers.loader import append_domain_closure_block
 from duckclaw.workers.manifest import load_manifest
 from duckclaw.workers.provider_input_budget import (
     configure_provider_budget_runtime_db_provider as _configure_provider_budget_runtime_db_provider,
@@ -134,7 +135,11 @@ def initialize_worker_graph_context(
     )
     prompt_policies = PromptPolicyResolver(db=db)
 
-    system_prompt = load_system_prompt(spec)
+    system_prompt = resolve_effective_system_prompt_for_worker(
+        db,
+        spec,
+        tenant_id=tenant_id,
+    )
     try:
         _configure_provider_budget_runtime_db_provider(lambda: db)
     except Exception:

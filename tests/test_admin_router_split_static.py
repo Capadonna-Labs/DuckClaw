@@ -173,6 +173,12 @@ def test_admin_playground_chat_routes_live_in_domain_module() -> None:
     playground_chat = Path(
         "services/api-gateway/routers/admin_domains/playground_chat.py"
     ).read_text(encoding="utf-8")
+    playground_pkg = Path("services/api-gateway/routers/admin_domains/playground")
+    playground_sources = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(playground_pkg.glob("*.py"))
+        if path.name != "__init__.py"
+    )
 
     assert "from routers.admin_domains.playground_chat import router as playground_chat_router" in admin
     assert "router.include_router(playground_chat_router)" in admin
@@ -194,31 +200,30 @@ def test_admin_playground_chat_routes_live_in_domain_module() -> None:
     assert '@router.patch("/conversations/{session_id}"' not in admin
     assert '@router.delete("/conversations/{session_id}"' not in admin
     assert '@router.post("/conversations/reindex"' not in admin
-    assert 'router = APIRouter(tags=["admin-playground-chat"])' in playground_chat
-    assert '@router.get("/playground/config", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.put("/playground/vault", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.put("/playground/worker", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.put("/playground/model", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.post("/playground/chat", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.post("/playground/voice", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.post("/playground/chat/cancel", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.get("/chats/history", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.get("/conversations", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.post("/conversations", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.get("/conversations/{session_id}", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.patch("/conversations/{session_id}", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.delete("/conversations/{session_id}", dependencies=[Depends(require_admin_key)])' in playground_chat
-    assert '@router.post("/conversations/reindex", dependencies=[Depends(require_admin_key)])' in playground_chat
+    assert '@router.get("/playground/config"' not in playground_chat
+    assert '@router.post("/playground/chat"' not in playground_chat
+    assert 'router = APIRouter(tags=["admin-playground-chat"])' in playground_sources
+    assert '@router.get("/playground/config", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.put("/playground/vault", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.put("/playground/worker", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.put("/playground/model", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.post("/playground/chat", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.post("/playground/voice", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.post("/playground/chat/cancel", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.get("/chats/history", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.get("/conversations", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.post("/conversations", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.get("/conversations/{session_id}", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.patch("/conversations/{session_id}", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.delete("/conversations/{session_id}", dependencies=[Depends(require_admin_key)])' in playground_sources
+    assert '@router.post("/conversations/reindex", dependencies=[Depends(require_admin_key)])' in playground_sources
 
 
 def test_playground_model_settings_use_runtime_setting_commands_only() -> None:
-    playground_chat = Path(
-        "services/api-gateway/routers/admin_domains/playground_chat.py"
+    config_routes = Path(
+        "services/api-gateway/routers/admin_domains/playground/config_routes.py"
     ).read_text(encoding="utf-8")
-    segment = playground_chat.split('async def playground_set_model(', 1)[1].split(
-        "\n\ndef _project_context_message(",
-        1,
-    )[0]
+    segment = config_routes.split("async def playground_set_model(", 1)[1]
 
     assert "open_gateway_db(read_only=False)" not in segment
     assert "DuckClaw(gw, read_only=False" not in segment

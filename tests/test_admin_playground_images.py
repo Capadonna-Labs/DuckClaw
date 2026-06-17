@@ -86,8 +86,8 @@ def test_playground_chat_with_images_routes_edit_inbound(
 
     monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fake_enrich)
 
-    import main as gateway_main
     import routers.admin as admin_router
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
     from test_admin_router import _mock_playground_team
 
     seen: dict = {}
@@ -101,7 +101,7 @@ def test_playground_chat_with_images_routes_edit_inbound(
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
-    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
     monkeypatch.setenv("DUCKCLAW_COMFYUI_INBOUND_EDIT", "1")
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
 
@@ -130,7 +130,7 @@ def test_playground_chat_with_images_mock_vlm(
 
     monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fake_enrich)
 
-    import main as gateway_main
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
     from test_admin_router import _mock_playground_team
 
@@ -142,7 +142,7 @@ def test_playground_chat_with_images_mock_vlm(
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
-    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
     monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
 
     r = admin_client.post(

@@ -459,7 +459,7 @@ def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch
 
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
-    import main as gateway_main
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import create_worker
@@ -472,7 +472,7 @@ def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["axis-maestro"]),
     )
-    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
     db = DuckClaw(str(gateway_db), read_only=False, engine="python")
     try:
         create_worker(
@@ -525,7 +525,7 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
 
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
-    import main as gateway_main
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
 
     async def _fake_invoke(*_args, **_kwargs):
@@ -536,7 +536,7 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
-    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
         headers={"X-Admin-Key": "test-admin-key"},
@@ -1563,7 +1563,7 @@ def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pyt
     png_b64 = (
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
     )
-    import main as gateway_main
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
 
     async def _fake_invoke(*_a, **_k):
@@ -1574,7 +1574,7 @@ def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pyt
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
-    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
 
     r = admin_client.post(
         "/api/v1/admin/playground/chat",

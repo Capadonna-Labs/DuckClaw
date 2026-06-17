@@ -11,7 +11,7 @@ from fastapi import Depends, Query
 from pydantic import BaseModel, Field
 
 from routers.admin_domains.admin_common import actor_from_header, problem
-from routers.admin_domains.playground_chat import _playground_telegram_user_id
+from routers.admin_domains.playground.tenant_resolution import playground_telegram_user_id
 
 _EDITABLE_SUFFIXES = frozenset({".yaml", ".yml", ".md", ".sql", ".py", ".txt", ".json"})
 
@@ -117,7 +117,7 @@ def template_card_description(template_dir: Path) -> tuple[str, str]:
 
 
 def default_vault_user_id(vault_user_id: str | None = None) -> str:
-    return _playground_telegram_user_id(vault_user_id) or "default"
+    return playground_telegram_user_id(vault_user_id) or "default"
 
 
 def manifest_file_for_worker(worker_id: str) -> Path:

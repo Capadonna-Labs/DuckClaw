@@ -8,7 +8,8 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+from duckclaw.write_commands import RawSqlCommand
 from duckclaw.utils.logger import log_tool_execution_sync
 from duckclaw.workers import read_pool
 from duckclaw.workers.db_runtime import infer_user_id_for_writer as _infer_user_id_for_writer
@@ -148,11 +149,15 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
                         released_ro = True
                 resolved = str(Path(db_path_str).expanduser().resolve())
                 uid = _infer_user_id_for_writer(resolved)
-                task_id = enqueue_duckdb_write_sync(
-                    db_path=resolved,
+                cmd = RawSqlCommand(
                     query=q,
-                    user_id=uid,
+                    params=[],
                     tenant_id="default",
+                )
+                task_id = enqueue_typed_command(
+                    cmd,
+                    db_path=resolved,
+                    user_id=uid,
                 )
                 _poll = 15.0 if released_ro else 3.0
                 st = poll_task_status_sync(task_id, timeout_sec=_poll)

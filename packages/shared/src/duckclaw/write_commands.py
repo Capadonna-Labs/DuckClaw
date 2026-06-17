@@ -288,6 +288,35 @@ class AppendTaskAuditCommand(WriteCommand):
     plan_title: str = ""
 
 
+class AppendLlmUsageLogCommand(WriteCommand):
+    """Append one row to ``llm_usage_log`` with parameterized INSERT."""
+
+    command_type: Literal["append_llm_usage_log"] = "append_llm_usage_log"
+    id: str
+    session_id: str = ""
+    worker_id: str = ""
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    model: str = ""
+
+
+class AppendMediaUsageLogCommand(WriteCommand):
+    """Append one row to ``media_usage_log`` with parameterized INSERT."""
+
+    command_type: Literal["append_media_usage_log"] = "append_media_usage_log"
+    id: str
+    session_id: str = ""
+    worker_id: str = ""
+    provider: str = "fal"
+    model_endpoint: str = ""
+    media_type: str = "image"
+    cost_usd: float = 0.0
+    latency_sec: float = 0.0
+    media_url: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Admin console user commands
 # ---------------------------------------------------------------------------

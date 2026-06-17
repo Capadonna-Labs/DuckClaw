@@ -831,7 +831,8 @@ async def _github_pat_api_user_status(token: str) -> int | None:
 
 def _enqueue_github_pat_invalid_task_audit() -> None:
     """Mejor esfuerzo: registrar en task_audit_log vía singleton writer (401 PAT)."""
-    from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    from duckclaw.write_commands import AppendTaskAuditCommand
 
     dp = ""
     try:
@@ -845,17 +846,17 @@ def _enqueue_github_pat_invalid_task_audit() -> None:
     qp = "GitHub PAT inválido o expirado (401) — revisa GITHUB_TOKEN en .env"
     plan = "github_pat_invalid"
     tenant = (os.environ.get("DUCKCLAW_GITHUB_MCP_HEALTH_AUDIT_TENANT") or "system").strip() or "system"
-    sql = (
-        "INSERT INTO task_audit_log (task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title) "
-        "VALUES (?, ?, ?, ?, 'FAILED', 0, ?)"
-    )
-    tid = enqueue_duckdb_write_sync(
-        db_path=db_path,
-        query=sql,
-        params=[task_id, tenant, "heartbeat", qp, plan],
-        user_id="default",
+    cmd = AppendTaskAuditCommand(
+        task_id=task_id,
         tenant_id=tenant,
+        audit_task_id=task_id,
+        worker_id="heartbeat",
+        query_prefix=qp,
+        status="FAILED",
+        duration_ms=0,
+        plan_title=plan,
     )
+    tid = enqueue_typed_command(cmd, db_path=db_path, user_id="default")
     poll_task_status_sync(tid, timeout_sec=12.0)
 
 

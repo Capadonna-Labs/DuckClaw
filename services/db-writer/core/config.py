@@ -40,7 +40,10 @@ class Settings(BaseSettings):
         ),
     )
     NEEDS_EMBEDDING_QUEUE_NAME: str = "duckclaw:needs_embedding"
-    
+    # DLQ: cada cola de state-delta usa ``{QUEUE_NAME}{DLQ_KEY_SUFFIX}`` (default ``:dlq``).
+    # Ej.: duckclaw:state_delta:context → duckclaw:state_delta:context:dlq
+    DLQ_KEY_SUFFIX: str = ":dlq"
+
     # Ruta absoluta calculada dinámicamente
     DUCKDB_PATH: str = str(ROOT_DIR / "db" / "duckclaw.duckdb") 
 

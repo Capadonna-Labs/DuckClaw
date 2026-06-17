@@ -12,6 +12,7 @@ from typing import Any
 import duckdb
 
 from core.config import settings
+from db_writer_ops import push_dlq
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import resolve_user_id_for_db_path
 from models.reports_state_delta import ReportsStateDelta
@@ -103,6 +104,7 @@ def _publish_report_reload(report_id: str) -> None:
     if not url:
         logger.warning("REPORTS_STATE_DELTA: REDIS_URL ausente; omitiendo publish reload")
         return
+    r = None
     try:
         import redis
 
@@ -110,6 +112,12 @@ def _publish_report_reload(report_id: str) -> None:
         r.publish(report_update_channel(report_id), "reload")
     except Exception as exc:  # noqa: BLE001
         logger.warning("REPORTS_STATE_DELTA publish failed report_id=%s: %s", report_id, exc)
+    finally:
+        if r is not None:
+            try:
+                r.close()
+            except Exception:
+                pass
 
 
 def _sync_handle_reports_state_delta(message: str) -> None:
@@ -177,5 +185,15 @@ def _sync_handle_reports_state_delta(message: str) -> None:
 
 
 async def handle_reports_state_delta_message(redis_client: Any, message: str) -> None:
-    del redis_client
-    await asyncio.to_thread(_sync_handle_reports_state_delta, message)
+    qname = str(settings.REPORTS_STATE_DELTA_QUEUE_NAME).strip()
+    try:
+        await asyncio.to_thread(_sync_handle_reports_state_delta, message)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("REPORTS_STATE_DELTA unrecoverable: %s", exc)
+        await push_dlq(
+            redis_client,
+            source_queue=qname,
+            message=message,
+            error=str(exc),
+            handler="reports_state_delta",
+        )

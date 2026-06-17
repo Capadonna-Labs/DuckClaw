@@ -316,18 +316,9 @@ def enqueue_duckdb_write_sync(
     queue_name: str = DEFAULT_WRITE_QUEUE_NAME,
     redis_url: str | None = None,
 ) -> str:
-    """LPUSH del payload JSON, o apply inline en perfil Spawn. Devuelve task_id."""
-    if spawn_inline_writes_enabled():
-        return apply_duckdb_write_sync(
-            db_path=db_path,
-            query=query,
-            params=params,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            task_id=task_id,
-        )
-
-    import redis
+    """Encola ``RawSqlCommand`` tipado (compat legacy). Devuelve task_id."""
+    _ = redis_url
+    from duckclaw.write_commands import RawSqlCommand
 
     tid = task_id or str(uuid.uuid4())
     tid_tenant = str(tenant_id or "default").strip() or "default"
@@ -336,17 +327,20 @@ def enqueue_duckdb_write_sync(
         target_db_path=str(db_path or "").strip(),
         tenant_id=tid_tenant,
     )
-    payload = {
-        "task_id": tid,
-        "tenant_id": tenant_id,
-        "user_id": uid,
-        "db_path": db_path,
-        "query": query,
-        "params": list(params or []),
-    }
-    r = redis.from_url(redis_url or redis_url_from_env(), decode_responses=True)
-    r.lpush(queue_name, json.dumps(payload))
-    return tid
+    command = RawSqlCommand(
+        task_id=tid,
+        query=query,
+        params=list(params or []),
+        db_path=str(db_path or ""),
+        user_id=uid,
+        tenant_id=tid_tenant,
+    )
+    return enqueue_typed_command(
+        command,
+        db_path=db_path,
+        user_id=uid,
+        queue_name=queue_name,
+    )
 
 
 def enqueue_typed_command(

@@ -80,6 +80,12 @@ class SovereignDraft(BaseModel):
     #: IDs adicionales como admin, separados por coma (opcional).
     wizard_extra_admin_telegram_ids: str = ""
 
+    # Consola admin (plug-and-play)
+    admin_console_email: str = "admin@duckclaw.local"
+    admin_console_password: str = ""
+    admin_api_key: str = ""
+    admin_password_auto_generated: bool = False
+
     # Orchestration
     orchestration: Literal["pm2", "docker"] = "pm2"
     gateway_port: int = Field(default_factory=_default_gateway_port)

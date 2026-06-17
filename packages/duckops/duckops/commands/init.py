@@ -87,6 +87,18 @@ def cmd_init(
         except KeyboardInterrupt:
             typer.echo("\nInterrumpido.")
             raise typer.Exit(130)
+        try:
+            from duckops.admin_bootstrap import ensure_admin_env_merged
+
+            updates = ensure_admin_env_merged(base)
+            if updates:
+                typer.secho(
+                    "Admin consola: claves materializadas en .env "
+                    f"({updates.get('DUCKCLAW_ADMIN_EMAIL', '')}).",
+                    fg=typer.colors.GREEN,
+                )
+        except Exception as exc:
+            typer.secho(f"[yellow]Admin bootstrap:[/] {exc}", err=True)
     else:
         typer.echo("Modo --no-wizard: ejecuta el wizard manualmente:")
         typer.echo(f"  python {wizard_script}")

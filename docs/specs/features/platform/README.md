@@ -5,6 +5,7 @@
 | Archivo | Rol | Léelo si… |
 |---------|-----|-----------|
 | [`DB_FIRST_CORE_REFACTOR.md`](DB_FIRST_CORE_REFACTOR.md) | **canonical** | Arquitectura DB-first, purges y roadmap |
+| [`PLUG_AND_PLAY_ONBOARDING.md`](PLUG_AND_PLAY_ONBOARDING.md) | **canonical** | Onboarding dev: doctor → init → serve → admin |
 | [`DUCKCLAW_ADMIN_UI.md`](DUCKCLAW_ADMIN_UI.md) | **canonical** | Trabajas en `apps/duckclaw-admin` |
 | [`ADMIN_IDENTITY_RBAC_ERD.md`](ADMIN_IDENTITY_RBAC_ERD.md) | **canonical** | Auth, sesiones y RBAC de la consola |
 | [`ADMIN_ACCESS_MANAGEMENT.md`](ADMIN_ACCESS_MANAGEMENT.md) | **canonical** | Usuarios consola, whitelist Telegram, shared grants |

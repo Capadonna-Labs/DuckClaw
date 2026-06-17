@@ -11,6 +11,7 @@ FULL_STEP_ORDER: tuple[WizardStep, ...] = (
     WizardStep.IDENTITY_SETUP,
     WizardStep.ORCHESTRATION,
     WizardStep.CONNECTIVITY,
+    WizardStep.ADMIN_CONSOLE,
     WizardStep.REVIEW_DEPLOY,
 )
 
@@ -19,6 +20,7 @@ EXPRESS_STEP_ORDER: tuple[WizardStep, ...] = (
     WizardStep.SOVEREIGNTY_AUDIT,
     WizardStep.CORE_SERVICES,
     WizardStep.ORCHESTRATION,
+    WizardStep.ADMIN_CONSOLE,
     WizardStep.REVIEW_DEPLOY,
 )
 

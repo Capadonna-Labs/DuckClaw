@@ -178,21 +178,34 @@ def cmd_doctor(
             con = duckdb.connect(db_path, read_only=True)
             try:
                 policy_health = check_framework_prompt_policies(con)
+                policy_ok = policy_health.ok
+                if not _emit(
+                    "Policies framework",
+                    policy_ok,
+                    policy_health.summary(),
+                ):
+                    critical_ok = False
+                elif policy_health.degraded:
+                    _emit(
+                        "Policies airbag",
+                        True,
+                        "capa 0 activa — ejecuta duckclaw-migrate para materializar en DB",
+                    )
+                from duckops.policy_health import check_catalog_worker_system_prompts
+
+                catalog_prompt_health = check_catalog_worker_system_prompts(con)
+                if not catalog_prompt_health.ok:
+                    _emit(
+                        "Catalog system_prompt",
+                        False,
+                        catalog_prompt_health.summary()
+                        + " — POST /api/v1/admin/prompt-policies/sync-catalog",
+                    )
+            except Exception as exc:
+                if not _emit("Policies framework", False, str(exc)[:160]):
+                    critical_ok = False
             finally:
                 con.close()
-            policy_ok = policy_health.ok
-            if not _emit(
-                "Policies framework",
-                policy_ok,
-                policy_health.summary(),
-            ):
-                critical_ok = False
-            elif policy_health.degraded:
-                _emit(
-                    "Policies airbag",
-                    True,
-                    "capa 0 activa — ejecuta duckclaw-migrate para materializar en DB",
-                )
         except Exception as exc:
             if not _emit("Policies framework", False, str(exc)[:160]):
                 critical_ok = False

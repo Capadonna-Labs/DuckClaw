@@ -78,12 +78,58 @@ def test_admin_prompt_policy_health_reports_missing_db_first_requirements(
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is False
-    assert data["checked_count"] == 4
-    assert data["missing_count"] == 3
+    assert data["checked_count"] == 7
+    assert data["missing_count"] == 2
+    assert data["inherited_count"] == 0
     assert data["missing"] == [
-        {"policy_type": "capability", "policy_name": "generic_worker", "source": "framework"},
         {"policy_type": "system_prompt", "policy_name": "inactive-worker", "source": "worker"},
         {"policy_type": "system_prompt", "policy_name": "missing-worker", "source": "worker"},
+    ]
+    assert data["inherited"] == []
+
+
+def test_admin_prompt_policy_health_reports_inherited_catalog_worker(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+) -> None:
+    import duckdb
+
+    from duckclaw.admin_worker_catalog import create_worker
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        create_worker(
+            con,
+            owner_email="admin@test.local",
+            worker_id="catalog-worker",
+            display_name="Catalog Worker",
+        )
+    finally:
+        con.close()
+
+    response = gateway_admin_client.get(
+        "/api/v1/admin/prompt-policies/health",
+        headers={"X-Admin-Key": "test-admin-key"},
+        params=[
+            ("worker_id", "catalog-worker"),
+            ("include_framework", "false"),
+        ],
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ok"] is True
+    assert data["checked_count"] == 1
+    assert data["missing_count"] == 0
+    assert data["inherited_count"] == 1
+    assert data["missing"] == []
+    assert data["inherited"] == [
+        {
+            "policy_type": "system_prompt",
+            "policy_name": "catalog-worker",
+            "source": "worker",
+            "warning": "especialización pendiente",
+        }
     ]
 
 
@@ -1028,7 +1074,9 @@ def test_prompt_policies_admin_crud_is_db_writer_backed(
         params={"policy_type": "system_prompt"},
     )
     assert empty.status_code == 200
-    assert empty.json()["policies"] == []
+    seeded = empty.json()["policies"]
+    assert any(p.get("policy_name") == "default" for p in seeded)
+    assert not any(p.get("policy_name") == "rag_turn" for p in seeded)
 
     upsert = admin_client.put(
         "/api/v1/admin/prompt-policies",
@@ -1051,7 +1099,7 @@ def test_prompt_policies_admin_crud_is_db_writer_backed(
     listed = admin_client.get(
         "/api/v1/admin/prompt-policies",
         headers=headers,
-        params={"policy_type": "system_prompt"},
+        params={"policy_type": "system_prompt", "policy_name": "rag_turn"},
     )
     assert listed.status_code == 200
     policies = listed.json()["policies"]
@@ -1084,7 +1132,9 @@ def test_prompt_policies_admin_crud_is_db_writer_backed(
         params={"policy_type": "system_prompt"},
     )
     assert active.status_code == 200
-    assert active.json()["policies"] == []
+    active_policies = active.json()["policies"]
+    assert not any(p.get("policy_name") == "rag_turn" for p in active_policies)
+    assert any(p.get("policy_name") == "default" for p in active_policies)
 
     inactive = admin_client.get(
         "/api/v1/admin/prompt-policies",
@@ -1092,7 +1142,9 @@ def test_prompt_policies_admin_crud_is_db_writer_backed(
         params={"policy_type": "system_prompt", "include_inactive": True},
     )
     assert inactive.status_code == 200
-    assert inactive.json()["policies"][0]["status"] == "inactive"
+    rag_rows = [p for p in inactive.json()["policies"] if p.get("policy_name") == "rag_turn"]
+    assert len(rag_rows) == 1
+    assert rag_rows[0]["status"] == "inactive"
 
 
 def test_admin_sandbox_status(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):

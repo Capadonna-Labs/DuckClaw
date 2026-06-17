@@ -108,7 +108,26 @@ def _apply_deactivate_prompt_policy(conn: Any, payload: dict) -> None:
     )
 
 
+def _apply_restore_framework_policy_pack(conn: Any, payload: dict) -> None:
+    from duckclaw.framework_policy_pack import apply_framework_policy_pack
+
+    force = bool(payload.get("force", True))
+    applied = apply_framework_policy_pack(conn, force=force)
+    payload["_applied"] = list(applied)
+
+
+def _apply_sync_catalog_prompts(conn: Any, payload: dict) -> None:
+    from duckclaw.catalog_prompt_sync import sync_all_catalog_worker_prompts
+
+    force = bool(payload.get("force", False))
+    actor_email = str(payload.get("actor_email") or "system").strip()
+    result = sync_all_catalog_worker_prompts(conn, actor_email=actor_email, force=force)
+    payload["_sync_result"] = result
+
+
 from duckclaw.write_handlers.registry import register_handler
 
 register_handler("upsert_prompt_policy", _apply_upsert_prompt_policy)
 register_handler("deactivate_prompt_policy", _apply_deactivate_prompt_policy)
+register_handler("restore_framework_policy_pack", _apply_restore_framework_policy_pack)
+register_handler("sync_catalog_prompts", _apply_sync_catalog_prompts)

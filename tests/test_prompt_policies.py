@@ -136,6 +136,76 @@ def test_prompt_policy_health_reports_missing_active_requirements() -> None:
     ]
 
 
+def test_classify_prompt_policy_health_marks_catalog_worker_without_row_as_inherited() -> None:
+    import duckdb
+
+    from duckclaw.admin_worker_catalog import create_worker
+    from duckclaw.prompt_policies.health import (
+        INHERITED_SYSTEM_PROMPT_WARNING,
+        PromptPolicyRequirement,
+        classify_prompt_policy_health,
+    )
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    create_worker(
+        con,
+        owner_email="ops@duckclaw.local",
+        worker_id="axis-maestro",
+        display_name="Axis Maestro",
+    )
+
+    classification = classify_prompt_policy_health(
+        con,
+        [
+            PromptPolicyRequirement("system_prompt", "axis-maestro", "worker"),
+            PromptPolicyRequirement("system_prompt", "ghost-worker", "worker"),
+        ],
+    )
+
+    assert classification.ok == ()
+    assert classification.missing == (
+        PromptPolicyRequirement("system_prompt", "ghost-worker", "worker"),
+    )
+    assert classification.inherited == (
+        PromptPolicyRequirement("system_prompt", "axis-maestro", "worker"),
+    )
+    assert classification.is_ok is False
+    assert INHERITED_SYSTEM_PROMPT_WARNING == "especialización pendiente"
+
+
+def test_classify_prompt_policy_health_keeps_framework_missing_critical() -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies.health import (
+        PromptPolicyRequirement,
+        classify_prompt_policy_health,
+    )
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    con.execute(
+        """
+        UPDATE main.prompt_policy_registry
+        SET active = false, status = 'inactive'
+        WHERE policy_type = 'capability' AND policy_name = 'generic_worker'
+        """
+    )
+
+    classification = classify_prompt_policy_health(
+        con,
+        [PromptPolicyRequirement("capability", "generic_worker", "framework")],
+    )
+
+    assert classification.ok == ()
+    assert classification.inherited == ()
+    assert classification.missing == (
+        PromptPolicyRequirement("capability", "generic_worker", "framework"),
+    )
+
+
 def test_prompt_policy_registry_tables_exist() -> None:
     import duckdb
 

@@ -41,6 +41,30 @@ En el chat TUI: `/web` abre la consola sin salir del terminal.
 
 Comprueba que el **API Gateway** responde en `http://localhost:8000/health` con HTTP 200. No prueba login ni Playground; solo confirma que el backend está vivo tras PM2.
 
+Tras el smoke, `duckops up` hace un preflight ligero de las **4 policies framework** (capa 0). Si faltan filas en DuckDB pero hay airbag en código, avisa sin abortar; con `--strict` falla si hay keys críticas ausentes.
+
+### Framework policy pack (migración 021)
+
+La migración **021** (`framework_policy_pack_v1`) materializa en DuckDB las cuatro policies mínimas del runtime (`capability/*` + `system_prompt/default`). Se aplica con:
+
+```bash
+uv run duckclaw-migrate
+uv run duckclaw-migrate --verify-only   # solo comprobar
+```
+
+Si el hub quedó sin seed (DB antigua o restore manual), restaura el pack del repo sin tocar prompts de workers:
+
+- **Admin:** `POST /prompt-policies/restore-framework` (consola → Prompt policies)
+- **CLI:** `uv run duckops doctor` — filas «Policies framework» y «Policies airbag»
+
+Spec: [`docs/specs/features/platform/FRAMEWORK_POLICY_PACK.md`](specs/features/platform/FRAMEWORK_POLICY_PACK.md).
+
+### DB-Writer singleton
+
+Solo el proceso **DB-Writer** (`PM2 DuckClaw-DB-Writer`) abre DuckDB en escritura. Gateway, agentes y admin encolan mutaciones tipadas vía Redis; el resto opera `read_only=True`. Contrato: [`docs/specs/features/platform/DB_WRITER_CONTRACT.md`](specs/features/platform/DB_WRITER_CONTRACT.md).
+
+`uv run duckops doctor` incluye la fila **DB-Writer** (PM2 online, cola Redis, métrica `db_writer:metric:processed`).
+
 ### Flags útiles
 
 | Flag | Uso |
@@ -52,6 +76,7 @@ Comprueba que el **API Gateway** responde en `http://localhost:8000/health` con 
 | `--ui tui\|web\|none` | Elegir modo sin menú |
 | `--no-browser` | Opción web sin abrir URL |
 | `--manual` | Wizard con Telegram/Tailscale |
+| `--strict` | Fallar si faltan policies framework críticas (degradado solo avisa) |
 
 ### Paso a paso (alternativa)
 

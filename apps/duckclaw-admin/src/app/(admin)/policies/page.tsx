@@ -40,6 +40,7 @@ export default function PromptPoliciesPage() {
   const [frameworkPolicies, setFrameworkPolicies] = useState<PromptPolicy[]>([]);
   const [frameworkContent, setFrameworkContent] = useState('');
   const [restoringFramework, setRestoringFramework] = useState(false);
+  const [syncingCatalog, setSyncingCatalog] = useState(false);
 
   const nextVersion = useMemo(() => latestVersion(policies) + 1, [policies]);
 
@@ -124,6 +125,31 @@ export default function PromptPoliciesPage() {
       setError(e instanceof Error ? e.message : 'No se pudo restaurar framework');
     } finally {
       setRestoringFramework(false);
+    }
+  };
+
+  const syncCatalog = async () => {
+    if (!canWrite || syncingCatalog) return;
+    const confirmed = window.confirm(
+      'Sincronizar system_prompt/<worker> desde snapshots del catálogo. Workers con policy activa se omiten salvo force. ¿Continuar?'
+    );
+    if (!confirmed) return;
+    setSyncingCatalog(true);
+    setError(null);
+    setMessage(null);
+    try {
+      const result = await adminService.syncCatalogPrompts(false);
+      const parts = [
+        result.synced.length ? `synced: ${result.synced.join(', ')}` : null,
+        result.skipped.length ? `skipped: ${result.skipped.join(', ')}` : null,
+        result.failed.length ? `failed: ${result.failed.join(', ')}` : null,
+      ].filter(Boolean);
+      setMessage(parts.length ? `Catálogo sincronizado — ${parts.join(' · ')}` : 'Catálogo sincronizado sin cambios');
+      reloadAll();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo sincronizar catálogo');
+    } finally {
+      setSyncingCatalog(false);
     }
   };
 
@@ -258,6 +284,14 @@ export default function PromptPoliciesPage() {
                 </button>
                 <button
                   type="button"
+                  onClick={syncCatalog}
+                  disabled={!canWrite || syncingCatalog}
+                  className="rounded-xl border border-gov-blue-200 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-dark-border dark:text-dark-cyan"
+                >
+                  {syncingCatalog ? 'Sincronizando...' : 'Sync catálogo'}
+                </button>
+                <button
+                  type="button"
                   onClick={restoreFramework}
                   disabled={!canWrite || restoringFramework}
                   className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-black text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
@@ -296,15 +330,33 @@ export default function PromptPoliciesPage() {
               {healthError ? (
                 <p className="mt-3 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-700">{healthError}</p>
               ) : health ? (
-                <p
-                  className={`mt-3 rounded-xl px-3 py-2 text-sm font-bold ${
-                    health.ok ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-800'
-                  }`}
-                >
-                  {health.ok
-                    ? `OK: ${health.checked_count} requirements`
-                    : `${health.missing_count} missing de ${health.checked_count}`}
-                </p>
+                <div className="mt-3 space-y-3 text-sm">
+                  <p
+                    className={`rounded-xl px-3 py-2 font-bold ${
+                      health.ok ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-800'
+                    }`}
+                  >
+                    {health.ok
+                      ? `OK: ${health.checked_count} requirements`
+                      : `${health.missing_count} missing de ${health.checked_count}`}
+                  </p>
+                  {health.inherited_count > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs font-black uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                        Herencia ({health.inherited_count})
+                      </p>
+                      {health.inherited.slice(0, 6).map((item) => (
+                        <p
+                          key={`${item.policy_type}:${item.policy_name}:${item.source}`}
+                          className="break-all rounded-xl border border-sky-200 px-3 py-2 font-mono text-xs text-sky-900 dark:border-sky-900 dark:text-sky-200"
+                        >
+                          {item.policy_type}/{item.policy_name}
+                          <span className="block pt-1 font-sans text-[11px] opacity-80">{item.warning}</span>
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
               ) : null}
             </section>
           </aside>
@@ -388,8 +440,27 @@ export default function PromptPoliciesPage() {
                     ? `OK: ${health.checked_count} requirements activos`
                     : `${health.missing_count} de ${health.checked_count} requirements faltan`}
                 </p>
+                {health.inherited_count > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-black uppercase tracking-wide text-sky-700 dark:text-sky-300">
+                      Herencia ({health.inherited_count})
+                    </p>
+                    {health.inherited.slice(0, 8).map((item) => (
+                      <p
+                        key={`${item.policy_type}:${item.policy_name}:${item.source}`}
+                        className="break-all rounded-xl border border-sky-200 px-3 py-2 font-mono text-xs text-sky-900 dark:border-sky-900 dark:text-sky-200"
+                      >
+                        {item.policy_type}/{item.policy_name}
+                        <span className="block pt-1 font-sans text-[11px] opacity-80">{item.warning}</span>
+                      </p>
+                    ))}
+                  </div>
+                )}
                 {health.missing_count > 0 && (
                   <div className="space-y-2">
+                    <p className="text-xs font-black uppercase tracking-wide text-amber-800 dark:text-amber-200">
+                      Missing ({health.missing_count})
+                    </p>
                     {health.missing.slice(0, 8).map((item) => (
                       <p
                         key={`${item.policy_type}:${item.policy_name}:${item.source}`}

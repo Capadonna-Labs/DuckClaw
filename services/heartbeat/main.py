@@ -26,7 +26,8 @@ import redis.asyncio as redis
 
 from duckclaw import DuckClaw
 from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
-from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
 from duckclaw.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths
 from duckclaw.runtime.scheduling.cron_wall_schedule import wall_once_expired, wall_schedule_should_fire
@@ -112,6 +113,38 @@ def _agent_config_chat_key(chat_id: Any, suffix: str) -> str:
         return f"chat_{str(chat_id)[:64]}_{suffix}"
 
 
+def _enqueue_chat_state_write_sync(
+    *,
+    db_path: str,
+    chat_id: Any,
+    tenant_id: str,
+    key: str,
+    value: str,
+) -> None:
+    try:
+        target_db_path = str(Path(db_path).expanduser().resolve())
+    except OSError:
+        target_db_path = db_path
+
+    ck = _agent_config_chat_key(chat_id, key)[:128]
+    chat_actor = f"chat:{str(chat_id or 'default').strip() or 'default'}"
+    command = UpsertAgentConfigEntriesCommand(
+        tenant_id=str(tenant_id or "default").strip() or "default",
+        actor_email=chat_actor,
+        entries={ck: str(value)[:16384]},
+    )
+    task_id = enqueue_typed_command(
+        command,
+        db_path=target_db_path,
+        user_id=str(chat_id or "default").strip() or "default",
+    )
+    status = poll_task_status_sync(task_id, timeout_sec=30.0)
+    if status is None:
+        raise TimeoutError("timeout esperando db-writer")
+    if status.status != "success":
+        raise RuntimeError((status.detail or "db-writer failed")[:500])
+
+
 async def _enqueue_chat_state_write(
     *,
     db_path: str,
@@ -120,18 +153,13 @@ async def _enqueue_chat_state_write(
     key: str,
     value: str,
 ) -> None:
-    query = (
-        "INSERT INTO agent_config (key, value) VALUES (?, ?) "
-        "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()"
-    )
-    ck = _agent_config_chat_key(chat_id, key)
     await asyncio.to_thread(
-        enqueue_duckdb_write_sync,
+        _enqueue_chat_state_write_sync,
         db_path=db_path,
-        query=query,
-        params=[ck, str(value)[:16384]],
-        user_id=str(chat_id),
-        tenant_id=str(tenant_id or "default"),
+        chat_id=chat_id,
+        tenant_id=tenant_id,
+        key=key,
+        value=value,
     )
 
 

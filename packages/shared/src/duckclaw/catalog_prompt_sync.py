@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from duckclaw.admin_worker_catalog import get_latest_worker_version
+
 
 def build_system_prompt_content_from_files(files: dict[str, str]) -> str:
     """Merge ``soul.md`` + ``system_prompt.md`` like ``load_system_prompt``."""
@@ -121,3 +123,60 @@ def sync_worker_system_prompt_policy(
         },
     )
     return True
+
+
+def sync_all_catalog_worker_prompts(
+    db: Any,
+    *,
+    actor_email: str,
+    force: bool = False,
+) -> dict[str, list[str]]:
+    """Backfill ``system_prompt/<worker_id>`` from latest catalog file snapshots."""
+
+    synced: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
+
+    rows = db.execute(
+        """
+        SELECT worker_uid, worker_id
+        FROM main.admin_worker_catalog
+        WHERE active = true AND worker_id != 'default'
+        ORDER BY worker_id
+        """
+    ).fetchall()
+
+    for row in rows:
+        if isinstance(row, dict):
+            worker_uid = str(row.get("worker_uid") or "")
+            worker_id = str(row.get("worker_id") or "")
+        else:
+            worker_uid = str(row[0] or "")
+            worker_id = str(row[1] or "")
+        if not worker_id:
+            continue
+        try:
+            latest = get_latest_worker_version(db, worker_uid=worker_uid)
+            if not latest:
+                failed.append(worker_id)
+                continue
+            files = dict(latest.get("files_snapshot") or {})
+            if not build_system_prompt_content_from_files(files):
+                skipped.append(worker_id)
+                continue
+            written = sync_worker_system_prompt_policy(
+                db,
+                worker_id=worker_id,
+                files=files,
+                actor_email=actor_email,
+                worker_uid=worker_uid,
+                force=force,
+            )
+            if written:
+                synced.append(worker_id)
+            else:
+                skipped.append(worker_id)
+        except Exception:
+            failed.append(worker_id)
+
+    return {"synced": synced, "skipped": skipped, "failed": failed}

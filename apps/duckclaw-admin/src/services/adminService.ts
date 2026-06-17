@@ -83,8 +83,10 @@ export interface PromptPolicyHealth {
   ok: boolean;
   checked_count: number;
   missing_count: number;
+  inherited_count: number;
   requirements: PromptPolicyRequirement[];
   missing: PromptPolicyRequirement[];
+  inherited: Array<PromptPolicyRequirement & { warning: string }>;
 }
 
 export interface PromptPolicyUpsertInput {
@@ -444,6 +446,15 @@ export const adminService = {
       '/prompt-policies/restore-framework',
       { method: 'POST' }
     ),
+
+  syncCatalogPrompts: (force = false) =>
+    adminFetch<{
+      ok: boolean;
+      task_id: string;
+      synced: string[];
+      skipped: string[];
+      failed: string[];
+    }>(`/prompt-policies/sync-catalog?force=${force ? 'true' : 'false'}`, { method: 'POST' }),
 
   getOverviewMetrics: (params?: OverviewMetricsParams) => {
     const qs = new URLSearchParams();

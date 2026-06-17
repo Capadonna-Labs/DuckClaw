@@ -1,8 +1,15 @@
-"""DEPRECATED transitional router for legacy raw-SQL writes.
+"""DEPRECATED — do not add new callers.
 
-Prefer typed ``WriteCommand`` payloads enqueued via ``duckclaw.db_write_queue``
-and handled by ``duckclaw.write_handlers`` in the singleton ``db-writer`` process.
-This module remains only for backward-compatible ``POST /api/v1/db/write`` callers.
+Legacy raw-SQL writes via ``POST /api/v1/db/write``. New code MUST use typed
+``WriteCommand`` payloads enqueued through ``duckclaw.db_write_queue`` and
+handled exclusively by the singleton ``db-writer`` process
+(``duckclaw.write_handlers``).
+
+Canonical contract (queues, ledger, idempotency, at-most-once semantics):
+``docs/specs/features/platform/DB_WRITER_CONTRACT.md``.
+
+Removal is blocked until zero production imports of this router remain; see
+``PLUG_AND_PLAY_ONBOARDING.md`` roadmap P4.
 """
 
 from __future__ import annotations
@@ -93,6 +100,7 @@ async def enqueue_write(req: WriteRequest, request: Request) -> EnqueueResponse:
         "tenant_id": req.tenant_id,
         "user_id": user_id,
         "db_path": db_path,
+        "command_type": "raw_sql",
         "query": req.query,
         "params": req.params,
     }

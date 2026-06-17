@@ -20,7 +20,13 @@ import duckdb
 import redis.asyncio as redis
 from context_injection_handler import handle_context_injection_message
 from core.config import settings
-from db_writer_ops import DbPathLockRegistry, push_dlq, record_metric
+from db_writer_ops import (
+    DbPathLockRegistry,
+    push_dlq,
+    record_metric,
+    run_processing_reclaim_loop,
+    run_reliable_queue_loop,
+)
 try:
     from meditate_state_delta_handler import handle_meditate_state_delta_message
 except ImportError:
@@ -435,36 +441,45 @@ async def execute_write(redis_client: redis.Redis, message: str) -> None:
 
 
 async def _sql_queue_loop(redis_client: redis.Redis) -> None:
-    logger.info("Escuchando cola SQL: %s", settings.QUEUE_NAME)
-    while True:
-        result = await redis_client.brpop(settings.QUEUE_NAME, timeout=0)
-        if result:
-            _, message = result
-            await execute_write(redis_client, message)
+    logger.info("Escuchando cola SQL (reliable): %s", settings.QUEUE_NAME)
+    await run_reliable_queue_loop(
+        redis_client,
+        settings.QUEUE_NAME,
+        execute_write,
+        lease_sec=settings.PROCESSING_LEASE_SEC,
+    )
 
 
 async def _context_injection_loop(redis_client: redis.Redis) -> None:
     # Debe coincidir con `context_injection_queue_key()` del API Gateway
     # (env DUCKCLAW_CONTEXT_STATE_DELTA_QUEUE o default duckclaw:state_delta:context).
     q = str(settings.CONTEXT_INJECTION_QUEUE_NAME).strip()
-    logger.info("Escuchando cola CONTEXT_INJECTION (delta_type=CONTEXT_INJECTION): %s", q)
-    while True:
-        result = await redis_client.brpop(q, timeout=0)
-        if result:
-            _, message = result
-            try:
-                preview = json.loads(message)
-                if str(preview.get("delta_type") or "") != "CONTEXT_INJECTION":
-                    logger.warning(
-                        "Mensaje en cola CONTEXT_INJECTION con delta_type inesperado: %s",
-                        preview.get("delta_type"),
-                    )
-            except json.JSONDecodeError:
-                logger.warning("CONTEXT_INJECTION payload no es JSON válido (primeros 120 chars): %s", message[:120])
-            try:
-                await handle_context_injection_message(redis_client, message)
-            except Exception as exc:  # noqa: BLE001
-                logger.exception("CONTEXT_INJECTION handler no capturó excepción: %s", exc)
+    logger.info("Escuchando cola CONTEXT_INJECTION (reliable, delta_type=CONTEXT_INJECTION): %s", q)
+
+    async def _handler(redis_client: redis.Redis, message: str) -> None:
+        try:
+            preview = json.loads(message)
+            if str(preview.get("delta_type") or "") != "CONTEXT_INJECTION":
+                logger.warning(
+                    "Mensaje en cola CONTEXT_INJECTION con delta_type inesperado: %s",
+                    preview.get("delta_type"),
+                )
+        except json.JSONDecodeError:
+            logger.warning(
+                "CONTEXT_INJECTION payload no es JSON válido (primeros 120 chars): %s",
+                message[:120],
+            )
+        try:
+            await handle_context_injection_message(redis_client, message)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("CONTEXT_INJECTION handler no capturó excepción: %s", exc)
+
+    await run_reliable_queue_loop(
+        redis_client,
+        q,
+        _handler,
+        lease_sec=settings.PROCESSING_LEASE_SEC,
+    )
 
 
 async def _visual_state_delta_loop(redis_client: redis.Redis) -> None:
@@ -472,16 +487,21 @@ async def _visual_state_delta_loop(redis_client: redis.Redis) -> None:
         logger.warning("VISUAL_STATE_DELTA handler no disponible; omitiendo loop")
         return
     q = str(settings.VISUAL_STATE_DELTA_QUEUE_NAME).strip()
-    logger.info("Escuchando cola VISUAL_STATE_DELTA (VISUAL_ASSET_UPSERT): %s", q)
-    while True:
-        result = await redis_client.brpop(q, timeout=0)
-        if result:
-            _, message = result
-            try:
-                await handle_visual_state_delta_message(redis_client, message)
-            except Exception as exc:  # noqa: BLE001
-                await push_dlq(redis_client, q, message, str(exc))
-                logger.exception("VISUAL_STATE_DELTA handler no capturó excepción: %s", exc)
+    logger.info("Escuchando cola VISUAL_STATE_DELTA (reliable, VISUAL_ASSET_UPSERT): %s", q)
+
+    async def _handler(redis_client: redis.Redis, message: str) -> None:
+        try:
+            await handle_visual_state_delta_message(redis_client, message)
+        except Exception as exc:  # noqa: BLE001
+            await push_dlq(redis_client, q, message, str(exc))
+            logger.exception("VISUAL_STATE_DELTA handler no capturó excepción: %s", exc)
+
+    await run_reliable_queue_loop(
+        redis_client,
+        q,
+        _handler,
+        lease_sec=settings.PROCESSING_LEASE_SEC,
+    )
 
 
 async def _meditate_state_delta_loop(redis_client: redis.Redis) -> None:
@@ -489,16 +509,24 @@ async def _meditate_state_delta_loop(redis_client: redis.Redis) -> None:
         logger.warning("MEDITATE_STATE_DELTA handler no disponible; omitiendo loop")
         return
     q = str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip()
-    logger.info("Escuchando cola MEDITATE_STATE_DELTA (PURGE_STALE_TASKS, QUARANTINE_MEMORY): %s", q)
-    while True:
-        result = await redis_client.brpop(q, timeout=0)
-        if result:
-            _, message = result
-            try:
-                await handle_meditate_state_delta_message(redis_client, message)
-            except Exception as exc:  # noqa: BLE001
-                await push_dlq(redis_client, q, message, str(exc))
-                logger.exception("MEDITATE_STATE_DELTA handler no capturó excepción: %s", exc)
+    logger.info(
+        "Escuchando cola MEDITATE_STATE_DELTA (reliable, PURGE_STALE_TASKS, QUARANTINE_MEMORY): %s",
+        q,
+    )
+
+    async def _handler(redis_client: redis.Redis, message: str) -> None:
+        try:
+            await handle_meditate_state_delta_message(redis_client, message)
+        except Exception as exc:  # noqa: BLE001
+            await push_dlq(redis_client, q, message, str(exc))
+            logger.exception("MEDITATE_STATE_DELTA handler no capturó excepción: %s", exc)
+
+    await run_reliable_queue_loop(
+        redis_client,
+        q,
+        _handler,
+        lease_sec=settings.PROCESSING_LEASE_SEC,
+    )
 
 
 async def _reports_state_delta_loop(redis_client: redis.Redis) -> None:
@@ -506,16 +534,35 @@ async def _reports_state_delta_loop(redis_client: redis.Redis) -> None:
         logger.warning("REPORTS_STATE_DELTA handler no disponible; omitiendo loop")
         return
     q = str(settings.REPORTS_STATE_DELTA_QUEUE_NAME).strip()
-    logger.info("Escuchando cola REPORTS_STATE_DELTA (CUSTOM_REPORT_UPSERT): %s", q)
-    while True:
-        result = await redis_client.brpop(q, timeout=0)
-        if result:
-            _, message = result
-            try:
-                await handle_reports_state_delta_message(redis_client, message)
-            except Exception as exc:  # noqa: BLE001
-                await push_dlq(redis_client, q, message, str(exc))
-                logger.exception("REPORTS_STATE_DELTA handler no capturó excepción: %s", exc)
+    logger.info("Escuchando cola REPORTS_STATE_DELTA (reliable, CUSTOM_REPORT_UPSERT): %s", q)
+
+    async def _handler(redis_client: redis.Redis, message: str) -> None:
+        try:
+            await handle_reports_state_delta_message(redis_client, message)
+        except Exception as exc:  # noqa: BLE001
+            await push_dlq(redis_client, q, message, str(exc))
+            logger.exception("REPORTS_STATE_DELTA handler no capturó excepción: %s", exc)
+
+    await run_reliable_queue_loop(
+        redis_client,
+        q,
+        _handler,
+        lease_sec=settings.PROCESSING_LEASE_SEC,
+    )
+
+
+def _all_reliable_queues() -> list[str]:
+    queues = [
+        str(settings.QUEUE_NAME).strip(),
+        str(settings.CONTEXT_INJECTION_QUEUE_NAME).strip(),
+    ]
+    if handle_visual_state_delta_message is not None:
+        queues.append(str(settings.VISUAL_STATE_DELTA_QUEUE_NAME).strip())
+    if handle_meditate_state_delta_message is not None:
+        queues.append(str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip())
+    if handle_reports_state_delta_message is not None:
+        queues.append(str(settings.REPORTS_STATE_DELTA_QUEUE_NAME).strip())
+    return queues
 
 
 async def process_queue():
@@ -523,6 +570,11 @@ async def process_queue():
     redis_client = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
     try:
         await asyncio.gather(
+            run_processing_reclaim_loop(
+                redis_client,
+                _all_reliable_queues(),
+                interval_sec=settings.PROCESSING_RECLAIM_INTERVAL_SEC,
+            ),
             _sql_queue_loop(redis_client),
             _context_injection_loop(redis_client),
             _visual_state_delta_loop(redis_client),

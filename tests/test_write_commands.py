@@ -759,6 +759,8 @@ class TestCommandHandlers:
         handler_names = (
             "_apply_upsert_prompt_policy",
             "_apply_deactivate_prompt_policy",
+            "_apply_restore_framework_policy_pack",
+            "_apply_sync_catalog_prompts",
         )
 
         for name in handler_names:
@@ -1365,8 +1367,40 @@ class TestCommandHandlers:
             "WHERE policy_type = 'system_prompt' AND policy_name = 'rag_turn' AND version = 1"
         ).fetchone()
         assert inactive == (False, "inactive")
-        with pytest.raises(FileNotFoundError, match="active prompt policy not found"):
-            PromptPolicyResolver(db=con).load("system_prompt", "rag_turn")
+        inherited = PromptPolicyResolver(db=con).load("system_prompt", "rag_turn")
+        default_prompt = PromptPolicyResolver(db=con).load("system_prompt", "default")
+        assert inherited == default_prompt
+
+    def test_restore_framework_policy_pack_handler_reapplies_seed(self, db_with_migrations) -> None:
+        from duckclaw.prompt_policies import PromptPolicyResolver
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        con.execute("DELETE FROM main.prompt_policy_registry")
+
+        dispatch_command(con, {
+            "command_type": "restore_framework_policy_pack",
+            "force": True,
+            "actor_email": "test@d.local",
+        })
+
+        resolver = PromptPolicyResolver(db=con)
+        default_prompt = resolver.load("system_prompt", "default")
+        assert "## IDENTITY" in default_prompt
+        assert resolver.load("capability", "generic_worker")
+
+        rows = con.execute(
+            """
+            SELECT policy_type, policy_name, metadata_json
+            FROM main.prompt_policy_registry
+            WHERE active = true
+            ORDER BY policy_type, policy_name
+            """
+        ).fetchall()
+        assert len(rows) == 4
+        for _ptype, _pname, metadata_raw in rows:
+            metadata = json.loads(metadata_raw) if metadata_raw else {}
+            assert metadata.get("seed") == "framework_policy_pack_v1"
 
     def test_worker_context_handlers_create_reorder_and_deactivate(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import dispatch_command

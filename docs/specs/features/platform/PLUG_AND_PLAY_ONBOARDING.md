@@ -186,6 +186,12 @@ Exit code `1` si fallan checks críticos (Redis o schema cuando hay DB configura
 
 Complementa `duckclaw-healthcheck` (infra Redis + probe HTTP opcional) con foco en **onboarding dev**.
 
+### Policies framework y catalog sync (post slice)
+
+`duckops doctor` y `duckops up` (tras smoke) evalúan las cuatro keys de `FRAMEWORK_PROMPT_POLICY_REQUIREMENTS`. Si faltan filas activas en `main.prompt_policy_registry` pero existe fallback en código (capa 0), la fila **Policies framework** queda en warning y **Policies airbag** indica degradación — el stack arranca, pero conviene ejecutar `duckclaw-migrate` (migración 021) o `POST /prompt-policies/restore-framework` en admin. Con `duckops up --strict`, keys críticas sin airbag hacen fallar el comando.
+
+Para alinear `system_prompt/<worker>` del catálogo con los snapshots en DuckDB (sin editar policies framework), el gateway expone `POST /prompt-policies/sync-catalog` → comando tipado `sync_catalog_prompts` vía db-writer. Útil tras importar templates o cambiar `files_snapshot` fuera del editor de policies. Ver [`FRAMEWORK_POLICY_PACK.md`](FRAMEWORK_POLICY_PACK.md) y `duckclaw.catalog_prompt_sync`.
+
 ---
 
 ## Fase 2 — trabajo pendiente

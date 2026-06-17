@@ -200,6 +200,11 @@ def cmd_up(
         "--no-prompt",
         help="No preguntar al final; salir tras el resumen (CI/scripts).",
     ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Fallar si faltan policies framework críticas (degradado solo avisa).",
+    ),
     migrate: bool = typer.Option(
         True,
         "--migrate/--no-migrate",
@@ -300,6 +305,14 @@ def cmd_up(
     typer.secho("[5/6] Smoke /health", fg=typer.colors.BLUE, bold=True)
     if not _run_smoke(root, typer.echo):
         typer.secho("Gateway no respondió; espera unos segundos y: uv run duckops smoke", fg=typer.colors.YELLOW)
+    from duckops.policy_health import run_framework_policy_preflight
+
+    if not run_framework_policy_preflight(root, print_fn=typer.echo, strict=strict):
+        typer.secho(
+            "Policies framework críticas ausentes; ejecuta duckclaw-migrate o usa --strict solo en CI.",
+            fg=typer.colors.RED,
+        )
+        raise typer.Exit(1)
     typer.echo("")
 
     # —— 6/6 Consola admin (estado) + sesión interactiva ——

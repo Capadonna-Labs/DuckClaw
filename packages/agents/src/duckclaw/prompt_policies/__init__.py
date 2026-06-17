@@ -6,7 +6,10 @@ from duckclaw.prompt_policies.framework_fallbacks import (
     list_framework_fallback_keys,
 )
 from duckclaw.prompt_policies.health import (
+    INHERITED_SYSTEM_PROMPT_WARNING,
+    PromptPolicyHealthClassification,
     PromptPolicyRequirement,
+    classify_prompt_policy_health,
     missing_prompt_policies,
     prompt_policy_requirements_for_workers,
 )
@@ -18,8 +21,11 @@ from duckclaw.prompt_policies.system_prompt import (
 )
 
 __all__ = [
+    "INHERITED_SYSTEM_PROMPT_WARNING",
+    "PromptPolicyHealthClassification",
     "PromptPolicyRequirement",
     "PromptPolicyResolver",
+    "classify_prompt_policy_health",
     "framework_fallback_content",
     "is_framework_policy_key",
     "list_framework_fallback_keys",

@@ -507,6 +507,21 @@ class DeactivatePromptPolicyCommand(WriteCommand):
     version: int | None = None
 
 
+class RestoreFrameworkPolicyPackCommand(WriteCommand):
+    """Re-apply ``framework_policy_pack_v1`` via db-writer (no worker prompts)."""
+
+    command_type: Literal["restore_framework_policy_pack"] = "restore_framework_policy_pack"
+    force: bool = True
+    actor_email: str = ""
+
+
+class SyncCatalogPromptsCommand(WriteCommand):
+    """Backfill ``system_prompt/<worker>`` from ``admin_worker_catalog`` snapshots."""
+
+    command_type: Literal["sync_catalog_prompts"] = "sync_catalog_prompts"
+    force: bool = False
+
+
 # ---------------------------------------------------------------------------
 # HITL commands
 # ---------------------------------------------------------------------------

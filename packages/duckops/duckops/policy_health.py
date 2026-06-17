@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from pathlib import Path
+from typing import Any, Callable
 
 from duckclaw.prompt_policies.framework_fallbacks import framework_fallback_content
 from duckclaw.prompt_policies.health import (
@@ -55,3 +56,102 @@ def check_framework_prompt_policies(db: Any) -> FrameworkPolicyHealth:
         degraded_keys=tuple(degraded),
         missing_keys=tuple(critical),
     )
+
+
+def run_framework_policy_preflight(
+    repo: Path,
+    *,
+    print_fn: Callable[[str], None],
+    strict: bool = False,
+) -> bool:
+    """Post-migrate smoke: warn on degraded airbag; fail only when ``strict``."""
+
+    del repo  # reserved for future hub path overrides
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path
+    except Exception as exc:
+        print_fn(f"Policies framework — omitido ({exc})")
+        return True
+
+    db_path = (get_gateway_db_path() or "").strip()
+    if not db_path:
+        print_fn("Policies framework — sin ruta hub (duckops init)")
+        return True
+
+    try:
+        import duckdb
+
+        con = duckdb.connect(db_path, read_only=True)
+        try:
+            health = check_framework_prompt_policies(con)
+        finally:
+            con.close()
+    except Exception as exc:
+        msg = f"Policies framework — error de lectura: {exc}"
+        print_fn(msg)
+        return not strict
+
+    if not health.ok:
+        print_fn(f"Policies framework — {health.summary()}")
+        if strict:
+            print_fn("Policies framework — fallo (--strict)")
+            return False
+        return True
+
+    if health.degraded:
+        print_fn(f"Policies framework — {health.summary()}")
+        print_fn(
+            "  hint: uv run duckclaw-migrate o "
+            "POST /prompt-policies/restore-framework en admin"
+        )
+        if strict:
+            print_fn("Policies framework — fallo degradado (--strict)")
+            return False
+        return True
+
+    print_fn(f"Policies framework — {health.summary()}")
+    return True
+
+
+@dataclass(frozen=True)
+class CatalogPromptHealth:
+    ok: bool
+    missing_worker_ids: tuple[str, ...]
+
+    def summary(self) -> str:
+        if self.ok:
+            return "workers de catálogo con system_prompt activo"
+        return f"faltan system_prompt: {', '.join(self.missing_worker_ids)}"
+
+
+def check_catalog_worker_system_prompts(db: Any) -> CatalogPromptHealth:
+    """Warn when active catalog workers lack an active ``system_prompt`` row."""
+
+    rows = db.execute(
+        """
+        SELECT worker_id
+        FROM main.admin_worker_catalog
+        WHERE active = true AND worker_id != 'default'
+        ORDER BY worker_id
+        """
+    ).fetchall()
+    missing: list[str] = []
+    for row in rows:
+        worker_id = str(row[0] if not isinstance(row, dict) else row.get("worker_id") or "").strip()
+        if not worker_id:
+            continue
+        has_policy = db.execute(
+            """
+            SELECT 1
+            FROM main.prompt_policy_registry
+            WHERE policy_type = 'system_prompt'
+              AND policy_name = ?
+              AND active = true
+              AND status = 'active'
+            LIMIT 1
+            """,
+            [worker_id],
+        ).fetchone()
+        if not has_policy:
+            missing.append(worker_id)
+    return CatalogPromptHealth(ok=not missing, missing_worker_ids=tuple(missing))

@@ -187,6 +187,13 @@ async def list_prompt_policies(
     return {"policies": [_prompt_policy_row(row) for row in rows]}
 
 
+def _prompt_policy_inherited_row(requirement: Any, *, warning: str) -> dict[str, str]:
+    return {
+        **_prompt_policy_requirement_row(requirement),
+        "warning": warning,
+    }
+
+
 @router.get("/health", dependencies=[Depends(require_admin_key)])
 async def prompt_policy_health(
     worker_id: list[str] | None = Query(None),
@@ -196,7 +203,8 @@ async def prompt_policy_health(
     from core.admin_identity import open_gateway_db
     from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
     from duckclaw.prompt_policies import (
-        missing_prompt_policies,
+        INHERITED_SYSTEM_PROMPT_WARNING,
+        classify_prompt_policy_health,
         prompt_policy_requirements_for_workers,
     )
     from duckclaw.workers.factory import list_workers
@@ -222,7 +230,7 @@ async def prompt_policy_health(
                 workers,
                 include_framework=include_framework,
             )
-            missing = missing_prompt_policies(db, requirements)
+            classification = classify_prompt_policy_health(db, requirements)
     except Exception as exc:
         raise _problem(
             400,
@@ -230,11 +238,16 @@ async def prompt_policy_health(
             "Ejecuta migración 16 antes de auditar prompt policies.",
         ) from exc
     return {
-        "ok": not missing,
+        "ok": classification.is_ok,
         "checked_count": len(requirements),
-        "missing_count": len(missing),
+        "missing_count": len(classification.missing),
+        "inherited_count": len(classification.inherited),
         "requirements": [_prompt_policy_requirement_row(item) for item in requirements],
-        "missing": [_prompt_policy_requirement_row(item) for item in missing],
+        "missing": [_prompt_policy_requirement_row(item) for item in classification.missing],
+        "inherited": [
+            _prompt_policy_inherited_row(item, warning=INHERITED_SYSTEM_PROMPT_WARNING)
+            for item in classification.inherited
+        ],
     }
 
 
@@ -318,12 +331,31 @@ async def restore_framework_policies(
 ) -> dict[str, Any]:
     """Re-aplica ``framework_policy_pack_v1`` sin tocar ``system_prompt/<worker>``."""
 
+    import json as _json
+
     from core.admin_identity import open_gateway_db
-    from duckclaw.framework_policy_pack import apply_framework_policy_pack
+    from duckclaw.db_write_queue import poll_task_status_sync
+    from duckclaw.write_commands import RestoreFrameworkPolicyPackCommand
 
     try:
-        with open_gateway_db(read_only=False) as db:
-            applied = apply_framework_policy_pack(db, force=True)
+        command = RestoreFrameworkPolicyPackCommand(force=True, actor_email=actor)
+        task_id = _enqueue_prompt_policy_command(command)
+        command_status = poll_task_status_sync(task_id, timeout_sec=8.0)
+        if command_status and command_status.status == "failed":
+            raise ValueError(command_status.detail or "restore framework failed")
+        applied: list[str] = []
+        with open_gateway_db(read_only=True) as db:
+            row = db.execute(
+                "SELECT command_json FROM main.admin_write_ledger WHERE task_id = ?",
+                [task_id],
+            ).fetchone()
+            if row and row[0]:
+                payload = _json.loads(str(row[0]))
+                raw_applied = payload.get("_applied")
+                if isinstance(raw_applied, list):
+                    applied = [str(item) for item in raw_applied]
+    except ValueError as exc:
+        raise _problem(400, str(exc), "restore_framework") from exc
     except Exception as exc:
         raise _problem(
             500,
@@ -332,7 +364,57 @@ async def restore_framework_policies(
         ) from exc
     return {
         "ok": True,
+        "task_id": task_id,
         "applied": applied,
         "actor": actor,
         "pack": "framework_policy_pack_v1",
+    }
+
+
+@router.post("/sync-catalog", dependencies=[Depends(require_admin_key)])
+async def sync_catalog_prompt_policies(
+    force: bool = Query(False),
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    """Backfill ``system_prompt/<worker>`` desde snapshots del catálogo DB."""
+
+    import json as _json
+
+    from core.admin_identity import open_gateway_db
+    from duckclaw.db_write_queue import poll_task_status_sync
+    from duckclaw.write_commands import SyncCatalogPromptsCommand
+
+    sync_result: dict[str, list[str]] = {"synced": [], "skipped": [], "failed": []}
+    try:
+        command = SyncCatalogPromptsCommand(force=force, actor_email=actor)
+        task_id = _enqueue_prompt_policy_command(command)
+        command_status = poll_task_status_sync(task_id, timeout_sec=15.0)
+        if command_status and command_status.status == "failed":
+            raise ValueError(command_status.detail or "sync catalog prompts failed")
+        with open_gateway_db(read_only=True) as db:
+            row = db.execute(
+                "SELECT command_json FROM main.admin_write_ledger WHERE task_id = ?",
+                [task_id],
+            ).fetchone()
+            if row and row[0]:
+                payload = _json.loads(str(row[0]))
+                raw_result = payload.get("_sync_result")
+                if isinstance(raw_result, dict):
+                    for key in ("synced", "skipped", "failed"):
+                        items = raw_result.get(key)
+                        if isinstance(items, list):
+                            sync_result[key] = [str(item) for item in items]
+    except ValueError as exc:
+        raise _problem(400, str(exc), "sync_catalog") from exc
+    except Exception as exc:
+        raise _problem(
+            500,
+            "No se pudo sincronizar prompts del catálogo",
+            str(exc)[:240],
+        ) from exc
+    return {
+        "ok": True,
+        "task_id": task_id,
+        "actor": actor,
+        **sync_result,
     }

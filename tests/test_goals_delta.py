@@ -24,25 +24,28 @@ import services.heartbeat.main as heartbeat
 
 
 def _patch_heartbeat_sync_duckdb_write(monkeypatch: Any) -> None:
-    """enqueue_duckdb_write_sync solo encola Redis; sin db-writer el .duckdb no cambia en tests."""
+    """Aplica comandos tipados inline; sin db-writer el .duckdb no cambia en tests."""
 
     import duckdb
 
-    def _sync(
-        *,
-        db_path: str,
-        query: str,
-        params: list[Any] | None = None,
-        **kwargs: Any,
-    ) -> str:
+    from duckclaw.db_write_queue import DbWriteTaskStatus
+    from duckclaw.write_command_handlers import dispatch_command
+
+    def _enqueue_typed(command: Any, *, db_path: str, user_id: str, **kwargs: Any) -> str:
+        _ = user_id, kwargs
         con = duckdb.connect(db_path)
         try:
-            con.execute(query, list(params or []))
+            dispatch_command(con, command.model_dump())
         finally:
             con.close()
-        return "test-task"
+        return command.task_id
 
-    monkeypatch.setattr(heartbeat, "enqueue_duckdb_write_sync", _sync)
+    def _poll(task_id: str, *, timeout_sec: float = 3.0, **kwargs: Any) -> DbWriteTaskStatus:
+        _ = task_id, timeout_sec, kwargs
+        return DbWriteTaskStatus(status="success")
+
+    monkeypatch.setattr(heartbeat, "enqueue_typed_command", _enqueue_typed)
+    monkeypatch.setattr(heartbeat, "poll_task_status_sync", _poll)
 
 
 def test_parse_goals_delta_arg_off() -> None:

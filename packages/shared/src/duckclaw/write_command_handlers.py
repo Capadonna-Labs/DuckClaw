@@ -83,6 +83,8 @@ from duckclaw.write_handlers.hitl import (
 )
 from duckclaw.write_handlers.prompt_policies import (
     _apply_deactivate_prompt_policy,
+    _apply_restore_framework_policy_pack,
+    _apply_sync_catalog_prompts,
     _apply_upsert_prompt_policy,
 )
 from duckclaw.write_handlers.runtime import (

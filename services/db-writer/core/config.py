@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     # DLQ: cada cola de state-delta usa ``{QUEUE_NAME}{DLQ_KEY_SUFFIX}`` (default ``:dlq``).
     # Ej.: duckclaw:state_delta:context → duckclaw:state_delta:context:dlq
     DLQ_KEY_SUFFIX: str = ":dlq"
+    # Cola reliable: BRPOPLPUSH mueve a ``{QUEUE}{PROCESSING_KEY_SUFFIX}`` hasta ACK.
+    PROCESSING_KEY_SUFFIX: str = ":processing"
+    PROCESSING_LEASE_SEC: int = 120
+    PROCESSING_RECLAIM_INTERVAL_SEC: int = 30
 
     # Ruta absoluta calculada dinámicamente
     DUCKDB_PATH: str = str(ROOT_DIR / "db" / "duckclaw.duckdb") 

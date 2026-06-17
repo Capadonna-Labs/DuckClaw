@@ -14,21 +14,35 @@ _WRITER_DIR = _REPO / "services" / "db-writer"
 
 def _import_db_writer_main():
     """Import main del db-writer sin colisión con api-gateway/main.py."""
+    import importlib.util
+
     writer_str = str(_WRITER_DIR)
     if writer_str not in sys.path:
         sys.path.insert(0, writer_str)
-    import main as db_writer_main  # noqa: PLC0415
-
-    return db_writer_main
+    module_name = "duckclaw_services_db_writer_main"
+    spec = importlib.util.spec_from_file_location(module_name, _WRITER_DIR / "main.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("db-writer main.py not found")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _import_db_writer_ops():
+    import importlib.util
+
     writer_str = str(_WRITER_DIR)
     if writer_str not in sys.path:
         sys.path.insert(0, writer_str)
-    import db_writer_ops  # noqa: PLC0415
-
-    return db_writer_ops
+    module_name = "duckclaw_services_db_writer_ops"
+    spec = importlib.util.spec_from_file_location(module_name, _WRITER_DIR / "db_writer_ops.py")
+    if spec is None or spec.loader is None:
+        raise RuntimeError("db-writer db_writer_ops.py not found")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 class FakeAsyncRedis:
@@ -175,3 +189,140 @@ def test_db_path_lock_allows_parallel_different_paths() -> None:
         await asyncio.gather(worker("/tmp/a.duckdb"), worker("/tmp/b.duckdb"))
 
     asyncio.run(run_workers())
+
+
+class FakeListRedis:
+    """Redis async mínimo para cola reliable (listas + zset + métricas)."""
+
+    def __init__(self) -> None:
+        self.lists: dict[str, list[str]] = {}
+        self.zsets: dict[str, dict[str, float]] = {}
+        self._kv: dict[str, str] = {}
+        self.brpoplpush_calls = 0
+
+    def _list(self, key: str) -> list[str]:
+        return self.lists.setdefault(key, [])
+
+    def _zset(self, key: str) -> dict[str, float]:
+        return self.zsets.setdefault(key, {})
+
+    async def lpush(self, key: str, value: str) -> int:
+        self._list(key).insert(0, value)
+        return len(self._list(key))
+
+    async def rpop(self, key: str) -> str | None:
+        lst = self._list(key)
+        return lst.pop() if lst else None
+
+    async def lrem(self, key: str, count: int, value: str) -> int:
+        lst = self._list(key)
+        removed = 0
+        if count == 0:
+            while value in lst:
+                lst.remove(value)
+                removed += 1
+        else:
+            for _ in range(abs(count)):
+                if value not in lst:
+                    break
+                lst.remove(value)
+                removed += 1
+        return removed
+
+    async def brpoplpush(self, source: str, dest: str, timeout: int = 0) -> str | None:
+        self.brpoplpush_calls += 1
+        src = self._list(source)
+        if not src:
+            return None
+        message = src.pop()
+        self._list(dest).insert(0, message)
+        return message
+
+    async def zadd(self, key: str, mapping: dict[str, float]) -> int:
+        z = self._zset(key)
+        for member, score in mapping.items():
+            z[member] = score
+        return len(mapping)
+
+    async def zrem(self, key: str, member: str) -> int:
+        z = self._zset(key)
+        if member in z:
+            del z[member]
+            return 1
+        return 0
+
+    async def zrangebyscore(self, key: str, min_score: float, max_score: float) -> list[str]:
+        z = self._zset(key)
+        return [m for m, s in z.items() if min_score <= s <= max_score]
+
+    async def incrby(self, key: str, delta: int = 1) -> int:
+        current = int(self._kv.get(key, "0"))
+        current += delta
+        self._kv[key] = str(current)
+        return current
+
+
+def test_main_uses_reliable_queue_not_brpop() -> None:
+    source = (_WRITER_DIR / "main.py").read_text(encoding="utf-8")
+    assert "run_reliable_queue_loop" in source
+    assert "await redis_client.brpop(" not in source
+
+
+def test_reclaim_processing_on_startup() -> None:
+    ops = _import_db_writer_ops()
+    redis_client = FakeListRedis()
+    queue = "duckdb_write_queue"
+    processing = ops.processing_queue_key(queue)
+    redis_client.lists[processing] = ["msg-a", "msg-b"]
+
+    reclaimed = asyncio.run(ops.reclaim_processing_on_startup(redis_client, queue))
+
+    assert reclaimed == 2
+    assert redis_client.lists.get(queue) == ["msg-a", "msg-b"]
+    assert redis_client.lists.get(processing) == []
+
+
+def test_reliable_queue_acks_after_handler() -> None:
+    ops = _import_db_writer_ops()
+    redis_client = FakeListRedis()
+    queue = "test:queue"
+    processing = ops.processing_queue_key(queue)
+    handled: list[str] = []
+
+    async def handler(_redis, message: str) -> None:
+        handled.append(message)
+
+    async def run_once() -> None:
+        await ops.reclaim_processing_on_startup(redis_client, queue)
+        await redis_client.lpush(queue, "payload-1")
+        message = await ops.pop_reliable_message(redis_client, queue, block_timeout=0)
+        assert message == "payload-1"
+        await ops.register_processing_lease(redis_client, queue, message, lease_sec=120)
+        await handler(redis_client, message)
+        await ops.ack_processing_message(redis_client, queue, message)
+
+    asyncio.run(run_once())
+
+    assert handled == ["payload-1"]
+    assert redis_client.lists.get(processing) == []
+    assert redis_client.lists.get(queue) == []
+
+
+def test_expired_lease_reclaim() -> None:
+    import time
+
+    ops = _import_db_writer_ops()
+    redis_client = FakeListRedis()
+    queue = "test:queue"
+    processing = ops.processing_queue_key(queue)
+    lease_key = ops.processing_lease_key(queue)
+    message = "stale-msg"
+    redis_client.lists[processing] = [message]
+    redis_client.zsets[lease_key] = {message: time.time() - 1}
+
+    reclaimed = asyncio.run(ops.reclaim_expired_processing_leases(redis_client, queue))
+
+    assert reclaimed == 1
+    assert redis_client.lists.get(queue) == [message]
+    assert redis_client.lists.get(processing) == []
+    assert message not in redis_client.zsets.get(lease_key, {})

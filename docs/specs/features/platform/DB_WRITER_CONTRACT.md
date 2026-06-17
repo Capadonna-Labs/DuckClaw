@@ -18,7 +18,25 @@ Contrato canónico del singleton writer (`services/db-writer/`). Gateway, agente
 | `duckclaw:state_delta:meditate` | `meditate_state_delta_handler` | `PURGE_STALE_TASKS`, `QUARANTINE_MEMORY` |
 | `duckclaw:state_delta:reports` | `reports_state_delta_handler` | `CUSTOM_REPORT_UPSERT` |
 
-Nombres overrideables vía env (`DUCKCLAW_*_STATE_DELTA_QUEUE`, `QUEUE_NAME`). El writer hace `BRPOP` en las cinco en paralelo (`asyncio.gather`).
+Nombres overrideables vía env (`DUCKCLAW_*_STATE_DELTA_QUEUE`, `QUEUE_NAME`). El writer consume las cinco en paralelo (`asyncio.gather`) con cola **reliable** (ver abajo).
+
+## Cola Reliable (at-most-once → no pérdida en crash)
+
+Antes: `BRPOP` sacaba el mensaje de Redis antes de `COMMIT`; un crash del writer implicaba pérdida silenciosa.
+
+Ahora (`db_writer_ops.py`):
+
+1. **`BRPOPLPUSH`** `{queue}` → `{queue}:processing` (atómico; el mensaje sigue en Redis hasta ACK).
+2. **Lease** en `db_writer:processing:lease:{queue}` (ZSET, TTL default 120s).
+3. **ACK** tras handler: `LREM` en `:processing` + `ZREM` lease.
+4. **Startup reclaim:** al arrancar cada loop, `RPOP` de `:processing` → `LPUSH` a cola principal (crash recovery).
+5. **Reclaim periódico:** cada 30s, leases expirados se reencolan (worker colgado).
+
+Config (`core/config.py`): `PROCESSING_KEY_SUFFIX`, `PROCESSING_LEASE_SEC`, `PROCESSING_RECLAIM_INTERVAL_SEC`.
+
+Métrica adicional: `db_writer:metric:reclaimed`.
+
+Semántica efectiva: **at-least-once** con dedup por `task_id`/ledger; el caller no pierde el mensaje por crash del writer, pero un reintento tras reclaim puede ejecutar dos veces si el ledger no alcanzó a registrar `completed` (mitigado por ledger + dedup Redis).
 
 ## Ruta Tipada vs Legacy (`raw_sql`)
 
@@ -43,11 +61,12 @@ Reintentos con el mismo `task_id` son seguros: no duplican efecto si el ledger y
 
 ## Dead Letter Queue (DLQ)
 
-Handlers state-delta que fallan tras `BRPOP` encolan en `{source_queue}:dlq` vía `push_dlq` (`db_writer_ops.py`). Payload: `source_queue`, `message`, `error`, `ts`. La cola SQL principal no usa DLQ automática (publica `task_status:failed`).
+Handlers state-delta que fallan tras consumo reliable encolan en `{source_queue}:dlq` vía `push_dlq` (`db_writer_ops.py`). Payload: `source_queue`, `message`, `error`, `ts`. La cola SQL principal no usa DLQ automática (publica `task_status:failed`).
 
-## Semántica At-Most-Once
+## Semántica de entrega
 
-- Tras `BRPOP` el mensaje sale de Redis: si el proceso muere antes de `COMMIT`, el write se pierde (no hay requeue).
+- Mensaje en `:processing` hasta ACK explícito; crash → reclaim al restart o por lease expirado.
+- Reintentos con el mismo `task_id` siguen siendo idempotentes vía ledger (`admin_write_ledger`) y soft dedup Redis.
 - Callers que necesitan confirmación deben hacer poll de `task_status:<task_id>` o verificar `admin_write_ledger`.
 - `DbPathLockRegistry` serializa escrituras concurrentes al mismo `db_path` normalizado dentro del proceso writer.
 
@@ -59,6 +78,7 @@ Contadores incrementales (`INCRBY`), sin TTL por defecto:
 |-------|-------------|
 | `db_writer:metric:processed` | Comandos tipados/SQL completados con éxito |
 | `db_writer:metric:failed` | Fallos tipados (handler, ACL, DuckDB) |
+| `db_writer:metric:reclaimed` | Mensajes devueltos de `:processing` a cola principal |
 
 `duckops doctor` y admin ops pueden leer `db_writer:metric:processed` como señal de actividad.
 

@@ -90,14 +90,48 @@ def test_admin_runtime_config_routes_live_in_domain_module() -> None:
     assert '@router.delete("/config", dependencies=[Depends(require_admin_key)])' in runtime_config
 
 
+def test_admin_knowledge_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    knowledge = Path("services/api-gateway/routers/admin_domains/knowledge.py").read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.knowledge import router as knowledge_router" in admin
+    assert "router.include_router(knowledge_router)" in admin
+    assert "class KnowledgeSourceCreateBody" not in db_first
+    assert "class KnowledgeSearchBody" not in db_first
+    assert "def _enqueue_knowledge_command" not in db_first
+    assert "def _knowledge_source_row" not in db_first
+    assert '@router.get("/knowledge/sources"' not in db_first
+    assert '@router.post("/knowledge/sources"' not in db_first
+    assert '@router.post("/knowledge/uploads"' not in db_first
+    assert '@router.delete("/knowledge/sources/{source_id}"' not in db_first
+    assert '@router.post("/knowledge/search"' not in db_first
+    assert 'router = APIRouter(tags=["admin-knowledge"])' in knowledge
+    assert '@router.get("/knowledge/sources", dependencies=[Depends(require_admin_key)])' in knowledge
+    assert '@router.post("/knowledge/sources", dependencies=[Depends(require_admin_key)])' in knowledge
+    assert '@router.post("/knowledge/uploads", dependencies=[Depends(require_admin_key)])' in knowledge
+    assert '@router.delete("/knowledge/sources/{source_id}", dependencies=[Depends(require_admin_key)])' in knowledge
+    assert '@router.post("/knowledge/search", dependencies=[Depends(require_admin_key)])' in knowledge
+
+
+def test_admin_knowledge_router_uses_typed_commands_for_mutations() -> None:
+    knowledge = Path("services/api-gateway/routers/admin_domains/knowledge.py").read_text(encoding="utf-8")
+
+    assert "open_gateway_db(read_only=False)" not in knowledge
+    assert "BEGIN TRANSACTION" not in knowledge
+    assert "enqueue_typed_command" in knowledge
+    assert "CreateKnowledgeSourceCommand" in knowledge
+    assert "UpsertKnowledgeDocumentCommand" in knowledge
+    assert "UpsertKnowledgeChunksCommand" in knowledge
+    assert "DeactivateKnowledgeSourceCommand" in knowledge
+    assert "task_id" in knowledge
+
+
 def test_runtime_settings_mutators_use_typed_write_commands() -> None:
     db_first = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
     telegram = Path("services/api-gateway/routers/admin_domains/telegram_routes.py").read_text(encoding="utf-8")
 
-    patch_segment = db_first.split('async def patch_runtime_settings(', 1)[1].split(
-        '@router.get("/knowledge/sources"',
-        1,
-    )[0]
+    patch_segment = db_first.split('async def patch_runtime_settings(', 1)[1]
     telegram_helper_segment = telegram.split(
         "def upsert_telegram_webhook_routes_runtime_setting(",
         1,

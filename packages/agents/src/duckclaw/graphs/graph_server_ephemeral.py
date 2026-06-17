@@ -157,10 +157,12 @@ def invoke_ephemeral_gateway_graph(
     from duckclaw.integrations.llm_providers import build_llm
     from duckclaw.manager.graph import clear_worker_graph_cache
 
-    from duckclaw.graphs import graph_server as gs
+    from duckclaw.graphs.graph_server_llm_config import _ensure_llm_config, get_graph_state
+    from duckclaw.graphs.graph_server_studio import _build_manager_graph_for_db
 
-    gs._ensure_llm_config()
-    db_path = str(gs._graph_state["db_path"])
+    _ensure_llm_config()
+    graph_state = get_graph_state()
+    db_path = str(graph_state["db_path"])
     os.makedirs(str(Path(db_path).parent), exist_ok=True)
     clear_worker_graph_cache()
     v_p = (vault_db_path or "").strip()
@@ -212,7 +214,7 @@ def invoke_ephemeral_gateway_graph(
                     tp,
                     (tm or "")[:80],
                 )
-        _invoke_provider = str(gs._graph_state.get("provider") or "")
+        _invoke_provider = str(graph_state.get("provider") or "")
         if ovr.get("llm_provider_override"):
             _invoke_provider = str(ovr.get("llm_provider_override") or "")
         elif trip:
@@ -227,5 +229,5 @@ def invoke_ephemeral_gateway_graph(
         )
     except Exception as exc:
         _log.warning("graph_server: LLM override resolution failed: %s", exc, exc_info=True)
-    graph = gs._build_manager_graph_for_db(db, **ovr)
+    graph = _build_manager_graph_for_db(db, **ovr)
     return graph, db

@@ -113,43 +113,6 @@ def initialize_worker_graph_context(
         )
         db = DuckClaw(path, read_only=effective_vault_ro, engine=_engine)
     ctx.db = db
-    spec = load_manifest(worker_id, templates_root, db=db, tenant_id=tenant_id)
-    if db is not None:
-        try:
-            spec.runtime_policy = load_worker_runtime_policy(
-                db,
-                getattr(spec, "logical_worker_id", None) or worker_id,
-                tenant_id=tenant_id,
-            )
-        except Exception as exc:
-            _log.debug("worker runtime policy unavailable for %s: %s", worker_id, exc)
-    is_market_analysis_worker = _worker_has_runtime_capability(spec, "market_analysis")
-    path = _get_db_path(worker_id, instance_name, db_path)
-    shared_resolved = _resolve_shared_db_path(spec, shared_db_path)
-
-    from duckclaw import DuckClaw
-
-    reuse_path = ""
-    if reuse_db is not None:
-        reuse_path = str(getattr(reuse_db, "_path", "") or "").strip()
-    reuse_read_only = bool(getattr(reuse_db, "_read_only", False)) if reuse_db is not None else False
-    same_as_reuse = bool(reuse_db is not None and reuse_path and _same_duckdb_file(reuse_path, path))
-    effective_vault_ro = bool(spec.read_only) or bool(open_vault_read_only)
-    if same_as_reuse and not (shared_resolved or "").strip() and not open_vault_read_only:
-        db = reuse_db
-        _log.debug(
-            "build_worker_graph: reuse DuckClaw (same file) path=%s ro=%s",
-            path, reuse_read_only,
-        )
-    else:
-        # Motor Python para RW en archivo: el manager ya abrió RO con duckdb Python; mezclar bridge C++ (auto)
-        # + Python en el mismo .duckdb en un PID provoca «different configuration».
-        _engine: Literal["auto", "python"] = (
-            "python"
-            if not effective_vault_ro and (path or "").strip() not in ("", ":memory:")
-            else "auto"
-        )
-        db = DuckClaw(path, read_only=effective_vault_ro, engine=_engine)
     # DuckDB no permite dos conexiones con config distinta al mismo archivo en el mismo PID.
     # Si ya tenemos una conexión (reuse_db) al mismo path, reusarla sin abrir otra.
     db_open_path = str(getattr(db, "_path", "") or path or "").strip()
@@ -311,6 +274,26 @@ def initialize_worker_graph_context(
         )
     _context_prompt_base: str | None = (effective_prompt + _schema_digest) if _cp.get("enabled") else None
 
+    context_monitor_node = _build_context_monitor_node(
+        pruning_config=_cp,
+        prompt_base=_context_prompt_base or effective_prompt,
+        llm_summary=llm_summary,
+        identity_fields=_identity_fields,
+    ) if use_cm else None
+
+    tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
+    tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
+
+    _groq_bind = (provider or "").strip().lower() == "groq"
+    _tools_for_llm_bind = _groq_tools_without_reddit_for_bind(tools) if _groq_bind else tools
+    _tools_sandbox_off_bind = (
+        _groq_tools_without_reddit_for_bind(tools_sandbox_off) if _groq_bind else tools_sandbox_off
+    )
+    if _groq_bind:
+        _log.info(
+            "Groq: bind genérico sin reddit_* (%d tools; forzados Reddit/otros usan set acorde).",
+            len(_tools_for_llm_bind),
+        )
 
     context_guard_config = getattr(spec, "context_guard_config", None) or {}
     ctx.context_guard_enabled = (

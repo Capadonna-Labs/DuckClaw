@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from typing import Any, Optional
 
 try:
@@ -11,7 +12,15 @@ except ImportError:
 
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 
-AGENT_CTX_UNPACK = '''
+
+def load_agent_env(ctx: WorkerGraphContext) -> dict[str, Any]:
+    """Execute AGENT_CTX_UNPACK; caller must materialize names for nested closures."""
+    env: dict[str, Any] = {"ctx": ctx}
+    exec(AGENT_CTX_UNPACK, env)
+    return env
+
+AGENT_CTX_UNPACK = textwrap.dedent(
+    """
     worker_id = ctx.worker_id
     db = ctx.db
     spec = ctx.spec
@@ -71,4 +80,5 @@ AGENT_CTX_UNPACK = '''
         reddit_share_slug_from_incoming as _reddit_share_slug_from_incoming,
         reddit_tool_message_no_data as _reddit_tool_message_no_data,
     )
-'''
+"""
+).strip() + "\n"

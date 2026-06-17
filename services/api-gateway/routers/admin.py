@@ -25,6 +25,7 @@ from routers.admin_domains.fly_commands_catalog import router as fly_commands_ca
 from routers.admin_domains.forge_projects import router as forge_projects_router
 from routers.admin_domains.hitl_admin import router as hitl_admin_router
 from routers.admin_domains.kanban import router as kanban_router
+from routers.admin_domains.knowledge import router as knowledge_router
 from routers.admin_domains.kanban_runtime import router as kanban_runtime_router
 from routers.admin_domains.ops import router as ops_router
 from routers.admin_domains.overview import gateway_db_query_rows as _gateway_db_query_rows
@@ -84,6 +85,7 @@ router.include_router(forge_projects_router)
 router.include_router(hitl_admin_router)
 router.include_router(kanban_router)
 router.include_router(kanban_runtime_router)
+router.include_router(knowledge_router)
 router.include_router(ops_router)
 router.include_router(overview_router)
 router.include_router(playground_chat_router)

@@ -13,7 +13,11 @@ from duckclaw.workers.factory_graph_context import WorkerGraphContext
 
 
 def make_should_continue(ctx: WorkerGraphContext):
+    max_rounds = max(1, int(ctx.max_tool_rounds))
+
     def should_continue(state: dict) -> str:
+        if int(state.get("_tool_round") or 0) >= max_rounds:
+            return "end"
         last = state["messages"][-1]
         _has_tools = bool(getattr(last, "tool_calls", None))
         return "tools" if _has_tools else "end"

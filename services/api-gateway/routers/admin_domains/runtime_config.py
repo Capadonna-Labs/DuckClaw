@@ -12,15 +12,6 @@ router = APIRouter(prefix="/runtime", tags=["admin-runtime-config"])
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
-_AGENT_CONFIG_DDL = """
-CREATE TABLE IF NOT EXISTS agent_config (
-    key VARCHAR PRIMARY KEY,
-    value TEXT,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
-
 class RuntimeConfigPutBody(BaseModel):
     vault_path: str
     chat_id: str = "default"
@@ -149,29 +140,18 @@ async def get_runtime_config(
     chat_id: str = Query("default"),
 ) -> dict[str, Any]:
     from duckclaw import DuckClaw
+    from duckclaw.admin_agent_config_read import list_agent_config_entries
 
     abs_path = _absolute_vault_path(vault_path)
     if not os.path.isfile(abs_path):
         raise _problem(404, "Vault no encontrado", vault_path)
     db = DuckClaw(abs_path, read_only=True, engine="python")
-    warning: str | None = None
     try:
-        try:
-            db.execute(_AGENT_CONFIG_DDL)
-        except Exception:
-            pass
-        raw = db.query("SELECT key, value FROM agent_config ORDER BY key")
-        rows = _parse_agent_config_rows(raw, chat_id)
+        result = list_agent_config_entries(db)
+        rows = _parse_agent_config_rows(result.rows, chat_id)
+        warning = result.warning
     except Exception as exc:
-        msg = str(exc)
-        if "agent_config" in msg.lower() and "does not exist" in msg.lower():
-            rows = []
-            warning = (
-                "La tabla agent_config no existe en esta bóveda. "
-                "Ejecuta: uv run python scripts/bootstrap_dbs.py"
-            )
-        else:
-            raise _problem(400, "Error leyendo agent_config", msg) from exc
+        raise _problem(400, "Error leyendo agent_config", str(exc)) from exc
     finally:
         db.close()
     out: dict[str, Any] = {"vault_path": vault_path, "chat_id": chat_id, "rows": rows}

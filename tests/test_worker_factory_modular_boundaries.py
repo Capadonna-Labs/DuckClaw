@@ -3,8 +3,10 @@ from __future__ import annotations
 import ast
 import importlib
 from pathlib import Path
+from typing import Any
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 
 
 FACTORY_PATH = Path("packages/agents/src/duckclaw/workers/factory.py")
@@ -26,6 +28,45 @@ def _write_worker_manifest(root: Path, worker_id: str) -> None:
         f"name: {worker_id}\nid: {worker_id}\ntopology: general\nskills: []\n",
         encoding="utf-8",
     )
+
+
+def _write_default_worker_layout(root: Path) -> Path:
+    """Filesystem layout expected by load_manifest(templates_root=root)."""
+    worker_dir = root / "templates" / "workers" / "default"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    worker_dir.joinpath("manifest.yaml").write_text(
+        "name: smoke-default\nid: default\ntopology: general\nskills: []\n",
+        encoding="utf-8",
+    )
+    worker_dir.joinpath("system_prompt.md").write_text("Eres un agente de prueba.", encoding="utf-8")
+    return worker_dir
+
+
+class _FakeBindableLLM:
+    """Minimal LLM stub: bind_tools returns self; invoke returns configured AIMessage."""
+
+    def __init__(self, *, content: str = "respuesta smoke", tool_calls: list[dict[str, Any]] | None = None) -> None:
+        self._content = content
+        self._tool_calls = tool_calls or []
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> _FakeBindableLLM:
+        return self
+
+    def invoke(self, messages: Any, **kwargs: Any) -> AIMessage:
+        return AIMessage(content=self._content, tool_calls=list(self._tool_calls))
+
+
+class _AlwaysToolCallLLM:
+    """LLM stub that always requests read_sql (exercises agent↔tools loop)."""
+
+    def bind_tools(self, tools: Any, **kwargs: Any) -> _AlwaysToolCallLLM:
+        return self
+
+    def invoke(self, messages: Any, **kwargs: Any) -> AIMessage:
+        return AIMessage(
+            content="",
+            tool_calls=[{"name": "read_sql", "args": {"query": "SELECT 1"}, "id": "loop-tool"}],
+        )
 
 
 def test_filesystem_worker_layout_exposes_only_default_template(tmp_path: Path) -> None:
@@ -540,6 +581,7 @@ def test_graph_builder_modules_respect_line_limits() -> None:
     workers = Path("packages/agents/src/duckclaw/workers")
     limits = {
         "factory_graph_assembly.py": 200,
+        "factory_graph_nodes_agent_invoke.py": 450,
     }
     default_max = 400
     for path in sorted(workers.glob("factory_graph_*.py")):
@@ -558,3 +600,200 @@ def test_graph_builder_owns_build_worker_graph() -> None:
     assert factory.build_worker_graph.__module__ == "duckclaw.workers.factory_graph_builder"
     names = _factory_function_names()
     assert "build_worker_graph" not in names
+
+
+def test_build_worker_graph_compiles_core_nodes_without_external_io(tmp_path: Path) -> None:
+    from duckclaw.workers.factory_graph_builder import build_worker_graph
+
+    templates_root = tmp_path / "layout"
+    _write_default_worker_layout(templates_root)
+    graph = build_worker_graph(
+        "default",
+        ":memory:",
+        None,
+        templates_root=templates_root,
+        llm_provider="none_llm",
+    )
+
+    assert hasattr(graph, "invoke")
+    node_names = set(graph.nodes)
+    assert {"prepare", "agent", "tools", "set_reply"}.issubset(node_names)
+    assert graph._worker_spec is not None
+    assert graph._worker_db is not None
+
+
+def test_build_worker_graph_prepare_agent_set_reply_path_without_llm(tmp_path: Path) -> None:
+    from duckclaw.workers.factory_graph_builder import build_worker_graph
+
+    templates_root = tmp_path / "layout"
+    _write_default_worker_layout(templates_root)
+    graph = build_worker_graph(
+        "default",
+        ":memory:",
+        None,
+        templates_root=templates_root,
+        llm_provider="none_llm",
+    )
+
+    out = graph.invoke(
+        {
+            "incoming": "hola contrato",
+            "chat_id": "chat-smoke",
+            "tenant_id": "default",
+        }
+    )
+
+    assert out.get("reply") == "Sin LLM configurado. Configura DUCKCLAW_LLM_PROVIDER."
+    messages = out.get("messages") or []
+    assert any(isinstance(m, SystemMessage) for m in messages)
+    assert any(isinstance(m, HumanMessage) for m in messages)
+    assert any(isinstance(m, AIMessage) for m in messages)
+
+
+def test_build_worker_graph_invoke_with_fake_llm_reaches_set_reply(tmp_path: Path) -> None:
+    from duckclaw.workers.factory_graph_builder import build_worker_graph
+
+    templates_root = tmp_path / "layout"
+    _write_default_worker_layout(templates_root)
+    graph = build_worker_graph(
+        "default",
+        ":memory:",
+        _FakeBindableLLM(content="respuesta contrato"),
+        templates_root=templates_root,
+        llm_provider="none_llm",
+    )
+
+    out = graph.invoke(
+        {
+            "incoming": "ping contrato",
+            "chat_id": "chat-smoke-llm",
+            "tenant_id": "default",
+        }
+    )
+
+    assert out.get("reply") == "respuesta contrato"
+
+
+def test_should_continue_routes_tools_and_set_reply() -> None:
+    from duckclaw.workers.factory_graph_context import WorkerGraphContext
+    from duckclaw.workers.factory_graph_nodes_routing import make_should_continue
+
+    ctx = WorkerGraphContext()
+    should_continue = make_should_continue(ctx)
+
+    with_tools = {"messages": [AIMessage(content="", tool_calls=[{"name": "get_current_time", "args": {}, "id": "1"}])]}
+    without_tools = {"messages": [AIMessage(content="solo texto")]}
+
+    assert should_continue(with_tools) == "tools"
+    assert should_continue(without_tools) == "end"
+
+
+def test_should_continue_caps_tool_rounds_at_max() -> None:
+    from duckclaw.workers.factory_graph_context import WorkerGraphContext
+    from duckclaw.workers.factory_graph_nodes_routing import make_should_continue
+
+    ctx = WorkerGraphContext(max_tool_rounds=2)
+    should_continue = make_should_continue(ctx)
+
+    capped = {
+        "messages": [AIMessage(content="", tool_calls=[{"name": "read_sql", "args": {}, "id": "1"}])],
+        "_tool_round": 2,
+    }
+    assert should_continue(capped) == "end"
+
+
+def test_build_worker_graph_caps_tool_loop_without_recursion_error(tmp_path: Path) -> None:
+    from duckclaw.workers.factory_graph_builder import build_worker_graph
+
+    templates_root = tmp_path / "layout"
+    _write_default_worker_layout(templates_root)
+    graph = build_worker_graph(
+        "default",
+        ":memory:",
+        _AlwaysToolCallLLM(),
+        templates_root=templates_root,
+        llm_provider="none_llm",
+        max_tool_rounds=2,
+    )
+
+    out = graph.invoke(
+        {
+            "incoming": "loop contrato",
+            "chat_id": "chat-tool-cap",
+            "tenant_id": "default",
+        }
+    )
+
+    assert isinstance(out, dict)
+    assert "reply" in out
+    assert int(out.get("_tool_round") or 0) == 2
+
+
+def test_prepare_node_feeds_agent_with_system_and_human_messages(tmp_path: Path) -> None:
+    from duckclaw.workers.factory_graph_setup import initialize_worker_graph_context
+    from duckclaw.workers.factory_graph_nodes_prepare import make_prepare_node
+
+    templates_root = tmp_path / "layout"
+    _write_default_worker_layout(templates_root)
+    ctx = initialize_worker_graph_context(
+        "default",
+        ":memory:",
+        None,
+        templates_root=templates_root,
+        llm_provider="none_llm",
+    )
+    ctx.sandbox_enabled_for_state = lambda _state: False
+    prepare_node = make_prepare_node(ctx)
+
+    out = prepare_node({"incoming": "mensaje prepare", "chat_id": "c-prepare", "tenant_id": "default"})
+
+    assert out.get("incoming") == "mensaje prepare"
+    roles = [type(m).__name__ for m in out.get("messages") or []]
+    assert roles[0] == "SystemMessage"
+    assert "HumanMessage" in roles
+
+
+def test_tools_node_wires_tool_lookup_from_context(tmp_path: Path) -> None:
+    from duckclaw.workers.factory_graph_setup import initialize_worker_graph_context
+    from duckclaw.workers.factory_graph_nodes_tools import make_tools_node
+
+    templates_root = tmp_path / "layout"
+    _write_default_worker_layout(templates_root)
+    ctx = initialize_worker_graph_context(
+        "default",
+        ":memory:",
+        None,
+        templates_root=templates_root,
+        llm_provider="none_llm",
+    )
+    ctx.sandbox_enabled_for_state = lambda _state: True
+
+    captured: dict[str, Any] = {}
+
+    class _EchoTool:
+        name = "echo_tool"
+
+        def invoke(self, args: dict[str, Any]) -> str:
+            captured["args"] = args
+            return "tool-ok"
+
+    ctx.tools_by_name = {"echo_tool": _EchoTool()}
+    ctx.tools_by_name_sandbox_off = {"echo_tool": _EchoTool()}
+    tools_node = make_tools_node(ctx)
+
+    state = {
+        "messages": [
+            SystemMessage(content="sys"),
+            HumanMessage(content="hi"),
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "echo_tool", "args": {"q": "x"}, "id": "tc1"}],
+            ),
+        ],
+        "chat_id": "chat-tools",
+        "tenant_id": "default",
+    }
+    out = tools_node(state)
+
+    assert captured.get("args") == {"q": "x"}
+    assert any(isinstance(m, ToolMessage) for m in out.get("messages") or [])

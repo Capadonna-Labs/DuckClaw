@@ -133,7 +133,7 @@ DB_FIRST_DDL_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/workers/loader.py": "worker belief bootstrap",
     "services/api-gateway/core/chat_auth.py": "chat auth authorized_users bootstrap DDL",
     "services/api-gateway/routers/admin.py": "authorized admin maintenance/bootstrap endpoints",
-    "services/api-gateway/routers/admin_domains/runtime_config.py": "authorized admin runtime config bootstrap",
+    "services/api-gateway/routers/admin_domains/runtime_config.py": "authorized admin runtime config (mutations via typed commands)",
     "services/db-writer/context_injection_handler.py": "DB-writer context command schema",
     "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate command schema",
     "services/db-writer/reports_state_delta_handler.py": "DB-writer reports command schema",

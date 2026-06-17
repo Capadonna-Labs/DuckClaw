@@ -42,14 +42,6 @@ class KnowledgeSearchBody(BaseModel):
     limit: int = 8
 
 
-def _fetchall(result: Any) -> list[Any]:
-    if hasattr(result, "fetchall"):
-        return list(result.fetchall())
-    if isinstance(result, list):
-        return result
-    return []
-
-
 def _enqueue_knowledge_command(command: Any) -> str:
     from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
     from duckclaw.gateway_db import get_gateway_db_path
@@ -90,92 +82,25 @@ def _validate_knowledge_ingest_root(source_uri: str) -> Path:
     return target
 
 
-def _knowledge_source_row(row: tuple[Any, ...]) -> dict[str, Any]:
-    (
-        source_id,
-        tenant_id,
-        project_id,
-        worker_uid,
-        source_kind,
-        source_uri,
-        display_name,
-        status,
-        metadata_json,
-        active,
-        created_at,
-        updated_at,
-        document_count,
-        chunk_count,
-    ) = row
-    try:
-        metadata = json.loads(metadata_json or "{}")
-    except json.JSONDecodeError:
-        metadata = {}
-    return {
-        "source_id": str(source_id),
-        "tenant_id": str(tenant_id or ""),
-        "project_id": str(project_id or ""),
-        "worker_uid": str(worker_uid or ""),
-        "source_kind": str(source_kind or ""),
-        "source_uri": str(source_uri or ""),
-        "display_name": str(display_name or ""),
-        "status": str(status or ""),
-        "metadata": metadata,
-        "active": bool(active),
-        "created_at": str(created_at),
-        "updated_at": str(updated_at),
-        "document_count": int(document_count or 0),
-        "chunk_count": int(chunk_count or 0),
-    }
-
-
 @router.get("/knowledge/sources", dependencies=[Depends(require_admin_key)])
 async def list_knowledge_sources(
     project_id: str = "",
     worker_uid: str = "",
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    # Read-model pendiente: esta lista sigue con SQL inline; no hay módulo compartido
-    # de consultas RAG en duckclaw.*. Las mutaciones ya usan typed write commands.
     from core.admin_identity import open_gateway_db
+    from duckclaw.admin_knowledge_read import list_knowledge_sources as _list_sources
     from duckclaw.admin_user_profiles import ensure_profile_for_user
 
     with open_gateway_db(read_only=True) as db:
         profile = ensure_profile_for_user(db, email=actor)
-        clauses = ["s.tenant_id = ?", "s.active = true"]
-        params: list[Any] = [profile["tenant_id"]]
-        if project_id:
-            clauses.append("(s.project_id = ? OR s.project_id = '')")
-            params.append(project_id)
-        if worker_uid:
-            clauses.append("(s.worker_uid = ? OR s.worker_uid = '')")
-            params.append(worker_uid)
-        rows = _fetchall(
-            db.execute(
-                f"""
-                SELECT s.source_id, s.tenant_id, s.project_id, s.worker_uid, s.source_kind,
-                       s.source_uri, s.display_name, s.status, s.metadata_json, s.active,
-                       s.created_at, s.updated_at,
-                       COUNT(DISTINCT d.document_id) AS document_count,
-                       COUNT(DISTINCT c.chunk_id) AS chunk_count
-                FROM main.admin_knowledge_sources s
-                LEFT JOIN main.admin_knowledge_documents d
-                  ON d.source_id = s.source_id AND d.active = true
-                LEFT JOIN main.admin_knowledge_chunks c
-                  ON c.source_id = s.source_id
-                 AND c.active = true
-                 AND (s.project_id = '' OR c.project_id = s.project_id OR c.project_id = '')
-                 AND (s.worker_uid = '' OR c.worker_uid = s.worker_uid OR c.worker_uid = '')
-                WHERE {' AND '.join(clauses)}
-                GROUP BY s.source_id, s.tenant_id, s.project_id, s.worker_uid, s.source_kind,
-                         s.source_uri, s.display_name, s.status, s.metadata_json, s.active,
-                         s.created_at, s.updated_at
-                ORDER BY s.updated_at DESC
-                """,
-                params,
-            )
+        sources = _list_sources(
+            db,
+            tenant_id=profile["tenant_id"],
+            project_id=project_id,
+            worker_uid=worker_uid,
         )
-    return {"sources": [_knowledge_source_row(row) for row in rows]}
+    return {"sources": sources}
 
 
 @router.post("/knowledge/sources", dependencies=[Depends(require_admin_key)])

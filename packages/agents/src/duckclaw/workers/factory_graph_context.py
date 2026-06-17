@@ -42,4 +42,5 @@ class WorkerGraphContext:
     agent_bind: dict[str, Any] = field(default_factory=dict)
     context_guard_enabled: bool = False
     context_guard_max_retries: int = 2
+    max_tool_rounds: int = 10
     agent_turn: dict[str, Any] = field(default_factory=dict)

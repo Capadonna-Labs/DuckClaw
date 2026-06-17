@@ -26,6 +26,17 @@ class WorkerQualitySignal:
     enabled: bool = True
 
 
+@dataclass(frozen=True)
+class WorkerQualitySignalOption:
+    """Read-model ligero para autocompletar metas /goals y UI admin."""
+
+    key: str
+    label: str
+    target: float
+    threshold: float
+    comparison: str = "symmetric"
+
+
 def normalize_quality_signal_key(value: str) -> str:
     key = _KEY_RE.sub("_", str(value or "").strip().lower()).strip("_")
     return key[:96]
@@ -88,6 +99,29 @@ def list_worker_quality_signals(
         if signal and signal.enabled:
             out.append(signal)
     return out
+
+
+def list_worker_quality_signal_options(
+    db: Any,
+    *,
+    tenant_id: str,
+    worker_id: str,
+) -> list[WorkerQualitySignalOption]:
+    """Opciones RO para autocompletar metas por worker (admin /goals)."""
+    return [
+        WorkerQualitySignalOption(
+            key=signal.key,
+            label=(signal.label or signal.key).strip() or signal.key,
+            target=signal.target,
+            threshold=signal.threshold,
+            comparison=signal.comparison,
+        )
+        for signal in list_worker_quality_signals(
+            db,
+            tenant_id=tenant_id,
+            worker_id=worker_id,
+        )
+    ]
 
 
 def upsert_worker_quality_signal(

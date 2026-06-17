@@ -7,7 +7,12 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 
-from routers.admin_domains.admin_common import problem, repo_root, require_admin_key
+from routers.admin_domains.admin_common import (
+    actor_from_header as _actor_from_header,
+    problem,
+    repo_root,
+    require_admin_key,
+)
 
 router = APIRouter(prefix="/catalog", tags=["admin-catalog-meta"])
 
@@ -181,6 +186,43 @@ async def catalog_industries() -> dict[str, Any]:
                     pass
                 items.append({"id": rel, "name": name, "path": rel})
     return {"industries": items, "starters": catalog_starter_items()}
+
+
+@router.get("/workers/{worker_id}/quality-signals", dependencies=[Depends(require_admin_key)])
+async def catalog_worker_quality_signals(
+    worker_id: str,
+    actor: str = Depends(_actor_from_header),
+) -> dict[str, Any]:
+    """Señales de calidad administrables (RO) para autocompletar metas /goals."""
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.worker_quality_signals import (
+        QUALITY_SIGNALS_DOMAIN,
+        list_worker_quality_signal_options,
+    )
+
+    wid = str(worker_id or "").strip()
+    if not wid:
+        raise problem(400, "worker_id requerido", worker_id)
+    with open_gateway_db(read_only=True) as db:
+        profile = ensure_profile_for_user(db, email=actor)
+        tenant_id = str(profile["tenant_id"] or "default").strip() or "default"
+        options = list_worker_quality_signal_options(db, tenant_id=tenant_id, worker_id=wid)
+    return {
+        "tenant_id": tenant_id,
+        "worker_id": wid,
+        "domain": QUALITY_SIGNALS_DOMAIN,
+        "signals": [
+            {
+                "key": item.key,
+                "label": item.label,
+                "target": item.target,
+                "threshold": item.threshold,
+                "comparison": item.comparison,
+            }
+            for item in options
+        ],
+    }
 
 
 @router.get("/topologies", dependencies=[Depends(require_admin_key)])

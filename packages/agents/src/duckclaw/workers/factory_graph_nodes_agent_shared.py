@@ -19,6 +19,72 @@ def load_agent_env(ctx: WorkerGraphContext) -> dict[str, Any]:
     exec(AGENT_CTX_UNPACK, env)
     return env
 
+
+AGENT_BINDING_NAMES: tuple[str, ...] = (
+    "worker_id",
+    "db",
+    "spec",
+    "path",
+    "provider",
+    "llm",
+    "tool_surface",
+    "is_market_analysis_worker",
+    "tools",
+    "tools_by_name",
+    "tools_sandbox_off",
+    "tools_by_name_sandbox_off",
+    "prompt_policies",
+    "_lid",
+    "use_cm",
+    "_tools_for_llm_bind",
+    "_tools_sandbox_off_bind",
+    "_sandbox_enabled_for_state",
+    "b",
+    "llm_with_tools_on",
+    "llm_with_tools_off",
+    "llm_force_schema_on",
+    "llm_force_schema_off",
+    "llm_force_read_sql_on",
+    "llm_force_read_sql_off",
+    "llm_force_admin_sql_on",
+    "llm_force_admin_sql_off",
+    "llm_force_run_sandbox_on",
+    "llm_force_run_sandbox_off",
+    "llm_force_tavily_on",
+    "llm_force_tavily_off",
+    "llm_force_generate_visual_on",
+    "llm_force_generate_visual_off",
+    "llm_force_fetch_market_on",
+    "llm_force_fetch_market_off",
+    "llm_force_reddit_post_on",
+    "llm_force_reddit_post_off",
+    "llm_force_reddit_search_on",
+    "llm_force_reddit_search_off",
+    "llm_force_reddit_fallback_on",
+    "llm_force_reddit_fallback_off",
+    "has_read_sql",
+    "has_tavily",
+    "has_generate_visual",
+    "has_reddit_tools",
+    "has_run_sandbox",
+    "_bind_tools",
+    "_count_tool_messages_named",
+    "_first_reddit_url_in_text",
+    "_incoming_has_reddit_share_path",
+    "_incoming_has_reddit_url",
+    "_incoming_looks_like_reddit_post_url",
+    "_is_latest_game_query",
+    "_is_schema_query",
+    "_patch_ai_reddit_share_tool_calls",
+    "_reddit_share_slug_from_incoming",
+    "_reddit_tool_message_no_data",
+)
+
+
+def unpack_agent_bindings(agent_env: dict[str, Any]) -> tuple[Any, ...]:
+    """Materialize AGENT_CTX_UNPACK keys as a tuple for closure capture."""
+    return tuple(agent_env[name] for name in AGENT_BINDING_NAMES)
+
 AGENT_CTX_UNPACK = textwrap.dedent(
     """
     worker_id = ctx.worker_id

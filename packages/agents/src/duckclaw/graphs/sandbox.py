@@ -6,6 +6,12 @@
 - run_in_sandbox(): bucle de auto-corrección (hasta max_retries intentos).
 - data_inject(): exporta SQL de DuckDB a /tmp/.../data.csv para montaje read-only.
 - sandbox_tool_factory(): StructuredTool para usar en general_graph.
+
+Artefactos en host: al terminar una ejecución, ``_collect_artifacts`` copia los ficheros
+de ``/workspace/output`` del contenedor a ``output/sandbox/default/`` (relativo al CWD del
+proceso gateway/agente). Ese directorio está en ``.gitignore`` (``output/``); se recrea en
+cada run y no debe versionarse. Telegram y el bot polling leen rutas bajo ``output/`` para
+adjuntar PNG/Excel/MD generados por el sandbox.
 """
 
 from __future__ import annotations

@@ -22,7 +22,6 @@ Implementación: `services/api-gateway/main.py`.
 ## Ver también
 
 - [Multi Vault](../operations/Multi-Vault-System.md)
-- [Observabilidad](../operations/Observability-2.1-Identidad.md)
 - [Singleton Writer](../architecture/singleton_writer.md)
 - [COMANDOS](../COMANDOS.md)
 - Spec: `specs/features/telegram-gateway/TELEGRAM.md`

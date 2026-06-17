@@ -1,29 +1,44 @@
 """
-DEPRECATED — Bot Telegram en polling legado.
+Bot Telegram en long polling (compat / dev).
 
 Producción: webhook del api-gateway (``services/api-gateway/routers/telegram_inbound_webhook.py``).
-Este módulo se conserva como stub de compatibilidad para tests y despliegues PM2 legacy.
+Helpers de integración: ``duckclaw.integrations.telegram.*``.
 
-Uso legacy (no recomendado):
+Uso:
   uv sync --extra agents
   uv run python -m duckclaw.graphs.telegram_bot
-
-Requiere: TELEGRAM_BOT_TOKEN y opcionalmente rutas multiplex / DUCKDB_PATH (vía ``get_gateway_db_path``).
-Lee variables desde .env en el directorio actual o en la raíz del proyecto.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
-import re
 import time
 from pathlib import Path
 from typing import Any, Optional
 
+from duckclaw.graphs.telegram_polling_setup import (
+    DEFAULT_FRAMEWORK,
+    DEFAULT_SYSTEM_PROMPT,
+    build_graph_via_forge,
+    get_config,
+    get_db_path,
+    get_store_db,
+    persist_conversation,
+    set_config,
+)
+from duckclaw.integrations.telegram.telegram_reply_egress import (
+    caption_for_photo,
+    extract_excel_paths,
+    extract_image_paths,
+    extract_markdown_paths,
+    format_reply_for_telegram_html,
+    log_polling,
+    normalize_worker_reply_for_telegram,
+    strip_paths_from_reply,
+    truncate_at_break,
+)
 from duckclaw.utils.langsmith_trace import get_tracing_config
-
-_AGENT_CONFIG_TABLE = "agent_config"
 
 
 def _load_dotenv() -> None:
@@ -49,347 +64,25 @@ def _load_dotenv() -> None:
             except Exception:
                 pass
             break
-_DEFAULT_SYSTEM_PROMPT = (
-    "Eres un asistente DuckClaw con acceso a DuckDB (SQL, PGQ, VSS). "
-    "Responde de forma breve y clara; prioriza datos de la base antes de suposiciones."
-)
-_DEFAULT_FRAMEWORK = "langgraph"
-
-_ARTIFACT_SEARCH_DIRS = ("output/sandbox/default", "output")
-
-
-def _truncate_at_break(text: str, max_len: int = 600) -> str:
-    if not text or len(text) <= max_len:
-        return text
-    s = text[: max_len + 1]
-    for sep in ("\n\n", ".\n", "\n", ". ", " "):
-        idx = s.rfind(sep)
-        if idx > max_len // 2:
-            return text[: idx + len(sep)].strip()
-    return text[:max_len].strip()
-
-
-def _artifact_search_bases() -> tuple[Path, ...]:
-    cwd = Path.cwd()
-    return (cwd,)
-
-
-def _resolve_artifact_path(raw: str, *, extensions: tuple[str, ...]) -> str | None:
-    m_clean = (raw or "").strip()
-    if not m_clean:
-        return None
-    p = Path(m_clean)
-    if p.is_absolute() and p.is_file() and p.suffix.lower() in extensions:
-        return str(p.resolve())
-    fname = p.name
-    for base in _artifact_search_bases():
-        for sub in _ARTIFACT_SEARCH_DIRS:
-            candidate = (base / sub / fname).resolve()
-            if candidate.is_file() and candidate.suffix.lower() in extensions:
-                return str(candidate)
-        candidate = (base / m_clean).resolve()
-        if candidate.is_file() and candidate.suffix.lower() in extensions:
-            return str(candidate)
-    return None
-
-
-def _extract_paths_by_extension(text: str, extensions: tuple[str, ...]) -> list[str]:
-    if not (text or "").strip():
-        return []
-    ext_pat = "|".join(re.escape(e.lstrip(".")) for e in extensions)
-    pattern = rf"([^\s`\"'<>]+\.(?:{ext_pat}))"
-    seen: set[str] = set()
-    found: list[str] = []
-    for match in re.findall(pattern, text, re.IGNORECASE):
-        resolved = _resolve_artifact_path(match, extensions=extensions)
-        if resolved and resolved not in seen:
-            seen.add(resolved)
-            found.append(resolved)
-    return found
-
-
-def _extract_image_paths(text: str) -> list[str]:
-    return _extract_paths_by_extension(text, (".png", ".jpg", ".jpeg", ".webp"))
-
-
-def _extract_excel_paths(text: str) -> list[str]:
-    return _extract_paths_by_extension(text, (".xlsx",))
-
-
-def _is_export_hashed_md(filename: str) -> bool:
-    name = Path(filename).stem
-    return bool(re.match(r"^export_[a-f0-9]{8}$", name, re.I))
-
-
-def _extract_markdown_paths(text: str) -> list[str]:
-    paths = _extract_paths_by_extension(text, (".md",))
-    return [p for p in paths if not _is_export_hashed_md(p)]
-
-
-def _strip_paths_from_reply(text: str) -> str:
-    if not (text or "").strip():
-        return text or ""
-    s = re.sub(
-        r"\s*[.;]?\s*(?:El gráfico|La gráfica|El diagrama|La imagen)\s+(?:ha\s+sido\s+)?guardad[oa]\s+en:\s*[^\n]+",
-        "",
-        text,
-        flags=re.IGNORECASE,
-    )
-    s = re.sub(r"\s*[.;]?\s*El archivo\s+se\s+ha\s+guardado\s+en:\s*[^\n]+", "", s, flags=re.IGNORECASE)
-    s = re.sub(r"\s*[.;]?\s*Archivo\s+(?:Excel|Markdown)?\s*guardado:\s*[^\n]+", "", s, flags=re.IGNORECASE)
-    path_kw = ("guardado en", "guardada en", "se ha guardado", "saved in", "saved to", "ruta:", "path:")
-    lines = []
-    for line in s.split("\n"):
-        low = line.strip().lower()
-        if "/workspace/output/" in low:
-            continue
-        if any(k in low for k in path_kw):
-            continue
-        if any(ext in low for ext in (".png", ".jpg", ".jpeg", ".webp", ".xlsx", ".md")) and ("/" in line or "\\" in line):
-            continue
-        lines.append(line)
-    return re.sub(r"\s{2,}", " ", "\n".join(lines).strip()).strip()
-
-
-def _caption_for_photo(text: str, image_paths: list[str]) -> str:
-    del image_paths
-    return _truncate_at_break(_strip_paths_from_reply(text), 600)
-
-
-def _log(msg: str) -> None:
-    """Write logs unbuffered so PM2 shows them immediately."""
-    print(msg, flush=True)
-
-
-def _normalize_reply(reply: str) -> str:
-    """Strip EOT tokens; hide raw tool-call JSON and error JSON so they never reach Telegram or logs."""
-    import json
-    from duckclaw.integrations.llm_providers import sanitize_worker_reply_text
-    from duckclaw.utils.tool_reply import friendly_query_error
-
-    s = sanitize_worker_reply_text(str(reply or ""))
-    # If graph returned raw tool-call JSON (e.g. Slayer-8B text output), don't send to user
-    if s.startswith("{") and '"name"' in s and ("parameters" in s or '"args"' in s):
-        return "El asistente está procesando. Si no ves resultado, intenta de nuevo."
-    # If graph returned raw {"error": "..."}, show a short message instead
-    if s.startswith('{"error"') or (s.startswith("{") and '"error"' in s[:20]):
-        try:
-            data = json.loads(s)
-            err = str((data or {}).get("error", ""))
-            friendly = friendly_query_error(err)
-            if friendly:
-                return friendly
-            if "Catalog Error" in err or "Table" in err or "does not exist" in err:
-                return "Esa tabla no existe. Pregunta por las tablas disponibles."
-            return "No se pudo completar la operación."
-        except (json.JSONDecodeError, TypeError):
-            pass
-    return s or ""
-
-
-def _format_reply_for_telegram(reply: str, max_len: int = 800) -> str:
-    """Convierte markdown del agente a HTML seguro para Telegram."""
-    from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
-
-    if not reply:
-        return ""
-    html = llm_markdown_to_telegram_html(reply.strip())
-    return _truncate_at_break(html, max_len) if len(html) > max_len else html
-
-
-def _persist_conversation(db: Any, chat_id: Any, role: str, content: str) -> None:
-    """Guarda un turno (user/assistant) en telegram_conversation para memoria."""
-    if not content or not str(content).strip():
-        return
-    try:
-        esc = str(content).replace("'", "''")[:16384]
-        db.execute(
-            f"INSERT INTO telegram_conversation (chat_id, role, content) VALUES ({int(chat_id)}, '{role}', '{esc}')"
-        )
-    except Exception:
-        pass
-
-
-def _get_db_path() -> str:
-    from duckclaw.gateway_db import get_gateway_db_path
-
-    path = (get_gateway_db_path() or "").strip()
-    if path:
-        return str(Path(path).resolve())
-    return str(Path.cwd() / "duckclaw_agents.duckdb")
-
-
-def _worker_db_path() -> str:
-    """Ruta a la DB de workers. Por defecto usa la misma que el agente (backward compat).
-    Si DUCKCLAW_WORKERS_DB_PATH está definida, usa esa ruta para una DB separada."""
-    env_path = os.environ.get("DUCKCLAW_WORKERS_DB_PATH", "").strip()
-    if env_path:
-        return str(Path(env_path).resolve())
-    return _get_db_path()
-
-
-def _load_wizard_config() -> dict:
-    """Carga la config guardada por la TUI (scripts/install_duckclaw.sh → wizard)."""
-    import json
-    path = Path.home() / ".config" / "duckclaw" / "wizard_config.json"
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
-
-
-def _ensure_agent_config(db: Any) -> None:
-    db.execute(
-        f"""
-        CREATE TABLE IF NOT EXISTS {_AGENT_CONFIG_TABLE} (
-            key VARCHAR PRIMARY KEY,
-            value TEXT,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    # Valores por defecto si no existen; sembrar llm_* desde wizard si existe
-    try:
-        import json
-        r = db.query(f"SELECT key, value FROM {_AGENT_CONFIG_TABLE}")
-        rows = json.loads(r) if isinstance(r, str) else r
-        keys_present = {row.get("key") for row in (rows or []) if isinstance(row, dict)}
-        defaults = [("framework", _DEFAULT_FRAMEWORK), ("system_prompt", _DEFAULT_SYSTEM_PROMPT)]
-        wizard = _load_wizard_config()
-        for k, v in wizard.items():
-            if k in ("llm_provider", "llm_model", "llm_base_url") and v:
-                defaults.append((k, str(v)))
-            if k in ("save_grpo_traces", "send_to_langsmith") and v is not None:
-                defaults.append((k, "true" if (v is True or str(v).lower() in ("true", "1", "yes", "y", "sí", "si")) else "false"))
-        for k, v in defaults:
-            if k not in keys_present:
-                esc = str(v).replace("'", "''")[:16384]
-                db.execute(
-                    f"INSERT INTO {_AGENT_CONFIG_TABLE} (key, value) VALUES ('{k}', '{esc}')"
-                )
-    except Exception:
-        pass
-
-
-def _get_config(db: Any) -> dict:
-    _ensure_agent_config(db)
-    import json
-    r = db.query(f"SELECT key, value FROM {_AGENT_CONFIG_TABLE}")
-    rows = json.loads(r) if isinstance(r, str) else r
-    out = {}
-    for row in (rows or []):
-        if isinstance(row, dict):
-            out[row.get("key", "")] = row.get("value", "")
-    # Rellenar llm_* y GRPO desde wizard si no están en agent_config
-    wizard = _load_wizard_config()
-    for key in ("llm_provider", "llm_model", "llm_base_url"):
-        if not out.get(key) and wizard.get(key):
-            out[key] = str(wizard[key])
-    for key in ("save_grpo_traces", "send_to_langsmith"):
-        if key not in out or out.get(key) == "":
-            wv = wizard.get(key)
-            if wv is not None:
-                out[key] = bool(wv) if isinstance(wv, bool) else str(wv).lower() in ("true", "1", "yes", "y", "sí", "si")
-    # Precedencia final: variables de entorno de ejecución.
-    # El instalador exporta DUCKCLAW_LLM_* al arrancar, así que deben poder
-    # sobrescribir valores viejos persistidos en agent_config.
-    env_overrides = {
-        "llm_provider": os.environ.get("DUCKCLAW_LLM_PROVIDER", "").strip(),
-        "llm_model": os.environ.get("DUCKCLAW_LLM_MODEL", "").strip(),
-        "llm_base_url": os.environ.get("DUCKCLAW_LLM_BASE_URL", "").strip(),
-    }
-    for key, val in env_overrides.items():
-        if val:
-            out[key] = val
-    for key, env_key in (("save_grpo_traces", "DUCKCLAW_SAVE_GRPO_TRACES"), ("send_to_langsmith", "DUCKCLAW_SEND_TO_LANGSMITH")):
-        ev = os.environ.get(env_key, "").strip().lower()
-        if ev:
-            out[key] = ev in ("true", "1", "yes", "y", "sí", "si")
-    return out
-
-
-def _set_config(db: Any, key: str, value: str) -> None:
-    _ensure_agent_config(db)
-    k = str(key).replace("'", "''")[:128]
-    v = str(value).replace("'", "''")[:16384]
-    db.execute(
-        f"""
-        INSERT INTO {_AGENT_CONFIG_TABLE} (key, value) VALUES ('{k}', '{v}')
-        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
-        """
-    )
-
-
-def _get_store_db(config: dict) -> Any:
-    """Deprecated — store_db_path / DUCKCLAW_STORE_DB_PATH ya no se usan en el core genérico."""
-    _ = config
-    return None
-
-
-def _build_graph_via_forge(
-    db: Any,
-    system_prompt: str,
-    llm_provider: str = "",
-    llm_model: str = "",
-    llm_base_url: str = "",
-    store_db: Optional[Any] = None,
-    save_traces: bool = False,
-    send_to_langsmith: bool = False,
-    worker_id: Optional[str] = None,
-) -> Any:
-    """Build compiled LangGraph via AgentAssembler (forge). Requires a valid LLM."""
-    from duckclaw.integrations.llm_providers import build_llm
-    from duckclaw.forge import AgentAssembler, ENTRY_ROUTER_YAML, WORKERS_TEMPLATES_DIR
-
-    provider = (llm_provider or "").strip().lower() or "none_llm"
-    llm = build_llm(provider, (llm_model or "").strip(), (llm_base_url or "").strip())
-    # Workers support none_llm (llm=None); entry router requires an LLM
-    if llm is None and not worker_id:
-        raise RuntimeError(
-            "Configura llm_provider en /setup (openai, anthropic, deepseek, mlx, iotcorelabs). "
-            "O añade OPENAI_API_KEY / ANTHROPIC_API_KEY en .env."
-        )
-
-    if worker_id:
-        yaml_path = WORKERS_TEMPLATES_DIR / worker_id / "manifest.yaml"
-    else:
-        yaml_path = ENTRY_ROUTER_YAML
-
-    return AgentAssembler.from_yaml(yaml_path).build(
-        db=db,
-        llm=llm,
-        store_db=store_db,
-        system_prompt=system_prompt,
-        llm_provider=(llm_provider or "").strip(),
-        llm_model=(llm_model or "").strip(),
-        save_traces=save_traces,
-        send_to_langsmith=send_to_langsmith,
-        db_path=_worker_db_path() if worker_id else None,
-    )
-
-
 def _run_bot() -> None:
     _load_dotenv()
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
-        _log("Falta TELEGRAM_BOT_TOKEN. Exporta la variable o ponla en .env en el directorio actual o en la raíz del proyecto.")
+        log_polling("Falta TELEGRAM_BOT_TOKEN. Exporta la variable o ponla en .env en el directorio actual o en la raíz del proyecto.")
         raise SystemExit(1)
 
     try:
         from telegram.ext import ApplicationBuilder  # noqa: F401
     except ImportError:
-        _log("Falta el extra telegram. Instala con:")
-        _log("  uv sync --extra agents")
-        _log("  # o: pip install 'duckclaw[agents]'   (usa comillas en zsh)")
+        log_polling("Falta el extra telegram. Instala con:")
+        log_polling("  uv sync --extra agents")
+        log_polling("  # o: pip install 'duckclaw[agents]'   (usa comillas en zsh)")
         raise SystemExit(1)
 
     from duckclaw import DuckClaw
     from duckclaw.integrations.telegram import TelegramBotBase
 
-    db_path = _get_db_path()
+    db_path = get_db_path()
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     db = DuckClaw(db_path)
 
@@ -426,11 +119,11 @@ def _run_bot() -> None:
             chat_id = getattr(getattr(message, "chat", None), "id", None)
             user = getattr(message, "from_user", None)
             username = getattr(user, "username", None) or getattr(user, "first_name", None) or "unknown"
-            _log(f"📩 Mensaje chat={chat_id} user={username}: {text}")
+            log_polling(f"📩 Mensaje chat={chat_id} user={username}: {text}")
 
             # Comando /setup: cambiar system_prompt y framework en caliente
             if text.startswith("/setup"):
-                _log("⚙️ Comando /setup recibido")
+                log_polling("⚙️ Comando /setup recibido")
                 self._handle_setup(message, text, chat_id)
                 return
 
@@ -449,7 +142,7 @@ def _run_bot() -> None:
                 username=str(username or ""),
             )
             if cmd_reply is not None:
-                _log(f"📋 Comando ejecutado chat={chat_id}")
+                log_polling(f"📋 Comando ejecutado chat={chat_id}")
                 asyncio.create_task(message.reply_text(cmd_reply, parse_mode="Markdown"))
                 return
 
@@ -461,19 +154,19 @@ def _run_bot() -> None:
             )
             if text and len(text) <= 25 and text.lower().strip() in _greetings:
                 reply = "👋 Hola, ¿en qué puedo ayudarte?"
-                _log(f"📤 Respuesta chat={chat_id}: {reply}")
-                _persist_conversation(self.db, chat_id, "user", text)
-                _persist_conversation(self.db, chat_id, "assistant", reply)
+                log_polling(f"📤 Respuesta chat={chat_id}: {reply}")
+                persist_conversation(self.db, chat_id, "user", text)
+                persist_conversation(self.db, chat_id, "assistant", reply)
                 asyncio.create_task(message.reply_text(reply))
                 return
 
             # Cargar config desde agent_config (y wizard si falta llm_*)
-            config = _get_config(self.db)
-            system_prompt = config.get("system_prompt") or _DEFAULT_SYSTEM_PROMPT
+            config = get_config(self.db)
+            system_prompt = config.get("system_prompt") or DEFAULT_SYSTEM_PROMPT
             llm_provider = config.get("llm_provider") or ""
             llm_model = config.get("llm_model") or ""
             llm_base_url = config.get("llm_base_url") or ""
-            store_db = _get_store_db(config)
+            store_db = get_store_db(config)
             save_tr = config.get("save_grpo_traces", False)
             if isinstance(save_tr, str):
                 save_tr = str(save_tr).lower() in ("true", "1", "yes", "y", "sí", "si")
@@ -498,7 +191,7 @@ def _run_bot() -> None:
                 return provider or "none_llm"
 
             display_model = _resolve_display_model(llm_provider, llm_model, llm_base_url)
-            _log(f"🤔 [{display_model}] pensando...")
+            log_polling(f"🤔 [{display_model}] pensando...")
 
             from duckclaw.graphs.on_the_fly_commands import (
                 append_task_audit,
@@ -519,7 +212,7 @@ def _run_bot() -> None:
             t0 = time.perf_counter()
             task_success = True
             try:
-                graph = _build_graph_via_forge(
+                graph = build_graph_via_forge(
                     self.db,
                     system_prompt,
                     llm_provider=llm_provider,
@@ -531,7 +224,7 @@ def _run_bot() -> None:
                     worker_id=worker_id or None,
                 )
                 history = self._get_history(chat_id, limit=history_limit)
-                _persist_conversation(self.db, chat_id, "user", text)
+                persist_conversation(self.db, chat_id, "user", text)
                 state = {"input": text, "incoming": text, "history": history}
                 if use_rag:
                     try:
@@ -557,7 +250,7 @@ def _run_bot() -> None:
                     set_idle(chat_id)
                 except Exception:
                     pass
-            reply = _normalize_reply(reply) or ""
+            reply = normalize_worker_reply_for_telegram(reply) or ""
             if use_rag and reply and text:
                 try:
                     from duckclaw.graphs.graph_rag import run_graph_memory_extractor_background
@@ -580,35 +273,35 @@ def _run_bot() -> None:
             except Exception:
                 pass
             reply_for_user = reply
-            reply_for_user = _strip_paths_from_reply(reply) or reply
-            text_to_send = _format_reply_for_telegram(reply_for_user, max_len=3500) or "Sin respuesta."
+            reply_for_user = strip_paths_from_reply(reply) or reply
+            text_to_send = format_reply_for_telegram_html(reply_for_user, max_len=3500) or "Sin respuesta."
             image_paths = []
             excel_paths = []
             markdown_paths = []
-            image_paths = _extract_image_paths(reply)
-            excel_paths = _extract_excel_paths(reply)
-            markdown_paths = _extract_markdown_paths(reply)
+            image_paths = extract_image_paths(reply)
+            excel_paths = extract_excel_paths(reply)
+            markdown_paths = extract_markdown_paths(reply)
             if image_paths:
-                _log(f"🖼️ Enviando {len(image_paths)} imagen(es) a Telegram")
+                log_polling(f"🖼️ Enviando {len(image_paths)} imagen(es) a Telegram")
             if excel_paths:
-                _log(f"📎 Enviando {len(excel_paths)} archivo(s) Excel a Telegram")
+                log_polling(f"📎 Enviando {len(excel_paths)} archivo(s) Excel a Telegram")
             if markdown_paths:
-                _log(f"📄 Enviando {len(markdown_paths)} archivo(s) Markdown a Telegram")
+                log_polling(f"📄 Enviando {len(markdown_paths)} archivo(s) Markdown a Telegram")
             # Log lo que realmente se envía (para que coincida con Telegram)
             _log_preview = (text_to_send or "")[:200].replace("\n", " ")
             if len(text_to_send or "") > 200:
                 _log_preview += "…"
             if image_paths:
                 try:
-                    caption_preview = _caption_for_photo(reply, image_paths)
-                    caption_preview = _format_reply_for_telegram(caption_preview or "📊 Gráfica generada", max_len=600)
-                    _log(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): [imagen] {caption_preview[:120]}")
+                    caption_preview = caption_for_photo(reply, image_paths)
+                    caption_preview = format_reply_for_telegram_html(caption_preview or "📊 Gráfica generada", max_len=600)
+                    log_polling(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): [imagen] {caption_preview[:120]}")
                 except Exception:
-                    _log(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): [imagen]")
+                    log_polling(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): [imagen]")
             elif excel_paths or markdown_paths:
-                _log(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): [documento] {_log_preview}")
+                log_polling(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): [documento] {_log_preview}")
             else:
-                _log(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): {_log_preview}")
+                log_polling(f"📤 [{display_model}] chat={chat_id} ({elapsed_ms}ms): {_log_preview}")
             def _user_wants_excel_only() -> bool:
                 """True si el usuario pidió explícitamente Excel (exportar a excel) y no reporte/informe MD."""
                 t = (text or "").lower()
@@ -632,9 +325,9 @@ def _run_bot() -> None:
             excel_only = _user_wants_excel_only()
             report_md_only = _user_wants_report_md() and markdown_paths and image_paths
             if excel_only and (image_paths or markdown_paths):
-                _log("📎 Usuario pidió Excel: enviando solo archivo Excel (sin imagen ni MD)")
+                log_polling("📎 Usuario pidió Excel: enviando solo archivo Excel (sin imagen ni MD)")
             if report_md_only:
-                _log("📄 Reporte MD: enviando solo archivo .md con insights (sin imágenes)")
+                log_polling("📄 Reporte MD: enviando solo archivo .md con insights (sin imágenes)")
             async def _send():
                 try:
                     # Reporte MD: un solo archivo .md con insights (sin imágenes)
@@ -652,7 +345,7 @@ def _run_bot() -> None:
                                 caption=caption,
                                 parse_mode="HTML",
                             )
-                            _persist_conversation(self.db, chat_id, "assistant", reply or "")
+                            persist_conversation(self.db, chat_id, "assistant", reply or "")
                             return
                     # Si pidió explícitamente Excel: solo enviar Excel, no MD ni imágenes
                     if excel_only and excel_paths:
@@ -663,9 +356,9 @@ def _run_bot() -> None:
                         doc_paths = markdown_paths if markdown_paths else excel_paths
                         send_images = True
                     if doc_paths:
-                        caption = _format_reply_for_telegram(reply_for_user, max_len=900) or "📎 Archivo generado"
+                        caption = format_reply_for_telegram_html(reply_for_user, max_len=900) or "📎 Archivo generado"
                         if len(caption) > 1024:
-                            caption = _truncate_at_break(caption, 900)
+                            caption = truncate_at_break(caption, 900)
                         for doc_path in doc_paths:
                             with open(doc_path, "rb") as f:
                                 doc_bytes = f.read()
@@ -678,12 +371,12 @@ def _run_bot() -> None:
                     if send_images and image_paths and not report_md_only:
                         # Solo insights, sin aviso de guardado ni rutas
                         try:
-                            caption_raw = _caption_for_photo(reply, image_paths)
-                            caption = _format_reply_for_telegram(caption_raw) if caption_raw else "📊 Gráfica generada"
+                            caption_raw = caption_for_photo(reply, image_paths)
+                            caption = format_reply_for_telegram_html(caption_raw) if caption_raw else "📊 Gráfica generada"
                         except Exception:
                             caption = "📊 Gráfica generada"
                         if len(caption) > 1024:
-                            caption = _truncate_at_break(caption, 900)
+                            caption = truncate_at_break(caption, 900)
                         if len(image_paths) == 1:
                             with open(image_paths[0], "rb") as f:
                                 photo_bytes = f.read()
@@ -718,12 +411,12 @@ def _run_bot() -> None:
                                     f.close()
                     if not doc_paths and not image_paths:
                         await message.reply_text(text_to_send, parse_mode="HTML")
-                    _persist_conversation(self.db, chat_id, "assistant", reply or "")
+                    persist_conversation(self.db, chat_id, "assistant", reply or "")
                 except Exception as send_err:
-                    _log(f"🖼️ Error enviando foto: {send_err}")
+                    log_polling(f"🖼️ Error enviando foto: {send_err}")
                     try:
                         await message.reply_text(text_to_send or "Sin respuesta.", parse_mode="HTML")
-                        _persist_conversation(self.db, chat_id, "assistant", reply or "")
+                        persist_conversation(self.db, chat_id, "assistant", reply or "")
                     except Exception:
                         pass
             asyncio.create_task(_send())
@@ -734,7 +427,7 @@ def _run_bot() -> None:
             parts = text.split(maxsplit=1)
             body = (parts[1] if len(parts) > 1 else "").strip()
             if not body:
-                config = _get_config(self.db)
+                config = get_config(self.db)
                 save_tr = config.get("save_grpo_traces", False)
                 if isinstance(save_tr, str):
                     save_tr = str(save_tr).lower() in ("true", "1", "yes", "y", "sí", "si")
@@ -743,7 +436,7 @@ def _run_bot() -> None:
                     send_ls = str(send_ls).lower() in ("true", "1", "yes", "y", "sí", "si")
                 asyncio.create_task(
                     message.reply_text(
-                        f"Config actual:\nframework={config.get('framework', _DEFAULT_FRAMEWORK)}\n"
+                        f"Config actual:\nframework={config.get('framework', DEFAULT_FRAMEWORK)}\n"
                         f"llm_provider={config.get('llm_provider', '')}\n"
                         f"llm_model={config.get('llm_model', '')}\n"
                         f"save_grpo_traces={save_tr}\nsend_to_langsmith={send_ls}\n"
@@ -758,7 +451,7 @@ def _run_bot() -> None:
                 value = value.strip()
                 allowed = ("framework", "system_prompt", "llm_provider", "llm_model", "llm_base_url", "save_grpo_traces", "send_to_langsmith")
                 if key in allowed:
-                    _set_config(self.db, key, value)
+                    set_config(self.db, key, value)
                     asyncio.create_task(message.reply_text(f"Config actualizado: {key}={value[:80]}..."))
                 else:
                     asyncio.create_task(message.reply_text(f"Claves permitidas: {', '.join(allowed)}"))
@@ -792,7 +485,7 @@ def _run_bot() -> None:
     def _error_handler(update: Any, context: Any) -> None:
         err = getattr(context, "error", None)
         if isinstance(err, tg_error.Conflict):
-            _log(
+            log_polling(
                 "Conflict: otra instancia del bot está usando el mismo token (p. ej. con PM2). "
                 "Detén la otra instancia o no arranques este proceso. Salida con código 0 para evitar reinicio en bucle."
             )
@@ -801,9 +494,9 @@ def _run_bot() -> None:
             raise err
 
     app.add_error_handler(_error_handler)
-    _log("Bot dinámico DuckClaw agents. Comando /setup para cambiar framework y system_prompt en caliente.")
-    _log(f"DB: {db_path}")
-    _log("🎧 Escuchando mensajes en Telegram... (Ctrl+C para salir)")
+    log_polling("Bot dinámico DuckClaw agents. Comando /setup para cambiar framework y system_prompt en caliente.")
+    log_polling(f"DB: {db_path}")
+    log_polling("🎧 Escuchando mensajes en Telegram... (Ctrl+C para salir)")
     app.run_polling()
 
 

@@ -127,6 +127,7 @@ DB_FIRST_DDL_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/graphs/graph_rag.py": "graph memory bootstrap DDL",
     "packages/agents/src/duckclaw/graphs/on_the_fly_commands.py": "chat command control-plane bootstrap",
     "packages/agents/src/duckclaw/graphs/telegram_bot.py": "telegram runtime bootstrap",
+    "packages/agents/src/duckclaw/graphs/telegram_polling_setup.py": "telegram polling agent_config bootstrap split from telegram_bot",
     "packages/agents/src/duckclaw/graphs/tools.py": "legacy tool schema bootstrap",
     "packages/agents/src/duckclaw/workers/db_runtime.py": "worker schema bootstrap",
     "packages/agents/src/duckclaw/workers/factory.py": "worker-local runtime bootstrap",

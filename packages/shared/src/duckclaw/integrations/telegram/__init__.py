@@ -7,6 +7,12 @@ from duckclaw.integrations.telegram.telegram_outbound_sync import (
     send_long_plain_text_markdown_v2_chunks_sync,
     send_message_markdown_v2_sync,
 )
+from duckclaw.integrations.telegram.telegram_reply_egress import (
+    format_reply_for_telegram_html,
+    normalize_worker_reply_for_telegram,
+    strip_paths_from_reply,
+    truncate_at_break,
+)
 from duckclaw.integrations.telegram.telegram_long_polling_bot_base import (
     TelegramBotBase,
     TelegramLongPollingBotBase,
@@ -37,11 +43,15 @@ __all__ = [
     "TelegramBotBase",
     "TelegramLongPollingBotBase",
     "effective_telegram_bot_token_outbound",
+    "format_reply_for_telegram_html",
     "is_valid_telegram_webhook_secret_token",
     "normalize_telegram_chat_id_for_bot_api",
+    "normalize_worker_reply_for_telegram",
     "send_long_plain_text_markdown_v2_chunks_sync",
     "send_message_markdown_v2_sync",
+    "strip_paths_from_reply",
     "telegram_bot_token_override",
+    "truncate_at_break",
     "resolve_telegram_token_from_flat_env",
     "resolve_telegram_token_for_worker_id",
     "telegram_agent_token_env_name",

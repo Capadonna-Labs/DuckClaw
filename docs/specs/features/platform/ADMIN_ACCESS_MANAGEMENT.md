@@ -44,7 +44,7 @@ Formato PBKDF2 legacy:
 
 ### Telegram y shared (existentes)
 
-Ver [`TELEGRAM_AUTH_WHITELIST.md`](../telegram-gateway/TELEGRAM_AUTH_WHITELIST.md) — `authorized_users`, `user_shared_db_access`.
+Ver [`TELEGRAM.md`](../telegram-gateway/TELEGRAM.md) — `authorized_users`, `user_shared_db_access`.
 
 ## Matriz de capacidades (consola web)
 

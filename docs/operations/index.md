@@ -15,7 +15,6 @@ Runbooks en español/inglés mixto. **Normativa:** [`../specs/`](../specs/) (baj
 | Meditate / Harness Core | [Meditate Homeostasis](Meditate-Homeostasis.md) |
 | Multi-vault `/vault` | [Multi Vault System](Multi-Vault-System.md) |
 | Trazas SFT | [SFT traces](../agents/sft_conversation_traces.md) · `packages/agents/train/` · `uv run duckops train` |
-| VLM | [`docs/specs/features/platform/VLM_INTEGRATION.md`](../specs/features/platform/VLM_INTEGRATION.md) (stale) · COMANDOS §5.2 |
 
 ## Principios
 

@@ -32,7 +32,7 @@ Si un futuro corte necesita comportamiento especifico de una vertical, debe mode
 
 ## Infra Bootstrap Y Vertical Purge (resumen)
 
-Hito 1 y 2 del corte infra — detalle histórico en [`docs/archive/platform/INFRA_BOOTSTRAP_VERTICAL_PURGE_SDD.md`](../../../archive/platform/INFRA_BOOTSTRAP_VERTICAL_PURGE_SDD.md).
+Hito 1 y 2 del corte infra — resumen en este documento (§ Hito 1).
 
 - El core arranca y pasa tests **sin** `DUCKCLAW_EXTENSION_ROOT` / `CAPADONNA_DRILLER_ROOT` en flujos genéricos; verticales quant/finance/trading viven fuera del monorepo (p. ej. Capadonna-Driller vía extension root).
 - HITL transversal en `duckclaw.hitl.*` + tablas `main.code_decisions` / `main.agent_uncertainty_log`; sin `capadonna_plugin` ni imports `duckclaw.quant.*` / `duckclaw.finance.*` en runtime core.

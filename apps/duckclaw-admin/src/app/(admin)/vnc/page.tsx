@@ -281,7 +281,7 @@ export default function VncPage() {
                 <p className="text-[10px] text-amber-700 dark:text-amber-300">
                   Este worker no declara <code className="font-mono">browser_sandbox</code> en su
                   manifest; noVNC solo aplica tras <code className="font-mono">run_browser_sandbox</code>{' '}
-                  en workers con navegador (p. ej. finanz, Job-Hunter, Quant-Trader).
+                  en workers con navegador (p. ej. platform-orchestrator, Job-Hunter, ui-designer).
                 </p>
               )}
               {networkPolicy?.browser_sandbox && !networkPolicy.network_toggle_available && (

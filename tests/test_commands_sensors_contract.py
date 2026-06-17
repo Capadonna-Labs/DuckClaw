@@ -36,7 +36,7 @@ def test_sensors_module_has_no_vertical_runtime_defaults() -> None:
         "quant",
         "trader",
         "finance",
-        "finanz",
+        "platform-orchestrator",
         "ibkr",
         "pqrs",
         "pqrsd",

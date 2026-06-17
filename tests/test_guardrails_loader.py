@@ -119,7 +119,7 @@ def test_heartbeat_tool_steps() -> None:
 def test_help_pipe_table() -> None:
     rows = load_guardrail_pipe_table("fly_commands", "help_entries")
     assert any(cmd == "/team" for cmd, _ in rows)
-    assert len(rows) >= 30
+    assert len(rows) >= 25
 
 
 def test_execute_help() -> None:
@@ -127,7 +127,7 @@ def test_execute_help() -> None:
 
     out = execute_help(None, "1")
     assert "Fly commands" in out
-    assert "/quant_cycle" in out
+    assert "/approve-code" in out
 
 
 def test_replan_suffix_format() -> None:

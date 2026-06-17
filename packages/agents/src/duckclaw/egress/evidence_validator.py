@@ -61,13 +61,12 @@ def _price_in_non_market_context(text: str, match_start: int, match_end: int, *,
     hi = min(len(text), match_end + window)
     chunk = text[lo:hi].lower()
     needles = (
-        "ibkr",
         "interactive brokers",
         "broker:",
         "broker (",
         "gateway",
         "cuentas locales",
-        "cuenta ibkr",
+        "cuenta broker",
         "bancolombia",
         "nequi",
         "global66",
@@ -128,7 +127,7 @@ def _ticker_tool_map_from_messages(messages: list[Any]) -> dict[str, str]:
         if not isinstance(m, ToolMessage):
             continue
         nm = str(getattr(m, "name", "") or "").strip()
-        if nm not in _EVIDENCE_TOOLS and nm not in {"get_ibkr_portfolio", "tavily_search", "get_current_time"}:
+        if nm not in _EVIDENCE_TOOLS and nm not in {"tavily_search", "get_current_time"} and "portfolio" not in nm.lower():
             continue
         content = str(getattr(m, "content", "") or "")
         if "error" in content.lower()[:200]:
@@ -183,15 +182,19 @@ def _inject_bracket_citations(
             out,
             flags=re.IGNORECASE,
         )
-    if "get_ibkr_portfolio" in tools_used and "[get_ibkr_portfolio" not in out.lower():
-        for m in _PRICE_PAT.finditer(out):
-            if _price_in_non_market_context(out, m.start(), m.end()):
-                continue
-            frag = out[m.end() : m.end() + 24]
-            if "[" in frag:
-                continue
-            out = out[: m.end()] + " [get_ibkr_portfolio]" + out[m.end() :]
-            break
+    portfolio_tools = sorted(t for t in tools_used if "portfolio" in t.lower())
+    if portfolio_tools:
+        ptool = portfolio_tools[0]
+        tag = f"[{ptool}"
+        if tag.lower() not in out.lower():
+            for m in _PRICE_PAT.finditer(out):
+                if _price_in_non_market_context(out, m.start(), m.end()):
+                    continue
+                frag = out[m.end() : m.end() + 24]
+                if "[" in frag:
+                    continue
+                out = out[: m.end()] + f" [{ptool}]" + out[m.end() :]
+                break
     return out
 
 

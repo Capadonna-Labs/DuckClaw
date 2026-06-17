@@ -112,7 +112,7 @@ def test_extract_visual_payload_photo_prefers_largest() -> None:
 
 def test_extract_visual_payload_inherits_photo_from_reply_to_message() -> None:
     msg = {
-        "text": "@finanz01_bot analiza",
+        "text": "@platform-orchestrator01_bot analiza",
         "reply_to_message": {
             "message_id": 99,
             "photo": [{"file_id": "s"}, {"file_id": "hq"}],

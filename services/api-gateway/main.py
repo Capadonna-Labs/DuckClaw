@@ -246,16 +246,9 @@ def _dedicated_gateway_vault_db_path() -> str | None:
 try:
     from core.config import settings
 except ImportError:
-    class _Settings:
-        PROJECT_NAME = "DuckClaw API Gateway"
-        VERSION = "0.1.0"
+    from duckclaw.gateway.settings import get_gateway_settings
 
-        def __init__(self) -> None:
-            from duckclaw.runtime_env import resolve_redis_url
-
-            self.REDIS_URL = resolve_redis_url()
-
-    settings = _Settings()
+    settings = get_gateway_settings()
 
 # Logs estructurados (Observabilidad 2.0)
 from duckclaw.utils.logger import (
@@ -432,33 +425,41 @@ def _langsmith_auth_log(*, auth_status: str, user_id: str, tenant_id: str) -> No
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from duckclaw.gateway.settings import get_gateway_settings
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.infra.readiness import assert_gateway_startup_ready
+
+    gw_settings = get_gateway_settings()
+    gw_settings.require_production_secrets()
+    gateway_db_path = get_gateway_db_path()
+    await assert_gateway_startup_ready(
+        redis_url=gw_settings.resolved_redis_url(),
+        gateway_db_path=gateway_db_path,
+    )
+
     _warn_if_loopback_gateway_port_steals_telegram_funnel()
-    app.state.redis = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
+    app.state.redis = redis.from_url(str(gw_settings.resolved_redis_url()), decode_responses=True)
     app.state.goals_ticker_task = None
     _normalize_local_artifacts_to_db()
-    # Forzar que Redis persista dump.rdb dentro de db/ (best-effort).
-    try:
-        repo_root = Path(__file__).resolve().parent.parent.parent
-        redis_dir = str((repo_root / "db").resolve())
-        await app.state.redis.config_set("dir", redis_dir)
-        await app.state.redis.config_set("dbfilename", "dump.rdb")
-    except Exception:
-        pass
-    # DDL en runtime desactivado: ejecutar scripts/bootstrap_dbs.py y ensure_registry antes de PM2.
+    # DDL en runtime desactivado: ejecutar duckclaw-migrate / bootstrap_dbs antes de PM2.
     app.state.telegram_mcp = None
-    try:
-        from duckclaw.forge.skills.telegram_mcp_bridge import (
-            infer_repo_root,
-            start_telegram_mcp_gateway_session,
-        )
 
-        _mcp_repo = infer_repo_root()
-        _mcp_sess = await start_telegram_mcp_gateway_session(_mcp_repo)
-        if _mcp_sess is not None:
-            app.state.telegram_mcp = _mcp_sess
-            _gateway_log.info("Telegram MCP: sesión stdio activa para egress")
-    except Exception as exc:  # noqa: BLE001
-        _gateway_log.warning("Telegram MCP: no se pudo iniciar (se usa Bot API directa): %s", exc)
+    async def _start_telegram_mcp() -> None:
+        try:
+            from duckclaw.forge.skills.telegram_mcp_bridge import (
+                infer_repo_root,
+                start_telegram_mcp_gateway_session,
+            )
+
+            _mcp_repo = infer_repo_root()
+            _mcp_sess = await start_telegram_mcp_gateway_session(_mcp_repo)
+            if _mcp_sess is not None:
+                app.state.telegram_mcp = _mcp_sess
+                _gateway_log.info("Telegram MCP: sesión stdio activa para egress")
+        except Exception as exc:  # noqa: BLE001
+            _gateway_log.warning("Telegram MCP: no se pudo iniciar (se usa Bot API directa): %s", exc)
+
+    asyncio.create_task(_start_telegram_mcp(), name="telegram-mcp-warm")
 
     try:
         from duckclaw.forge.skills.reddit_bridge import (

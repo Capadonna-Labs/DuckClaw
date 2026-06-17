@@ -74,7 +74,7 @@ def test_vault_command_flow(tmp_path, monkeypatch):
     assert out and "activa actual" in out
 
 
-def test_scoped_resolve_ignores_finanzdb_on_disk(tmp_path, monkeypatch):
+def test_scoped_resolve_ignores_hubdb_on_disk(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID", raising=False)
     user = TELEGRAM_TEST_USER_ID
@@ -130,7 +130,7 @@ def test_vault_fly_uses_session_duckdb_path_over_gateway_env(tmp_path, monkeypat
     """Multiplex: el gateway abre DuckClaw(bóveda del bot); /vault debe mostrar ese archivo, no el hub por defecto."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
-    fin = tmp_path / "finanzdb1.duckdb"
+    fin = tmp_path / "hubdb1.duckdb"
     fin.write_bytes(b"x" * 100)
     siata = tmp_path / "siatadb1.duckdb"
     siata.write_bytes(b"y" * 100)
@@ -141,7 +141,7 @@ def test_vault_fly_uses_session_duckdb_path_over_gateway_env(tmp_path, monkeypat
     db._path = str(siata.resolve())
     out = handle_command(db, "c1", "/vault", tenant_id="SIATA", vault_user_id="u1", requester_id="u1")
     assert out and "siatadb1.duckdb" in out
-    assert "finanzdb1.duckdb" not in out
+    assert "hubdb1.duckdb" not in out
     assert "Tenant: SIATA" in out
 
 
@@ -193,10 +193,10 @@ def test_vault_command_scoped_tenant(tmp_path, monkeypatch):
     db = _DummyDB()
     private_dir = tmp_path / "db" / "private" / "u1"
     private_dir.mkdir(parents=True, exist_ok=True)
-    (private_dir / "finanzdb1.duckdb").write_bytes(b"x" * 200_000)
+    (private_dir / "hubdb1.duckdb").write_bytes(b"x" * 200_000)
     out = handle_command(db, "chat1", "/vault", requester_id="u1", tenant_id="Proyecto", vault_user_id="u1")
     assert out and "default" in out
-    assert "finanzdb1" not in out
+    assert "hubdb1" not in out
 
 
 def test_resolve_promotes_existing_non_default_when_default_active(tmp_path, monkeypatch):
@@ -207,11 +207,11 @@ def test_resolve_promotes_existing_non_default_when_default_active(tmp_path, mon
     # Create a larger real vault file manually (simulate prior data)
     private_dir = tmp_path / "db" / "private" / user
     private_dir.mkdir(parents=True, exist_ok=True)
-    real_vault = private_dir / "finanzdb1.duckdb"
+    real_vault = private_dir / "hubdb1.duckdb"
     real_vault.write_bytes(b"x" * 200_000)
     active_id, active_path = resolve_active_vault(user)
-    assert active_id == "finanzdb1"
-    assert active_path.endswith("finanzdb1.duckdb")
+    assert active_id == "hubdb1"
+    assert active_path.endswith("hubdb1.duckdb")
 
 
 def test_validate_shared_paths_user_and_tenant(tmp_path, monkeypatch):

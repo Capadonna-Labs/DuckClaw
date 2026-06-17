@@ -84,7 +84,7 @@ async def _test_upsert_and_list_conversations_impl():
     sid = new_admin_conversation_session_id()
     meta = await upsert_conversation_meta(
         redis,
-        tenant_id="Finanzas",
+        tenant_id="Orchestrator",
         session_id=sid,
         actor="admin@duckclaw.local",
         section="playground",
@@ -97,17 +97,17 @@ async def _test_upsert_and_list_conversations_impl():
     assert meta.section == "playground"
     assert "Quant-Trader" in meta.workers
 
-    items, total = await list_conversations(redis, "Finanzas", section="playground")
+    items, total = await list_conversations(redis, "Orchestrator", section="playground")
     assert total >= 1
     assert any(i.session_id == sid for i in items)
 
-    patched = await patch_conversation_title(redis, "Finanzas", sid, "Macro test")
+    patched = await patch_conversation_title(redis, "Orchestrator", sid, "Macro test")
     assert patched is not None
     assert patched.title == "Macro test"
 
-    ok = await delete_conversation(redis, "Finanzas", sid)
+    ok = await delete_conversation(redis, "Orchestrator", sid)
     assert ok is True
-    assert await get_conversation_meta(redis, "Finanzas", sid) is None
+    assert await get_conversation_meta(redis, "Orchestrator", sid) is None
 
 
 def test_upsert_and_list_conversations():
@@ -168,13 +168,13 @@ def test_admin_conversation_meta_roundtrip():
         session_id="admin-conv-1",
         tenant_id="default",
         title="Test",
-        workers=["finanz"],
-        preferred_worker_id="finanz",
+        workers=["platform-orchestrator"],
+        preferred_worker_id="platform-orchestrator",
     )
     data = json.loads(m.model_dump_json())
     restored = AdminConversationMeta.model_validate(data)
     assert restored.title == "Test"
-    assert restored.preferred_worker_id == "finanz"
+    assert restored.preferred_worker_id == "platform-orchestrator"
 
 
 async def _test_patch_conversation_worker_impl():
@@ -189,10 +189,10 @@ async def _test_patch_conversation_worker_impl():
         last_worker_id="default",
         title="Worker test",
     )
-    meta = await patch_conversation_worker(redis, "default", sid, "finanz")
+    meta = await patch_conversation_worker(redis, "default", sid, "platform-orchestrator")
     assert meta is not None
-    assert meta.preferred_worker_id == "finanz"
-    assert "finanz" in meta.workers
+    assert meta.preferred_worker_id == "platform-orchestrator"
+    assert "platform-orchestrator" in meta.workers
 
 
 def test_patch_conversation_worker():

@@ -703,7 +703,7 @@ export function useAdminChat({
         'default';
       let assistantPreviews: ChatMsg['imagePreviews'] | undefined;
       const chartNamesFromStream = (streamVisual.fly_chart_names ?? []).filter((n) => n?.trim());
-      const defaultChartNames = ['trading-pnl.png', 'participation-pie.png'];
+      const defaultChartNames = ['metrics-overview.png', 'participation-pie.png'];
       const chartNameAt = (index: number) =>
         chartNamesFromStream[index] ?? defaultChartNames[index] ?? `chart-${index + 1}.png`;
       const artifactIdsFromFly = (streamVisual.fly_chart_artifact_ids ?? []).filter((id) =>

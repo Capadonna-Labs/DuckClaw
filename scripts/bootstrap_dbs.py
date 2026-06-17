@@ -28,6 +28,7 @@ except ImportError:
 import duckdb
 
 from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.schema_migrations import migrate_gateway_database, verify_schema_integrity
 from duckclaw.admin_console_users import ensure_admin_console_users_table, seed_admin_console_users_if_empty
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
 from duckclaw.vaults import db_root, ensure_registry
@@ -286,6 +287,18 @@ def main() -> int:
     extensions = _collect_extensions(templates_root) if templates_root.is_dir() else []
     print("ensure_registry (system.duckdb)...", flush=True)
     ensure_registry()
+    gateway_path = get_gateway_db_path()
+    if gateway_path:
+        print(f"duckclaw-migrate (gateway hub): {gateway_path}", flush=True)
+        try:
+            migrate_gateway_database(gateway_path)
+            ok, msg = verify_schema_integrity(gateway_path)
+            if not ok:
+                print(f"  [error] gateway schema: {msg}", file=sys.stderr)
+                return 1
+        except Exception as exc:
+            print(f"  [error] gateway migrate: {exc}", file=sys.stderr)
+            return 1
     if args.only and not args.extra_dbs:
         print("Uso: --only requiere al menos una ruta .duckdb.", file=sys.stderr)
         return 1

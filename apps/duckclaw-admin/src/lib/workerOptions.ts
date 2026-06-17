@@ -18,13 +18,15 @@ export function workersInclude(workers: WorkerOption[] | undefined, id: string):
   return workerOptionIds(workers).includes(id);
 }
 
-/** Clave canónica para emparejar workers (finanz, Quant-Trader, QuantTraderWorker, …). */
+/** Clave canónica para emparejar workers (aliases legacy incluidos). */
 export function normalizeWorkerKey(id: string): string {
   const slug = id.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
   if (!slug) return '';
-  if (slug === 'finanz' || slug === 'finanzworker') return 'finanz';
-  if (slug === 'quanttrader' || slug === 'quanttraderworker') {
-    return 'quant-trader';
+  if (slug === 'platformorchestrator' || slug === 'platformorchestratorworker') {
+    return 'platform-orchestrator';
+  }
+  if (slug === 'uidesigner' || slug === 'uidesignerworker') {
+    return 'ui-designer';
   }
   return slug;
 }

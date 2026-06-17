@@ -683,8 +683,8 @@ def _visual_state_delta_target_db_path() -> str:
     """
     DuckDB donde db-writer crea ``main.visual_assets``.
 
-    Usa el hub del gateway (p. ej. finanzdb1), no la bóveda activa del worker
-    (p. ej. quant_traderdb1): durante ComfyUI el grafo mantiene RO/RW abierto en
+    Usa el hub del gateway (p. ej. hubdb1), no la bóveda activa del worker
+    (p. ej. workerdb1): durante ComfyUI el grafo mantiene RO/RW abierto en
     la bóveda del worker y el writer singleton no puede tomar lock en el mismo archivo.
     """
     try:
@@ -696,11 +696,10 @@ def _visual_state_delta_target_db_path() -> str:
 
 
 def _state_delta_base() -> dict[str, str]:
-    from duckclaw.capadonna_plugin import load_capadonna_lib
+    from duckclaw.capadonna_plugin import capadonna_tool_tenant_id, capadonna_tool_user_id
 
-    _qtc = load_capadonna_lib("quant_tool_context")
-    tenant_id = _qtc.get_quant_tool_tenant_id() if _qtc is not None else ""
-    user_id = _qtc.get_quant_tool_user_id() if _qtc is not None else ""
+    tenant_id = capadonna_tool_tenant_id()
+    user_id = capadonna_tool_user_id()
 
     return {
         "tenant_id": tenant_id or "default",
@@ -712,13 +711,9 @@ def _state_delta_base() -> dict[str, str]:
 def configure_visual_generation_context(*, tenant_id: str, user_id: str) -> None:
     """Best-effort context bridge for visual generation state deltas."""
     try:
-        from duckclaw.capadonna_plugin import load_capadonna_lib
+        from duckclaw.capadonna_plugin import set_capadonna_tool_context
 
-        context = load_capadonna_lib("quant_tool_context")
-        if context is None:
-            return
-        context.set_quant_tool_tenant_id((tenant_id or "default").strip() or "default")
-        context.set_quant_tool_user_id((user_id or "default").strip() or "default")
+        set_capadonna_tool_context(tenant_id=tenant_id, user_id=user_id)
     except Exception:
         return
 
@@ -748,10 +743,9 @@ def _generate_visual_asset_impl(
     template_name = str(cfg.get("template") or "comfy_default").strip() or "comfy_default"
     timeout_sec = _coerce_comfy_timeout_sec(cfg.get("timeout_sec"))
     client_id = str(uuid.uuid4())
-    from duckclaw.capadonna_plugin import load_capadonna_lib
+    from duckclaw.capadonna_plugin import capadonna_tool_chat_id
 
-    _qtc = load_capadonna_lib("quant_tool_context")
-    chat_id = _qtc.get_quant_tool_chat_id() if _qtc is not None else ""
+    chat_id = capadonna_tool_chat_id()
 
     try:
         workflow, meta = load_workflow_template(template_name)
@@ -920,10 +914,9 @@ def _edit_visual_asset_impl(
     den = _default_img2img_denoise() if denoise is None else float(denoise)
     timeout_sec = _comfy_timeout_sec()
     client_id = str(uuid.uuid4())
-    from duckclaw.capadonna_plugin import load_capadonna_lib
+    from duckclaw.capadonna_plugin import capadonna_tool_chat_id
 
-    _qtc = load_capadonna_lib("quant_tool_context")
-    chat_id = _qtc.get_quant_tool_chat_id() if _qtc is not None else ""
+    chat_id = capadonna_tool_chat_id()
 
     try:
         uploaded_name = upload_image_to_comfy(src, base_url)

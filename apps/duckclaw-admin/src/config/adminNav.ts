@@ -65,7 +65,6 @@ export const BUILD_NAV_GROUP: AdminNavGroup = {
     { href: '/mcp', label: 'MCP', section: 'core', audience: 'admin' },
     { href: '/integrations', label: 'Integraciones', section: 'integrations', audience: 'admin' },
     { href: '/gen/image', label: 'Imágenes', section: 'core', audience: 'admin' },
-    { href: '/train', label: 'Train', section: 'core', audience: 'admin' },
     { href: '/vnc', label: 'VNC', section: 'core', audience: 'admin', adminOnly: true },
   ],
 };

@@ -78,8 +78,8 @@ def test_playground_nav_groups_keep_kanban_nested_and_audit_in_security() -> Non
     assert "href: '/kanban'" not in operation_body
     assert "label: 'Auditoría'" not in operation_body
     assert "href: '/audit'" not in operation_body
-    assert "label: 'Train'" in build_body
-    assert "href: '/train'" in build_body
+    assert "label: 'Train'" not in build_body
+    assert "href: '/train'" not in build_body
     assert "label: 'VNC'" in build_body
     assert "href: '/vnc'" in build_body
     assert "label: 'Auditoría'" in security_body

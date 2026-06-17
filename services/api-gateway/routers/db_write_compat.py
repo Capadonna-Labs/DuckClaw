@@ -1,3 +1,10 @@
+"""DEPRECATED transitional router for legacy raw-SQL writes.
+
+Prefer typed ``WriteCommand`` payloads enqueued via ``duckclaw.db_write_queue``
+and handled by ``duckclaw.write_handlers`` in the singleton ``db-writer`` process.
+This module remains only for backward-compatible ``POST /api/v1/db/write`` callers.
+"""
+
 from __future__ import annotations
 
 import json

@@ -151,15 +151,14 @@ O como PM2: `DuckClaw-DB-Writer`.
 | Ruta                                                  | Descripción                                                                  |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------- |
 | `packages/agents/src/duckclaw/workers/loader.py`      | `run_schema(db, spec)` — crea schema, `agent_beliefs`, ejecuta `schema.sql`. |
-| `packages/agents/src/duckclaw/forge/templates/finanz/schema.sql` | DDL de tablas (cuentas, presupuestos, deudas, transacciones, etc.).          |
+| `packages/agents/src/duckclaw/forge/templates/<worker_id>/schema.sql` | DDL de tablas del template (ej. `default/schema.sql`).          |
 | `scripts/duckclaw_setup_wizard.py`                   | Wizard CLI: crea `db/<nombre>.duckdb` si no existe; gestiona PM2 (Gateway, DB Writer). |
-| `packages/shared/scripts/recreate_gateway_db.py`      | Recrea la DB del Gateway con schema Finanz.                                  |
-| `packages/shared/scripts/apply_finanz_schema.py`      | Aplica tablas Finanz a una `.duckdb` existente.                              |
+| `scripts/recreate_gateway_db.py`      | Recrea la DB del Gateway con el schema del hub.                                  |
 
 
 **Flujo de creación:**
 
-1. Al cargar un worker (ej. finanz), `run_schema(db, spec)` en `factory.py`.
+1. Al cargar un worker (ej. `default`), `run_schema(db, spec)` en `factory.py`.
 2. `CREATE SCHEMA IF NOT EXISTS <schema_name>`.
 3. `CREATE TABLE IF NOT EXISTS agent_beliefs`.
 4. Ejecución de `forge/templates/<worker>/schema.sql`.
@@ -197,7 +196,6 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | ------------------------------------------------------- | -------------------------------------------------- |
 | `packages/shared/scripts/sync_telegram_duckdb.sh`       | Sincroniza `telegram.duckdb` desde el VPS (rsync). |
 | `packages/shared/scripts/install_duckclaw.sh`           | Instalación general.                               |
-| `packages/shared/scripts/validate_ibkr_connectivity.sh` | Valida conectividad con IBKR/Capadonna.            |
 | `packages/shared/scripts/validate_cuentas_gateway.py`   | Valida tabla `cuentas` en la DB del Gateway.       |
 | `packages/shared/scripts/inspect_telegram_db.py`        | Inspecciona tablas de la DB del Gateway.           |
 
@@ -230,7 +228,7 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 3. Si el mensaje empieza por `/` → `handle_command()` (fly commands) → respuesta inmediata.
 4. Si no: `graph_server._get_or_build_graph()` → `_ainvoke(graph, message, ...)`.
 5. `set_busy(session_id, task=message)` en Redis (ActivityManager).
-6. El grafo invoca el agente (Finanz, etc.) con herramientas.
+6. El grafo invoca el worker delegado con herramientas.
 
 ### 3.3 Ejecución del agente (admin_sql)
 
@@ -264,7 +262,7 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | Variable                      | Uso                                                 |
 | ----------------------------- | --------------------------------------------------- |
 | `DUCKDB_PATH`                 | Hub / ruta efectiva cuando no multiplex otras claves (`GATEWAY_DB_ENV_KEYS`).       |
-| `DUCKCLAW_*_DB_PATH`          | Bóveda por perfil en orden gateway: `FINANZ`, `JOB_HUNTER`, `SIATA`, `QUANT_TRADER`, `PQRSD_ASSISTANT` (`GATEWAY_DB_ENV_KEYS` en código).                           |
+| `DUCKCLAW_*_DB_PATH`          | Bóveda por perfil de gateway (`GATEWAY_DB_ENV_KEYS` en código; ver implementación).                           |
 | `DUCKCLAW_DB_PATH`            | Convención histórica en `.env` (wizard duplica `DUCKDB_PATH` para db-writer).       |
 | `DUCKCLAW_WRITE_QUEUE_URL`    | Redis para la cola de escritura.                    |
 | `DUCKCLAW_REDIS_URL`          | Redis para ActivityManager (`/tasks`).              |
@@ -287,7 +285,7 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | **Consumir cola**                         | `services/db-writer/main.py`                                                           |
 | **admin_sql**                           | `packages/agents/src/duckclaw/graphs/tools.py`                                         |
 | **Crear schema**                          | `packages/agents/src/duckclaw/workers/loader.py` (`run_schema`)                        |
-| **Schema Finanz**                         | `packages/agents/src/duckclaw/forge/templates/finanz/schema.sql`                                  |
+| **Schema por template**                         | `packages/agents/src/duckclaw/forge/templates/<worker_id>/schema.sql`                                  |
 | **Ruta DB**                               | `services/db-writer/core/config.py` (`DUCKDB_PATH`)                                   |
 | **Sincronizar VPS**                       | `packages/shared/scripts/sync_telegram_duckdb.sh`                                      |
 | **Tests pipeline**                        | `tests/run_singleton_writer_pipeline.py`                                               |
@@ -332,11 +330,11 @@ Al iniciar, el wizard lista los procesos PM2 detectados. Si el usuario elige "Ge
 - **Normalización:** Cualquier ruta se normaliza a `db/<nombre>.duckdb` respecto a la raíz del repo.
 - **Compatibilidad:** Al escribir `DUCKCLAW_DB_PATH`, el wizard escribe también `DUCKDB_PATH` para que `services/db-writer` use la misma ruta.
 - **Creación automática:** Al confirmar o guardar, se crea el archivo `.duckdb` en `db/` si no existe.
-- **Varios API Gateways (PM2):** La fuente de verdad por proceso es el bloque `env` de `config/api_gateways_pm2.json`: rutas dedicadas (`DUCKCLAW_*_DB_PATH`, `DUCKDB_PATH`; plantilla `config/api_gateways_pm2.json.example`). Compat merge: también `DUCKCLAW_DB_PATH` en JSON legado (`DUCKCLAW_SHARED_DB_PATH` si aplica). Al ejecutar `duckops serve --pm2 --gateway` o el deploy PM2 del wizard soberano, las variables del `.env` compartido se fusionan en ese bloque pero **no sustituyen** esas rutas de bóveda si ya estaban definidas en el JSON (evita que al añadir otro gateway la ruta de Finanz pase a ser la del último valor genérico del `.env`). Para cambiar la bóveda de un gateway existente de forma explícita: volver a materializar el borrador soberano para ese nombre, editar `config/api_gateways_pm2.json`, o `duckops serve --pm2 --gateway --gateway-db-path <ruta>`.
+- **Varios API Gateways (PM2):** La fuente de verdad por proceso es el bloque `env` de `config/api_gateways_pm2.json`: rutas dedicadas (`DUCKCLAW_*_DB_PATH`, `DUCKDB_PATH`; plantilla `config/api_gateways_pm2.json.example`). Compat merge: también `DUCKCLAW_DB_PATH` en JSON legado (`DUCKCLAW_SHARED_DB_PATH` si aplica). Al ejecutar `duckops serve --pm2 --gateway` o el deploy PM2 del wizard soberano, las variables del `.env` compartido se fusionan en ese bloque pero **no sustituyen** esas rutas de bóveda si ya estaban definidas en el JSON (evita que al añadir otro gateway la ruta de un perfil existente pase a ser la del último valor genérico del `.env`). Para cambiar la bóveda de un gateway existente de forma explícita: volver a materializar el borrador soberano para ese nombre, editar `config/api_gateways_pm2.json`, o `duckops serve --pm2 --gateway --gateway-db-path <ruta>`.
 
 **Logs `[tenant:worker N]` (subagent_slot_rank)**
 
-En PM2/Gateway, entradas como `[Finanzas:finanz 2]` o `[Finanzas:Job-Hunter 1]` usan un sufijo numérico que viene del rank en un ZSET de Redis (`duckclaw:subagent_active:...`), no de un “Worker 1” productivo vs “Worker 2” ocioso. El número solo refleja **cuántas ejecuciones de ese mismo `worker_id` en ese chat** estaban registradas como activas al adquirir el slot. Comparar `Job-Hunter 1` con `finanz 2` no indica carga entre roles (claves Redis distintas). Detalle y diagnóstico: `packages/agents/src/duckclaw/graphs/subagent_run_id.py`.
+En PM2/Gateway, entradas como `[Acme:research_worker 2]` o `[Acme:job_hunter 1]` usan un sufijo numérico que viene del rank en un ZSET de Redis (`duckclaw:subagent_active:...`), no de un “Worker 1” productivo vs “Worker 2” ocioso. El número solo refleja **cuántas ejecuciones de ese mismo `worker_id` en ese chat** estaban registradas como activas al adquirir el slot. Comparar `job_hunter 1` con `research_worker 2` no indica carga entre roles (claves Redis distintas). Detalle y diagnóstico: `packages/agents/src/duckclaw/graphs/subagent_run_id.py`.
 
 **Flujo completo (wizard → pipeline operativo)**
 

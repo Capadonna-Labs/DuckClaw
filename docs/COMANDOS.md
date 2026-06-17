@@ -123,10 +123,9 @@ Equipo:
 - BI-Analyst
 - gymbro
 - powerseal
-- PQRSD-Assistant
+- support_assistant
 - SIATA-Analyst
-- Quant-Trader
-- finanz
+- market_analyst
 - support
 - AXIS
 - default
@@ -202,7 +201,7 @@ comfyui:
 
 Reiniciar gateway y db-writer tras cambiar `.env`. Specs: `COMFYUI_VISUAL_BRIDGE.md`, `COMFYUI_IMAGE_EDIT.md`.
 
-## Reddit MCP (Quant-Trader / Finanz)
+## Reddit MCP (workers con skill de sentimiento)
 
 Precarga `mcp-reddit` en disco local (~3 s de arranque vs 2–5 min con `npx` en cada cold start):
 
@@ -224,11 +223,11 @@ export DUCKCLAW_REDDIT_MCP_COMMAND=node
 export DUCKCLAW_REDDIT_MCP_ARGS="/ruta/a/mcp-reddit/dist/server.js"
 ```
 
-Spec: `specs/features/quant/QUANT_REDDIT_MCP_SENTIMENT.md`.
+Spec: manifest del worker con skill Reddit (`skills.reddit_mcp` o equivalente).
 
-## Google Trends MCP (Finanz / Quant-Trader)
+## Google Trends MCP (workers con skill de tendencias)
 
-Incluido en `uv sync` por defecto (`google-trends-mcp` en el venv del gateway). Se registra automáticamente en workers de mercado (`finanz`, `quant_trader`) en turnos con `tool_surface=full` (tools: `interest_over_time`, `related_queries`).
+Incluido en `uv sync` por defecto (`google-trends-mcp` en el venv del gateway). Se registra automáticamente en workers que declaren la skill en manifest en turnos con `tool_surface=full` (tools: `interest_over_time`, `related_queries`).
 
 ```bash
 cd /root/duckclaw   # o la raíz del monorepo

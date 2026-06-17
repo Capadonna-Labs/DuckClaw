@@ -221,7 +221,7 @@ def test_manager_invokes_worker_builder_without_session_kwargs(monkeypatch) -> N
         "duckclaw.manager.graph.release_subagent_slot",
         lambda *args, **kwargs: None,
     )
-    monkeypatch.setattr("duckclaw.manager.graph._worker_graph_cache", {})
+    monkeypatch.setattr("duckclaw.manager.manager_worker_cache._worker_graph_cache", {})
 
     graph = build_manager_graph(con)
     out = graph.invoke(

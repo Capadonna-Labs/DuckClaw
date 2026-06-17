@@ -85,7 +85,7 @@ Cada intento de acceso debe ser registrado para cumplir con la normativa colombi
 ## 6. Guía de pruebas (Smoke)
 
 ### 6.1. Confirmar que el esquema existe
-En DuckDB (mismo DB que usa el Gateway; por defecto `db/finanzdb1.duckdb`):
+En DuckDB (mismo DB que usa el Gateway; por defecto `db/gateway.duckdb`):
 ```sql
 SELECT * FROM main.authorized_users;
 ```

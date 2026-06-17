@@ -3,18 +3,18 @@
 > **Diseño (esta spec)** · **Runbook operativo:** [`docs/operations/Multi-Vault-System.md`](../../../docs/operations/Multi-Vault-System.md).
 
 ## 1. Objetivo Arquitectónico
-Evolucionar el sistema de persistencia para permitir que un único usuario gestione múltiples bases de datos privadas independientes (ej. "Finanzas Personales", "Inversiones", "Proyectos Secretos"). El sistema debe permitir la creación, listado y conmutación en caliente (Hot-Swapping) de estas bóvedas, garantizando que el agente siempre trabaje sobre el contexto de datos correcto mediante el alias dinámico `private` en DuckDB.
+Evolucionar el sistema de persistencia para permitir que un único usuario gestione múltiples bases de datos privadas independientes (ej. "Proyecto Alpha", "Archivo Personal", "Proyectos Secretos"). El sistema debe permitir la creación, listado y conmutación en caliente (Hot-Swapping) de estas bóvedas, garantizando que el agente siempre trabaje sobre el contexto de datos correcto mediante el alias dinámico `private` en DuckDB.
 
 ## 2. Modelo de Metadatos (System Registry)
 
-Para gestionar la relación Usuario-Bóvedas, la base de datos `system.duckdb` debe incorporar un registro de propiedad. Cada **ámbito (`scope_id`)** representa un tenant/gateway lógico (p. ej. Finanz con tenant `default` vs JobHunter con tenant `Trabajo`), de modo que el mismo `user_id` de Telegram puede tener **distinta bóveda activa** por gateway sin compartir el puntero `is_active`.
+Para gestionar la relación Usuario-Bóvedas, la base de datos `system.duckdb` debe incorporar un registro de propiedad. Cada **ámbito (`scope_id`)** representa un tenant/gateway lógico (p. ej. gateway A con tenant `default` vs gateway B con tenant `Trabajo`), de modo que el mismo `user_id` de Telegram puede tener **distinta bóveda activa** por gateway sin compartir el puntero `is_active`.
 
 ```sql
 -- Tabla de registro de bóvedas (PK compuesta con scope)
 CREATE TABLE IF NOT EXISTS user_vaults (
     user_id VARCHAR,             -- ID de Telegram / UUID
     scope_id VARCHAR NOT NULL DEFAULT '',  -- '' = legacy / tenant default; slug del tenant en otros gateways
-    vault_id VARCHAR,           -- ID único del archivo (ej. 'finanzas_abc')
+    vault_id VARCHAR,           -- ID único del archivo (ej. 'project_alpha')
     vault_name VARCHAR,         -- Nombre amigable (ej. 'Gastos 2026')
     is_active BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS user_vaults (
 
 **Resolución de `scope_id`:** `vault_scope_id_for_tenant(tenant_id)` en `duckclaw.vaults`: si el tenant efectivo es vacío o `default`, `scope_id = ''` (comportamiento histórico); en caso contrario, slug sanitizado del tenant (misma regla que rutas `shared/`).
 
-**Bootstrap por ámbito:** con `scope_id != ''` el sistema **no** promueve automáticamente otras bóvedas del disco ni adopta el primer `.duckdb` no-default de la carpeta del usuario (evita que gateways como JobHunter abran `finanzdb1.duckdb` solo por convivir en `db/private/{user}/`). La bóveda inicial puede forzarse con `DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID` (slug); si no está definida, se usa `default`.
+**Bootstrap por ámbito:** con `scope_id != ''` el sistema **no** promueve automáticamente otras bóvedas del disco ni adopta el primer `.duckdb` no-default de la carpeta del usuario (evita que un gateway con tenant dedicado abra `legacy_project.duckdb` solo por convivir en `db/private/{user}/`). La bóveda inicial puede forzarse con `DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID` (slug); si no está definida, se usa `default`.
 
 ## 3. Topología de Archivos (Hierarchical Storage)
 

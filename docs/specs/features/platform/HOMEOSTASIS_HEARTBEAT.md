@@ -69,7 +69,7 @@ async def run_heartbeat():
                 
                 async with httpx.AsyncClient() as client:
                     await client.post(
-                        f"{GATEWAY_URL}?tenant_id={tenant_id}&worker_id=finanz", 
+                        f"{GATEWAY_URL}?tenant_id={tenant_id}&worker_id=default", 
                         json=payload,
                         headers={"X-Tailscale-Auth-Key": "tu_secreto"}
                     )

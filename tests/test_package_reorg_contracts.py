@@ -46,8 +46,10 @@ def test_agents_runtime_and_manager_facades_expose_public_contracts() -> None:
 def test_manager_graph_implementation_is_owned_by_manager_package() -> None:
     manager_graph = importlib.import_module("duckclaw.manager.graph")
     legacy_graph = importlib.import_module("duckclaw.graphs.manager_graph")
+    builder = importlib.import_module("duckclaw.manager.manager_graph_builder")
 
-    assert manager_graph.build_manager_graph.__module__ == "duckclaw.manager.graph"
+    assert manager_graph.build_manager_graph is builder.build_manager_graph
+    assert builder.build_manager_graph.__module__ == "duckclaw.manager.manager_graph_builder"
     assert legacy_graph.build_manager_graph is manager_graph.build_manager_graph
 
 

@@ -10,7 +10,7 @@ Este documento describe el **Modo B**: varios bots compartiendo **una** URL púb
 
 Una sola URL HTTPS (p. ej. Tailscale Funnel) no puede ejecutar varios procesos Puerto-distintos a la vez. Si **todos** los bots registran el mismo `setWebhook` URL contra **un** gateway, ese gateway debe enrutar cada `Update` al worker y al `TELEGRAM_BOT_TOKEN` correcto.
 
-Hoy el handler usa `DUCKCLAW_TELEGRAM_DEFAULT_WORKER` → por defecto `finanz`, y un solo token de salida, por lo que cualquier bot que comparta la URL se comporta como Finanz.
+Hoy el handler usa `DUCKCLAW_TELEGRAM_DEFAULT_WORKER` → por defecto `default`, y un solo token de salida, por lo que cualquier bot que comparta la URL se comporta como el worker por defecto del proceso.
 
 ## Solución
 
@@ -19,7 +19,7 @@ Telegram envía el `secret_token` definido en `setWebhook` en la cabecera `X-Tel
 Variable opcional: `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` — JSON lista de objetos:
 
 - `secret` (string, obligatorio): mismo valor que `secret_token` en `setWebhook` de ese bot.
-- `worker_id` (string, obligatorio): id del grafo (p. ej. `finanz`, `bi_analyst`, `siata_analyst`).
+- `worker_id` (string, obligatorio): id del grafo (p. ej. `research_worker`, `bi_analyst`, `support`).
 - `tenant_id` (string, opcional): por defecto `default`.
 - `bot_token_env` (string, obligatorio): nombre de variable con el token Bot API para **respuestas** de ese bot (convención estándar: `TELEGRAM_<ID_MANIFEST_EN_MAYÚSCULAS>_TOKEN`, p. ej. `TELEGRAM_BI_ANALYST_TOKEN`; los nombres `TELEGRAM_BOT_TOKEN_*` siguen funcionando como legado).
 - `vault_db_env` (string, opcional): nombre de variable cuyo valor es la ruta DuckDB de la **bóveda** de ese bot (p. ej. `DUCKCLAW_VAULT_DB_PATH` o una clave explícita por vault, no por agente). Si falta, el proceso multiplex usa el hub del proceso PM2 (`DUCKCLAW_GATEWAY_DB_PATH` / `DUCKDB_PATH`; legado: `DUCKCLAW_DB_PATH`) — típicamente incorrecto para otro vault. Obligatorio cuando cada bot tiene su propio `.duckdb`.

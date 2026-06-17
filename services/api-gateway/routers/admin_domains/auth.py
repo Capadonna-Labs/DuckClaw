@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import logging
+import os
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, field_validator
 
+from routers.admin_domains.admin_common import problem
+
 router = APIRouter(prefix="/auth", tags=["admin-auth"])
+_log = logging.getLogger(__name__)
 
 
 class AdminLoginBody(BaseModel):
@@ -14,22 +19,144 @@ class AdminLoginBody(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, value: str) -> str:
-        return (value or "").strip().lower()
+    def normalize_email(cls, v: str) -> str:
+        return (v or "").strip().lower()
 
     @field_validator("password")
     @classmethod
-    def password_min_length(cls, value: str) -> str:
-        if len(value or "") < 8:
-            raise ValueError("password too short")
-        return value
+    def password_length(cls, v: str) -> str:
+        if len(v) < 8 or len(v) > 128:
+            raise ValueError("invalid password length")
+        return v
+
+
+async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response: Response) -> dict[str, Any]:
+    from core.admin_auth import (
+        apply_login_delay,
+        check_ip_rate_limit,
+        clear_email_failures,
+        client_ip,
+        create_session,
+        record_email_failure,
+        set_auth_cookies,
+    )
+    from duckclaw import DuckClaw
+    from duckclaw import db_write_queue
+    from duckclaw.admin_console_users import (
+        authenticate_console_user_readonly,
+        console_users_seed_required,
+        default_seed_users,
+    )
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.write_commands import (
+        ClearAdminLoginFailuresCommand,
+        RecordAdminLoginFailureCommand,
+        UpdateConsoleUserPasswordHashCommand,
+        UpsertConsoleUserCommand,
+    )
+
+    redis_client = getattr(request.app.state, "redis", None)
+    ip = client_ip(request)
+    if redis_client is not None:
+        await check_ip_rate_limit(redis_client, ip)
+        await apply_login_delay(redis_client, body.email)
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise problem(503, "Gateway DuckDB no disponible", gw)
+
+    from core.admin_identity import attach_profile_to_console_user, console_user_public
+
+    def _enqueue_auth_command(command: Any) -> str:
+        task_id = db_write_queue.enqueue_typed_command(command, db_path=gw, user_id="default")
+        command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
+        if command_status and command_status.status == "failed":
+            raise RuntimeError(command_status.detail or "admin auth write failed")
+        return task_id
+
+    db = DuckClaw(gw, read_only=True, engine="python")
+    should_seed = False
+    try:
+        should_seed = console_users_seed_required(db)
+    finally:
+        db.close()
+
+    if should_seed:
+        for seed_user in default_seed_users():
+            _enqueue_auth_command(
+                UpsertConsoleUserCommand(
+                    tenant_id="default",
+                    actor_email="system",
+                    email=seed_user["email"],
+                    nombre=seed_user.get("nombre") or seed_user["email"],
+                    rol=seed_user.get("rol") or "user",
+                    password=seed_user.get("password") or "",
+                    initials=seed_user.get("initials") or "",
+                    active=True,
+                )
+            )
+
+    db = DuckClaw(gw, read_only=True, engine="python")
+    user: dict[str, Any] | None = None
+    password_update: dict[str, Any] | None = None
+    try:
+        user, password_update = authenticate_console_user_readonly(
+            db, email=body.email, password=body.password
+        )
+        if user:
+            user = attach_profile_to_console_user(db, user)
+    finally:
+        db.close()
+
+    if not user:
+        try:
+            _enqueue_auth_command(
+                RecordAdminLoginFailureCommand(
+                    tenant_id="default",
+                    actor_email="system",
+                    email=body.email,
+                )
+            )
+        except RuntimeError as exc:
+            raise problem(503, "DB-writer rechazó fallo de login", str(exc)) from exc
+        if redis_client is not None:
+            await record_email_failure(redis_client, body.email)
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    try:
+        if password_update:
+            _enqueue_auth_command(
+                UpdateConsoleUserPasswordHashCommand(
+                    tenant_id="default",
+                    actor_email=str(user.get("email") or "system"),
+                    email=str(password_update.get("email") or body.email),
+                    password_hash=str(password_update.get("password_hash") or ""),
+                    hash_algo=str(password_update.get("hash_algo") or "argon2id"),
+                    hash_params=dict(password_update.get("hash_params") or {}),
+                )
+            )
+        _enqueue_auth_command(
+            ClearAdminLoginFailuresCommand(
+                tenant_id="default",
+                actor_email=str(user.get("email") or "system"),
+                email=body.email,
+            )
+        )
+    except RuntimeError as exc:
+        raise problem(503, "DB-writer rechazó estado de login", str(exc)) from exc
+
+    if redis_client is None:
+        raise problem(503, "Redis no disponible para sesiones", "redis")
+    await clear_email_failures(redis_client, body.email)
+    session_id, csrf_token = await create_session(redis_client, user=user)
+    set_auth_cookies(response, session_id, csrf_token, request=request)
+    _log.info("login_success email=%s ip=%s", body.email, ip)
+    return {"user": console_user_public(user)}
 
 
 @router.post("/login")
 async def admin_auth_login(body: AdminLoginBody, request: Request, response: Response) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._admin_auth_login_impl(body, request, response)
+    return await admin_auth_login_impl(body, request, response)
 
 
 @router.get("/me")

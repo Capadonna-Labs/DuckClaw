@@ -479,3 +479,82 @@ def test_factory_deprecated_debug_probe_removed() -> None:
     assert "_ibkr_cancel_debug_log" not in source
     assert "debug-fd1dbb.log" not in source
     assert "hypothesis_id" not in source
+
+
+def test_factory_facade_stays_thin() -> None:
+    """factory.py is a re-export facade; graph assembly lives in sibling modules."""
+    line_count = len(_factory_source().splitlines())
+    assert line_count <= 250, f"factory.py grew to {line_count} lines; keep it a thin facade"
+    names = _factory_function_names()
+    assert "build_worker_graph" not in names
+    assert "_build_worker_tools" not in names
+    assert "_resolve_reddit_share_url_to_comments_url" not in names
+    assert "_send_sandbox_heartbeat_telegram" not in names
+
+
+def test_reddit_helpers_own_share_resolution() -> None:
+    reddit = importlib.import_module("duckclaw.workers.factory_reddit_helpers")
+    from duckclaw.workers import factory
+
+    assert factory._resolve_reddit_share_url_to_comments_url is reddit._resolve_reddit_share_url_to_comments_url
+    assert factory.reddit_share_shortlink_fallback_query is reddit.reddit_share_shortlink_fallback_query
+    names = _factory_function_names()
+    assert "_resolve_reddit_share_url_to_comments_url" not in names
+    assert "reddit_share_shortlink_fallback_query" not in names
+
+
+def test_agent_node_helpers_own_cancel_and_llm_failure() -> None:
+    helpers = importlib.import_module("duckclaw.workers.factory_agent_node_helpers")
+    from duckclaw.workers import factory
+
+    assert factory._parse_comfyui_edit_inbound is helpers._parse_comfyui_edit_inbound
+    assert factory._agent_node_llm_failure_user_message is helpers._agent_node_llm_failure_user_message
+    assert factory._identity_fields is helpers._identity_fields
+    names = _factory_function_names()
+    assert "_parse_comfyui_edit_inbound" not in names
+    assert "_agent_node_llm_failure_user_message" not in names
+
+
+def test_sandbox_notify_owns_heartbeat_scheduling() -> None:
+    notify = importlib.import_module("duckclaw.workers.factory_sandbox_notify")
+    from duckclaw.workers import factory
+
+    assert factory._schedule_run_browser_novnc_tool_heartbeat is notify._schedule_run_browser_novnc_tool_heartbeat
+    assert factory._send_sandbox_heartbeat_telegram is notify._send_sandbox_heartbeat_telegram
+    names = _factory_function_names()
+    assert "_schedule_run_browser_novnc_tool_heartbeat" not in names
+
+
+def test_tool_builder_owns_worker_tools() -> None:
+    builder = importlib.import_module("duckclaw.workers.factory_tool_builder")
+    from duckclaw.workers import factory
+
+    assert factory._build_worker_tools is builder._build_worker_tools
+    assert factory._ensure_worker_duckdb_extensions is builder._ensure_worker_duckdb_extensions
+    names = _factory_function_names()
+    assert "_build_worker_tools" not in names
+
+
+def test_graph_builder_modules_respect_line_limits() -> None:
+    """factory_graph_* modules stay under modular size guardrails."""
+    workers = Path("packages/agents/src/duckclaw/workers")
+    limits = {
+        "factory_graph_assembly.py": 200,
+    }
+    default_max = 400
+    for path in sorted(workers.glob("factory_graph_*.py")):
+        if path.name == "factory_graph_builder.py":
+            continue
+        line_count = len(path.read_text(encoding="utf-8").splitlines())
+        max_lines = limits.get(path.name, default_max)
+        assert line_count <= max_lines, f"{path.name} has {line_count} lines (max {max_lines})"
+
+
+def test_graph_builder_owns_build_worker_graph() -> None:
+    graph = importlib.import_module("duckclaw.workers.factory_graph_builder")
+    from duckclaw.workers import factory
+
+    assert factory.build_worker_graph is graph.build_worker_graph
+    assert factory.build_worker_graph.__module__ == "duckclaw.workers.factory_graph_builder"
+    names = _factory_function_names()
+    assert "build_worker_graph" not in names

@@ -17,9 +17,9 @@ _LONE_HTTP_URL_ONLY_LINE = re.compile(
 
 def clear_worker_graph_cache() -> None:
     """Compatibility wrapper for callers that historically imported this facade."""
-    from duckclaw.manager.graph import clear_worker_graph_cache as _clear_worker_graph_cache
+    from duckclaw.manager.manager_worker_cache import clear_worker_graph_cache as _clear
 
-    _clear_worker_graph_cache()
+    _clear()
 
 
 def _worker_id_alnum_slug(worker_id: str | None) -> str:

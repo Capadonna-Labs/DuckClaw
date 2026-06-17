@@ -8,7 +8,7 @@ Consolidación de la arquitectura de razonamiento, ciclo de vida de agentes, hom
 
 Agentes que mantienen "salud" minimizando incertidumbre en su dominio.
 
-- **Estado interno (Beliefs)**: tabla `agent_beliefs` por worker (p. ej. Finanz: `presupuesto_mensual`, `tasa_ahorro_objetivo`; Engineer: `cobertura_tests_minima`).
+- **Estado interno (Beliefs)**: tabla `agent_beliefs` por worker (p. ej. Planner: `objetivo_semanal`, `umbral_alerta`; Engineer: `cobertura_tests_minima`).
 - **HomeostasisNode**: en cada ciclo: (1) Percepción, (2) Cálculo de Sorpresa vs beliefs, (3) Si sorpresa alta → acción de restauración, (4) Actualización de beliefs.
 - **HomeostasisManager** (skill): entrada `belief_key`, `observed_value`; si `delta > threshold` → `Action_Restore_Homeostasis`, si no → `Action_Maintain_Equilibrium`.
 - Plantillas en `forge/templates/` pueden incluir `homeostasis.yaml` (beliefs, thresholds, actions por trigger). Auditoría: consultar `agent_beliefs` para explicar decisiones.
@@ -22,7 +22,7 @@ Instanciación de trabajadores virtuales por plantilla declarativa.
 - **Estructura**: `packages/agents/src/duckclaw/forge/templates/<worker_id>/` con `manifest.yaml`, `system_prompt.md`, `schema.sql`, `skills/` (módulos Python).
 - **WorkerFactory**: entrada `worker_id`, `telegram_chat_id`; lee manifest, ejecuta schema en DuckDB (esquema aislado), carga system_prompt en Planner, inyecta tools de `skills/` en Executor; salida grafo LangGraph compilado con checkpointer.
 - **WorkerCLI**: `duckops hire <worker_id> --name <instance_name>` → valida plantilla, genera `.env.<instance_name>`, actualiza ecosystem.config.cjs, `pm2 start`.
-- **Roster típico**: FinanzWorker (Planner→Executor→SQLValidator→Explainer; insert_transaction, get_monthly_summary, categorize_expense); SupportWorker (RAG_Retriever, solo lectura; search_knowledge_base, get_ticket_status). Aislamiento: un `thread_id` por instancia; auditoría con `worker_role`, `instance` en LangSmith; skills de código dinámico vía SandboxPipeline.
+- **Roster típico**: `research_worker` (Planner→Executor→SQLValidator→Explainer; `read_sql`, resúmenes agregados); `support` (RAG_Retriever, solo lectura; `search_knowledge_base`, `get_ticket_status`). Aislamiento: un `thread_id` por instancia; auditoría con `worker_role`, `instance` en LangSmith; skills de código dinámico vía SandboxPipeline.
 
 ---
 

@@ -13,24 +13,24 @@ Para SFT, el modelo necesita ver la conversación completa, **incluyendo el uso 
   "messages":[
     {
       "role": "system",
-      "content": "Eres Finanz. Tienes acceso a la herramienta read_sql..."
+      "content": "Eres un asistente de datos. Tienes acceso a la herramienta read_sql..."
     },
     {
       "role": "user",
-      "content": "¿Cuánto dinero tengo en Bancolombia?"
+      "content": "¿Cuántos registros activos hay en la tabla clientes?"
     },
     {
       "role": "assistant",
-      "tool_calls":[{"name": "read_sql", "arguments": {"query": "SELECT balance FROM cuentas WHERE name='Bancolombia'"}}]
+      "tool_calls":[{"name": "read_sql", "arguments": {"query": "SELECT COUNT(*) AS n FROM clientes WHERE status='active'"}}]
     },
     {
       "role": "tool",
       "name": "read_sql",
-      "content": "[{\"balance\": 5000000}]"
+      "content": "[{\"n\": 42}]"
     },
     {
       "role": "assistant",
-      "content": "Tienes $5,000,000 en tu cuenta de Bancolombia."
+      "content": "Hay 42 registros activos en clientes."
     }
   ]
 }
@@ -58,16 +58,16 @@ Para GRPO (Aprendizaje por Refuerzo), el formato es diferente. No le das la resp
   "prompt":[
     {
       "role": "system",
-      "content": "Eres Finanz. Tienes acceso a la herramienta read_sql..."
+      "content": "Eres un asistente de datos. Tienes acceso a la herramienta read_sql..."
     },
     {
       "role": "user",
-      "content": "¿Cuánto dinero tengo en Bancolombia?"
+      "content": "¿Cuántos registros activos hay en la tabla clientes?"
     }
   ],
   "reward_metadata": {
-    "expected_sql_tables": ["cuentas"],
-    "worker_id": "finanz"
+    "expected_sql_tables": ["clientes"],
+    "worker_id": "research_worker"
   }
 }
 ```

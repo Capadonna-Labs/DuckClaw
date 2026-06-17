@@ -141,8 +141,11 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     assert "searchKnowledge:" in service
     assert '@router.get("/workspace/projects/{project_id}"' in workspace_router
     assert '@router.get("/workspace/projects/{project_id}"' not in db_first_router
-    assert '@router.get("/knowledge/sources"' in db_first_router
-    assert '@router.post("/knowledge/search"' in db_first_router
+    knowledge_router = Path("services/api-gateway/routers/admin_domains/knowledge.py").read_text(
+        encoding="utf-8"
+    )
+    assert '@router.get("/knowledge/sources"' in knowledge_router
+    assert '@router.post("/knowledge/search"' in knowledge_router
     assert "projectDetailFallbackFromList" in bff_proxy
     assert "res.status === 405" in bff_proxy
 
@@ -150,7 +153,7 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
 def test_rag_manager_upload_contract_and_navigation() -> None:
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
-    router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
+    router = Path("services/api-gateway/routers/admin_domains/knowledge.py").read_text(encoding="utf-8")
     bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
     rag_page = Path("apps/duckclaw-admin/src/app/(admin)/knowledge/page.tsx")
     project_detail = Path("apps/duckclaw-admin/src/app/(admin)/projects/[projectId]/page.tsx").read_text(

@@ -23,12 +23,9 @@ Endpoints:
 
 from __future__ import annotations
 
-import asyncio
-import json
 import os
-import time
 from pathlib import Path
-from typing import Any, AsyncGenerator, Optional
+from typing import Any
 
 # ── dotenv ─────────────────────────────────────────────────────────────────────
 
@@ -60,24 +57,8 @@ def _load_dotenv() -> None:
 _load_dotenv()
 
 import logging as _logging
-from functools import partial
 
-
-def _parallel_chat_invocations_enabled() -> bool:
-    """Alineado con services/api-gateway/main.py (incl. alias CHAT_PARALLEL_INVOCATIONS)."""
-    for key in ("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS", "CHAT_PARALLEL_INVOCATIONS"):
-        if (os.environ.get(key) or "").strip().lower() in ("1", "true", "yes", "on"):
-            return True
-    return False
-
-
-from duckclaw.utils.langsmith_trace import get_tracing_config
-from duckclaw.utils.logger import (
-    configure_structured_logging,
-    extract_usage_from_messages,
-    format_chat_log_identity,
-    structured_log_context,
-)
+from duckclaw.utils.logger import configure_structured_logging
 
 _lvl_name = (os.environ.get("DUCKCLAW_LOG_LEVEL") or "INFO").strip().upper()
 configure_structured_logging(level=getattr(_logging, _lvl_name, _logging.INFO))
@@ -85,10 +66,9 @@ configure_structured_logging(level=getattr(_logging, _lvl_name, _logging.INFO))
 # ── FastAPI app ────────────────────────────────────────────────────────────────
 
 try:
-    from fastapi import FastAPI, HTTPException, Request
+    from fastapi import FastAPI, Request
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse, StreamingResponse
-    from pydantic import BaseModel, Field
+    from starlette.responses import JSONResponse
 except ImportError as exc:
     raise ImportError(
         "Instala las dependencias del servidor:\n"
@@ -115,7 +95,6 @@ app.add_middleware(
 
 async def _tailscale_auth_middleware(request: Request, call_next):
     """Valida X-Tailscale-Auth-Key si DUCKCLAW_TAILSCALE_AUTH_KEY está definida."""
-    from starlette.responses import JSONResponse
     auth_key = os.environ.get("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
     if not auth_key:
         return await call_next(request)
@@ -133,430 +112,37 @@ async def _tailscale_auth_middleware(request: Request, call_next):
 
 app.middleware("http")(_tailscale_auth_middleware)
 
-# ── Estado global del grafo ────────────────────────────────────────────────────
-# No se guarda conexión DuckDB al archivo del gateway entre peticiones (evita lock con db-writer).
-# Se cachea LLM + rutas; el grafo manager se compila por turno con un DuckClaw RO efímero.
-# Para LangGraph Studio: grafo aparte contra :memory: (sin lock de archivo).
-
-_graph_state: dict[str, Any] = {}
-_graph_init_error: Optional[Exception] = None
-
-
-def _ensure_llm_config() -> None:
-    """Carga y cachea LLM y metadatos. No abre el .duckdb del gateway."""
-    from duckclaw.integrations.llm_providers import (
-        _ensure_duckclaw_llm_env_from_legacy_llm_vars,
-        build_llm,
-    )
-    from duckclaw.gateway_db import get_gateway_db_path
-
-    # Misma fusión LLM_* → DUCKCLAW_* que build_llm (evita leer solo DUCKCLAW_* obsoleto).
-    _ensure_duckclaw_llm_env_from_legacy_llm_vars()
-
-    provider = os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx").strip().lower()
-    model = os.environ.get("DUCKCLAW_LLM_MODEL", "").strip()
-    base_url = os.environ.get("DUCKCLAW_LLM_BASE_URL", "http://127.0.0.1:8080/v1").strip()
-    fingerprint = (provider, model, base_url)
-
-    if _graph_state.get("llm") is not None and _graph_state.get("_llm_env_fingerprint") == fingerprint:
-        return
-
-    # Proveedor/modelo/base cambiaron: el grafo Studio y el LLM global deben reconstruirse.
-    if _graph_state.get("llm") is not None:
-        try:
-            _sd = _graph_state.get("studio_db")
-            if _sd is not None and hasattr(_sd, "close"):
-                _sd.close()
-        except Exception:
-            pass
-        _graph_state.pop("studio_graph", None)
-        _graph_state.pop("studio_db", None)
-        _graph_state.pop("_llm_env_fingerprint", None)
-        _graph_state.pop("llm", None)
-
-    db_path = get_gateway_db_path()
-    os.makedirs(str(Path(db_path).parent), exist_ok=True)
-
-    system_prompt = os.environ.get(
-        "DUCKCLAW_SYSTEM_PROMPT",
-        "Eres un asistente útil con acceso a una base de datos.",
-    ).strip()
-
-    llm = build_llm(provider, model, base_url)
-    if llm is None:
-        raise RuntimeError(
-            "No se pudo inicializar el LLM. "
-            "Configura DUCKCLAW_LLM_PROVIDER y DUCKCLAW_LLM_BASE_URL en .env."
-        )
-
-    _graph_state["llm"] = llm
-    _graph_state["_llm_env_fingerprint"] = fingerprint
-    _graph_state["provider"] = provider
-    _graph_state["model"] = model
-    _graph_state["base_url"] = base_url
-    _graph_state["db_path"] = db_path
-    _graph_state["system_prompt"] = system_prompt
-
-
-def _build_manager_graph_for_db(
-    db: Any,
-    *,
-    llm_override: Any | None = None,
-    llm_provider_override: str | None = None,
-    llm_model_override: str | None = None,
-    llm_base_url_override: str | None = None,
-) -> Any:
-    """Compila el grafo manager con la conexión ``db`` del turno (o :memory: para Studio)."""
-    from duckclaw.forge import AgentAssembler, MANAGER_ROUTER_YAML
-
-    _ensure_llm_config()
-    llm = _graph_state["llm"] if llm_override is None else llm_override
-    provider = _graph_state["provider"] if llm_provider_override is None else llm_provider_override
-    model = _graph_state["model"] if llm_model_override is None else llm_model_override
-    base_url = _graph_state["base_url"] if llm_base_url_override is None else llm_base_url_override
-    db_path = _graph_state["db_path"]
-    system_prompt = _graph_state["system_prompt"]
-
-    # :memory: exige read_only=False en DuckDB; no advertir por ello.
-    _dp = (getattr(db, "_path", None) or "").strip()
-    if (
-        db is not None
-        and _dp
-        and _dp != ":memory:"
-        and not getattr(db, "_read_only", False)
-    ):
-        from duckclaw.spawn_profile import is_spawn_profile
-
-        if not is_spawn_profile():
-            _logging.getLogger(__name__).warning(
-                "graph_server: DuckClaw no está en read_only; revisar core y ruta gateway (multiplex)"
-            )
-
-    return AgentAssembler.from_yaml(MANAGER_ROUTER_YAML).build(
-        db=db,
-        llm=llm,
-        system_prompt=system_prompt,
-        llm_provider=provider,
-        llm_model=model,
-        llm_base_url=base_url,
-        db_path=db_path,
-    )
-
-
-def _ensure_studio_graph() -> Any:
-    """Grafo compilado contra :memory: para langgraph dev / GET /graph (sin lock al vault)."""
-    if _graph_state.get("studio_graph") is not None:
-        return _graph_state["studio_graph"]
-
-    from duckclaw import DuckClaw
-
-    # DuckDB: «Cannot launch in-memory database in read-only mode»
-    mem = DuckClaw(":memory:", read_only=False)
-    _graph_state["studio_db"] = mem
-    _graph_state["studio_graph"] = _build_manager_graph_for_db(mem)
-    return _graph_state["studio_graph"]
-
-
-from duckclaw.graphs.graph_server_ephemeral import (
+from duckclaw.graphs.graph_server_ephemeral import (  # noqa: E402
     invoke_ephemeral_gateway_graph as _invoke_ephemeral_gateway_graph,
     is_duckdb_lock_error as _is_duckdb_lock_error,
     resolve_llm_triplet_for_graph_invoke as _resolve_llm_triplet_for_graph_invoke,
 )
+from duckclaw.graphs.graph_server_invoke import (  # noqa: E402
+    _ainvoke,
+    ainvoke_manager_ephemeral,
+)
+from duckclaw.graphs.graph_server_llm_config import (  # noqa: E402
+    _ensure_llm_config,
+    _resolve_display_model,
+    get_graph_state,
+)
+from duckclaw.graphs.graph_server_routes import (  # noqa: E402
+    InvokeRequest,
+    InvokeResponse,
+    register_graph_server_routes,
+)
+from duckclaw.graphs.graph_server_studio import (  # noqa: E402
+    _build_manager_graph_for_db,
+    _ensure_studio_graph,
+    _get_or_build_graph,
+    _graph_init_error,
+    get_graph,
+)
 
+# Compatibilidad histórica: tests y graph_server_ephemeral mutaban _graph_state en el facade.
+_graph_state = get_graph_state()
 
-# ── Pre-inicialización en tiempo de importación ────────────────────────────────
-# langgraph dev importa este módulo antes del event loop: solo LLM (+ grafo :memory: opcional).
-
-def _pre_init() -> None:
-    global _graph_init_error
-    try:
-        _ensure_llm_config()
-        _ensure_studio_graph()
-    except Exception as exc:
-        _graph_init_error = exc
-        print(f"[graph_server] Pre-init warning: {exc}", flush=True)
-
-_pre_init()
-
-
-def _resolve_display_model() -> str:
-    provider = os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx")
-    if provider == "mlx":
-        mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
-        if mid:
-            return f"mlx:{mid.rstrip('/').rsplit('/', 1)[-1]}"
-        return "mlx:local"
-    model = os.environ.get("DUCKCLAW_LLM_MODEL", "")
-    return f"{provider}:{model}" if model else provider
-
-
-# ── Pydantic models ────────────────────────────────────────────────────────────
-
-class InvokeRequest(BaseModel):
-    message: str = Field(..., description="Mensaje del usuario")
-    chat_id: str = Field("api", description="ID de sesión (para memoria de conversación)")
-    tenant_id: str = Field("default", description="ID del tenant (para whitelist y aislamiento de workers)")
-    history: list[dict] = Field(default_factory=list, description="Historial [{role, content}]")
-    stream: bool = Field(False, description="Si true, usar /stream en su lugar")
-    username: str | None = Field(None, description="Nombre del usuario (para grupos)")
-    chat_type: str | None = Field(None, description="Tipo de chat: private, group, supergroup, etc.")
-    user_id: str | None = Field(None, description="ID del usuario para resolver bóveda activa")
-
-
-class InvokeResponse(BaseModel):
-    reply: str
-    model: str
-    elapsed_ms: int
-    chat_id: str
-    usage_tokens: dict[str, int] | None = None
-
-
-# ── Endpoints ──────────────────────────────────────────────────────────────────
-
-@app.get("/", summary="Info del servidor")
-async def root():
-    from duckclaw.gateway_db import get_gateway_db_path
-
-    return {
-        "service":    "DuckClaw LangGraph API",
-        "version":    "0.1.0",
-        "model":      _resolve_display_model(),
-        "db_path":    get_gateway_db_path() or "(default)",
-        "tracing":    os.environ.get("LANGCHAIN_TRACING_V2", "false"),
-        "project":    os.environ.get("LANGCHAIN_PROJECT", ""),
-        "endpoints":  ["/invoke", "/stream", "/health", "/docs"],
-    }
-
-
-@app.get("/health", summary="Health check")
-async def health():
-    return {"status": "ok", "model": _resolve_display_model()}
-
-
-@app.post("/invoke", response_model=InvokeResponse, summary="Invocar el grafo")
-async def invoke(req: InvokeRequest):
-    """
-    Envía un mensaje al grafo LangGraph y retorna la respuesta.
-    Las trazas se envían automáticamente a LangSmith si LANGCHAIN_TRACING_V2=true.
-    """
-    try:
-        _ensure_llm_config()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
-
-    from duckclaw.manager.graph import clear_worker_graph_cache
-
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
-    # Enriquecer el estado con identidad (username/chat_type) para general_graph.
-    history = req.history or []
-    state = {
-        "incoming": req.message,
-        "history": history,
-        "username": req.username or "",
-        "chat_type": (req.chat_type or "").lower() if req.chat_type else "",
-    }
-
-    t0 = time.monotonic()
-    uid = (req.user_id or "").strip() or req.chat_id
-    chat_ident = format_chat_log_identity(req.chat_id, req.username)
-    try:
-        with structured_log_context(tenant_id=req.tenant_id, chat_id=chat_ident, worker_id="manager"):
-            # El grafo manager se encarga de mapear state → subgrafos; general_graph usará username/chat_type.
-            result = await _ainvoke(
-                graph,
-                state["incoming"],
-                history,
-                req.chat_id,
-                tenant_id=req.tenant_id,
-                user_id=uid,
-                username=req.username,
-            )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Error en el grafo: {exc}")
-    finally:
-        try:
-            db.close()
-        except Exception:
-            pass
-        clear_worker_graph_cache()
-
-    elapsed_ms = int((time.monotonic() - t0) * 1000)
-    return InvokeResponse(
-        reply=result.get("reply", ""),
-        model=_resolve_display_model(),
-        elapsed_ms=elapsed_ms,
-        chat_id=req.chat_id,
-        usage_tokens=result.get("usage_tokens"),
-    )
-
-
-@app.post("/stream", summary="Invocar el grafo con streaming SSE")
-async def stream(req: InvokeRequest):
-    """
-    Streaming de la respuesta token por token usando Server-Sent Events (SSE).
-    Cada evento tiene el formato: data: <token>\\n\\n
-    El evento final es: data: [DONE]\\n\\n
-    """
-    try:
-        _ensure_llm_config()
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
-
-    from duckclaw.manager.graph import clear_worker_graph_cache
-
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
-
-    async def event_generator() -> AsyncGenerator[str, None]:
-        try:
-            uid = (req.user_id or "").strip() or req.chat_id
-            chat_ident = format_chat_log_identity(req.chat_id, req.username)
-            with structured_log_context(tenant_id=req.tenant_id, chat_id=chat_ident, worker_id="manager"):
-                invoke_result = await _ainvoke(
-                    graph,
-                    req.message,
-                    req.history,
-                    req.chat_id,
-                    tenant_id=req.tenant_id,
-                    user_id=uid,
-                    username=req.username,
-                )
-            reply = invoke_result.get("reply", "") or ""
-            for word in reply.split(" "):
-                yield f"data: {word} \n\n"
-                await _async_sleep(0.02)
-            yield "data: [DONE]\n\n"
-        except Exception as exc:
-            yield f"data: [ERROR] {exc}\n\n"
-        finally:
-            try:
-                db.close()
-            except Exception:
-                pass
-            clear_worker_graph_cache()
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
-    )
-
-
-@app.get("/graph", summary="Estructura del grafo compilado")
-async def graph_info():
-    """Retorna la estructura del grafo en formato JSON (compatible con LangSmith Studio)."""
-    try:
-        graph = _ensure_studio_graph()
-        # LangGraph compiled graphs exponen get_graph()
-        if hasattr(graph, "get_graph"):
-            g = graph.get_graph()
-            return JSONResponse(content={
-                "nodes": [str(n) for n in (g.nodes if hasattr(g, "nodes") else [])],
-                "edges": [str(e) for e in (g.edges if hasattr(g, "edges") else [])],
-            })
-        return {"graph": "compiled", "type": str(type(graph).__name__)}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-# ── Helpers async ──────────────────────────────────────────────────────────────
-
-async def _ainvoke(
-    graph: Any,
-    message: str,
-    history: list,
-    chat_id: str,
-    *,
-    tenant_id: str = "default",
-    user_id: str | None = None,
-    user_incoming: str | None = None,
-    username: str | None = None,
-    vault_db_path: str | None = None,
-    shared_db_path: str | None = None,
-    is_system_prompt: bool | None = False,
-    outbound_telegram_bot_token: str | None = None,
-    entry_worker_id: str | None = None,
-) -> dict:
-    """
-    Invoca el grafo y retorna {"reply": str, "messages": list | None}.
-    messages (cuando existe) es la secuencia completa del turno para trazas SFT (tool_calls, tool, assistant).
-    """
-    import asyncio
-
-    # `input` primero: LangSmith suele usar esta clave para la columna **Input** en la tabla Runs
-    # (convención LangChain). `incoming` sigue siendo la fuente de verdad en el grafo.
-    _tok = (outbound_telegram_bot_token or "").strip() or None
-    _state_user_incoming = (user_incoming or message or "").strip()
-    state: dict[str, Any] = {
-        "input": message,
-        "incoming": message,
-        "user_incoming": _state_user_incoming,
-        "history": history or [],
-        "chat_id": chat_id,
-        "tenant_id": tenant_id,
-        "user_id": (user_id or "").strip() or str(chat_id),
-        "username": (username or "").strip(),
-        "vault_db_path": (vault_db_path or "").strip() or "",
-        "shared_db_path": (shared_db_path or "").strip() or "",
-    }
-    if _tok:
-        state["outbound_telegram_bot_token"] = _tok
-    if is_system_prompt:
-        state["is_system_prompt"] = True
-    _ew = (entry_worker_id or "").strip()
-    if _ew:
-        state["entry_worker_id"] = _ew
-    loop = asyncio.get_event_loop()
-
-    trace_cfg = get_tracing_config(tenant_id, "manager", chat_id)
-    # ainvoke sigue ejecutando nodos síncronos (p. ej. worker_graph.invoke) en el event loop
-    # y bloquea otras peticiones HTTP. Con paralelismo por chat, mover invoke a un hilo.
-    if _parallel_chat_invocations_enabled():
-        result = await asyncio.to_thread(graph.invoke, state, trace_cfg)
-    elif hasattr(graph, "ainvoke"):
-        result = await graph.ainvoke(state, trace_cfg)
-    else:
-        result = await loop.run_in_executor(None, partial(graph.invoke, state, trace_cfg))
-
-    reply = str(result.get("reply") or result.get("output") or "Sin respuesta.")
-    messages = result.get("messages")
-    usage = extract_usage_from_messages(messages)
-    out: dict[str, Any] = {"reply": reply, "messages": messages}
-    if usage:
-        out["usage_tokens"] = usage
-    # Manager -> subagente: propagar para logs/auditoria en el API Gateway.
-    for _k in (
-        "assigned_worker_id",
-        "plan_title",
-        "_audit_done",
-        "sandbox_photo_base64",
-        "visual_artifact_id",
-        "outbound_image_paths",
-    ):
-        if _k in result:
-            out[_k] = result[_k]
-    return out
-
-
-async def _async_sleep(seconds: float) -> None:
-    import asyncio
-    await asyncio.sleep(seconds)
-
-
-# ── get_graph() para langgraph.json / LangSmith Studio ─────────────────────────
-
-def get_graph() -> Any:
-    """
-    Entry point para langgraph dev / LangSmith Studio.
-    Usa DuckDB :memory: para no mantener lock sobre el archivo del gateway.
-    """
-    if _graph_init_error is not None and _graph_state.get("llm") is None:
-        raise _graph_init_error
-    try:
-        return _ensure_studio_graph()
-    except Exception as exc:
-        if _graph_init_error is not None:
-            raise _graph_init_error from exc
-        raise
+register_graph_server_routes(app)
 
 
 def get_db() -> Any:
@@ -569,58 +155,6 @@ def get_db() -> Any:
     p = get_gateway_db_path()
     os.makedirs(str(Path(p).parent), exist_ok=True)
     return GatewayDbEphemeralReadonly(p)
-
-
-def _get_or_build_graph() -> Any:
-    """Compatibilidad: mismo grafo que LangGraph Studio (:memory:), no el del archivo del gateway."""
-    return _ensure_studio_graph()
-
-
-async def ainvoke_manager_ephemeral(
-    message: str,
-    history: list,
-    chat_id: str,
-    *,
-    tenant_id: str = "default",
-    user_id: str | None = None,
-    user_incoming: str | None = None,
-    username: str | None = None,
-    vault_db_path: str | None = None,
-    shared_db_path: str | None = None,
-    is_system_prompt: bool | None = False,
-    outbound_telegram_bot_token: str | None = None,
-    entry_worker_id: str | None = None,
-) -> dict:
-    """
-    Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
-    Uso recomendado desde services/api-gateway en lugar de retener un grafo global.
-    """
-    from duckclaw.manager.graph import clear_worker_graph_cache
-
-    _ensure_llm_config()
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, chat_id, vault_db_path)
-    try:
-        return await _ainvoke(
-            graph,
-            message,
-            history,
-            chat_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            user_incoming=user_incoming,
-            username=username,
-            vault_db_path=vault_db_path,
-            shared_db_path=shared_db_path,
-            is_system_prompt=is_system_prompt,
-            outbound_telegram_bot_token=outbound_telegram_bot_token,
-            entry_worker_id=entry_worker_id,
-        )
-    finally:
-        try:
-            db.close()
-        except Exception:
-            pass
-        clear_worker_graph_cache()
 
 
 # ── __main__ ───────────────────────────────────────────────────────────────────

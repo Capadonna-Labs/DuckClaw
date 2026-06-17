@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Optional
 
 try:
@@ -9,19 +11,84 @@ try:
 except ImportError:
     RunnableConfig = Any  # type: ignore[misc, assignment]
 
+from duckclaw.workers.factory_agent_node_helpers import _identity_fields, _last_human_message_index
 from duckclaw.workers.runtime_policy_helpers import (
     worker_has_runtime_capability as _worker_has_runtime_capability,
     worker_use_heuristic_first_tool as _worker_use_heuristic_first_tool,
 )
-from duckclaw.workers.tool_invocation_policy import decide_market_data_tool_invocation as _decide_market_data_tool_invocation
+from duckclaw.workers.tool_binding import tool_called_since as _tool_called_since
+from duckclaw.workers.tool_invocation_policy import (
+    decide_current_time_tool_invocation as _decide_current_time_tool_invocation,
+    decide_market_data_tool_invocation as _decide_market_data_tool_invocation,
+)
 from langchain_core.messages import AIMessage
 
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
-from duckclaw.workers.factory_graph_nodes_agent_shared import AGENT_CTX_UNPACK
+from duckclaw.workers.factory_graph_nodes_agent_shared import load_agent_env
+
+_log = logging.getLogger(__name__)
 
 
 def make_agent_policy_late(ctx: WorkerGraphContext):
-    exec(AGENT_CTX_UNPACK, {"ctx": ctx}, locals())
+    _agent_env = load_agent_env(ctx)
+    worker_id = _agent_env['worker_id']
+    db = _agent_env['db']
+    spec = _agent_env['spec']
+    path = _agent_env['path']
+    provider = _agent_env['provider']
+    llm = _agent_env['llm']
+    tool_surface = _agent_env['tool_surface']
+    is_market_analysis_worker = _agent_env['is_market_analysis_worker']
+    tools = _agent_env['tools']
+    tools_by_name = _agent_env['tools_by_name']
+    tools_sandbox_off = _agent_env['tools_sandbox_off']
+    tools_by_name_sandbox_off = _agent_env['tools_by_name_sandbox_off']
+    prompt_policies = _agent_env['prompt_policies']
+    _lid = _agent_env['_lid']
+    use_cm = _agent_env['use_cm']
+    _tools_for_llm_bind = _agent_env['_tools_for_llm_bind']
+    _tools_sandbox_off_bind = _agent_env['_tools_sandbox_off_bind']
+    _sandbox_enabled_for_state = _agent_env['_sandbox_enabled_for_state']
+    b = _agent_env['b']
+    llm_with_tools_on = _agent_env['llm_with_tools_on']
+    llm_with_tools_off = _agent_env['llm_with_tools_off']
+    llm_force_schema_on = _agent_env['llm_force_schema_on']
+    llm_force_schema_off = _agent_env['llm_force_schema_off']
+    llm_force_read_sql_on = _agent_env['llm_force_read_sql_on']
+    llm_force_read_sql_off = _agent_env['llm_force_read_sql_off']
+    llm_force_admin_sql_on = _agent_env['llm_force_admin_sql_on']
+    llm_force_admin_sql_off = _agent_env['llm_force_admin_sql_off']
+    llm_force_run_sandbox_on = _agent_env['llm_force_run_sandbox_on']
+    llm_force_run_sandbox_off = _agent_env['llm_force_run_sandbox_off']
+    llm_force_tavily_on = _agent_env['llm_force_tavily_on']
+    llm_force_tavily_off = _agent_env['llm_force_tavily_off']
+    llm_force_generate_visual_on = _agent_env['llm_force_generate_visual_on']
+    llm_force_generate_visual_off = _agent_env['llm_force_generate_visual_off']
+    llm_force_fetch_market_on = _agent_env['llm_force_fetch_market_on']
+    llm_force_fetch_market_off = _agent_env['llm_force_fetch_market_off']
+    llm_force_reddit_post_on = _agent_env['llm_force_reddit_post_on']
+    llm_force_reddit_post_off = _agent_env['llm_force_reddit_post_off']
+    llm_force_reddit_search_on = _agent_env['llm_force_reddit_search_on']
+    llm_force_reddit_search_off = _agent_env['llm_force_reddit_search_off']
+    llm_force_reddit_fallback_on = _agent_env['llm_force_reddit_fallback_on']
+    llm_force_reddit_fallback_off = _agent_env['llm_force_reddit_fallback_off']
+    has_read_sql = _agent_env['has_read_sql']
+    has_tavily = _agent_env['has_tavily']
+    has_generate_visual = _agent_env['has_generate_visual']
+    has_reddit_tools = _agent_env['has_reddit_tools']
+    has_run_sandbox = _agent_env['has_run_sandbox']
+    _bind_tools = _agent_env['_bind_tools']
+    _count_tool_messages_named = _agent_env['_count_tool_messages_named']
+    _first_reddit_url_in_text = _agent_env['_first_reddit_url_in_text']
+    _incoming_has_reddit_share_path = _agent_env['_incoming_has_reddit_share_path']
+    _incoming_has_reddit_url = _agent_env['_incoming_has_reddit_url']
+    _incoming_looks_like_reddit_post_url = _agent_env['_incoming_looks_like_reddit_post_url']
+    _is_latest_game_query = _agent_env['_is_latest_game_query']
+    _is_schema_query = _agent_env['_is_schema_query']
+    _patch_ai_reddit_share_tool_calls = _agent_env['_patch_ai_reddit_share_tool_calls']
+    _reddit_share_slug_from_incoming = _agent_env['_reddit_share_slug_from_incoming']
+    _reddit_tool_message_no_data = _agent_env['_reddit_tool_message_no_data']
+
     def run(state: dict, config: Optional[RunnableConfig] = None) -> dict | None:
                 _intent_incoming = ctx.agent_turn['_intent_incoming']
                 _orch = ctx.agent_turn['_orch']

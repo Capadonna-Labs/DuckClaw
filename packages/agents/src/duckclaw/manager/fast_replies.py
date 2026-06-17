@@ -20,7 +20,7 @@ def _manager_capabilities_fast_path_ok(incoming: str) -> bool:
     raw = (incoming or "").strip()
     if not raw or raw.startswith("/"):
         return False
-    from duckclaw.graphs.on_the_fly_commands import _is_capabilities_smalltalk
+    from duckclaw.commands.fast_replies import _is_capabilities_smalltalk
 
     return _is_capabilities_smalltalk(raw)
 

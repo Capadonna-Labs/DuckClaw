@@ -144,6 +144,7 @@ DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/graphs/graph_server.py": "legacy graph command handler awaiting DB-writer migration",
     "packages/agents/src/duckclaw/graphs/graph_server_ephemeral.py": "ephemeral DuckDB open/invoke helpers split from graph_server",
+    "packages/agents/src/duckclaw/graphs/graph_server_studio.py": "LangGraph Studio :memory: bootstrap (DuckDB forbids in-memory read_only)",
     "services/api-gateway/core/fly_command_invocation.py": "legacy slash/fly command bridge pending typed-command migration",
     "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
     "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",

@@ -562,6 +562,45 @@ class TestWriteCommands:
         for name in removed_names:
             assert not hasattr(write_commands, name)
 
+    def test_append_llm_usage_log_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import AppendLlmUsageLogCommand
+
+        cmd = AppendLlmUsageLogCommand(
+            tenant_id="default",
+            id="USAGE-1",
+            session_id="sess-1",
+            worker_id="worker-1",
+            input_tokens=100,
+            output_tokens=50,
+            total_tokens=150,
+            cost_usd=0.00042,
+            model="gpt-test",
+        )
+        raw = json.loads(cmd.to_redis_payload())
+        assert raw["command_type"] == "append_llm_usage_log"
+        assert raw["id"] == "USAGE-1"
+        assert raw["total_tokens"] == 150
+
+    def test_append_media_usage_log_command_roundtrip(self) -> None:
+        from duckclaw.write_commands import AppendMediaUsageLogCommand
+
+        cmd = AppendMediaUsageLogCommand(
+            tenant_id="tenant-a",
+            id="MEDIA-1",
+            session_id="sess-2",
+            worker_id="media-worker",
+            provider="fal",
+            model_endpoint="fal-ai/flux/dev",
+            media_type="image",
+            cost_usd=0.025,
+            latency_sec=1.5,
+            media_url="https://cdn.example/img.png",
+        )
+        raw = json.loads(cmd.to_redis_payload())
+        assert raw["command_type"] == "append_media_usage_log"
+        assert raw["model_endpoint"] == "fal-ai/flux/dev"
+        assert raw["latency_sec"] == 1.5
+
     def test_each_command_has_unique_task_id(self) -> None:
         from duckclaw.write_commands import UpsertWorkerCommand
 
@@ -1538,17 +1577,61 @@ class TestCommandHandlers:
         with pytest.raises(ValueError, match="Unknown command_type"):
             dispatch_command(con, {"command_type": "nonexistent"})
 
-    def test_raw_sql_skips_typed_handler(self) -> None:
-        """RawSqlCommand command_type='raw_sql' so _handle_typed_command returns False."""
-        from duckclaw.write_commands import RawSqlCommand
+    def test_raw_sql_handler_executes_parameterized_query(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
 
-        cmd = RawSqlCommand(
-            query="SELECT 1", db_path="/tmp/test.duckdb",
-            user_id="u1", task_id="t-raw",
-        )
-        raw = json.loads(cmd.to_redis_payload())
-        assert raw["command_type"] == "raw_sql"
-        # Typed handler skips raw_sql — falls through to legacy SQL path
+        con = db_with_migrations
+        con.execute("CREATE TABLE IF NOT EXISTS raw_sql_probe (id INTEGER, label VARCHAR)")
+        dispatch_command(con, {
+            "command_type": "raw_sql",
+            "query": "INSERT INTO raw_sql_probe (id, label) VALUES (?, ?)",
+            "params": [7, "typed"],
+        })
+        row = con.execute("SELECT id, label FROM raw_sql_probe WHERE id = 7").fetchone()
+        assert row == (7, "typed")
+
+    def test_append_llm_usage_log_handler_inserts_row(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "append_llm_usage_log",
+            "id": "USAGE-test-1",
+            "tenant_id": "default",
+            "session_id": "sess-1",
+            "worker_id": "w1",
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "total_tokens": 15,
+            "cost_usd": 0.001,
+            "model": "test-model",
+        })
+        row = con.execute(
+            "SELECT id, total_tokens, model FROM llm_usage_log WHERE id = 'USAGE-test-1'"
+        ).fetchone()
+        assert row == ("USAGE-test-1", 15, "test-model")
+
+    def test_append_media_usage_log_handler_inserts_row(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        dispatch_command(con, {
+            "command_type": "append_media_usage_log",
+            "id": "MEDIA-test-1",
+            "tenant_id": "tenant-a",
+            "session_id": "sess-2",
+            "worker_id": "w2",
+            "provider": "fal",
+            "model_endpoint": "fal-ai/flux/dev",
+            "media_type": "image",
+            "cost_usd": 0.025,
+            "latency_sec": 2.0,
+            "media_url": "https://cdn.example/img.png",
+        })
+        row = con.execute(
+            "SELECT id, media_type, cost_usd FROM media_usage_log WHERE id = 'MEDIA-test-1'"
+        ).fetchone()
+        assert row == ("MEDIA-test-1", "image", 0.025)
 
     def test_write_ledger_records_entry(self, db_with_migrations) -> None:
         """admin_write_ledger INSERT and SELECT work correctly."""
@@ -2198,6 +2281,48 @@ class TestEnqueueTypedCommand:
         assert db_queue.index("run_pending_migrations(conn)") < db_queue.index("BEGIN TRANSACTION")
         assert "run_pending_migrations(conn)" in db_writer
         assert db_writer.index("run_pending_migrations(conn)") < db_writer.index("BEGIN TRANSACTION")
+
+    def test_enqueue_duckdb_write_sync_wraps_raw_sql_command(self, monkeypatch) -> None:
+        from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+
+        captured: list[dict] = []
+
+        def _fake_enqueue_typed_command(command, *, db_path, user_id, queue_name):
+            captured.append({
+                "command_type": command.command_type,
+                "query": command.query,
+                "params": command.params,
+                "task_id": command.task_id,
+                "db_path": db_path,
+                "user_id": user_id,
+                "queue_name": queue_name,
+            })
+            return command.task_id
+
+        monkeypatch.setattr(
+            "duckclaw.db_write_queue.enqueue_typed_command",
+            _fake_enqueue_typed_command,
+        )
+        monkeypatch.setattr(
+            "duckclaw.vaults.resolve_user_id_for_db_path",
+            lambda user_id, _path, tenant_id=None: user_id,
+        )
+
+        tid = enqueue_duckdb_write_sync(
+            db_path="db/private/default/test.duckdb",
+            query="INSERT INTO probe VALUES (?, ?)",
+            params=[1, "a"],
+            user_id="default",
+            tenant_id="default",
+            task_id="legacy-task-1",
+            queue_name="typed:q",
+        )
+
+        assert tid == "legacy-task-1"
+        assert len(captured) == 1
+        assert captured[0]["command_type"] == "raw_sql"
+        assert captured[0]["query"] == "INSERT INTO probe VALUES (?, ?)"
+        assert captured[0]["params"] == [1, "a"]
 
     def test_enqueue_typed_command_pushes_enriched_payload_once(self, monkeypatch) -> None:
         import sys

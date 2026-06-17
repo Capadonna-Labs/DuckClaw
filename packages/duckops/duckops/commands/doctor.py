@@ -38,6 +38,59 @@ def _emit(label: str, ok: bool, detail: str) -> bool:
     return ok
 
 
+def _check_db_writer() -> tuple[bool, str]:
+    """PM2 DuckClaw-DB-Writer, cola duckdb_write_queue y métrica processed."""
+    from duckops.sovereign.stack_health import DB_WRITER_PM2_NAME, pm2_available, pm2_process_online
+
+    detail_parts: list[str] = []
+    writer_ok = False
+
+    try:
+        from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+        if spawn_inline_writes_enabled():
+            writer_ok = True
+            detail_parts.append("escrituras inline (spawn)")
+    except Exception:
+        pass
+
+    if pm2_available():
+        if pm2_process_online(DB_WRITER_PM2_NAME):
+            writer_ok = True
+            detail_parts.append(f"PM2 {DB_WRITER_PM2_NAME} online")
+        else:
+            detail_parts.append(f"PM2 {DB_WRITER_PM2_NAME} offline")
+    else:
+        detail_parts.append("PM2 no en PATH")
+
+    redis_url = (
+        (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
+    )
+    if redis_url:
+        try:
+            import redis as redis_sync
+
+            client = redis_sync.Redis.from_url(
+                redis_url,
+                decode_responses=True,
+                socket_connect_timeout=2,
+            )
+            queue_depth = int(client.llen("duckdb_write_queue"))
+            detail_parts.append(f"LLEN duckdb_write_queue={queue_depth}")
+            if not writer_ok and queue_depth > 0:
+                detail_parts.append("cola huérfana")
+            processed = client.get("db_writer:metric:processed")
+            if processed is not None:
+                detail_parts.append(f"processed={processed}")
+        except Exception as exc:
+            detail_parts.append(f"Redis: {str(exc)[:100]}")
+
+    if not detail_parts:
+        detail_parts.append("sin señales de writer")
+
+    return writer_ok, " · ".join(detail_parts)
+
+
 @app.callback(invoke_without_command=True)
 def cmd_doctor(
     ctx: typer.Context,
@@ -151,6 +204,12 @@ def cmd_doctor(
         key_ok,
         "configurada" if key_ok else "falta o placeholder (duckops init)",
     )
+
+    try:
+        dbw_ok, dbw_detail = _check_db_writer()
+        _emit("DB-Writer", dbw_ok, dbw_detail)
+    except Exception as exc:
+        _emit("DB-Writer", False, str(exc)[:160])
 
     admin_email = (os.environ.get("DUCKCLAW_ADMIN_EMAIL") or "").strip()
     admin_pass = (os.environ.get("DUCKCLAW_ADMIN_PASSWORD") or "").strip()

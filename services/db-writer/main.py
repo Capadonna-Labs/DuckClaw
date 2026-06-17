@@ -3,6 +3,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from pathlib import Path
 
 # Multi-Vault: rutas bajo db/ deben resolver igual que el Gateway (cwd suele ser services/db-writer).
@@ -19,6 +20,7 @@ import duckdb
 import redis.asyncio as redis
 from context_injection_handler import handle_context_injection_message
 from core.config import settings
+from db_writer_ops import DbPathLockRegistry, push_dlq, record_metric
 try:
     from meditate_state_delta_handler import handle_meditate_state_delta_message
 except ImportError:
@@ -47,6 +49,128 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger("db-writer")
+
+_db_path_locks = DbPathLockRegistry()
+
+_TASK_ID_PARTIAL_RE = re.compile(r'"task_id"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"')
+
+
+def _extract_task_id_partial(message: str) -> str:
+    match = _TASK_ID_PARTIAL_RE.search(message)
+    if not match:
+        return "unknown"
+    raw = match.group(1)
+    try:
+        return str(json.loads(f'"{raw}"'))
+    except json.JSONDecodeError:
+        return raw
+
+
+def _ledger_is_completed(conn: duckdb.DuckDBPyConnection, task_id: str) -> bool:
+    row = conn.execute(
+        "SELECT status FROM main.admin_write_ledger WHERE task_id = ?",
+        [task_id],
+    ).fetchone()
+    return row is not None and row[0] == "completed"
+
+
+def _ledger_insert_completed(
+    conn: duckdb.DuckDBPyConnection,
+    task_id: str,
+    command_type: str,
+    command_json: str,
+) -> None:
+    conn.execute(
+        "INSERT INTO main.admin_write_ledger "
+        "(task_id, command_type, command_json, status, created_at) "
+        "VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP)",
+        [task_id, command_type, command_json],
+    )
+
+
+def _run_typed_command_sync(
+    task_id: str,
+    command_type: str,
+    payload: dict,
+    target_db_path: str,
+) -> str:
+    """Ejecuta comando tipado en DuckDB. Retorna 'completed' o 'already_completed'."""
+    conn = duckdb.connect(target_db_path, read_only=False)
+    try:
+        from duckclaw.schema_migrations import run_pending_migrations
+
+        run_pending_migrations(conn)
+        conn.execute("BEGIN TRANSACTION")
+
+        if _ledger_is_completed(conn, task_id):
+            conn.execute("ROLLBACK")
+            return "already_completed"
+
+        if command_type == "raw_sql":
+            query = str(payload.get("query") or "")
+            params = payload.get("params", [])
+            if not query:
+                raise ValueError("No hay query SQL")
+            conn.execute(query, params)
+        else:
+            from duckclaw.write_command_handlers import dispatch_command
+
+            dispatch_command(conn, payload)
+
+        _ledger_insert_completed(
+            conn,
+            task_id,
+            command_type,
+            json.dumps(payload, default=str),
+        )
+        conn.execute("COMMIT")
+        return "completed"
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+def _run_legacy_sql_sync(
+    task_id: str,
+    query: str,
+    params: list,
+    target_db_path: str,
+    payload: dict,
+) -> str:
+    """Ejecuta SQL legacy con transacción y ledger. Retorna 'completed' o 'already_completed'."""
+    conn = duckdb.connect(target_db_path, read_only=False)
+    try:
+        from duckclaw.schema_migrations import run_pending_migrations
+
+        run_pending_migrations(conn)
+        conn.execute("BEGIN TRANSACTION")
+
+        if _ledger_is_completed(conn, task_id):
+            conn.execute("ROLLBACK")
+            return "already_completed"
+
+        conn.execute(query, params)
+        _ledger_insert_completed(
+            conn,
+            task_id,
+            "legacy_sql",
+            json.dumps(payload, default=str),
+        )
+        conn.execute("COMMIT")
+        return "completed"
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+    finally:
+        conn.close()
 
 
 async def _is_duplicate_task(
@@ -89,7 +213,7 @@ def _validate_target_db_path(user_id: str, target_db_path: str, tenant_id: str |
     except ValueError:
         raise
     except Exception as exc:
-        logger.warning("ACL shared check skipped/failed: %s", exc)
+        raise ValueError(f"ACL shared check failed: {exc}") from exc
     return resolved
 
 
@@ -100,8 +224,8 @@ async def _handle_typed_command(
 ) -> bool:
     """Process a typed write command. Returns True if handled, False to fall through to legacy."""
     command_type = str(payload.get("command_type") or "").strip()
-    if not command_type or command_type == "raw_sql":
-        return False  # Fall through to legacy SQL path
+    if not command_type:
+        return False
 
     dedup_key = f"dedup:task:{task_id}"
 
@@ -111,6 +235,7 @@ async def _handle_typed_command(
             redis_client, task_id,
             DbWriteTaskStatus(status="success", detail="already processed"),
         )
+        await record_metric(redis_client, "processed")
         return True
 
     tenant_id = str(payload.get("tenant_id") or "default")
@@ -127,64 +252,41 @@ async def _handle_typed_command(
             redis_client, task_id,
             DbWriteTaskStatus(status="failed", detail=str(exc)),
         )
+        await record_metric(redis_client, "failed")
         return True
 
     try:
-        conn = duckdb.connect(target_db_path, read_only=False)
-        try:
-            from duckclaw.schema_migrations import run_pending_migrations
-
-            run_pending_migrations(conn)
-            conn.execute("BEGIN TRANSACTION")
-
-            # Durable dedup: skip if already completed in the target DB
-            row = conn.execute(
-                "SELECT status FROM main.admin_write_ledger WHERE task_id = ?",
-                [task_id],
-            ).fetchone()
-            if row and row[0] == "completed":
-                conn.execute("ROLLBACK")
-                conn.close()
-                logger.info("[%s] Already completed (ledger dedup)", task_id)
-                await _publish_task_status(
-                    redis_client, task_id,
-                    DbWriteTaskStatus(status="success", detail="already completed"),
-                )
-                await redis_client.set(dedup_key, "1", ex=TASK_STATUS_TTL_SEC * 2)
-                return True
-
-            from duckclaw.write_command_handlers import dispatch_command
-
-            dispatch_command(conn, payload)
-
-            conn.execute(
-                "INSERT INTO main.admin_write_ledger "
-                "(task_id, command_type, command_json, status, created_at) "
-                "VALUES (?, ?, ?, 'completed', CURRENT_TIMESTAMP)",
-                [task_id, command_type, json.dumps(payload, default=str)],
+        async with _db_path_locks.acquire(target_db_path):
+            outcome = await asyncio.to_thread(
+                _run_typed_command_sync,
+                task_id,
+                command_type,
+                payload,
+                target_db_path,
             )
-            conn.execute("COMMIT")
-
-            # Mark dedup after successful COMMIT
-            await redis_client.set(dedup_key, "1", ex=TASK_STATUS_TTL_SEC * 2)
-        except Exception:
-            try:
-                conn.execute("ROLLBACK")
-            except Exception:
-                pass
-            raise
-        finally:
-            conn.close()
     except Exception as exc:
         logger.error("[%s] Typed command %s failed: %s", task_id, command_type, exc)
         await _publish_task_status(
             redis_client, task_id,
             DbWriteTaskStatus(status="failed", detail=str(exc)[:500]),
         )
+        await record_metric(redis_client, "failed")
         return True
 
+    if outcome == "already_completed":
+        logger.info("[%s] Already completed (ledger dedup)", task_id)
+        await _publish_task_status(
+            redis_client, task_id,
+            DbWriteTaskStatus(status="success", detail="already completed"),
+        )
+        await redis_client.set(dedup_key, "1", ex=TASK_STATUS_TTL_SEC * 2)
+        await record_metric(redis_client, "processed")
+        return True
+
+    await redis_client.set(dedup_key, "1", ex=TASK_STATUS_TTL_SEC * 2)
     logger.info("[%s] Command %s completed", task_id, command_type)
     await _publish_task_status(redis_client, task_id, DbWriteTaskStatus(status="success"))
+    await record_metric(redis_client, "processed")
     return True
 
 
@@ -214,7 +316,7 @@ async def execute_write(redis_client: redis.Redis, message: str) -> None:
         if await _handle_typed_command(redis_client, task_id, payload):
             return
 
-        # Legacy raw SQL path
+        # Legacy raw SQL path (payloads sin command_type)
         query = str(payload.get("query") or "")
         params = payload.get("params", [])
         target_db_path = str(payload.get("db_path") or settings.DUCKDB_PATH)
@@ -278,22 +380,44 @@ async def execute_write(redis_client: redis.Redis, message: str) -> None:
                     )
                     return
         except Exception as exc:
-            logger.warning("[%s] ACL shared check skipped/failed: %s", task_id, exc)
+            logger.warning("[%s] ACL shared check failed (fail-closed): %s", task_id, exc)
+            await _publish_task_status(
+                redis_client,
+                task_id,
+                DbWriteTaskStatus(status="failed", detail=f"ACL shared check failed: {exc}"[:500]),
+            )
+            return
 
-        def _exec() -> None:
-            conn_local = duckdb.connect(target_db_path, read_only=False)
-            try:
-                conn_local.execute(query, params)
-            finally:
-                conn_local.close()
+        async with _db_path_locks.acquire(target_db_path):
+            outcome = await asyncio.to_thread(
+                _run_legacy_sql_sync,
+                task_id,
+                query,
+                params,
+                target_db_path,
+                payload,
+            )
 
-        await asyncio.to_thread(_exec)
+        if outcome == "already_completed":
+            logger.info("[%s] Legacy SQL already completed (ledger dedup)", task_id)
+            await _publish_task_status(
+                redis_client,
+                task_id,
+                DbWriteTaskStatus(status="success", detail="already completed"),
+            )
+            return
 
         logger.info("[%s] Escritura exitosa en %s: %s...", task_id, target_db_path, query[:60])
         await _publish_task_status(redis_client, task_id, DbWriteTaskStatus(status="success"))
 
     except json.JSONDecodeError:
+        partial_task_id = _extract_task_id_partial(message)
         logger.error("Error decodificando el mensaje de Redis. Formato JSON inválido.")
+        await _publish_task_status(
+            redis_client,
+            partial_task_id,
+            DbWriteTaskStatus(status="failed", detail="Formato JSON inválido"),
+        )
     except duckdb.Error as e:
         logger.error("[%s] Error de DuckDB ejecutando la query: %s", task_id, e)
         await _publish_task_status(
@@ -356,6 +480,7 @@ async def _visual_state_delta_loop(redis_client: redis.Redis) -> None:
             try:
                 await handle_visual_state_delta_message(redis_client, message)
             except Exception as exc:  # noqa: BLE001
+                await push_dlq(redis_client, q, message, str(exc))
                 logger.exception("VISUAL_STATE_DELTA handler no capturó excepción: %s", exc)
 
 
@@ -372,6 +497,7 @@ async def _meditate_state_delta_loop(redis_client: redis.Redis) -> None:
             try:
                 await handle_meditate_state_delta_message(redis_client, message)
             except Exception as exc:  # noqa: BLE001
+                await push_dlq(redis_client, q, message, str(exc))
                 logger.exception("MEDITATE_STATE_DELTA handler no capturó excepción: %s", exc)
 
 
@@ -388,6 +514,7 @@ async def _reports_state_delta_loop(redis_client: redis.Redis) -> None:
             try:
                 await handle_reports_state_delta_message(redis_client, message)
             except Exception as exc:  # noqa: BLE001
+                await push_dlq(redis_client, q, message, str(exc))
                 logger.exception("REPORTS_STATE_DELTA handler no capturó excepción: %s", exc)
 
 

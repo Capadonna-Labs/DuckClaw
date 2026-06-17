@@ -120,6 +120,43 @@ def _enqueue_write(db: Any, sql: str, tenant_id: str) -> None:
                 pass
 
 
+def _enqueue_typed_write(db: Any, command: Any, tenant_id: str) -> None:
+    from pathlib import Path
+
+    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+
+    raw_path = str(getattr(db, "_path", "") or "").strip()
+    if not raw_path or raw_path == ":memory:":
+        return
+    resolved = str(Path(raw_path).expanduser().resolve())
+    uid = _infer_user_id_for_queue(resolved)
+    released_ro = False
+    try:
+        release = getattr(db, "release_file_handle_for_external_writer", None)
+        susp = getattr(db, "suspend_readonly_file_handle", None)
+        resu = getattr(db, "resume_readonly_file_handle", None)
+        if callable(release):
+            release()
+            released_ro = bool(callable(resu))
+        elif callable(susp) and callable(resu):
+            susp()
+            released_ro = True
+        write_tid = enqueue_typed_command(
+            command,
+            db_path=resolved,
+            user_id=uid,
+        )
+        poll_task_status_sync(write_tid, timeout_sec=15.0)
+    finally:
+        if released_ro:
+            try:
+                resu2 = getattr(db, "resume_readonly_file_handle", None)
+                if callable(resu2):
+                    resu2()
+            except Exception:
+                pass
+
+
 def append_llm_usage_log(
     db: Any,
     *,
@@ -139,26 +176,42 @@ def append_llm_usage_log(
     ensure_llm_usage_log_table(db)
     row_id = f"USAGE-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
     cost = round(estimate_llm_cost_usd(inp, out, model=model), 6)
-    tenant_s = str(tenant_id or "default").replace("'", "''")[:128]
-    session_s = str(session_id or "").replace("'", "''")[:128]
-    worker_s = str(worker_id or "").replace("'", "''")[:64]
-    model_s = str(model or "").replace("'", "''")[:128]
-    sql = (
-        f"""
-        INSERT INTO {_LLM_USAGE_TABLE}
-          (id, tenant_id, session_id, worker_id, input_tokens, output_tokens, total_tokens, cost_usd, model)
-        VALUES (
-          '{row_id}', '{tenant_s}', '{session_s}', '{worker_s}',
-          {inp}, {out}, {total}, {cost}, '{model_s}'
-        )
-        """
-    )
+    tenant_s = str(tenant_id or "default").strip()[:128] or "default"
+    session_s = str(session_id or "").strip()[:128]
+    worker_s = str(worker_id or "").strip()[:64]
+    model_s = str(model or "").strip()[:128]
     if _skip_runtime_ddl(db):
         try:
-            _enqueue_write(db, sql, tenant_s)
+            from duckclaw.write_commands import AppendLlmUsageLogCommand
+
+            _enqueue_typed_write(
+                db,
+                AppendLlmUsageLogCommand(
+                    tenant_id=tenant_s,
+                    id=row_id,
+                    session_id=session_s,
+                    worker_id=worker_s,
+                    input_tokens=inp,
+                    output_tokens=out,
+                    total_tokens=total,
+                    cost_usd=cost,
+                    model=model_s,
+                ),
+                tenant_s,
+            )
         except Exception as exc:
             import logging
 
             logging.getLogger(__name__).warning("llm_usage_log: enqueue insert failed: %s", exc)
         return
+    sql = (
+        f"""
+        INSERT INTO {_LLM_USAGE_TABLE}
+          (id, tenant_id, session_id, worker_id, input_tokens, output_tokens, total_tokens, cost_usd, model)
+        VALUES (
+          '{row_id}', '{tenant_s.replace("'", "''")}', '{session_s.replace("'", "''")}', '{worker_s.replace("'", "''")}',
+          {inp}, {out}, {total}, {cost}, '{model_s.replace("'", "''")}'
+        )
+        """
+    )
     db.execute(sql)

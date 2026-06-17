@@ -47,7 +47,9 @@ from duckclaw.write_handlers import (  # noqa: F401
     kanban,
     knowledge,
     prompt_policies,
+    raw_sql,
     runtime,
+    usage_logs,
     workers,
     workspace,
 )
@@ -90,6 +92,11 @@ from duckclaw.write_handlers.runtime import (
     _apply_upsert_agent_config_entries,
     _apply_upsert_runtime_setting,
     _ensure_task_audit_log_table,
+)
+from duckclaw.write_handlers.raw_sql import _apply_raw_sql
+from duckclaw.write_handlers.usage_logs import (
+    _apply_append_llm_usage_log,
+    _apply_append_media_usage_log,
 )
 from duckclaw.write_handlers.workers import (
     _apply_deactivate_catalog_skill,

@@ -60,6 +60,7 @@ Hito 1 y 2 del corte infra — resumen en este documento (§ Hito 1).
 
 ### Comandos Y DB-Writer
 
+- Contrato singleton writer (colas, ledger, DLQ, métricas): [`DB_WRITER_CONTRACT.md`](DB_WRITER_CONTRACT.md).
 - `duckclaw.commands.chat_state` extrae estado chat-scoped antes mezclado en `on_the_fly_commands.py`, incluyendo los fly commands `/forget` y `/context on|off` (`execute_forget`, `execute_context_toggle`). Tambien expone `set_chat_state_via_typed_command` para escribir claves `agent_config` con `UpsertAgentConfigEntriesCommand` cuando el handle esta en read-only, y `forget_chat_state_via_typed_command` para borrar historial `/forget` mediante `ForgetChatStateCommand`. `on_the_fly_commands.py` queda como fachada de compatibilidad y dispatcher.
 - `duckclaw.commands.team_templates` extrae equipo de chat/tenant y mantiene compatibilidad con imports legacy.
 - `duckclaw.commands.team_access` extrae whitelist generica de Telegram Guard y usa comandos tipados para mutaciones de usuarios autorizados y shared grants.

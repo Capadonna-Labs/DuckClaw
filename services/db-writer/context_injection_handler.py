@@ -13,6 +13,7 @@ from typing import Any, List
 import duckdb
 
 from core.config import settings
+from db_writer_ops import push_dlq
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import validate_user_db_path
 from models.context_injection import ContextInjectionStateDelta
@@ -318,6 +319,13 @@ async def handle_context_injection_message(redis_client: Any, message: str) -> N
                     logger.error("CONTEXT_INJECTION reencolado falló: %s", rq_exc)
             return
         logger.exception("CONTEXT_INJECTION error procesando mensaje: %s", exc)
+        await push_dlq(
+            redis_client,
+            source_queue=qname,
+            message=message,
+            error=str(exc),
+            handler="context_injection",
+        )
         return
 
     for ev in events:

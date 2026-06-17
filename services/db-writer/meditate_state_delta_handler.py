@@ -11,6 +11,7 @@ from typing import Any
 import duckdb
 
 from core.config import settings
+from db_writer_ops import push_dlq
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.vaults import validate_user_db_path
 from models.meditate_state_delta import MeditateStateDelta
@@ -208,5 +209,15 @@ def _sync_handle_meditate_state_delta(message: str) -> None:
 
 
 async def handle_meditate_state_delta_message(redis_client: Any, message: str) -> None:
-    del redis_client
-    await asyncio.to_thread(_sync_handle_meditate_state_delta, message)
+    qname = str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip()
+    try:
+        await asyncio.to_thread(_sync_handle_meditate_state_delta, message)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("MEDITATE_STATE_DELTA unrecoverable: %s", exc)
+        await push_dlq(
+            redis_client,
+            source_queue=qname,
+            message=message,
+            error=str(exc),
+            handler="meditate_state_delta",
+        )

@@ -1,5 +1,7 @@
 """
 Compacta salidas JSON de mcp-reddit antes del historial del LLM (anti-OOM / KV cache).
+
+Integración Reddit — vive en agents, no en shared (core genérico).
 """
 
 from __future__ import annotations
@@ -48,7 +50,6 @@ def _reddit_mcp_llm_max_posts_from_env() -> int:
     return 8
 
 
-# Límite de posts en el Markdown enviado al modelo (además del truncado por post).
 REDDIT_MCP_LLM_MAX_POSTS = _reddit_mcp_llm_max_posts_from_env()
 _TITLE_MAX_CHARS = 140
 

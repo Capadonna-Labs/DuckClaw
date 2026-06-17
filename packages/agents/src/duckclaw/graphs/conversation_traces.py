@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from duckclaw.integrations.llm_providers import sanitize_worker_reply_text
-from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+from duckclaw.workers.reddit_formatters import format_reddit_mcp_reply_if_applicable
 
 # Mismo criterio que manager_graph: el modelo a veces repite encabezados de subagente
 # (eco de DMs de heartbeat) en contenido assistant; limpiar al serializar trazas SFT.

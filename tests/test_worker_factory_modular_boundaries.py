@@ -727,6 +727,36 @@ def test_build_worker_graph_caps_tool_loop_without_recursion_error(tmp_path: Pat
     assert isinstance(out, dict)
     assert "reply" in out
     assert int(out.get("_tool_round") or 0) == 2
+    assert (out.get("reply") or "").strip()
+    assert "herramienta" in (out.get("reply") or "").lower()
+
+
+def test_set_reply_synthesizes_reply_when_tool_cap_exhausted(tmp_path: Path) -> None:
+    from duckclaw.workers.factory_graph_builder import build_worker_graph
+
+    templates_root = tmp_path / "layout"
+    _write_default_worker_layout(templates_root)
+    graph = build_worker_graph(
+        "default",
+        ":memory:",
+        _AlwaysToolCallLLM(),
+        templates_root=templates_root,
+        llm_provider="none_llm",
+        max_tool_rounds=1,
+    )
+
+    out = graph.invoke(
+        {
+            "incoming": "cap inmediato",
+            "chat_id": "chat-tool-cap-1",
+            "tenant_id": "default",
+        }
+    )
+
+    assert (out.get("reply") or "").strip()
+    assert "herramienta" in (out.get("reply") or "").lower()
+    last_msg = (out.get("messages") or [])[-1]
+    assert not getattr(last_msg, "tool_calls", None)
 
 
 def test_prepare_node_feeds_agent_with_system_and_human_messages(tmp_path: Path) -> None:

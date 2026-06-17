@@ -106,3 +106,9 @@ def _apply_deactivate_prompt_policy(conn: Any, payload: dict) -> None:
         "WHERE policy_type = ? AND policy_name = ?" + version_clause,
         params,
     )
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("upsert_prompt_policy", _apply_upsert_prompt_policy)
+register_handler("deactivate_prompt_policy", _apply_deactivate_prompt_policy)

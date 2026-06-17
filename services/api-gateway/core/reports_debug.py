@@ -22,7 +22,7 @@ def reports_debug_log(*, hypothesis_id: str, location: str, message: str, data: 
         "timestamp": int(time.time() * 1000),
     }
     roots: list[Path] = []
-    for key in ("DUCKCLAW_REPO_ROOT", "CAPADONNA_DRILLER_ROOT"):
+    for key in ("DUCKCLAW_EXTENSION_ROOT", "DUCKCLAW_REPO_ROOT"):
         raw = (os.environ.get(key) or "").strip()
         if raw:
             roots.append(Path(raw).expanduser())

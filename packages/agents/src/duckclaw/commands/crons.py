@@ -677,7 +677,7 @@ def execute_crons_schedule(
         persist_err = clear_goals_cron_wall_storage(db, chat_id, tenant_id=tid)
         if persist_err:
             return f"No se pudo guardar: {persist_err}"
-        from duckclaw.forge.homeostasis.goals_alignment import (
+        from duckclaw.homeostasis.goals_alignment import (
             normalize_jitter_ratio,
             normalize_notify_channel,
             normalize_proactive_mode,

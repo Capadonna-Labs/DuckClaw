@@ -183,3 +183,12 @@ def _apply_append_task_audit(conn: Any, payload: dict) -> None:
         [audit_task_id, tenant_id, worker_id, query_prefix, status, duration_ms, plan_title],
     )
 
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("upsert_runtime_setting", _apply_upsert_runtime_setting)
+register_handler("upsert_agent_config_entries", _apply_upsert_agent_config_entries)
+register_handler("delete_agent_config_entries", _apply_delete_agent_config_entries)
+register_handler("forget_chat_state", _apply_forget_chat_state)
+register_handler("append_task_audit", _apply_append_task_audit)
+

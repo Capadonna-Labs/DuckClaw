@@ -83,3 +83,11 @@ def _apply_delete_shared_db_grant(conn: Any, payload: dict) -> None:
         "WHERE tenant_id = ? AND user_id = ? AND resource_key = ?",
         [tenant_id, user_id, resource_key],
     )
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("upsert_authorized_user", _apply_upsert_authorized_user)
+register_handler("delete_authorized_user", _apply_delete_authorized_user)
+register_handler("upsert_shared_db_grant", _apply_upsert_shared_db_grant)
+register_handler("delete_shared_db_grant", _apply_delete_shared_db_grant)

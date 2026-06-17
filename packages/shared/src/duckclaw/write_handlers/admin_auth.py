@@ -67,3 +67,12 @@ def _apply_update_console_user_password_hash(conn: Any, payload: dict) -> None:
         hash_algo=hash_algo,
         hash_params=hash_params,
     )
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("upsert_console_user", _apply_upsert_console_user)
+register_handler("deactivate_console_user", _apply_deactivate_console_user)
+register_handler("record_admin_login_failure", _apply_record_admin_login_failure)
+register_handler("clear_admin_login_failures", _apply_clear_admin_login_failures)
+register_handler("update_console_user_password_hash", _apply_update_console_user_password_hash)

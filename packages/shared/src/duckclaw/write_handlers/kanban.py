@@ -110,3 +110,9 @@ def _apply_delete_kanban_card(conn: Any, payload: dict) -> None:
         actor_email=actor_email,
         payload={"title": row[0], "status": row[1]},
     )
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("upsert_kanban_card", _apply_upsert_kanban_card)
+register_handler("delete_kanban_card", _apply_delete_kanban_card)

@@ -2316,7 +2316,11 @@ def _run_section(
                     send_ls = str(send_ls).lower() in ("true", "1", "yes", "y", "sí", "si")
                 if send_ls:
                     env["DUCKCLAW_SEND_TO_LANGSMITH"] = "true"
-        console.print(Panel("Arrancando bot en modo polling...", border_style="cyan"))
+        console.print(Panel(
+            "Arrancando bot en modo polling (legacy). "
+            "Producción: api-gateway webhook en /telegram/webhook.",
+            border_style="cyan",
+        ))
         env["PYTHONPATH"] = str(repo_root) + (
             os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else ""
         )

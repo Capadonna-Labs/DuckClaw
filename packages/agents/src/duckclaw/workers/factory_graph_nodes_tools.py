@@ -54,7 +54,7 @@ def make_tools_node(ctx: WorkerGraphContext):
             heartbeat_message_for_tool,
             schedule_chat_heartbeat_dm,
         )
-        from duckclaw.utils.formatters import format_reddit_mcp_reply_if_applicable
+        from duckclaw.workers.reddit_formatters import format_reddit_mcp_reply_if_applicable
 
         _chat_ctx = state.get("chat_id") or state.get("session_id") or "default"
         _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"

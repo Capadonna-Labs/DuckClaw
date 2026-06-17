@@ -1,13 +1,12 @@
 """
-Bot de Telegram dinámico: configuración desde DuckDB (agent_config) y /setup en caliente.
+DEPRECATED — Bot Telegram en polling legado.
 
-Uso:
-  uv sync --extra agents   # instala telegram + langgraph
+Producción: webhook del api-gateway (``services/api-gateway/routers/telegram_inbound_webhook.py``).
+Este módulo se conserva como stub de compatibilidad para tests y despliegues PM2 legacy.
+
+Uso legacy (no recomendado):
+  uv sync --extra agents
   uv run python -m duckclaw.graphs.telegram_bot
-
-  # o con pip (en zsh/bash usa comillas):
-  pip install 'duckclaw[agents]'
-  python -m duckclaw.graphs.telegram_bot
 
 Requiere: TELEGRAM_BOT_TOKEN y opcionalmente rutas multiplex / DUCKDB_PATH (vía ``get_gateway_db_path``).
 Lee variables desde .env en el directorio actual o en la raíz del proyecto.
@@ -325,15 +324,9 @@ def _set_config(db: Any, key: str, value: str) -> None:
 
 
 def _get_store_db(config: dict) -> Any:
-    """Return DuckClaw instance for store DB if path is set and exists, else None."""
-    path = (config.get("store_db_path") or os.environ.get("DUCKCLAW_STORE_DB_PATH", "")).strip()
-    if not path:
-        return None
-    resolved = Path(path).resolve()
-    if not resolved.exists():
-        return None
-    from duckclaw import DuckClaw
-    return DuckClaw(str(resolved), read_only=True)
+    """Deprecated — store_db_path / DUCKCLAW_STORE_DB_PATH ya no se usan en el core genérico."""
+    _ = config
+    return None
 
 
 def _build_graph_via_forge(
@@ -753,7 +746,6 @@ def _run_bot() -> None:
                         f"Config actual:\nframework={config.get('framework', _DEFAULT_FRAMEWORK)}\n"
                         f"llm_provider={config.get('llm_provider', '')}\n"
                         f"llm_model={config.get('llm_model', '')}\n"
-                        f"store_db_path={config.get('store_db_path', '') or '(vacío)'}\n"
                         f"save_grpo_traces={save_tr}\nsend_to_langsmith={send_ls}\n"
                         f"system_prompt={config.get('system_prompt', '')[:150]}...\n\n"
                         "Para cambiar: /setup llm_provider=openai | save_grpo_traces=true | send_to_langsmith=true"
@@ -764,7 +756,7 @@ def _run_bot() -> None:
                 key, _, value = body.partition("=")
                 key = key.strip().lower()
                 value = value.strip()
-                allowed = ("framework", "system_prompt", "llm_provider", "llm_model", "llm_base_url", "store_db_path", "save_grpo_traces", "send_to_langsmith")
+                allowed = ("framework", "system_prompt", "llm_provider", "llm_model", "llm_base_url", "save_grpo_traces", "send_to_langsmith")
                 if key in allowed:
                     _set_config(self.db, key, value)
                     asyncio.create_task(message.reply_text(f"Config actualizado: {key}={value[:80]}..."))

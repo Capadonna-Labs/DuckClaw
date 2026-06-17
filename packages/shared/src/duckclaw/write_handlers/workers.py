@@ -522,3 +522,21 @@ def _apply_upsert_worker_capability(conn: Any, payload: dict) -> None:
             "VALUES (?, ?, ?, ?, ?, true)",
             [worker_uid, capability_id, permission, config_json, policy_json],
         )
+
+
+from duckclaw.write_handlers.registry import register_handler
+
+register_handler("upsert_worker", _apply_upsert_worker)
+register_handler("upsert_user_agent", _apply_upsert_user_agent)
+register_handler("upsert_catalog_skill", _apply_upsert_catalog_skill)
+register_handler("deactivate_catalog_skill", _apply_deactivate_catalog_skill)
+register_handler("deactivate_worker", _apply_deactivate_worker)
+register_handler("update_catalog_worker_file", _apply_update_catalog_worker_file)
+register_handler("deactivate_catalog_worker", _apply_deactivate_catalog_worker)
+register_handler("reactivate_catalog_worker", _apply_reactivate_catalog_worker)
+register_handler("hard_delete_catalog_worker", _apply_hard_delete_catalog_worker)
+register_handler("import_templates_to_catalog", _apply_import_templates_to_catalog)
+register_handler("upsert_worker_context", _apply_upsert_worker_context)
+register_handler("reorder_worker_contexts", _apply_reorder_worker_contexts)
+register_handler("deactivate_worker_context", _apply_deactivate_worker_context)
+register_handler("upsert_worker_capability", _apply_upsert_worker_capability)

@@ -2,6 +2,7 @@
  * PM2 — MLX-Inference (mlx_lm texto). Variables en .env; start_mlx.sh las carga.
  *
  *   pm2 start config/ecosystem.mlx.config.cjs
+ *   pm2 start config/ecosystem.config.cjs   # alias
  */
 const path = require("path");
 

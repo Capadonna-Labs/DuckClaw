@@ -67,9 +67,6 @@ def db_root() -> Path:
     ``db/`` relativo al cwd (legacy).
     """
     ext_root = (os.environ.get("DUCKCLAW_EXTENSION_ROOT") or "").strip()
-    if not ext_root:
-        # Legacy alias — solo lectura; preferir DUCKCLAW_EXTENSION_ROOT.
-        ext_root = (os.environ.get("CAPADONNA_DRILLER_ROOT") or "").strip()
     if ext_root:
         return (Path(ext_root).expanduser().resolve() / "db")
     repo_root = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()

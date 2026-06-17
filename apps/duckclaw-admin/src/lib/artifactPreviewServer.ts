@@ -5,9 +5,7 @@ import { repoRoot } from '@/lib/localOps';
 
 /** Misma prioridad que ``vaults.db_root()`` en el gateway (extensión externa antes que monorepo). */
 export function resolveProductDbRoot(): string {
-  const extensionRoot =
-    process.env.DUCKCLAW_EXTENSION_ROOT?.trim() ||
-    process.env.CAPADONNA_DRILLER_ROOT?.trim();
+  const extensionRoot = process.env.DUCKCLAW_EXTENSION_ROOT?.trim();
   if (extensionRoot) return extensionRoot;
   return repoRoot();
 }

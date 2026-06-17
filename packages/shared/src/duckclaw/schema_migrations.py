@@ -996,6 +996,105 @@ _M019_MANAGED_WORKSPACE_DRAFT_POLICY = [
     """,
 ]
 
+_M020_FRAMEWORK_CAPABILITY_POLICIES = [
+    """
+    INSERT INTO main.prompt_policy_registry
+      (policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active)
+    SELECT
+      'ppol_capability_generic_worker_v1',
+      'capability',
+      'generic_worker',
+      1,
+      'active',
+      content,
+      sha256(content),
+      '{"seed":"schema_migration_020","scope":"framework"}',
+      true
+    FROM (
+      SELECT 'Como agente {worker_id} puedo conversar, consultar DuckDB (solo lectura cuando aplica), usar herramientas del manifest y coordinar subtareas. Indica tu objetivo de forma concreta.' AS content
+    )
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM main.prompt_policy_registry
+      WHERE policy_type = 'capability'
+        AND policy_name = 'generic_worker'
+        AND version = 1
+    )
+    """,
+    """
+    INSERT INTO main.prompt_policy_registry
+      (policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active)
+    SELECT
+      'ppol_capability_axis_coordinator_v1',
+      'capability',
+      'axis_coordinator',
+      1,
+      'active',
+      content,
+      sha256(content),
+      '{"seed":"schema_migration_020","scope":"framework"}',
+      true
+    FROM (
+      SELECT 'Coordino el equipo desde {coord}. Agentes disponibles:\n{lines}\nIndica qué agente o tarea necesitas.' AS content
+    )
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM main.prompt_policy_registry
+      WHERE policy_type = 'capability'
+        AND policy_name = 'axis_coordinator'
+        AND version = 1
+    )
+    """,
+    """
+    INSERT INTO main.prompt_policy_registry
+      (policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active)
+    SELECT
+      'ppol_capability_default_fallback_v1',
+      'capability',
+      'default_fallback',
+      1,
+      'active',
+      content,
+      sha256(content),
+      '{"seed":"schema_migration_020","scope":"framework"}',
+      true
+    FROM (
+      SELECT 'Puedo ayudarte con conversación general, consultas DuckDB y herramientas configuradas en tu entorno. Escribe qué necesitas con detalle.' AS content
+    )
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM main.prompt_policy_registry
+      WHERE policy_type = 'capability'
+        AND policy_name = 'default_fallback'
+        AND version = 1
+    )
+    """,
+    """
+    INSERT INTO main.prompt_policy_registry
+      (policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active)
+    SELECT
+      'ppol_system_prompt_default_v1',
+      'system_prompt',
+      'default',
+      1,
+      'active',
+      content,
+      sha256(content),
+      '{"seed":"schema_migration_020","scope":"framework"}',
+      true
+    FROM (
+      SELECT 'Eres un asistente útil con acceso a una base de datos DuckDB y a un sandbox de ejecución Python/Bash. Cuando uses una herramienta, interpreta el resultado y responde en lenguaje natural claro y conciso. Nunca copies el resultado crudo de una herramienta. Si hay una lista de tablas, menciónalas de forma legible. Si hay datos de una consulta, preséntelos de forma organizada. Usa run_sandbox para ejecutar código Python o Bash arbitrario cuando el usuario lo pida. Estilo de respuesta: sé conciso y directo; usa como máximo 1 o 2 emojis por mensaje si aportan claridad; evita listas largas sin resumir, encabezados markdown (##) y relleno; responde con lo esencial.' AS content
+    )
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM main.prompt_policy_registry
+      WHERE policy_type = 'system_prompt'
+        AND policy_name = 'default'
+        AND version = 1
+    )
+    """,
+]
+
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "initial_core", _M001_INITIAL_CORE),
     (2, "worker_versions", _M002_WORKER_VERSIONS),
@@ -1016,4 +1115,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (17, "worker_runtime_policies", _M017_WORKER_RUNTIME_POLICIES),
     (18, "authorized_users", _M018_AUTHORIZED_USERS),
     (19, "managed_workspace_draft_policy", _M019_MANAGED_WORKSPACE_DRAFT_POLICY),
+    (20, "framework_capability_policies", _M020_FRAMEWORK_CAPABILITY_POLICIES),
 ]

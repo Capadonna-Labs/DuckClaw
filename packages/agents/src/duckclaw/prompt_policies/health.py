@@ -11,6 +11,9 @@ from duckclaw.prompt_policies.resolver import normalize_policy_type
 
 FRAMEWORK_PROMPT_POLICY_REQUIREMENTS = (
     ("capability", "generic_worker", "framework"),
+    ("capability", "axis_coordinator", "framework"),
+    ("capability", "default_fallback", "framework"),
+    ("system_prompt", "default", "framework"),
 )
 
 

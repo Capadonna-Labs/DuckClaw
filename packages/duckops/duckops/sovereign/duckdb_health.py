@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.validate import private_db_dir_writable
@@ -67,6 +68,20 @@ class DuckDbHealth:
     @property
     def size_human(self) -> str:
         return human_bytes(self.size_bytes) if self.exists else "—"
+
+
+def open_repo_duckdb_readonly(repo_root: Path, draft: SovereignDraft) -> Any | None:
+    """Conexión DuckDB read-only a la bóveda del borrador (catálogo / workers)."""
+    rel = primary_duckdb_relpath(draft)
+    abs_path = resolve_duckdb_path(repo_root, rel)
+    if not abs_path.is_file():
+        return None
+    try:
+        from duckclaw.graphs.graph_server_ephemeral import open_duckclaw_readonly_with_retry
+
+        return open_duckclaw_readonly_with_retry(str(abs_path))
+    except Exception:
+        return None
 
 
 def audit_duckdb(

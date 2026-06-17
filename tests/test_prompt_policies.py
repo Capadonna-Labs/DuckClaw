@@ -58,13 +58,11 @@ def test_prompt_policy_resolver_formats_capabilities_from_db_only() -> None:
 
     con = duckdb.connect(":memory:")
     run_pending_migrations(con)
-    _seed_policy(con, "capability", "generic_worker", "worker={worker_id}")
 
     resolver = PromptPolicyResolver(db=con)
 
-    assert resolver.format("capabilities", "generic_worker", worker_id="ciberseguridad-agent") == (
-        "worker=ciberseguridad-agent"
-    )
+    formatted = resolver.format("capabilities", "generic_worker", worker_id="ciberseguridad-agent")
+    assert "ciberseguridad-agent" in formatted
 
 
 def test_prompt_policy_resolver_requires_db() -> None:
@@ -130,7 +128,6 @@ def test_prompt_policy_health_reports_missing_active_requirements() -> None:
 
     assert missing == [
         PromptPolicyRequirement("capability", "inactive_capability", "manager"),
-        PromptPolicyRequirement("capability", "generic_worker", "manager"),
     ]
 
 
@@ -151,6 +148,22 @@ def test_prompt_policy_registry_tables_exist() -> None:
     assert "prompt_policy_registry" in tables
     assert "worker_prompt_bindings" in tables
     assert "tool_policy_directives" in tables
+
+
+def test_framework_capability_policies_are_seeded_by_migrations() -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies import PromptPolicyResolver
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+
+    resolver = PromptPolicyResolver(db=con)
+    assert "{worker_id}" in resolver.load("capability", "generic_worker")
+    assert "{coord}" in resolver.load("capability", "axis_coordinator")
+    assert resolver.load("capability", "default_fallback")
+    assert "DuckDB" in resolver.load("system_prompt", "default")
 
 
 def test_managed_workspace_draft_policy_is_seeded_by_migrations() -> None:

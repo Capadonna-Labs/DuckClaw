@@ -30,6 +30,15 @@ Si un futuro corte necesita comportamiento especifico de una vertical, debe mode
 - El manager es un orquestador generico. Routing, fast plans y clasificacion de tareas se basan en capacidades/policies, no en nombres de dominios.
 - Los wrappers legacy pueden mantenerse solo como compatibilidad temporal si delegan en el owner nuevo y tienen tests que protejan la direccion del cambio.
 
+## Infra Bootstrap Y Vertical Purge (resumen)
+
+Hito 1 y 2 del corte infra — detalle histórico en [`docs/archive/platform/INFRA_BOOTSTRAP_VERTICAL_PURGE_SDD.md`](../../../archive/platform/INFRA_BOOTSTRAP_VERTICAL_PURGE_SDD.md).
+
+- El core arranca y pasa tests **sin** `DUCKCLAW_EXTENSION_ROOT` / `CAPADONNA_DRILLER_ROOT` en flujos genéricos; verticales quant/finance/trading viven fuera del monorepo (p. ej. Capadonna-Driller vía extension root).
+- HITL transversal en `duckclaw.hitl.*` + tablas `main.code_decisions` / `main.agent_uncertainty_log`; sin `capadonna_plugin` ni imports `duckclaw.quant.*` / `duckclaw.finance.*` en runtime core.
+- Cola `quant_state_delta` eliminada del db-writer transversal; deltas de producto en extensiones externas (`workers/duckclaw/lib/quant_state_delta.py`).
+- Hito 2 (implementado): gateway fail-fast sin Redis + schema migrada + secretos prod (salvo `DUCKCLAW_DEV_MODE=1`); entry points `duckclaw-migrate` y `duckclaw-healthcheck`. Runbook: [`docs/architecture/infra-bootstrap.md`](../../../architecture/infra-bootstrap.md).
+
 ## Lo Movido O Limpiado Hasta Ahora
 
 ### Manager Y Routing
@@ -485,7 +494,7 @@ Estos residuos existen en el repo actual y no deben confundirse con patrones a c
 - `services/db-writer/quant_state_delta_handler.py` y `services/db-writer/models/quant_state_delta.py`: **removidos del core** en Hito 1.
 - `services/api-gateway/routers/admin.py`: agregador/compat (~115 lineas) con reexports historicos; auth login en `admin_domains/auth.py`; bootstrap filesystem `POST /projects` en `admin_domains/project_bootstrap_routes.py`; impls de templates en `admin_domains/template_lifecycle.py`; HITL admin en `admin_domains/hitl_admin.py` (`duckclaw.hitl.*`, sin capadonna).
 - `services/api-gateway/routers/admin_domains/access_management.py`: los mutadores admin de access management delegan en comandos tipados/DB-writer y el modulo salio de la allowlist de conexiones DuckDB read-write directas.
-- `scripts/deployment/patch_tts_production_env.py`, `scripts/deployment/test_sensory_tts.py`, `scripts/deployment/test_tts_duration_remote.py`, `scripts/deployment/debug_tts_mac.py` e `integrations/sensory-node/scripts/check_tts_amplitude.py`: smoke/debug/patch scripts de TTS aun nombran voces legacy. No deben copiarse como defaults; el siguiente corte Sensory debe moverlos a ids genericos o resolver voz desde `DUCKCLAW_TTS_VOICE_MAP`/manifest.
+- `scripts/deployment/patch_tts_production_env.py`, `scripts/deployment/test_sensory_tts.py`, `scripts/deployment/test_tts_duration_remote.py` e `integrations/sensory-node/scripts/check_tts_amplitude.py`: smoke/debug/patch scripts de TTS aun nombran voces legacy. No deben copiarse como defaults; el siguiente corte Sensory debe moverlos a ids genericos o resolver voz desde `DUCKCLAW_TTS_VOICE_MAP`/manifest.
 - `packages/duckops/duckops/sovereign/materialize.py`: contiene comentarios/operaciones con nombres legacy; no es runtime manager core.
 
 Las allowlists vivas estan declaradas en `tests/test_forge_legacy_cleanup.py`. Si un futuro subagente agrega una excepcion, debe agregar tambien una razon explicita y preferiblemente una tarea de follow-up para retirarla.
@@ -536,7 +545,7 @@ Estado de routers citados en `DB_FIRST_READ_WRITE_ALLOWLIST` / revision manual:
 
 ### Opcional O Bloqueado Por Input Admin
 
-- Genericizar scripts Sensory legacy (`patch_tts_production_env.py`, `test_sensory_tts.py`, `test_tts_duration_remote.py`, `debug_tts_mac.py`, `check_tts_amplitude.py`) para resolver voces desde manifest/env administrado, o moverlos fuera del core si siguen siendo smoke scripts de dominio.
+- Genericizar scripts Sensory legacy (`patch_tts_production_env.py`, `test_sensory_tts.py`, `test_tts_duration_remote.py`, `check_tts_amplitude.py`) para resolver voces desde manifest/env administrado, o moverlos fuera del core si siguen siendo smoke scripts de dominio.
 - Extender UI/admin runtime settings para exponer `gateway.default_tenant_id` y otros defaults transversales solo si el admin necesita gestionarlos desde pantalla; el contrato DB-first ya existe.
 - Extender el barrido de residuos laborales y verticales fuera del runtime core separando menciones negativas de specs/tests contra ejemplos runtime.
 - Mantener tests guardrail cerca del contrato. Cada cleanup que cierre un residuo debe retirar o estrechar su allowlist.

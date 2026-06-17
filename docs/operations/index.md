@@ -1,20 +1,21 @@
 # Operaciones
 
-Runbooks en español/inglés mixto. **Normativa:** [`../specs/`](../specs/).
+Runbooks en español/inglés mixto. **Normativa:** [`../specs/`](../specs/) (bajo `docs/specs/`, no en la raíz del repo).
 
 ## Acceso rápido
 
 | Necesidad | Documento |
 |-----------|-----------|
-| Wizard + topología | [Installation](../Installation.md) |
+| Wizard + topología | [`README.md`](../README.md) (quick start) · [`COMANDOS.md`](../COMANDOS.md) |
 | PM2, Redis, Telegram, variables | [COMANDOS](../COMANDOS.md) |
-| Conflictos puerto / DuckDB / PM2 | [Troubleshooting Gateway PM2](../Troubleshooting-Gateway-PM2.md) |
+| Conflictos puerto / DuckDB / PM2 | [COMANDOS](../COMANDOS.md) · `uv run python scripts/doctor.py` |
 | Logs, LangSmith, fly commands | [Observability](Observability-2.1-Identidad.md) |
-| Sandbox Strix | [Strix Sandbox Security](Strix-Sandbox-Security.md) |
+| Sandbox Strix | [Skills & sandbox Strix](../core/03_Skills_and_Tooling_Framework.md) (§ Sandbox de ejecución) |
 | Heartbeat | [Homeostasis Heartbeat](Homeostasis-Heartbeat.md) |
+| Meditate / Harness Core | [Meditate Homeostasis](Meditate-Homeostasis.md) |
 | Multi-vault `/vault` | [Multi Vault System](Multi-Vault-System.md) |
-| Trazas SFT | [SFT traces](../agents/sft_conversation_traces.md) · `packages/agents/train/SFT_MLX_PIPELINE.md` |
-| VLM | `specs/features/platform/VLM_INTEGRATION.md` · COMANDOS §5.2 |
+| Trazas SFT | [SFT traces](../agents/sft_conversation_traces.md) · `packages/agents/train/` · `uv run duckops train` |
+| VLM | [`docs/specs/features/platform/VLM_INTEGRATION.md`](../specs/features/platform/VLM_INTEGRATION.md) (stale) · COMANDOS §5.2 |
 
 ## Principios
 
@@ -26,4 +27,4 @@ Runbooks en español/inglés mixto. **Normativa:** [`../specs/`](../specs/).
 
 - [DB-first Core Refactor](../specs/features/platform/DB_FIRST_CORE_REFACTOR.md) · [Singleton Writer](../architecture/singleton_writer.md) · [Tri-cameral](../architecture/tri_cameral_memory.md)
 - [API Gateway](../api/api_gateway.md) · [DB Writer](../api/db_writer.md)
-- [Specs plataforma](../specs/features/platform/)
+- [Specs plataforma (índice)](../specs/features/platform/README.md)

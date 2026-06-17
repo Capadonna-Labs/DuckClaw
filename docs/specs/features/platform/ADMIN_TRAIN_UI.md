@@ -1,4 +1,8 @@
+> ⚠️ **STALE** — no refleja el estado actual del código. Ver [`docs/README.md`](../../../README.md).
+
 # Admin UI — Train (SFT / GRPO / trazas)
+
+> **Obsoleto (2026):** las rutas **`/api/v1/admin/train/*`** y la pestaña admin **`/train`** fueron **eliminadas** del API Gateway (404). Usa el pipeline en [`packages/agents/train/`](../../../../packages/agents/train/) y la CLI **`uv run duckops train`** (`packages/duckops/duckops/commands/train.py`). Este documento se conserva solo como referencia histórica de la UI planificada.
 
 ## Objetivo
 

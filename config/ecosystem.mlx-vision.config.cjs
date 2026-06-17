@@ -9,7 +9,7 @@ const path = require("path");
 const root = path.resolve(__dirname, "..");
 const startMlxVision = path.join(
   root,
-  "packages/agents/train/scripts/start_mlx_vision.sh",
+  "packages/agents/train/scripts/serve/start_mlx_vision.sh",
 );
 
 module.exports = {

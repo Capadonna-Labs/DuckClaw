@@ -1,3 +1,5 @@
+> ⚠️ **STALE** — no refleja el estado actual del código. Ver [`docs/README.md`](../../../README.md).
+
 **VLM INTEGRATION**
 
 ### Objetivo

@@ -10,7 +10,7 @@ Vista unificada en la consola web para administrar:
 2. **Usuarios Telegram** (`authorized_users`): roles `admin` | `user`
 3. **Permisos sobre bases DuckDB compartidas** (`user_shared_db_access`)
 
-Fuente de verdad DuckDB: hub del gateway (`get_gateway_db_path()`). Escrituras vía gateway admin API (DuckClaw RW en hub, mismo patrón que whitelist Telegram).
+Fuente de verdad DuckDB: hub del gateway (`get_gateway_db_path()`). **Escrituras:** el gateway abre DuckClaw en **`read_only=True`**; mutaciones de usuarios consola, whitelist Telegram y shared grants se encolan como **comandos tipados** (`UpsertConsoleUserCommand`, `UpsertAuthorizedUserCommand`, `UpsertSharedGrantCommand`, etc.) y las aplica el **DB-writer** — mismo patrón que el resto del admin DB-first. No hay apertura RW directa del hub para estas rutas.
 Redis solo mantiene sesiones/rate-limit temporales; no es autoridad de usuarios. Cada `/auth/me` revalida `admin_console_users.active` en DuckDB antes de renovar la sesión.
 
 ## Persistencia

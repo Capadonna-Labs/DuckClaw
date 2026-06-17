@@ -6,7 +6,7 @@
 const path = require("path");
 
 const root = path.resolve(__dirname, "..");
-const startMlx = path.join(root, "packages/agents/train/scripts/start_mlx.sh");
+const startMlx = path.join(root, "packages/agents/train/scripts/serve/start_mlx.sh");
 
 module.exports = {
   apps: [

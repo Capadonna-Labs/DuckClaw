@@ -76,7 +76,7 @@ pm2 start config/ecosystem.comfyui.config.cjs --update-env
 
 En `.env`: `COMFYUI_API_URL=http://127.0.0.1:8188`, `DUCKCLAW_COMFYUI_INBOUND_EDIT=1` (edición foto+caption en Telegram).
 
-Specs: [`COMFYUI_VISUAL_BRIDGE.md`](specs/features/platform/COMFYUI_VISUAL_BRIDGE.md), [`COMFYUI_IMAGE_EDIT.md`](specs/features/platform/COMFYUI_IMAGE_EDIT.md).
+Implementación: `packages/agents/src/duckclaw/forge/skills/comfyui_bridge.py` y admin **Gen → Image**.
 
 ---
 
@@ -87,7 +87,7 @@ uv run duckops train -c config/lora_config.yaml
 # Trazas JSONL: packages/agents/train/conversation_traces/
 ```
 
-Ver [`docs/agents/sft_conversation_traces.md`](agents/sft_conversation_traces.md).
+Ver [`packages/agents/train/SFT_MLX_PIPELINE.md`](../packages/agents/train/SFT_MLX_PIPELINE.md).
 
 ---
 

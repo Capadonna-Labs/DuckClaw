@@ -2,7 +2,7 @@
 AgentAssembler: único punto de instanciación de agentes LangGraph.
 
 Lee especificaciones YAML y produce grafos compilados listos para usar.
-Delega a build_general_graph, build_retail_graph, build_entry_router_graph
+Delega a build_general_graph, build_entry_router_graph
 y a la lógica de WorkerFactory para workers.
 
 Spec: Agent Forge Refactor
@@ -89,10 +89,8 @@ class AgentAssembler:
     ) -> Any:
         """Construye y retorna el LangGraph compilado según el tipo de spec. Para workers, db/llm pueden ser None si db_path está en overrides."""
         t = (self.spec.get("type") or "general").strip().lower()
-        if t == "general":
+        if t in {"general", "retail"}:
             return self._build_general(db, llm, **overrides)
-        if t == "retail":
-            return self._build_retail(store_db or db, llm, console=console, **overrides)
         if t == "entry_router":
             return self._build_router(
                 db,
@@ -133,24 +131,6 @@ class AgentAssembler:
             tools_spec=tools_spec,
         )
 
-    def _build_retail(
-        self,
-        store_db: Any,
-        llm: Any,
-        console: Optional[Any] = None,
-        **overrides,
-    ) -> Any:
-        """Construye el grafo retail (Contador Soberano)."""
-        from duckclaw.graphs.retail_graph import build_retail_graph
-
-        system_prompt = overrides.get("system_prompt") or self.spec.get("system_prompt") or ""
-        return build_retail_graph(
-            store_db,
-            llm,
-            console=console,
-            system_prompt=system_prompt,
-        )
-
     def _build_router(
         self,
         db: Any,
@@ -162,7 +142,7 @@ class AgentAssembler:
         send_to_langsmith: bool = False,
         **overrides,
     ) -> Any:
-        """Construye el grafo entry_router (ruteo retail/general)."""
+        """Construye el grafo entry_router (delega en general_graph)."""
         from duckclaw.graphs.router import build_entry_router_graph
 
         system_prompt = overrides.get("system_prompt") or self.spec.get("system_prompt") or ""

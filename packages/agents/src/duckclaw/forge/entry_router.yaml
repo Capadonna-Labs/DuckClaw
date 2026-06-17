@@ -1,4 +1,4 @@
-# Entry router: rutea mensajes a retail (Contador Soberano) o general (SQL, schema, memory).
+# Entry router: punto de entrada único (delega en general_graph).
 # Usado por graph_server y API Gateway como punto de entrada único.
 type: entry_router
 system_prompt: ""

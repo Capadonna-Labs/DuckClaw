@@ -208,7 +208,6 @@ DEFAULT_STRUCTURED_LOGGERS: tuple[str, ...] = (
     "duckclaw.obs",
     "duckclaw.graphs",
     "duckclaw.graphs.general_graph",
-    "duckclaw.graphs.retail_graph",
     "duckclaw.graphs.manager_graph",
     "duckclaw.graphs.graph_server",
     "duckclaw.workers",

@@ -19,6 +19,8 @@ import logging
 import os
 from typing import Any
 
+from duckclaw.utils.telegram_markdown_v2 import unescape_telegram_markdown_v2_layers
+
 _log = logging.getLogger(__name__)
 
 
@@ -55,8 +57,6 @@ def normalize_history_item(h: Any) -> dict[str, str] | None:
     # Asistente: quitar capas de escape MarkdownV2 si el cliente guardó la respuesta HTTP tal cual.
     if role == "assistant":
         try:
-            from duckclaw.graphs.on_the_fly_commands import unescape_telegram_markdown_v2_layers
-
             text = unescape_telegram_markdown_v2_layers(text)
         except Exception:
             pass

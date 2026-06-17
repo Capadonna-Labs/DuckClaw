@@ -63,9 +63,10 @@ def test_gateway_duckclaw_read_write_is_limited_to_explicit_runtime_compat() -> 
 
 def test_gateway_main_delegates_legacy_fly_rw_exception_to_owner() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    chat_owner = (GATEWAY_ROOT / "core" / "agent_chat.py").read_text(encoding="utf-8")
     fly_owner = (GATEWAY_ROOT / "core" / "fly_command_invocation.py").read_text(encoding="utf-8")
 
-    assert "invoke_legacy_fly_command" in main
+    assert "invoke_legacy_fly_command" in chat_owner
     assert "DuckClaw(" not in main
     assert "DuckClaw(vault_db_path, read_only=True" in fly_owner
     assert "read_only=False" not in fly_owner
@@ -168,6 +169,113 @@ def test_gateway_main_delegates_health_to_core_module() -> None:
     assert "_telegram_path_route_count" not in main
     assert '@router.get("/health")' in health_owner
     assert "async def system_health" in health_owner
+
+
+def test_gateway_main_delegates_homeostasis_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    homeostasis_owner = (GATEWAY_ROOT / "core" / "homeostasis.py").read_text(encoding="utf-8")
+
+    assert "from core.homeostasis import router as homeostasis_router" in main
+    assert "app.include_router(homeostasis_router)" in main
+    assert "async def homeostasis_status" not in main
+    assert "async def homeostasis_ask_task" not in main
+    assert "class AskTaskBody" not in main
+    assert '@router.get("/api/v1/homeostasis/status")' in homeostasis_owner
+    assert "async def homeostasis_ask_task" in homeostasis_owner
+
+
+def test_gateway_main_delegates_middleware_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    middleware_owner = (GATEWAY_ROOT / "core" / "middleware.py").read_text(encoding="utf-8")
+
+    assert "from core.middleware import register_gateway_middleware" in main
+    assert "register_gateway_middleware(app)" in main
+    assert "async def observability_context_middleware" not in main
+    assert "async def tailscale_auth_middleware" not in main
+    assert "async def telegram_http_ingress_probe_middleware" not in main
+    assert "def register_gateway_middleware" in middleware_owner
+    assert "async def observability_context_middleware" in middleware_owner
+
+
+def test_gateway_main_delegates_agent_routes_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    agent_owner = (GATEWAY_ROOT / "core" / "agent_routes.py").read_text(encoding="utf-8")
+
+    assert "from core.agent_routes import effective_tenant_id, router as agent_routes_router" in main
+    assert "app.include_router(agent_routes_router)" in main
+    assert "async def agent_workers" not in main
+    assert "async def agent_history" not in main
+    assert '@router.get("/api/v1/agent/workers")' in agent_owner
+    assert "def effective_tenant_id" in agent_owner
+
+
+def test_gateway_main_delegates_chat_locks_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    chat_owner = (GATEWAY_ROOT / "core" / "agent_chat.py").read_text(encoding="utf-8")
+    locks_owner = (GATEWAY_ROOT / "core" / "chat_locks.py").read_text(encoding="utf-8")
+
+    assert "from core.chat_locks import maybe_chat_lock_for_request" in chat_owner
+    assert "async def _chat_lock" not in main
+    assert "async def _maybe_chat_lock_for_request" not in main
+    assert "def chat_parallel_invocations_enabled" in locks_owner
+    assert "async def maybe_chat_lock_for_request" in locks_owner
+
+
+def test_gateway_main_delegates_telegram_delivery_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    delivery_owner = (GATEWAY_ROOT / "core" / "telegram_delivery.py").read_text(encoding="utf-8")
+
+    assert "from core.telegram_delivery import" in main
+    assert "def _outbound_deliver_chat_text_sync" not in main
+    assert "def _deliver_outbound_by_channel" not in main
+    assert "def outbound_deliver_chat_text_sync" in delivery_owner
+    assert "def deliver_outbound_by_channel" in delivery_owner
+
+
+def test_gateway_main_delegates_db_read_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    db_read_owner = (GATEWAY_ROOT / "core" / "db_read_route.py").read_text(encoding="utf-8")
+
+    assert "from core.db_read_route import router as db_read_router" in main
+    assert "app.include_router(db_read_router)" in main
+    assert "class ReadRequest" not in main
+    assert "async def db_read" not in main
+    assert "def resolve_db_path_for_vault" not in main
+    assert '@router.post("/api/v1/db/read")' in db_read_owner
+
+
+def test_gateway_main_delegates_agent_chat_to_core_module() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    chat_owner = (GATEWAY_ROOT / "core" / "agent_chat.py").read_text(encoding="utf-8")
+    auth_owner = (GATEWAY_ROOT / "core" / "chat_auth.py").read_text(encoding="utf-8")
+    format_owner = (GATEWAY_ROOT / "core" / "chat_reply_format.py").read_text(encoding="utf-8")
+
+    assert "from core.agent_chat import invoke_chat, resolve_chat_session_id, router as agent_chat_router" in main
+    assert "app.include_router(agent_chat_router)" in main
+    assert "invoke_agent_chat=invoke_chat" in main
+    assert "async def agent_chat" not in main
+    assert "async def _invoke_chat" not in main
+    assert "async def invoke_chat" in chat_owner
+    assert '@router.post("/api/v1/agent/chat")' in chat_owner
+    assert "_AUTHORIZED_USERS_TABLE_DDL" in auth_owner
+    assert "async def authorize_or_reject" in auth_owner
+    assert "def clean_agent_response" in format_owner
+    assert "def clean_agent_response" not in main
+
+
+def test_gateway_main_delegates_chat_auth_format_visual_to_core_modules() -> None:
+    main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    visual_owner = (GATEWAY_ROOT / "core" / "chat_visual_artifacts.py").read_text(encoding="utf-8")
+    vault_owner = (GATEWAY_ROOT / "core" / "gateway_vault.py").read_text(encoding="utf-8")
+
+    assert "from core.chat_auth import authorize_or_reject" in main
+    assert "from core.chat_reply_format import clean_agent_response" in main
+    assert "from core.chat_visual_artifacts import" in main
+    assert "from core.gateway_vault import dedicated_gateway_vault_db_path" in main
+    assert "def admin_visual_fields_from_invoke_result" in visual_owner
+    assert "def dedicated_gateway_vault_db_path" in vault_owner
+    assert "async def _lookup_whitelist_role" not in main
+    assert "def _persist_admin_fly_charts" not in main
 
 
 def test_admin_domains_do_not_call_legacy_raw_write_queue() -> None:

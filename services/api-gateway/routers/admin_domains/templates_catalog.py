@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import BaseModel, Field
 
 from duckclaw import db_write_queue
 from duckclaw.gateway_db import get_gateway_db_path
@@ -13,23 +12,20 @@ from duckclaw.write_commands import (
     ReactivateCatalogWorkerCommand,
     UpdateCatalogWorkerFileCommand,
 )
+from routers.admin_domains.template_lifecycle import (
+    FileWriteBody,
+    TemplateCreateBody,
+    VaultBindingPutBody,
+    create_template_impl,
+    get_template_impl,
+    get_template_vault_binding_impl,
+    list_templates_impl,
+    put_template_vault_binding_impl,
+    template_vault_options_impl,
+    validate_template_impl,
+)
 
 router = APIRouter(prefix="/templates", tags=["admin-templates"])
-
-
-class FileWriteBody(BaseModel):
-    content: str = ""
-
-
-class VaultBindingPutBody(BaseModel):
-    scope: str = Field(default="", description="private | shared; vacío = quitar binding")
-    vault_id: str | None = Field(default=None, max_length=128)
-    path: str | None = Field(default=None, max_length=512)
-
-
-class TemplateCreateBody(BaseModel):
-    id: str = Field(..., min_length=1, max_length=64)
-    source_template: str = Field(default="industries/business_standard")
 
 
 def _problem(status_code: int, title: str, detail: str) -> HTTPException:
@@ -80,9 +76,7 @@ async def list_templates(
     include_inactive: bool = Query(False),
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._list_templates_impl(include_inactive=include_inactive, actor=actor)
+    return await list_templates_impl(include_inactive=include_inactive, actor=actor)
 
 
 @router.get("/{worker_id}", dependencies=[Depends(require_admin_key)])
@@ -91,9 +85,7 @@ async def get_template(
     include_content: bool = True,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._get_template_impl(
+    return await get_template_impl(
         worker_id=worker_id,
         include_content=include_content,
         actor=actor,
@@ -135,9 +127,7 @@ async def template_vault_options(
     worker_id: str,
     vault_user_id: str | None = Query(None, description="ID dueño de db/private/ (default: DUCKCLAW_OWNER_ID)"),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._template_vault_options_impl(
+    return await template_vault_options_impl(
         worker_id=worker_id,
         vault_user_id=vault_user_id,
     )
@@ -148,9 +138,7 @@ async def get_template_vault_binding(
     worker_id: str,
     vault_user_id: str | None = Query(None),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._get_template_vault_binding_impl(
+    return await get_template_vault_binding_impl(
         worker_id=worker_id,
         vault_user_id=vault_user_id,
     )
@@ -162,9 +150,7 @@ async def put_template_vault_binding(
     body: VaultBindingPutBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._put_template_vault_binding_impl(
+    return await put_template_vault_binding_impl(
         worker_id=worker_id,
         body=body,
         actor=actor,
@@ -176,9 +162,7 @@ async def create_template(
     body: TemplateCreateBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._create_template_impl(body=body, actor=actor)
+    return await create_template_impl(body=body, actor=actor)
 
 
 @router.delete("/{worker_id}", dependencies=[Depends(require_admin_key)])
@@ -237,6 +221,4 @@ async def hard_delete_template(
 
 @router.post("/{worker_id}/validate", dependencies=[Depends(require_admin_key)])
 async def validate_template(worker_id: str) -> dict[str, Any]:
-    from routers import admin as admin_router
-
-    return await admin_router._validate_template_impl(worker_id=worker_id)
+    return await validate_template_impl(worker_id=worker_id)

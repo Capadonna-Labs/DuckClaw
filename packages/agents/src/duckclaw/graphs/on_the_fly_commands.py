@@ -6,14 +6,9 @@ Spec: specs/interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md
 
 from __future__ import annotations
 
-from datetime import datetime
-import json
 import os
-from pathlib import Path
 import re
-import shutil
-import time
-from typing import Any, Optional, Tuple
+from typing import Any
 from duckclaw.commands.chat_state import (
     _AGENT_CONFIG_TABLE as _AGENT_CONFIG_TABLE,
     _PREFIX as _PREFIX,
@@ -195,6 +190,11 @@ from duckclaw.commands.team_access import (
     configure_team_access_acl_db_provider as _configure_team_access_acl_db_provider,
     execute_team_whitelist as execute_team_whitelist,
 )
+from duckclaw.commands.workers import (
+    _DEFAULT_WORKER as _DEFAULT_WORKER,
+    execute_roles as execute_roles,
+    execute_skills_list as execute_skills_list,
+)
 from duckclaw.commands.vaults import (
     _dedicated_gateway_db_path_for_vault as _dedicated_gateway_db_path_for_vault,
     _dedicated_gateway_vault_label as _dedicated_gateway_vault_label,
@@ -206,9 +206,27 @@ from duckclaw.commands.vaults import (
     execute_vault as execute_vault,
 )
 
-from duckclaw.guardrails.loader import format_guardrail, load_guardrail, load_guardrail_pipe_table
-from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_fly, structured_log_context
-from duckclaw.utils.telegram_markdown_v2 import TELEGRAM_MARKDOWN_V2_SPECIAL
+from duckclaw.commands.fly_dispatch import (
+    _dispatch_fly_command as _dispatch_fly_command,
+    get_worker_id_for_chat as get_worker_id_for_chat,
+    handle_command as handle_command,
+    parse_command as parse_command,
+)
+from duckclaw.commands.fly_misc import (
+    execute_approve_reject as execute_approve_reject,
+    execute_help as execute_help,
+    execute_lake_status as execute_lake_status,
+    execute_tasks as execute_tasks,
+)
+from duckclaw.commands.fly_outbound import (
+    pop_all_fly_outbound_charts as pop_all_fly_outbound_charts,
+    pop_all_fly_outbound_charts_b64 as pop_all_fly_outbound_charts_b64,
+    pop_fly_outbound_chart_b64 as pop_fly_outbound_chart_b64,
+    register_fly_outbound_chart_b64 as register_fly_outbound_chart_b64,
+)
+from duckclaw.utils.telegram_markdown_v2 import (
+    unescape_telegram_markdown_v2_layers as unescape_telegram_markdown_v2_layers,
+)
 
 def _team_access_acl_db_provider() -> Any:
     from duckclaw.graphs.graph_server import get_db
@@ -364,424 +382,6 @@ def _browser_sandbox_sensor_lines_provider() -> list[str]:
 _configure_browser_sandbox_sensor_lines_provider(_browser_sandbox_sensor_lines_provider)
 
 _configure_goals_vault_user_id_resolver(_resolve_meditate_vault_user_id)
-
-# Cola FIFO de PNG base64 por chat: api-gateway hace pop_all y sendPhoto en orden.
-_FLY_OUTBOUND_CHART_B64: dict[str, list[str]] = {}
-
-
-_FLY_OUTBOUND_CHART_NAMES: dict[str, list[str]] = {}
-
-
-def register_fly_outbound_chart_b64(
-    session_id: Any, b64: str, *, chart_name: str | None = None
-) -> None:
-    s = (b64 or "").strip()
-    if not s:
-        return
-    k = str(session_id).strip()
-    _FLY_OUTBOUND_CHART_B64.setdefault(k, []).append(s)
-    if chart_name and str(chart_name).strip():
-        _FLY_OUTBOUND_CHART_NAMES.setdefault(k, []).append(str(chart_name).strip())
-
-
-def pop_all_fly_outbound_charts(session_id: Any) -> tuple[list[str], list[str]]:
-    """Devuelve y vacía figuras encoladas (b64, nombres legibles) en orden FIFO."""
-    k = str(session_id).strip()
-    charts_b64 = _FLY_OUTBOUND_CHART_B64.pop(k, [])
-    chart_names = _FLY_OUTBOUND_CHART_NAMES.pop(k, [])
-    while len(chart_names) < len(charts_b64):
-        chart_names.append(f"chart-{len(chart_names) + 1}.png")
-    return charts_b64, chart_names
-
-
-def pop_all_fly_outbound_charts_b64(session_id: Any) -> list[str]:
-    """Devuelve y vacía todas las figuras encoladas para este chat (orden FIFO)."""
-    charts_b64, _ = pop_all_fly_outbound_charts(session_id)
-    return charts_b64
-
-
-def pop_fly_outbound_chart_b64(session_id: Any) -> str | None:
-    """Compat: saca solo el primer PNG de la cola; preferir pop_all en el gateway."""
-    k = str(session_id).strip()
-    q = _FLY_OUTBOUND_CHART_B64.get(k)
-    if not q:
-        return None
-    first = q.pop(0)
-    if not q:
-        del _FLY_OUTBOUND_CHART_B64[k]
-    return first
-
-
-def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
-    """
-    Quita hasta ``max_layers`` capas de escape estilo MarkdownV2 (mismo juego de
-    caracteres que ``escape_telegram_markdown_v2``). Sirve para:
-
-    - Historial que reinyecta la respuesta HTTP ya escapada (cliente / gateway).
-    - Salidas del modelo que copian ``\\.``, ``\\!``, ``\\*`` del contexto.
-
-    Sin esto, el escape MDV2 vuelve a escapar las barras y el texto crece
-    (p. ej. ``\\!`` → ``\\\\!`` → ``\\\\\\!``).
-    """
-    if not text:
-        return ""
-    esc = frozenset(TELEGRAM_MARKDOWN_V2_SPECIAL)
-    t = str(text)
-    for _ in range(max(1, int(max_layers))):
-        out: list[str] = []
-        i = 0
-        while i < len(t):
-            if t[i] == "\\" and i + 1 < len(t) and t[i + 1] in esc:
-                out.append(t[i + 1])
-                i += 2
-            else:
-                out.append(t[i])
-                i += 1
-        t_new = "".join(out)
-        if t_new == t:
-            return t_new
-        t = t_new
-    return t
-
-def parse_command(text: str) -> Tuple[str, str]:
-    """Parse /command or /command args. Returns (name, args)."""
-    if not text or not text.strip().startswith("/"):
-        return "", ""
-    parts = text.strip().split(maxsplit=1)
-    name = (parts[0] or "").lstrip("/").lower()
-    if "@" in name:
-        name = name.split("@", 1)[0]
-    args = (parts[1] if len(parts) > 1 else "").strip()
-    return name, args
-
-
-def execute_roles(db: Any, chat_id: Any) -> str:
-    """/roles: lista todos los trabajadores virtuales (templates) disponibles. El manager solo delegará a los que estén en /workers."""
-    from duckclaw.workers.factory import list_workers
-    all_templates = list_workers()
-    if not all_templates:
-        return "No hay templates en forge/templates. Añade al menos uno."
-    lines = "\n".join(f"- {w}" for w in all_templates)
-    return format_guardrail("fly_commands", "roles_list_intro", lines=lines)
-
-
-# Worker por defecto: el manager orquesta y delega a los trabajadores en forge/templates
-_DEFAULT_WORKER = "manager"
-
-
-def execute_role_switch(db: Any, chat_id: Any, worker_id: str) -> str:
-    """/role <worker_id>: cambia el rol. Por defecto 'manager' delega a los templates. Sin args: muestra rol actual y disponibles."""
-    from duckclaw.workers.factory import list_workers
-    available = list_workers()
-    wid_raw = (worker_id or "").strip()
-    if not wid_raw:
-        current = get_chat_state(db, chat_id, "worker_id") or _DEFAULT_WORKER
-        if current == "manager":
-            current_display = "Manager (delega a trabajadores en templates)"
-        else:
-            try:
-                from duckclaw.workers.manifest import load_manifest
-                spec = load_manifest(current)
-                current_display = f"{spec.name} ({current})"
-            except Exception:
-                current_display = current
-        avail_str = "\n".join(f"- {w}" for w in available) if available else "ninguna"
-        return (
-            f"🦆 Rol: {current_display}\n\n"
-            f"Disponibles: manager (por defecto)\n{avail_str}\n/role <id>"
-        )
-    if wid_raw.lower() == "manager":
-        set_chat_state(db, chat_id, "worker_id", "manager")
-        return "✅ Manager. Delega a los trabajadores en templates."
-    canonical = _resolve_template_id(available, wid_raw)
-    if not canonical:
-        avail_str = "\n".join(f"- {w}" for w in available) if available else "ninguna"
-        return f"Rol '{wid_raw}' no existe.\nDisponibles:\n{avail_str}"
-    try:
-        from duckclaw.workers.manifest import load_manifest
-        spec = load_manifest(canonical)
-        set_chat_state(db, chat_id, "worker_id", canonical)
-        skills = ", ".join(spec.skills_list or []) or "read_sql, admin_sql"
-        return f"✅ {spec.name} ({canonical}). Herramientas: {skills}"
-    except Exception as e:
-        return f"Error al cargar rol: {e}."
-
-
-def execute_skills_list(db: Any, chat_id: Any, args: str) -> str:
-    """/skills <worker_id>: lista herramientas del template. worker_id debe ser uno de /roles."""
-    from duckclaw.workers.factory import list_workers
-    available = list_workers()
-    wid_raw = (args or "").strip()
-    if not wid_raw:
-        return "Uso: /skills <worker_id>. Ver templates: /roles"
-    if wid_raw.startswith("--"):
-        return "Indica un worker_id (ej. research_worker). Ver templates: /roles"
-    canonical = _resolve_template_id(available, wid_raw)
-    if not canonical:
-        return f"Template '{wid_raw}' no encontrado. Disponibles (usa /roles): {', '.join(available)}"
-    try:
-        from duckclaw.workers.manifest import load_manifest
-        spec = load_manifest(canonical)
-        skill_lines = [f"- {s}" for s in (spec.skills_list or [])]
-        skill_lines.append("- read_sql (solo lectura)")
-        skill_lines.append("- admin_sql (lectura + escrituras)")
-        return f"🔧 {spec.name} ({canonical})\n" + "\n".join(skill_lines)
-    except Exception as e:
-        return f"Error: {e}."
-
-
-def execute_approve_reject(db: Any, chat_id: Any, approved: bool) -> str:
-    """/approve o /reject: HITL (grafo en interrupt). Sin interrupt implementado: mensaje informativo."""
-    return "No hay operación pendiente de aprobación. (El grafo no está en estado interrupt en esta versión.)"
-
-
-def execute_tasks(db: Any, chat_id: Any) -> str:
-    """/tasks: estado del ActivityManager (Redis): IDLE, BUSY, subagente, tarea actual, tiempo en ejecución."""
-    from duckclaw.graphs.activity import get_activity
-    data = get_activity(chat_id)
-    if data is None:
-        return "⏸ IDLE (Redis no configurado)."
-    status = data.get("status", "IDLE")
-    task = data.get("task", "")
-    worker_id = data.get("worker_id", "") or ""
-    started_at = data.get("started_at", 0)
-    elapsed_s = ""
-    if started_at and status == "BUSY":
-        try:
-            elapsed_s = f" · {int(time.time()) - int(started_at)}s"
-        except Exception:
-            pass
-    # Guión en worker_id (p. ej. SIATA-Analyst) obliga a \- en MarkdownV2; muchos clientes muestran el \ literal.
-    # Mismo criterio que label de gateway: espacio en lugar de guion para etiqueta legible sin escapes.
-    worker_display = (worker_id or "").replace("-", " ").strip()
-    worker_s = f" · {worker_display}" if worker_display else ""
-    # Segunda línea: solo el título del plan (task), precedido por un bullet grande
-    task_preview = f"• {str(task)[:60]}" if task else "—"
-    icon = "▶" if status == "BUSY" else "⏸"
-    return f"{icon} {status}{elapsed_s}{worker_s}\n" + task_preview
-
-
-def execute_help(db: Any, chat_id: Any) -> str:
-    """/help: lista los fly commands disponibles."""
-    entries = list(load_guardrail_pipe_table("fly_commands", "help_entries"))
-    block = "\n".join(f"- {cmd} — {desc}" for cmd, desc in entries)
-    return f"{load_guardrail('fly_commands', 'help_header')}\n{block}"
-
-
-def _fly_reply_preview(s: str, max_len: int = 120) -> str:
-    """Resumen de respuesta para [FLY] sin volcar secretos ni bloques enormes."""
-    t = (s or "").replace("\n", " ").strip()
-    if len(t) > max_len:
-        return t[:max_len] + "..."
-    return t
-
-
-def execute_lake_status() -> str:
-    """/lake [status]: variables de lake y prueba SSH corta (BatchMode, ConnectTimeout=5)."""
-    try:
-        lines = _lake_ssh_status_lines(compact=False)
-    except Exception as e:
-        return f"Lake: no se pudo leer conectividad: {e}"
-    return "\n".join(lines)
-
-
-def _dispatch_fly_command(
-    db: Any,
-    chat_id: Any,
-    name: str,
-    args: str,
-    *,
-    requester_id: Any = None,
-    tenant_id: Any = None,
-    vault_user_id: Any = None,
-    username: str = "",
-    entry_worker_id: str | None = None,
-) -> Optional[str]:
-    """Ejecuta un comando fly ya parseado (sin contexto de logging)."""
-    if name == "sensors":
-        return execute_sensors(db)
-    if name == "lake":
-        sub = (args or "").strip().lower()
-        if sub in ("", "status"):
-            return execute_lake_status()
-        return "Uso: /lake o /lake status"
-    if name in ("resolve_uncertainty", "resolve-uncertainty"):
-        return execute_resolve_uncertainty(db, chat_id, args, tenant_id=tenant_id)
-    if name == "uncertainty":
-        sub = (args or "").strip().lower()
-        if sub in ("--status", "status", ""):
-            return execute_uncertainty_status(db, chat_id, args)
-        return "Uso: /uncertainty --status"
-    if name in ("approve_code", "approve-code"):
-        return execute_code_approve(db, chat_id, args)
-    if name in ("reject_code", "reject-code"):
-        return execute_code_reject(db, chat_id, args)
-    if name == "help":
-        return execute_help(db, chat_id)
-    if name == "role":
-        return (
-            "El comando /role ya no existe. Usa /workers para ver o definir el equipo, /help para ver todos los comandos."
-        
-        )
-    if name == "roles":
-        return execute_roles(db, chat_id)
-    if name == "team":
-        return execute_team_whitelist(db, tenant_id, requester_id, args)
-    if name == "vault":
-        return execute_vault(
-            args,
-            vault_user_id=vault_user_id or requester_id or chat_id,
-            tenant_id=tenant_id,
-            db=db,
-            entry_worker_id=entry_worker_id,
-            chat_id=chat_id,
-            worker_id_resolver=get_worker_id_for_chat,
-        )
-    if name == "workers":
-        return execute_team(
-            db, chat_id, args, tenant_id=tenant_id, requester_id=requester_id
-        )
-    if name == "skills":
-        return execute_skills_list(db, chat_id, args)
-    if name == "forget":
-        return execute_forget(db, chat_id, tenant_id=tenant_id)
-    if name == "context":
-        return execute_context_toggle(db, chat_id, args, tenant_id=tenant_id)
-    if name == "comfyui":
-        return execute_comfyui_provider(db, chat_id, args, tenant_id=tenant_id)
-    if name in ("sandbox", "sandox"):
-        return execute_sandbox_toggle(db, chat_id, args, tenant_id=tenant_id)
-    if name in ("internet", "red", "network"):
-        return execute_internet_toggle(
-            db,
-            chat_id,
-            args,
-            worker_id=entry_worker_id or "",
-            tenant_id=tenant_id,
-        )
-    if name == "heartbeat":
-        return execute_heartbeat(db, chat_id, args, tenant_id=tenant_id)
-    if name == "audit":
-        return execute_audit(db, chat_id)
-    if name == "health":
-        return execute_health(db)
-    if name == "approve":
-        return execute_approve_reject(db, chat_id, True)
-    if name == "reject":
-        return execute_approve_reject(db, chat_id, False)
-    if name in ("prompt", "system_prompt", "system"):
-        return execute_prompt(db, chat_id, args)
-    if name in ("model", "provider", "llm"):
-        return execute_model(db, chat_id, args)
-    if name in ("models",):
-        return execute_models(db, chat_id, args)
-    if name == "setup":
-        return _execute_setup(db, chat_id, args)
-    if name == "goals":
-        return execute_homeostasis_goals(
-            db,
-            chat_id,
-            args,
-            tenant_id=tenant_id,
-            vault_user_id=vault_user_id,
-        )
-    if name == "crons":
-        return execute_crons_schedule(
-            db,
-            chat_id,
-            args,
-            tenant_id=tenant_id,
-            vault_user_id=vault_user_id,
-        )
-    if name == "meditate":
-        args_norm = (args or "").strip().lower()
-        if args_norm in ("--self", "--now"):
-            return None
-        return execute_meditate(
-            db, chat_id, args, tenant_id=tenant_id, vault_user_id=vault_user_id
-        )
-    if name == "tasks":
-        return execute_tasks(db, chat_id)
-    if name == "history":
-        return execute_history(db, chat_id, args)
-    return None
-
-
-
-
-def handle_command(
-    db: Any,
-    chat_id: Any,
-    text: str,
-    *,
-    requester_id: Any = None,
-    tenant_id: Any = None,
-    vault_user_id: Any = None,
-    username: str = "",
-    entry_worker_id: str | None = None,
-) -> Optional[str]:
-    """
-    Middleware: si el mensaje es un comando on-the-fly, ejecuta y retorna la respuesta.
-    Si no es comando o no es manejado, retorna None.
-    """
-    name, args = parse_command(text)
-    if not name:
-        return None
-    tid = str(tenant_id or "default").strip() or "default"
-    try:
-        cid = str(chat_id if chat_id is not None else "unknown").strip() or "unknown"
-    except Exception:
-        cid = "unknown"
-    uname = (username or "").strip()
-    if not uname and db is not None:
-        try:
-            uname = str(get_chat_state(db, chat_id, "username") or "").strip()
-        except Exception:
-            uname = ""
-    chat_ident = format_chat_log_identity(cid, uname or None)
-    _fly_log = get_obs_logger("duckclaw.fly")
-    with structured_log_context(tenant_id=tid, worker_id="gateway", chat_id=chat_ident):
-        try:
-            set_chat_state(db, chat_id, "tenant_id", tid)
-            if requester_id is not None:
-                set_chat_state(db, chat_id, "last_requester_id", str(requester_id).strip())
-        except Exception:
-            pass
-        ew = (entry_worker_id or "").strip()
-        if ew and ew.lower() != "manager" and db is not None:
-            try:
-                from duckclaw.workers.factory import list_workers
-
-                canonical = _resolve_template_id(list_workers(), ew)
-                if canonical:
-                    set_chat_state(db, chat_id, "worker_id", canonical)
-                    _crons_debug_log(
-                        "on_the_fly_commands.py:handle_command",
-                        "entry_worker_synced",
-                        {"chat_id": cid, "worker_id": canonical},
-                        hypothesis_id="B",
-                    )
-            except Exception:
-                pass
-        out = _dispatch_fly_command(
-            db,
-            chat_id,
-            name,
-            args,
-            requester_id=requester_id,
-            tenant_id=tenant_id,
-            vault_user_id=vault_user_id,
-            username=username or "",
-            entry_worker_id=entry_worker_id,
-        )
-        if out is not None:
-            log_fly(_fly_log, "/%s -> %s", name, _fly_reply_preview(out))
-        return out
-
-
-def get_worker_id_for_chat(db: Any, chat_id: Any) -> str:
-    """Devuelve el worker_id asignado a este chat. Por defecto: manager (orquesta y delega a templates)."""
-    return get_chat_state(db, chat_id, "worker_id") or _DEFAULT_WORKER
 
 
 _CAPABILITIES_SMALLTALK = re.compile(

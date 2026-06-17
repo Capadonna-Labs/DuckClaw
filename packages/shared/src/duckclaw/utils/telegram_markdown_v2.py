@@ -275,3 +275,35 @@ def escape_telegram_markdown_v2(text: str) -> str:
     for i, raw in enumerate(preserved):
         t = t.replace(f"TGLINKTOKEN{i}", raw)
     return t
+
+
+def unescape_telegram_markdown_v2_layers(text: str, max_layers: int = 4) -> str:
+    """
+    Quita hasta ``max_layers`` capas de escape estilo MarkdownV2 (mismo juego de
+    caracteres que ``escape_telegram_markdown_v2``). Sirve para:
+
+    - Historial que reinyecta la respuesta HTTP ya escapada (cliente / gateway).
+    - Salidas del modelo que copian ``\\.``, ``\\!``, ``\\*`` del contexto.
+
+    Sin esto, el escape MDV2 vuelve a escapar las barras y el texto crece
+    (p. ej. ``\\!`` → ``\\\\!`` → ``\\\\\\!``).
+    """
+    if not text:
+        return ""
+    esc = frozenset(TELEGRAM_MARKDOWN_V2_SPECIAL)
+    t = str(text)
+    for _ in range(max(1, int(max_layers))):
+        out: list[str] = []
+        i = 0
+        while i < len(t):
+            if t[i] == "\\" and i + 1 < len(t) and t[i + 1] in esc:
+                out.append(t[i + 1])
+                i += 2
+            else:
+                out.append(t[i])
+                i += 1
+        t_new = "".join(out)
+        if t_new == t:
+            return t_new
+        t = t_new
+    return t

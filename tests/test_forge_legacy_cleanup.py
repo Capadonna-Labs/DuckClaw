@@ -30,7 +30,13 @@ REMOVED_LEGACY_MODELS = (
     FORGE_ROOT / "models" / "__init__.py",
     FORGE_ROOT / "models" / "core_satellite.py",
 )
+REMOVED_VERTICAL_PACKAGES = (
+    REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "quant",
+    REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "finance",
+)
 REMOVED_VERTICAL_CORE_MODULES = (
+    REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "forge" / "code_decision_service.py",
+    REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "forge" / "skills" / "quant_investor_profile.py",
     REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "egress" / "job_hunter_output_validator.py",
     REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "github" / "workflow.py",
     FORGE_ROOT / "skills" / "github_bridge.py",
@@ -200,9 +206,18 @@ REMOVED_DOMAIN_VERTICAL_MARKERS_RE = re.compile(
     r")(?![a-z0-9])"
 )
 DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
-    "packages/agents/src/duckclaw/capadonna_plugin.py": "external Capadonna compatibility facade",
+    "packages/agents/src/duckclaw/state_delta_enqueue.py": "transversal state-delta router without product imports",
 }
 DOMAIN_VERTICAL_RUNTIME_ALLOWLIST = frozenset(DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS)
+CAPADONNA_DRILLER_IMPORT_ALLOWLIST = frozenset()
+CAPADONNA_DRILLER_IMPORT_MARKERS = (
+    "capadonna_plugin",
+    "load_capadonna_lib",
+    "dispatch_capadonna_fly_command",
+    "approve_capadonna_code_decision",
+    "reject_capadonna_code_decision",
+    "epistemic_humility_bridge",
+)
 ON_THE_FLY_COMMAND_GRAPH = (
     REPO_ROOT
     / "packages"
@@ -211,6 +226,15 @@ ON_THE_FLY_COMMAND_GRAPH = (
     / "duckclaw"
     / "graphs"
     / "on_the_fly_commands.py"
+)
+MANAGER_GRAPH = (
+    REPO_ROOT
+    / "packages"
+    / "agents"
+    / "src"
+    / "duckclaw"
+    / "manager"
+    / "graph.py"
 )
 ON_THE_FLY_VERTICAL_MARKERS_RE = re.compile(
     r"(?i)(?<![a-z0-9])("
@@ -415,6 +439,11 @@ def test_removed_legacy_forge_models_stay_removed() -> None:
     assert existing == []
 
 
+def test_removed_vertical_quant_finance_packages_stay_removed() -> None:
+    existing = [_rel(path) for path in REMOVED_VERTICAL_PACKAGES if path.exists()]
+    assert existing == []
+
+
 def test_removed_job_hunter_and_github_vertical_core_modules_stay_removed() -> None:
     existing = [_rel(path) for path in REMOVED_VERTICAL_CORE_MODULES if path.exists()]
     assert existing == []
@@ -590,6 +619,11 @@ def test_on_the_fly_command_graph_has_no_quant_finance_trading_residue() -> None
     ]
 
     assert offenders == []
+
+
+def test_manager_graph_has_no_trading_tick_vertical_residue() -> None:
+    text = MANAGER_GRAPH.read_text(encoding="utf-8", errors="ignore")
+    assert "TRADING_TICK" not in text
 
 
 def test_sandbox_graph_has_no_domain_specific_runtime_guidance() -> None:
@@ -852,6 +886,59 @@ def test_core_framework_domain_vertical_markers_are_confined_to_explicit_allowli
     assert offenders == []
 
 
+def test_core_framework_does_not_import_capadonna_plugin_outside_allowlist() -> None:
+    scan_roots = (
+        REPO_ROOT / "packages" / "agents" / "src" / "duckclaw",
+        REPO_ROOT / "services" / "api-gateway",
+    )
+    current_test = Path(__file__).resolve()
+    offenders: list[str] = []
+    for root in scan_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            if path.resolve() == current_test or any(part in IGNORED_DIRS for part in path.parts):
+                continue
+            rel_path = _rel(path)
+            if rel_path in CAPADONNA_DRILLER_IMPORT_ALLOWLIST:
+                continue
+            tree = _parse_python(path)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    for alias in node.names:
+                        if alias.name == "duckclaw.capadonna_plugin":
+                            offenders.append(f"{rel_path}:{node.lineno}: import {alias.name}")
+                elif isinstance(node, ast.ImportFrom):
+                    if node.module == "duckclaw.capadonna_plugin":
+                        offenders.append(f"{rel_path}:{node.lineno}: from duckclaw.capadonna_plugin import ...")
+
+    assert offenders == []
+
+
+def test_core_framework_capadonna_markers_are_confined_to_allowlist() -> None:
+    scan_roots = (
+        REPO_ROOT / "packages" / "agents" / "src" / "duckclaw",
+        REPO_ROOT / "services" / "api-gateway",
+    )
+    current_test = Path(__file__).resolve()
+    offenders: list[str] = []
+    for root in scan_roots:
+        if not root.exists():
+            continue
+        for path in root.rglob("*.py"):
+            if path.resolve() == current_test or any(part in IGNORED_DIRS for part in path.parts):
+                continue
+            rel_path = _rel(path)
+            if rel_path in CAPADONNA_DRILLER_IMPORT_ALLOWLIST:
+                continue
+            text = path.read_text(encoding="utf-8", errors="ignore").lower()
+            for marker in CAPADONNA_DRILLER_IMPORT_MARKERS:
+                if marker in text:
+                    offenders.append(f"{rel_path}: {marker}")
+
+    assert offenders == []
+
+
 def test_core_egress_uses_transversal_evidence_validator_imports() -> None:
     offenders: list[str] = []
     current_test = Path(__file__).resolve()
@@ -921,5 +1008,32 @@ def test_direct_read_write_duckdb_connections_are_confined_to_explicit_allowlist
                     and keyword.value.value is False
                 ):
                     offenders.append(f"{rel_path}:{node.lineno}")
+
+    assert offenders == []
+
+
+COMMANDS_PACKAGE_ROOT = (
+    REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "commands"
+)
+HITL_COMMAND_MODULE = COMMANDS_PACKAGE_ROOT / "hitl.py"
+CAPADONNA_DRILLER_MARKER_RE = re.compile(r"(?i)capadonna|driller")
+
+
+def test_commands_package_has_no_capadonna_or_driller_imports() -> None:
+    offenders: list[str] = []
+    for path in sorted(COMMANDS_PACKAGE_ROOT.rglob("*.py")):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        for match in CAPADONNA_DRILLER_MARKER_RE.finditer(text):
+            offenders.append(f"{_rel(path)}:{match.start()}: {match.group(0)}")
+
+    assert offenders == []
+
+
+def test_hitl_command_module_has_no_capadonna_or_driller_imports() -> None:
+    text = HITL_COMMAND_MODULE.read_text(encoding="utf-8", errors="ignore")
+    offenders = [
+        f"{match.start()}: {match.group(0)}"
+        for match in CAPADONNA_DRILLER_MARKER_RE.finditer(text)
+    ]
 
     assert offenders == []

@@ -479,6 +479,31 @@ class DeactivatePromptPolicyCommand(WriteCommand):
 
 
 # ---------------------------------------------------------------------------
+# HITL commands
+# ---------------------------------------------------------------------------
+
+class UpdateCodeDecisionStatusCommand(WriteCommand):
+    """Update one row in ``main.code_decisions`` after human approval/rejection."""
+
+    command_type: Literal["update_code_decision_status"] = "update_code_decision_status"
+    decision_id: str
+    status: Literal["APPROVED", "REJECTED", "FAILED"]
+    pr_url: str = ""
+    pr_number: int | None = None
+    rationale: str = ""
+    resolved_by: str = "system"
+
+
+class ResolveUncertaintyEventCommand(WriteCommand):
+    """Resolve one ``main.agent_uncertainty_log`` event from PENDING_HITL."""
+
+    command_type: Literal["resolve_uncertainty_event"] = "resolve_uncertainty_event"
+    event_id: str
+    session_uid: str = ""
+    resolved_by: str = "system"
+
+
+# ---------------------------------------------------------------------------
 # DuckDB admin maintenance commands
 # ---------------------------------------------------------------------------
 

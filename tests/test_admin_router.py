@@ -676,7 +676,7 @@ def test_ops_commands(admin_client: TestClient):
 
 
 def test_normalize_pm2_gateway_restart_interrupted(admin_client: TestClient):
-    from routers.admin import _normalize_ops_result
+    from routers.admin_domains.ops import _normalize_ops_result
 
     raw = {
         "exit_code": -2,

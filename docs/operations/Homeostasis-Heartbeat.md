@@ -1,5 +1,7 @@
 # Homeostasis Heartbeat (Demonio de Proactividad)
 
+**Código:** `services/heartbeat/main.py` · **PM2:** `ecosystem.heartbeat.config.cjs`
+
 ## Objetivo
 
 El microservicio `services/heartbeat` se despierta de forma periódica, evalúa las creencias de homeostasis en DuckDB y, cuando detecta una anomalía, inyecta un **SYSTEM_EVENT** en el API Gateway. El agente decide si debe enviar un mensaje proactivo al usuario usando la herramienta `send_proactive_message`, que usa salida nativa (Bot API / webhook outbound del gateway).

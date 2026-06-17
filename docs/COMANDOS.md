@@ -87,7 +87,7 @@ uv run duckops train -c config/lora_config.yaml
 # Trazas JSONL: packages/agents/train/conversation_traces/
 ```
 
-Ver [`packages/agents/train/SFT_MLX_PIPELINE.md`](../packages/agents/train/SFT_MLX_PIPELINE.md).
+Ver [`packages/agents/train/`](../packages/agents/train/) (`train_sft.py`, `config/lora_config.yaml`).
 
 ---
 

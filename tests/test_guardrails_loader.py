@@ -34,7 +34,6 @@ _REQUIRED = [
     ("resilience", "exhausted_plan_failure"),
     ("heartbeat", "tool_steps"),
     ("system_prompts", "general_default"),
-    ("system_prompts", "retail_default"),
     ("system_prompts", "dreamer_consolidation"),
     ("validators", "fact_checker"),
     ("validators", "self_correction"),

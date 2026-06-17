@@ -40,7 +40,7 @@ duckclaw/
 - **Singleton DB-Writer**: serializes durable DuckDB writes via Redis queues; keeps ledger-style state consistent.
 - **API Gateway**: FastAPI front door (`services/api-gateway`); agent chat, DB write enqueue, Telegram webhook, VLM image ingest, health.
 - **duckops**: Python CLI (`uv run duckops …`) for wizard-driven setup and local service control.
-- **Training traces (optional)**: JSONL under `packages/agents/train/conversation_traces/` — [`packages/agents/train/SFT_MLX_PIPELINE.md`](packages/agents/train/SFT_MLX_PIPELINE.md).
+- **Training traces (optional)**: JSONL under `packages/agents/train/conversation_traces/` — [`packages/agents/train/`](packages/agents/train/) (`train_sft.py`).
 - **Admin UI (Next.js)**: [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md) — consola plantillas/Telegram/runtime (`pnpm admin:dev`)
 - **CRM PQRSD (legacy / hackathon)**: [retoPWRSomegahack](https://github.com/ManePeqsiCoda/retoPWRSomegahack) · código heredado en `apps/duckclaw-admin/src/lib/crm/`
 

@@ -12,10 +12,30 @@ def test_admin_auth_routes_live_in_domain_module() -> None:
     assert '@router.post("/auth/login")' not in admin
     assert '@router.get("/auth/me")' not in admin
     assert '@router.post("/auth/logout")' not in admin
+    assert "_admin_auth_login_impl" not in admin
+    assert "AdminLoginBody" not in admin
     assert 'router = APIRouter(prefix="/auth", tags=["admin-auth"])' in auth
     assert '@router.post("/login")' in auth
     assert '@router.get("/me")' in auth
     assert '@router.post("/logout")' in auth
+    assert "async def admin_auth_login_impl" in auth
+    assert "class AdminLoginBody" in auth
+
+
+def test_project_bootstrap_routes_live_in_domain_module() -> None:
+    admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
+    bootstrap = Path(
+        "services/api-gateway/routers/admin_domains/project_bootstrap_routes.py"
+    ).read_text(encoding="utf-8")
+
+    assert "from routers.admin_domains.project_bootstrap_routes import router as project_bootstrap_router" in admin
+    assert "router.include_router(project_bootstrap_router)" in admin
+    assert '@router.post("/projects"' not in admin
+    assert "class ProjectCreateBody" not in admin
+    assert "async def create_project" not in admin
+    assert 'router = APIRouter(tags=["admin-project-bootstrap"])' in bootstrap
+    assert '@router.post("/projects", dependencies=[Depends(require_admin_key)])' in bootstrap
+    assert "class ProjectCreateBody" in bootstrap
 
 
 def test_admin_template_routes_live_in_domain_module() -> None:

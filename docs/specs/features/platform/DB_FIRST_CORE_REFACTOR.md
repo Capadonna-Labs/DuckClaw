@@ -132,6 +132,7 @@ Si un futuro corte necesita comportamiento especifico de una vertical, debe mode
 - `duckclaw.commands.model_setup` ya no escribe prompts de sistema en `agent_config` (`system_prompt` / `system_prompt_<worker>`). `/prompt <worker> --change ...` y `/setup system_prompt=...` hacen upsert de `main.prompt_policy_registry` con `policy_type='system_prompt'` y `policy_name=<worker_id>` mediante `UpsertPromptPolicyCommand`; `get_effective_system_prompt` resuelve desde `PromptPolicyResolver`.
 - `duckclaw.workers.read_pool` ya no contiene special-cases por worker BI. Las restricciones de `SELECT *` sin `LIMIT` se modelan con la capability DB-first generica `bounded_select_star_read`; las restricciones de JSON remoto siguen bajo `bounded_json_read`.
 - `duckclaw.workers.factory` ya no registra ni orquesta GitHub/Job Hunter como ramas especiales del core; esas integraciones solo pueden volver como capability/policy DB-first o extension externa.
+- `duckclaw.workers.factory` es fachada delgada (~180 líneas): re-exporta API pública y delega ensamblaje del grafo a `factory_graph_builder` (re-export) → `factory_graph_assembly` + módulos `factory_graph_*` (setup, nodos, routing). Helpers Reddit en `factory_reddit_helpers`, cancel/identity/LLM-failure en `factory_agent_node_helpers`, heartbeats sandbox/noVNC en `factory_sandbox_notify`, registro de tools SQL/skills en `factory_tool_builder`.
 - Los guardrails Markdown `capabilities/job_hunter.md` y `manager_tasks/job_*` fueron removidos del core. El runtime generico no debe cargar politicas de busqueda laboral desde archivos versionados como defaults.
 - `packages/agents/src/duckclaw/graphs/sandbox.py` no contiene guias runtime verticales de Quant/Finanz/MQL5/ML4T/PyPortfolioOpt/broker/trading ni defaults laborales. La salida tabular del browser sandbox es generica (`rows_extracted` + Parquet bajo `/workspace/output/`) y la descripcion de browser solo habla de Playwright/sitios SPA de forma transversal.
 - El layout de entrenamiento vive bajo `packages/agents/train/` con separacion de scripts de data, scripts de serve, datasets y outputs.
@@ -371,6 +372,12 @@ Regla practica: `admin.py` agrega y conserva compatibilidad; `admin_db_first.py`
 - `duckclaw.db_write_queue`, `duckclaw.write_commands` y `duckclaw.write_command_handlers`: cola singleton, confirmacion de task status y contrato de mutacion DB-first.
 - `duckclaw.shared_db_grants`: grants compartidos como control plane, no como bypass de filesystem.
 - `duckclaw.workers.discovery`: discovery/listado DB-first de workers, con filesystem limitado a `default` y fachada legacy desde `duckclaw.workers.factory`.
+- `duckclaw.workers.factory`: fachada delgada con re-exports estables; no contiene ensamblaje del grafo ni helpers Reddit/sandbox/tools.
+- `duckclaw.workers.factory_graph_*`: ensamblaje LangGraph modular (`factory_graph_assembly` cablea `StateGraph`; `factory_graph_setup` inicializa contexto; nodos en `factory_graph_nodes_prepare`, `factory_graph_nodes_agent*` (policy early/late + invoke), `factory_graph_nodes_tools`, `factory_graph_nodes_set_reply`, `factory_graph_nodes_routing`; bind Reddit en `factory_graph_agent_bind` / `factory_graph_agent_reddit_helpers`). `factory_graph_builder` es re-export delgado de `build_worker_graph`.
+- `duckclaw.workers.factory_reddit_helpers`: resolución de URLs/share Reddit y prefetch JSON público.
+- `duckclaw.workers.factory_agent_node_helpers`: cancel check, identity fields, mensajes de fallo LLM y parse ComfyUI inbound.
+- `duckclaw.workers.factory_sandbox_notify`: heartbeats Telegram sandbox y pre-DM noVNC.
+- `duckclaw.workers.factory_tool_builder`: registro de tools SQL/skills del worker.
 - `duckclaw.workers.visual_evidence_policy`: politicas puras de retry visual del grafo de worker, sin defaults de dominio ni fallback filesystem.
 - `duckclaw.workers.tool_output_truncation`: truncado y compactacion pura de salidas de tools antes de alimentar contexto LLM; no decide provider budgets ni routing de tools.
 - `duckclaw.workers.provider_input_budget`: presupuesto de entrada por proveedor y poda pura de historial, apoyado en `tool_output_truncation`; lee runtime settings DB-first de provider budget y no decide routing ni tool binding.
@@ -406,7 +413,7 @@ Ejecutar o actualizar estos tests cuando un corte toque el area correspondiente:
 - `tests/test_manager_worker_reply_formatting.py`: asegura que formatting de respuestas de subagentes viva en `duckclaw.manager.worker_reply_formatting`.
 - `tests/test_forge_legacy_cleanup.py`: protege removal de paquetes Forge legacy, shims `WORKER_*`, env vars DB path de dominio, War Room core, CREATE TABLE fuera de allowlists, read-write DuckDB fuera de allowlists, confina marcadores Quant/Finance/IBKR y **prohibe imports Capadonna-Driller** (`duckclaw.capadonna_plugin`, marcadores `capadonna`/`driller`) en `packages/agents` y `services/api-gateway`.
 - `tests/test_package_reorg_contracts.py`: protege facades publicas compartidas y ownership de `duckclaw.manager.graph`.
-- `tests/test_worker_factory_modular_boundaries.py`: protege que `template_registry`, `load_manifest` y `workers.discovery.list_workers` expongan desde filesystem solo `default`; `workers.factory.list_workers` queda como fachada compatible y agentes extra deben venir de DB/catalogo.
+- `tests/test_worker_factory_modular_boundaries.py`: protege que `template_registry`, `load_manifest` y `workers.discovery.list_workers` expongan desde filesystem solo `default`; `workers.factory.list_workers` queda como fachada compatible y agentes extra deben venir de DB/catalogo. También fija que `factory.py` sea fachada delgada (≤250 líneas) y que `build_worker_graph`, helpers Reddit, agent-node, sandbox notify y tool builder vivan en `factory_*` sibling modules con re-export estable.
 - `tests/test_worker_factory_modular_boundaries.py::test_tool_output_truncation_owns_helpers_with_factory_facade` y `tests/test_tool_output_truncation.py`: protegen que el truncado de `ToolMessage`, sandbox outputs y sanitizacion de tools `reddit_*` vivan en `duckclaw.workers.tool_output_truncation`, con fachada legacy desde `workers.factory`.
 - `tests/test_worker_factory_modular_boundaries.py::test_provider_input_budget_owns_helpers_with_factory_facade` y `tests/test_provider_input_budget.py`: protegen que presupuesto de entrada por proveedor, estimacion de tokens, runtime settings DB-first de Groq/MLX y poda pura de historial vivan en `duckclaw.workers.provider_input_budget`, con fachada legacy desde `workers.factory`.
 - `tests/test_worker_factory_modular_boundaries.py::test_context_monitor_owns_summary_helpers_with_factory_facade` y `tests/test_context_monitor.py`: protegen que resumen/compresion de contexto y el builder del nodo `context_monitor` vivan en `duckclaw.workers.context_monitor`, con fachada legacy desde `workers.factory` y sin hardcodes BI en la policy de compresion.
@@ -469,12 +476,14 @@ uv run pytest tests/test_tool_response_repair.py tests/test_answer_evidence_vali
 
 Estos residuos existen en el repo actual y no deben confundirse con patrones a copiar:
 
-- `packages/agents/src/duckclaw/workers/factory.py`: sigue siendo una superficie grande de ensamblaje de tools/runtime. Los cortes recientes retiraron orquestacion determinista Quant/IBKR/Finance y Job Hunter/GitHub hardcodeado; el pendiente ya no debe resolverse con ramas por dominio, sino con capabilities/tools DB-first o extensiones.
-- `packages/agents/src/duckclaw/graphs/on_the_fly_commands.py` (~435 lineas): fachada de compatibilidad con adaptadores graph-local; dispatcher, cola outbound y comandos misc viven en `duckclaw.commands.fly_*`.
+- `packages/agents/src/duckclaw/workers/factory.py`: fachada delgada (~178 lineas). Ensamblaje LangGraph repartido en `factory_graph_assembly.py` (<200 lineas) y módulos `factory_graph_*` (cada uno ≤400 lineas; guardrail `tests/test_worker_factory_modular_boundaries.py::test_graph_builder_modules_respect_line_limits`).
+- `packages/agents/src/duckclaw/graphs/on_the_fly_commands.py` (~438 lineas): fachada de compatibilidad con adaptadores graph-local; dispatcher, cola outbound y comandos misc viven en `duckclaw.commands.fly_*`.
+- `packages/agents/src/duckclaw/manager/graph.py` (~74 lineas): fachada de compatibilidad; ensamblaje en `manager_graph_builder.py` y nodos/helpers en `manager_*` (guardrail `tests/test_manager_graph_split_static.py`).
+- `packages/agents/src/duckclaw/graphs/graph_server.py` (~660 lineas tras extraccion): helpers efimeros DuckDB/LLM por turno en `graph_server_ephemeral.py` (~230 lineas); pendiente extraer `_ensure_llm_config` / studio graph y endpoints FastAPI.
 - `packages/agents/src/duckclaw/graphs/sandbox.py`: el prompt y summary del browser sandbox ya son genericos respecto a busqueda laboral; los pendientes restantes son cleanup de ejemplos/heuristicas de navegacion no laborales.
 - `packages/agents/src/duckclaw/finance/*` y `packages/agents/src/duckclaw/quant/*`: **removidos en Hito 1**; producto vertical en Capadonna-Driller (repo externo).
 - `services/db-writer/quant_state_delta_handler.py` y `services/db-writer/models/quant_state_delta.py`: **removidos del core** en Hito 1.
-- `services/api-gateway/routers/admin.py`: agregador/compat (~302 lineas) con auth login, `POST /projects` y reexports; impls de templates en `admin_domains/template_lifecycle.py`; HITL admin en `admin_domains/hitl_admin.py` (`duckclaw.hitl.*`, sin capadonna).
+- `services/api-gateway/routers/admin.py`: agregador/compat (~115 lineas) con reexports historicos; auth login en `admin_domains/auth.py`; bootstrap filesystem `POST /projects` en `admin_domains/project_bootstrap_routes.py`; impls de templates en `admin_domains/template_lifecycle.py`; HITL admin en `admin_domains/hitl_admin.py` (`duckclaw.hitl.*`, sin capadonna).
 - `services/api-gateway/routers/admin_domains/access_management.py`: los mutadores admin de access management delegan en comandos tipados/DB-writer y el modulo salio de la allowlist de conexiones DuckDB read-write directas.
 - `scripts/deployment/patch_tts_production_env.py`, `scripts/deployment/test_sensory_tts.py`, `scripts/deployment/test_tts_duration_remote.py`, `scripts/deployment/debug_tts_mac.py` e `integrations/sensory-node/scripts/check_tts_amplitude.py`: smoke/debug/patch scripts de TTS aun nombran voces legacy. No deben copiarse como defaults; el siguiente corte Sensory debe moverlos a ids genericos o resolver voz desde `DUCKCLAW_TTS_VOICE_MAP`/manifest.
 - `packages/duckops/duckops/sovereign/materialize.py`: contiene comentarios/operaciones con nombres legacy; no es runtime manager core.
@@ -495,18 +504,33 @@ Las allowlists vivas estan declaradas en `tests/test_forge_legacy_cleanup.py`. S
 
 ## Pendientes Recomendados
 
+### Auditoria admin allowlist (2026-06)
+
+Estado de routers citados en `DB_FIRST_READ_WRITE_ALLOWLIST` / revision manual:
+
+| Modulo | RW DuckDB / legacy | Comandos tipados | Accion |
+|--------|-------------------|------------------|--------|
+| `admin_db_first.py` (~531 lineas) | Mutaciones knowledge/RAG y runtime settings ya encolan comandos; lecturas RO con SQL inline en `list_knowledge_sources` | `UpsertRuntimeSettingCommand`, `CreateKnowledgeSourceCommand`, `UpsertKnowledgeDocumentCommand`, `UpsertKnowledgeChunksCommand`, `DeactivateKnowledgeSourceCommand` | **Documentado**: pendiente extraer knowledge a `admin_domains/knowledge.py` y retirar SQL inline de listado cuando exista read-model compartido |
+| `visual_assets.py` | Sin DuckDB; solo HTTP a ComfyUI + resolucion RO de runtime settings | N/A (generacion visual via bridge, no vault write) | **OK** — retirar de allowlist RW cuando el guardrail distinga routers sin DuckDB |
+| `duckdb_explorer.py` | Lecturas RO via `admin_duckdb_readonly`; drop legacy encola `DropLegacyDuckDbObjectsCommand` | `DropLegacyDuckDbObjectsCommand` | **OK** — allowlist RW justificada solo por spawn profile / validacion pre-drop |
+| `runtime_config.py` | GET abre vault RO con `DuckClaw` + intento DDL bootstrap (`agent_config`); PUT/DELETE encolan comandos | `UpsertAgentConfigEntriesCommand`, `DeleteAgentConfigEntriesCommand` | **Documentado**: GET necesita read-model sin DDL side-effect; no hay `ListAgentConfigCommand` |
+| `playground_chat.py` (facade) | Fachada de reexports; rutas en `playground/*` usan Redis para conversaciones, RO gateway para catalogo, `UpsertRuntimeSettingCommand` en PUT /model | `UpsertRuntimeSettingCommand` (config_routes) | **OK** — allowlist heredada; mutaciones DuckDB del turno pasan por `invoke_chat` / graph_server efimero |
+
+**Corte aplicado en esta sesion:** ninguno en admin — no habia rutas con comando+handler existente sin cablear (bajo riesgo).
+
 ### Inmediato
 
-- Reducir `on_the_fly_commands.py` (~838 lineas) extrayendo el siguiente bloque con comando tipado equivalente y tests de contrato; el god-file sigue siendo el mayor residuo transversal del command graph.
+- Reducir `on_the_fly_commands.py` (~438 lineas, no ~838) extrayendo el siguiente bloque con comando tipado equivalente y tests de contrato; el god-file sigue siendo el mayor residuo transversal del command graph.
 - En cada corte, escribir primero el contrato de comando tipado y handler en `packages/shared/src/duckclaw/write_commands.py` y `write_command_handlers.py`; despues mover la ruta a `services/api-gateway/routers/admin_domains/*` y dejar guardrail estatico.
 - Reducir el resto de `on_the_fly_commands.py` solo cuando el corte tenga comando tipado equivalente y el gateway pueda invocarlo sin DuckDB RW directo.
-- Mantener `workers/factory.py` como superficie de alto riesgo: tras extraer discovery/listado, retry visual, truncado de tool outputs, provider input budget, context monitor, helpers puros de tool binding/tool_choice y flags sandbox DB-first, los siguientes cortes deben migrar registro de tools/capabilities y runtime assembly hacia owners pequenos DB-first o extensiones, no a nuevas ramas por dominio.
+- Mantener `workers/factory.py` como fachada delgada (~178 lineas). El ensamblaje del grafo vive en `factory_graph_assembly` + `factory_graph_setup` + `factory_graph_nodes_*` (no un god-file `factory_graph_builder`).
+- ~~Extraer bloques de `manager/graph.py` (~1911 lineas)~~ **Hecho:** `graph.py` queda fachada (~75 lineas); ensamblaje en `manager_graph_builder.py`; nodos en `manager_nodes_*`, plan/delegacion en `manager_plan_task.py` / `manager_delegation.py` / `manager_planner_llm.py`; guardrail `tests/test_manager_graph_split_static.py`.
 
 ### Mediano
 
 - Crear un owner DB-first tipado para el registry administrable de beliefs si `/goals` necesita autocompletar metas por worker; no reabrir manifests de workers no-default como fallback.
-- Extraer `POST /projects` y helpers filesystem de templates hacia `admin_domains/*` cuando el wizard use solo catálogo DB-first; HITL admin ya vive en `hitl_admin.py`.
-- Seguir retirando allowlists de routers admin vecinos (`admin.py`, `admin_db_first.py`, `admin_domains/visual_assets.py`, `runtime_config.py`, `duckdb_explorer.py` y flujos relacionados) cuando cada mutacion tenga comando tipado, BFF claro y guardrail focal.
+- ~~Extraer `POST /projects` y helpers filesystem de templates hacia `admin_domains/*`~~ **Hecho:** `POST /projects` vive en `admin_domains/project_bootstrap_routes.py`; `admin.py` queda agregador (~115 lineas).
+- Seguir retirando allowlists de routers admin vecinos cuando cada mutacion tenga comando tipado, BFF claro y guardrail focal (ver tabla auditoria arriba).
 - Revisar imports legacy restantes de harness/homeostasis y `graphs/tools.py` en cortes dedicados; los owners canonicos ya existen, pero aun quedan fachadas e imports historicos.
 
 ### Opcional O Bloqueado Por Input Admin

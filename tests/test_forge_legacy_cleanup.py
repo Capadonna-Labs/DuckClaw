@@ -131,6 +131,7 @@ DB_FIRST_DDL_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/workers/db_runtime.py": "worker schema bootstrap",
     "packages/agents/src/duckclaw/workers/factory.py": "worker-local runtime bootstrap",
     "packages/agents/src/duckclaw/workers/loader.py": "worker belief bootstrap",
+    "services/api-gateway/core/chat_auth.py": "chat auth authorized_users bootstrap DDL",
     "services/api-gateway/routers/admin.py": "authorized admin maintenance/bootstrap endpoints",
     "services/api-gateway/routers/admin_domains/runtime_config.py": "authorized admin runtime config bootstrap",
     "services/db-writer/context_injection_handler.py": "DB-writer context command schema",
@@ -142,6 +143,7 @@ DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 
 DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/graphs/graph_server.py": "legacy graph command handler awaiting DB-writer migration",
+    "packages/agents/src/duckclaw/graphs/graph_server_ephemeral.py": "ephemeral DuckDB open/invoke helpers split from graph_server",
     "services/api-gateway/core/fly_command_invocation.py": "legacy slash/fly command bridge pending typed-command migration",
     "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
     "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",
@@ -236,6 +238,7 @@ MANAGER_GRAPH = (
     / "manager"
     / "graph.py"
 )
+MANAGER_GRAPH_BUILDER = MANAGER_GRAPH.parent / "manager_graph_builder.py"
 ON_THE_FLY_VERTICAL_MARKERS_RE = re.compile(
     r"(?i)(?<![a-z0-9])("
     r"quant(?:[_-]?(?:trader|core|trading|market|cfd|hrp|moc|auto))?"
@@ -622,8 +625,9 @@ def test_on_the_fly_command_graph_has_no_quant_finance_trading_residue() -> None
 
 
 def test_manager_graph_has_no_trading_tick_vertical_residue() -> None:
-    text = MANAGER_GRAPH.read_text(encoding="utf-8", errors="ignore")
-    assert "TRADING_TICK" not in text
+    for path in (MANAGER_GRAPH, MANAGER_GRAPH_BUILDER):
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        assert "TRADING_TICK" not in text
 
 
 def test_sandbox_graph_has_no_domain_specific_runtime_guidance() -> None:

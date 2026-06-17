@@ -8,6 +8,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 MANAGER_CORE_FILES = (
     REPO_ROOT / "packages/agents/src/duckclaw/manager/graph.py",
+    REPO_ROOT / "packages/agents/src/duckclaw/manager/manager_graph_builder.py",
+    REPO_ROOT / "packages/agents/src/duckclaw/manager/manager_plan_task.py",
+    REPO_ROOT / "packages/agents/src/duckclaw/manager/manager_nodes_invoke.py",
     REPO_ROOT / "packages/agents/src/duckclaw/manager/routing.py",
     REPO_ROOT / "packages/agents/src/duckclaw/manager/fast_plans.py",
 )

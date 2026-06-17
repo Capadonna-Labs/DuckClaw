@@ -79,7 +79,7 @@ También válido bajo `skills: [{ comfyui: { enabled: true } }]`.
 
 Cola: `duckclaw:state_delta:visual`. Consumidor: `services/db-writer/visual_state_delta_handler.py`.
 
-**`target_db_path`:** hub del gateway (`get_gateway_db_path()`, p. ej. `finanzdb1.duckdb`), no la bóveda del worker activo. El worker suele mantener un handle DuckDB abierto en su vault durante ComfyUI; escribir `visual_assets` en el mismo `.duckdb` compite con el singleton db-writer (lock). Los PNG siguen en `db/private/{tenant_id}/artifacts/`.
+**`target_db_path`:** hub del gateway (`get_gateway_db_path()`, p. ej. `gateway.duckdb`), no la bóveda del worker activo. El worker suele mantener un handle DuckDB abierto en su vault durante ComfyUI; escribir `visual_assets` en el mismo `.duckdb` compite con el singleton db-writer (lock). Los PNG siguen en `db/private/{tenant_id}/artifacts/`.
 
 ## Esquema DuckDB
 

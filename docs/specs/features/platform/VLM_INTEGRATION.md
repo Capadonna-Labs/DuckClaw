@@ -14,7 +14,7 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
   "sender_id": "12345678",
   "chat_id": "wr_-100123456789",
   "photo_id": "AgACAgEAAx0...",
-  "caption": "@Finanz evalúa el impacto de esta volatilidad en mi portafolio",
+  "caption": "@research_worker resume el impacto de este gráfico en el contexto del proyecto",
   "mime_type": "image/jpeg"
 }
 ```
@@ -26,7 +26,7 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
   "delta_type": "VLM_CONTEXT_EXTRACTED",
   "mutation": {
     "image_hash": "sha256...",
-    "vlm_summary": "Captura de pantalla de Google Finance mostrando el índice VIX con un valor de 24.55 (-2.77%).",
+    "vlm_summary": "Captura de pantalla de un panel de métricas mostrando un indicador clave con valor 24.55 (-2.77%).",
     "confidence_score": 0.89
   }
 }
@@ -34,12 +34,12 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
 
 ### Flujo Cognitivo
 1. **Ingesta y Filtro (Gateway):** El webhook recibe el mensaje con la imagen. Se aplica el *Zero-Trust Check* (¿El usuario está en `wr_members`?).
-2. **Mention Gate Visual:** Si la imagen **no** tiene un `caption` con una mención explícita (ej. `@Finanz`) o un comando, se hace *Drop Silencioso*. No procesamos imágenes huérfanas para proteger los recursos del Mac mini.
+2. **Mention Gate Visual:** Si la imagen **no** tiene un `caption` con una mención explícita (ej. `@research_worker`) o un comando, se hace *Drop Silencioso*. No procesamos imágenes huérfanas para proteger los recursos del Mac mini.
 3. **Descarga Efímera:** La imagen se descarga a un buffer en memoria o a `/tmp/duckclaw_vlm/` (montado en RAM disk).
 4. **Inferencia Soberana (MLX-VLM):** 
    * Se invoca un modelo cuantizado en Apple Silicon vía **`mlx_vlm` en proceso** (misma familia que Gemma 4 multimodal en disco o HF; sobreescribible con `DUCKCLAW_VLM_MLX_VLM_MODEL`). El cargador pasa `pathlib.Path` al processor/tokenizer (requerido por `mlx_vlm`; evita fallos al unir rutas).
    * **HTTP** (`DUCKCLAW_VLM_MLX_BASE_URL` / `VLM_MLX_BASE_URL`): solo si hay un servidor **OpenAI-compatible con visión** en un puerto distinto del `mlx_lm server` de texto. Mismo host:puerto que el LLM de texto → **404** en `/v1/chat/completions` con `image_url` (el gateway omite ese intento salvo `DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK=1`). Para Gemma 4 **imagen**, lo habitual es **`mlx_vlm` en proceso** en el Gateway con los pesos locales o HF.
-   * **Prompt del sistema VLM:** *"Describe los datos financieros, texto o código presentes en esta imagen de forma concisa. No inventes datos."*
+   * **Prompt del sistema VLM:** *"Describe los datos, texto o código presentes en esta imagen de forma concisa. No inventes datos."*
    * **Fallback:** Si MLX (local o HTTP OpenAI-compatible) falla, el Gateway intenta **Gemini Flash** vía API REST. **OpenAI Vision** solo entra en la cadena si se opta explícitamente con `DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1` y existe `OPENAI_API_KEY` (por defecto: MLX → Gemini, sin OpenAI).
 
 ### Variables de entorno (Gateway — visión)
@@ -64,18 +64,18 @@ El usuario envía capturas de pantalla de mercados (ej. Google Finance, VIX) o f
 
 **Orden HTTP:** por defecto `mlx` → `gemini` (si hay clave). Con `DUCKCLAW_VLM_ALLOW_OPENAI_VISION=1` y `OPENAI_API_KEY`: se añade `openai` al final (o según `DUCKCLAW_VLM_PRIMARY=openai` para priorizar OpenAI en visión).
 5. **Inyección de Contexto:** El texto resultante del VLM se concatena con el `caption` original del usuario y se envía al *Manager Graph* como un mensaje de texto estándar.
-6. **Ejecución del Worker (Degradación Epistémica):** Finanz recibe: *"Usuario dice: '@Finanz evalúa el impacto...'. Contexto visual adjunto: 'Imagen muestra VIX a 24.55'"*. Finanz **debe** ejecutar `fetch_market_data(symbol="VIX")` para validar el valor real en el ledger antes de calcular la *Temperatura* en su modelo CFD.
+6. **Ejecución del Worker (Degradación Epistémica):** El worker delegado recibe: *"Usuario dice: '@research_worker resume el impacto...'. Contexto visual adjunto: 'Imagen muestra indicador clave a 24.55'"*. El worker **debe** ejecutar `fetch_market_data(symbol="…")` o `read_sql` para validar el valor contra una fuente autorizada antes de citarlo en la respuesta.
 
 ### Contratos (Skills)
 *   `process_visual_payload(file_id: str, caption: str) -> str`: Función interna del Gateway que orquesta la descarga y la inferencia VLM. Retorna el string descriptivo.
-*   `verify_visual_claim(symbol: str, claimed_value: float) -> dict`: Skill determinista para Finanz que cruza el valor extraído por el VLM con el valor real del mercado (IBKR/Lake Capadonna).
+*   `verify_visual_claim(symbol: str, claimed_value: float) -> dict`: Skill determinista opcional del worker que cruza el valor extraído por el VLM con una fuente de datos autorizada (p. ej. bridge de mercado o consulta SQL).
 
 ### Validaciones
-*   **Regla de Evidencia Única (Enforced):** El *Validator Node* de Finanz rechazará cualquier `propose_trade` o cálculo de riesgo que cite el valor "24.55" si no existe un tool call exitoso a una fuente de datos autorizada en el mismo turno. La imagen es una hipótesis; el tool call es la evidencia. Si el borrador del agente viola la regla en `set_reply`, el grafo del worker **reintenta un ciclo** (`set_reply → agent → tools`) con `read_sql`/`fetch_market_data` forzado (máx. `DUCKCLAW_VISUAL_EVIDENCE_MAX_RETRIES`, default 1) antes de escalar al usuario.
+*   **Regla de Evidencia Única (Enforced):** El *Validator Node* del worker rechazará cualquier respuesta que cite el valor "24.55" si no existe un tool call exitoso a una fuente de datos autorizada en el mismo turno. La imagen es una hipótesis; el tool call es la evidencia. Si el borrador del agente viola la regla en `set_reply`, el grafo del worker **reintenta un ciclo** (`set_reply → agent → tools`) con `read_sql`/`fetch_market_data` forzado (máx. `DUCKCLAW_VISUAL_EVIDENCE_MAX_RETRIES`, default 1) antes de escalar al usuario.
 *   **Protección de Memoria (Mac mini):** El proceso de MLX-VLM debe correr en un subproceso con límite de memoria estricto. Si el KV Cache del LLM principal (texto) y el VLM compiten por la memoria unificada y exceden el 85% de la RAM, el VLM hace *fail-fast* hacia la API remota.
 *   **Purga de Archivos:** Toda imagen descargada se elimina criptográficamente (`os.remove` + sobrescritura si es disco físico) inmediatamente después de la inferencia. No se guardan imágenes en DuckDB, solo el `image_hash` y el `vlm_summary`.
 
 ### Edge cases
 *   **Imágenes Múltiples (Álbumes en Telegram):** Telegram envía los álbumes como mensajes separados. El Gateway debe agruparlos por `media_group_id` y procesarlos como un solo batch hacia el VLM para no perder contexto, aplicando un límite estricto de max 3 imágenes por request.
-*   **Imágenes sin texto/irrelevantes:** Si el usuario envía un meme al War Room con la mención `@Finanz`, el VLM retornará "Imagen de un gato". Finanz responderá: *"Estímulo visual irrelevante para operaciones de Cyber-Fluid Dynamics. Especifique parámetros financieros."*
+*   **Imágenes sin texto/irrelevantes:** Si el usuario envía un meme al War Room con la mención `@research_worker`, el VLM retornará "Imagen de un gato". El worker responderá que el estímulo visual no aporta datos útiles al dominio configurado y pedirá parámetros concretos.
 *   **Archivos maliciosos (Steganography/Zip bombs):** La validación del `mime_type` debe ser estricta (`image/jpeg`, `image/png`, `image/webp`). Se prohíbe el procesamiento de SVG o PDFs complejos en esta fase inicial para evitar vectores de ataque en la librería de procesamiento de imágenes.

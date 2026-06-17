@@ -1,7 +1,7 @@
 """
 Reddit MCP Bridge — stdio hacia mcp-reddit (npm).
 
-Spec: Capadonna-Driller extension (Reddit sentiment bridge).
+Spec: extension product bridge (Reddit sentiment bridge).
 Requiere: pip mcp; Node/npx; REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT,
           REDDIT_USERNAME, REDDIT_PASSWORD en el entorno del gateway.
 """

@@ -74,7 +74,7 @@ Para que clientes HTTP (Angular, integraciones internas) puedan manejar errores 
       "title": "Too Many Requests",
       "status": 429,
       "detail": "Has excedido el límite de 20 mensajes por minuto.",
-      "instance": "/api/v1/agent/finanz/chat"
+      "instance": "/api/v1/agent/research_worker/chat"
     }
     ```
 

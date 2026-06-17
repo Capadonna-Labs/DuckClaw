@@ -26,6 +26,6 @@ Telegram exige HTTPS. El monorepo no impone un proveedor: cada despliegue debe a
 ## Relación con otros modos
 
 - **Multiplex** (`DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`, varios bots, un solo proceso/puerto): [TELEGRAM_WEBHOOK_MULTIPLEX.md](TELEGRAM_WEBHOOK_MULTIPLEX.md).
-- Rutas `…/webhook/finanz` y `…/webhook/trabajo`: compatibilidad **legado** cuando un solo funnel recibe todo el tráfico; no sustituyen el modo recomendado si ya tienes N URLs → N puertos.
+- Rutas `…/webhook/<worker_slug>` (p. ej. `…/webhook/research_worker`): compatibilidad **legado** cuando un solo funnel recibe todo el tráfico; no sustituyen el modo recomendado si ya tienes N URLs → N puertos.
 
 Operación: [docs/COMANDOS.md](../../../docs/COMANDOS.md) § 2.0. Para verificación local usar `uv run duckops ingress telegram-check`; para encender Tailscale/Funnel + registrar webhooks en modo compacto usar `uv run duckops ingress telegram-start`.

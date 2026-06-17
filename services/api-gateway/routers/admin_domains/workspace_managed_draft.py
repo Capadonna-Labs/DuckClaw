@@ -18,7 +18,7 @@ from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.write_commands import ConfirmWorkspaceManagedDraftCommand
-from routers.admin_domains.playground_chat import _resolved_llm_for_playground
+from routers.admin_domains.playground.llm_settings import resolved_llm_for_playground
 from routers.admin_domains.prompt_policies import (
     WORKSPACE_MANAGED_DRAFT_POLICY_NAME,
     WORKSPACE_MANAGED_DRAFT_POLICY_TYPE,
@@ -263,7 +263,7 @@ def _workspace_managed_draft_prompt(
 
 
 def _workspace_managed_has_configured_llm(*, tenant_id: str, actor: str) -> bool:
-    llm = _resolved_llm_for_playground(
+    llm = resolved_llm_for_playground(
         chat_id="admin-managed-workspace-draft",
         tenant_id=tenant_id,
         actor_email=actor,

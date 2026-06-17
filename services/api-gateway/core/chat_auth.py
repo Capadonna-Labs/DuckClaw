@@ -227,3 +227,15 @@ async def authorize_or_reject(
         status_code=403,
         detail="Acceso denegado. No tienes autorización para interactuar con este agente.",
     )
+
+
+def resolve_authorize_or_reject():
+    """Compat tests: ``monkeypatch.setattr(main, '_authorize_or_reject', ...)``."""
+    import sys
+
+    main_mod = sys.modules.get("main")
+    if main_mod is not None:
+        fn = getattr(main_mod, "_authorize_or_reject", None)
+        if fn is not None and fn is not authorize_or_reject:
+            return fn
+    return authorize_or_reject

@@ -63,10 +63,10 @@ def test_gateway_duckclaw_read_write_is_limited_to_explicit_runtime_compat() -> 
 
 def test_gateway_main_delegates_legacy_fly_rw_exception_to_owner() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
-    chat_owner = (GATEWAY_ROOT / "core" / "agent_chat.py").read_text(encoding="utf-8")
+    graph_owner = (GATEWAY_ROOT / "core" / "chat_graph_runner.py").read_text(encoding="utf-8")
     fly_owner = (GATEWAY_ROOT / "core" / "fly_command_invocation.py").read_text(encoding="utf-8")
 
-    assert "invoke_legacy_fly_command" in chat_owner
+    assert "invoke_legacy_fly_command" in graph_owner
     assert "DuckClaw(" not in main
     assert "DuckClaw(vault_db_path, read_only=True" in fly_owner
     assert "read_only=False" not in fly_owner
@@ -211,10 +211,10 @@ def test_gateway_main_delegates_agent_routes_to_core_module() -> None:
 
 def test_gateway_main_delegates_chat_locks_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
-    chat_owner = (GATEWAY_ROOT / "core" / "agent_chat.py").read_text(encoding="utf-8")
+    graph_owner = (GATEWAY_ROOT / "core" / "chat_graph_runner.py").read_text(encoding="utf-8")
     locks_owner = (GATEWAY_ROOT / "core" / "chat_locks.py").read_text(encoding="utf-8")
 
-    assert "from core.chat_locks import maybe_chat_lock_for_request" in chat_owner
+    assert "from core.chat_locks import maybe_chat_lock_for_request" in graph_owner
     assert "async def _chat_lock" not in main
     assert "async def _maybe_chat_lock_for_request" not in main
     assert "def chat_parallel_invocations_enabled" in locks_owner
@@ -247,6 +247,7 @@ def test_gateway_main_delegates_db_read_to_core_module() -> None:
 def test_gateway_main_delegates_agent_chat_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
     chat_owner = (GATEWAY_ROOT / "core" / "agent_chat.py").read_text(encoding="utf-8")
+    routes_owner = (GATEWAY_ROOT / "core" / "chat_http_routes.py").read_text(encoding="utf-8")
     auth_owner = (GATEWAY_ROOT / "core" / "chat_auth.py").read_text(encoding="utf-8")
     format_owner = (GATEWAY_ROOT / "core" / "chat_reply_format.py").read_text(encoding="utf-8")
 
@@ -256,7 +257,7 @@ def test_gateway_main_delegates_agent_chat_to_core_module() -> None:
     assert "async def agent_chat" not in main
     assert "async def _invoke_chat" not in main
     assert "async def invoke_chat" in chat_owner
-    assert '@router.post("/api/v1/agent/chat")' in chat_owner
+    assert '@router.post("/api/v1/agent/chat")' in routes_owner
     assert "_AUTHORIZED_USERS_TABLE_DDL" in auth_owner
     assert "async def authorize_or_reject" in auth_owner
     assert "def clean_agent_response" in format_owner

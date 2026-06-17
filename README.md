@@ -2,7 +2,7 @@
 
 **Multi-agent platform** with a zero-trust posture, **DuckDB** as the analytical state store, and a **singleton DB-Writer** path for ACID mutations (Gateway and workers enqueue; `services/db-writer` applies).
 
-Cross-platform (Windows / Linux / macOS) · Multi-tenant vaults · Microservices-ready · Spec-driven development (`specs/`)
+Cross-platform (Windows / Linux / macOS) · Multi-tenant vaults · Microservices-ready · Spec-driven development (`docs/specs/`)
 
 ---
 
@@ -10,11 +10,11 @@ Cross-platform (Windows / Linux / macOS) · Multi-tenant vaults · Microservices
 
 | Qué | Dónde |
 |-----|--------|
-| **Specs (normativa)** | [`specs/`](specs/) — leer antes de implementar |
+| **Specs (normativa)** | [`docs/specs/`](docs/specs/) — leer antes de implementar |
 | **Runbooks** | [`docs/`](docs/) — Markdown en repo, sin HTML |
 | **Mapa del repo** | [`MONOREPO.md`](MONOREPO.md) — `packages/` vs `services/` |
 
-Entrada: [`docs/index.md`](docs/index.md) · Diagrama: [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md)
+Entrada: [`docs/README.md`](docs/README.md) · Diagrama: [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md)
 
 ---
 
@@ -24,7 +24,7 @@ Ver detalle en [`MONOREPO.md`](MONOREPO.md). Resumen:
 
 ```
 duckclaw/
-├── specs/             # SDD — fuente de verdad
+├── docs/specs/        # SDD — fuente de verdad normativa
 ├── docs/              # Runbooks (instalar, PM2, troubleshooting)
 ├── services/          # Procesos: api-gateway, db-writer, heartbeat, …
 ├── packages/          # Librerías: shared, agents, core, duckops
@@ -54,7 +54,7 @@ uv run duckops init # interactive wizard
 uv run duckops serve --gateway
 ```
 
-Operational detail (Redis, Telegram, PM2—including `duckops serve --pm2 --gateway`, DB-Writer—`doctor.py`, VLM env vars, trace flags): see [`docs/COMANDOS.md`](docs/COMANDOS.md) (**§8** cheat sheet) and [`docs/Installation.md`](docs/Installation.md). VLM spec: `specs/features/platform/VLM_INTEGRATION.md`.
+Operational detail (Redis, Telegram, PM2—including `duckops serve --pm2 --gateway`, DB-Writer—`doctor.py`, VLM env vars, trace flags): see [`docs/COMANDOS.md`](docs/COMANDOS.md) (**§8** cheat sheet). VLM spec (stale): [`docs/specs/features/platform/VLM_INTEGRATION.md`](docs/specs/features/platform/VLM_INTEGRATION.md).
 
 ---
 
@@ -100,7 +100,7 @@ No pongas el PAT en la línea de `docker run` (sale en histórico de shell); usa
 
 ## Testing the singleton-writer pipeline
 
-End-to-end **API Gateway → Redis → DB Writer → DuckDB** is covered by [`tests/run_singleton_writer_pipeline.py`](tests/run_singleton_writer_pipeline.py). Architecture context: [`docs/architecture/singleton_writer.md`](docs/architecture/singleton_writer.md); infrastructure narrative: `specs/core/01_System_Infrastructure.md` and `specs/core/00_Flujo de Vida del Dato (Wizard).md`.
+End-to-end **API Gateway → Redis → DB Writer → DuckDB** is covered by [`tests/run_singleton_writer_pipeline.py`](tests/run_singleton_writer_pipeline.py). Architecture context: [`docs/architecture/singleton_writer.md`](docs/architecture/singleton_writer.md); infrastructure narrative: [`docs/core/01_System_Infrastructure.md`](docs/core/01_System_Infrastructure.md) and [`docs/core/00_Flujo de Vida del Dato (Wizard).md`](docs/core/00_Flujo de Vida del Dato (Wizard).md).
 
 **Unit tests** (no live Redis):
 
@@ -127,7 +127,7 @@ docker build -t duckclaw-api -f docker/api/Dockerfile .
 
 ## Spec-driven development
 
-No substantial feature without an approved spec under [`specs/`](specs/). Index and conventions: [`specs/SDD_INDEX.md`](specs/SDD_INDEX.md).
+No substantial feature without an approved spec under [`docs/specs/`](docs/specs/). Platform index: [`docs/specs/features/platform/README.md`](docs/specs/features/platform/README.md).
 
 ---
 

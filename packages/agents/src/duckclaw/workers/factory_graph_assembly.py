@@ -41,6 +41,7 @@ def build_worker_graph(
     open_vault_read_only: bool = False,
     db: Any | None = None,
     tenant_id: str = "default",
+    max_tool_rounds: int | None = None,
 ) -> Any:
     ctx = initialize_worker_graph_context(
         worker_id,
@@ -59,6 +60,8 @@ def build_worker_graph(
         db=db,
         tenant_id=tenant_id,
     )
+    if max_tool_rounds is not None:
+        ctx.max_tool_rounds = max(1, int(max_tool_rounds))
     spec = ctx.spec
     db = ctx.db
     use_cm = ctx.use_context_monitor

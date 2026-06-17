@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+from typing import Any
 
 from duckclaw.graphs import on_the_fly_commands
 
@@ -11,6 +12,7 @@ GOALS_EXPORTS = (
     "_normalize_belief_key",
     "_get_goals_registry_fallback_first",
     "_get_goals_registry_for_chat",
+    "list_goal_signal_autocomplete",
     "get_manager_goals",
     "set_manager_goals",
     "_goal_title",
@@ -50,6 +52,49 @@ def test_goals_registry_does_not_fallback_to_filesystem_manifests() -> None:
 
     assert leaked == []
     assert "duckclaw.worker_quality_signals" in source
+
+
+def test_goals_autocomplete_reads_quality_signals_without_manifests(monkeypatch: Any) -> None:
+    from duckclaw.commands import goals as goals_module
+
+    calls: list[tuple[str, str]] = []
+
+    def _fake_options(db: Any, *, tenant_id: str, worker_id: str) -> list[Any]:
+        del db
+        calls.append((tenant_id, worker_id))
+        from duckclaw.worker_quality_signals import WorkerQualitySignalOption
+
+        return [
+            WorkerQualitySignalOption(
+                key="latency_ms",
+                label="Latencia",
+                target=250.0,
+                threshold=25.0,
+                comparison="ceiling",
+            )
+        ]
+
+    monkeypatch.setattr(
+        "duckclaw.worker_quality_signals.list_worker_quality_signal_options",
+        _fake_options,
+    )
+
+    out = goals_module.list_goal_signal_autocomplete(
+        object(),
+        tenant_id="tenant_a",
+        worker_id="analytics-worker",
+    )
+
+    assert calls == [("tenant_a", "analytics-worker")]
+    assert out == [
+        {
+            "key": "latency_ms",
+            "label": "Latencia",
+            "target": 250.0,
+            "threshold": 25.0,
+            "comparison": "ceiling",
+        }
+    ]
 
 
 def test_on_the_fly_goals_imports_remain_compatible() -> None:

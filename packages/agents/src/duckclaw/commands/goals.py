@@ -37,6 +37,31 @@ def _get_goals_registry_fallback_first() -> Optional[Any]:
     return None
 
 
+def list_goal_signal_autocomplete(
+    db: Any,
+    *,
+    tenant_id: str,
+    worker_id: str,
+) -> list[dict[str, Any]]:
+    """Stub RO para autocompletar metas /goals desde señales de calidad DB-first."""
+    from duckclaw.worker_quality_signals import list_worker_quality_signal_options
+
+    return [
+        {
+            "key": option.key,
+            "label": option.label,
+            "target": option.target,
+            "threshold": option.threshold,
+            "comparison": option.comparison,
+        }
+        for option in list_worker_quality_signal_options(
+            db,
+            tenant_id=str(tenant_id or "default").strip() or "default",
+            worker_id=str(worker_id or "").strip(),
+        )
+    ]
+
+
 def _get_goals_registry_for_chat(
     db: Any,
     chat_id: Any,

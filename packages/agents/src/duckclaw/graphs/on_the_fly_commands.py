@@ -1,7 +1,26 @@
 """
-On-the-Fly CLI: comandos de Telegram que mutan estado del grafo sin reiniciar.
+On-the-Fly CLI: fachada de compatibilidad y cableado graph-local.
 
 Spec: specs/interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md
+DB-first: docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md
+
+La lógica de comandos vive en ``duckclaw.commands.*`` (dispatch en
+``fly_dispatch``). Este módulo reexporta símbolos legacy y registra
+adaptadores que **no** pueden moverse a ``commands`` sin ciclos
+``commands → graphs → commands``:
+
+- ``_team_access_acl_db_provider`` → ``graph_server.get_db`` para ACL whitelist.
+- ``_GraphHeartbeatAdapter`` → ``chat_heartbeat`` (Redis/SSE + persistencia DB).
+- ``_GraphMeditateTickHeartbeatPublisher`` → heartbeat admin UI en ticks /meditate.
+- ``configure_heartbeat_runtime_db_provider`` / ``configure_provider_budget_runtime_db_provider``
+  → wiring de ``get_db`` hacia runtime settings (best-effort al importar).
+- ``_sandbox_session_cleanup`` → ``graphs.sandbox.cleanup_sandbox_session_for_chat``.
+- ``_prompt_template_ids_provider`` / ``_prompt_system_fallback_provider`` →
+  catálogo workers y prompt ``default`` en disco (solo worker ``default``).
+- ``_browser_sandbox_sensor_lines_provider`` → diagnóstico Docker/Playwright sandbox.
+
+No extraer estos bloques a ``duckclaw.commands.*`` sin romper el guardrail
+``from duckclaw.graphs`` en módulos de comandos.
 """
 
 from __future__ import annotations
@@ -95,6 +114,7 @@ from duckclaw.commands.goals import (
     configure_goals_vault_user_id_resolver as _configure_goals_vault_user_id_resolver,
     execute_homeostasis_goals as execute_homeostasis_goals,
     get_manager_goals as get_manager_goals,
+    list_goal_signal_autocomplete as list_goal_signal_autocomplete,
     set_manager_goals as set_manager_goals,
 )
 from duckclaw.commands.history import (
@@ -297,11 +317,13 @@ class _GraphMeditateTickHeartbeatPublisher:
 _configure_meditate_tick_heartbeat_publisher(_GraphMeditateTickHeartbeatPublisher())
 try:
     from duckclaw.graphs.chat_heartbeat import configure_heartbeat_runtime_db_provider
+    from duckclaw.graphs.graph_server import get_db
 
     configure_heartbeat_runtime_db_provider(get_db)
 except Exception:
     pass
 try:
+    from duckclaw.graphs.graph_server import get_db
     from duckclaw.workers.provider_input_budget import configure_provider_budget_runtime_db_provider
 
     configure_provider_budget_runtime_db_provider(get_db)

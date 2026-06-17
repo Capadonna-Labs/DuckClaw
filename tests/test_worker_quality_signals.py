@@ -55,6 +55,42 @@ def test_worker_quality_signals_roundtrip_db_first() -> None:
     assert rows[0].label == "Latencia"
 
 
+def test_worker_quality_signals_autocomplete_options_read_only() -> None:
+    from duckclaw.worker_quality_signals import (
+        list_worker_quality_signal_options,
+        upsert_worker_quality_signal,
+    )
+
+    con = duckdb.connect(":memory:")
+    try:
+        db = _DuckDbAdapter(con)
+        upsert_worker_quality_signal(
+            db,
+            tenant_id="tenant_a",
+            worker_id="analytics-worker",
+            key="completion_rate_pct",
+            target=95.0,
+            threshold=2.0,
+            comparison="ceiling",
+            label="Tasa de completitud",
+        )
+
+        options = list_worker_quality_signal_options(
+            db,
+            tenant_id="tenant_a",
+            worker_id="analytics-worker",
+        )
+    finally:
+        con.close()
+
+    assert len(options) == 1
+    assert options[0].key == "completion_rate_pct"
+    assert options[0].label == "Tasa de completitud"
+    assert options[0].target == 95.0
+    assert options[0].threshold == 2.0
+    assert options[0].comparison == "ceiling"
+
+
 def test_worker_quality_signals_feed_goals_registry() -> None:
     from duckclaw.commands.chat_state import set_chat_state
     from duckclaw.commands.goals import _get_goals_registry_for_chat

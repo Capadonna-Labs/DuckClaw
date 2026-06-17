@@ -23,20 +23,26 @@ Un clon del monorepo debe llevar a un **stack local funcional** (gateway + DB-wr
 
 ## Flujo recomendado (seguro / probable)
 
-Orden canónico para un dev nuevo en macOS/Linux con `uv` instalado:
+Orden canónico para un dev nuevo en **macOS o Linux**:
 
 | Paso | Comando | Qué hace |
 |------|---------|----------|
-| 1 | `uv sync` | Instala workspace (`duckclaw-shared`, `duckops`, gateway, agents). |
-| 2 | `uv run duckops doctor` | Diagnóstico **solo lectura**: Redis, schema, admin key, puerto gateway. Sin mutar PM2 ni `.env`. |
-| 3 | `uv run duckops init` | **Sovereign Wizard v2.0** por defecto (TUI). Materializa `.env`, secretos, PM2 ecosystems, migración DuckDB. |
-| 4 | `uv run duckclaw-migrate` | Idempotente si `init` ya migró; útil tras pull con nuevas migraciones. |
-| 5 | `uv run duckops serve --gateway --pm2` | Arranca gateway + DB-Writer (flag `--stack` por defecto) y comprueba Redis. |
-| 6 | `uv run duckops stack up` | Alternativa explícita si solo quieres levantar procesos PM2 sin re-desplegar gateway. |
-| 7 | `uv run duckops doctor --smoke` | Probe `GET /health` si el gateway escucha. |
-| 8 | Abrir consola admin | `http://127.0.0.1:3001` (o `DUCKCLAW_ADMIN_PORT`) tras `npm run dev` en `apps/duckclaw-admin`. |
+| **0** | `uv run duckops up` | **Todo en uno:** prerequisitos, wizard (1ª vez), migrate, PM2 stack, admin dev, navegador. |
+| 1 | (alternativa) `uv run duckops bootstrap --yes` | Solo prerequisitos + `uv sync`. |
+| 2 | `uv run duckops init` | TUI si no usaste `up` o reconfiguras. |
+| 3 | `uv run duckops smoke` | Verificar `/health` tras cambios. |
 
-**Atajo clásico:** `uv run duckops init --classic` → `scripts/duckclaw_setup_wizard.py` (Rich). Mantener hasta retirada explícita en roadmap de fachadas.
+Tras login en consola admin → **Playground** (chat), no Overview.
+
+Alternativas:
+
+- `uv run duckops doctor` — solo diagnóstico (lista uv, Redis, Node, PM2).
+- `uv run duckops doctor --bootstrap --yes` — bootstrap + diagnóstico en un comando.
+- `uv run duckops bootstrap --check` — lista prerequisitos sin instalar.
+
+**Plataformas:** auto-install en macOS (Homebrew) y Linux (apt + sudo). Windows nativo: no soportado; usar WSL2.
+
+**Atajo clásico:** `uv run duckops init --classic` → `scripts/duckclaw_setup_wizard.py` (Rich).
 
 ### Qué debe crear `init` (objetivo fase 2)
 
@@ -134,9 +140,17 @@ Prioridad: **cero imports prod** → borrar en PR pequeño con test de contrato 
 
 ---
 
-## Day 1 smoke (5 comandos)
+## Day 1 smoke
 
-Ejecutar desde la raíz del monorepo tras `uv sync`:
+### Camino único (recomendado)
+
+```bash
+uv run duckops up
+```
+
+Criterio de éxito: prerequisitos OK, wizard (si aplica), migrate, PM2 stack online, `doctor --smoke` 2xx, admin en `:3001`, login → **Playground**.
+
+### Camino granular (debug)
 
 ```bash
 uv run duckops doctor
@@ -154,7 +168,7 @@ Criterio de éxito:
 4. `serve --gateway --pm2 --stack` — Gateway y DB-Writer `online`, health OK (o mensaje de espera).
 5. `doctor --smoke` — HTTP 2xx en `/health`.
 
-Consola admin (fuera de los 5 comandos CLI): `cd apps/duckclaw-admin && npm run dev` → login con credenciales seed.
+Consola admin: integrada en `duckops up` (menú TUI/web); manual: `cd apps/duckclaw-admin && pnpm dev`.
 
 ---
 
@@ -194,7 +208,7 @@ Complementa `duckclaw-healthcheck` (infra Redis + probe HTTP opcional) con foco 
 | Smoke | `doctor --smoke`, `duckops smoke` | No prueba login admin ni consola Next.js |
 | Redis | Doctor falla si no hay ping | Obligatorio para gateway en runtime |
 | DB-Writer | PM2 `DuckClaw-DB-Writer` | Requiere binario compilado / ecosystem generado |
-| Consola admin | `.env.local` sincronizado | `cd apps/duckclaw-admin && npm install && npm run dev` |
+| Consola admin | `.env.local` sincronizado | `cd apps/duckclaw-admin && pnpm install && pnpm dev` |
 | Telegram / MLX | Opcionales en init | No cubiertos por smoke |
 
 ---

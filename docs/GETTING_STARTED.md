@@ -2,34 +2,66 @@
 
 Entrada mínima para un dev nuevo. Detalle normativo: [`docs/specs/features/platform/PLUG_AND_PLAY_ONBOARDING.md`](specs/features/platform/PLUG_AND_PLAY_ONBOARDING.md).
 
-## Requisitos
+## Requisitos automáticos (macOS / Linux)
 
-- Python 3.11+ y [uv](https://docs.astral.sh/uv/)
-- Node 20+ (solo si usas la consola admin)
-- Redis local o Docker (el wizard puede levantar Redis)
-- PM2 (`npm i -g pm2`) para stack local recomendado
+No necesitas memorizar la lista: el CLI instala lo que falte.
 
-## Camino rápido
+| Herramienta | Para qué |
+|-------------|----------|
+| **uv** | Dependencias Python del monorepo |
+| **Redis** | Colas y sesiones |
+| **Node + npm** | Consola admin |
+| **PM2** | Gateway y db-writer en segundo plano |
+
+Soportado: **macOS** (Homebrew) y **Linux** (apt). Windows nativo: usa WSL2.
+
+## Camino plug & play (un comando)
 
 ```bash
 git clone <repo> duckclaw && cd duckclaw
-uv sync
-uv run duckops doctor          # diagnóstico sin tocar el sistema
-uv run duckops init            # Sovereign Wizard v2 (TUI); --classic para wizard Rich
-uv run duckclaw-migrate        # idempotente tras init o pull
-uv run duckops serve --gateway --pm2   # gateway + db-writer (--stack por defecto)
-uv run duckops doctor --smoke  # probe GET /health tras arrancar stack
+
+# Si no tienes uv aún: curl -LsSf https://astral.sh/uv/install.sh | sh
+uv run duckops up
 ```
 
-Consola admin:
+`duckops up` hace en orden:
+
+1. Instala **uv**, **Redis**, **Node**, **pnpm**, **PM2** si faltan (macOS/Linux) + `uv sync`
+2. Abre el **wizard TUI** la primera vez (admin + `.env` + PM2)
+3. `duckclaw-migrate`
+4. Gateway + DB-Writer en PM2
+5. Smoke `/health`
+6. **Menú persistente:** chat TUI, consola web o salir — puedes alternar sin bajar PM2
+
+Tras login web → **Playground** (chat).
+
+En el chat TUI: `/web` abre la consola sin salir del terminal.
+
+### Smoke `/health` (paso 5)
+
+Comprueba que el **API Gateway** responde en `http://localhost:8000/health` con HTTP 200. No prueba login ni Playground; solo confirma que el backend está vivo tras PM2.
+
+### Flags útiles
+
+| Flag | Uso |
+|------|-----|
+| `--no-yes` | Solo comprueba prerequisitos; no instala brew/apt |
+| `--skip-init` | No abrir wizard (falla si falta config) |
+| `--skip-admin` | Solo backend; sin Next.js |
+| `--no-prompt` | Salir tras el resumen (CI); sin menú interactivo |
+| `--ui tui\|web\|none` | Elegir modo sin menú |
+| `--no-browser` | Opción web sin abrir URL |
+| `--manual` | Wizard con Telegram/Tailscale |
+
+### Paso a paso (alternativa)
 
 ```bash
-cd apps/duckclaw-admin
-# .env.local se sincroniza en duckops init; si falta: cp .env.example .env.local
-npm install && npm run dev
+uv run duckops bootstrap --yes
+uv run duckops init
+uv run duckclaw-migrate
+uv run duckops serve --gateway --pm2
+uv run duckops smoke
 ```
-
-Abre `http://127.0.0.1:3001` y entra con `DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASSWORD` del `.env` raíz.
 
 ## Siguiente lectura
 
@@ -41,9 +73,11 @@ Abre `http://127.0.0.1:3001` y entra con `DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMI
 
 | Comando | Uso |
 |---------|-----|
-| `uv run duckops doctor` | Redis, schema, admin key, puerto |
-| `uv run duckops doctor --smoke` | Lo anterior + GET `/health` |
-| `uv run duckops smoke` | Alias de `doctor --smoke` |
-| `uv run duckclaw-healthcheck` | Infra Redis (+ probe gateway opcional) |
-| `uv run duckclaw-migrate --verify-only` | Solo verificar migraciones |
-| `uv run duckops stack status` | Estado PM2 gateway / db-writer |
+| `uv run duckops up` | **Día 0 completo** (recomendado) |
+| `uv run duckops bootstrap --yes` | Solo prerequisitos + `uv sync` |
+| `uv run duckops bootstrap --check` | Solo lista qué falta |
+| `uv run duckops doctor --bootstrap --yes` | Bootstrap + diagnóstico |
+| `uv run duckops init --no-bootstrap` | Wizard sin tocar el sistema |
+| `uv run duckops smoke` | Health check del gateway |
+| `uv run duckclaw-migrate --verify-only` | Verificar migraciones |
+| `uv run duckops stack status` | Estado PM2 |

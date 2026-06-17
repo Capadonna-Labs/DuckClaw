@@ -45,6 +45,16 @@ def cmd_init(
         "--classic",
         help="Wizard legacy (Rich, scripts/duckclaw_setup_wizard.py) en lugar del Sovereign v2.0.",
     ),
+    bootstrap: bool = typer.Option(
+        True,
+        "--bootstrap/--no-bootstrap",
+        help="Verifica/instala uv, Redis, Node y PM2 antes del wizard.",
+    ),
+    yes: bool = typer.Option(
+        True,
+        "--yes/--no-yes",
+        help="Instalar paquetes del sistema (brew/apt) si faltan. Usa --no-yes para solo comprobar.",
+    ),
     use_wizard: bool = typer.Option(
         True,
         "--wizard/--no-wizard",
@@ -56,6 +66,26 @@ def cmd_init(
         return
 
     repo_path = repo.resolve() if repo is not None else None
+    base = repo_path if repo_path is not None else _repo_root()
+
+    if bootstrap:
+        from duckops.prerequisites import ensure_development_prerequisites, platform_label
+
+        typer.secho(f"Prerequisitos ({platform_label()})", fg=typer.colors.CYAN)
+        if not ensure_development_prerequisites(
+            base,
+            install=True,
+            assume_yes=yes,
+            sync_python=True,
+            print_fn=typer.echo,
+        ):
+            typer.secho(
+                "Bootstrap falló. Prueba: uv run duckops bootstrap --yes",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo("")
 
     if not classic:
         from duckops.sovereign.runner import run_sovereign_chat, run_sovereign_wizard
@@ -64,7 +94,6 @@ def cmd_init(
             raise typer.Exit(run_sovereign_chat(repo_path))
         raise typer.Exit(run_sovereign_wizard(repo_path, manual=manual))
 
-    base = repo_path if repo_path is not None else _repo_root()
     wizard_script = base / "scripts" / "duckclaw_setup_wizard.py"
 
     if not wizard_script.is_file():

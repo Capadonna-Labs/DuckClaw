@@ -15,12 +15,22 @@ from prompt_toolkit import PromptSession
 from rich.console import Console
 from rich.panel import Panel
 
+from duckops.admin_dev_server import (
+    admin_login_url,
+    ensure_admin_web_ready,
+    open_admin_browser,
+)
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.materialize import load_draft_json
 from duckops.sovereign.tui_chat_layout import render_chat_intro
 from duckops.sovereign.tui_shell import TuiShell
 from duckops.sovereign.wizard_theme import DUCK_ACCENT, PANEL_BORDER, panel_title
-from duckops.sovereign.workers_catalog import list_worker_picks
+from duckops.sovereign.duckdb_health import open_repo_duckdb_readonly
+from duckops.sovereign.workers_catalog import (
+    list_worker_picks,
+    resolve_worker_choice,
+    suggest_default_worker_id,
+)
 
 
 @dataclass(frozen=True)
@@ -180,9 +190,26 @@ class PlaygroundChatClient:
 
 def _help_text() -> str:
     return (
-        "Comandos: /workers · /worker <id> · /quit\n"
+        "Comandos: /workers · /worker <id> · /web · /quit\n"
+        "/web abre la consola Playground en el navegador (gateway + admin activos).\n"
         "Escribe un mensaje para hablar con el agente seleccionado."
     )
+
+
+def _format_http_chat_error(exc: httpx.HTTPStatusError) -> str:
+    detail = ""
+    try:
+        payload = exc.response.json()
+        if isinstance(payload, dict):
+            detail = str(payload.get("detail") or payload.get("title") or "")
+    except Exception:
+        detail = exc.response.text[:240] if exc.response else ""
+    if "prompt policy not found" in detail.lower():
+        return (
+            f"[red]HTTP {exc.response.status_code}[/] Falta policy en DuckDB.\n"
+            "[dim]Ejecuta: uv run duckclaw-migrate[/]"
+        )
+    return f"[red]HTTP {exc.response.status_code}[/] {detail}".strip()
 
 
 def run_tui_chat(
@@ -202,7 +229,6 @@ def run_tui_chat(
         )
         return 1
 
-    picks = list_worker_picks(repo_root)
     worker_id = cfg.default_worker_id
     port_match = re.search(r":(\d+)$", cfg.base_url)
     from duckclaw.gateway_port import resolve_gateway_port
@@ -219,6 +245,25 @@ def run_tui_chat(
     shell.show_tenant_in_chrome = True
     shell.note("Modo chat TUI")
 
+    db = open_repo_duckdb_readonly(repo_root, shell_draft)
+    try:
+        picks = list_worker_picks(repo_root, db=db, tenant_id=cfg.tenant_id)
+    finally:
+        if db is not None and hasattr(db, "close"):
+            try:
+                db.close()
+            except Exception:
+                pass
+
+    worker_id = suggest_default_worker_id(picks, worker_id)
+    cfg = GatewayChatConfig(
+        base_url=cfg.base_url,
+        admin_key=cfg.admin_key,
+        tenant_id=cfg.tenant_id,
+        telegram_user_id=cfg.telegram_user_id,
+        default_worker_id=worker_id,
+    )
+
     render_chat_intro(
         console,
         base_url=cfg.base_url,
@@ -233,7 +278,7 @@ def run_tui_chat(
 
     while True:
         try:
-            raw = session.prompt("[magenta]*[/] ", default="")
+            raw = session.prompt("› ", default="")
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Chat finalizado.[/]")
             return 0
@@ -247,6 +292,16 @@ def run_tui_chat(
         if low in ("/quit", "/salir", "/q"):
             console.print("[dim]Hasta luego.[/]")
             return 0
+        if low in ("/web", "/ui", "/browser", "/navegador"):
+            if ensure_admin_web_ready(repo_root, print_fn=lambda m: console.print(m)):
+                console.print(f"[green]Consola web:[/] {admin_login_url(repo_root)}")
+                open_admin_browser(repo_root, print_fn=lambda m: console.print(m))
+            else:
+                console.print(
+                    "[yellow]No se pudo levantar la consola.[/] "
+                    "cd apps/duckclaw-admin && pnpm dev"
+                )
+            continue
         if low == "/workers":
             if not picks:
                 console.print("[yellow]No hay plantillas en forge/templates.[/]")
@@ -260,7 +315,11 @@ def run_tui_chat(
             if len(parts) < 2 or not parts[1].strip():
                 console.print("[yellow]Uso: /worker <id>[/]")
                 continue
-            worker_id = parts[1].strip()
+            resolved = resolve_worker_choice(parts[1].strip(), picks, repo_root)
+            if not resolved:
+                console.print(f"[yellow]Worker desconocido:[/] {parts[1].strip()}")
+                continue
+            worker_id = resolved
             cfg = GatewayChatConfig(
                 base_url=cfg.base_url,
                 admin_key=cfg.admin_key,
@@ -276,12 +335,7 @@ def run_tui_chat(
         try:
             result = client.post_chat(line, worker_id=worker_id, stream=use_stream)
         except httpx.HTTPStatusError as exc:
-            detail = ""
-            try:
-                detail = exc.response.json().get("detail", "")
-            except Exception:
-                detail = exc.response.text[:200] if exc.response else ""
-            console.print(f"[red]HTTP {exc.response.status_code}[/] {detail}".strip())
+            console.print(_format_http_chat_error(exc))
             continue
         except httpx.RequestError as exc:
             console.print(

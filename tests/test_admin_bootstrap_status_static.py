@@ -50,3 +50,14 @@ def test_login_page_renders_degraded_gateway_state_without_masking_as_credential
     assert "status.recoveryCommand" in banner
     assert "gateway_unreachable" in store
     assert "Gateway no disponible" in store
+
+
+def test_login_defaults_to_playground_after_auth() -> None:
+    store = AUTH_STORE.read_text(encoding="utf-8")
+    login = LOGIN_PAGE.read_text(encoding="utf-8")
+
+    assert "export function adminPostAuthPath" in store
+    assert "return '/playground'" in store
+    assert "adminPostAuthPath(saved)" in login
+    assert "adminPostAuthPath(null)" in login
+    assert "router.replace('/overview'" not in login

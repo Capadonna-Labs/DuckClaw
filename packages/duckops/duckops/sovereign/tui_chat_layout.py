@@ -51,7 +51,7 @@ def render_chat_intro(
     console.print("[bold]Primeros pasos[/]")
     console.print("  1. Escribe un mensaje o usa [cyan]/workers[/] para cambiar agente.")
     console.print("  2. Sé concreto para mejores respuestas del playground.")
-    console.print("  3. [cyan]/help[/] · [cyan]/worker <id>[/] · [cyan]/quit[/]")
+    console.print("  3. [cyan]/help[/] · [cyan]/worker <id>[/] · [cyan]/web[/] · [cyan]/quit[/]")
     console.print()
     duck = audit_duckdb(repo_root, draft, quick=True)
     duck_line = duckdb_chrome_summary(duck)

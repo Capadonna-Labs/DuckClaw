@@ -30,7 +30,7 @@ function LoginForm() {
   }, [router]);
 
   useEffect(() => {
-    if (hasHydrated && isAuthenticated) router.replace('/overview');
+    if (hasHydrated && isAuthenticated) router.replace(adminPostAuthPath(null));
   }, [hasHydrated, isAuthenticated, router]);
 
   const submitLogin = useCallback(

@@ -43,27 +43,57 @@ def cmd_doctor(
     ctx: typer.Context,
     repo: Path | None = typer.Option(None, "--repo", "-C", help="Raíz del monorepo."),
     smoke: bool = typer.Option(False, "--smoke", help="Además, probe GET /health si el gateway escucha."),
+    bootstrap: bool = typer.Option(
+        False,
+        "--bootstrap",
+        help="Instala prerequisitos faltantes (uv, Redis, Node, PM2) y ejecuta uv sync.",
+    ),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        "-y",
+        help="Con --bootstrap: instalar sin pedir confirmación (brew/apt).",
+    ),
 ) -> None:
-    """Comprueba Redis, migraciones, admin key y puerto gateway (sin modificar el sistema)."""
+    """Comprueba Redis, migraciones, admin key y puerto gateway."""
     if ctx.invoked_subcommand is not None:
         return
 
     root = (repo or _repo_root()).resolve()
+
+    if bootstrap:
+        from duckops.prerequisites import ensure_development_prerequisites, platform_label
+
+        typer.secho(f"DuckClaw bootstrap ({platform_label()})", fg=typer.colors.CYAN)
+        if not ensure_development_prerequisites(
+            root,
+            install=True,
+            assume_yes=yes,
+            sync_python=True,
+            print_fn=typer.echo,
+        ):
+            raise typer.Exit(1)
+        typer.echo("")
+
     _load_dotenv(root)
     typer.secho("DuckClaw doctor", fg=typer.colors.CYAN)
 
     critical_ok = True
 
     try:
-        from duckclaw.runtime_env import resolve_redis_url
-        from duckops.sovereign.validate import redis_ping_url
+        from duckops.prerequisites import check_all
 
-        redis_url = resolve_redis_url()
-        ok_redis, msg_redis = redis_ping_url(redis_url)
-        if not _emit("Redis", ok_redis, msg_redis if ok_redis else f"{msg_redis} · {redis_url}"):
-            critical_ok = False
+        for tool in check_all():
+            is_critical = tool.name == "Redis"
+            if not _emit(
+                tool.name,
+                tool.ok,
+                f"{tool.version} · {tool.detail}" if tool.version else tool.detail,
+            ):
+                if is_critical:
+                    critical_ok = False
     except Exception as exc:
-        if not _emit("Redis", False, str(exc)[:160]):
+        if not _emit("Prerequisitos", False, str(exc)[:160]):
             critical_ok = False
 
     db_path = ""
@@ -138,7 +168,10 @@ def cmd_doctor(
             critical_ok = False
 
     if not critical_ok:
-        typer.secho("Corrige lo anterior o ejecuta: uv run duckops init", fg=typer.colors.YELLOW)
+        typer.secho(
+            "Corrige lo anterior. Instala prerequisitos: uv run duckops bootstrap --yes",
+            fg=typer.colors.YELLOW,
+        )
         raise typer.Exit(1)
 
     typer.secho("Listo para init/serve o stack ya operativo.", fg=typer.colors.GREEN)

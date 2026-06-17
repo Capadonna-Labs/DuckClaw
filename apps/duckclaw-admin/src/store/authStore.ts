@@ -108,7 +108,7 @@ export function adminPostAuthPath(returnTo: string | null | undefined): string {
   if (returnTo && returnTo.startsWith('/') && returnTo !== '/login') {
     return returnTo;
   }
-  return '/overview';
+  return '/playground';
 }
 
 /** @deprecated RBAC is server-derived; kept for compatibility during migration. */

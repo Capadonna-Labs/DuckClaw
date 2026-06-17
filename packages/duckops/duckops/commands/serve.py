@@ -26,6 +26,11 @@ def cmd_serve(
     ),
     pm2: bool = typer.Option(False, "--pm2", help="Desplegar como servicio PM2."),
     gateway: bool = typer.Option(False, "--gateway", "-g", help="Usar microservicio services/api-gateway (Telegram, agentes)."),
+    stack: bool = typer.Option(
+        True,
+        "--stack/--no-stack",
+        help="Con --gateway --pm2: arranca DB-Writer y comprueba Redis antes.",
+    ),
     name: str = typer.Option(
         None,
         "--name",
@@ -63,6 +68,25 @@ def cmd_serve(
         if port is not None
         else resolve_gateway_port(repo, app_name=effective_name)
     )
+
+    if gateway and pm2 and stack:
+        try:
+            from duckclaw.runtime_env import resolve_redis_url
+            from duckops.sovereign.validate import redis_ping_url
+
+            redis_url = resolve_redis_url()
+            ok_redis, msg_redis = redis_ping_url(redis_url)
+            if ok_redis:
+                typer.secho(f"Redis OK — {msg_redis}", fg=typer.colors.GREEN)
+            else:
+                typer.secho(
+                    f"Redis no responde ({msg_redis}). "
+                    "Arranca Redis (docker compose, brew services) antes del stack.",
+                    fg=typer.colors.YELLOW,
+                )
+        except Exception as exc:
+            typer.secho(f"No se pudo comprobar Redis: {exc}", fg=typer.colors.YELLOW)
+
     code = serve_fn(
         host=host,
         port=effective_port,
@@ -76,3 +100,29 @@ def cmd_serve(
     )
     if code != 0:
         raise typer.Exit(code)
+
+    if gateway and pm2 and stack:
+        import duckops.commands.stack as stack_mod
+
+        db_ecosystem = repo / "config" / "ecosystem.db-writer.config.cjs"
+        if db_ecosystem.is_file():
+            try:
+                stack_mod._pm2_start(db_ecosystem, stack_mod.DB_WRITER_NAME)
+                typer.secho("DB-Writer PM2 arrancado (DuckClaw-DB-Writer).", fg=typer.colors.GREEN)
+            except typer.Exit:
+                raise
+            except Exception as exc:
+                typer.secho(f"DB-Writer: {exc}", fg=typer.colors.YELLOW)
+        else:
+            typer.secho(
+                f"No existe {db_ecosystem}; ejecuta duckops init o duckops stack up.",
+                fg=typer.colors.YELLOW,
+            )
+        if stack_mod._wait_for_gateway_health("127.0.0.1", effective_port, 15.0):
+            typer.secho(f"Gateway /health OK en :{effective_port}", fg=typer.colors.GREEN)
+        else:
+            typer.secho(
+                f"Gateway aún no responde en :{effective_port}/health "
+                "(puede tardar unos segundos).",
+                fg=typer.colors.YELLOW,
+            )

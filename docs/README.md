@@ -6,8 +6,9 @@ Mapa canónico de `docs/`. Las **specs normativas** viven bajo **`docs/specs/`**
 
 ## Lectura recomendada (nuevo dev)
 
-1. **[`README.md`](../README.md)** — layout del monorepo, `uv sync`, `duckops init`, `duckops serve --gateway`.
-2. **Este archivo** — qué leer según tu tarea.
+1. **[`GETTING_STARTED.md`](GETTING_STARTED.md)** — camino plug-and-play (`uv sync`, `duckops doctor`, `duckops init`).
+2. **[`README.md`](../README.md)** — layout del monorepo, `duckops serve --gateway`.
+3. **Este archivo** — qué leer según tu tarea.
 3. **[`docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`](specs/features/platform/DB_FIRST_CORE_REFACTOR.md)** — **fuente de verdad de arquitectura** (DB-first, qué es core, qué está limpio, roadmap).
 4. **[`docs/architecture/system_overview.md`](architecture/system_overview.md)** — diagrama y componentes.
 5. **[`docs/COMANDOS.md`](COMANDOS.md)** — PM2, Redis, Telegram, variables, cheat sheet operativo.

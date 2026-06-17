@@ -6,13 +6,23 @@ from pathlib import Path
 
 import typer
 
-from duckops.commands import audit, comfyui, db, deploy, ingress, init, mcp, serve, stack, train
+from duckops.commands import audit, comfyui, db, deploy, doctor, ingress, init, mcp, serve, smoke, stack, train
 
 app = typer.Typer(
     name="duckops",
     help="DuckClaw Operations CLI — Wizard, deploy y auditoría Habeas Data.",
 )
 
+app.add_typer(
+    doctor.app,
+    name="doctor",
+    help="Diagnóstico local: Redis, migraciones, admin key y puerto gateway.",
+)
+app.add_typer(
+    smoke.app,
+    name="smoke",
+    help="Smoke local: doctor + GET /health.",
+)
 app.add_typer(
     init.app,
     name="init",

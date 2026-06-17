@@ -264,7 +264,8 @@ def test_express_order_stack_then_review() -> None:
     assert WizardStep.CONNECTIVITY not in EXPRESS_STEP_ORDER
     assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.SOVEREIGNTY_AUDIT) == WizardStep.CORE_SERVICES
     assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.CORE_SERVICES) == WizardStep.ORCHESTRATION
-    assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.ORCHESTRATION) == WizardStep.REVIEW_DEPLOY
+    assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.ORCHESTRATION) == WizardStep.ADMIN_CONSOLE
+    assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.ADMIN_CONSOLE) == WizardStep.REVIEW_DEPLOY
     assert next_step_in(EXPRESS_STEP_ORDER, WizardStep.REVIEW_DEPLOY) is None
 
 

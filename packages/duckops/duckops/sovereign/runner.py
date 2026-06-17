@@ -59,6 +59,9 @@ def run_sovereign_wizard(repo_root: Path | None = None, *, manual: bool = False)
         draft.gateway_port = resolve_gateway_port(rr, app_name=draft.gateway_pm2_name)
     except Exception:
         pass
+    from duckops.admin_bootstrap import hydrate_draft_admin_from_repo
+
+    hydrate_draft_admin_from_repo(rr, draft)
     code, shell = run_wizard_loop(rr, console, draft, manual=manual)
     if code == 2:
 

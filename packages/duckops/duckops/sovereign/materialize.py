@@ -820,6 +820,16 @@ def materialize(
 
     updates["DUCKCLAW_TELEGRAM_MCP_ENABLED"] = "1" if draft.enable_telegram_mcp else "0"
 
+    from duckops.admin_bootstrap import (  # noqa: PLC0415
+        merge_admin_env_local,
+        resolve_admin_env_updates,
+        seed_admin_console_users,
+    )
+
+    admin_updates = resolve_admin_env_updates(draft, repo_root)
+    updates.update(admin_updates)
+    gateway_url = updates.get("DUCKCLAW_GATEWAY_URL", "")
+
     if draft.redis_local_managed:
         ok, msg = try_start_redis_local(repo_root)
         console_print(f"[Redis local] {msg}")
@@ -838,6 +848,13 @@ def materialize(
         console_print(f"Error escribiendo .env: {e}")
         return 1
 
+    merge_admin_env_local(repo_root, admin_updates, gateway_url=gateway_url)
+    if draft.admin_password_auto_generated:
+        console_print(
+            f"[yellow]Admin[/] email={draft.admin_console_email} · password generada en este init "
+            "(revisa el paso Consola admin si no la anotaste)."
+        )
+
     save_wizard_config_json(draft)
 
     if draft.enable_telegram_mcp:
@@ -851,6 +868,12 @@ def materialize(
     else:
         _db_abs = _resolve_repo_db_path(repo_root, primary_rel)
         seed_telegram_guard_admins(repo_root, _db_abs, draft, console_print)
+        try:
+            seeded = seed_admin_console_users(repo_root, primary_rel, draft)
+            if seeded:
+                console_print(f"[green]Admin consola[/] seed: {seeded} usuario(s) en hub DuckDB")
+        except Exception as exc:
+            console_print(f"[yellow]Admin consola seed:[/] {exc}")
 
     if patch_security_policy is not None:
         patch_security_policy(repo_root, draft.default_worker_id)

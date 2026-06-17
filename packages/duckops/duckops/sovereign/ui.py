@@ -12,6 +12,12 @@ from prompt_toolkit import PromptSession
 from rich.console import Console
 from rich.panel import Panel
 
+from duckops.admin_bootstrap import (
+    admin_bootstrap_ready,
+    generate_admin_password,
+    hydrate_draft_admin_from_repo,
+    is_admin_password_valid,
+)
 from duckops.sovereign.cloudflared_tunnel import (
     cloudflared_available,
     pm2_available,
@@ -1026,6 +1032,147 @@ def run_wizard_loop(
                 console.print(f"[green]{save_draft_json(draft)}[/]")
                 return 0, shell
             draft.enable_telegram_mcp = val.lower() not in ("n", "no", "0")
+            n = next_step_in(order, step)
+            if n:
+                step = n
+            continue
+
+        if step == WizardStep.ADMIN_CONSOLE:
+            hydrate_draft_admin_from_repo(repo_root, draft)
+            if draft.wizard_profile == "express":
+                shell.print_content_panel(
+                    "[dim]Login consola admin[/] (BFF → gateway).\n"
+                    f"Email por defecto: [bold]{draft.admin_console_email}[/]\n"
+                    "Puedes generar una contraseña segura o escribir la tuya (mín. 8 caracteres).",
+                    title="Consola admin",
+                )
+                try:
+                    choice = run_list_picker(
+                        "Contraseña admin",
+                        [
+                            "Generar contraseña segura (recomendado)",
+                            "Escribir contraseña manualmente",
+                            "Conservar la del .env actual",
+                        ],
+                        values=["generate", "manual", "keep"],
+                        initial_index=0 if not is_admin_password_valid(draft.admin_console_password) else 2,
+                    )
+                except WizardResetRequested:
+                    draft, step = _apply_wizard_reset(console, shell, repo_root, order)
+                    continue
+                except PickerCancelled:
+                    p = prev_step_in(order, step)
+                    if p:
+                        step = p
+                    continue
+                if choice == "generate":
+                    draft.admin_console_password = generate_admin_password()
+                    draft.admin_password_auto_generated = True
+                elif choice == "manual":
+                    while True:
+                        tok, val = _ask_until(
+                            session,
+                            f"Password admin (≥8) [{draft.admin_console_email}]: ",
+                            password=True,
+                            default="",
+                        )
+                        if tok == NAV_BACK:
+                            break
+                        if tok == NAV_QUICK_SAVE:
+                            console.print(f"[green]{save_draft_json(draft)}[/]")
+                            return 0, shell
+                        if is_admin_password_valid(val):
+                            draft.admin_console_password = val.strip()
+                            draft.admin_password_auto_generated = False
+                            break
+                        console.print("[red]La contraseña debe tener al menos 8 caracteres.[/]")
+                    if tok == NAV_BACK:
+                        continue
+                elif choice == "keep" and not is_admin_password_valid(draft.admin_console_password):
+                    console.print("[yellow]No hay contraseña válida en .env; generando una nueva.[/]")
+                    draft.admin_console_password = generate_admin_password()
+                    draft.admin_password_auto_generated = True
+                try:
+                    email_val = run_list_picker(
+                        "Email admin",
+                        [draft.admin_console_email, "Otro email…"],
+                        values=["default", "custom"],
+                        initial_index=0,
+                    )
+                except WizardResetRequested:
+                    draft, step = _apply_wizard_reset(console, shell, repo_root, order)
+                    continue
+                except PickerCancelled:
+                    continue
+                if email_val == "custom":
+                    tok, val = _ask_until(
+                        session,
+                        "Email admin: ",
+                        default=draft.admin_console_email,
+                    )
+                    if tok == NAV_BACK:
+                        continue
+                    if tok == NAV_QUICK_SAVE:
+                        console.print(f"[green]{save_draft_json(draft)}[/]")
+                        return 0, shell
+                    if (val or "").strip():
+                        draft.admin_console_email = val.strip()
+            else:
+                tok, val = _ask_until(
+                    session,
+                    f"Email admin [{draft.admin_console_email}]: ",
+                    default=draft.admin_console_email,
+                )
+                if tok == NAV_BACK:
+                    p = prev_step_in(order, step)
+                    if p:
+                        step = p
+                    continue
+                if tok == NAV_QUICK_SAVE:
+                    console.print(f"[green]{save_draft_json(draft)}[/]")
+                    return 0, shell
+                if (val or "").strip():
+                    draft.admin_console_email = val.strip()
+                console.print()
+                tok, val = _ask_until(
+                    session,
+                    "Password admin (≥8, vacío = generar): ",
+                    password=True,
+                    default="",
+                )
+                if tok == NAV_BACK:
+                    continue
+                if tok == NAV_QUICK_SAVE:
+                    console.print(f"[green]{save_draft_json(draft)}[/]")
+                    return 0, shell
+                if (val or "").strip():
+                    if not is_admin_password_valid(val):
+                        console.print("[red]La contraseña debe tener al menos 8 caracteres.[/]")
+                        continue
+                    draft.admin_console_password = val.strip()
+                    draft.admin_password_auto_generated = False
+                else:
+                    draft.admin_console_password = generate_admin_password()
+                    draft.admin_password_auto_generated = True
+
+            if not admin_bootstrap_ready(
+                draft.admin_console_email,
+                draft.admin_console_password,
+                draft.admin_api_key,
+            ):
+                console.print("[red]Faltan credenciales admin válidas.[/]")
+                continue
+            if draft.admin_password_auto_generated:
+                console.print(
+                    Panel(
+                        f"[bold]Email[/] {draft.admin_console_email}\n"
+                        f"[bold]Password generada[/] [yellow]{draft.admin_console_password}[/]\n"
+                        "[dim]Guárdala: no se volverá a mostrar.[/]",
+                        title="Credenciales consola admin",
+                        border_style=PANEL_BORDER_SUCCESS,
+                    )
+                )
+            shell.complete_step(step)
             n = next_step_in(order, step)
             if n:
                 step = n

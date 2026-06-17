@@ -14,6 +14,7 @@ class WizardStep(str, Enum):
     IDENTITY_SETUP = "identity_setup"
     CONNECTIVITY = "connectivity"
     ORCHESTRATION = "orchestration"
+    ADMIN_CONSOLE = "admin_console"
     REVIEW_DEPLOY = "review_deploy"
 
 
@@ -49,6 +50,11 @@ STEP_UI: dict[WizardStep, StepCopy] = {
         title_sovereign="Telegram",
         subtitle_technical="Bot · HTTPS",
         description="Solo perfil manual; en rápida usa la consola admin.",
+    ),
+    WizardStep.ADMIN_CONSOLE: StepCopy(
+        title_sovereign="Consola admin",
+        subtitle_technical="Email · password · API key",
+        description="Credenciales obligatorias para login en duckclaw-admin.",
     ),
     WizardStep.REVIEW_DEPLOY: StepCopy(
         title_sovereign="Revisión",

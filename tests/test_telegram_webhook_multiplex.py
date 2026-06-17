@@ -21,11 +21,11 @@ def _clear_route_cache(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_classic_no_secret_allows_any_header(monkeypatch: pytest.MonkeyPatch) -> None:
     r = m.telegram_webhook_resolve_dispatch(
         "anything",
-        default_worker_id="finanz",
-        default_tenant_id="Finanzas",
+        default_worker_id="platform-orchestrator",
+        default_tenant_id="Orchestrator",
         default_bot_token="tok-default",
     )
-    assert r == ("legacy_default", "finanz", "Finanzas", "tok-default")
+    assert r == ("legacy_default", "platform-orchestrator", "Orchestrator", "tok-default")
 
 
 def test_classic_secret_requires_match(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,14 +33,14 @@ def test_classic_secret_requires_match(monkeypatch: pytest.MonkeyPatch) -> None:
     assert (
         m.telegram_webhook_resolve_dispatch(
             "s3cr3t",
-            default_worker_id="finanz",
+            default_worker_id="platform-orchestrator",
             default_tenant_id="default",
             default_bot_token="t1",
         )
-        == ("legacy_default", "finanz", "default", "t1")
+        == ("legacy_default", "platform-orchestrator", "default", "t1")
     )
-    assert m.telegram_webhook_resolve_dispatch(None, default_worker_id="finanz", default_tenant_id="d", default_bot_token="t") == "reject"
-    assert m.telegram_webhook_resolve_dispatch("nope", default_worker_id="finanz", default_tenant_id="d", default_bot_token="t") == "reject"
+    assert m.telegram_webhook_resolve_dispatch(None, default_worker_id="platform-orchestrator", default_tenant_id="d", default_bot_token="t") == "reject"
+    assert m.telegram_webhook_resolve_dispatch("nope", default_worker_id="platform-orchestrator", default_tenant_id="d", default_bot_token="t") == "reject"
 
 
 def test_multiplex_route_picks_worker_and_token_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -58,9 +58,9 @@ def test_multiplex_route_picks_worker_and_token_env(monkeypatch: pytest.MonkeyPa
     m._cached_bindings_error = None
     out = m.telegram_webhook_resolve_dispatch(
         "bi-header",
-        default_worker_id="finanz",
+        default_worker_id="platform-orchestrator",
         default_tenant_id="default",
-        default_bot_token="tok-finanz",
+        default_bot_token="tok-orch",
     )
     assert isinstance(out, m.TelegramWebhookResolvedDispatch)
     assert out.worker_id == "bi_analyst"
@@ -104,8 +104,8 @@ def test_multiplex_vault_db_env_resolves_path(
     routes = [
         {
             "secret": "hdr-fin",
-            "worker_id": "finanz",
-            "tenant_id": "Finanzas",
+            "worker_id": "platform-orchestrator",
+            "tenant_id": "Orchestrator",
             "bot_token_env": "TELEGRAM_FINANZ_TOKEN",
             "vault_db_env": "DUCKCLAW_VAULT_DB_PATH",
         }
@@ -136,14 +136,14 @@ def test_multiplex_legacy_still_default_process(monkeypatch: pytest.MonkeyPatch)
         }
     ]
     monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", json.dumps(routes))
-    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "finanz-legacy")
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "orch-legacy")
     monkeypatch.setenv("TELEGRAM_BI_ANALYST_TOKEN", "bi-tok")
     m._cached_bindings = None
     m._cached_bindings_error = None
     r = m.telegram_webhook_resolve_dispatch(
-        "finanz-legacy",
-        default_worker_id="finanz",
-        default_tenant_id="Finanzas",
-        default_bot_token="finanz-tok",
+        "orch-legacy",
+        default_worker_id="platform-orchestrator",
+        default_tenant_id="Orchestrator",
+        default_bot_token="orch-tok",
     )
-    assert r == ("legacy_default", "finanz", "Finanzas", "finanz-tok")
+    assert r == ("legacy_default", "platform-orchestrator", "Orchestrator", "orch-tok")

@@ -17,13 +17,13 @@ def test_duckclaw_log_filter_injects_context() -> None:
     )
 
     reset_log_context()
-    set_log_context(tenant_id="acme", worker_id="finanz", chat_id="12345")
+    set_log_context(tenant_id="acme", worker_id="platform-orchestrator", chat_id="12345")
     fmt = DuckClawStructuredFormatter()
     flt = DuckClawLogFilter()
     record = logging.LogRecord("test", logging.INFO, __file__, 1, "hello", (), None)
     assert flt.filter(record) is True
     line = fmt.format(record)
-    assert "acme" in line and "finanz" in line and "12345" in line and "hello" in line
+    assert "acme" in line and "platform-orchestrator" in line and "12345" in line and "hello" in line
     reset_log_context()
 
 

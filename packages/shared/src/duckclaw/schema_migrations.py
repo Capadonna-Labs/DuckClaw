@@ -40,8 +40,9 @@ def ensure_migrations_table(db: Any) -> None:
     db.execute(_MIGRATIONS_TABLE_DDL)
 
 
-def applied_versions(db: Any) -> set[int]:
-    ensure_migrations_table(db)
+def applied_versions(db: Any, *, create_table: bool = True) -> set[int]:
+    if create_table:
+        ensure_migrations_table(db)
     try:
         rows = db.execute(
             "SELECT version, checksum FROM main.schema_migrations ORDER BY version"
@@ -51,8 +52,9 @@ def applied_versions(db: Any) -> set[int]:
         return set()
 
 
-def applied_with_checksums(db: Any) -> dict[int, str]:
-    ensure_migrations_table(db)
+def applied_with_checksums(db: Any, *, create_table: bool = True) -> dict[int, str]:
+    if create_table:
+        ensure_migrations_table(db)
     try:
         rows = db.execute(
             "SELECT version, checksum FROM main.schema_migrations ORDER BY version"
@@ -135,6 +137,91 @@ def verify_migration_integrity(db: Any) -> list[str]:
                 f"current_definition={expected}"
             )
     return drifts
+
+
+def verify_schema_integrity(db_path: str) -> tuple[bool, str]:
+    """Verify gateway DuckDB exists and all versioned migrations are applied.
+
+    Returns ``(ok, message)``. When ``DUCKCLAW_SCHEMA_STRICT=1``, checksum drift
+    also fails verification.
+    """
+    import os
+    from pathlib import Path
+
+    path = Path((db_path or "").strip()).expanduser()
+    if not path.is_file():
+        return False, f"Gateway database not found at {path}. Run: duckclaw-migrate"
+
+    import duckdb
+
+    con = duckdb.connect(str(path), read_only=True)
+    try:
+        applied = applied_versions(con, create_table=False)
+        expected_versions = {version for version, _, _ in _ALL_MIGRATIONS}
+        missing = sorted(expected_versions - applied)
+        if missing:
+            return (
+                False,
+                f"Pending schema migrations: {missing}. Run: duckclaw-migrate",
+            )
+
+        strict = (os.environ.get("DUCKCLAW_SCHEMA_STRICT") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if strict:
+            current = applied_with_checksums(con, create_table=False)
+            drifts: list[str] = []
+            for version, name, ddl in sorted(_ALL_MIGRATIONS):
+                if version not in current:
+                    continue
+                expected = _checksum(ddl)
+                if current[version] != expected:
+                    drifts.append(
+                        f"version={version} name={name} "
+                        f"registered={current[version]} "
+                        f"current_definition={expected}"
+                    )
+            if drifts:
+                return False, f"Schema drift detected: {drifts[0]}"
+        return True, "ok"
+    finally:
+        con.close()
+
+
+def migrate_gateway_database(db_path: str, *, seed_admin: bool = True) -> list[int]:
+    """Apply pending migrations and core bootstrap DDL to the gateway DuckDB."""
+    from pathlib import Path
+
+    import duckdb
+
+    from duckclaw.bootstrap_core import bootstrap_core_schema
+
+    path = Path(db_path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    class _Adapter:
+        __slots__ = ("_con",)
+
+        def __init__(self, con: Any) -> None:
+            self._con = con
+
+        def execute(self, sql: str, params=None):
+            if params is not None:
+                return self._con.execute(sql, params)
+            return self._con.execute(sql)
+
+    con = duckdb.connect(str(path), read_only=False)
+    try:
+        adapter = _Adapter(con)
+        before = applied_versions(con)
+        bootstrap_core_schema(adapter, seed_admin=seed_admin)
+        after = applied_versions(con)
+        return sorted(after - before)
+    finally:
+        con.close()
 
 
 # ---------------------------------------------------------------------------

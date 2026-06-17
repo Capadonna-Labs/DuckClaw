@@ -42,7 +42,7 @@ def test_sanitize_worker_reply_strips_html_escaped_eot() -> None:
 
 
 def test_sanitize_worker_reply_strips_tool_section_headers() -> None:
-    raw = "finanz 2\n\n### get_ibkr_portfolio\nEstado: conectado."
+    raw = "platform-orchestrator 2\n\n### get_ibkr_portfolio\nEstado: conectado."
     out = sanitize_worker_reply_text(raw)
     assert "get_ibkr_portfolio" not in out
     assert "Estado: conectado" in out

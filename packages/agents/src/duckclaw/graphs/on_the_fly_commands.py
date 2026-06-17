@@ -1054,58 +1054,36 @@ def execute_uncertainty_status(db: Any, chat_id: Any, args: str) -> str:
 
 
 def execute_code_approve(db: Any, chat_id: Any, args: str) -> str:
-    """/approve-code <uuid>: HITL para code_decisions."""
+    """/approve-code <uuid>: HITL delegado a Capadonna-Driller."""
     decision_id = (args or "").strip().lower().split()[0] if (args or "").strip() else ""
     if not re.match(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
         decision_id,
     ):
         return "Uso: /approve-code <decision_id_UUID>"
-    try:
-        from duckclaw.forge.code_decision_service import approve_code_decision
+    from duckclaw.capadonna_plugin import capadonna_missing_message, dispatch_capadonna_fly_command
 
-        tenant = str(get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
-        user_id = str(get_chat_state(db, chat_id, "last_requester_id") or tenant).strip() or tenant
-        result = approve_code_decision(
-            db,
-            decision_id=decision_id,
-            tenant_id=tenant,
-            user_id=user_id,
-            chat_id=str(chat_id).strip(),
-        )
-        if result.get("error"):
-            return f"No: {result['error']}"
-        pr_url = result.get("pr_url") or ""
-        return f"Código aprobado. decision_id={decision_id}. PR: {pr_url or 'ver GitHub Actions'}."
-    except Exception as exc:
-        return f"Error al aprobar code_decision: {exc}"
+    result = dispatch_capadonna_fly_command("approve-code", db, chat_id, args)
+    if result is None:
+        return capadonna_missing_message()
+    return result
 
 
 def execute_code_reject(db: Any, chat_id: Any, args: str) -> str:
-    """/reject-code <uuid> [razón]: rechaza code_decision."""
+    """/reject-code <uuid> [razón]: delegado a Capadonna-Driller."""
     parts = (args or "").strip().split(maxsplit=1)
     decision_id = (parts[0] if parts else "").strip().lower()
-    rationale = parts[1] if len(parts) > 1 else ""
     if not re.match(
         r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
         decision_id,
     ):
         return "Uso: /reject-code <decision_id_UUID> [razón]"
-    try:
-        from duckclaw.forge.code_decision_service import reject_code_decision
+    from duckclaw.capadonna_plugin import capadonna_missing_message, dispatch_capadonna_fly_command
 
-        tenant = str(get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
-        user_id = str(get_chat_state(db, chat_id, "last_requester_id") or tenant).strip() or tenant
-        result = reject_code_decision(
-            db,
-            decision_id=decision_id,
-            tenant_id=tenant,
-            user_id=user_id,
-            rationale=rationale,
-        )
-        return f"Decisión {decision_id} → {result.get('status', 'REJECTED')}."
-    except Exception as exc:
-        return f"Error al rechazar: {exc}"
+    result = dispatch_capadonna_fly_command("reject-code", db, chat_id, args)
+    if result is None:
+        return capadonna_missing_message()
+    return result
 
 
 def _dispatch_fly_command(
@@ -1227,6 +1205,20 @@ def _dispatch_fly_command(
         return execute_tasks(db, chat_id)
     if name == "history":
         return execute_history(db, chat_id, args)
+    if (os.environ.get("CAPADONNA_DRILLER_ROOT") or "").strip():
+        from duckclaw.capadonna_plugin import dispatch_capadonna_fly_command
+
+        return dispatch_capadonna_fly_command(
+            name,
+            db,
+            chat_id,
+            args,
+            requester_id=requester_id,
+            tenant_id=tenant_id,
+            vault_user_id=vault_user_id,
+            username=username,
+            entry_worker_id=entry_worker_id,
+        )
     return None
 
 

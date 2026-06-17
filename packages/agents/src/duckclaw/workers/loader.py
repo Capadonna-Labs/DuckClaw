@@ -77,7 +77,7 @@ def _ensure_agent_beliefs(db: Any, schema: str) -> None:
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Field lessons (Finanz Reflector) — nullable / backward compatible
+    # Field lessons (reflector) — nullable / backward compatible
     for col_sql in (
         "belief_kind VARCHAR",
         "context_trigger VARCHAR",

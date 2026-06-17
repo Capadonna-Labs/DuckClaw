@@ -183,7 +183,7 @@ def _load_skills_context() -> str:
     return "\n\n---\n\n".join(parts) if parts else ""
 
 
-# Keywords that indicate retail intent (finanzas, inventario, ventas, gastos)
+# Keywords that indicate retail intent (inventario, ventas, gastos)
 RETAIL_KEYWORDS = re.compile(
     r"\b(venta|vendí|vendimos|inventario|stock|qué hay|que queda|listar productos|"
     r"gasto|gastos|gastar|arriendo|servicios|registra venta|registrar venta|"

@@ -36,7 +36,7 @@ def test_health_module_has_no_vertical_defaults_or_duckdb_writes() -> None:
         "quant",
         "trader",
         "finance",
-        "finanz",
+        "platform-orchestrator",
         "ibkr",
         "pqrs",
         "pqrsd",

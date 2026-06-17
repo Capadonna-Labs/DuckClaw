@@ -123,5 +123,5 @@ def test_chat_heartbeat_uses_catalog_messages_without_vertical_examples() -> Non
     text = CHAT_HEARTBEAT.read_text(encoding="utf-8")
 
     assert "load_guardrail_kv" not in text
-    for marker in ("BI-Analyst", "SIATA", "finanz"):
+    for marker in ("BI-Analyst", "SIATA", "platform-orchestrator"):
         assert marker not in text

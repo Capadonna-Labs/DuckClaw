@@ -44,10 +44,10 @@ def gateway_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             """
         )
         rows = [
-            ("t1", "default", "finanz", "q1", "SUCCESS", 100, now - timedelta(hours=2)),
-            ("t2", "default", "finanz", "q2", "FAILED", 200, now - timedelta(hours=3)),
-            ("t3", "default", "quant_trader", "q3", "SUCCESS", 5000, now - timedelta(hours=1)),
-            ("t4", "default", "finanz", "q4", "SUCCESS", 3000, now - timedelta(days=10)),
+            ("t1", "default", "platform-orchestrator", "q1", "SUCCESS", 100, now - timedelta(hours=2)),
+            ("t2", "default", "platform-orchestrator", "q2", "FAILED", 200, now - timedelta(hours=3)),
+            ("t3", "default", "ui-designer", "q3", "SUCCESS", 5000, now - timedelta(hours=1)),
+            ("t4", "default", "platform-orchestrator", "q4", "SUCCESS", 3000, now - timedelta(days=10)),
         ]
         for task_id, tenant_id, worker_id, qp, status, dur, created in rows:
             con.execute(
@@ -76,10 +76,10 @@ def gateway_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             """
         )
         usage_rows = [
-            ("u1", "default", "sess-a", "finanz", 1000, 500, 1500, 0.001, now - timedelta(days=1)),
-            ("u2", "default", "sess-a", "finanz", 2000, 800, 2800, 0.002, now - timedelta(days=1)),
-            ("u3", "default", "sess-b", "quant_trader", 5000, 2000, 7000, 0.005, now - timedelta(hours=5)),
-            ("u4", "default", "sess-old", "finanz", 9000, 1000, 10000, 0.01, now - timedelta(days=20)),
+            ("u1", "default", "sess-a", "platform-orchestrator", 1000, 500, 1500, 0.001, now - timedelta(days=1)),
+            ("u2", "default", "sess-a", "platform-orchestrator", 2000, 800, 2800, 0.002, now - timedelta(days=1)),
+            ("u3", "default", "sess-b", "ui-designer", 5000, 2000, 7000, 0.005, now - timedelta(hours=5)),
+            ("u4", "default", "sess-old", "platform-orchestrator", 9000, 1000, 10000, 0.01, now - timedelta(days=20)),
         ]
         for uid, tenant_id, session_id, worker_id, inp, out, total, cost, created in usage_rows:
             con.execute(
@@ -108,10 +108,10 @@ def test_overview_metrics_ok(gateway_admin_client: TestClient) -> None:
     assert "db_path" in data
 
     by_worker = {a["worker_id"]: a for a in data["activity"]}
-    assert by_worker["finanz"]["success_count"] == 1
-    assert by_worker["finanz"]["failed_count"] == 1
-    assert by_worker["quant_trader"]["success_count"] == 1
-    assert by_worker["quant_trader"]["failed_count"] == 0
+    assert by_worker["platform-orchestrator"]["success_count"] == 1
+    assert by_worker["platform-orchestrator"]["failed_count"] == 1
+    assert by_worker["ui-designer"]["success_count"] == 1
+    assert by_worker["ui-designer"]["failed_count"] == 0
 
     assert len(data["latency"]) >= 1
     assert all("hour" in row and "avg_latency" in row for row in data["latency"])
@@ -119,14 +119,14 @@ def test_overview_metrics_ok(gateway_admin_client: TestClient) -> None:
     usage = data["usage"]
     assert usage["summary"]["total_tokens"] == 11300
     by_agent = {s["label"]: s for s in usage["series"]}
-    assert by_agent["finanz"]["total_tokens"] == 4300
-    assert by_agent["quant_trader"]["total_tokens"] == 7000
+    assert by_agent["platform-orchestrator"]["total_tokens"] == 4300
+    assert by_agent["ui-designer"]["total_tokens"] == 7000
 
 
 def test_overview_metrics_usage_group_by_session(gateway_admin_client: TestClient) -> None:
     r = gateway_admin_client.get(
         "/api/v1/admin/overview/metrics",
-        params={"usage_group_by": "session", "worker_id": "finanz"},
+        params={"usage_group_by": "session", "worker_id": "platform-orchestrator"},
         headers={"X-Admin-Key": "test-admin-key"},
     )
     assert r.status_code == 200

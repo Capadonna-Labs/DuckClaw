@@ -19,7 +19,7 @@ def test_context_injection_delta_pydantic_roundtrip() -> None:
     )
 
     d = build_context_injection_delta(
-        tenant_id="Finanzas",
+        tenant_id="Orchestrator",
         raw_text="nota técnica",
         user_id="42",
         target_db_path="/tmp/x.duckdb",
@@ -48,7 +48,7 @@ def test_sync_context_injection_inserts_row(monkeypatch: pytest.MonkeyPatch, tmp
     monkeypatch.setattr(vaults_mod, "db_root", lambda: tmp_path)
     priv = tmp_path / "private" / "u1"
     priv.mkdir(parents=True)
-    dbf = priv / "finanz.duckdb"
+    dbf = priv / "platform-orchestrator.duckdb"
 
     def _fake_embed(_t: str) -> list[float]:
         return [0.01] * 384

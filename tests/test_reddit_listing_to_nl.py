@@ -14,7 +14,7 @@ from duckclaw.utils.formatters import (
 
 
 def test_formats_subreddit_posts_json() -> None:
-    raw = """finanz 2
+    raw = """platform-orchestrator 2
 
 {
   "subreddit": "worldnews",

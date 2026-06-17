@@ -47,8 +47,16 @@ jobs:
       - name: Run tests (unit + smoke)
         run: uv run pytest tests/ -v -m "not integration" --ignore=tests/run_singleton_writer_pipeline.py --ignore=tests/deprecated
 
+      - name: Migrate gateway schema
+        env:
+          REDIS_URL: redis://localhost:6379/0
+          DUCKDB_PATH: db/duckclaw.duckdb
+        run: uv run duckclaw-migrate --no-seed-admin
+
       - name: Run singleton writer pipeline integration test with logs
         env:
           REDIS_URL: redis://localhost:6379/0
+          DUCKDB_PATH: db/duckclaw.duckdb
+          DUCKCLAW_DEV_MODE: "1"
           RUN_SINGLETON_PIPELINE_INTEGRATION: "1"
         run: uv run pytest tests/run_singleton_writer_pipeline.py -v -m integration --capture=no

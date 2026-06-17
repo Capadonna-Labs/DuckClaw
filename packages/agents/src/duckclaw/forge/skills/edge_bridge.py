@@ -2,11 +2,10 @@ import ctypes
 import json
 import logging
 import argparse
-import importlib.util
 import os
 import time
 from pathlib import Path
-from typing import Optional, List, Any, Callable
+from typing import Optional, List, Any
 
 from duckclaw_edge_devices.client import (
     close_serial,
@@ -17,57 +16,27 @@ from duckclaw_edge_devices.client import (
 
 _log = logging.getLogger(__name__)
 
+_DEFAULT_EDGE_STATE_DELTA_QUEUE = "duckclaw:state_delta:edge"
 
-def _resolve_push_quant_state_delta_sync() -> Callable[[dict[str, Any]], bool]:
-    """Import desde paquete duckclaw, archivo hermano en VPS, o fallback inline (sin segundo .py)."""
-    here = Path(__file__).resolve().parent
+
+def _push_edge_state_delta_sync(payload: dict[str, Any]) -> bool:
+    url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
+    if not url:
+        _log.warning("[edge_bridge] REDIS_URL ausente; omitiendo enqueue")
+        return False
+    queue = (
+        os.environ.get("DUCKCLAW_EDGE_STATE_DELTA_QUEUE") or _DEFAULT_EDGE_STATE_DELTA_QUEUE
+    ).strip()
     try:
-        from duckclaw.forge.skills.quant_state_delta import (
-            push_quant_state_delta_sync as _fn,
-        )
+        import redis
 
-        return _fn
-    except ModuleNotFoundError:
-        pass
+        r = redis.from_url(url, decode_responses=True)
+        r.lpush(queue, json.dumps(payload, ensure_ascii=False))
+        return True
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("[edge_bridge] LPUSH falló: %s", exc)
+        return False
 
-    sibling = here / "quant_state_delta.py"
-    if sibling.is_file():
-        spec = importlib.util.spec_from_file_location(
-            "duckclaw_forge_quant_state_delta", sibling
-        )
-        if spec and spec.loader:
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
-            fn = getattr(mod, "push_quant_state_delta_sync", None)
-            if callable(fn):
-                return fn  # type: ignore[return-value]
-
-    _default_q = "duckclaw:state_delta:quant"
-
-    def push_quant_state_delta_sync(payload: dict[str, Any]) -> bool:
-        def _queue_key() -> str:
-            return (
-                os.environ.get("DUCKCLAW_QUANT_STATE_DELTA_QUEUE") or _default_q
-            ).strip()
-
-        url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
-        if not url:
-            _log.warning("[quant_state_delta] REDIS_URL ausente; omitiendo enqueue")
-            return False
-        try:
-            import redis
-
-            r = redis.from_url(url, decode_responses=True)
-            r.lpush(_queue_key(), json.dumps(payload, ensure_ascii=False))
-            return True
-        except Exception as exc:  # noqa: BLE001
-            _log.warning("[quant_state_delta] LPUSH falló: %s", exc)
-            return False
-
-    return push_quant_state_delta_sync
-
-
-push_quant_state_delta_sync = _resolve_push_quant_state_delta_sync()
 
 _lib: Optional[ctypes.CDLL] = None
 
@@ -130,7 +99,7 @@ def poll_edge_device(port: str, baud_rate: int, emit_interval_sec: float, tenant
                     },
                 }
 
-                if push_quant_state_delta_sync(payload):
+                if _push_edge_state_delta_sync(payload):
                     _log.info(f"[edge_bridge] Emitido: {device_id} | {metrics}")
 
             elif res == -1 and not is_system_mode:

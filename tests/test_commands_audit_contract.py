@@ -33,7 +33,7 @@ def test_audit_module_has_no_vertical_runtime_defaults_or_rw_duckdb() -> None:
         "quant",
         "trader",
         "finance",
-        "finanz",
+        "platform-orchestrator",
         "ibkr",
         "pqrs",
         "pqrsd",

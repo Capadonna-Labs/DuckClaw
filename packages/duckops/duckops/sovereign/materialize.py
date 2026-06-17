@@ -792,7 +792,7 @@ def materialize(
     if _dw.startswith("axis"):
         updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel
     # Gateways no-Finanz con tenant propio: bóveda inicial por slug de worker.
-    if _dw and _dw != "finanz":
+    if _dw and _dw != "default":
         updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = (draft.default_worker_id or "").strip()
     else:
         updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = ""
@@ -806,7 +806,7 @@ def materialize(
     if tok:
         from duckclaw.integrations.telegram.telegram_agent_token import telegram_agent_token_env_name
 
-        _wid = (draft.default_worker_id or "finanz").strip()
+        _wid = (draft.default_worker_id or "default").strip()
         _std_key = telegram_agent_token_env_name(_wid)
         if _std_key:
             updates[_std_key] = tok

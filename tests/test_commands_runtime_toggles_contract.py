@@ -39,7 +39,7 @@ def test_runtime_toggles_module_has_no_vertical_defaults() -> None:
         "quant",
         "trader",
         "finance",
-        "finanz",
+        "platform-orchestrator",
         "ibkr",
         "pqrs",
         "pqrsd",

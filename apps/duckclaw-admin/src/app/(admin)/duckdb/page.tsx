@@ -260,7 +260,7 @@ export default function DuckDbPage() {
                   value={legacySchemasValue}
                   onChange={(e) => setLegacySchemasValue(e.target.value)}
                   rows={3}
-                  placeholder="pqrsd_crm, quant_core, war_room_core"
+                  placeholder="pqrsd_crm, market_data, war_room_core"
                   className="w-full rounded-xl border px-3 py-2 font-mono text-sm dark:border-dark-border dark:bg-dark-surface"
                 />
                 <div className="flex flex-wrap items-center justify-between gap-3">

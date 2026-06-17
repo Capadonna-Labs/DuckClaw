@@ -52,7 +52,7 @@ def test_model_setup_module_has_no_vertical_or_worker_filesystem_defaults() -> N
         "quant",
         "trader",
         "finance",
-        "finanz",
+        "platform-orchestrator",
         "ibkr",
         "pqrs",
         "pqrsd",

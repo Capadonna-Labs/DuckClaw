@@ -45,7 +45,7 @@ def test_history_module_has_no_vertical_runtime_defaults_or_raw_queue_sql() -> N
         "quant",
         "trader",
         "finance",
-        "finanz",
+        "platform-orchestrator",
         "ibkr",
         "pqrs",
         "pqrsd",

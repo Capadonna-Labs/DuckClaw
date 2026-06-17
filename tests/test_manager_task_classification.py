@@ -41,7 +41,7 @@ def test_task_classification_has_no_hardcoded_vertical_policy() -> None:
         "trabajo",
         "vacante",
         "postul",
-        "finanz",
+        "platform-orchestrator",
         "quant",
         "pqrs",
         "leila",

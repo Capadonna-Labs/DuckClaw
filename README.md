@@ -54,7 +54,7 @@ uv run duckops init # interactive wizard
 uv run duckops serve --gateway
 ```
 
-Operational detail (Redis, Telegram, PM2—including `duckops serve --pm2 --gateway`, DB-Writer—`doctor.py`, VLM env vars, trace flags): see [`docs/COMANDOS.md`](docs/COMANDOS.md) (**§8** cheat sheet). VLM spec (stale): [`docs/specs/features/platform/VLM_INTEGRATION.md`](docs/specs/features/platform/VLM_INTEGRATION.md).
+Operational detail (Redis, Telegram, PM2, DB-Writer, `doctor.py`): see [`docs/COMANDOS.md`](docs/COMANDOS.md).
 
 ---
 

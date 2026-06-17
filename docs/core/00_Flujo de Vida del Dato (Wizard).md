@@ -172,8 +172,7 @@ O como PM2: `DuckClaw-DB-Writer`.
 
 | Ruta | Descripción |
 | ---- | ----------- |
-| `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_MULTIPLEX.md` | Webhook inbound multiplex por bot. |
-| `specs/features/telegram-gateway/TELEGRAM_WEBHOOK_ONE_PORT.md` | Un proceso gateway por bot/puerto. |
+| `specs/features/telegram-gateway/TELEGRAM.md` | Webhook inbound, multiplex y variables esenciales. |
 
 
 **Flujo Telegram webhook inbound:**

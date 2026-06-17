@@ -26,5 +26,5 @@ DuckClaw models memory in three complementary layers:
 
 ## Related docs
 
-- [ADF Framework](../agents/adf_framework.md) — how workers use memory and tools
+- [Skills and Tooling Framework](../core/03_Skills_and_Tooling_Framework.md) — how workers use memory and tools
 - [Operations hub](../operations/index.md)

@@ -6,13 +6,13 @@
  * Logs:      pm2 logs DuckClaw-Inference
  * Persistir: pm2 save
  *
- * Requiere: mlx/start_mlx.sh y .env (opcional: MLX_PYTHON, MLX_MODEL_PATH, MLX_PORT).
+ * Requiere: packages/agents/train/scripts/serve/start_mlx.sh y .env (opcional: MLX_PYTHON, MLX_MODEL_PATH, MLX_PORT).
  * DuckClaw usa por defecto http://127.0.0.1:8080/v1 (provider=mlx).
  */
 const path = require("path");
 
-const root = __dirname;
-const startScript = path.join(root, "mlx", "start_mlx.sh");
+const root = path.resolve(__dirname, "..");
+const startScript = path.join(root, "packages/agents/train/scripts/serve/start_mlx.sh");
 
 module.exports = {
   apps: [

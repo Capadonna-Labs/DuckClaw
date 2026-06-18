@@ -389,16 +389,21 @@ def test_topbar_can_restart_gateway_without_gateway_proxy() -> None:
 
 
 def test_manager_preserves_rag_blocks_for_worker_task() -> None:
-    manager = Path("packages/agents/src/duckclaw/manager/graph.py").read_text(encoding="utf-8")
+    manager_invoke = Path(
+        "packages/agents/src/duckclaw/manager/manager_nodes_invoke.py"
+    ).read_text(encoding="utf-8")
+    manager_helpers = Path(
+        "packages/agents/src/duckclaw/manager/manager_invoke_helpers.py"
+    ).read_text(encoding="utf-8")
     context_blocks = Path("packages/agents/src/duckclaw/forge/rag/context_blocks.py").read_text(encoding="utf-8")
 
-    assert "from duckclaw.forge.rag.context_blocks import" in manager
-    assert "preserve_context_blocks_for_worker" in manager
+    assert "from duckclaw.forge.rag.context_blocks import" in manager_invoke
+    assert "preserve_context_blocks_for_worker" in manager_invoke
     assert "strip_tagged_blocks" in context_blocks
-    assert "explicit_storage_request=explicit_duckdb_schema_request" in manager
+    assert "explicit_storage_request=explicit_duckdb_schema_request" in manager_invoke
     assert 'extract_tagged_block(incoming, "RAG_SOURCE_INVENTORY")' in context_blocks
     assert 'extract_tagged_block(incoming, "RAG_CONTEXT")' in context_blocks
     assert "Responde al usuario usando el contexto RAG disponible." in context_blocks
-    assert "planned_task_for_worker = preserve_context_blocks_for_worker(" in manager
-    assert '"input": planned_task_for_worker' in manager
-    assert '"incoming": planned_task_for_worker' in manager
+    assert "planned_task_for_worker = preserve_context_blocks_for_worker(" in manager_invoke
+    assert '"input": planned_task_for_worker' in manager_helpers
+    assert '"incoming": planned_task_for_worker' in manager_helpers

@@ -23,6 +23,15 @@ _PROMPT_POLICY_TYPES = {"directive", "capability", "system_prompt", "manager_tas
 _PROMPT_POLICY_STATUSES = {"draft", "active", "inactive", "archived"}
 
 
+def _fetchone(result: Any) -> Any | None:
+    """DuckClaw.execute devuelve list; duckdb devuelve cursor."""
+    if hasattr(result, "fetchone"):
+        return result.fetchone()
+    if isinstance(result, list):
+        return result[0] if result else None
+    return None
+
+
 class PromptPolicyUpsertBody(BaseModel):
     policy_type: str = Field(..., min_length=1, max_length=64)
     policy_name: str = Field(..., min_length=1, max_length=160)
@@ -345,10 +354,12 @@ async def restore_framework_policies(
             raise ValueError(command_status.detail or "restore framework failed")
         applied: list[str] = []
         with open_gateway_db(read_only=True) as db:
-            row = db.execute(
-                "SELECT command_json FROM main.admin_write_ledger WHERE task_id = ?",
-                [task_id],
-            ).fetchone()
+            row = _fetchone(
+                db.execute(
+                    "SELECT command_json FROM main.admin_write_ledger WHERE task_id = ?",
+                    [task_id],
+                )
+            )
             if row and row[0]:
                 payload = _json.loads(str(row[0]))
                 raw_applied = payload.get("_applied")
@@ -392,10 +403,12 @@ async def sync_catalog_prompt_policies(
         if command_status and command_status.status == "failed":
             raise ValueError(command_status.detail or "sync catalog prompts failed")
         with open_gateway_db(read_only=True) as db:
-            row = db.execute(
-                "SELECT command_json FROM main.admin_write_ledger WHERE task_id = ?",
-                [task_id],
-            ).fetchone()
+            row = _fetchone(
+                db.execute(
+                    "SELECT command_json FROM main.admin_write_ledger WHERE task_id = ?",
+                    [task_id],
+                )
+            )
             if row and row[0]:
                 payload = _json.loads(str(row[0]))
                 raw_result = payload.get("_sync_result")

@@ -24,6 +24,15 @@ def test_shared_layer_flat_modules_expose_public_contracts() -> None:
         assert hasattr(module, attr), module_name
 
 
+def test_duckclaw_namespace_merges_core_and_shared() -> None:
+    import duckclaw
+    from duckclaw.db_bridge import DuckClaw as BridgeDuckClaw
+
+    assert duckclaw.DuckClaw is BridgeDuckClaw
+    assert len(duckclaw.__path__) >= 2
+    importlib.import_module("duckclaw.duckdb_read_compat")
+
+
 def test_agents_runtime_and_manager_facades_expose_public_contracts() -> None:
     modules = (
         ("duckclaw.runtime.graph_server", "get_graph"),
@@ -37,6 +46,8 @@ def test_agents_runtime_and_manager_facades_expose_public_contracts() -> None:
         ("duckclaw.manager.fast_plans", "_try_capability_fast_plan"),
         ("duckclaw.manager.task_classification", "_worker_should_use_lite_stdio_mcp_surface"),
         ("duckclaw.manager.planning", "_plan_task"),
+        ("duckclaw.traces", "TraceCollector"),
+        ("duckclaw.train", "MlxSFT"),
     )
     for module_name, attr in modules:
         module = importlib.import_module(module_name)
@@ -51,6 +62,33 @@ def test_manager_graph_implementation_is_owned_by_manager_package() -> None:
     assert manager_graph.build_manager_graph is builder.build_manager_graph
     assert builder.build_manager_graph.__module__ == "duckclaw.manager.manager_graph_builder"
     assert legacy_graph.build_manager_graph is manager_graph.build_manager_graph
+
+
+def test_tests_do_not_import_task_classification_from_legacy_manager_graph() -> None:
+    """Task classification moved to ``duckclaw.manager.task_classification`` (not the graph facade)."""
+    import ast
+
+    tests_dir = Path("tests")
+    banned = frozenset(
+        {
+            "_incoming_looks_like_semantic_context_followup",
+            "_worker_should_use_lite_stdio_mcp_surface",
+            "_incoming_has_context_summary_system_directive",
+        }
+    )
+    offenders: list[str] = []
+    current = Path(__file__).resolve()
+    for path in sorted(tests_dir.rglob("test_*.py")):
+        if path.resolve() == current:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.ImportFrom) or node.module != "duckclaw.graphs.manager_graph":
+                continue
+            for alias in node.names:
+                if alias.name in banned:
+                    offenders.append(f"{path}:{node.lineno}: {alias.name}")
+    assert offenders == [], f"Use duckclaw.manager.task_classification: {offenders}"
 
 
 def test_homeostasis_goals_alignment_implementation_is_owned_by_homeostasis_package() -> None:

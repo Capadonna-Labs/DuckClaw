@@ -206,6 +206,22 @@ def initialize_worker_graph_context(
     _register_post_llm_skill_tools(tools, spec, db=db, llm=llm)
     tools_by_name = {t.name: t for t in tools}
 
+    try:
+        from duckclaw.extensions.skills import invoke_extension_worker_skill_hooks
+
+        _lid_skills = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
+        invoke_extension_worker_skill_hooks(
+            tools=tools,
+            spec=spec,
+            db=db,
+            llm=llm,
+            logical_worker_id=_lid_skills,
+            worker_path=str(path or ""),
+        )
+        tools_by_name = {t.name: t for t in tools}
+    except Exception:
+        _log.debug("extension worker skill hooks skipped", exc_info=True)
+
     if getattr(spec, "homeostasis_config", None):
         try:
             from duckclaw.forge.skills.homeostasis_bridge import register_homeostasis_skill

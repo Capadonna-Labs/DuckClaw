@@ -42,7 +42,6 @@ duckclaw/
 - **duckops**: Python CLI (`uv run duckops …`) for wizard-driven setup and local service control.
 - **Training traces (optional)**: JSONL under `packages/agents/train/conversation_traces/` — [`packages/agents/train/`](packages/agents/train/) (`train_sft.py`).
 - **Admin UI (Next.js)**: [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md) — consola plantillas/Telegram/runtime (`pnpm admin:dev`)
-- **CRM PQRSD (legacy / hackathon)**: [retoPWRSomegahack](https://github.com/ManePeqsiCoda/retoPWRSomegahack) · código heredado en `apps/duckclaw-admin/src/lib/crm/`
 
 ---
 

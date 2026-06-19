@@ -75,7 +75,7 @@ def run_framework_policy_preflight(
 
     db_path = (get_gateway_db_path() or "").strip()
     if not db_path:
-        print_fn("Policies framework — sin ruta hub (duckops init)")
+        print_fn("Policies framework — sin ruta hub (duckops up o duckops configure)")
         return True
 
     try:

@@ -23,7 +23,7 @@ def _reject_non_default_filesystem_worker(worker_id: str) -> None:
 
 
 def _find_templates_root() -> Path:
-    """Legacy fallback; canónico: ``duckclaw.forge.WORKERS_TEMPLATES_DIR`` (``forge/templates/``)."""
+    """Legacy fallback; canónico: ``duckclaw.forge.WORKERS_TEMPLATES_DIR`` (forge/seed o catálogo DB)."""
     here = Path(__file__).resolve().parent
     # duckclaw/workers -> packages/agents (4 levels up)
     candidates = [
@@ -40,7 +40,7 @@ def _find_templates_root() -> Path:
 
 
 def get_worker_dir(worker_id: str, templates_root: Optional[Path] = None) -> Path:
-    """Return worker dir: ``forge/templates/<worker_id>/`` (o legacy ``templates/workers/<id>/``)."""
+    """Return worker dir: catálogo DB / forge/seed ``<worker_id>/`` (o legacy ``templates/workers/<id>/``)."""
     _reject_non_default_filesystem_worker(worker_id)
     if templates_root is not None:
         path = templates_root / "templates" / "workers" / worker_id.strip()

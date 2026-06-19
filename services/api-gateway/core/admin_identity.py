@@ -151,6 +151,26 @@ def attach_profile_to_console_user(db: Any, user: dict[str, Any]) -> dict[str, A
     return out
 
 
+def _skills_from_manifest_snapshot(manifest: dict[str, Any] | None) -> list[str]:
+    if not isinstance(manifest, dict):
+        return []
+    skills = manifest.get("skills") or []
+    if isinstance(skills, str):
+        skills = [part.strip() for part in skills.split(",") if part.strip()]
+    names: list[str] = []
+    if not isinstance(skills, list):
+        return names
+    for item in skills:
+        if isinstance(item, str) and item.strip():
+            names.append(item.strip())
+            continue
+        if isinstance(item, dict):
+            label = item.get("name") or item.get("id")
+            if label:
+                names.append(str(label).strip())
+    return names
+
+
 def list_templates_payload(
     db: Any,
     *,
@@ -165,10 +185,15 @@ def list_templates_payload(
         include_inactive=include_inactive,
     ):
         wid = str(row.get("id") or row.get("worker_id") or "")
+        worker_uid = str(row.get("worker_uid") or "").strip()
+        skills_list: list[str] = []
+        if worker_uid:
+            latest = get_latest_worker_version(db, worker_uid=worker_uid) or {}
+            skills_list = _skills_from_manifest_snapshot(latest.get("manifest_snapshot"))
         items.append(
             {
                 "id": wid,
-                "worker_uid": str(row.get("worker_uid") or ""),
+                "worker_uid": worker_uid,
                 "worker_id": str(row.get("worker_id") or wid),
                 "name": str(row.get("display_name") or row.get("name") or wid),
                 "source": str(row.get("source") or "catalog"),
@@ -177,6 +202,7 @@ def list_templates_payload(
                 "status": str(row.get("status") or "active"),
                 "active": bool(row.get("active", True)),
                 "read_only": str(row.get("source") or "") == "catalog",
+                "skills_list": skills_list,
             }
         )
     return items

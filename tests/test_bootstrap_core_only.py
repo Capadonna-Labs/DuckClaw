@@ -76,3 +76,22 @@ def test_bootstrap_dbs_core_only_cli(tmp_path: Path, monkeypatch) -> None:
     finally:
         con.close()
         db_path.unlink(missing_ok=True)
+
+
+def test_bootstrap_default_templates_root_prefers_seed() -> None:
+    from scripts.bootstrap_dbs import _default_templates_root
+
+    root = _default_templates_root()
+    assert root is not None
+    assert root.name == "seed"
+    assert (root / "default" / "manifest.yaml").is_file()
+
+
+def test_sovereign_draft_default_vault_matches_session_db() -> None:
+    from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH
+    from duckops.sovereign.draft import SovereignDraft
+    from duckops.sovereign.materialize import effective_primary_duckdb_relpath
+
+    d = SovereignDraft()
+    assert d.duckdb_vault_path == DEFAULT_SESSION_DB_RELPATH
+    assert effective_primary_duckdb_relpath(d) == DEFAULT_SESSION_DB_RELPATH

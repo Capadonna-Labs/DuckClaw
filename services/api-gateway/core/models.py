@@ -41,6 +41,10 @@ class ChatRequest(BaseModel):
         "default",
         description="ID del tenant (cliente) para whitelist y aislamiento de workers.",
     )
+    project_id: str | None = Field(
+        None,
+        description="ID del proyecto admin para contexto RAG y search_project_knowledge.",
+    )
     shared_db_path: str | None = Field(
         None,
         description="Ruta a .duckdb compartido; solo tiene efecto en workers con forge_context.shared_db_path_env.",

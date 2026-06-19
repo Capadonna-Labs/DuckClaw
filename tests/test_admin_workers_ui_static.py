@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES_PAGE = ROOT / "apps/duckclaw-admin/src/app/(admin)/templates/page.tsx"
 TEMPLATE_DETAIL_PAGE = ROOT / "apps/duckclaw-admin/src/app/(admin)/templates/[workerId]/page.tsx"
+POLICIES_PAGE = ROOT / "apps/duckclaw-admin/src/app/(admin)/policies/page.tsx"
 ADMIN_SERVICE = ROOT / "apps/duckclaw-admin/src/services/adminService.ts"
 
 
@@ -82,3 +83,19 @@ def test_catalog_context_creation_gives_feedback_and_keeps_new_tab() -> None:
     assert "Escribe un nombre para el contexto" in detail_page
     assert "disabled={!title.trim()}" in detail_page
     assert "load(title)" in detail_page
+
+
+def test_policies_page_surfaces_agent_capabilities_without_legacy_paths() -> None:
+    page = POLICIES_PAGE.read_text(encoding="utf-8")
+
+    assert "Tus agentes" in page
+    assert "Reglas base" in page
+    assert "¿Qué sigue?" in page
+    assert "listTemplates" in page
+    assert "listPromptPolicies" in page
+    assert "skills_list" in page
+    assert "Listo" in page
+    assert "Falta instrucciones" in page
+    assert 'href={`/templates/${encodeURIComponent(agent.id)}`}' in page
+    assert "forge/templates" not in page
+    assert "tenant" not in page.lower()

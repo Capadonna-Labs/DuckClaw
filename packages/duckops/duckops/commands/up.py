@@ -113,6 +113,37 @@ def _rollback_gateway_db(repo: Path, print_fn) -> bool:
     return True
 
 
+def _post_migrate_catalog_hint(print_fn) -> None:
+    """One-line hint when catalog worker prompts are missing after migrate."""
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path
+        import duckdb
+
+        from duckops.policy_health import check_catalog_worker_system_prompts, check_framework_prompt_policies
+
+        db_path = (get_gateway_db_path() or "").strip()
+        if not db_path:
+            return
+        con = duckdb.connect(db_path, read_only=True)
+        try:
+            catalog = check_catalog_worker_system_prompts(con)
+            framework = check_framework_prompt_policies(con)
+        finally:
+            con.close()
+    except Exception:
+        return
+
+    if not catalog.ok:
+        print_fn(
+            "  hint: faltan prompts por agente — en admin → Prompt policies → Sync catálogo "
+            f"({catalog.summary()})."
+        )
+    elif framework.degraded:
+        print_fn(
+            "  hint: policies framework en modo degradado — Restaurar defaults o Sync catálogo en admin."
+        )
+
+
 def _which_uv() -> str | None:
     import shutil
 
@@ -235,7 +266,7 @@ def cmd_up(
 
     from duckops.admin_dev_server import admin_login_url, resolve_admin_port, wait_admin_http
     from duckops.post_up import run_post_up_loop
-    from duckops.prerequisites import ensure_development_prerequisites, platform_label
+    from duckops.prerequisites import check_redis, ensure_development_prerequisites, platform_label
     from duckops.stack_readiness import admin_credentials_hint, needs_wizard_init
 
     # —— 1/6 Prerequisitos ——
@@ -247,6 +278,16 @@ def cmd_up(
         sync_python=True,
         print_fn=typer.echo,
     ):
+        if not check_redis().ok:
+            from duckops.prerequisites import redis_start_hint
+
+            typer.secho(
+                "Redis no responde. Sin Redis DuckClaw no puede guardar datos ni procesar colas. "
+                f"{redis_start_hint()}. "
+                "O deja que lo instalemos: uv run duckops bootstrap --yes",
+                fg=typer.colors.RED,
+                err=True,
+            )
         raise typer.Exit(1)
     typer.echo("")
 
@@ -262,7 +303,7 @@ def cmd_up(
             raise typer.Exit(code)
     elif needs_wizard_init(root):
         typer.secho(
-            "Falta configuración. Quita --skip-init o ejecuta: uv run duckops init",
+            "Falta configuración. Quita --skip-init o ejecuta: uv run duckops up",
             fg=typer.colors.YELLOW,
         )
         raise typer.Exit(1)
@@ -290,6 +331,7 @@ def cmd_up(
             detail = "rollback aplicado" if rolled_back else "rollback no disponible"
             typer.secho(f"migrate falló ({detail}).", fg=typer.colors.RED)
             raise typer.Exit(1)
+        _post_migrate_catalog_hint(typer.echo)
     else:
         typer.secho("Migraciones omitidas (--no-migrate).", fg=typer.colors.YELLOW)
     typer.echo("")

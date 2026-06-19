@@ -1,4 +1,4 @@
-"""Catálogo de plantillas forge/templates para el wizard (alineado con /workers y consola admin)."""
+"""Catálogo de agentes para el wizard (alineado con /workers y consola admin)."""
 
 from __future__ import annotations
 
@@ -122,7 +122,7 @@ def format_worker_picker_block(
     """Texto Rich para mostrar opciones numeradas."""
     if not picks:
         return (
-            "[yellow]No se encontraron plantillas en forge/templates.[/]\n"
+            "[yellow]No se encontraron agentes en el catálogo.[/]\n"
             "[dim]Comprueba que el monorepo esté completo o escribe el id del worker a mano.[/]"
         )
     lines: list[str] = []

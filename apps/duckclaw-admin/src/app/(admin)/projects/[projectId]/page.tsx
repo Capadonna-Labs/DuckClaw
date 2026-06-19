@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { Bot, ChevronRight, Database, FolderKanban, PlayCircle, RefreshCw } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
+import { KnowledgeStatusBadge } from '@/components/knowledge/KnowledgeStatusBadge';
 
 type ProjectDetailResponse = Awaited<ReturnType<typeof adminService.getWorkspaceProject>>;
 
@@ -207,14 +208,18 @@ function KnowledgeSourceCard({
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-gov-blue-50 p-4 dark:border-dark-border md:flex-row md:items-center md:justify-between">
       <div className="min-w-0">
-        <p className="font-black text-gov-gray-900 dark:text-dark-text">
-          {source.display_name || source.source_uri}
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="font-black text-gov-gray-900 dark:text-dark-text">
+            {source.display_name || source.source_uri}
+          </p>
+          <KnowledgeStatusBadge source={source} />
+        </div>
         <p className="mt-1 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
           {source.source_uri}
         </p>
         <p className="mt-2 text-xs text-gov-gray-500 dark:text-dark-muted">
-          {source.status} · {source.document_count} docs · {source.chunk_count} chunks
+          {source.document_count} documento{source.document_count === 1 ? '' : 's'} ·{' '}
+          {source.chunk_count} fragmento{source.chunk_count === 1 ? '' : 's'}
         </p>
       </div>
       <span className="rounded-full border border-gov-blue-100 px-3 py-1 text-[11px] font-black uppercase tracking-wider text-gov-blue-700 dark:border-dark-border dark:text-dark-cyan">

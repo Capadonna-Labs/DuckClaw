@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -36,6 +37,125 @@ def _emit(label: str, ok: bool, detail: str) -> bool:
     mark = typer.style("OK", fg=typer.colors.GREEN) if ok else typer.style("—", fg=typer.colors.YELLOW)
     typer.echo(f"  {mark} {label} — {detail}")
     return ok
+
+
+def _duckdb_paths_same(a: str, b: str) -> bool:
+    try:
+        return Path(a).resolve() == Path(b).resolve()
+    except OSError:
+        return (a or "").strip() == (b or "").strip()
+
+
+def _playground_vault_user_id() -> str:
+    for key in ("DUCKCLAW_OWNER_ID", "DUCKCLAW_ADMIN_CHAT_ID"):
+        value = (os.environ.get(key) or "").strip()
+        if value:
+            return value
+    return "default"
+
+
+def _expected_playground_vault_path() -> str:
+    from duckclaw.gateway_db import resolve_env_duckdb_path
+
+    uid = re.sub(r"[^a-z0-9_-]", "_", _playground_vault_user_id().lower())[:128] or "default"
+    return resolve_env_duckdb_path(f"db/private/{uid}/duckclaw.duckdb")
+
+
+def _legacy_hub_path() -> str:
+    from duckclaw.gateway_db import resolve_env_duckdb_path
+
+    return resolve_env_duckdb_path("db/duckclaw.duckdb")
+
+
+def _knowledge_source_count(db_path: str) -> int | None:
+    path = Path(db_path)
+    if not path.is_file():
+        return None
+    try:
+        import duckdb
+
+        con = duckdb.connect(str(path), read_only=True)
+        try:
+            row = con.execute("SELECT count(*) FROM main.admin_knowledge_sources").fetchone()
+            return int(row[0]) if row else 0
+        except Exception:
+            return None
+        finally:
+            con.close()
+    except Exception:
+        return None
+
+
+def _emit_split_check(label: str, ok: bool, detail: str, *, strict: bool, split: bool) -> bool:
+    if ok:
+        mark = typer.style("OK", fg=typer.colors.GREEN)
+        typer.echo(f"  {mark} {label} — {detail}")
+        return True
+    if split and strict:
+        mark = typer.style("FAIL", fg=typer.colors.RED)
+        typer.echo(f"  {mark} {label} — {detail}")
+        return False
+    mark = typer.style("WARN", fg=typer.colors.YELLOW)
+    typer.echo(f"  {mark} {label} — {detail}")
+    return True
+
+
+def _check_hub_vault_split(gateway_path: str, *, strict: bool) -> bool:
+    vault_path = _expected_playground_vault_path()
+    legacy_path = _legacy_hub_path()
+    gateway = (gateway_path or "").strip()
+
+    issues: list[str] = []
+    is_split = False
+
+    gateway_exists = bool(gateway) and Path(gateway).is_file()
+    vault_exists = Path(vault_path).is_file()
+    legacy_exists = Path(legacy_path).is_file()
+
+    if gateway_exists and vault_exists and not _duckdb_paths_same(gateway, vault_path):
+        is_split = True
+        issues.append(f"gateway ({gateway}) ≠ bóveda playground ({vault_path})")
+
+    if legacy_exists and vault_exists and not _duckdb_paths_same(legacy_path, vault_path):
+        is_split = True
+        issues.append(
+            f"legacy db/duckclaw.duckdb y bóveda {vault_path} coexisten — split RAG/SQL"
+        )
+
+    seen: set[str] = set()
+    counts: list[tuple[str, int]] = []
+    for label, path in (("gateway", gateway), ("bóveda", vault_path), ("legacy", legacy_path)):
+        if not path or not Path(path).is_file():
+            continue
+        try:
+            resolved = str(Path(path).resolve())
+        except OSError:
+            resolved = path
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        row_count = _knowledge_source_count(path)
+        if row_count is not None:
+            counts.append((label, row_count))
+
+    if len(counts) >= 2:
+        values = [count for _, count in counts]
+        if any(count > 0 for count in values) and any(count == 0 for count in values):
+            is_split = True
+            parts = [f"{label}={count}" for label, count in counts]
+            issues.append(f"admin_knowledge_sources desalineado ({', '.join(parts)})")
+
+    if not issues:
+        detail = gateway or vault_path
+        return _emit_split_check("Session DB unificada", True, detail, strict=strict, split=False)
+
+    return _emit_split_check(
+        "Session DB unificada",
+        False,
+        "; ".join(issues),
+        strict=strict,
+        split=is_split,
+    )
 
 
 def _check_db_writer() -> tuple[bool, str]:
@@ -107,6 +227,11 @@ def cmd_doctor(
         "-y",
         help="Con --bootstrap: instalar sin pedir confirmación (brew/apt).",
     ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Falla si hub y bóveda DuckDB están desalineados (split RAG/SQL).",
+    ),
 ) -> None:
     """Comprueba Redis, migraciones, admin key y puerto gateway."""
     if ctx.invoked_subcommand is not None:
@@ -156,7 +281,7 @@ def cmd_doctor(
 
         db_path = (get_gateway_db_path() or "").strip()
         if not db_path:
-            _emit("Migraciones", True, "sin ruta hub (ejecuta duckops init)")
+            _emit("Migraciones", True, "sin ruta hub (ejecuta duckops up o duckops configure)")
         else:
             ok_schema, msg_schema = verify_schema_integrity(db_path)
             if not _emit(
@@ -168,6 +293,9 @@ def cmd_doctor(
     except Exception as exc:
         if not _emit("Migraciones", False, str(exc)[:160]):
             critical_ok = False
+
+    if not _check_hub_vault_split(db_path, strict=strict):
+        critical_ok = False
 
     if db_path:
         try:
@@ -215,7 +343,7 @@ def cmd_doctor(
     _emit(
         "Admin API key",
         key_ok,
-        "configurada" if key_ok else "falta o placeholder (duckops init)",
+        "configurada" if key_ok else "falta o placeholder (duckops up o duckops configure)",
     )
 
     try:

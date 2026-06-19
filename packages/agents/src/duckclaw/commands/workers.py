@@ -17,7 +17,7 @@ def execute_roles(db: Any, chat_id: Any) -> str:
 
     all_templates = list_workers()
     if not all_templates:
-        return "No hay templates en forge/templates. Añade al menos uno."
+        return "No hay agentes en el catálogo. Añade al menos uno (forge/seed o consola admin)."
     lines = "\n".join(f"- {w}" for w in all_templates)
     return format_guardrail("fly_commands", "roles_list_intro", lines=lines)
 

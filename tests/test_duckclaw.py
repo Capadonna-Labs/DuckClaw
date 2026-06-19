@@ -1,13 +1,16 @@
-import duckclaw
+"""Smoke tests for the DuckClaw DuckDB bridge."""
 
-# Base en memoria para que cada ejecución sea reproducible (sin datos acumulados)
-db = duckclaw.DuckClaw(":memory:")
+from __future__ import annotations
 
-# Crear tabla e insertar
-db.execute("CREATE TABLE test (id INTEGER, name TEXT)")
-db.execute("INSERT INTO test VALUES (1, 'model-alpha'), (2, 'model-beta')")
+import json
 
-# Consultar (devuelve JSON por defecto)
-result = db.query("SELECT * FROM test")
-print(f"Versión de DuckDB: {db.get_version()}")
-print(f"Datos en DuckClaw (JSON): {result}")
+from duckclaw import DuckClaw
+
+
+def test_duckclaw_in_memory_execute_and_query() -> None:
+    db = DuckClaw(":memory:")
+    db.execute("CREATE TABLE test (id INTEGER, name TEXT)")
+    db.execute("INSERT INTO test VALUES (1, 'model-alpha'), (2, 'model-beta')")
+    result = json.loads(db.query("SELECT * FROM test ORDER BY id"))
+    assert result == [{"id": "1", "name": "model-alpha"}, {"id": "2", "name": "model-beta"}]
+    assert db.get_version()

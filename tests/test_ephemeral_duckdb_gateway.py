@@ -57,7 +57,7 @@ def test_graph_server_get_db_is_ephemeral(monkeypatch: pytest.MonkeyPatch, tmp_p
 
 
 def test_clear_worker_graph_cache_idempotent() -> None:
-    from duckclaw.graphs.manager_graph import clear_worker_graph_cache
+    from duckclaw.manager.routing import clear_worker_graph_cache
 
     clear_worker_graph_cache()
     clear_worker_graph_cache()

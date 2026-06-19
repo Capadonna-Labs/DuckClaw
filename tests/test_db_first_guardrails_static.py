@@ -108,7 +108,9 @@ def test_gateway_fly_rw_exception_lists_only_current_pending_commands() -> None:
     pending_legacy_rw: set[str] = set()
 
     assert _fly_command_set(fly_owner, "LEGACY_RW_FLY_COMMANDS") == pending_legacy_rw
-    assert pending_legacy_rw.isdisjoint(_fly_command_set(fly_owner, "READ_ONLY_SAFE_FLY_COMMANDS"))
+    assert pending_legacy_rw.isdisjoint(
+        _fly_command_set(fly_owner, "_CORE_READ_ONLY_SAFE_FLY_COMMANDS")
+    )
     assert "Estado actual de `LEGACY_RW_FLY_COMMANDS`: ninguno." in docs
 
 

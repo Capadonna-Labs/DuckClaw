@@ -911,6 +911,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "pyyaml" },
     { name = "redis" },
     { name = "requests" },
 ]
@@ -926,6 +927,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "python-telegram-bot", marker = "extra == 'telegram'", specifier = ">=21.0" },
+    { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "redis", specifier = ">=5.0.0" },
     { name = "requests", specifier = ">=2.28.0" },
 ]

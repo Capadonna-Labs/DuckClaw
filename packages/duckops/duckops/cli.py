@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from duckops.commands import audit, bootstrap, comfyui, db, deploy, doctor, ingress, init, mcp, serve, smoke, stack, train, up
+from duckops.commands import audit, bootstrap, comfyui, configure, db, deploy, doctor, ingress, init, mcp, serve, smoke, stack, train, up
 
 app = typer.Typer(
     name="duckops",
@@ -34,9 +34,14 @@ app.add_typer(
     help="Smoke local: doctor + GET /health.",
 )
 app.add_typer(
+    configure.app,
+    name="configure",
+    help="Wizard Sovereign v2.0 y setup inicial (ver duckops configure --help).",
+)
+app.add_typer(
     init.app,
     name="init",
-    help="Sovereign Wizard v2.0 y setup inicial (ver duckops init --help).",
+    help="[Deprecado] Usa duckops up o duckops configure.",
 )
 app.add_typer(serve.app, name="serve", help="Arranca el API Gateway o servidor LangGraph.")
 app.add_typer(stack.app, name="stack", help="Estado y arranque del stack local DuckClaw.")

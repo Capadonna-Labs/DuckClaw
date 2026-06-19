@@ -27,7 +27,7 @@ except ImportError:
 
 import duckdb
 
-from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH, get_gateway_db_path
 from duckclaw.schema_migrations import migrate_gateway_database, verify_schema_integrity
 from duckclaw.admin_console_users import ensure_admin_console_users_table, seed_admin_console_users_if_empty
 from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
@@ -195,6 +195,23 @@ def _install_extensions(con: duckdb.DuckDBPyConnection, extensions: list[str]) -
             pass
 
 
+def _default_templates_root() -> Path | None:
+    """Prefer forge/seed (canonical); fall back to legacy forge/templates if present."""
+    for name in ("seed", "templates"):
+        candidate = (
+            _REPO_ROOT
+            / "packages"
+            / "agents"
+            / "src"
+            / "duckclaw"
+            / "forge"
+            / name
+        )
+        if candidate.is_dir():
+            return candidate
+    return None
+
+
 def bootstrap_core_file(path: Path) -> None:
     """Perfil genérico Spawn: solo tablas núcleo (spec SPAWN_GENERIC_DEPLOY)."""
     from duckclaw.bootstrap_core import bootstrap_core_schema
@@ -267,24 +284,24 @@ def main() -> int:
         "--templates-root",
         type=Path,
         default=None,
-        help="Raíz de forge/templates (por defecto packages/agents/.../templates)",
+        help="Raíz de forge/seed o forge/templates (por defecto: seed si existe)",
     )
     args = parser.parse_args()
     templates_root = args.templates_root
     if templates_root is None:
-        templates_root = (
-            _REPO_ROOT
-            / "packages"
-            / "agents"
-            / "src"
-            / "duckclaw"
-            / "forge"
-            / "templates"
+        templates_root = _default_templates_root()
+    if not args.core_only and (templates_root is None or not templates_root.is_dir()):
+        print(
+            f"No existe templates_root (forge/seed ni forge/templates bajo packages/agents). "
+            f"Usa --core-only o --templates-root.",
+            file=sys.stderr,
         )
-    if not args.core_only and not templates_root.is_dir():
-        print(f"No existe templates_root: {templates_root}", file=sys.stderr)
         return 1
-    extensions = _collect_extensions(templates_root) if templates_root.is_dir() else []
+    extensions = (
+        _collect_extensions(templates_root)
+        if templates_root is not None and templates_root.is_dir()
+        else []
+    )
     print("ensure_registry (system.duckdb)...", flush=True)
     ensure_registry()
     gateway_path = get_gateway_db_path()
@@ -305,8 +322,10 @@ def main() -> int:
     only_explicit = bool(args.only) or bool(args.core_only)
     targets = _iter_duckdb_targets(list(args.extra_dbs), only_explicit=only_explicit)
     if args.core_only and not targets:
-        default_db = os.environ.get("DUCKDB_PATH") or os.environ.get(
-            "DUCKCLAW_DB_PATH", "db/private/default/duckclaw.duckdb"
+        default_db = (
+            (os.environ.get("DUCKDB_PATH") or "").strip()
+            or (os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
+            or DEFAULT_SESSION_DB_RELPATH
         )
         rp = _resolve_extra_db(default_db)
         if rp is not None:

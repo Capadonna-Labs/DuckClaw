@@ -29,6 +29,7 @@ import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
 import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
 import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
+import { SessionDatabaseChip } from '@/components/playground/SessionDatabaseChip';
 import type { FlyCommandEntry } from '@/types/admin';
 
 const FREQUENT_CHAT_COMMANDS = new Set(['/team', '/vault', '/model', '/workers']);
@@ -371,8 +372,8 @@ export default function PlaygroundPage() {
 
       {settingsModal === 'vault' && (
         <SettingsModal
-          title="Bóveda DuckDB"
-          description="DuckDB efectivo para este hilo."
+          title="Base de datos de esta sesión"
+          description="Archivo .duckdb que usa esta conversación para SQL, reglas y conocimiento (RAG)."
           onClose={() => setSettingsModal(null)}
         >
           {conv.sessionId ? (
@@ -454,7 +455,13 @@ export default function PlaygroundPage() {
             Cargando conversación…
           </p>
         ) : (
-          <AdminChatPanel
+          <>
+            <SessionDatabaseChip
+              path={activeVaultPath}
+              scope={activeVaultScope}
+              onConfigure={() => setSettingsModal('vault')}
+            />
+            <AdminChatPanel
             key={`${conv.sessionId}-${workerId}`}
             chatId={conv.sessionId}
             chat={chat}
@@ -471,6 +478,7 @@ export default function PlaygroundPage() {
             }
             className="flex-1 lg:h-full min-h-0 border-0 rounded-none shadow-none"
           />
+          </>
         )}
       </div>
 
@@ -739,9 +747,9 @@ function RunSettingsCard({
         />
         <RunSettingButton
           icon={<Database size={16} aria-hidden />}
-          title="DuckDB"
+          title="Base de datos"
           value={activeVaultPath || '—'}
-          detail={activeVaultScope === 'chat' ? 'Por conversación' : 'Default efectivo'}
+          detail={activeVaultScope === 'chat' ? 'Por conversación' : 'Misma para RAG y SQL'}
           mono
           onClick={() => onOpen('vault')}
         />

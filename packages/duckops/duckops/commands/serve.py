@@ -115,7 +115,7 @@ def cmd_serve(
                 typer.secho(f"DB-Writer: {exc}", fg=typer.colors.YELLOW)
         else:
             typer.secho(
-                f"No existe {db_ecosystem}; ejecuta duckops init o duckops stack up.",
+                f"No existe {db_ecosystem}; ejecuta duckops up o duckops stack up.",
                 fg=typer.colors.YELLOW,
             )
         if stack_mod._wait_for_gateway_health("127.0.0.1", effective_port, 15.0):

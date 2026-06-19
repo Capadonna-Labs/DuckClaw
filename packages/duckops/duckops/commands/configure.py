@@ -1,0 +1,160 @@
+"""Comando configure: Sovereign Wizard v2.0 por defecto; wizard clásico con --classic."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import typer
+
+app = typer.Typer()
+
+
+def _repo_root() -> Path:
+    """Raíz del monorepo (packages/duckops/duckops/commands -> ../../../../)."""
+    return Path(__file__).resolve().parent.parent.parent.parent.parent
+
+
+def run_configure(
+    *,
+    tenant_id: str = "default",
+    repo: Path | None = None,
+    chat: bool = False,
+    manual: bool = False,
+    classic: bool = False,
+    bootstrap: bool = True,
+    yes: bool = True,
+    use_wizard: bool = True,
+) -> None:
+    """Ejecuta el wizard de configuración (Sovereign v2.0 o clásico)."""
+    repo_path = repo.resolve() if repo is not None else None
+    base = repo_path if repo_path is not None else _repo_root()
+
+    if bootstrap:
+        from duckops.prerequisites import ensure_development_prerequisites, platform_label
+
+        typer.secho(f"Prerequisitos ({platform_label()})", fg=typer.colors.CYAN)
+        if not ensure_development_prerequisites(
+            base,
+            install=True,
+            assume_yes=yes,
+            sync_python=True,
+            print_fn=typer.echo,
+        ):
+            typer.secho(
+                "Bootstrap falló. Prueba: uv run duckops bootstrap --yes",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(1)
+        typer.echo("")
+
+    if not classic:
+        from duckops.sovereign.runner import run_sovereign_chat, run_sovereign_wizard
+
+        if chat:
+            raise typer.Exit(run_sovereign_chat(repo_path))
+        raise typer.Exit(run_sovereign_wizard(repo_path, manual=manual))
+
+    wizard_script = base / "scripts" / "duckclaw_setup_wizard.py"
+
+    if not wizard_script.is_file():
+        typer.echo(f"[red]No se encontró el wizard: {wizard_script}[/]", err=True)
+        raise typer.Exit(1)
+
+    typer.secho(f"Forjando agente para {tenant_id} (wizard clásico)...", fg=typer.colors.CYAN)
+
+    if use_wizard:
+        env = os.environ.copy()
+        env["PYTHONPATH"] = str(base) + (os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+        try:
+            result = subprocess.run(
+                [sys.executable, str(wizard_script)],
+                cwd=str(base),
+                env=env,
+            )
+            if result.returncode != 0:
+                raise typer.Exit(result.returncode)
+        except KeyboardInterrupt:
+            typer.echo("\nInterrumpido.")
+            raise typer.Exit(130)
+        try:
+            from duckops.admin_bootstrap import ensure_admin_env_merged
+
+            updates = ensure_admin_env_merged(base)
+            if updates:
+                typer.secho(
+                    "Admin consola: claves materializadas en .env "
+                    f"({updates.get('DUCKCLAW_ADMIN_EMAIL', '')}).",
+                    fg=typer.colors.GREEN,
+                )
+        except Exception as exc:
+            typer.secho(f"[yellow]Admin bootstrap:[/] {exc}", err=True)
+    else:
+        typer.echo("Modo --no-wizard: ejecuta el wizard manualmente:")
+        typer.echo(f"  python {wizard_script}")
+
+    typer.secho("¡Agente listo!", fg=typer.colors.GREEN)
+
+
+@app.callback(invoke_without_command=True)
+def cmd_configure(
+    ctx: typer.Context,
+    tenant_id: str = typer.Argument(
+        default="default",
+        help="Ignóralo salvo que uses --classic (asistente antiguo).",
+        hidden=True,
+    ),
+    repo: Path | None = typer.Option(
+        None,
+        "--repo",
+        "-C",
+        help="Carpeta del proyecto DuckClaw (por defecto: donde estás parado).",
+    ),
+    chat: bool = typer.Option(
+        False,
+        "--chat",
+        help="Probar el chat en terminal, sin abrir la consola web.",
+    ),
+    manual: bool = typer.Option(
+        False,
+        "--manual",
+        help="Configuración avanzada: Telegram, Tailscale y más opciones.",
+    ),
+    classic: bool = typer.Option(
+        False,
+        "--classic",
+        help="Asistente de configuración anterior (solo si el nuevo falla).",
+    ),
+    bootstrap: bool = typer.Option(
+        True,
+        "--bootstrap/--no-bootstrap",
+        help="Comprobar e instalar lo necesario (Redis, Node, etc.) antes de configurar.",
+    ),
+    yes: bool = typer.Option(
+        True,
+        "--yes/--no-yes",
+        help="Instalar automáticamente lo que falte en tu Mac o Linux.",
+    ),
+    use_wizard: bool = typer.Option(
+        True,
+        "--wizard/--no-wizard",
+        help="Con --classic: abrir el asistente interactivo.",
+    ),
+) -> None:
+    """Vuelve a configurar DuckClaw (cuentas, claves, servicios). Para la primera vez usa duckops up."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    run_configure(
+        tenant_id=tenant_id,
+        repo=repo,
+        chat=chat,
+        manual=manual,
+        classic=classic,
+        bootstrap=bootstrap,
+        yes=yes,
+        use_wizard=use_wizard,
+    )

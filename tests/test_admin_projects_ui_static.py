@@ -195,7 +195,7 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
 
     assert page_path.exists()
     page = page_path.read_text(encoding="utf-8")
-    assert "{ href: '/policies', label: 'Prompt policies'" in nav
+    assert "{ href: '/policies', label: 'Instrucciones'" in nav
     assert "'/policies': ClipboardList" in sidebar
     assert "PromptPolicy" in service
     assert "PromptPolicyHealth" in service
@@ -219,8 +219,9 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
     assert "MANAGED_DRAFT_POLICY_TYPE = 'manager_task'" in page
     assert "MANAGED_DRAFT_POLICY_NAME = 'admin_workspace_managed_draft'" in page
     assert "JSON.parse(content)" in page
-    assert "Guardar nueva versión" in page
-    assert "Health de policies" in page
+    assert "Guardar borrador" in page
+    assert "Estado" in page
+    assert "humanHealthSummary" in page
     assert "getPromptPolicyHealth()" in page
     assert "missing_count" in page
     assert "adminService.upsertPromptPolicy" in page

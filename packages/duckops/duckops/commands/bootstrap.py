@@ -60,6 +60,6 @@ def cmd_bootstrap(
         raise typer.Exit(1)
 
     typer.secho(
-        "Prerequisitos listos. Siguiente: uv run duckops init",
+        "Prerequisitos listos. Siguiente: uv run duckops up",
         fg=typer.colors.GREEN,
     )

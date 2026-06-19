@@ -212,4 +212,8 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             description="Devuelve la ruta o nombre del archivo .duckdb al que tiene acceso el agente. Usar cuando pregunten por el nombre de la base de datos.",
         )
     )
+
+    from duckclaw.forge.skills.search_project_knowledge_bridge import register_search_project_knowledge_tool
+
+    register_search_project_knowledge_tool(tools)
     return tools

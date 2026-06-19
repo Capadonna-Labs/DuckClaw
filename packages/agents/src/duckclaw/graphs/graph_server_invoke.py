@@ -38,6 +38,7 @@ async def _ainvoke(
     is_system_prompt: bool | None = False,
     outbound_telegram_bot_token: str | None = None,
     entry_worker_id: str | None = None,
+    project_id: str | None = None,
 ) -> dict:
     """
     Invoca el grafo y retorna {"reply": str, "messages": list | None}.
@@ -58,6 +59,7 @@ async def _ainvoke(
         "username": (username or "").strip(),
         "vault_db_path": (vault_db_path or "").strip() or "",
         "shared_db_path": (shared_db_path or "").strip() or "",
+        "project_id": (project_id or "").strip(),
     }
     if _tok:
         state["outbound_telegram_bot_token"] = _tok
@@ -112,6 +114,7 @@ async def ainvoke_manager_ephemeral(
     is_system_prompt: bool | None = False,
     outbound_telegram_bot_token: str | None = None,
     entry_worker_id: str | None = None,
+    project_id: str | None = None,
 ) -> dict:
     """
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
@@ -136,6 +139,7 @@ async def ainvoke_manager_ephemeral(
             is_system_prompt=is_system_prompt,
             outbound_telegram_bot_token=outbound_telegram_bot_token,
             entry_worker_id=entry_worker_id,
+            project_id=project_id,
         )
     finally:
         try:

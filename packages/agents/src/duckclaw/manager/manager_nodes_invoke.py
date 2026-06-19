@@ -112,10 +112,16 @@ def build_invoke_worker_node(
                 pass
         if assigned is None:
             set_idle(chat_id)
-            _log.warning("manager: no hay plantillas de worker disponibles en %s", getattr(troot, "__str__", lambda: "")() or "forge/templates")
+            _log.warning(
+                "manager: no hay agentes disponibles en el catálogo (%s)",
+                getattr(troot, "__str__", lambda: "")() or "forge/seed",
+            )
             # No incluir "messages": None — add_messages en ManagerAgentState exige valores no nulos.
             return {
-                "reply": "No hay plantillas de worker configuradas. Añade al menos una en forge/templates (con manifest.yaml).",
+                "reply": (
+                    "No hay agentes configurados en el catálogo. "
+                    "Importa al menos uno desde forge/seed o la consola admin."
+                ),
                 "_audit_done": True,
                 "assigned_worker_id": None,
             }

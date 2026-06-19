@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH
 from duckops.sovereign.draft import SovereignDraft
 
 _WIZARD_DIR = Path.home() / ".config" / "duckclaw"
 _DRAFT_PATH = _WIZARD_DIR / "wizard_draft.json"
 _CONFIG_PATH = _WIZARD_DIR / "wizard_config.json"
 
-NEUTRAL_DUCKDB_VAULT = "db/sovereign_memory.duckdb"
+NEUTRAL_DUCKDB_VAULT = DEFAULT_SESSION_DB_RELPATH
 NEUTRAL_GATEWAY_PM2 = "DuckClaw-Gateway"
 NEUTRAL_WORKER_CANDIDATES = ("default",)
 

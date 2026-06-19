@@ -6,6 +6,8 @@ import { useSearchParams } from 'next/navigation';
 import { Database, FolderUp, RefreshCw, Trash2, UploadCloud } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
+import { KnowledgePlaygroundBanner } from '@/components/knowledge/KnowledgePlaygroundBanner';
+import { KnowledgeStatusBadge } from '@/components/knowledge/KnowledgeStatusBadge';
 
 const ACCEPTED_EXTENSIONS = '.md,.markdown,.txt,.json,.csv';
 const DIRECTORY_INPUT_PROPS = { webkitdirectory: '', directory: '' };
@@ -143,8 +145,7 @@ export default function KnowledgePage() {
               Gestor RAG
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-gov-gray-600 dark:text-dark-muted">
-              Asocia conocimiento a un proyecto y, opcionalmente, a un agente. El Playground recupera estos chunks
-              cuando conversa con `project_id`.
+              Sube documentos y asígnalos a un proyecto. El Playground los usa cuando eliges ese proyecto en el chat.
             </p>
           </div>
           {projectId && (
@@ -157,6 +158,13 @@ export default function KnowledgePage() {
           )}
         </div>
       </header>
+
+      <KnowledgePlaygroundBanner
+        projectId={projectId}
+        projectName={selectedProject?.name}
+        sources={sources}
+        loading={loading}
+      />
 
       <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
         <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
@@ -312,7 +320,9 @@ export default function KnowledgePage() {
           <p className="mt-4 text-sm text-gov-gray-500 dark:text-dark-muted">Cargando fuentes RAG...</p>
         ) : sources.length === 0 ? (
           <p className="mt-4 rounded-2xl border border-dashed border-gov-blue-100 p-4 text-sm text-gov-gray-500 dark:border-dark-border dark:text-dark-muted">
-            Sin fuentes RAG para este scope.
+            {projectId
+              ? 'Aún no hay documentos para este proyecto. Sube archivos arriba.'
+              : 'Elige un proyecto para ver o añadir conocimiento.'}
           </p>
         ) : (
           <div className="mt-4 grid gap-3">
@@ -322,15 +332,27 @@ export default function KnowledgePage() {
                 className="flex flex-col gap-3 rounded-2xl border border-gov-blue-50 p-4 dark:border-dark-border md:flex-row md:items-center md:justify-between"
               >
                 <div className="min-w-0">
-                  <p className="font-black text-gov-gray-900 dark:text-dark-text">
-                    {source.display_name || source.source_uri}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="font-black text-gov-gray-900 dark:text-dark-text">
+                      {source.display_name || source.source_uri}
+                    </p>
+                    <KnowledgeStatusBadge source={source} />
+                  </div>
                   <p className="mt-1 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
                     {source.source_uri}
                   </p>
                   <p className="mt-2 text-xs text-gov-gray-500 dark:text-dark-muted">
-                    {source.status} · {source.document_count} docs · {source.chunk_count} chunks
+                    {source.document_count} documento{source.document_count === 1 ? '' : 's'} ·{' '}
+                    {source.chunk_count} fragmento{source.chunk_count === 1 ? '' : 's'} para el chat
                   </p>
+                  {source.chunk_count === 0 && (
+                    <Link
+                      href={`/playground?project=${encodeURIComponent(projectId)}`}
+                      className="mt-2 inline-block text-xs font-bold text-gov-blue-800 underline dark:text-dark-cyan"
+                    >
+                      El agente no verá contenido hasta que haya fragmentos — probar en Playground →
+                    </Link>
+                  )}
                 </div>
                 <button
                   type="button"

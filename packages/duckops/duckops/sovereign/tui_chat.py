@@ -20,6 +20,7 @@ from duckops.admin_dev_server import (
     ensure_admin_web_ready,
     open_admin_browser,
 )
+from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.materialize import load_draft_json
 from duckops.sovereign.tui_chat_columns import render_chat_turn, render_input_chrome
@@ -71,7 +72,7 @@ def _draft_from_dotenv(repo_root: Path, cfg: "GatewayChatConfig") -> SovereignDr
     env = _parse_env_file(repo_root / ".env")
     vault = (env.get("DUCKDB_PATH") or env.get("DUCKCLAW_DB_PATH") or "").strip()
     return SovereignDraft(
-        duckdb_vault_path=vault or "db/sovereign_memory.duckdb",
+        duckdb_vault_path=vault or DEFAULT_SESSION_DB_RELPATH,
         tenant_id=cfg.tenant_id,
         default_worker_id=cfg.default_worker_id,
     )

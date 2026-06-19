@@ -40,7 +40,7 @@ def manifest_display_fields(template_id: str) -> tuple[str, str]:
 
     manifest = _templates_dir() / template_id / "manifest.yaml"
     name = template_id
-    subtitle = f"Plantilla forge/templates/{template_id}"
+    subtitle = f"Agente del catálogo ({template_id})"
     if not manifest.is_file():
         return name, subtitle
     try:

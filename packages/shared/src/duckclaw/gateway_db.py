@@ -21,6 +21,9 @@ GATEWAY_DB_ENV_KEYS: tuple[str, ...] = (
     "DUCKDB_PATH",
 )
 
+# Bóveda operativa única en dev: RAG, políticas, chat y ACL del gateway.
+DEFAULT_SESSION_DB_RELPATH = "db/private/default/duckclaw.duckdb"
+
 
 class GatewayDbEphemeralReadonly:
     """
@@ -72,12 +75,12 @@ def resolve_env_duckdb_path(raw: str) -> str:
 
 
 def raw_gateway_db_path_from_environ() -> str:
-    """Primera variable de entorno no vacía en ``GATEWAY_DB_ENV_KEYS``; fallback ``db/duckclaw.duckdb``."""
+    """Primera variable de entorno no vacía en ``GATEWAY_DB_ENV_KEYS``; fallback ``DEFAULT_SESSION_DB_RELPATH``."""
     for key in GATEWAY_DB_ENV_KEYS:
         v = (os.environ.get(key) or "").strip()
         if v:
             return v
-    return "db/duckclaw.duckdb"
+    return DEFAULT_SESSION_DB_RELPATH
 
 
 def raw_gateway_db_path_from_mapping(mapping: Mapping[str, Any]) -> str:
@@ -98,6 +101,16 @@ def get_gateway_db_path() -> str:
     ``DUCKDB_PATH``; resuelta con ``resolve_env_duckdb_path``.
     """
     return resolve_env_duckdb_path(raw_gateway_db_path_from_environ())
+
+
+def get_session_db_path() -> str:
+    """
+    Alias de ``get_gateway_db_path()`` — DuckDB operativa canónica en dev.
+
+    Una sola sesión por tenant (RAG, políticas, chat, ACL); sin ATTACH extra
+    salvo que el wizard materialice ``DUCKCLAW_SHARED_DB_PATH`` explícito.
+    """
+    return get_gateway_db_path()
 
 
 def get_gateway_db() -> Any:

@@ -7,10 +7,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH
 from duckops.sovereign.draft import SovereignDraft
 from duckops.sovereign.validate import private_db_dir_writable
 
-_DEFAULT_VAULT = "db/sovereign_memory.duckdb"
+_DEFAULT_VAULT = DEFAULT_SESSION_DB_RELPATH
 
 
 def primary_duckdb_relpath(draft: SovereignDraft) -> str:

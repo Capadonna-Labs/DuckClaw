@@ -112,6 +112,7 @@ async def lifespan(app: FastAPI):
     _warn_if_loopback_gateway_port_steals_telegram_funnel()
     app.state.redis = redis.from_url(str(gw_settings.resolved_redis_url()), decode_responses=True)
     app.state.goals_ticker_task = None
+    app.state.knowledge_auto_sync_task = None
     _normalize_local_artifacts_to_db()
     # DDL en runtime desactivado: ejecutar duckclaw-migrate / bootstrap_dbs antes de PM2.
     app.state.telegram_mcp = None
@@ -195,6 +196,31 @@ async def lifespan(app: FastAPI):
             _log.warning("embedded crons ticker no disponible: %s", exc)
 
     try:
+        from duckclaw.forge.rag.knowledge_auto_sync import auto_sync_enabled, auto_sync_poll_seconds, run_auto_sync_poll
+
+        if auto_sync_enabled():
+            _knowledge_poll_s = auto_sync_poll_seconds()
+
+            async def _knowledge_auto_sync_loop() -> None:
+                while True:
+                    try:
+                        await asyncio.to_thread(run_auto_sync_poll)
+                    except Exception as _ks_exc:  # noqa: BLE001
+                        _log.warning("knowledge auto-sync loop error: %s", _ks_exc)
+                    await asyncio.sleep(_knowledge_poll_s)
+
+            app.state.knowledge_auto_sync_task = asyncio.create_task(
+                _knowledge_auto_sync_loop(),
+                name="knowledge-auto-sync",
+            )
+            _log.info(
+                "knowledge auto-sync enabled (poll=%ss, vault/Obsidian folder sources)",
+                _knowledge_poll_s,
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("knowledge auto-sync no disponible: %s", exc)
+
+    try:
         from duckclaw.forge.skills.comfyui_bridge import (
             clear_all_comfy_generations,
             reset_comfyui_runtime,
@@ -240,6 +266,15 @@ async def lifespan(app: FastAPI):
         except BaseException:
             pass
         app.state.goals_ticker_task = None
+
+    _ks = getattr(app.state, "knowledge_auto_sync_task", None)
+    if _ks is not None:
+        _ks.cancel()
+        try:
+            await _ks
+        except BaseException:
+            pass
+        app.state.knowledge_auto_sync_task = None
 
     _tg_mcp = getattr(app.state, "telegram_mcp", None)
     if _tg_mcp is not None:

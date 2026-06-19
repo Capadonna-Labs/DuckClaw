@@ -65,6 +65,9 @@ class ManagerAgentState(TypedDict, total=False):
     # Worker de la ruta HTTP. Usado para anclar SYSTEM_EVENT de /crons --delta.
     entry_worker_id: Optional[str]
 
+    # Proyecto activo (admin playground / RAG); propagado al subgrafo worker.
+    project_id: Optional[str]
+
     coordinator_worker_id: Optional[str]
     delegation_pool: Optional[List[str]]
 

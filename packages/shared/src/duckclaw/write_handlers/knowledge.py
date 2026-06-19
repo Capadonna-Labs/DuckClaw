@@ -252,6 +252,40 @@ def _apply_upsert_knowledge_chunks(conn: Any, payload: dict) -> None:
             )
 
 
+def _apply_deactivate_knowledge_documents(conn: Any, payload: dict) -> None:
+    source_id = str(payload["source_id"]).strip()
+    tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
+    document_ids = payload.get("document_ids") or []
+    if not source_id:
+        raise ValueError("source_id required")
+    if not isinstance(document_ids, list) or not document_ids:
+        return
+    _require_knowledge_source(conn, source_id)
+    for raw_id in document_ids:
+        document_id = str(raw_id).strip()
+        if not document_id:
+            continue
+        row = conn.execute(
+            "SELECT document_id FROM main.admin_knowledge_documents "
+            "WHERE document_id = ? AND source_id = ?",
+            [document_id, source_id],
+        ).fetchone()
+        if not row:
+            continue
+        conn.execute(
+            "UPDATE main.admin_knowledge_documents "
+            "SET active = false, updated_at = CURRENT_TIMESTAMP "
+            "WHERE document_id = ?",
+            [document_id],
+        )
+        conn.execute(
+            "UPDATE main.admin_knowledge_chunks "
+            "SET active = false, updated_at = CURRENT_TIMESTAMP "
+            "WHERE document_id = ?",
+            [document_id],
+        )
+
+
 def _apply_deactivate_knowledge_source(conn: Any, payload: dict) -> None:
     source_id = str(payload["source_id"]).strip()
     tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
@@ -285,4 +319,5 @@ from duckclaw.write_handlers.registry import register_handler
 register_handler("create_knowledge_source", _apply_create_knowledge_source)
 register_handler("upsert_knowledge_document", _apply_upsert_knowledge_document)
 register_handler("upsert_knowledge_chunks", _apply_upsert_knowledge_chunks)
+register_handler("deactivate_knowledge_documents", _apply_deactivate_knowledge_documents)
 register_handler("deactivate_knowledge_source", _apply_deactivate_knowledge_source)

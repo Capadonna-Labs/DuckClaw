@@ -152,6 +152,7 @@ export interface KnowledgeSource {
   updated_at?: string;
   document_count: number;
   chunk_count: number;
+  document_paths?: string;
 }
 
 export interface KnowledgeSearchResult {
@@ -1451,6 +1452,14 @@ export const adminService = {
     );
   },
 
+  getKnowledgeConfig: () =>
+    adminFetch<{
+      allowed_roots: { path: string; label: string; exists: boolean }[];
+      output_roots: { path: string; label: string; exists: boolean }[];
+      auto_sync: boolean;
+      auto_sync_poll_sec: number;
+    }>('/knowledge/config'),
+
   createKnowledgeSource: (body: {
     source_uri: string;
     display_name?: string;
@@ -1467,7 +1476,41 @@ export const adminService = {
       task_ids: string[];
       documents: number;
       chunks: number;
+      skipped_hidden?: number;
+      skipped_unsupported?: number;
     }>('/knowledge/sources', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  previewKnowledgeFolder: (source_uri: string) =>
+    adminFetch<{
+      ok: boolean;
+      source_uri: string;
+      file_count: number;
+      skipped_hidden: number;
+      skipped_secret: number;
+      skipped_unsupported: number;
+      sample_paths: string[];
+    }>('/knowledge/sources/preview', {
+      method: 'POST',
+      body: JSON.stringify({ source_uri }),
+    }),
+
+  syncKnowledgeSource: (
+    sourceId: string,
+    body: { compute_embeddings?: boolean } = {}
+  ) =>
+    adminFetch<{
+      ok: boolean;
+      source_id: string;
+      task_ids: string[];
+      scanned: number;
+      upserted: number;
+      skipped: number;
+      removed: number;
+      chunks: number;
+    }>(`/knowledge/sources/${encodeURIComponent(sourceId)}/sync`, {
       method: 'POST',
       body: JSON.stringify(body),
     }),
@@ -1483,7 +1526,7 @@ export const adminService = {
     form.set('display_name', body.display_name || '');
     form.set('project_id', body.project_id || '');
     form.set('worker_uid', body.worker_uid || '');
-    form.set('compute_embeddings', body.compute_embeddings ? 'true' : 'false');
+    form.set('compute_embeddings', body.compute_embeddings === false ? 'false' : 'true');
     for (const file of body.files) {
       const relativePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
       form.append('files', file, relativePath);

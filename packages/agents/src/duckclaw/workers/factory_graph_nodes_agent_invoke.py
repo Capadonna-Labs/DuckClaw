@@ -171,8 +171,15 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             explicit_storage_request=explicit_duckdb_schema_request,
         )
         if _rag_turn_without_db_intent:
+            _rag_tid = (state.get("tenant_id") or "default").strip() or "default"
             _msg_list = [
-                SystemMessage(content=rag_turn_system_prompt(prompt_policies, _lid))
+                SystemMessage(
+                    content=rag_turn_system_prompt(
+                        prompt_policies,
+                        _lid,
+                        tenant_id=_rag_tid,
+                    )
+                )
             ] + [m for m in _msg_list if not isinstance(m, SystemMessage)]
         _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
         _invoked_llm: Any = llm_with_tools

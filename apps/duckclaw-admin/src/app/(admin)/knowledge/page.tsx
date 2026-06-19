@@ -3,13 +3,22 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Database, FolderUp, RefreshCw, Trash2, UploadCloud } from 'lucide-react';
+import { Database, FolderSync, FolderUp, RefreshCw, Trash2, UploadCloud } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
 import { KnowledgePlaygroundBanner } from '@/components/knowledge/KnowledgePlaygroundBanner';
 import { KnowledgeStatusBadge } from '@/components/knowledge/KnowledgeStatusBadge';
+import {
+  formatFolderPreviewLine,
+  formatKnowledgeError,
+  type KnowledgeFolderPreview,
+} from '@/components/knowledge/knowledgeErrorMessage';
+import {
+  knowledgeSourcePrimaryLabel,
+  knowledgeSourceSecondaryLine,
+} from '@/components/knowledge/knowledgeSourceLabel';
 
-const ACCEPTED_EXTENSIONS = '.md,.markdown,.txt,.json,.csv';
+const ACCEPTED_EXTENSIONS = '.md,.markdown,.txt,.json,.csv,.pdf,.docx,.doc,.pptx,.html,.htm';
 const DIRECTORY_INPUT_PROPS = { webkitdirectory: '', directory: '' };
 
 export default function KnowledgePage() {
@@ -27,6 +36,23 @@ export default function KnowledgePage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [computeEmbeddings, setComputeEmbeddings] = useState(true);
+  const [folderPreview, setFolderPreview] = useState<KnowledgeFolderPreview | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
+  const [vaultRoots, setVaultRoots] = useState<{ path: string; label: string; exists: boolean }[]>([]);
+
+  useEffect(() => {
+    adminService
+      .getKnowledgeConfig()
+      .then((cfg) => {
+        const roots = cfg.allowed_roots.filter((r) => r.exists);
+        setVaultRoots(roots);
+        if (roots.length === 1) {
+          setServerPath(roots[0].path);
+        }
+      })
+      .catch(() => setVaultRoots([]));
+  }, []);
 
   useEffect(() => {
     adminService
@@ -76,18 +102,37 @@ export default function KnowledgePage() {
         files,
         project_id: projectId,
         worker_uid: workerUid,
-        display_name: displayName.trim() || selectedProject?.name || 'Carga RAG',
+        display_name: displayName.trim() || undefined,
+        compute_embeddings: computeEmbeddings,
       });
       setFiles([]);
       setDisplayName('');
       setNotice(`Carga lista: ${result.documents} docs, ${result.chunks} chunks.`);
       loadSources();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudieron subir archivos');
+      setError(formatKnowledgeError(e instanceof Error ? e.message : 'No se pudieron subir archivos'));
     } finally {
       setBusy(false);
     }
-  }, [displayName, files, loadSources, projectId, selectedProject?.name, workerUid]);
+  }, [computeEmbeddings, displayName, files, loadSources, projectId, selectedProject?.name, workerUid]);
+
+  const previewServerPath = useCallback(async () => {
+    if (!serverPath.trim()) return;
+    setPreviewBusy(true);
+    setError(null);
+    setFolderPreview(null);
+    try {
+      const preview = await adminService.previewKnowledgeFolder(serverPath.trim());
+      setFolderPreview(preview);
+      if (preview.file_count === 0) {
+        setError('No hay archivos .md/.txt/.pdf indexables en esa carpeta.');
+      }
+    } catch (e) {
+      setError(formatKnowledgeError(e instanceof Error ? e.message : 'No se pudo comprobar la carpeta'));
+    } finally {
+      setPreviewBusy(false);
+    }
+  }, [serverPath]);
 
   const importServerPath = useCallback(async () => {
     if (!projectId || !serverPath.trim()) return;
@@ -102,18 +147,60 @@ export default function KnowledgePage() {
         project_id: projectId,
         worker_uid: workerUid,
         ingest: true,
-        compute_embeddings: false,
+        compute_embeddings: computeEmbeddings,
       });
       setServerPath('');
       setDisplayName('');
-      setNotice(`Ruta importada: ${result.documents} docs, ${result.chunks} chunks.`);
+      setFolderPreview(null);
+      const skipNote =
+        (result.skipped_hidden ?? 0) > 0
+          ? ` (${result.skipped_hidden} ocultos omitidos, ej. .obsidian)`
+          : '';
+      setNotice(`Vault importado: ${result.documents} docs, ${result.chunks} chunks${skipNote}. Auto-sync activo.`);
       loadSources();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo importar la ruta servidor');
+      setError(formatKnowledgeError(e instanceof Error ? e.message : 'No se pudo importar la ruta servidor'));
     } finally {
       setBusy(false);
     }
-  }, [displayName, loadSources, projectId, serverPath, workerUid]);
+  }, [computeEmbeddings, displayName, loadSources, projectId, serverPath, workerUid]);
+
+  const syncSource = useCallback(
+    async (source: KnowledgeSource) => {
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        const result = await adminService.syncKnowledgeSource(source.source_id, {
+          compute_embeddings: computeEmbeddings,
+        });
+        setNotice(
+          `Sync: ${result.scanned} escaneados, ${result.upserted} actualizados, ${result.skipped} sin cambios, ${result.removed} eliminados.`
+        );
+        loadSources();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'No se pudo sincronizar la fuente');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [computeEmbeddings, loadSources]
+  );
+
+  const isFolderSource = (source: KnowledgeSource) =>
+    source.source_kind === 'folder' &&
+    Boolean(source.source_uri) &&
+    !source.source_uri.startsWith('upload://');
+
+  const lastSyncLabel = (source: KnowledgeSource) => {
+    const raw = source.metadata?.last_sync_at;
+    if (typeof raw !== 'string' || !raw) return null;
+    try {
+      return new Date(raw).toLocaleString();
+    } catch {
+      return raw;
+    }
+  };
 
   const deactivateSource = useCallback(
     async (source: KnowledgeSource) => {
@@ -228,8 +315,22 @@ export default function KnowledgePage() {
             <UploadCloud size={18} />
             Subir archivos desde tu PC
           </h2>
-          <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-            Recomendado para empezar. Soporta Markdown, texto, JSON y CSV.
+          <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
+            Markdown, texto, JSON, CSV. PDF/Word si el servidor tiene{' '}
+            <code className="font-mono text-[10px]">markitdown</code> instalado (
+            <code className="font-mono text-[10px]">uv sync --extra rag-docs</code>).
+          </p>
+          <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm font-bold text-gov-gray-700 dark:text-dark-text">
+            <input
+              type="checkbox"
+              checked={computeEmbeddings}
+              onChange={(e) => setComputeEmbeddings(e.target.checked)}
+              className="rounded border-gov-blue-200"
+            />
+            Búsqueda semántica (embeddings)
+          </label>
+          <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
+            Recomendado activado. Si lo apagas, solo busca por palabras exactas.
           </p>
           <p className="mt-4 text-xs font-black uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted">
             Seleccionar archivos
@@ -269,25 +370,83 @@ export default function KnowledgePage() {
         <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
           <h2 className="flex items-center gap-2 text-lg font-black text-gov-gray-900 dark:text-dark-text">
             <FolderUp size={18} />
-            Ruta servidor avanzada
+            Vault Obsidian (Mac)
           </h2>
           <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-            Para carpetas grandes ya disponibles en el host. Deben estar bajo `DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS`.
+            Pega la ruta de tu vault. DuckClaw indexa solo notas (.md, PDF…), omite{' '}
+            <code className="font-mono text-[10px]">.obsidian</code> y sincroniza solo cada ~15s.
           </p>
           <input
             value={serverPath}
-            onChange={(e) => setServerPath(e.target.value)}
-            placeholder="/Users/workstation/docs/aws"
-            className="mt-4 w-full rounded-xl border border-gov-blue-100 px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+            onChange={(e) => {
+              setServerPath(e.target.value);
+              setFolderPreview(null);
+            }}
+            placeholder="/Users/…/MacMiniVault"
+            className="mt-4 w-full rounded-xl border border-gov-blue-100 px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
           />
-          <button
-            type="button"
-            onClick={() => void importServerPath()}
-            disabled={!projectId || !serverPath.trim() || busy}
-            className="mt-4 w-full rounded-xl border border-gov-blue-200 px-4 py-2 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
-          >
-            Importar ruta servidor
-          </button>
+          {vaultRoots.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {vaultRoots.map((root) => (
+                <button
+                  key={root.path}
+                  type="button"
+                  onClick={() => {
+                    setServerPath(root.path);
+                    setFolderPreview(null);
+                    setError(null);
+                  }}
+                  className="rounded-lg border border-gov-blue-200 bg-gov-blue-50 px-3 py-1.5 text-xs font-bold text-gov-blue-900 hover:bg-gov-blue-100 dark:border-dark-border dark:bg-dark-bg dark:text-dark-cyan"
+                >
+                  Usar {root.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {folderPreview && (
+            <div className="mt-3 rounded-xl border border-gov-blue-50 bg-gov-blue-50/60 p-3 text-xs text-gov-gray-700 dark:border-dark-border dark:bg-dark-bg dark:text-dark-muted">
+              <p className="font-bold">{formatFolderPreviewLine(folderPreview)}</p>
+              {folderPreview.sample_paths.length > 0 && (
+                <ul className="mt-2 space-y-0.5 font-mono text-[10px] opacity-80">
+                  {folderPreview.sample_paths.map((path) => (
+                    <li key={path} className="truncate">
+                      {path}
+                    </li>
+                  ))}
+                  {folderPreview.file_count > folderPreview.sample_paths.length && (
+                    <li>… y {folderPreview.file_count - folderPreview.sample_paths.length} más</li>
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
+          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-bold text-gov-gray-700 dark:text-dark-text">
+            <input
+              type="checkbox"
+              checked={computeEmbeddings}
+              onChange={(e) => setComputeEmbeddings(e.target.checked)}
+              className="rounded border-gov-blue-200"
+            />
+            Búsqueda semántica al importar
+          </label>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => void previewServerPath()}
+              disabled={!serverPath.trim() || previewBusy || busy}
+              className="flex-1 rounded-xl border border-gov-blue-200 px-4 py-2 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
+            >
+              {previewBusy ? 'Comprobando…' : 'Comprobar carpeta'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void importServerPath()}
+              disabled={!projectId || !serverPath.trim() || busy}
+              className="flex-1 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
+            >
+              {busy ? 'Importando…' : 'Importar vault'}
+            </button>
+          </div>
         </div>
       </section>
 
@@ -334,16 +493,24 @@ export default function KnowledgePage() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="font-black text-gov-gray-900 dark:text-dark-text">
-                      {source.display_name || source.source_uri}
+                      {knowledgeSourcePrimaryLabel(source)}
                     </p>
                     <KnowledgeStatusBadge source={source} />
                   </div>
-                  <p className="mt-1 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
-                    {source.source_uri}
+                  {knowledgeSourceSecondaryLine(source) && (
+                    <p className="mt-1 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
+                      {knowledgeSourceSecondaryLine(source)}
+                    </p>
+                  )}
+                  <p className="mt-1 truncate font-mono text-[10px] text-gov-gray-400 dark:text-dark-muted/80">
+                    {source.source_id}
                   </p>
                   <p className="mt-2 text-xs text-gov-gray-500 dark:text-dark-muted">
                     {source.document_count} documento{source.document_count === 1 ? '' : 's'} ·{' '}
                     {source.chunk_count} fragmento{source.chunk_count === 1 ? '' : 's'} para el chat
+                    {lastSyncLabel(source) && (
+                      <> · última sync {lastSyncLabel(source)}</>
+                    )}
                   </p>
                   {source.chunk_count === 0 && (
                     <Link
@@ -354,15 +521,28 @@ export default function KnowledgePage() {
                     </Link>
                   )}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void deactivateSource(source)}
-                  disabled={busy}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/60 dark:text-red-300"
-                >
-                  <Trash2 size={14} />
-                  Desactivar
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {isFolderSource(source) && (
+                    <button
+                      type="button"
+                      onClick={() => void syncSource(source)}
+                      disabled={busy}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl border border-gov-blue-200 px-3 py-2 text-xs font-bold text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
+                    >
+                      <FolderSync size={14} />
+                      Sincronizar
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void deactivateSource(source)}
+                    disabled={busy}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/60 dark:text-red-300"
+                  >
+                    <Trash2 size={14} />
+                    Desactivar
+                  </button>
+                </div>
               </div>
             ))}
           </div>

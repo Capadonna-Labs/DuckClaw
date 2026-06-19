@@ -477,6 +477,14 @@ class DeactivateKnowledgeSourceCommand(WriteCommand):
     source_id: str
 
 
+class DeactivateKnowledgeDocumentsCommand(WriteCommand):
+    """Soft-delete specific documents (and their chunks) within a knowledge source."""
+
+    command_type: Literal["deactivate_knowledge_documents"] = "deactivate_knowledge_documents"
+    source_id: str
+    document_ids: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Prompt policy commands
 # ---------------------------------------------------------------------------

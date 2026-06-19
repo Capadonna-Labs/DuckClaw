@@ -213,7 +213,13 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         )
     )
 
+    from duckclaw.forge.skills.list_project_knowledge_bridge import register_list_project_knowledge_tool
+    from duckclaw.forge.skills.read_project_knowledge_bridge import register_read_project_knowledge_tool
     from duckclaw.forge.skills.search_project_knowledge_bridge import register_search_project_knowledge_tool
+    from duckclaw.forge.skills.write_output_document_bridge import register_write_output_document_tool
 
     register_search_project_knowledge_tool(tools)
+    register_list_project_knowledge_tool(tools)
+    register_read_project_knowledge_tool(tools)
+    register_write_output_document_tool(tools)
     return tools

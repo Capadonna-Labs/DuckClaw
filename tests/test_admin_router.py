@@ -1502,6 +1502,44 @@ def test_knowledge_sources_and_search_are_scoped(
     assert results[0]["match_type"] == "lexical"
 
 
+def test_knowledge_uploads_use_filename_as_display_name_when_unset(
+    gateway_admin_client: TestClient,
+    gateway_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/knowledge/uploads",
+        headers=headers,
+        data={
+            "project_id": "proj_upload",
+            "worker_uid": "wrk_upload",
+        },
+        files={
+            "files": (
+                "aws/iam.md",
+                b"# IAM\n\nUse least privilege policies for cloud access.",
+                "text/markdown",
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    source_id = response.json()["source_id"]
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/knowledge/sources",
+        headers=headers,
+        params={"project_id": "proj_upload"},
+    )
+    assert listed.status_code == 200
+    source = next(item for item in listed.json()["sources"] if item["source_id"] == source_id)
+    assert source["display_name"] == "iam.md"
+    assert source["document_paths"] == "aws/iam.md"
+
+
 def test_knowledge_uploads_create_project_scoped_chunks(
     gateway_admin_client: TestClient,
     gateway_db: Path,

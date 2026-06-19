@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Bot, X, Maximize2 } from 'lucide-react';
 import { ThinkingDots } from '@/components/chat/ChatBubble';
@@ -12,6 +12,11 @@ import { useFloatingChatUnread } from '@/components/chat/useFloatingChatUnread';
 import { titleForAdminPath } from '@/config/adminNav';
 import { adminService } from '@/services/adminService';
 import { sectionFromPath } from '@/lib/conversationStorage';
+import {
+  projectIdFromPathname,
+  readLastProjectId,
+  writeLastProjectId,
+} from '@/lib/floatingChatProject';
 
 const BUBBLE_OFFSET_STORAGE_KEY = 'duckclaw-floating-chat-offset-x';
 const BUBBLE_SIZE_PX = 48;
@@ -62,10 +67,18 @@ function maxDragOffset(): number {
 
 export function FloatingAdminChat() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const isNarrow = useNarrowViewport();
   const [open, setOpen] = useState(false);
   const [tenantId, setTenantId] = useState<string | undefined>();
   const [offsetX, setOffsetX] = useState(0);
+  const projectId = useMemo(() => {
+    const fromUrl = (searchParams.get('project') || '').trim();
+    if (fromUrl) return fromUrl;
+    const fromPath = projectIdFromPathname(pathname);
+    if (fromPath) return fromPath;
+    return readLastProjectId();
+  }, [pathname, searchParams]);
   const dragRef = useRef({
     active: false,
     startX: 0,
@@ -81,6 +94,7 @@ export function FloatingAdminChat() {
   const chat = useAdminChat({
     chatId: conv.sessionId ?? '',
     initialWorker: pathWorker,
+    projectId,
     enabled: Boolean(conv.sessionId),
     onConversationActivity: conv.bumpRefresh,
   });
@@ -245,6 +259,7 @@ export function FloatingAdminChat() {
           onSelect: (id, meta) => selectConversation(id, meta?.title),
           onCreateNew: () => void createConversation(),
         }}
+        projectLabel={projectId || undefined}
         className="flex-1 min-h-0 w-full"
       />
     );

@@ -84,6 +84,25 @@ def knowledge_inventory_for_project(
     return inventory
 
 
+def knowledge_documents_for_project(
+    db: Any,
+    *,
+    tenant_id: str,
+    project_id: str,
+    worker_uid: str = "",
+    limit: int = 80,
+) -> list[dict[str, Any]]:
+    from duckclaw.admin_knowledge_read import list_project_knowledge_documents
+
+    return list_project_knowledge_documents(
+        db,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        worker_uid=worker_uid,
+        limit=limit,
+    )
+
+
 def build_knowledge_context(
     db: Any,
     *,
@@ -102,6 +121,13 @@ def build_knowledge_context(
         worker_uid=worker_uid,
         limit=inventory_limit,
     )
+    documents = knowledge_documents_for_project(
+        db,
+        tenant_id=tenant_id,
+        project_id=project_id,
+        worker_uid=worker_uid,
+        limit=80,
+    )
     rows = search_knowledge(
         db,
         query=query,
@@ -114,20 +140,33 @@ def build_knowledge_context(
     context = KnowledgeContext(
         inventory=inventory,
         rows=rows,
-        inventory_block=format_inventory_block(inventory),
+        inventory_block=format_inventory_block(inventory, documents=documents),
         rag_block=format_rag_block(rows),
     )
     return context
 
 
-def format_inventory_block(inventory: list[dict[str, Any]]) -> str:
-    if not inventory:
+def format_inventory_block(
+    inventory: list[dict[str, Any]],
+    *,
+    documents: list[dict[str, Any]] | None = None,
+) -> str:
+    if not inventory and not documents:
         return ""
-    lines = [
-        f"- {source['display_name']} ({source['status']}): "
-        f"{source['document_count']} docs, {source['chunk_count']} chunks, tipo={source['source_kind']}"
-        for source in inventory
-    ]
+    lines: list[str] = []
+    for source in inventory:
+        lines.append(
+            f"- {source['display_name']} ({source['status']}): "
+            f"{source['document_count']} docs, {source['chunk_count']} chunks, tipo={source['source_kind']}"
+        )
+    if documents:
+        lines.append("Documentos indexados:")
+        for doc in documents:
+            path = str(doc.get("relative_path") or "").strip()
+            if not path:
+                continue
+            chunks = int(doc.get("chunk_count") or 0)
+            lines.append(f"  · {path} ({chunks} chunks)")
     return "\n".join(["[RAG_SOURCE_INVENTORY]", *lines, "[/RAG_SOURCE_INVENTORY]"])
 
 

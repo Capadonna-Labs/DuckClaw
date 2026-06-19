@@ -263,6 +263,7 @@ def prepare_worker_invoke_state(
     import time
 
     out_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
+    project_id = (state.get("project_id") or "").strip()
     worker_state: dict[str, Any] = {
         "input": planned_task_for_worker,
         "incoming": planned_task_for_worker,
@@ -280,6 +281,8 @@ def prepare_worker_invoke_state(
         "plan_attempt_index": pa,
         "plan_max_attempts": max_a,
     }
+    if project_id:
+        worker_state["project_id"] = project_id
     if out_tok:
         worker_state["outbound_telegram_bot_token"] = out_tok
     mission = state.get("active_mission")

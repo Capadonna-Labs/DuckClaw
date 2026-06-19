@@ -72,6 +72,17 @@ def search_project_knowledge(query: str, source_id: str = "") -> str:
             worker_uid=get_knowledge_tool_worker_uid(),
             source_id=(source_id or "").strip(),
         )
+        if not rows:
+            from duckclaw.forge.rag.knowledge_core import read_knowledge_document
+
+            rows = read_knowledge_document(
+                db,
+                relative_path=q,
+                tenant_id=get_knowledge_tool_tenant_id(),
+                project_id=project_id,
+                worker_uid=get_knowledge_tool_worker_uid(),
+                limit=8,
+            )
         chunks = [
             {
                 "relative_path": str(row.get("relative_path") or ""),

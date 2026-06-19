@@ -36,6 +36,7 @@ from duckclaw.commands.team_access import execute_team_whitelist
 from duckclaw.commands.team_templates import _resolve_template_id, execute_team
 from duckclaw.commands.vaults import execute_vault
 from duckclaw.commands.workers import _DEFAULT_WORKER, execute_roles, execute_skills_list
+from duckclaw.extensions.fly import dispatch_extension_fly_command
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_fly, structured_log_context
 
 
@@ -182,6 +183,19 @@ def _dispatch_fly_command(
         return execute_tasks(db, chat_id)
     if name == "history":
         return execute_history(db, chat_id, args)
+    ext_out = dispatch_extension_fly_command(
+        name,
+        db,
+        chat_id,
+        args,
+        requester_id=requester_id,
+        tenant_id=tenant_id,
+        vault_user_id=vault_user_id,
+        username=username,
+        entry_worker_id=entry_worker_id,
+    )
+    if ext_out is not None:
+        return ext_out
     return None
 
 

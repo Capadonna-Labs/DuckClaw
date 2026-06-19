@@ -101,7 +101,7 @@ def test_summarize_stored_context_task_list() -> None:
 
 
 def test_llm_plan_summarize_new_context() -> None:
-    from duckclaw.graphs.manager_graph import _llm_plan
+    from duckclaw.manager.manager_planner_llm import _llm_plan
 
     title, tasks = _llm_plan("[SYSTEM_DIRECTIVE: SUMMARIZE_NEW_CONTEXT]\nbody")
     assert title == "Síntesis de contexto (recién inyectado)"

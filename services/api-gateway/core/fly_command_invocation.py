@@ -15,6 +15,7 @@ from core.telegram_media_upload import send_sandbox_chart_to_telegram_sync
 from duckclaw import DuckClaw
 from duckclaw.channels import GatewayDeliveryContext
 from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.extensions.fly import extension_fly_read_only_command_names
 from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
 from duckclaw.graphs.on_the_fly_commands import handle_command, parse_command, pop_all_fly_outbound_charts
 from duckclaw.manager.graph import clear_worker_graph_cache, worker_graph_cache_entry_count
@@ -25,7 +26,7 @@ PersistAdminFlyCharts = Callable[[str, list[str]], list[str]]
 
 _log = logging.getLogger("duckclaw.gateway")
 
-READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
+_CORE_READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
     (
         "approve-code",
         "approve_code",
@@ -61,6 +62,7 @@ READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
         "workers",
     )
 )
+READ_ONLY_SAFE_FLY_COMMANDS = _CORE_READ_ONLY_SAFE_FLY_COMMANDS | extension_fly_read_only_command_names()
 LEGACY_RW_FLY_COMMANDS = frozenset(())
 
 

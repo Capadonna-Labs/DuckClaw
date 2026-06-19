@@ -17,10 +17,7 @@ Variables de entorno:
 
 from __future__ import annotations
 
-import json
 import os
-import random
-import subprocess
 import sys
 from pathlib import Path
 
@@ -36,30 +33,17 @@ DEFAULT_MODEL = os.environ.get(
 DEFAULT_LORA_LAYERS = os.environ.get("SFT_LORA_LAYERS", "42")
 
 
-def _split_train_valid_lines(
-    lines: list[str],
-    val_fraction: float,
-    seed: int,
-) -> tuple[list[str], list[str]]:
-    """Parte líneas JSONL en train y valid (estratificado por shuffle). valid vacío si hay <2 líneas."""
-    n = len(lines)
-    if n < 2:
-        return lines, []
-    rng = random.Random(seed)
-    shuffled = lines.copy()
-    rng.shuffle(shuffled)
-    n_val = max(1, int(n * val_fraction))
-    n_val = min(n_val, n - 1)
-    valid_lines = shuffled[:n_val]
-    train_lines = shuffled[n_val:]
-    return train_lines, valid_lines
+def _curate_messages_row(trace: dict) -> dict | None:
+    messages = trace.get("messages")
+    if not isinstance(messages, list) or len(messages) < 2:
+        return None
+    return {"messages": messages}
 
 
 def main() -> int:
     dataset_path = Path(os.environ.get("SFT_DATASET_PATH", str(DEFAULT_DATASET)))
     adapters_path = Path(os.environ.get("SFT_ADAPTERS_PATH", str(DEFAULT_ADAPTERS)))
     model_path = os.environ.get("MLX_MODEL_PATH", DEFAULT_MODEL)
-    python_path = os.environ.get("MLX_PYTHON", sys.executable)
     lora_layers = os.environ.get("SFT_LORA_LAYERS", DEFAULT_LORA_LAYERS)
 
     if not dataset_path.exists():
@@ -72,75 +56,50 @@ def main() -> int:
 
     val_fraction = float(os.environ.get("SFT_VALID_FRACTION", "0.1"))
     val_seed = int(os.environ.get("SFT_VALID_SEED", "42"))
+    train_ratio = max(0.0, min(1.0, 1.0 - val_fraction))
 
     data_dir = GEMMA4_DIR / "sft_data_dir"
-    data_dir.mkdir(parents=True, exist_ok=True)
-    train_jsonl = data_dir / "train.jsonl"
-    valid_jsonl = data_dir / "valid.jsonl"
 
-    with open(dataset_path, encoding="utf-8") as f:
-        all_lines = [line for line in f if line.strip()]
+    from duckclaw.train.mlx_sft import MlxSFT
 
-    train_lines, valid_lines = _split_train_valid_lines(all_lines, val_fraction, val_seed)
-    train_jsonl.write_text("".join(train_lines), encoding="utf-8")
-    if valid_lines:
-        valid_jsonl.write_text("".join(valid_lines), encoding="utf-8")
-    elif valid_jsonl.exists():
-        valid_jsonl.unlink()
+    sft = (
+        MlxSFT(str(dataset_path))
+        .load_traces(status_filter=None)
+        .curate(_curate_messages_row)
+        .split_and_save(str(data_dir), train_ratio=train_ratio, seed=val_seed)
+    )
 
-    test_jsonl = data_dir / "test.jsonl"
-    with open(test_jsonl, "w", encoding="utf-8") as f:
-        f.write(
-            json.dumps(
-                {
-                    "messages": [
-                        {"role": "user", "content": "ok"},
-                        {"role": "assistant", "content": "ok"},
-                    ]
-                },
-                ensure_ascii=False,
-            )
-            + "\n"
-        )
-
-    num_lines = len(all_lines)
-    iters = max(10, num_lines)
-
-    adapters_path.mkdir(parents=True, exist_ok=True)
+    num_lines = len(sft.curated_traces)
+    train_lines = sum(1 for _ in open(data_dir / "train.jsonl", encoding="utf-8") if _.strip())
+    valid_path = data_dir / "valid.jsonl"
+    valid_lines = sum(1 for _ in open(valid_path, encoding="utf-8") if _.strip()) if valid_path.is_file() else 0
 
     if os.environ.get("SFT_SKIP_MLX", "").lower() in ("1", "true", "yes"):
         print(
             f"Materializado {data_dir} (train/valid/test). "
-            f"Train: {len(train_lines)} líneas, valid: {len(valid_lines)}. "
+            f"Train: {train_lines} líneas, valid: {valid_lines}. "
             "Sin ejecutar mlx (SFT_SKIP_MLX).",
             flush=True,
         )
         return 0
 
-    cmd = [
-        python_path,
-        "-m",
-        "mlx_lm",
-        "lora",
-        "--model",
-        model_path,
-        "--train",
-        "--data",
-        str(data_dir),
-        "--iters",
-        str(iters),
-        "--batch-size",
-        "1",
-        "--learning-rate",
-        "2e-5",
-        "--num-layers",
-        str(lora_layers),
-        "--adapter-path",
-        str(adapters_path),
-    ]
-    print("Ejecutando:", " ".join(cmd))
-    result = subprocess.run(cmd, cwd=str(ROOT))
-    return result.returncode
+    iters = max(10, num_lines)
+    print(
+        f"Ejecutando MlxSFT.run_train (model={model_path}, data={data_dir}, iters={iters})",
+        flush=True,
+    )
+    try:
+        sft.run_train(
+            base_model=model_path,
+            adapters_path=str(adapters_path),
+            iterations=iters,
+            batch_size=1,
+            lora_layers=str(lora_layers),
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return 0
 
 
 if __name__ == "__main__":

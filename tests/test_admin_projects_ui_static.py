@@ -229,8 +229,13 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
     assert "No se borrará físicamente" in page
     assert "Esta acción desactiva solo la versión" in page
     assert "disabled={!canWrite" in page
-    assert "_M020" not in migrations
-    assert "_M021" not in migrations
+    assert "_M019_MANAGED_WORKSPACE_DRAFT_POLICY" in migrations
+    m020_segment = migrations.split("_M020_FRAMEWORK_CAPABILITY_POLICIES", 1)[1].split(
+        "_M021_FRAMEWORK_POLICY_PACK", 1
+    )[0]
+    m021_segment = migrations.split("_M021_FRAMEWORK_POLICY_PACK", 1)[1].split("_MIGRATION_HOOKS", 1)[0]
+    assert "admin_workspace_managed_draft" not in m020_segment
+    assert "admin_workspace_managed_draft" not in m021_segment
 
 
 def test_template_editor_explains_db_context_storage() -> None:
@@ -245,7 +250,9 @@ def test_template_editor_explains_db_context_storage() -> None:
 
 def test_playground_project_selection_forces_project_worker() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
-    router = Path("services/api-gateway/routers/admin_domains/playground_chat.py").read_text(encoding="utf-8")
+    project_rag = Path(
+        "services/api-gateway/routers/admin_domains/playground/project_rag_context.py"
+    ).read_text(encoding="utf-8")
     provider = Path("packages/agents/src/duckclaw/forge/rag/context_provider.py").read_text(encoding="utf-8")
 
     assert "firstProjectWorkerId" in page
@@ -253,8 +260,8 @@ def test_playground_project_selection_forces_project_worker() -> None:
     assert "syncProjectWorkerSelection" in page
     assert "setPlaygroundWorker" in page
     assert "worker actual no pertenece al proyecto" in page
-    assert "build_knowledge_context" in router
-    assert "_knowledge_inventory_for_project" not in router
+    assert "build_knowledge_context" in project_rag
+    assert "_knowledge_inventory_for_project" not in project_rag
     assert "RAG_SOURCE_INVENTORY" in provider
     assert "No confundas la base de conocimiento RAG con la bóveda DuckDB" in provider
 
@@ -389,16 +396,21 @@ def test_topbar_can_restart_gateway_without_gateway_proxy() -> None:
 
 
 def test_manager_preserves_rag_blocks_for_worker_task() -> None:
-    manager = Path("packages/agents/src/duckclaw/manager/graph.py").read_text(encoding="utf-8")
+    manager_invoke = Path(
+        "packages/agents/src/duckclaw/manager/manager_nodes_invoke.py"
+    ).read_text(encoding="utf-8")
+    manager_helpers = Path(
+        "packages/agents/src/duckclaw/manager/manager_invoke_helpers.py"
+    ).read_text(encoding="utf-8")
     context_blocks = Path("packages/agents/src/duckclaw/forge/rag/context_blocks.py").read_text(encoding="utf-8")
 
-    assert "from duckclaw.forge.rag.context_blocks import" in manager
-    assert "preserve_context_blocks_for_worker" in manager
+    assert "from duckclaw.forge.rag.context_blocks import" in manager_invoke
+    assert "preserve_context_blocks_for_worker" in manager_invoke
     assert "strip_tagged_blocks" in context_blocks
-    assert "explicit_storage_request=explicit_duckdb_schema_request" in manager
+    assert "explicit_storage_request=explicit_duckdb_schema_request" in manager_invoke
     assert 'extract_tagged_block(incoming, "RAG_SOURCE_INVENTORY")' in context_blocks
     assert 'extract_tagged_block(incoming, "RAG_CONTEXT")' in context_blocks
     assert "Responde al usuario usando el contexto RAG disponible." in context_blocks
-    assert "planned_task_for_worker = preserve_context_blocks_for_worker(" in manager
-    assert '"input": planned_task_for_worker' in manager
-    assert '"incoming": planned_task_for_worker' in manager
+    assert "planned_task_for_worker = preserve_context_blocks_for_worker(" in manager_invoke
+    assert '"input": planned_task_for_worker' in manager_helpers
+    assert '"incoming": planned_task_for_worker' in manager_helpers

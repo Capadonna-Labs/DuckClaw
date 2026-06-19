@@ -5,6 +5,7 @@ import inspect
 from typing import Any
 
 import duckclaw
+from duckclaw.commands import fly_dispatch
 from duckclaw.graphs import on_the_fly_commands
 
 
@@ -152,7 +153,7 @@ def test_internet_network_aliases_remain_dispatcher_compatible(monkeypatch: Any)
         calls.append((str(chat_id), args, worker_id, tenant_id))
         return "ok"
 
-    monkeypatch.setattr(on_the_fly_commands, "execute_internet_toggle", _fake_internet_toggle)
+    monkeypatch.setattr(fly_dispatch, "execute_internet_toggle", _fake_internet_toggle)
 
     for alias in ("internet", "red", "network"):
         out = on_the_fly_commands._dispatch_fly_command(

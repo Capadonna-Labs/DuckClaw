@@ -30,6 +30,9 @@ import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
 import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
 import { SessionDatabaseChip } from '@/components/playground/SessionDatabaseChip';
+import { PlaygroundRagProjectWarning } from '@/components/playground/PlaygroundRagProjectWarning';
+import { Pm2LiveLogsPanel } from '@/components/admin/Pm2LiveLogsPanel';
+import { writeLastProjectId } from '@/lib/floatingChatProject';
 import type { FlyCommandEntry } from '@/types/admin';
 
 const FREQUENT_CHAT_COMMANDS = new Set(['/team', '/vault', '/model', '/workers']);
@@ -50,6 +53,8 @@ export default function PlaygroundPage() {
   const [projectId, setProjectId] = useState(initialProject);
   const [defaultsSaving, setDefaultsSaving] = useState(false);
   const [defaultsMsg, setDefaultsMsg] = useState<string | null>(null);
+  const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
+  const [logsPanelOpen, setLogsPanelOpen] = useState(false);
 
   const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
   const {
@@ -91,6 +96,10 @@ export default function PlaygroundPage() {
     enabled: Boolean(conv.sessionId),
     onConversationActivity: conv.bumpRefresh,
   });
+
+  useEffect(() => {
+    writeLastProjectId(projectId);
+  }, [projectId]);
 
   useEffect(() => {
     if (searchParams.get('new') !== '1' || !config || conversationBootstrapping) return;
@@ -167,6 +176,16 @@ export default function PlaygroundPage() {
   useEffect(() => {
     loadConfig();
   }, [loadConfig]);
+
+  useEffect(() => {
+    adminService
+      .listKnowledgeSources()
+      .then((sources) => {
+        const indexed = sources.filter((s) => (s.chunk_count || 0) > 0).length;
+        setIndexedKnowledgeSources(indexed);
+      })
+      .catch(() => setIndexedKnowledgeSources(0));
+  }, [config?.effective_tenant_id]);
 
   useEffect(() => {
     if (workerId && chat.workerId !== workerId) {
@@ -450,6 +469,21 @@ export default function PlaygroundPage() {
           <Settings2 size={15} aria-hidden />
           Run settings
         </button>
+        <div className="hidden lg:flex items-center justify-end gap-2 px-3 pt-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setLogsPanelOpen((open) => !open)}
+            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black ${
+              logsPanelOpen
+                ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
+                : 'border-gov-blue-100 text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan'
+            }`}
+            aria-pressed={logsPanelOpen}
+          >
+            <Terminal size={14} />
+            Logs PM2
+          </button>
+        </div>
         {conv.bootstrapping || !conv.sessionId ? (
           <p className="flex-1 flex items-center justify-center text-sm text-gov-gray-400 p-8">
             Cargando conversación…
@@ -460,6 +494,11 @@ export default function PlaygroundPage() {
               path={activeVaultPath}
               scope={activeVaultScope}
               onConfigure={() => setSettingsModal('vault')}
+            />
+            <PlaygroundRagProjectWarning
+              projectId={projectId}
+              indexedSourceCount={indexedKnowledgeSources}
+              onOpenRouting={() => setSettingsModal('routing')}
             />
             <AdminChatPanel
             key={`${conv.sessionId}-${workerId}`}
@@ -478,6 +517,11 @@ export default function PlaygroundPage() {
             }
             className="flex-1 lg:h-full min-h-0 border-0 rounded-none shadow-none"
           />
+          {logsPanelOpen && (
+            <div className="shrink-0 border-t dark:border-dark-border bg-slate-950/95 p-3 max-h-[min(42vh,360px)] overflow-hidden flex flex-col">
+              <Pm2LiveLogsPanel embedded />
+            </div>
+          )}
           </>
         )}
       </div>

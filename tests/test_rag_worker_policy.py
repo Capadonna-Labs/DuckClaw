@@ -152,6 +152,31 @@ def test_explicit_execution_or_browser_intent_keeps_sandbox_tools_available() ->
     assert not should_hide_sandbox_tools("abre https://example.com en el navegador", "abre https://example.com")
 
 
+def test_rag_turn_prompt_inherits_default_with_tenant_id_placeholder() -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies import PromptPolicyResolver
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    con.execute(
+        "UPDATE main.prompt_policy_registry SET content = ? "
+        "WHERE policy_type = 'system_prompt' AND policy_name = 'default'",
+        ["Workspace {tenant_id} worker {worker_id}"],
+    )
+    con.execute("DELETE FROM main.prompt_policy_registry WHERE policy_name = 'rag_turn'")
+
+    prompt = rag_turn_system_prompt(
+        PromptPolicyResolver(db=con),
+        "aws-expert-agent",
+        tenant_id="tenant_test",
+    )
+
+    assert "tenant_test" in prompt
+    assert "aws-expert-agent" in prompt
+
+
 def test_rag_turn_prompt_avoids_storage_and_operational_menus() -> None:
     import duckdb
 

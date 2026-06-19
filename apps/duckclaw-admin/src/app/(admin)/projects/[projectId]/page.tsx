@@ -7,6 +7,10 @@ import { Bot, ChevronRight, Database, FolderKanban, PlayCircle, RefreshCw } from
 import { adminService } from '@/services/adminService';
 import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
 import { KnowledgeStatusBadge } from '@/components/knowledge/KnowledgeStatusBadge';
+import {
+  knowledgeSourcePrimaryLabel,
+  knowledgeSourceSecondaryLine,
+} from '@/components/knowledge/knowledgeSourceLabel';
 
 type ProjectDetailResponse = Awaited<ReturnType<typeof adminService.getWorkspaceProject>>;
 
@@ -210,13 +214,15 @@ function KnowledgeSourceCard({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p className="font-black text-gov-gray-900 dark:text-dark-text">
-            {source.display_name || source.source_uri}
+            {knowledgeSourcePrimaryLabel(source)}
           </p>
           <KnowledgeStatusBadge source={source} />
         </div>
-        <p className="mt-1 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
-          {source.source_uri}
-        </p>
+        {knowledgeSourceSecondaryLine(source) && (
+          <p className="mt-1 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
+            {knowledgeSourceSecondaryLine(source)}
+          </p>
+        )}
         <p className="mt-2 text-xs text-gov-gray-500 dark:text-dark-muted">
           {source.document_count} documento{source.document_count === 1 ? '' : 's'} ·{' '}
           {source.chunk_count} fragmento{source.chunk_count === 1 ? '' : 's'}

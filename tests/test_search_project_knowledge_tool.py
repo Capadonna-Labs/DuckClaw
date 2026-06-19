@@ -84,6 +84,77 @@ def test_search_project_knowledge_returns_chunks_when_context_set(
     assert "least privilege" in chunk["excerpt"].lower()
 
 
+def test_list_project_knowledge_returns_document_inventory(
+    hub_with_knowledge: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw.forge.skills.knowledge_tool_context import (
+        set_knowledge_tool_project_id,
+        set_knowledge_tool_tenant_id,
+    )
+    from duckclaw.forge.skills.list_project_knowledge_bridge import list_project_knowledge
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.search_project_knowledge_bridge._resolve_hub_db_path",
+        lambda: str(hub_with_knowledge),
+    )
+    set_knowledge_tool_tenant_id("tenant_a")
+    set_knowledge_tool_project_id("proj_a")
+
+    payload = json.loads(list_project_knowledge())
+    assert payload["document_count"] == 1
+    assert payload["documents"][0]["relative_path"] == "aws/iam.md"
+
+
+def test_read_knowledge_document_matches_path_substring(
+    hub_with_knowledge: Path,
+) -> None:
+    import duckdb
+
+    from duckclaw.forge.rag.knowledge_core import read_knowledge_document
+
+    con = duckdb.connect(str(hub_with_knowledge), read_only=True)
+    try:
+        rows = read_knowledge_document(
+            con,
+            relative_path="iam.md",
+            tenant_id="tenant_a",
+            project_id="proj_a",
+        )
+    finally:
+        con.close()
+    assert len(rows) == 1
+    assert rows[0]["relative_path"] == "aws/iam.md"
+
+
+def test_fold_search_text_strips_accents() -> None:
+    from duckclaw.forge.rag.knowledge_core import fold_search_text
+
+    assert fold_search_text("Caché") == "cache"
+
+
+def test_read_project_knowledge_returns_content(
+    hub_with_knowledge: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw.forge.skills.knowledge_tool_context import (
+        set_knowledge_tool_project_id,
+        set_knowledge_tool_tenant_id,
+    )
+    from duckclaw.forge.skills.read_project_knowledge_bridge import read_project_knowledge
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.search_project_knowledge_bridge._resolve_hub_db_path",
+        lambda: str(hub_with_knowledge),
+    )
+    set_knowledge_tool_tenant_id("tenant_a")
+    set_knowledge_tool_project_id("proj_a")
+
+    payload = json.loads(read_project_knowledge("aws/iam.md"))
+    assert payload["relative_path"] == "aws/iam.md"
+    assert "least privilege" in payload["content"].lower()
+
+
 def test_search_project_knowledge_requires_project_id() -> None:
     from duckclaw.forge.skills.knowledge_tool_context import set_knowledge_tool_project_id
     from duckclaw.forge.skills.search_project_knowledge_bridge import search_project_knowledge

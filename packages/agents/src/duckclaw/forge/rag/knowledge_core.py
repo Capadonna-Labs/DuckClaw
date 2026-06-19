@@ -10,11 +10,19 @@ import csv
 import hashlib
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+from duckclaw.forge.rag.markitdown_convert import (
+    MARKITDOWN_SUFFIXES,
+    convert_bytes_to_text,
+    convert_file_path_to_text,
+)
+
 _ALLOWED_SUFFIXES = {".md", ".markdown", ".txt", ".json", ".csv"}
+_INGEST_SUFFIXES = _ALLOWED_SUFFIXES | MARKITDOWN_SUFFIXES
 _SECRET_NAME_RE = re.compile(r"(secret|token|password|api[_-]?key|apikey|\.env)", re.I)
 _WORD_RE = re.compile(r"\w+", re.UNICODE)
 _LEX_SKIP = {
@@ -71,23 +79,79 @@ def safe_relative_path(root: str | Path, path: str | Path) -> str:
     return rel.as_posix()
 
 
-def iter_allowed_files(root: str | Path) -> list[Path]:
+def _relative_parts_under_root(base: Path, candidate: Path) -> tuple[str, ...] | None:
+    try:
+        rel = candidate.expanduser().resolve().relative_to(base.expanduser().resolve())
+    except ValueError:
+        return None
+    return rel.parts
+
+
+def _should_skip_knowledge_candidate(parts: tuple[str, ...]) -> bool:
+    if any(part.startswith(".") for part in parts):
+        return True
+    if any(_SECRET_NAME_RE.search(part) for part in parts):
+        return True
+    return False
+
+
+@dataclass(frozen=True)
+class FolderScanStats:
+    files: list[Path]
+    skipped_hidden: int = 0
+    skipped_secret: int = 0
+    skipped_unsupported: int = 0
+
+    @property
+    def file_count(self) -> int:
+        return len(self.files)
+
+
+def scan_knowledge_folder(root: str | Path) -> FolderScanStats:
+    """List ingest-eligible files; skip Obsidian/.git/etc. without failing the scan."""
     base = Path(root).expanduser().resolve()
     if not base.exists():
         raise FileNotFoundError(f"knowledge root not found: {root}")
     candidates = [base] if base.is_file() else sorted(p for p in base.rglob("*") if p.is_file())
-    out: list[Path] = []
+    base_for_rel = base if base.is_dir() else base.parent
+    files: list[Path] = []
+    skipped_hidden = 0
+    skipped_secret = 0
+    skipped_unsupported = 0
     for candidate in candidates:
-        if candidate.suffix.lower() not in _ALLOWED_SUFFIXES:
+        if candidate.suffix.lower() not in _INGEST_SUFFIXES:
+            skipped_unsupported += 1
             continue
-        safe_relative_path(base if base.is_dir() else base.parent, candidate)
-        out.append(candidate)
-    return out
+        parts = _relative_parts_under_root(base_for_rel, candidate)
+        if parts is None:
+            continue
+        if any(part.startswith(".") for part in parts):
+            skipped_hidden += 1
+            continue
+        if any(_SECRET_NAME_RE.search(part) for part in parts):
+            skipped_secret += 1
+            continue
+        files.append(candidate)
+    return FolderScanStats(
+        files=files,
+        skipped_hidden=skipped_hidden,
+        skipped_secret=skipped_secret,
+        skipped_unsupported=skipped_unsupported,
+    )
+
+
+def iter_allowed_files(root: str | Path) -> list[Path]:
+    return scan_knowledge_folder(root).files
 
 
 def read_document_text(path: str | Path) -> tuple[str, str]:
     p = Path(path)
     suffix = p.suffix.lower()
+    if suffix in MARKITDOWN_SUFFIXES:
+        text = convert_file_path_to_text(p)
+        if not text.strip():
+            raise ValueError(f"markitdown no extrajo texto de: {p.name}")
+        return text, "text/markdown"
     if suffix not in _ALLOWED_SUFFIXES:
         raise ValueError(f"unsupported knowledge file type: {suffix}")
     if suffix == ".json":
@@ -104,6 +168,11 @@ def read_document_text(path: str | Path) -> tuple[str, str]:
 def normalize_uploaded_document(filename: str, data: bytes) -> tuple[str, str, str]:
     relative_path = _safe_uploaded_relative_path(filename)
     suffix = Path(relative_path).suffix.lower()
+    if suffix in MARKITDOWN_SUFFIXES:
+        text = convert_bytes_to_text(data=data, filename=relative_path)
+        if not text.strip():
+            raise ValueError(f"no se extrajo texto de {relative_path}")
+        return relative_path, text, "text/markdown"
     if suffix not in _ALLOWED_SUFFIXES:
         raise ValueError(f"unsupported knowledge file type: {suffix}")
     raw = data.decode("utf-8", errors="replace")
@@ -304,6 +373,15 @@ def embed_chunk_payloads(
     return out
 
 
+def fold_search_text(text: str) -> str:
+    """Lowercase + strip accents for Spanish/English fuzzy match."""
+    raw = (text or "").strip().lower()
+    if not raw:
+        return ""
+    decomposed = unicodedata.normalize("NFD", raw)
+    return "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+
+
 def lexical_tokens(query: str, *, max_tokens: int = 8) -> list[str]:
     tokens: list[str] = []
     for raw in _WORD_RE.findall((query or "").lower()):
@@ -311,9 +389,12 @@ def lexical_tokens(query: str, *, max_tokens: int = 8) -> list[str]:
         if len(token) < 2 or token in _LEX_SKIP:
             continue
         tokens.append(token)
+        folded = fold_search_text(token)
+        if folded and folded != token and folded not in tokens:
+            tokens.append(folded)
         if len(tokens) >= max_tokens:
             break
-    return tokens
+    return tokens[:max_tokens]
 
 
 def search_knowledge(
@@ -454,7 +535,10 @@ def _search_knowledge_lexical(
     )
     token_clauses = []
     for token in tokens:
-        token_clauses.append("strpos(lower(c.content), lower(?)) >= 1")
+        token_clauses.append(
+            "(strpos(lower(c.content), lower(?)) >= 1 OR strpos(lower(d.relative_path), lower(?)) >= 1)"
+        )
+        params.append(token)
         params.append(token)
     sql = f"""
         SELECT c.chunk_id, c.source_id, c.document_id, d.relative_path, c.chunk_index,
@@ -468,6 +552,52 @@ def _search_knowledge_lexical(
           AND ({' OR '.join(token_clauses)})
         ORDER BY c.updated_at DESC
         LIMIT {limit}
+    """
+    return _row_dicts(
+        con.execute(sql, params),
+        ["chunk_id", "source_id", "document_id", "relative_path", "chunk_index", "text", "score", "match_type"],
+    )
+
+
+def read_knowledge_document(
+    con: Any,
+    *,
+    relative_path: str,
+    tenant_id: str,
+    project_id: str,
+    worker_uid: str = "",
+    limit: int = 40,
+) -> list[dict[str, Any]]:
+    """Return all active chunks for a document matched by relative_path substring."""
+    needle = (relative_path or "").strip().lstrip("/")
+    if not needle:
+        return []
+    lim = max(1, min(int(limit), 80))
+    where_sql, params = _scope_where(
+        tenant_id=tenant_id,
+        project_id=project_id,
+        worker_uid=worker_uid,
+        source_id="",
+    )
+    folded = fold_search_text(needle)
+    params.extend([f"%{needle.lower()}%", f"%{folded}%"])
+    sql = f"""
+        SELECT c.chunk_id, c.source_id, c.document_id, d.relative_path, c.chunk_index,
+               c.content AS text,
+               NULL::DOUBLE AS score,
+               'read' AS match_type
+        FROM main.admin_knowledge_chunks c
+        JOIN main.admin_knowledge_documents d ON d.document_id = c.document_id
+        JOIN main.admin_knowledge_sources s ON s.source_id = c.source_id
+        WHERE {where_sql}
+          AND c.active = true
+          AND d.active = true
+          AND (
+            lower(d.relative_path) LIKE lower(?)
+            OR lower(d.relative_path) LIKE lower(?)
+          )
+        ORDER BY d.relative_path ASC, c.chunk_index ASC
+        LIMIT {lim}
     """
     return _row_dicts(
         con.execute(sql, params),

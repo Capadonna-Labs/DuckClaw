@@ -1,8 +1,95 @@
-# DuckClaw (`DUCKCLAW.md`)
+# DuckClaw
 
-**Multi-agent platform** with a zero-trust posture, **DuckDB** as the analytical state store, and a **singleton DB-Writer** path for ACID mutations (Gateway and workers enqueue; `services/db-writer` applies).
+Plataforma multi-agente con **DuckDB** como estado analítico, mutaciones ACID vía **DB-Writer** (cola Redis) y **API Gateway** como puerta de entrada.
 
-Cross-platform (Windows / Linux / macOS) · Multi-tenant vaults · Microservices-ready · Spec-driven development (`docs/specs/`)
+Multi-tenant · Windows / Linux / macOS · Spec-driven (`docs/specs/`)
+
+---
+
+## Inicio rápido
+
+```bash
+uv sync
+uv run duckops init          # wizard de configuración
+uv run duckops serve --gateway
+```
+
+Diagnóstico: `uv run python scripts/doctor.py`  
+Operación (Redis, PM2, Telegram, variables): [`docs/COMANDOS.md`](docs/COMANDOS.md)
+
+**VPS (actualizar):** `bash scripts/deploy/vps-deploy.sh` · primera vez: `--install` · remoto: `--remote user@host`
+
+---
+
+## Estructura del repo
+
+```
+duckclaw/
+├── packages/     # Librerías: agents, core, shared, duckops
+├── services/     # Procesos: api-gateway, db-writer, heartbeat, …
+├── apps/         # Consola admin (Next.js)
+├── integrations/ # Sensory node, edge devices, …
+├── docs/         # Specs, arquitectura y runbooks
+└── tests/
+```
+
+---
+
+## Componentes principales
+
+| Pieza | Rol |
+|-------|-----|
+| **API Gateway** | Chat, webhooks, admin API, encola escrituras |
+| **DB-Writer** | Aplica mutaciones DuckDB de forma serializada |
+| **Agents** | Manager, workers LangGraph, comandos fly, RAG |
+| **duckops** | CLI local: `init`, `serve`, `doctor` |
+| **Admin UI** | [`apps/duckclaw-admin/`](apps/duckclaw-admin/) — plantillas, playground, políticas |
+
+Extensiones externas (fly commands, worker skills): [`docs/extensions/fly-commands.md`](docs/extensions/fly-commands.md)
+
+---
+
+## Imports Python
+
+Puntos de entrada públicos más usados (`uv sync` en la raíz):
+
+```python
+# DuckDB
+from duckclaw import DuckClaw
+
+# MLOps / SFT (filesystem-only, sin Redis)
+from duckclaw.traces import TraceCollector
+from duckclaw.train import MlxSFT
+
+# Workers
+from duckclaw.workers import WorkerFactory, WorkerSpec, list_workers, load_manifest
+
+# RAG
+from duckclaw.forge.rag import (
+    build_knowledge_context,
+    preserve_context_blocks_for_worker,
+    search_knowledge,
+)
+
+# Extensiones desde repos externos (DUCKCLAW_EXTENSION_ROOT, …)
+from duckclaw.extensions import (
+    dispatch_extension_fly_command,
+    extension_fly_read_only_command_names,
+    invoke_extension_worker_skill_hooks,
+)
+```
+
+Script de entrenamiento: `packages/agents/train/train_sft.py` (usa `MlxSFT` internamente).
+
+---
+
+## Tests
+
+```bash
+uv run pytest tests/ -m "not integration" --ignore tests/run_singleton_writer_pipeline.py --ignore tests/deprecated
+```
+
+Pipeline completo Gateway → Redis → DB-Writer: [`tests/run_singleton_writer_pipeline.py`](tests/run_singleton_writer_pipeline.py)
 
 ---
 
@@ -10,124 +97,10 @@ Cross-platform (Windows / Linux / macOS) · Multi-tenant vaults · Microservices
 
 | Qué | Dónde |
 |-----|--------|
-| **Specs (normativa)** | [`docs/specs/`](docs/specs/) — leer antes de implementar |
-| **Runbooks** | [`docs/`](docs/) — Markdown en repo, sin HTML |
-| **Mapa del repo** | [`MONOREPO.md`](MONOREPO.md) — `packages/` vs `services/` |
-
-Entrada: [`docs/README.md`](docs/README.md) · Diagrama: [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md)
-
----
-
-## Monorepo layout
-
-Ver detalle en [`MONOREPO.md`](MONOREPO.md). Resumen:
-
-```
-duckclaw/
-├── docs/specs/        # SDD — fuente de verdad normativa
-├── docs/              # Runbooks (instalar, PM2, troubleshooting)
-├── services/          # Procesos: api-gateway, db-writer, heartbeat, …
-├── packages/          # Librerías: shared, agents, core, duckops
-├── config/            # PM2, MCP (secretos en .env)
-├── tests/
-└── pyproject.toml     # uv workspace
-```
-
----
-
-## Key components
-
-- **Singleton DB-Writer**: serializes durable DuckDB writes via Redis queues; keeps ledger-style state consistent.
-- **API Gateway**: FastAPI front door (`services/api-gateway`); agent chat, DB write enqueue, Telegram webhook, VLM image ingest, health.
-- **duckops**: Python CLI (`uv run duckops …`) for wizard-driven setup and local service control.
-- **Training traces (optional)**: JSONL under `packages/agents/train/conversation_traces/` — [`packages/agents/train/`](packages/agents/train/) (`train_sft.py`).
-- **Admin UI (Next.js)**: [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md) — consola plantillas/Telegram/runtime (`pnpm admin:dev`)
-- **CRM PQRSD (legacy / hackathon)**: [retoPWRSomegahack](https://github.com/ManePeqsiCoda/retoPWRSomegahack) · código heredado en `apps/duckclaw-admin/src/lib/crm/`
-
----
-
-## Developer quick start
-
-```bash
-uv sync
-uv run duckops init # interactive wizard
-uv run duckops serve --gateway
-```
-
-Operational detail (Redis, Telegram, PM2, DB-Writer, `doctor.py`): see [`docs/COMANDOS.md`](docs/COMANDOS.md).
-
----
-
-## Herramientas de Desarrollo
-
-### Vibe Kanban (Planning Board)
-
-Planning board con soporte para agentes de código. Requiere **Node.js ≥ 20**. Ejecutar solo en el Mac mini local (no en el VPS); no publicar por túnel por defecto (acceso vía localhost o Tailscale).
-
-```bash
-npm run kanban
-# o directamente:
-npx vibe-kanban --port 3333
-```
-
-Acceso: http://localhost:3333
-
-**GitHub MCP en Vibe Kanban:** si la app no admite archivo de proyecto, configura MCP en **Settings → MCP Servers** (documentación en [Connecting MCP Servers](https://www.vibekanban.com/docs/settings-beta/mcp-servers)). Usa la misma imagen Docker oficial `ghcr.io/github/github-mcp-server` con `GITHUB_PERSONAL_ACCESS_TOKEN` y toolsets como `repos,issues,pull_requests` (omitir `projects`).
-
-### Diagnóstico rápido (Doctor)
-
-```bash
-uv run python scripts/doctor.py
-```
-
-### GitHub MCP Docker (protocolo MCP real)
-
-El Doctor valida PAT + imagen, pero **no** abre una sesión stdio completa. Si pruebas a mano con un solo mensaje JSON hacia Docker, típico error del servidor oficial:
-
-```text
-method invalid during initialization  method=tools/list
-```
-
-Eso aparece porque el transporte MCP exige el handshake (**`initialize`**, luego **`notifications/initialized`**) antes de **`tools/list`**. DuckClaw y el siguiente script usan el cliente Python **`mcp`**, que ya hace ese orden al listar herramientas.
-
-```bash
-uv run python scripts/smoke/smoke_github_mcp_stdio.py
-```
-
-No pongas el PAT en la línea de `docker run` (sale en histórico de shell); usa solo `GITHUB_TOKEN` en `.env` o variables de entorno.
-
----
-
-## Testing the singleton-writer pipeline
-
-End-to-end **API Gateway → Redis → DB Writer → DuckDB** is covered by [`tests/run_singleton_writer_pipeline.py`](tests/run_singleton_writer_pipeline.py). Architecture context: [`docs/architecture/singleton_writer.md`](docs/architecture/singleton_writer.md); infrastructure narrative: [`docs/core/01_System_Infrastructure.md`](docs/core/01_System_Infrastructure.md) and [`docs/core/00_Flujo de Vida del Dato (Wizard).md`](docs/core/00_Flujo de Vida del Dato (Wizard).md).
-
-**Unit tests** (no live Redis):
-
-```bash
-uv run pytest tests/run_singleton_writer_pipeline.py -v -m "not integration"
-```
-
-**Integration** (Redis on `localhost:6379`, e.g. `docker run -d --name duckclaw-redis -p 6379:6379 redis:7-alpine`):
-
-```bash
-RUN_SINGLETON_PIPELINE_INTEGRATION=1 uv run pytest tests/run_singleton_writer_pipeline.py -v -m integration
-```
-
----
-
-## Docker
-
-```bash
-docker build -t duckclaw-base -f docker/base/Dockerfile .
-docker build -t duckclaw-api -f docker/api/Dockerfile .
-```
-
----
-
-## Spec-driven development
-
-No substantial feature without an approved spec under [`docs/specs/`](docs/specs/). Platform index: [`docs/specs/features/platform/README.md`](docs/specs/features/platform/README.md).
+| Índice | [`docs/README.md`](docs/README.md) |
+| Primeros pasos | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) |
+| Arquitectura | [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md) |
+| Specs | [`docs/specs/`](docs/specs/) |
 
 ---
 

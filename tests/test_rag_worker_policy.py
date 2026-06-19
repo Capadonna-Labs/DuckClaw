@@ -239,18 +239,20 @@ def test_rag_debug_instrumentation_is_not_left_in_runtime_modules() -> None:
 
 
 def test_factory_uses_extracted_rag_policy_for_get_db_path() -> None:
-    factory = Path("packages/agents/src/duckclaw/workers/factory.py").read_text(encoding="utf-8")
+    factory_invoke = Path(
+        "packages/agents/src/duckclaw/workers/factory_graph_nodes_agent_invoke.py"
+    ).read_text(encoding="utf-8")
 
-    assert "from duckclaw.forge.rag.tool_policy import" in factory
-    assert "from duckclaw.forge.rag.prompt_policy import" in factory
-    assert "from duckclaw.workers.tool_surface_policy import" in factory
-    assert "should_prioritize_rag_over_storage_tools(" in factory
-    assert "should_hide_storage_identity_tools(" in factory
-    assert "_auto_tools = without_storage_identity_tools(_auto_tools)" in factory
-    assert "_auto_tools = without_privileged_mutation_tools(_auto_tools)" in factory
-    assert "_auto_tools = without_sandbox_tools(_auto_tools)" in factory
-    assert "_auto_tools = without_storage_tools(_auto_tools)" in factory
-    assert "rag_turn_system_prompt(prompt_policies, _lid)" in factory
+    assert "from duckclaw.forge.rag.tool_policy import" in factory_invoke
+    assert "from duckclaw.forge.rag.prompt_policy import" in factory_invoke
+    assert "from duckclaw.workers.tool_surface_policy import" in factory_invoke
+    assert "should_prioritize_rag_over_storage_tools(" in factory_invoke
+    assert "should_hide_storage_identity_tools(" in factory_invoke
+    assert "_auto_tools = without_storage_identity_tools(_auto_tools)" in factory_invoke
+    assert "_auto_tools = without_privileged_mutation_tools(_auto_tools)" in factory_invoke
+    assert "_auto_tools = without_sandbox_tools(_auto_tools)" in factory_invoke
+    assert "_auto_tools = without_storage_tools(_auto_tools)" in factory_invoke
+    assert "rag_turn_system_prompt(prompt_policies, _lid)" in factory_invoke
 
 
 def test_rag_tool_policy_lives_in_rag_package_not_workers() -> None:

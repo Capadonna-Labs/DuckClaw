@@ -46,13 +46,18 @@ def test_resilience_flow_initial_suffix_and_output_fields(monkeypatch) -> None:
     }
 
 
-def test_manager_graph_delegates_resilience_flow_helpers_to_manager_module() -> None:
-    from duckclaw.graphs import manager_graph
+def test_manager_resilience_flow_helpers_live_in_manager_module() -> None:
     from duckclaw.manager import resilience_flow
 
-    assert manager_graph._initial_replan_state is resilience_flow._initial_replan_state
-    assert (
-        manager_graph._planned_task_with_replan_suffix
-        is resilience_flow._planned_task_with_replan_suffix
-    )
-    assert manager_graph._replan_output_fields is resilience_flow._replan_output_fields
+    assert callable(resilience_flow._initial_replan_state)
+    assert callable(resilience_flow._planned_task_with_replan_suffix)
+    assert callable(resilience_flow._replan_output_fields)
+
+
+def test_manager_worker_reply_formatting_helpers_live_in_manager_module() -> None:
+    from duckclaw.manager import worker_reply_formatting
+
+    assert callable(worker_reply_formatting._strip_leading_subagent_instance_headers)
+    assert callable(worker_reply_formatting._worker_base_from_subagent_label)
+    assert callable(worker_reply_formatting._reply_already_has_worker_header)
+    assert callable(worker_reply_formatting._prepend_subagent_label_once)

@@ -236,6 +236,7 @@ async def prepare_playground_chat_turn(
         username=actor or guard_user_id,
         chat_type="private",
         tenant_id=turn.eff_tenant,
+        project_id=turn.project_id,
         stream=body.stream,
         vault_db_path=vault_path or None,
     )
@@ -290,6 +291,7 @@ async def prepare_playground_voice_turn(
         username=actor or guard_user_id,
         chat_type="private",
         tenant_id=turn.eff_tenant,
+        project_id=turn.project_id,
         stream=False,
         vault_db_path=vault_path or None,
     )

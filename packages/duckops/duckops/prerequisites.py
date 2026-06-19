@@ -33,6 +33,19 @@ def platform_label() -> str:
     return system
 
 
+def redis_start_hint() -> str:
+    """Ejemplos concretos para arrancar Redis (mensajes orientados al usuario)."""
+    system = platform.system()
+    if system == "Darwin":
+        return "En macOS: brew services start redis"
+    if system == "Linux":
+        return (
+            "En Linux: sudo systemctl start redis "
+            "(Fedora: sudo dnf install -y redis && sudo systemctl enable --now redis)"
+        )
+    return "Arranca Redis en localhost:6379"
+
+
 def _default_print(msg: str) -> None:
     print(msg, flush=True)
 

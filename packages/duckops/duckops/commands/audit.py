@@ -41,7 +41,7 @@ def cmd_audit(
     config_path = _config_path()
     if not config_path.is_file():
         console.print(Panel(
-            f"No hay configuración en {config_path}.\nEjecuta: duckops init",
+            f"No hay configuración en {config_path}.\nEjecuta: duckops up o duckops configure",
             title="Auditoría",
             border_style="yellow",
         ))

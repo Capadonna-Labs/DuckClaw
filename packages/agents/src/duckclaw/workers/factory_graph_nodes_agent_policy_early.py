@@ -68,10 +68,18 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                         set_goals_tool_db_path,
                         set_goals_tool_worker_id,
                     )
+                    from duckclaw.forge.skills.knowledge_tool_context import (
+                        set_knowledge_tool_project_id,
+                        set_knowledge_tool_tenant_id,
+                        set_knowledge_tool_worker_uid,
+                    )
 
                     set_goals_tool_chat_id(str(_chat_ctx))
                     set_goals_tool_worker_id(worker_id)
                     set_goals_tool_db_path(str(path))
+                    set_knowledge_tool_tenant_id(_tenant_ctx)
+                    set_knowledge_tool_project_id(str(state.get("project_id") or ""))
+                    set_knowledge_tool_worker_uid(worker_id)
                 except Exception:
                     pass
                 _wl = _worker_log_label(worker_id)

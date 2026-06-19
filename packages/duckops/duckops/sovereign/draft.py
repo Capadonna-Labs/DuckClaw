@@ -6,6 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH
 from duckops.sovereign.validate import DEFAULT_GATEWAY_PORT
 
 
@@ -46,7 +47,7 @@ class SovereignDraft(BaseModel):
         description="Canal de comunicación",
     )
     duckdb_vault_path: str = Field(
-        default="db/sovereign_memory.duckdb",
+        default=DEFAULT_SESSION_DB_RELPATH,
         description="Hub DuckDB (multiplex / DUCKDB_PATH); el wizard lo infiere del .env si hay rutas por agente",
     )
     duckdb_shared_path: str = Field(default="", description="BD compartida opcional (ej. BI)")

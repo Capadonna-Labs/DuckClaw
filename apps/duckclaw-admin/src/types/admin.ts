@@ -11,6 +11,7 @@ export interface AdminUser {
 export interface TemplateSummary {
   id: string;
   worker_uid?: string;
+  worker_id?: string;
   name?: string;
   description?: string;
   description_source?: string;
@@ -19,6 +20,8 @@ export interface TemplateSummary {
   source_template_id?: string;
   status?: string;
   active?: boolean;
+  read_only?: boolean;
+  skills_list?: string[];
   schema_name?: string;
   temperature?: number;
   topology?: string;

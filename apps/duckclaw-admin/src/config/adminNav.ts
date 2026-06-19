@@ -77,7 +77,7 @@ export const DATA_NAV_GROUP: AdminNavGroup = {
     { href: '/reports', label: 'Reportes', section: 'core', audience: 'admin' },
     { href: '/duckdb', label: 'DuckDB', section: 'core', audience: 'admin' },
     { href: '/runtime', label: 'Runtime overrides', section: 'core', audience: 'admin' },
-    { href: '/policies', label: 'Prompt policies', section: 'core', audience: 'admin' },
+    { href: '/policies', label: 'Instrucciones', section: 'core', audience: 'admin' },
   ],
 };
 
@@ -172,7 +172,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/playground': 'Playground',
   '/projects': 'Proyectos',
   '/knowledge': 'RAG',
-  '/policies': 'Prompt policies',
+  '/policies': 'Instrucciones',
   '/integrations': 'Integraciones',
   '/gen': 'Gen',
   '/gen/image': 'Image',

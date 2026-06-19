@@ -23,8 +23,9 @@ except ImportError:
     patch_security_policy = None
 from duckops.sovereign.stack_health import ensure_db_writer_pm2
 from duckops.sovereign.telegram_set_webhook import register_telegram_webhook_after_deploy
+from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH
 
-DEFAULT_SOVEREIGN_VAULT = "db/sovereign_memory.duckdb"
+DEFAULT_SOVEREIGN_VAULT = DEFAULT_SESSION_DB_RELPATH
 
 
 def effective_primary_duckdb_relpath(draft: SovereignDraft) -> str:

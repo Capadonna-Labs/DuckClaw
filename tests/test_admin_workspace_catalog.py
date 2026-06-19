@@ -1238,7 +1238,7 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     from duckclaw import DuckClaw
     from duckclaw.admin_worker_catalog import create_worker
     from duckclaw.admin_workspace import attach_agent_to_project, create_project
-    import main as gateway_main
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
 
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
     db = DuckClaw(str(gateway_db), read_only=False, engine="python")
@@ -1282,7 +1282,7 @@ def test_playground_config_and_chat_support_db_first_project_scope(
         captured["message"] = _chat.message
         return {"response": f"ok:{worker_id}", "assigned_worker_id": worker_id}
 
-    monkeypatch.setattr(gateway_main, "_invoke_chat", _fake_invoke)
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
 
     chat = gateway_admin_client.post(
         "/api/v1/admin/playground/chat",

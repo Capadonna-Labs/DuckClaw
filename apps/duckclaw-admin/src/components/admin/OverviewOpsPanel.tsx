@@ -47,13 +47,6 @@ export function OverviewOpsPanel({ gatewayStale, onHealthReload }: Props) {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] items-start gap-4 sm:gap-6 p-4 sm:p-6">
-        <div className="rounded-2xl border border-gov-gray-100 dark:border-dark-border p-4 bg-white/80 dark:bg-dark-bg/30 min-w-0">
-          <h3 className="text-sm font-black text-gov-gray-900 dark:text-dark-text mb-3">
-            Arranque y conexión
-          </h3>
-          <StackBootstrapPanel compact onConnected={onHealthReload} />
-        </div>
-
         <div className="self-start xl:sticky xl:top-4 rounded-2xl border border-slate-800 bg-slate-950 p-3 sm:p-4 text-slate-100 shadow-inner min-w-0 overflow-hidden">
           <div className="flex items-center justify-between gap-3 mb-4">
             <div className="min-w-0">

@@ -7,6 +7,7 @@ import { adminService } from '@/services/adminService';
 import type { AdminHealth, OverviewMetrics } from '@/types/admin';
 import { Bot, Database, MessageCircle, PlusCircle, Users } from 'lucide-react';
 import { OverviewOpsPanel } from '@/components/admin/OverviewOpsPanel';
+import { PlatformQuickStart } from '@/components/admin/PlatformQuickStart';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { formatGatewayStatus, isGatewayHealthy } from '@/lib/healthLabels';
 import { useAuthStore } from '@/store/authStore';
@@ -70,6 +71,8 @@ export default function OverviewPage() {
 
       {error && <GatewayErrorBanner message={error} />}
 
+      <PlatformQuickStart />
+
       {!isAdmin && <UserHomeActions />}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -119,15 +122,15 @@ function UserHomeActions() {
       <HomeAction
         href="/playground"
         icon={MessageCircle}
-        title="Hablar con default"
-        description="Abre el chat y empieza con el agente base."
+        title="Ir al chat"
+        description="Elige un agente y conversa en Playground."
         primary
       />
       <HomeAction
-        href="/projects"
+        href="/templates"
         icon={PlusCircle}
-        title="Crear borrador administrado"
-        description="Proyectos y agentes DB-first con borrador revisable."
+        title="Crear agente"
+        description="Nuevo asistente con herramientas base incluidas."
       />
       <HomeAction
         href="/templates"

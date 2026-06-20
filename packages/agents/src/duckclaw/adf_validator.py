@@ -86,16 +86,29 @@ def validate_agent(adf_path: Path, *, canonical_agent_id: str | None = None) -> 
         errors.append(f"system_prompt.md: error de lectura — {e}")
 
     try:
-        policy = yaml.safe_load((adf_path / "security_policy.yaml").read_text(encoding="utf-8"))
-        if not isinstance(policy, dict):
-            errors.append("security_policy.yaml: raíz debe ser un mapa YAML")
+        policy_path = adf_path / "security_policy.yaml"
+        if policy_path.is_file():
+            policy = yaml.safe_load(policy_path.read_text(encoding="utf-8"))
+            if not isinstance(policy, dict):
+                errors.append("security_policy.yaml: raíz debe ser un mapa YAML")
+            elif "network" in policy or "filesystem" in policy or "max_execution_time_seconds" in policy:
+                try:
+                    from duckclaw.forge.schema import SecurityPolicy
+
+                    SecurityPolicy.model_validate(policy)
+                except Exception as exc:
+                    errors.append(f"security_policy.yaml: schema Strix inválido — {exc}")
+            else:
+                if "can_do" not in policy:
+                    errors.append("security_policy.yaml: falta 'can_do' (legacy) o bloque 'network' (Strix)")
+                if "cannot_do" not in policy:
+                    errors.append("security_policy.yaml: falta 'cannot_do' (legacy) o bloque 'network' (Strix)")
+                if "data_egress" not in policy:
+                    warnings.append("security_policy.yaml: falta 'data_egress' (recomendado en formato legacy)")
         else:
-            if "can_do" not in policy:
-                errors.append("security_policy.yaml: falta 'can_do'")
-            if "cannot_do" not in policy:
-                errors.append("security_policy.yaml: falta 'cannot_do'")
-            if "data_egress" not in policy:
-                warnings.append("security_policy.yaml: falta 'data_egress' (recomendado)")
+            warnings.append(
+                "security_policy.yaml ausente — la plataforma aplicará zero-trust al ejecutar sandbox"
+            )
     except Exception as e:
         errors.append(f"security_policy.yaml: error de parseo — {e}")
 

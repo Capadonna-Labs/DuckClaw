@@ -43,6 +43,7 @@ export const CONVERSAR_NAV_GROUP: AdminNavGroup = {
   label: 'Conversar',
   hint: 'Chat, historial y tablero',
   items: [
+    { href: '/overview', label: 'Inicio', section: 'core', audience: 'admin' },
     { href: '/playground', label: 'Chat', section: 'core', audience: 'admin' },
   ],
 };

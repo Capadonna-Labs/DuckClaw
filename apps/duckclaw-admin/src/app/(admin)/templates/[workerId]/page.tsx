@@ -8,6 +8,7 @@ import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
 import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
+import { WorkerCapabilitiesCard } from '@/components/templates/WorkerCapabilitiesCard';
 
 type MarkdownViewMode = 'edit' | 'preview' | 'split';
 
@@ -227,6 +228,11 @@ export default function TemplateEditorPage() {
           )}
         </div>
       </header>
+
+      <WorkerCapabilitiesCard
+        workerId={workerId}
+        manifestYaml={detail?.contents?.['manifest.yaml']}
+      />
 
       <div className="flex flex-col lg:flex-row gap-4">
         <aside className="lg:w-56 shrink-0 max-h-48 lg:max-h-[520px] overflow-y-auto rounded-xl border dark:border-dark-border p-2 bg-gov-gray-50 dark:bg-dark-bg">

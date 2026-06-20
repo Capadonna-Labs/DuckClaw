@@ -187,9 +187,11 @@ def list_templates_payload(
         wid = str(row.get("id") or row.get("worker_id") or "")
         worker_uid = str(row.get("worker_uid") or "").strip()
         skills_list: list[str] = []
+        manifest_snapshot: dict[str, Any] = {}
         if worker_uid:
             latest = get_latest_worker_version(db, worker_uid=worker_uid) or {}
-            skills_list = _skills_from_manifest_snapshot(latest.get("manifest_snapshot"))
+            manifest_snapshot = dict(latest.get("manifest_snapshot") or {})
+            skills_list = _skills_from_manifest_snapshot(manifest_snapshot)
         items.append(
             {
                 "id": wid,
@@ -203,6 +205,7 @@ def list_templates_payload(
                 "active": bool(row.get("active", True)),
                 "read_only": str(row.get("source") or "") == "catalog",
                 "skills_list": skills_list,
+                "internal_scaffold": manifest_snapshot.get("internal_scaffold") is True,
             }
         )
     return items

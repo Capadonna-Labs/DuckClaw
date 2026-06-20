@@ -237,10 +237,12 @@ def initialize_worker_graph_context(
         except Exception:
             pass
 
-    # Strix Sandbox: `run_sandbox` si hay security_policy.yaml; `run_browser_sandbox` si browser_sandbox en manifest.
+    # Strix Sandbox: `run_sandbox` con LLM (política zero-trust si falta YAML); browser opt-in en manifest.
     try:
-        security_policy_path = spec.worker_dir / "security_policy.yaml"
-        if security_policy_path.is_file() and llm is not None:
+        if llm is not None:
+            from duckclaw.framework_tool_pack import ensure_baseline_worker_files
+
+            ensure_baseline_worker_files(spec.worker_dir)
             from duckclaw.graphs.sandbox import (
                 browser_sandbox_tool_factory,
                 get_browser_session_url_tool_factory,

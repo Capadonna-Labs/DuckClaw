@@ -1,30 +1,25 @@
-# Plantilla base DuckClaw — todo agente nuevo parte de aquí (admin UI).
-name: Agente DuckClaw
-id: default_agent
+# Plantilla interna DuckClaw — NO es un agente para usar en producción.
+# Al crear un agente nuevo, la consola copia esta carpeta como punto de partida.
+# Las herramientas base (SQL, RAG, sandbox) se fusionan automáticamente vía framework_tool_pack.
+name: Plantilla base DuckClaw
+id: default
 schema_name: agent_worker
 topology: general
+internal_scaffold: true
 read_only: false
+tool_profile: general
 description: >
-  Agente base para conversaciones generales y creación rápida de asistentes personalizados desde la consola.
-  Sirve como punto de partida para ajustar instrucciones, tono y herramientas.
+  Scaffold interno del producto. No lo asignes a proyectos ni lo uses en Playground.
+  Crea un agente propio (p. ej. aws-expert-agent) desde Agentes → Nuevo.
 
 llm:
   required: true
   temperature: 0.3
 
-skills:
-  - get_current_time
-  - read_sql
-  - comfyui:
-      enabled: true
-      template: comfy_default
-      edit_template: comfy_img2img_edit
-  - fal:
-      enabled: false
+skills: []
 
-# tool_orchestration: (opcional) ver specs/features/platform/WORKER_TOOL_ORCHESTRATION.md
-# tool_orchestration:
-#   intents:
-#     example_intent:
-#       patterns: ['(?i)ejemplo']
-#       force_first_tool: read_sql
+# Skills opcionales (añadir en agentes reales, no en esta plantilla):
+#   - research: { tavily_enabled: true }
+#   - comfyui: { enabled: true, template: comfy_default }
+#   - fal: { enabled: false }
+# browser_sandbox: true  # solo si necesitas navegador + VNC

@@ -30,6 +30,7 @@ import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
 import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
 import { SessionDatabaseChip } from '@/components/playground/SessionDatabaseChip';
+import { PlaygroundSandboxChip } from '@/components/playground/PlaygroundSandboxChip';
 import { PlaygroundRagProjectWarning } from '@/components/playground/PlaygroundRagProjectWarning';
 import { Pm2LiveLogsPanel } from '@/components/admin/Pm2LiveLogsPanel';
 import { writeLastProjectId } from '@/lib/floatingChatProject';
@@ -55,6 +56,8 @@ export default function PlaygroundPage() {
   const [defaultsMsg, setDefaultsMsg] = useState<string | null>(null);
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
+  const [sandboxToggling, setSandboxToggling] = useState(false);
+  const [sandboxRefreshKey, setSandboxRefreshKey] = useState(0);
 
   const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
   const {
@@ -276,6 +279,25 @@ export default function PlaygroundPage() {
   const pageScroll = useScrollFabPair(mainScrollEl);
   const activeVaultPath = chat.vaultPath || config?.vault?.effective_path || '';
   const activeVaultScope = chat.vaultPath ? 'chat' : config?.vault?.scope;
+  const handleSandboxToggle = useCallback(
+    async (command: '/sandbox on' | '/sandbox off') => {
+      if (!conv.sessionId || !workerId.trim()) return;
+      setSandboxToggling(true);
+      try {
+        await adminService.playgroundChat({
+          worker_id: workerId.trim(),
+          message: command,
+          chat_id: conv.sessionId,
+          tenant_id: config?.effective_tenant_id,
+          vault_db_path: activeVaultPath || undefined,
+        });
+        setSandboxRefreshKey((value) => value + 1);
+      } finally {
+        setSandboxToggling(false);
+      }
+    },
+    [activeVaultPath, config?.effective_tenant_id, conv.sessionId, workerId]
+  );
   const selectWorker = useCallback(
     (next: string) => {
       setWorkerId(next);
@@ -494,6 +516,14 @@ export default function PlaygroundPage() {
               path={activeVaultPath}
               scope={activeVaultScope}
               onConfigure={() => setSettingsModal('vault')}
+            />
+            <PlaygroundSandboxChip
+              chatId={conv.sessionId}
+              workerId={workerId}
+              tenantId={config?.effective_tenant_id}
+              toggling={sandboxToggling}
+              refreshKey={sandboxRefreshKey}
+              onToggleCommand={handleSandboxToggle}
             />
             <PlaygroundRagProjectWarning
               projectId={projectId}

@@ -26,6 +26,29 @@ export interface TemplateSummary {
   temperature?: number;
   topology?: string;
   load_error?: string;
+  /** true cuando el manifest es scaffold interno (no agente de producción). */
+  internal_scaffold?: boolean;
+}
+
+export interface WorkerCapabilityRow {
+  name: string;
+  kind: string;
+  permission: string;
+}
+
+export interface WorkerToolRow {
+  name: string;
+  category?: string;
+  source?: string;
+}
+
+export interface WorkerCapabilitiesPayload {
+  worker_id: string;
+  skills?: string[];
+  tools?: WorkerToolRow[];
+  db_capabilities?: WorkerCapabilityRow[];
+  tool_profile?: string;
+  baseline_applied?: boolean;
 }
 
 export interface TemplateDetail {

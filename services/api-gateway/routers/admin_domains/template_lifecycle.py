@@ -225,6 +225,10 @@ def create_worker_from_source(
 
     shutil.copytree(base, dest)
 
+    from duckclaw.framework_tool_pack import ensure_baseline_skills, ensure_baseline_worker_files
+
+    ensure_baseline_worker_files(dest)
+
     preset_rel = (source_template or "default").strip().strip("/")
     preset_dir = templates_dir() / preset_rel
     preset_skills: list[str] = []
@@ -247,8 +251,10 @@ def create_worker_from_source(
                 data = {}
             data["id"] = wid
             data["name"] = (name or wid).strip()
+            data.pop("internal_scaffold", None)
             if description.strip():
                 data["description"] = description.strip()
+            final_skills = ensure_baseline_skills(final_skills, manifest=data)
             data["skills"] = final_skills
             if topology.strip():
                 data["topology"] = topology.strip()

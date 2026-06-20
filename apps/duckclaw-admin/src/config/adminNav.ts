@@ -38,6 +38,15 @@ export const USER_WORKSPACE_NAV_GROUP: AdminNavGroup = {
   ],
 };
 
+export const CONVERSAR_NAV_GROUP: AdminNavGroup = {
+  id: 'conversar',
+  label: 'Conversar',
+  hint: 'Chat, historial y tablero',
+  items: [
+    { href: '/playground', label: 'Chat', section: 'core', audience: 'admin' },
+  ],
+};
+
 export const OPERATION_NAV_GROUP: AdminNavGroup = {
   id: 'operation',
   label: 'Inicio',
@@ -63,7 +72,6 @@ export const BUILD_NAV_GROUP: AdminNavGroup = {
     { href: '/knowledge', label: 'RAG', section: 'core', audience: 'admin' },
     { href: '/skills', label: 'Skills', section: 'core', audience: 'admin' },
     { href: '/mcp', label: 'MCP', section: 'core', audience: 'admin' },
-    { href: '/integrations', label: 'Integraciones', section: 'integrations', audience: 'admin' },
     { href: '/gen/image', label: 'Imágenes', section: 'core', audience: 'admin' },
     { href: '/vnc', label: 'VNC', section: 'core', audience: 'admin', adminOnly: true },
   ],
@@ -83,7 +91,7 @@ export const DATA_NAV_GROUP: AdminNavGroup = {
 
 export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
   id: 'integrations',
-  label: 'Integraciones',
+  label: 'Conectar',
   hint: 'Canales y dispositivos conectados',
   items: [
     { href: '/telegram', label: 'Telegram', section: 'integrations', audience: 'admin' },
@@ -116,16 +124,17 @@ export const USER_NAV_STRUCTURE: readonly AdminNavEntry[] = [
 
 /** Orden del sidebar admin: grupos semánticos para reducir carga cognitiva. */
 export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
-  { type: 'group', group: OPERATION_NAV_GROUP },
-  { type: 'group', group: PLAYGROUND_NAV_GROUP },
+  { type: 'group', group: CONVERSAR_NAV_GROUP },
   { type: 'group', group: BUILD_NAV_GROUP },
   { type: 'group', group: DATA_NAV_GROUP },
+  { type: 'group', group: INTEGRATIONS_NAV_GROUP },
   { type: 'group', group: SECURITY_NAV_GROUP },
 ];
 
 /** Lista plana (compat tests / búsquedas). */
 export const ADMIN_NAV: readonly AdminNavItem[] = [
   ...USER_WORKSPACE_NAV_GROUP.items,
+  ...CONVERSAR_NAV_GROUP.items,
   ...OPERATION_NAV_GROUP.items,
   ...PLAYGROUND_NAV_GROUP.items,
   ...BUILD_NAV_GROUP.items,

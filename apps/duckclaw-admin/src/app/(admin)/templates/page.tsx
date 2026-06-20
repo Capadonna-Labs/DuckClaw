@@ -11,6 +11,7 @@ import { clampInput, LIMITS } from '@/lib/validation';
 import { isAdminRole } from '@/lib/roles';
 import { paginateItems } from '@/lib/pagination';
 import { agentDescription, agentMetadata } from '@/lib/agentCards';
+import { filterVisibleTemplates } from '@/lib/templateVisibility';
 import { Bot, ChevronLeft, ChevronRight, Search, Trash2 } from 'lucide-react';
 
 const AGENTS_PAGE_SIZE = 5;
@@ -32,7 +33,7 @@ export default function TemplatesPage() {
     adminService
       .listTemplates({ include_inactive: showInactive })
       .then((nextItems) => {
-        setItems(nextItems);
+        setItems(filterVisibleTemplates(nextItems));
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
   }, [showInactive]);

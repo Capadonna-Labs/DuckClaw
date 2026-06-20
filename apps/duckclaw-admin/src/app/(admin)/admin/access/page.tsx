@@ -1,11 +1,11 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { PageShell } from '@/components/admin/PageShell';
 import SettingsSection from '@/components/settings/SettingsSection';
+import { AccountSettingsPanel } from '@/components/settings/AccountSettingsPanel';
 import { ConsoleUsersPanel } from '@/components/access/ConsoleUsersPanel';
-import { TelegramUsersPanel } from '@/components/access/TelegramUsersPanel';
 import { SharedGrantsPanel } from '@/components/access/SharedGrantsPanel';
 import { PermissionsMatrix } from '@/components/access/PermissionsMatrix';
 import { AccessPersistenceInfo } from '@/components/access/AccessPersistenceInfo';
@@ -13,18 +13,26 @@ import { useAuthStore } from '@/store/authStore';
 import { adminService } from '@/services/adminService';
 import { Shield, Users } from 'lucide-react';
 
-type TabId = 'console' | 'telegram' | 'shared';
+type TabId = 'cuenta' | 'console' | 'shared';
 
 const TABS: { id: TabId; label: string }[] = [
+  { id: 'cuenta', label: 'Mi cuenta' },
   { id: 'console', label: 'Consola' },
-  { id: 'telegram', label: 'Telegram' },
   { id: 'shared', label: 'Bases compartidas' },
 ];
 
+function parseTab(raw: string | null): TabId {
+  if (raw === 'cuenta' || raw === 'console' || raw === 'shared') {
+    return raw;
+  }
+  return 'cuenta';
+}
+
 export default function AccessPage() {
-  const { usuario } = useAuthStore();
+  const { usuario, logout } = useAuthStore();
   const router = useRouter();
-  const [tab, setTab] = useState<TabId>('console');
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<TabId>(() => parseTab(searchParams.get('tab')));
   const [tenantId, setTenantId] = useState('default');
   const [overview, setOverview] = useState<{
     console_users: number;
@@ -33,6 +41,14 @@ export default function AccessPage() {
     db_path?: string;
     db_exists?: boolean;
   } | null>(null);
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'telegram') {
+      router.replace('/telegram');
+      return;
+    }
+    setTab(parseTab(searchParams.get('tab')));
+  }, [router, searchParams]);
 
   useEffect(() => {
     if (usuario?.rol !== 'admin') {
@@ -53,6 +69,16 @@ export default function AccessPage() {
       .catch(() => setOverview(null));
   }, [usuario?.rol, router, tenantId]);
 
+  const selectTab = (next: TabId) => {
+    setTab(next);
+    router.replace(`/admin/access?tab=${next}`, { scroll: false });
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    router.replace('/login');
+  };
+
   if (usuario?.rol !== 'admin') {
     return null;
   }
@@ -61,33 +87,33 @@ export default function AccessPage() {
     <PageShell>
       <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-black dark:text-dark-text">Acceso</h1>
+          <h1 className="text-3xl font-black dark:text-dark-text">Usuarios y roles</h1>
           <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
-            Usuarios consola, whitelist Telegram y permisos sobre bases compartidas
+            Tu cuenta, usuarios de la consola web y permisos sobre bases compartidas
           </p>
-          {overview && (
+          {overview && tab !== 'cuenta' && (
             <p className="text-xs text-gov-gray-500 mt-2 font-mono">
-              consola {overview.console_users} · telegram {overview.telegram_users} · grants{' '}
-              {overview.shared_grants}
+              consola {overview.console_users} · grants {overview.shared_grants}
             </p>
           )}
         </div>
-        <PermissionsMatrix />
+        {tab !== 'cuenta' && <PermissionsMatrix />}
       </header>
 
-      <AccessPersistenceInfo
-        dbPath={overview?.db_path}
-        dbExists={overview?.db_exists}
-        activeTab={tab}
-        tenantId={tenantId}
-      />
+      {tab !== 'cuenta' && (
+        <AccessPersistenceInfo
+          dbPath={overview?.db_path}
+          dbExists={overview?.db_exists}
+          activeTab={tab}
+        />
+      )}
 
       <div className="flex flex-wrap gap-2 border-b dark:border-dark-border pb-2">
         {TABS.map((t) => (
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => selectTab(t.id)}
             className={`px-4 py-2 rounded-xl text-sm font-bold ${
               tab === t.id
                 ? 'bg-gov-blue-700 text-white'
@@ -97,7 +123,7 @@ export default function AccessPage() {
             {t.label}
           </button>
         ))}
-        {(tab === 'telegram' || tab === 'shared') && (
+        {tab === 'shared' && (
           <input
             value={tenantId}
             onChange={(e) => setTenantId(e.target.value)}
@@ -107,23 +133,15 @@ export default function AccessPage() {
         )}
       </div>
 
+      {tab === 'cuenta' && <AccountSettingsPanel onLogout={handleLogout} />}
+
       {tab === 'console' && (
         <SettingsSection
           titulo="Usuarios consola"
-          descripcion="Personas que pueden entrar a la consola"
+          descripcion="Personas que pueden entrar a la consola web (login email/contraseña)"
           icono={<Shield size={22} />}
         >
           <ConsoleUsersPanel />
-        </SettingsSection>
-      )}
-
-      {tab === 'telegram' && (
-        <SettingsSection
-          titulo="Usuarios Telegram"
-          descripcion="Personas autorizadas para usar el bot"
-          icono={<Users size={22} />}
-        >
-          <TelegramUsersPanel tenantId={tenantId} onTenantIdChange={setTenantId} />
         </SettingsSection>
       )}
 

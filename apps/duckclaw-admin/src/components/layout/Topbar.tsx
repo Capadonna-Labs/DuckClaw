@@ -1,6 +1,7 @@
 'use client';
 
-import { ChevronDown, LogOut, Sun, Moon, Menu, RefreshCw } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronDown, LogOut, Sun, Moon, Menu, RefreshCw, User } from 'lucide-react';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
@@ -8,6 +9,7 @@ import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { useEffect, useRef, useState } from 'react';
 import { adminService } from '@/services/adminService';
+import { PlatformStatusStrip } from '@/components/admin/GatewayStatusBadge';
 
 interface TopbarProps {
   onMenuClick?: () => void;
@@ -64,27 +66,30 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
         sidebarOpen={sidebarOpen}
       />
       <div className="flex items-center gap-2 md:gap-4">
-        {canRunOps && (
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => void restartStack()}
-              disabled={stackRestarting}
-              className="inline-flex items-center gap-2 rounded-xl border border-gov-blue-100 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
-              title="Reiniciar DuckClaw-DB-Writer y DuckClaw-Gateway con PM2"
-            >
-              <RefreshCw size={14} className={stackRestarting ? 'animate-spin' : ''} />
-              <span className="hidden sm:inline">
-                {stackRestarting ? 'Reiniciando...' : 'Reiniciar stack'}
-              </span>
-            </button>
-            {stackRestartMessage && (
-              <div className="absolute right-0 top-full z-50 mt-2 w-72 rounded-2xl border bg-white p-3 text-xs font-semibold text-gov-gray-700 shadow-lg dark:border-dark-border dark:bg-dark-surface dark:text-dark-text">
-                {stackRestartMessage}
-              </div>
-            )}
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <PlatformStatusStrip />
+          {canRunOps && (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => void restartStack()}
+                disabled={stackRestarting}
+                className="inline-flex items-center gap-2 rounded-xl border border-gov-blue-100 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
+                title="Reiniciar DuckClaw-DB-Writer y DuckClaw-Gateway con PM2"
+              >
+                <RefreshCw size={14} className={stackRestarting ? 'animate-spin' : ''} />
+                <span className="hidden sm:inline">
+                  {stackRestarting ? 'Reiniciando...' : 'Reiniciar stack'}
+                </span>
+              </button>
+              {stackRestartMessage && (
+                <div className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border bg-white p-3 text-xs font-semibold text-gov-gray-700 shadow-lg dark:border-dark-border dark:bg-dark-surface dark:text-dark-text">
+                  {stackRestartMessage}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
         <button
           type="button"
           onClick={toggleTheme}
@@ -98,6 +103,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
           email={usuario?.email || ''}
           initials={usuario?.initials ?? obtenerIniciales(usuario?.nombre || usuario?.email || '')}
           onLogout={handleLogout}
+          isAdmin={canRunOps}
         />
       </div>
     </header>
@@ -109,11 +115,13 @@ function UserMenu({
   email,
   initials,
   onLogout,
+  isAdmin,
 }: {
   displayName: string;
   email: string;
   initials: string;
   onLogout: () => void;
+  isAdmin?: boolean;
 }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -152,7 +160,23 @@ function UserMenu({
         <ChevronDown size={14} className={userMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
       </button>
       {userMenuOpen && (
-        <div className="absolute right-0 top-full mt-2 w-48 rounded-2xl border bg-white dark:bg-dark-surface dark:border-dark-border shadow-lg p-2 z-50">
+        <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl border bg-white dark:bg-dark-surface dark:border-dark-border shadow-lg p-2 z-50">
+          <div className={`px-3 py-2 border-b dark:border-dark-border mb-1 ${isAdmin ? 'lg:hidden' : ''}`}>
+            <p className="text-xs font-bold dark:text-dark-text truncate">{displayName}</p>
+            {email && (
+              <p className="text-[10px] text-gov-gray-500 font-mono truncate">{email}</p>
+            )}
+          </div>
+          {isAdmin && (
+            <Link
+              href="/admin/access?tab=cuenta"
+              onClick={() => setUserMenuOpen(false)}
+              className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-gov-blue-800 hover:bg-gov-blue-50 dark:text-dark-cyan dark:hover:bg-dark-bg"
+            >
+              <User size={16} />
+              Mi cuenta
+            </Link>
+          )}
           <button
             type="button"
             onClick={onLogout}

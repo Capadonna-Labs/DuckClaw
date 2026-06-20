@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnsiLogText } from '@/lib/ansiLog';
+import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { PM2_LOGGABLE_APPS } from '@/lib/pm2LogApps';
-import { Radio, Square, Terminal } from 'lucide-react';
+import { adminService, type OpsCommand } from '@/services/adminService';
+import { Radio, RefreshCw, Square, Terminal } from 'lucide-react';
 
 const MAX_LINES = 6_000;
 const MAX_SELECTED = 2;
@@ -14,12 +16,17 @@ function sessionHeaders(method = 'GET'): HeadersInit {
   return mutationHeaders(method);
 }
 
+/** Cubiertos por «Iniciar plataforma» en Overview. */
+const HIDDEN_QUICK_OPS = new Set(['start_stack', 'start_telegram_ingress']);
+
 type Props = {
   /** Sin cabecera ni borde exterior (p. ej. dentro de SettingsSection). */
   embedded?: boolean;
+  /** Muestra botones PM2 (list, restart, etc.) encima del stream. */
+  showQuickActions?: boolean;
 };
 
-export function Pm2LiveLogsPanel({ embedded = false }: Props) {
+export function Pm2LiveLogsPanel({ embedded = false, showQuickActions = false }: Props) {
   const [selected, setSelected] = useState<string[]>(['DuckClaw-Gateway']);
   const [runningApps, setRunningApps] = useState<string[]>([...PM2_LOGGABLE_APPS]);
   const [offlineApps, setOfflineApps] = useState<string[]>([]);
@@ -27,8 +34,20 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
   const [logText, setLogText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
+  const [opsCommands, setOpsCommands] = useState<OpsCommand[]>([]);
+  const [runningOp, setRunningOp] = useState<string | null>(null);
+  const [opsError, setOpsError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const tailRef = useRef<HTMLDivElement>(null);
+
+  const appendLog = useCallback((chunk: string) => {
+    setLogText((prev) => {
+      const merged = prev + (prev && !prev.endsWith('\n') ? '\n' : '') + chunk + '\n';
+      const all = merged.split('\n');
+      if (all.length <= MAX_LINES) return merged;
+      return all.slice(-MAX_LINES).join('\n');
+    });
+  }, []);
 
   const toggle = (name: string) => {
     setSelected((prev) => {
@@ -91,13 +110,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
         buffer = lines.pop() ?? '';
         if (lines.length === 0) continue;
 
-        setLogText((prev) => {
-          const merged =
-            prev + (prev && !prev.endsWith('\n') ? '\n' : '') + lines.join('\n') + '\n';
-          const all = merged.split('\n');
-          if (all.length <= MAX_LINES) return merged;
-          return all.slice(-MAX_LINES).join('\n');
-        });
+        appendLog(lines.join('\n'));
       }
     } catch (e) {
       if (ac.signal.aborted) return;
@@ -108,7 +121,31 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
         setStreaming(false);
       }
     }
-  }, [selected, stop]);
+  }, [appendLog, selected, stop]);
+
+  const runOp = async (opId: string) => {
+    setRunningOp(opId);
+    setOpsError(null);
+    try {
+      const r = await adminService.runOps(opId);
+      const formatted = formatOpsOutput({
+        ok: r.ok,
+        exit_code: r.exit_code,
+        stdout: r.stdout,
+        stderr: r.stderr,
+        executed_via: r.executed_via,
+        op_id: opId,
+      });
+      appendLog(`--- ${opId} ---\n${formatted}`);
+      if (opId === 'pm2_restart_gateway' && r.ok) {
+        window.setTimeout(() => window.location.reload(), 2500);
+      }
+    } catch (e) {
+      setOpsError(e instanceof Error ? e.message : 'Error al ejecutar la operación');
+    } finally {
+      setRunningOp(null);
+    }
+  };
 
   useEffect(() => {
     if (!autoScroll || !tailRef.current) return;
@@ -142,8 +179,44 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
     };
   }, []);
 
+  useEffect(() => {
+    if (!showQuickActions) return;
+    adminService
+      .listOpsCommands()
+      .then((r) => setOpsCommands(r.commands ?? []))
+      .catch(() => setOpsCommands([]));
+  }, [showQuickActions]);
+
+  const quickCommands = opsCommands.filter(
+    (c) => !HIDDEN_QUICK_OPS.has(c.id) && c.id.startsWith('pm2_')
+  );
+
   const body = (
     <>
+      {showQuickActions && quickCommands.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex items-center gap-2">
+            <RefreshCw size={14} className="text-slate-400 shrink-0" />
+            <p className="text-xs font-black text-slate-300">Acciones PM2</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {quickCommands.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                disabled={runningOp !== null || streaming}
+                onClick={() => void runOp(c.id)}
+                title={c.argv.join(' ')}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[11px] font-bold text-slate-200 hover:border-gov-blue-500 hover:bg-slate-800 disabled:opacity-50 transition-colors max-w-full truncate"
+              >
+                {runningOp === c.id ? 'Ejecutando…' : c.label}
+              </button>
+            ))}
+          </div>
+          {opsError && <p className="text-xs text-red-400">{opsError}</p>}
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2">
         {PM2_LOGGABLE_APPS.map((name) => {
           const on = selected.includes(name);
@@ -160,7 +233,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
                   ? name
                   : `${name}: no está en PM2 de este host (p. ej. GPU en Mac Mini)`
               }
-              className={`px-3 py-2 rounded-xl text-sm font-semibold border transition-colors ${
+              className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold border transition-colors max-w-full truncate ${
                 on
                   ? 'bg-gov-blue-700 text-white border-gov-blue-700'
                   : isRunning
@@ -181,7 +254,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
             type="button"
             onClick={start}
             disabled={selected.length === 0}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gov-blue-700 text-white font-semibold text-sm hover:bg-gov-blue-800 disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-gov-blue-700 text-white font-semibold text-sm hover:bg-gov-blue-800 disabled:opacity-50"
           >
             <Radio size={16} />
             Iniciar stream
@@ -190,7 +263,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
           <button
             type="button"
             onClick={stop}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700"
+            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700"
           >
             <Square size={16} />
             Detener
@@ -203,7 +276,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
         >
           Limpiar
         </button>
-        <label className="flex items-center gap-2 text-sm text-gov-gray-500 ml-2">
+        <label className="flex items-center gap-2 text-xs sm:text-sm text-gov-gray-500">
           <input
             type="checkbox"
             checked={autoScroll}
@@ -217,7 +290,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
       </div>
 
       {offlineApps.length > 0 && (
-        <p className="text-xs text-amber-700 dark:text-amber-300">
+        <p className="text-xs text-amber-700 dark:text-amber-300 break-words">
           No disponibles en este host: {offlineApps.join(', ')} (MLX-Vision/ComfyUI suelen estar en la Mac GPU).
         </p>
       )}
@@ -226,13 +299,17 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
 
       <div
         ref={tailRef}
-        className="p-4 bg-slate-950 rounded-xl overflow-auto max-h-[min(50vh,420px)] min-h-[200px]"
+        className="p-3 sm:p-4 bg-slate-950 rounded-xl overflow-auto max-h-[min(50vh,420px)] min-h-[160px]"
       >
         {logText ? (
           <AnsiLogText text={logText} />
         ) : (
           <span className="text-slate-400 text-xs font-mono">
-            {streaming ? 'Esperando líneas…' : 'Pulsa Iniciar stream para ver logs.'}
+            {streaming
+              ? 'Esperando líneas…'
+              : showQuickActions
+                ? 'Ejecuta una acción PM2 o pulsa Iniciar stream.'
+                : 'Pulsa Iniciar stream para ver logs.'}
           </span>
         )}
       </div>
@@ -240,7 +317,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
   );
 
   if (embedded) {
-    return <div className="space-y-4">{body}</div>;
+    return <div className="space-y-3 sm:space-y-4 min-w-0">{body}</div>;
   }
 
   return (

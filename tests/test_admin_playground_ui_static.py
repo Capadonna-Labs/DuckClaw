@@ -84,12 +84,12 @@ def test_playground_nav_groups_keep_kanban_nested_and_audit_in_security() -> Non
     assert "href: '/vnc'" in build_body
     assert "label: 'Auditoría'" in security_body
     assert "href: '/audit'" in security_body
-    assert "label: 'Settings'" in security_body
-    assert "href: '/settings'" in security_body
+    assert "href: '/settings'" not in security_body
     assert "href: '/settings'" not in system_body
     assert "href: '/train'" not in system_body
     assert "href: '/vnc'" not in system_body
-    assert "{ type: 'group', group: SYSTEM_NAV_GROUP }" not in nav
+    assert "href: '/telegram'" in system_body
+    assert "href: '/telegram'" not in security_body
 
 
 def test_integrations_are_nested_inside_agents_selector() -> None:
@@ -102,9 +102,9 @@ def test_integrations_are_nested_inside_agents_selector() -> None:
         "/** Lista plana", 1
     )[0]
 
-    assert "label: 'Integraciones'" in build_body
-    assert "href: '/integrations'" in build_body
-    assert "{ type: 'group', group: INTEGRATIONS_NAV_GROUP }" not in structure_body
+    assert "label: 'Integraciones'" not in build_body
+    assert "href: '/integrations'" not in build_body
+    assert "{ type: 'group', group: INTEGRATIONS_NAV_GROUP }" in structure_body
     assert "IntegrationsNavSelector" in sidebar
     assert "Telegram" in sidebar
     assert 'href="/telegram"' in sidebar
@@ -148,8 +148,7 @@ def test_admin_sidebar_keeps_core_groups_and_data_access() -> None:
     assert "{ type: 'group', group: BUILD_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: DATA_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: SECURITY_NAV_GROUP }" in structure_body
-    assert "{ type: 'group', group: INTEGRATIONS_NAV_GROUP }" not in structure_body
-    assert "{ type: 'group', group: SYSTEM_NAV_GROUP }" not in structure_body
+    assert "{ type: 'group', group: SYSTEM_NAV_GROUP }" in structure_body
     assert "hint:" not in operation_body
     assert "hint:" not in playground_body
     assert "hint:" not in build_body

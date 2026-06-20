@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import { Check, Copy, Database } from 'lucide-react';
 
-export type AccessTabId = 'console' | 'telegram' | 'shared';
+export type AccessTabId = 'console' | 'shared';
 
 const TABLE_ROWS: {
   id: AccessTabId;
@@ -14,13 +14,7 @@ const TABLE_ROWS: {
   {
     id: 'console',
     label: 'Usuarios consola',
-    table: 'Acceso a la consola',
-    roleField: 'Admin o usuario',
-  },
-  {
-    id: 'telegram',
-    label: 'Usuarios Telegram',
-    table: 'Acceso al bot',
+    table: 'Acceso a la consola web',
     roleField: 'Admin o usuario',
   },
   {
@@ -35,10 +29,9 @@ type Props = {
   dbPath?: string;
   dbExists?: boolean;
   activeTab: AccessTabId;
-  tenantId?: string;
 };
 
-export function AccessPersistenceInfo({ dbPath, dbExists, activeTab, tenantId }: Props) {
+export function AccessPersistenceInfo({ dbPath, dbExists, activeTab }: Props) {
   const [copied, setCopied] = useState(false);
   const path = (dbPath || '').trim();
 
@@ -66,7 +59,7 @@ export function AccessPersistenceInfo({ dbPath, dbExists, activeTab, tenantId }:
               Hub Gateway DuckDB
             </p>
             <p className="text-xs text-gov-gray-600 dark:text-dark-muted">
-              Acceso a consola, Telegram y bases compartidas
+              Usuarios consola y permisos compartidos (hub gateway)
             </p>
           </div>
         </div>
@@ -124,14 +117,7 @@ export function AccessPersistenceInfo({ dbPath, dbExists, activeTab, tenantId }:
                   <td className="px-3 py-2 font-medium">{row.label}</td>
                   <td className="px-3 py-2 font-mono">{row.table}</td>
                   <td className="px-3 py-2 font-mono hidden sm:table-cell text-gov-gray-600 dark:text-dark-muted">
-                    {row.id === 'telegram' && tenantId ? (
-                      <>
-                        {row.roleField}
-                        <span className="block text-[10px] mt-0.5">Tenant: {tenantId}</span>
-                      </>
-                    ) : (
-                      row.roleField
-                    )}
+                    {row.roleField}
                   </td>
                 </tr>
               );

@@ -462,9 +462,9 @@ export default function KnowledgePage() {
         </div>
       )}
 
-      <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Fuentes registradas</h2>
+      <section className="rounded-3xl border border-gov-blue-100 bg-white p-4 sm:p-5 dark:border-dark-border dark:bg-dark-surface overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text min-w-0">Fuentes registradas</h2>
           <button
             type="button"
             onClick={loadSources}
@@ -490,19 +490,19 @@ export default function KnowledgePage() {
                 key={source.source_id}
                 className="flex flex-col gap-3 rounded-2xl border border-gov-blue-50 p-4 dark:border-dark-border md:flex-row md:items-center md:justify-between"
               >
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-black text-gov-gray-900 dark:text-dark-text">
+                    <p className="font-black text-gov-gray-900 dark:text-dark-text break-words">
                       {knowledgeSourcePrimaryLabel(source)}
                     </p>
                     <KnowledgeStatusBadge source={source} />
                   </div>
                   {knowledgeSourceSecondaryLine(source) && (
-                    <p className="mt-1 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
+                    <p className="mt-1 break-all font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
                       {knowledgeSourceSecondaryLine(source)}
                     </p>
                   )}
-                  <p className="mt-1 truncate font-mono text-[10px] text-gov-gray-400 dark:text-dark-muted/80">
+                  <p className="mt-1 break-all font-mono text-[10px] text-gov-gray-400 dark:text-dark-muted/80">
                     {source.source_id}
                   </p>
                   <p className="mt-2 text-xs text-gov-gray-500 dark:text-dark-muted">

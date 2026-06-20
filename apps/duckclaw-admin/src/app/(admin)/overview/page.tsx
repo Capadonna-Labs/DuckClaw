@@ -5,16 +5,14 @@ import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { AdminHealth, OverviewMetrics } from '@/types/admin';
-import { Bot, Database, MessageCircle, PlusCircle, Users } from 'lucide-react';
+import { MessageCircle, PlusCircle, Users } from 'lucide-react';
 import { OverviewOpsPanel } from '@/components/admin/OverviewOpsPanel';
 import { PlatformQuickStart } from '@/components/admin/PlatformQuickStart';
 import { friendlyGatewayError } from '@/lib/adminErrors';
-import { formatGatewayStatus, isGatewayHealthy } from '@/lib/healthLabels';
 import { useAuthStore } from '@/store/authStore';
 import { isAdminRole } from '@/lib/roles';
 
 const ActivityChart = dynamic(() => import('@/components/dashboard/ActivityChart'), { ssr: false });
-const LatencyChart = dynamic(() => import('@/components/dashboard/LatencyChart'), { ssr: false });
 const TokenUsageChart = dynamic(() => import('@/components/dashboard/TokenUsageChart'), { ssr: false });
 
 export default function OverviewPage() {
@@ -75,16 +73,6 @@ export default function OverviewPage() {
 
       {!isAdmin && <UserHomeActions />}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <MetricCard icon={Bot} label="Workers" value={health?.workers_count ?? '—'} />
-        <MetricCard
-          icon={Database}
-          label="Gateway"
-          value={error ? 'Off-line' : formatGatewayStatus(health?.status)}
-          online={error ? false : health != null ? isGatewayHealthy(health.status) : undefined}
-        />
-      </div>
-
       {!error && (
         <>
           {metricsError && (
@@ -95,14 +83,9 @@ export default function OverviewPage() {
           <ChartCard title="Uso LLM — tokens y costo (USD)">
             <TokenUsageChart initial={metrics?.usage} />
           </ChartCard>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <ChartCard title="Pulso de Ejecución (7d)">
-              <ActivityChart data={metrics?.activity ?? []} />
-            </ChartCard>
-            <ChartCard title="Rendimiento y Latencia (24h)">
-              <LatencyChart data={metrics?.latency ?? []} />
-            </ChartCard>
-          </div>
+          <ChartCard title="Pulso de Ejecución (7d)">
+            <ActivityChart data={metrics?.activity ?? []} />
+          </ChartCard>
         </>
       )}
 
@@ -170,36 +153,6 @@ function HomeAction({
         {description}
       </p>
     </Link>
-  );
-}
-
-function MetricCard({
-  icon: Icon,
-  label,
-  value,
-  online,
-}: {
-  icon: React.ElementType;
-  label: string;
-  value: string | number;
-  online?: boolean;
-}) {
-  return (
-    <div className="bg-white dark:bg-dark-surface rounded-2xl border border-gov-gray-100 dark:border-dark-border p-5">
-      <Icon className="text-gov-blue-600 dark:text-dark-cyan mb-2" size={22} />
-      <p className="text-xs text-gov-gray-500 uppercase font-bold tracking-wider">{label}</p>
-      <div className="flex items-center gap-2 mt-1">
-        {online !== undefined && (
-          <span
-            className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${
-              online ? 'bg-emerald-500' : 'bg-red-500'
-            }`}
-            aria-hidden
-          />
-        )}
-        <p className="font-black text-2xl text-gov-gray-900 dark:text-dark-text">{value}</p>
-      </div>
-    </div>
   );
 }
 

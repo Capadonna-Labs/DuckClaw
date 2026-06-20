@@ -481,16 +481,32 @@ export default function PlaygroundPage() {
       ) : (
         <>
       <div className="relative flex-1 flex flex-col min-w-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setPanelOpen((open) => !open)}
-          className="lg:hidden absolute right-3 top-3 z-20 flex items-center gap-1.5 rounded-full border border-gov-blue-100 bg-white/90 px-3 py-2 text-[11px] font-black text-gov-blue-800 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan"
-          aria-expanded={panelOpen}
-          aria-label={panelToggleTitle}
-        >
-          <Settings2 size={15} aria-hidden />
-          Run settings
-        </button>
+        <div className="lg:hidden absolute right-3 top-3 z-20 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setLogsPanelOpen((open) => !open)}
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-2 text-[11px] font-black shadow-sm backdrop-blur ${
+              logsPanelOpen
+                ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
+                : 'border-gov-blue-100 bg-white/90 text-gov-blue-800 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan'
+            }`}
+            aria-pressed={logsPanelOpen}
+            aria-label="Logs PM2"
+          >
+            <Terminal size={14} />
+            <span className="sr-only sm:not-sr-only">Logs</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setPanelOpen((open) => !open)}
+            className="flex items-center gap-1.5 rounded-full border border-gov-blue-100 bg-white/90 px-2.5 py-2 text-[11px] font-black text-gov-blue-800 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan"
+            aria-expanded={panelOpen}
+            aria-label={panelToggleTitle}
+          >
+            <Settings2 size={15} aria-hidden />
+            <span className="sr-only sm:not-sr-only">Run settings</span>
+          </button>
+        </div>
         <div className="hidden lg:flex items-center justify-end gap-2 px-3 pt-2 shrink-0">
           <button
             type="button"
@@ -548,8 +564,8 @@ export default function PlaygroundPage() {
             className="flex-1 lg:h-full min-h-0 border-0 rounded-none shadow-none"
           />
           {logsPanelOpen && (
-            <div className="shrink-0 border-t dark:border-dark-border bg-slate-950/95 p-3 max-h-[min(42vh,360px)] overflow-hidden flex flex-col">
-              <Pm2LiveLogsPanel embedded />
+            <div className="shrink-0 border-t dark:border-dark-border bg-slate-950/95 p-3 max-h-[min(42vh,360px)] overflow-hidden flex flex-col min-w-0">
+              <Pm2LiveLogsPanel embedded showQuickActions />
             </div>
           )}
           </>
@@ -578,7 +594,7 @@ export default function PlaygroundPage() {
             aria-label="Cerrar configuración"
             onClick={() => setPanelOpen(false)}
           />
-          <aside className="relative w-full max-w-sm h-full min-h-0 flex flex-col bg-white dark:bg-dark-surface border-l dark:border-dark-border shadow-xl">
+          <aside className="relative w-full max-w-[min(100vw,24rem)] min-w-0 h-full flex flex-col bg-white dark:bg-dark-surface border-l dark:border-dark-border shadow-xl">
             <div className="flex items-center justify-between gap-2 shrink-0 p-4 border-b dark:border-dark-border">
               <span className="text-xs font-bold uppercase text-gov-gray-500 tracking-wide">
                 Configuración
@@ -909,8 +925,8 @@ function RunSettingButton({
       <span className="min-w-0 flex-1">
         <span className="block text-[11px] font-bold text-gov-gray-500">{title}</span>
         <span
-          className={`mt-0.5 block truncate text-sm font-black text-gov-gray-900 dark:text-dark-text ${
-            mono ? 'font-mono text-xs' : ''
+          className={`mt-0.5 block text-sm font-black text-gov-gray-900 dark:text-dark-text ${
+            mono ? 'font-mono text-xs break-all' : 'truncate'
           }`}
           title={value}
         >

@@ -111,7 +111,7 @@ export function PlaygroundSandboxChip({
       {error && (
         <p className="mt-1 text-[10px] text-amber-800 dark:text-amber-200">{error}</p>
       )}
-      <p className="mt-1 text-[10px] text-gov-gray-500 dark:text-dark-muted">
+      <p className="mt-1 text-[10px] text-gov-gray-500 dark:text-dark-muted max-sm:hidden">
         El toggle persiste por conversación en el vault. Usa{' '}
         <code className="font-mono">/sandbox on</code> en el chat o el botón de arriba.
       </p>

@@ -34,7 +34,6 @@ export const USER_WORKSPACE_NAV_GROUP: AdminNavGroup = {
     { href: '/playground', label: 'Chat', section: 'core', audience: 'user' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
     { href: '/projects', label: 'Proyectos', section: 'core', audience: 'user' },
-    { href: '/settings', label: 'Ajustes', section: 'footer', audience: 'user' },
   ],
 };
 
@@ -92,10 +91,9 @@ export const DATA_NAV_GROUP: AdminNavGroup = {
 
 export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
   id: 'integrations',
-  label: 'Conectar',
-  hint: 'Canales y dispositivos conectados',
+  label: 'Dispositivos',
+  hint: 'Edge y nodos sensoriales',
   items: [
-    { href: '/telegram', label: 'Telegram', section: 'integrations', audience: 'admin' },
     { href: '/integrations/edge-devices', label: 'Edge devices', section: 'integrations', audience: 'admin' },
     { href: '/integrations/sensory-node', label: 'Sensory node', section: 'integrations', audience: 'admin' },
   ],
@@ -107,15 +105,16 @@ export const SECURITY_NAV_GROUP: AdminNavGroup = {
   items: [
     { href: '/admin/access', label: 'Usuarios y roles', section: 'admin', audience: 'admin', adminOnly: true },
     { href: '/audit', label: 'Auditoría', section: 'admin', audience: 'admin', adminOnly: true },
-    { href: '/settings', label: 'Settings', section: 'footer', audience: 'admin' },
   ],
 };
 
 export const SYSTEM_NAV_GROUP: AdminNavGroup = {
   id: 'system',
-  label: 'Sistema avanzado',
-  hint: 'Diagnóstico y operación técnica',
-  items: [],
+  label: 'Canales avanzados',
+  hint: 'Integraciones opcionales fuera del flujo web',
+  items: [
+    { href: '/telegram', label: 'Telegram', section: 'integrations', audience: 'admin', adminOnly: true },
+  ],
 };
 
 /** Orden del sidebar para usuarios que crean y usan agentes. */
@@ -130,6 +129,7 @@ export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
   { type: 'group', group: DATA_NAV_GROUP },
   { type: 'group', group: INTEGRATIONS_NAV_GROUP },
   { type: 'group', group: SECURITY_NAV_GROUP },
+  { type: 'group', group: SYSTEM_NAV_GROUP },
 ];
 
 /** Lista plana (compat tests / búsquedas). */
@@ -189,6 +189,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/telegram': 'Telegram',
   '/integrations/edge-devices': 'Edge devices',
   '/integrations/sensory-node': 'Sensory node',
+  '/admin/access': 'Usuarios y roles',
   '/admin': 'Administración',
 };
 

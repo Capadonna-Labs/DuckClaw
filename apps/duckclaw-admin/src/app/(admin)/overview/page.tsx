@@ -83,7 +83,7 @@ export default function OverviewPage() {
           <ChartCard title="Uso LLM — tokens y costo (USD)">
             <TokenUsageChart initial={metrics?.usage} />
           </ChartCard>
-          <ChartCard title="Pulso de Ejecución (7d)">
+          <ChartCard title="Rendimiento">
             <ActivityChart data={metrics?.activity ?? []} />
           </ChartCard>
         </>

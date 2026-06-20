@@ -25,7 +25,7 @@ const adminLabels = labelsFor('admin');
 assert.equal(adminLabels.includes('Chat'), true);
 assert.equal(adminLabels.includes('Runtime overrides'), true);
 assert.equal(adminLabels.includes('Usuarios y roles'), true);
-assert.equal(adminLabels.includes('Inicio'), false);
+assert.equal(adminLabels.includes('Inicio'), true);
 
 const adminGroups = groupLabelsFor('admin');
 assert.equal(adminGroups.includes('Conversar'), true);

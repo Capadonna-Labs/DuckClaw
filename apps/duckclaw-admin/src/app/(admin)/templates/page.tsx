@@ -7,12 +7,13 @@ import type { TemplateSummary } from '@/types/admin';
 import EmptyState from '@/components/shared/EmptyState';
 import { useAuthStore } from '@/store/authStore';
 import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
+import { CreateAgentDialog } from '@/components/templates/CreateAgentDialog';
 import { clampInput, LIMITS } from '@/lib/validation';
 import { isAdminRole } from '@/lib/roles';
 import { paginateItems } from '@/lib/pagination';
 import { agentDescription, agentMetadata } from '@/lib/agentCards';
 import { filterVisibleTemplates } from '@/lib/templateVisibility';
-import { Bot, ChevronLeft, ChevronRight, Search, Trash2 } from 'lucide-react';
+import { Bot, ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react';
 
 const AGENTS_PAGE_SIZE = 5;
 
@@ -28,6 +29,7 @@ export default function TemplatesPage() {
   const [deleting, setDeleting] = useState(false);
   const [page, setPage] = useState(1);
   const [showInactive, setShowInactive] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
 
   const reload = useCallback(() => {
     adminService
@@ -120,13 +122,25 @@ export default function TemplatesPage() {
               : 'Agentes disponibles para conversar, usar como base o revisar.'}
           </p>
         </div>
-        <Link
-          href="/projects"
-          className="px-4 py-2 bg-gov-blue-700 text-white text-sm font-bold rounded-xl"
-        >
-          {isAdmin ? 'Crear borrador administrado' : 'Crear proyecto'}
-        </Link>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gov-blue-700 text-white text-sm font-bold rounded-xl"
+          >
+            <Plus size={16} />
+            Nuevo agente
+          </button>
+          <Link
+            href="/projects"
+            className="px-4 py-2 border border-gov-gray-200 text-sm font-bold rounded-xl dark:border-dark-border"
+          >
+            {isAdmin ? 'Proyecto administrado' : 'Crear proyecto'}
+          </Link>
+        </div>
       </header>
+
+      <CreateAgentDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={reload} />
 
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <TemplateSearch q={q} setQ={setQ} />

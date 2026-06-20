@@ -9,6 +9,8 @@ import { useAuthStore } from '@/store/authStore';
 import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { WorkerCapabilitiesCard } from '@/components/templates/WorkerCapabilitiesCard';
+import { ManifestGuidedPanel } from '@/components/templates/ManifestGuidedPanel';
+import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
 
 type MarkdownViewMode = 'edit' | 'preview' | 'split';
 
@@ -25,6 +27,7 @@ const TAB_LABELS: Record<string, string> = {
   'soul.md': 'Tono y personalidad',
   'domain_closure.md': 'Límites del dominio',
   'manifest.yaml': 'Configuración (manifest)',
+  'security_policy.yaml': 'Sandbox (política)',
 };
 
 export default function TemplateEditorPage() {
@@ -296,6 +299,14 @@ export default function TemplateEditorPage() {
             </p>
           )}
           {error && <p className="text-sm text-red-600">{error}</p>}
+          {tab === 'manifest.yaml' && (
+            <ManifestGuidedPanel
+              yaml={content}
+              onChange={setContent}
+              disabled={!canEditFiles}
+            />
+          )}
+          {tab === 'security_policy.yaml' && <SecurityPolicyInfoPanel />}
           {markdownFile && (
             <MarkdownViewToggle
               mode={markdownView}

@@ -153,6 +153,20 @@ def build_spec_from_manifest(
     if isinstance(skills_list, str):
         skills_list = [s.strip() for s in skills_list.split(",") if s.strip()]
     skills_names, skill_configs = _parse_skill_bindings(skills_list)
+    try:
+        from duckclaw.framework_tool_pack import (
+            ensure_baseline_skill_configs,
+            ensure_baseline_skills,
+        )
+
+        skills_names = ensure_baseline_skills(skills_names, manifest=data)
+        skill_configs = ensure_baseline_skill_configs(
+            skill_configs,
+            skills=skills_names,
+            manifest=data,
+        )
+    except Exception:
+        pass
     risk_level = str(data.get("risk_level") or "conservative").strip().lower()
     if risk_level not in ("aggressive", "conservative"):
         risk_level = "conservative"

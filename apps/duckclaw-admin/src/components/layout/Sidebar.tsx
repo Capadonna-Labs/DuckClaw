@@ -63,6 +63,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
 
 const GROUP_ICONS: Record<string, LucideIcon> = {
   'user-workspace': UserCircle,
+  conversar: MessageCircle,
   operation: LayoutDashboard,
   playground: MessageCircle,
   build: Hammer,
@@ -77,7 +78,7 @@ function isNavActive(pathname: string, href: string): boolean {
 }
 
 function groupHasActive(pathname: string, group: AdminNavGroup): boolean {
-  if (group.id === 'playground') {
+  if (group.id === 'conversar' || group.id === 'playground') {
     return pathname.startsWith('/playground') || pathname === '/kanban';
   }
   return group.items.some((item) => {
@@ -100,7 +101,7 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
     () => navEntriesForRole(usuario?.rol),
     [usuario?.rol]
   );
-  const [openGroupId, setOpenGroupId] = useState<string | null>('operation');
+  const [openGroupId, setOpenGroupId] = useState<string | null>('conversar');
 
   useEffect(() => {
     const activeGroup = entries.find(

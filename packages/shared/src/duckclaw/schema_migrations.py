@@ -1104,6 +1104,10 @@ _M021_FRAMEWORK_POLICY_PACK = [
     "SELECT 1 AS framework_policy_pack_v1_noop",
 ]
 
+_M022_FRAMEWORK_PACK_REFRESH = [
+    "SELECT 1 AS framework_pack_refresh_v2_noop",
+]
+
 
 def _migration_021_apply_framework_policy_pack(db: Any) -> None:
     from duckclaw.framework_policy_pack import apply_framework_policy_pack
@@ -1111,8 +1115,15 @@ def _migration_021_apply_framework_policy_pack(db: Any) -> None:
     apply_framework_policy_pack(db)
 
 
+def _migration_022_refresh_framework_packs(db: Any) -> None:
+    from duckclaw.framework_policy_pack import apply_framework_policy_pack
+
+    apply_framework_policy_pack(db)
+
+
 _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     21: _migration_021_apply_framework_policy_pack,
+    22: _migration_022_refresh_framework_packs,
 }
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
@@ -1137,4 +1148,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (19, "managed_workspace_draft_policy", _M019_MANAGED_WORKSPACE_DRAFT_POLICY),
     (20, "framework_capability_policies", _M020_FRAMEWORK_CAPABILITY_POLICIES),
     (21, "framework_policy_pack_v1", _M021_FRAMEWORK_POLICY_PACK),
+    (22, "framework_pack_refresh_v2", _M022_FRAMEWORK_PACK_REFRESH),
 ]

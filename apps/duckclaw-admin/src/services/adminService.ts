@@ -13,6 +13,7 @@ import type {
   OverviewMetricsParams,
   SharedDbGrant,
   WhitelistUser,
+  WorkerCapabilitiesPayload,
 } from '@/types/admin';
 
 export interface AuditEntry {
@@ -87,6 +88,24 @@ export interface PromptPolicyHealth {
   requirements: PromptPolicyRequirement[];
   missing: PromptPolicyRequirement[];
   inherited: Array<PromptPolicyRequirement & { warning: string }>;
+}
+
+export interface WorkerCapabilities {
+  worker_id: string;
+  skills_declared: string[];
+  skills_effective: string[];
+  tools_runtime: string[];
+  framework_baseline: boolean;
+  sandbox: {
+    registered: boolean;
+    docker_ok: boolean;
+    session_enabled: boolean | null;
+  };
+  optional: {
+    tavily: boolean;
+    browser_sandbox: boolean;
+  };
+  gaps: string[];
 }
 
 export interface PromptPolicyUpsertInput {
@@ -328,6 +347,31 @@ function sessionHeaders(method = 'GET'): HeadersInit {
   return mutationHeaders(method);
 }
 
+async function adminFetchOptional<T>(path: string, init?: RequestInit): Promise<T | null> {
+  const method = init?.method || 'GET';
+  const res = await fetch(`/api/admin${path}`, {
+    ...init,
+    credentials: 'include',
+    headers: {
+      'Content-Type': 'application/json',
+      ...sessionHeaders(method),
+      ...(init?.headers ?? {}),
+    },
+    cache: 'no-store',
+  });
+  if (res.status === 404) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const raw = parseApiErrorDetail(data, res.status);
+    const detail =
+      data?.code === 'gateway_unreachable' || res.status === 503
+        ? friendlyGatewayError(raw || 'gateway_unreachable')
+        : friendlyGatewayError(raw || `Error ${res.status}`);
+    throw new Error(detail);
+  }
+  return data as T;
+}
+
 async function adminFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const method = init?.method || 'GET';
   const res = await fetch(`/api/admin${path}`, {
@@ -473,6 +517,11 @@ export const adminService = {
   },
 
   getTemplate: (id: string) => adminFetch<TemplateDetail>(`/templates/${encodeURIComponent(id)}`),
+
+  getWorkerCapabilities: (workerId: string) =>
+    adminFetchOptional<WorkerCapabilities>(
+      `/workers/${encodeURIComponent(workerId)}/capabilities`
+    ),
 
   saveTemplateFile: (workerId: string, filePath: string, content: string) =>
     adminFetch<{ ok: boolean }>(

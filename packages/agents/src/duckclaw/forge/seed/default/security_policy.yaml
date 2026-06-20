@@ -1,0 +1,11 @@
+network:
+  default: deny
+  allow_list: []
+filesystem:
+  readonly_mounts: []
+  ephemeral_volumes:
+    - /workspace/output
+secrets:
+  in_memory_only: true
+  allowed_secrets: []
+max_execution_time_seconds: 120

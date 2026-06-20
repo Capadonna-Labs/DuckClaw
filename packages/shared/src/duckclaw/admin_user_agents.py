@@ -134,6 +134,12 @@ def create_runtime_agent(
     agent_dir = runtime_agents_root() / tenant_id / wid
     agent_dir.mkdir(parents=True, exist_ok=False)
     prompt = (system_prompt or "").strip()
+    from duckclaw.framework_tool_pack import ensure_baseline_skills
+
+    merged_skills = ensure_baseline_skills(
+        list(skills or []),
+        manifest={"tool_profile": "general"},
+    )
     manifest = {
         "id": wid,
         "display_name": (display_name or wid).strip(),
@@ -142,7 +148,8 @@ def create_runtime_agent(
         "source_template_id": (source_template_id or "default").strip() or "default",
         "description": (description or "").strip(),
         "system_prompt": prompt,
-        "skills": list(skills or []),
+        "skills": merged_skills,
+        "tool_profile": "general",
     }
     manifest_path = agent_dir / "manifest.json"
     manifest_json = json.dumps(manifest, ensure_ascii=False, indent=2) + "\n"

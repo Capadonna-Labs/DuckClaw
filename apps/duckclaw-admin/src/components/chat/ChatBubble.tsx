@@ -10,6 +10,7 @@ import {
   formatToolDurationMs,
   parseToolNameFromHeartbeatText,
 } from '@/lib/toolHeartbeat';
+import { stripContextBlocksForDisplay } from '@/lib/chatMessageImages';
 
 export function formatChatIdentityPrefix(workerId?: string, swarmSlot = 1): string {
   const slot = Number.isFinite(swarmSlot) && swarmSlot >= 1 ? Math.floor(swarmSlot) : 1;
@@ -96,7 +97,9 @@ export function ChatBubble({
   const displayText =
     isHeartbeat && m.text
       ? stripHeartbeatBodyPrefix(m.text, m.workerId, m.swarmSlot ?? 1)
-      : m.text;
+      : isUser && m.text
+        ? stripContextBlocksForDisplay(m.text)
+        : m.text;
   const hasCopyableText = Boolean((displayText || '').trim());
   const canCopy =
     !m.streaming && !isHeartbeat && hasCopyableText && (isAssistant || isUser);

@@ -4,6 +4,17 @@ import {
   parseArtifactIdFromPath,
 } from '@/lib/artifactPreview';
 
+const CONTEXT_BLOCK_TAGS = ['PROJECT_CONTEXT', 'RAG_SOURCE_INVENTORY', 'RAG_CONTEXT'] as const;
+
+/** Quita bloques de contexto inyectados (playground/RAG) antes de mostrar en el hilo. */
+export function stripContextBlocksForDisplay(text: string): string {
+  let out = text || '';
+  for (const tag of CONTEXT_BLOCK_TAGS) {
+    out = out.replace(new RegExp(`\\[${tag}\\][\\s\\S]*?\\[\\/${tag}\\]`, 'g'), '');
+  }
+  return out.replace(/\n{3,}/g, '\n\n').trim();
+}
+
 const ARTIFACT_ID_RE =
   /(?:artifact[_-]?id\s*[=:]\s*|visual_artifact_id\s*[=:]\s*)([0-9a-f-]{36})/i;
 
@@ -81,7 +92,8 @@ export function historyToChatMessages(
   const out: ChatMsg[] = [];
   for (const m of raw) {
     const role = m.role === 'user' ? 'user' : m.role === 'assistant' ? 'assistant' : null;
-    const text = (m.content || '').trim();
+    const rawText = (m.content || '').trim();
+    const text = role === 'user' ? stripContextBlocksForDisplay(rawText) : rawText;
     if (!role || !text) continue;
     const imagePreviews =
       role === 'assistant' ? artifactPreviewFromMessage(text, tid) : undefined;

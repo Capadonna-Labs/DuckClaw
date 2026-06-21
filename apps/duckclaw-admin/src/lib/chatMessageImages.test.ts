@@ -5,6 +5,7 @@ import {
   historyToChatMessages,
   payloadImagesFromPreviews,
   preserveImagePreviewsFromPrevious,
+  stripContextBlocksForDisplay,
   userPreviewsFromPayload,
 } from './chatMessageImages';
 import type { ChatMsg } from '../components/chat/types';
@@ -51,5 +52,14 @@ const prev: ChatMsg[] = [
   },
 ];
 assert.deepEqual(preserveImagePreviewsFromPrevious(server, prev), prev);
+
+const polluted = `[PROJECT_CONTEXT]\nNombre: Demo\n[/PROJECT_CONTEXT]\n\n¿Qué puedes hacer?`;
+assert.equal(stripContextBlocksForDisplay(polluted), '¿Qué puedes hacer?');
+const historyStripped = historyToChatMessages(
+  [{ role: 'user', content: polluted }, { role: 'assistant', content: 'Puedo ayudarte.' }],
+  'default'
+);
+assert.equal(historyStripped[0]?.text, '¿Qué puedes hacer?');
+assert.equal(historyStripped[1]?.text, 'Puedo ayudarte.');
 
 console.log('chatMessageImages.test.ts: ok');

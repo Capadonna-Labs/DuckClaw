@@ -27,7 +27,8 @@ async def persist_chat_history(
     tenant_id = prepared.tenant_id
     session_id = prepared.session_id
     if not prepared.is_system_prompt:
-        user_item = normalize_history_item({"role": "user", "content": message})
+        user_for_history = (prepared.user_incoming or message or "").strip()
+        user_item = normalize_history_item({"role": "user", "content": user_for_history})
         assistant_item = normalize_history_item({"role": "assistant", "content": reply_plain_for_storage})
         if not user_item or not assistant_item:
             return
@@ -40,7 +41,7 @@ async def persist_chat_history(
             actor=(username or "").strip(),
             effective_worker_id=effective_worker_id,
             worker_id=prepared.worker_id,
-            user_message=message,
+            user_message=user_for_history,
             assistant_message=reply_plain_for_storage,
             message_count=len(saved_items),
         )

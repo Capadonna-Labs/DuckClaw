@@ -9,13 +9,8 @@ import {
   Bot,
   ChevronRight,
   Copy,
-  Brain,
-  Database,
-  FileText,
-  MessageSquareText,
   PanelRightClose,
   PanelRightOpen,
-  SlidersHorizontal,
   Terminal,
   Trash2,
   X,
@@ -32,6 +27,7 @@ import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/worker
 import { SessionDatabaseChip } from '@/components/playground/SessionDatabaseChip';
 import { PlaygroundSandboxChip } from '@/components/playground/PlaygroundSandboxChip';
 import { PlaygroundRagProjectWarning } from '@/components/playground/PlaygroundRagProjectWarning';
+import { PlaygroundRunSettingsPanel } from '@/components/playground/PlaygroundRunSettingsPanel';
 import { Pm2LiveLogsPanel } from '@/components/admin/Pm2LiveLogsPanel';
 import { writeLastProjectId } from '@/lib/floatingChatProject';
 import type { FlyCommandEntry } from '@/types/admin';
@@ -389,38 +385,26 @@ export default function PlaygroundPage() {
   const panelToggleTitle = panelOpen ? 'Ocultar panel de configuración' : 'Mostrar panel de configuración';
 
   const runSettingsPanel = (
-    <>
-      <RunSettingsCard
-        config={config}
-        activeVaultPath={activeVaultPath}
-        activeVaultScope={activeVaultScope}
-        workerLabel={
-          workerOptionLabel(
-            selectableWorkers.find((worker) => workerOptionId(worker) === workerId) ?? workerId
-          ) || workerId || '—'
-        }
-        projectLabel={activeProject?.name || 'Todos los agentes'}
-        systemReady={Boolean(systemPreview.trim())}
-        invalidWorkers={config?.workers_invalid ?? []}
-        defaultsSaving={defaultsSaving}
-        defaultsMsg={defaultsMsg}
-        onSaveDefault={savePlaygroundDefaults}
-        onOpen={setSettingsModal}
-      />
-      <button
-        type="button"
-        onClick={() => setLogsPanelOpen((open) => !open)}
-        className={`hidden lg:flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-black ${
-          logsPanelOpen
-            ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
-            : 'border-gov-blue-100 text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan'
-        }`}
-        aria-pressed={logsPanelOpen}
-      >
-        <Terminal size={14} />
-        {logsPanelOpen ? 'Ocultar logs PM2' : 'Mostrar logs PM2'}
-      </button>
-    </>
+    <PlaygroundRunSettingsPanel
+      config={config}
+      activeVaultPath={activeVaultPath}
+      activeVaultScope={activeVaultScope}
+      workerLabel={
+        workerOptionLabel(
+          selectableWorkers.find((worker) => workerOptionId(worker) === workerId) ?? workerId
+        ) || workerId || '—'
+      }
+      projectLabel={activeProject?.name || 'Todos los agentes'}
+      systemPreview={systemPreview}
+      systemReady={Boolean(systemPreview.trim())}
+      invalidWorkers={config?.workers_invalid ?? []}
+      defaultsSaving={defaultsSaving}
+      defaultsMsg={defaultsMsg}
+      logsPanelOpen={logsPanelOpen}
+      onLogsToggle={() => setLogsPanelOpen((open) => !open)}
+      onSaveDefault={savePlaygroundDefaults}
+      onOpen={setSettingsModal}
+    />
   );
 
   const settingsDialog = (
@@ -626,8 +610,8 @@ export default function PlaygroundPage() {
           />
           <aside className="relative w-full max-w-[min(100vw,24rem)] min-w-0 h-full flex flex-col bg-white dark:bg-dark-surface border-l dark:border-dark-border shadow-xl">
             <div className="flex items-center justify-between gap-2 shrink-0 p-4 border-b dark:border-dark-border">
-              <span className="text-xs font-bold uppercase text-gov-gray-500 tracking-wide">
-                Configuración
+              <span className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">
+                Run settings
               </span>
               <button
                 type="button"
@@ -651,13 +635,12 @@ export default function PlaygroundPage() {
         }`}
         aria-hidden={!panelOpen}
       >
-        <div className="w-80 h-full min-h-0 flex flex-col">
-          <div className="flex items-center justify-between gap-2 shrink-0 pb-2">
-            <span className="text-xs font-bold uppercase text-gov-gray-500 tracking-wide">
-              Run settings
-            </span>
+        <div className="flex h-full min-h-0 w-80 flex-col rounded-2xl border border-gov-gray-200/90 bg-gov-gray-50/40 p-3 dark:border-dark-border dark:bg-dark-bg/60">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gov-gray-200/80 pb-3 dark:border-dark-border">
+            <h2 className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">Run settings</h2>
+            <Settings2 size={15} className="text-gov-gray-400 dark:text-dark-muted" aria-hidden />
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-3">{runSettingsPanel}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto pr-0.5 pt-3">{runSettingsPanel}</div>
         </div>
       </aside>
 
@@ -812,166 +795,6 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
         )}
       </div>
     </section>
-  );
-}
-
-function RunSettingsCard({
-  config,
-  activeVaultPath,
-  activeVaultScope,
-  workerLabel,
-  projectLabel,
-  systemReady,
-  invalidWorkers,
-  defaultsSaving,
-  defaultsMsg,
-  onSaveDefault,
-  onOpen,
-}: {
-  config: PlaygroundConfig | null;
-  activeVaultPath: string;
-  activeVaultScope?: string;
-  workerLabel: string;
-  projectLabel: string;
-  systemReady: boolean;
-  invalidWorkers: string[];
-  defaultsSaving: boolean;
-  defaultsMsg: string | null;
-  onSaveDefault: () => void;
-  onOpen: (modal: Exclude<PlaygroundSettingsModal, null>) => void;
-}) {
-  return (
-    <section className="sticky top-0 z-10 rounded-[1.75rem] border border-gov-blue-100 bg-white/95 p-3 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/95">
-      <div className="flex items-start justify-between gap-3 px-1">
-        <div>
-          <h2 className="flex items-center gap-2 text-sm font-black dark:text-dark-text">
-            <SlidersHorizontal size={18} className="text-gov-blue-700 dark:text-dark-cyan" />
-            Run settings
-          </h2>
-          <p className="mt-1 text-[10px] text-gov-gray-500">
-            Control de conversación, sin ocupar chat.
-          </p>
-        </div>
-        <span className="rounded-full bg-emerald-50 dark:bg-emerald-950/30 px-2 py-1 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">
-          Activo
-        </span>
-      </div>
-
-      <div className="mt-3 grid gap-2">
-        <RunSettingButton
-          icon={<Brain size={16} aria-hidden />}
-          title="Modelo"
-          value={config?.llm?.model || '—'}
-          detail={config?.llm?.provider || 'Proveedor LLM'}
-          onClick={() => onOpen('model')}
-        />
-        <RunSettingButton
-          icon={<Database size={16} aria-hidden />}
-          title="DuckDB"
-          value={activeVaultPath || '—'}
-          detail={activeVaultScope === 'chat' ? 'Por conversación' : 'Misma para RAG y SQL'}
-          mono
-          onClick={() => onOpen('vault')}
-        />
-        <RunSettingButton
-          icon={<Settings2 size={16} aria-hidden />}
-          title="Proyecto"
-          value={projectLabel}
-          detail="Filtro de agentes"
-          onClick={() => onOpen('routing')}
-        />
-        <RunSettingButton
-          icon={<Bot size={16} aria-hidden />}
-          title="Agente"
-          value={workerLabel}
-          detail="Worker de esta conversación"
-          onClick={() => onOpen('routing')}
-        />
-        <RunSettingButton
-          icon={<FileText size={16} aria-hidden />}
-          title="System instructions"
-          value={systemReady ? 'Cargado' : 'Sin prompt'}
-          detail="Comportamiento del agente"
-          onClick={() => onOpen('instructions')}
-        />
-        <RunSettingButton
-          icon={<MessageSquareText size={16} aria-hidden />}
-          title="Comandos"
-          value="Atajos del chat"
-          detail="/model · /vault · /workers"
-          onClick={() => onOpen('commands')}
-        />
-      </div>
-
-      {invalidWorkers.length > 0 && (
-        <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-[11px] font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-          Agentes no disponibles: {invalidWorkers.join(', ')}.
-        </p>
-      )}
-
-      <div className="mt-3 rounded-2xl border border-gov-blue-100 bg-gov-blue-50/70 p-3 dark:border-dark-border dark:bg-dark-bg">
-        <button
-          type="button"
-          onClick={onSaveDefault}
-          disabled={!config || defaultsSaving}
-          className="w-full rounded-xl bg-gov-blue-700 px-3 py-2 text-xs font-black text-white disabled:opacity-50"
-        >
-          {defaultsSaving ? 'Guardando…' : 'Guardar como default'}
-        </button>
-        {defaultsMsg && (
-          <p className="mt-2 text-[10px] font-semibold text-gov-blue-700 dark:text-dark-cyan">
-            {defaultsMsg}
-          </p>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function RunSettingButton({
-  icon,
-  title,
-  value,
-  detail,
-  mono,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  value: string;
-  detail: string;
-  mono?: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex w-full items-center gap-3 rounded-2xl bg-gov-gray-50 px-3 py-3 text-left transition-colors hover:bg-gov-blue-50 dark:bg-dark-bg dark:hover:bg-dark-border/50"
-    >
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-gov-blue-700 shadow-sm dark:bg-dark-surface dark:text-dark-cyan">
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[11px] font-bold text-gov-gray-500">{title}</span>
-        <span
-          className={`mt-0.5 block text-sm font-black text-gov-gray-900 dark:text-dark-text ${
-            mono ? 'font-mono text-xs break-all' : 'truncate'
-          }`}
-          title={value}
-        >
-          {value}
-        </span>
-        <span className="mt-0.5 block truncate text-[10px] text-gov-gray-500" title={detail}>
-          {detail}
-        </span>
-      </span>
-      <ChevronRight
-        size={16}
-        className="shrink-0 text-gov-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-gov-blue-600"
-        aria-hidden
-      />
-    </button>
   );
 }
 

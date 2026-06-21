@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const source = readFileSync(new URL('./page.tsx', import.meta.url), 'utf8');
+const runSettingsSource = readFileSync(
+  new URL('../../../components/playground/PlaygroundRunSettingsPanel.tsx', import.meta.url),
+  'utf8'
+);
 const chatPanelSource = readFileSync(
   new URL('../../../components/chat/AdminChatPanel.tsx', import.meta.url),
   'utf8'
@@ -38,17 +42,17 @@ assert.equal(
 );
 
 assert.ok(
-  source.includes('RunSettingsCard') && source.includes('SettingsModal'),
+  source.includes('PlaygroundRunSettingsPanel') && source.includes('SettingsModal'),
   'Playground settings should expose compact run settings and modal details'
 );
 
 assert.ok(
-  source.includes('title="Proyecto"') && source.includes('title="Agente"'),
+  runSettingsSource.includes('label="Proyecto"') && runSettingsSource.includes('label="Agente"'),
   'Run settings should expose project and agent controls as separate visible entries'
 );
 
 assert.equal(
-  source.includes('title="Proyecto y agente"'),
+  runSettingsSource.includes('title="Proyecto y agente"'),
   false,
   'Project and agent should not be hidden behind one combined settings row'
 );

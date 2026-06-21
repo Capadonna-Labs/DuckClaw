@@ -402,6 +402,7 @@ export default function PlaygroundPage() {
       defaultsMsg={defaultsMsg}
       logsPanelOpen={logsPanelOpen}
       onLogsToggle={() => setLogsPanelOpen((open) => !open)}
+      logsPanel={<Pm2LiveLogsPanel embedded />}
       onSaveDefault={savePlaygroundDefaults}
       onOpen={setSettingsModal}
     />
@@ -433,12 +434,13 @@ export default function PlaygroundPage() {
 
       {settingsModal === 'model' && (
         <SettingsModal
-          title="Modelo"
+          title="Model selection"
           description="Proveedor y modelo LLM de esta conversación."
+          size="wide"
           onClose={() => setSettingsModal(null)}
         >
           {conv.sessionId ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               <SettingValue label="Actual" value={`${config?.llm?.provider || '—'} · ${config?.llm?.model || '—'}`} />
               <ChatLlmSelectors
                 chatId={conv.sessionId}
@@ -447,7 +449,7 @@ export default function PlaygroundPage() {
                 catalog={config?.catalog ?? []}
                 onUpdated={loadConfig}
                 disabled={config?.authorized === false || chat.loading}
-                compact
+                size="modal"
               />
             </div>
           ) : (
@@ -529,7 +531,13 @@ export default function PlaygroundPage() {
         <div className="lg:hidden absolute right-3 top-3 z-20 flex items-center gap-2">
           <button
             type="button"
-            onClick={() => setLogsPanelOpen((open) => !open)}
+            onClick={() => {
+              setLogsPanelOpen((open) => {
+                const next = !open;
+                if (next) setPanelOpen(true);
+                return next;
+              });
+            }}
             className={`flex items-center gap-1.5 rounded-full border px-2.5 py-2 text-[11px] font-black shadow-sm backdrop-blur ${
               logsPanelOpen
                 ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
@@ -565,6 +573,7 @@ export default function PlaygroundPage() {
             initialWorker={workerId}
             variant="full"
             showHeader={false}
+            showStudioHeader
             showWorkerLink={false}
             composeLayout="studio"
             composeChips={playgroundComposeChips}
@@ -577,11 +586,6 @@ export default function PlaygroundPage() {
             }
             className="flex-1 lg:h-full min-h-0 border-0 rounded-none shadow-none"
           />
-          {logsPanelOpen && (
-            <div className="shrink-0 border-t dark:border-dark-border bg-slate-950/95 p-3 max-h-[min(42vh,360px)] overflow-hidden flex flex-col min-w-0">
-              <Pm2LiveLogsPanel embedded />
-            </div>
-          )}
           </>
         )}
       </div>
@@ -635,12 +639,14 @@ export default function PlaygroundPage() {
         }`}
         aria-hidden={!panelOpen}
       >
-        <div className="flex h-full min-h-0 w-80 flex-col rounded-2xl border border-gov-gray-200/90 bg-gov-gray-50/40 p-3 dark:border-dark-border dark:bg-dark-bg/60">
+        <div className="flex h-full min-h-0 w-80 min-w-0 flex-col overflow-hidden rounded-2xl border border-gov-gray-200/90 bg-gov-gray-50/40 p-3 dark:border-dark-border dark:bg-dark-bg/60">
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gov-gray-200/80 pb-3 dark:border-dark-border">
             <h2 className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">Run settings</h2>
             <Settings2 size={15} className="text-gov-gray-400 dark:text-dark-muted" aria-hidden />
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto pr-0.5 pt-3">{runSettingsPanel}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pt-3 [scrollbar-gutter:stable]">
+            {runSettingsPanel}
+          </div>
         </div>
       </aside>
 
@@ -802,11 +808,13 @@ function SettingsModal({
   title,
   description,
   onClose,
+  size = 'default',
   children,
 }: {
   title: string;
   description: string;
   onClose: () => void;
+  size?: 'default' | 'wide';
   children: React.ReactNode;
 }) {
   return (
@@ -818,7 +826,9 @@ function SettingsModal({
         onClick={onClose}
       />
       <section
-        className="relative z-10 flex max-h-[min(760px,92dvh)] w-full max-w-md flex-col overflow-hidden rounded-[2rem] border border-gov-blue-100 bg-white shadow-2xl dark:border-dark-border dark:bg-dark-surface"
+        className={`relative z-10 flex max-h-[min(760px,92dvh)] w-full flex-col overflow-hidden rounded-[2rem] border border-gov-blue-100 bg-white shadow-2xl dark:border-dark-border dark:bg-dark-surface ${
+          size === 'wide' ? 'max-w-lg' : 'max-w-md'
+        }`}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -845,9 +855,9 @@ function SettingsModal({
 
 function SettingValue({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl bg-gov-gray-50 px-3 py-2 dark:bg-dark-bg">
-      <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-500">{label}</p>
-      <p className="mt-0.5 truncate text-sm font-semibold dark:text-dark-text" title={value}>
+    <div className="rounded-2xl bg-gov-gray-50 px-4 py-3 dark:bg-dark-bg">
+      <p className="text-[11px] font-bold uppercase tracking-wide text-gov-gray-500">{label}</p>
+      <p className="mt-1 truncate text-base font-semibold dark:text-dark-text" title={value}>
         {value}
       </p>
     </div>

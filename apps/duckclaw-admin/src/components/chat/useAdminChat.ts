@@ -28,6 +28,7 @@ import {
   writeStoredVaultPath,
 } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
+import { accumulateUsageTokens } from '@/lib/formatTokenCount';
 import { mutationHeaders } from '@/lib/csrfClient';
 import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
 import { playTtsAudio, primeAudioPlayback, type TtsAudioFormat } from '@/lib/playTtsAudio';
@@ -142,6 +143,43 @@ function readStoredWorker(chatId: string): string | null {
   }
 }
 
+function chatTokenStorageKey(chatId: string): string {
+  return `duckclaw.chat_tokens.${chatId}`;
+}
+
+function readStoredChatTokens(chatId: string): number {
+  if (!chatId || typeof window === 'undefined') return 0;
+  try {
+    const raw = sessionStorage.getItem(chatTokenStorageKey(chatId));
+    const n = raw ? Number.parseInt(raw, 10) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStoredChatTokens(chatId: string, total: number): void {
+  if (!chatId || typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(chatTokenStorageKey(chatId), String(Math.max(0, Math.floor(total))));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+function applySessionTokenDelta(
+  chatId: string,
+  setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
+  usage?: Record<string, number> | null
+): void {
+  if (!usage) return;
+  setSessionTokenTotal((prev) => {
+    const next = accumulateUsageTokens(prev, usage);
+    if (next !== prev) writeStoredChatTokens(chatId, next);
+    return next;
+  });
+}
+
 export type AdminChatController = ReturnType<typeof useAdminChat>;
 
 export function useAdminChat({
@@ -242,6 +280,7 @@ export function useAdminChat({
   });
   const [error, setError] = useState<string | null>(null);
   const [vaultPath, setVaultPathState] = useState('');
+  const [sessionTokenTotal, setSessionTokenTotal] = useState(0);
   const thinkingStartedAt = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -288,6 +327,10 @@ export function useAdminChat({
     setThinking(false);
     finalizeCancelledGeneration();
   }, [chatId, finalizeCancelledGeneration]);
+
+  useEffect(() => {
+    setSessionTokenTotal(readStoredChatTokens(chatId));
+  }, [chatId]);
 
   const loadConfig = useCallback(() => {
     if (!enabled) return;
@@ -667,6 +710,7 @@ export function useAdminChat({
             };
           },
           onDone: (meta) => {
+            applySessionTokenDelta(chatId, setSessionTokenTotal, meta.usage_tokens);
             if ((meta.response || '').trim()) {
               authoritativeResponse = meta.response.trim();
             }
@@ -985,6 +1029,7 @@ export function useAdminChat({
     imageAttachments,
     vaultPath,
     setVaultPath,
+    sessionTokenTotal,
     reloadConfig: loadConfig,
   };
 }

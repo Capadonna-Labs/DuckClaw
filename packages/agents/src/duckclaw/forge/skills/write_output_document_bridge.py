@@ -63,8 +63,10 @@ def register_write_output_document_tool(tools_list: list[Any]) -> None:
             description=(
                 "Escribe un archivo en una raíz de salida permitida "
                 "(vault Obsidian / DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS). "
-                "Si omites extensión se usa .md; si indicas .py, .json, etc. se respeta tal cual. "
-                "Para informes Word/PDF escribe .md y luego export_output_document."
+                "Úsalo para borradores .md o artefactos auxiliares. "
+                "Para informes Word con plantilla del vault usa el Report Engine: "
+                "register_report_template → create_report_instance → patch_report_section → render_report_instance. "
+                "No uses pandoc como primera opción para informes corporativos."
             ),
         )
     )

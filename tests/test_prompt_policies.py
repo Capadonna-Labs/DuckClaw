@@ -317,6 +317,8 @@ def test_migration_021_upgrades_framework_pack_content() -> None:
     assert "## IDENTITY" in content
     assert "## PLATFORM SURFACE" in content
     assert "run_sandbox" in content
+    assert "REPORT ENGINE" in content
+    assert "render_report_instance" in content
     assert "framework_policy_pack_v1" in metadata
 
 

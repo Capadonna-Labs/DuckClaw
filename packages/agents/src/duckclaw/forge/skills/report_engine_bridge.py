@@ -37,11 +37,14 @@ def _session_scope() -> tuple[str, str, str]:
 
 
 def _dispatch_write(payload: dict[str, Any]) -> None:
-    from duckclaw.db_write_queue import enqueue_or_apply_duckdb_write_sync
+    """Encola comando tipado y espera confirmación del db-writer antes de continuar."""
+    from duckclaw.db_write_queue import enqueue_or_apply_duckdb_write_sync, poll_task_status_sync
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
 
     tenant_id, actor_email, _ = _session_scope()
+    task_id = str(uuid.uuid4())
     body = {
-        "task_id": str(uuid.uuid4()),
+        "task_id": task_id,
         "tenant_id": tenant_id,
         "actor_email": actor_email,
         **payload,
@@ -52,6 +55,17 @@ def _dispatch_write(payload: dict[str, Any]) -> None:
         user_id=actor_email,
         tenant_id=tenant_id,
     )
+    if spawn_inline_writes_enabled():
+        return
+    status = poll_task_status_sync(task_id, timeout_sec=10.0, interval_sec=0.08)
+    if status is None:
+        raise RuntimeError(
+            "Timeout esperando confirmación del db-writer. "
+            "Revisa que DuckClaw-DB-Writer esté activo (pm2) o habilita escrituras inline."
+        )
+    if status.status != "success":
+        detail = (status.detail or "db-writer rechazó el comando").strip()
+        raise RuntimeError(detail)
 
 
 def list_report_templates(limit: int = 50) -> str:
@@ -63,7 +77,19 @@ def list_report_templates(limit: int = 50) -> str:
     try:
         db = _open_hub_db()
         rows = _list(db, tenant_id=tenant_id, actor_email=actor_email, limit=limit)
-        return json.dumps({"templates": rows, "count": len(rows)}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "templates": rows,
+                "count": len(rows),
+                "hint": (
+                    "Sin plantillas: usa register_report_template con el .docx del vault "
+                    "(ej. INFORME MENSUAL.docx en la raíz)."
+                    if not rows
+                    else ""
+                ),
+            },
+            ensure_ascii=False,
+        )
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
     finally:
@@ -294,14 +320,18 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 register_report_template,
                 name="register_report_template",
                 description=(
-                    "Registra una plantilla .docx del vault. Detecta secciones por placeholders "
-                    "{{ nombre }} o títulos Heading. Transversal: cualquier usuario define su plantilla."
+                    "Registra una plantilla .docx del vault para el Report Engine. "
+                    "Paso 1 del flujo Word corporativo (antes de create_report_instance). "
+                    "Detecta secciones por {{ placeholders }} o títulos Heading."
                 ),
             ),
             StructuredTool.from_function(
                 create_report_instance,
                 name="create_report_instance",
-                description="Crea un borrador de informe desde plantilla (título, periodo, proyecto opcional).",
+                description=(
+                    "Crea borrador de informe desde plantilla registrada. "
+                    "Paso 2: luego patch_report_section por cada sección."
+                ),
             ),
             StructuredTool.from_function(
                 get_report_status,
@@ -322,7 +352,11 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
             StructuredTool.from_function(
                 render_report_instance,
                 name="render_report_instance",
-                description="Genera el Word final del informe en el vault de salida.",
+                description=(
+                    "Genera el Word final (docxtpl) en el vault de salida. "
+                    "Paso final del Report Engine — preferir sobre convert_document/pandoc "
+                    "cuando hay plantilla corporativa registrada."
+                ),
             ),
         ]
     )

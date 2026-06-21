@@ -19,7 +19,13 @@
     "extract_document_text",
     "write_output_document",
     "render_docx_template",
-    "convert_document"
+    "convert_document",
+    "list_report_templates",
+    "register_report_template",
+    "create_report_instance",
+    "patch_report_section",
+    "get_report_status",
+    "render_report_instance"
   ],
   "templates": [
     {

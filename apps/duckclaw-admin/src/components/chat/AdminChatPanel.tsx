@@ -52,6 +52,8 @@ export type AdminChatPanelProps = {
   headerActions?: React.ReactNode;
   /** Pills de contexto (BD, sandbox, RAG) encima del textarea — estilo barra de composición. */
   composeChips?: React.ReactNode;
+  /** `studio`: caja única redondeada con chips dentro (Playground). */
+  composeLayout?: 'default' | 'studio';
   /** Compatibilidad: los contenedores pueden resolver gestión de conversaciones fuera del panel base. */
   conversationManage?: Pick<
     ConversationManagePanelProps,
@@ -89,6 +91,7 @@ export function AdminChatPanel({
   onRenameConversation,
   headerActions,
   composeChips,
+  composeLayout = 'default',
   conversationManage,
   className = '',
 }: AdminChatPanelProps) {
@@ -134,6 +137,7 @@ export function AdminChatPanel({
   } = chat;
 
   const isCompact = variant === 'compact';
+  const isStudioCompose = composeLayout === 'studio';
   const canSend = usuario?.rol === 'admin';
   const canSubmit =
     canSend &&
@@ -478,88 +482,179 @@ export function AdminChatPanel({
         )}
       </div>
 
-      <footer className="p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50 shrink-0 relative z-20">
-        {composeChips ? (
-          <div className="mb-2 flex flex-wrap items-center gap-1.5">{composeChips}</div>
-        ) : null}
-        {imageAttachments.pendingImages.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-2">
-            {imageAttachments.pendingImages.map((img) => (
-              <div className="relative" key={img.id}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={img.previewUrl}
-                  alt={img.name}
-                  className="h-14 w-14 object-cover rounded-lg border dark:border-dark-border"
+      <footer
+        className={`p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shrink-0 relative z-20 ${
+          isStudioCompose
+            ? 'bg-white dark:bg-dark-surface border-t dark:border-dark-border'
+            : 'border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50'
+        }`}
+      >
+        <input
+          ref={imageAttachments.fileInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          multiple
+          className="hidden"
+          onChange={(e) => void imageAttachments.onPickFiles(e.target.files)}
+        />
+
+        {isStudioCompose ? (
+          <div className="rounded-2xl border border-gov-gray-200 bg-gov-gray-50/80 dark:border-dark-border dark:bg-dark-bg/60 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow">
+            {imageAttachments.pendingImages.length > 0 && (
+              <div className="flex flex-wrap gap-2 px-3 pt-3">
+                {imageAttachments.pendingImages.map((img) => (
+                  <div className="relative" key={img.id}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.previewUrl}
+                      alt={img.name}
+                      className="h-14 w-14 object-cover rounded-lg border dark:border-dark-border"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => imageAttachments.removeImage(img.id)}
+                      className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-600 text-white"
+                      aria-label="Quitar imagen"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void send();
+                }
+              }}
+              rows={2}
+              placeholder="Escribe un mensaje…"
+              className="w-full min-h-[3rem] max-h-40 resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-gov-gray-900 placeholder:text-gov-gray-400 focus:outline-none dark:text-dark-text dark:placeholder:text-dark-muted"
+              disabled={!canSend}
+            />
+            <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-0.5">
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">{composeChips}</div>
+              <div className="flex shrink-0 items-center gap-0.5">
+                <MediaAttachMenu
+                  variant="minimal"
+                  canSend={canSend && Boolean(workerId)}
+                  loading={loading}
+                  voiceRecording={voice.recording}
+                  voiceBusy={voice.busy}
+                  voiceResponseMode={voiceResponseMode}
+                  voiceResponseAvailable={voiceResponseAvailable}
+                  imageCount={imageAttachments.pendingImages.length}
+                  onPickImage={() => imageAttachments.fileInputRef.current?.click()}
+                  onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
+                  onVoiceNoteClick={() => void handleVoiceClick()}
                 />
+                {loading ? (
+                  <button
+                    type="button"
+                    onClick={cancelGeneration}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-red-200 text-red-700 dark:border-red-900/60 dark:text-red-400"
+                    aria-label="Cancelar"
+                    title="Cancelar"
+                  >
+                    <X size={16} aria-hidden />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void send()}
+                    disabled={!canSubmit}
+                    className="flex h-9 min-w-[2.25rem] items-center justify-center gap-1 rounded-full bg-gov-blue-700 px-3 text-white disabled:opacity-40 hover:bg-gov-blue-800 dark:bg-gov-blue-600"
+                    aria-label="Enviar"
+                    title="Enviar"
+                  >
+                    <Send size={16} aria-hidden />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            {composeChips ? (
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">{composeChips}</div>
+            ) : null}
+            {imageAttachments.pendingImages.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {imageAttachments.pendingImages.map((img) => (
+                  <div className="relative" key={img.id}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={img.previewUrl}
+                      alt={img.name}
+                      className="h-14 w-14 object-cover rounded-lg border dark:border-dark-border"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => imageAttachments.removeImage(img.id)}
+                      className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-600 text-white"
+                      aria-label="Quitar imagen"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <MediaAttachMenu
+                canSend={canSend && Boolean(workerId)}
+                loading={loading}
+                voiceRecording={voice.recording}
+                voiceBusy={voice.busy}
+                voiceResponseMode={voiceResponseMode}
+                voiceResponseAvailable={voiceResponseAvailable}
+                imageCount={imageAttachments.pendingImages.length}
+                onPickImage={() => imageAttachments.fileInputRef.current?.click()}
+                onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
+                onVoiceNoteClick={() => void handleVoiceClick()}
+              />
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void send();
+                  }
+                }}
+                rows={isCompact ? 1 : 2}
+                placeholder="Mensaje…"
+                className="flex-1 px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none"
+                disabled={!canSend}
+              />
+              {loading ? (
                 <button
                   type="button"
-                  onClick={() => imageAttachments.removeImage(img.id)}
-                  className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-600 text-white"
-                  aria-label="Quitar imagen"
+                  onClick={cancelGeneration}
+                  className="px-3 py-2 border-2 border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-400 bg-white dark:bg-dark-surface rounded-xl font-bold text-xs flex items-center gap-1 shrink-0"
+                  aria-label="Cancelar"
                 >
-                  <X size={12} />
+                  <X size={16} aria-hidden /> Cancelar
                 </button>
-              </div>
-            ))}
-          </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void send()}
+                  disabled={!canSubmit}
+                  className="px-3 py-2 bg-gov-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1 disabled:opacity-50 shrink-0"
+                >
+                  <Send size={16} aria-hidden /> Enviar
+                </button>
+              )}
+            </div>
+          </>
         )}
-        <div className="flex gap-2">
-          <input
-            ref={imageAttachments.fileInputRef}
-            type="file"
-            accept="image/jpeg,image/png,image/webp"
-            multiple
-            className="hidden"
-            onChange={(e) => void imageAttachments.onPickFiles(e.target.files)}
-          />
-          <MediaAttachMenu
-            canSend={canSend && Boolean(workerId)}
-            loading={loading}
-            voiceRecording={voice.recording}
-            voiceBusy={voice.busy}
-            voiceResponseMode={voiceResponseMode}
-            voiceResponseAvailable={voiceResponseAvailable}
-            imageCount={imageAttachments.pendingImages.length}
-            onPickImage={() => imageAttachments.fileInputRef.current?.click()}
-            onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
-            onVoiceNoteClick={() => void handleVoiceClick()}
-          />
-          <textarea
-            ref={inputRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            rows={isCompact ? 1 : 2}
-            placeholder="Mensaje…"
-            className="flex-1 px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none"
-            disabled={!canSend}
-          />
-          {loading ? (
-            <button
-              type="button"
-              onClick={cancelGeneration}
-              className="px-3 py-2 border-2 border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-400 bg-white dark:bg-dark-surface rounded-xl font-bold text-xs flex items-center gap-1 shrink-0"
-              aria-label="Cancelar"
-            >
-              <X size={16} aria-hidden /> Cancelar
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => void send()}
-              disabled={!canSubmit}
-              className="px-3 py-2 bg-gov-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1 disabled:opacity-50 shrink-0"
-            >
-              <Send size={16} aria-hidden /> Enviar
-            </button>
-          )}
-        </div>
         {voice.recording ? (
           <p className="text-xs text-red-600 mt-1.5">Grabando… pulsa el cuadrado para enviar la nota de voz.</p>
         ) : loading && voice.busy ? (

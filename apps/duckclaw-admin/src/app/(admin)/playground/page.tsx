@@ -389,23 +389,38 @@ export default function PlaygroundPage() {
   const panelToggleTitle = panelOpen ? 'Ocultar panel de configuración' : 'Mostrar panel de configuración';
 
   const runSettingsPanel = (
-    <RunSettingsCard
-      config={config}
-      activeVaultPath={activeVaultPath}
-      activeVaultScope={activeVaultScope}
-      workerLabel={
-        workerOptionLabel(
-          selectableWorkers.find((worker) => workerOptionId(worker) === workerId) ?? workerId
-        ) || workerId || '—'
-      }
-      projectLabel={activeProject?.name || 'Todos los agentes'}
-      systemReady={Boolean(systemPreview.trim())}
-      invalidWorkers={config?.workers_invalid ?? []}
-      defaultsSaving={defaultsSaving}
-      defaultsMsg={defaultsMsg}
-      onSaveDefault={savePlaygroundDefaults}
-      onOpen={setSettingsModal}
-    />
+    <>
+      <RunSettingsCard
+        config={config}
+        activeVaultPath={activeVaultPath}
+        activeVaultScope={activeVaultScope}
+        workerLabel={
+          workerOptionLabel(
+            selectableWorkers.find((worker) => workerOptionId(worker) === workerId) ?? workerId
+          ) || workerId || '—'
+        }
+        projectLabel={activeProject?.name || 'Todos los agentes'}
+        systemReady={Boolean(systemPreview.trim())}
+        invalidWorkers={config?.workers_invalid ?? []}
+        defaultsSaving={defaultsSaving}
+        defaultsMsg={defaultsMsg}
+        onSaveDefault={savePlaygroundDefaults}
+        onOpen={setSettingsModal}
+      />
+      <button
+        type="button"
+        onClick={() => setLogsPanelOpen((open) => !open)}
+        className={`hidden lg:flex w-full items-center justify-center gap-1.5 rounded-xl border px-3 py-2 text-[11px] font-black ${
+          logsPanelOpen
+            ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
+            : 'border-gov-blue-100 text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan'
+        }`}
+        aria-pressed={logsPanelOpen}
+      >
+        <Terminal size={14} />
+        {logsPanelOpen ? 'Ocultar logs PM2' : 'Mostrar logs PM2'}
+      </button>
+    </>
   );
 
   const settingsDialog = (
@@ -553,21 +568,6 @@ export default function PlaygroundPage() {
             <span className="sr-only sm:not-sr-only">Run settings</span>
           </button>
         </div>
-        <div className="hidden lg:flex items-center justify-end gap-2 px-3 pt-2 shrink-0">
-          <button
-            type="button"
-            onClick={() => setLogsPanelOpen((open) => !open)}
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[11px] font-black ${
-              logsPanelOpen
-                ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
-                : 'border-gov-blue-100 text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan'
-            }`}
-            aria-pressed={logsPanelOpen}
-          >
-            <Terminal size={14} />
-            Logs PM2
-          </button>
-        </div>
         {conv.bootstrapping || !conv.sessionId ? (
           <p className="flex-1 flex items-center justify-center text-sm text-gov-gray-400 p-8">
             Cargando conversación…
@@ -582,6 +582,7 @@ export default function PlaygroundPage() {
             variant="full"
             showHeader={false}
             showWorkerLink={false}
+            composeLayout="studio"
             composeChips={playgroundComposeChips}
             conversationTitle={conv.conversationTitle}
             onRenameConversation={conv.renameConversation}

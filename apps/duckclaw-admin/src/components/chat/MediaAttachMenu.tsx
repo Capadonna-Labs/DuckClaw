@@ -12,6 +12,8 @@ export type MediaAttachMenuProps = {
   voiceResponseAvailable: boolean;
   imageCount: number;
   maxImages?: number;
+  /** Botones sin borde para barra de composición tipo AI Studio. */
+  variant?: 'default' | 'minimal';
   onPickImage: () => void;
   onToggleVoiceResponse: () => void;
   onVoiceNoteClick: () => void;
@@ -26,10 +28,12 @@ export function MediaAttachMenu({
   voiceResponseAvailable,
   imageCount,
   maxImages = 3,
+  variant = 'default',
   onPickImage,
   onToggleVoiceResponse,
   onVoiceNoteClick,
 }: MediaAttachMenuProps) {
+  const isMinimal = variant === 'minimal';
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
@@ -56,12 +60,18 @@ export function MediaAttachMenu({
         type="button"
         onClick={() => setOpen((v) => !v)}
         disabled={!canSend && !voiceRecording}
-        className={`px-2 py-2 border rounded-xl shrink-0 disabled:opacity-50 ${
-          voiceRecording
-            ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400'
-            : open
-              ? 'border-gov-blue-300 bg-gov-blue-50 text-gov-blue-800 dark:border-gov-blue-800 dark:bg-gov-blue-950/40 dark:text-gov-blue-200'
-              : 'dark:border-dark-border'
+        className={`shrink-0 disabled:opacity-50 ${
+          isMinimal
+            ? `p-2 rounded-full text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg dark:text-dark-muted ${
+                voiceRecording ? 'text-red-600 dark:text-red-400' : open ? 'text-gov-blue-700 dark:text-dark-cyan' : ''
+              }`
+            : `px-2 py-2 border rounded-xl ${
+                voiceRecording
+                  ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-400'
+                  : open
+                    ? 'border-gov-blue-300 bg-gov-blue-50 text-gov-blue-800 dark:border-gov-blue-800 dark:bg-gov-blue-950/40 dark:text-gov-blue-200'
+                    : 'dark:border-dark-border'
+              }`
         }`}
         aria-label="Adjuntar multimedia"
         aria-haspopup="menu"

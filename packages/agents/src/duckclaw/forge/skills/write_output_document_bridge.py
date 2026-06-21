@@ -8,7 +8,10 @@ from typing import Any
 from langchain_core.tools import StructuredTool
 
 from duckclaw.forge.rag.knowledge_core import sha256_text
-from duckclaw.forge.rag.knowledge_paths import resolve_knowledge_output_path
+from duckclaw.forge.rag.knowledge_paths import (
+    normalize_output_relative_path,
+    resolve_knowledge_output_path,
+)
 
 
 def write_output_document(relative_path: str, content: str, output_root: str = "") -> str:
@@ -17,11 +20,8 @@ def write_output_document(relative_path: str, content: str, output_root: str = "
     if not text:
         return json.dumps({"error": "El contenido está vacío."}, ensure_ascii=False)
 
-    rel = (relative_path or "").replace("\\", "/").strip()
-    if not rel.lower().endswith((".md", ".markdown", ".txt")):
-        rel = f"{rel.rstrip('/')}.md"
-
     try:
+        rel = normalize_output_relative_path(relative_path)
         target = resolve_knowledge_output_path(relative_path=rel, output_root=output_root)
         target.parent.mkdir(parents=True, exist_ok=True)
         data = text.encode("utf-8")
@@ -61,9 +61,10 @@ def register_write_output_document_tool(tools_list: list[Any]) -> None:
             write_output_document,
             name="write_output_document",
             description=(
-                "Escribe un archivo markdown o texto en una raíz de salida permitida "
+                "Escribe un archivo en una raíz de salida permitida "
                 "(vault Obsidian / DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS). "
-                "Usa relative_path como ruta dentro del vault; output_root opcional si hay varias raíces."
+                "Si omites extensión se usa .md; si indicas .py, .json, etc. se respeta tal cual. "
+                "Para informes Word/PDF escribe .md y luego export_output_document."
             ),
         )
     )

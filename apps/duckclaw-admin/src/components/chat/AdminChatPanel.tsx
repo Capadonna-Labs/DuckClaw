@@ -50,6 +50,8 @@ export type AdminChatPanelProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
   headerActions?: React.ReactNode;
+  /** Pills de contexto (BD, sandbox, RAG) encima del textarea — estilo barra de composición. */
+  composeChips?: React.ReactNode;
   /** Compatibilidad: los contenedores pueden resolver gestión de conversaciones fuera del panel base. */
   conversationManage?: Pick<
     ConversationManagePanelProps,
@@ -86,6 +88,7 @@ export function AdminChatPanel({
   conversationTitle,
   onRenameConversation,
   headerActions,
+  composeChips,
   conversationManage,
   className = '',
 }: AdminChatPanelProps) {
@@ -367,7 +370,7 @@ export function AdminChatPanel({
         </header>
       )}
 
-      {config?.team_hint && !isCompact && (
+      {config?.team_hint && showHeader && !isCompact && (
         <p
           className={`text-[10px] px-3 py-1.5 border-b shrink-0 ${
             config.authorized === false
@@ -476,6 +479,9 @@ export function AdminChatPanel({
       </div>
 
       <footer className="p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50 shrink-0 relative z-20">
+        {composeChips ? (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">{composeChips}</div>
+        ) : null}
         {imageAttachments.pendingImages.length > 0 && (
           <div className="flex flex-wrap gap-2 mb-2">
             {imageAttachments.pendingImages.map((img) => (

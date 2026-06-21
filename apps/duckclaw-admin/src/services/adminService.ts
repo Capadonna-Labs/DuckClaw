@@ -40,6 +40,57 @@ export interface CreateSkillInput {
   visibility?: 'private' | 'public';
 }
 
+export interface ReportSectionProgress {
+  id: string;
+  label: string;
+  status: string;
+}
+
+export interface ReportInstanceProgress {
+  section_count: number;
+  complete_count: number;
+  partial_count: number;
+  missing_count: number;
+  completion_percent: number;
+  missing_sections: ReportSectionProgress[];
+  partial_sections: ReportSectionProgress[];
+  complete_sections: string[];
+}
+
+export interface ReportInstanceSummary {
+  instance_id: string;
+  template_id: string;
+  template_name: string;
+  title: string;
+  period_key: string;
+  project_id: string;
+  status: string;
+  preview_html: string;
+  rendered_docx_uri: string;
+  conversation_id: string;
+  updated_at: string;
+  progress: ReportInstanceProgress;
+}
+
+export interface ReportInstanceDetail {
+  instance: {
+    instance_id: string;
+    template_id: string;
+    tenant_id: string;
+    owner_email: string;
+    project_id: string;
+    title: string;
+    period_key: string;
+    state: Record<string, unknown>;
+    status: string;
+    preview_html: string;
+    rendered_docx_uri: string;
+    conversation_id: string;
+  };
+  template_name: string;
+  progress: ReportInstanceProgress;
+}
+
 export interface ManagedWorkspaceDraft {
   project: {
     name: string;
@@ -1522,6 +1573,7 @@ export const adminService = {
     adminFetch<{
       ok: boolean;
       source_id: string;
+      status?: string;
       task_ids: string[];
       documents: number;
       chunks: number;
@@ -1606,6 +1658,19 @@ export const adminService = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  listReportInstances: (params?: { project_id?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.project_id) qs.set('project_id', params.project_id);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return adminFetch<{ instances: ReportInstanceSummary[]; count: number }>(
+      `/report-instances${query ? `?${query}` : ''}`
+    );
+  },
+
+  getReportInstance: (instanceId: string) =>
+    adminFetch<ReportInstanceDetail>(`/report-instances/${encodeURIComponent(instanceId)}`),
 
   createManagedWorkspaceDraft: (body: { prompt: string }) =>
     adminFetch<ManagedWorkspaceDraft>('/workspace/orchestrator/draft', {

@@ -52,6 +52,7 @@ from duckclaw.write_handlers import (  # noqa: F401
     usage_logs,
     workers,
     workspace,
+    reports,
 )
 from duckclaw.write_handlers.admin_auth import (
     _apply_clear_admin_login_failures,

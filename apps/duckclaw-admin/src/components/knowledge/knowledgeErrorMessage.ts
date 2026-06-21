@@ -32,6 +32,10 @@ export function formatKnowledgeError(raw: string): string {
       /DB-Writer desactualizado/i,
       msg,
     ],
+    [
+      /500|timeout|timed out|ECONNRESET/i,
+      'La indexación tardó demasiado. Reinicia el Gateway con el último código o importa eligiendo un agente concreto.',
+    ],
   ];
 
   for (const [pattern, text] of rules) {

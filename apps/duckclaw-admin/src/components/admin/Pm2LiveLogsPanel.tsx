@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnsiLogText } from '@/lib/ansiLog';
-import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { PM2_LOGGABLE_APPS } from '@/lib/pm2LogApps';
-import { adminService, type OpsCommand } from '@/services/adminService';
-import { Radio, RefreshCw, Square, Terminal } from 'lucide-react';
+import { Radio, Square, Terminal } from 'lucide-react';
 
 const MAX_LINES = 6_000;
 const MAX_SELECTED = 2;
@@ -16,17 +14,12 @@ function sessionHeaders(method = 'GET'): HeadersInit {
   return mutationHeaders(method);
 }
 
-/** Cubiertos por «Iniciar plataforma» en Overview. */
-const HIDDEN_QUICK_OPS = new Set(['start_stack', 'start_telegram_ingress']);
-
 type Props = {
   /** Sin cabecera ni borde exterior (p. ej. dentro de SettingsSection). */
   embedded?: boolean;
-  /** Muestra botones PM2 (list, restart, etc.) encima del stream. */
-  showQuickActions?: boolean;
 };
 
-export function Pm2LiveLogsPanel({ embedded = false, showQuickActions = false }: Props) {
+export function Pm2LiveLogsPanel({ embedded = false }: Props) {
   const [selected, setSelected] = useState<string[]>(['DuckClaw-Gateway']);
   const [runningApps, setRunningApps] = useState<string[]>([...PM2_LOGGABLE_APPS]);
   const [offlineApps, setOfflineApps] = useState<string[]>([]);
@@ -34,9 +27,6 @@ export function Pm2LiveLogsPanel({ embedded = false, showQuickActions = false }:
   const [logText, setLogText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
-  const [opsCommands, setOpsCommands] = useState<OpsCommand[]>([]);
-  const [runningOp, setRunningOp] = useState<string | null>(null);
-  const [opsError, setOpsError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const tailRef = useRef<HTMLDivElement>(null);
 
@@ -123,30 +113,6 @@ export function Pm2LiveLogsPanel({ embedded = false, showQuickActions = false }:
     }
   }, [appendLog, selected, stop]);
 
-  const runOp = async (opId: string) => {
-    setRunningOp(opId);
-    setOpsError(null);
-    try {
-      const r = await adminService.runOps(opId);
-      const formatted = formatOpsOutput({
-        ok: r.ok,
-        exit_code: r.exit_code,
-        stdout: r.stdout,
-        stderr: r.stderr,
-        executed_via: r.executed_via,
-        op_id: opId,
-      });
-      appendLog(`--- ${opId} ---\n${formatted}`);
-      if (opId === 'pm2_restart_gateway' && r.ok) {
-        window.setTimeout(() => window.location.reload(), 2500);
-      }
-    } catch (e) {
-      setOpsError(e instanceof Error ? e.message : 'Error al ejecutar la operación');
-    } finally {
-      setRunningOp(null);
-    }
-  };
-
   useEffect(() => {
     if (!autoScroll || !tailRef.current) return;
     tailRef.current.scrollTop = tailRef.current.scrollHeight;
@@ -179,44 +145,8 @@ export function Pm2LiveLogsPanel({ embedded = false, showQuickActions = false }:
     };
   }, []);
 
-  useEffect(() => {
-    if (!showQuickActions) return;
-    adminService
-      .listOpsCommands()
-      .then((r) => setOpsCommands(r.commands ?? []))
-      .catch(() => setOpsCommands([]));
-  }, [showQuickActions]);
-
-  const quickCommands = opsCommands.filter(
-    (c) => !HIDDEN_QUICK_OPS.has(c.id) && c.id.startsWith('pm2_')
-  );
-
   const body = (
     <>
-      {showQuickActions && quickCommands.length > 0 && (
-        <div className="space-y-2">
-          <div className="flex items-center gap-2">
-            <RefreshCw size={14} className="text-slate-400 shrink-0" />
-            <p className="text-xs font-black text-slate-300">Acciones PM2</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {quickCommands.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                disabled={runningOp !== null || streaming}
-                onClick={() => void runOp(c.id)}
-                title={c.argv.join(' ')}
-                className="rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1.5 text-[11px] font-bold text-slate-200 hover:border-gov-blue-500 hover:bg-slate-800 disabled:opacity-50 transition-colors max-w-full truncate"
-              >
-                {runningOp === c.id ? 'Ejecutando…' : c.label}
-              </button>
-            ))}
-          </div>
-          {opsError && <p className="text-xs text-red-400">{opsError}</p>}
-        </div>
-      )}
-
       <div className="flex flex-wrap gap-2">
         {PM2_LOGGABLE_APPS.map((name) => {
           const on = selected.includes(name);
@@ -305,11 +235,7 @@ export function Pm2LiveLogsPanel({ embedded = false, showQuickActions = false }:
           <AnsiLogText text={logText} />
         ) : (
           <span className="text-slate-400 text-xs font-mono">
-            {streaming
-              ? 'Esperando líneas…'
-              : showQuickActions
-                ? 'Ejecuta una acción PM2 o pulsa Iniciar stream.'
-                : 'Pulsa Iniciar stream para ver logs.'}
+            {streaming ? 'Esperando líneas…' : 'Pulsa Iniciar stream para ver logs.'}
           </span>
         )}
       </div>

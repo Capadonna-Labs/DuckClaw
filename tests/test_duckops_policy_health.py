@@ -41,3 +41,45 @@ def test_check_framework_policies_degraded_without_db_rows() -> None:
     assert health.ok is True
     assert health.degraded is True
     assert "capability/generic_worker" in health.degraded_keys
+
+
+def test_catalog_prompt_check_skips_dormant_imported_workers() -> None:
+    import duckdb
+
+    from duckclaw.schema_migrations import run_pending_migrations
+    from duckops.policy_health import check_catalog_worker_system_prompts
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    con.execute(
+        """
+        INSERT INTO main.admin_worker_catalog
+          (worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, active)
+        VALUES
+          ('uid_aws', 'default', 'admin@test', 'aws-expert-agent', 'AWS Expert', 'template', true)
+        """
+    )
+    health = check_catalog_worker_system_prompts(con)
+    assert health.ok is True
+    assert "aws-expert-agent" not in health.missing_worker_ids
+
+
+def test_catalog_prompt_check_flags_runtime_workers_without_policy() -> None:
+    import duckdb
+
+    from duckclaw.schema_migrations import run_pending_migrations
+    from duckops.policy_health import check_catalog_worker_system_prompts
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+    con.execute(
+        """
+        INSERT INTO main.admin_worker_catalog
+          (worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, active)
+        VALUES
+          ('uid_mine', 'default', 'admin@test', 'my-agent', 'Mi agente', 'runtime', true)
+        """
+    )
+    health = check_catalog_worker_system_prompts(con)
+    assert health.ok is False
+    assert "my-agent" in health.missing_worker_ids

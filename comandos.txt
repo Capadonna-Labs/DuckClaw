@@ -1,13 +1,10 @@
 -------- PARA LEVANTAR EL SISTEMA --------
 
-source .venv/bin/activate                  # activa venv
-pip install -r requirements.txt
-uv sync --extra rag-docs                   # monorepo + markitdown (PDF/Word)
-uv sync     
-
-uv run  duckops doctor --strict            # health check antes de probar
-uv run duckops configure                   # si es primera vez o cambiaste 
-uv run  duckops up                         # gateway + redis + servicios
+source .venv/bin/activate                  # activa venv (opcional; uv run no lo exige)
+uv sync                                    # deps Python del monorepo (también lo hace duckops up)
+uv run duckops doctor --strict             # health check antes de probar
+uv run duckops configure                   # si es primera vez o cambiaste .env
+uv run duckops up                          # uv sync + gateway + redis + servicios
 
 --------- INTERFAZ GRAFICA ----------
 cd apps/duckclaw-admin

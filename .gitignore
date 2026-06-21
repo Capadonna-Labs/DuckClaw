@@ -98,3 +98,4 @@ _auto_publish_fix/
 _reports_fix_staging/
 _reports_staging/
 debug-*.log
+/Users/workstation/Developer/duckclaw/.duckops/migrate-backups

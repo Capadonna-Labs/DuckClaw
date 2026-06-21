@@ -14,6 +14,7 @@ def project_context_message(
     project_id: str,
 ) -> tuple[str, int]:
     from core.admin_identity import open_gateway_db
+    from duckclaw.forge.rag.injection_policy import should_inject_playground_context
 
     agent_ids = [
         str(agent.get("worker_id") or "").strip()
@@ -30,25 +31,29 @@ def project_context_message(
     )
     knowledge_blocks: list[str] = []
     rag_context_count = 0
-    try:
-        from duckclaw.forge.rag.context_provider import build_knowledge_context
+    if project_id:
+        if should_inject_playground_context(msg):
+            try:
+                from duckclaw.forge.rag.context_provider import build_knowledge_context
 
-        with open_gateway_db(read_only=True) as db:
-            knowledge_context = build_knowledge_context(
-                db,
-                query=msg,
-                tenant_id=tenant_id,
-                project_id=project_id,
-                worker_uid=worker_uid,
-            )
-        rag_context_count = knowledge_context.context_count
-        if knowledge_context.inventory_block:
-            knowledge_blocks.append(knowledge_context.inventory_block)
-        if knowledge_context.rag_block:
-            knowledge_blocks.append(knowledge_context.rag_block)
-    except Exception:
-        rag_context_count = 0
-        knowledge_blocks = []
+                with open_gateway_db(read_only=True) as db:
+                    knowledge_context = build_knowledge_context(
+                        db,
+                        query=msg,
+                        tenant_id=tenant_id,
+                        project_id=project_id,
+                        worker_uid=worker_uid,
+                    )
+                rag_context_count = knowledge_context.context_count
+                if knowledge_context.inventory_block:
+                    knowledge_blocks.append(knowledge_context.inventory_block)
+                if knowledge_context.rag_block:
+                    knowledge_blocks.append(knowledge_context.rag_block)
+            except Exception:
+                rag_context_count = 0
+                knowledge_blocks = []
+    if not should_inject_playground_context(msg):
+        return msg, rag_context_count
     project_block = "\n".join(
         [
             "[PROJECT_CONTEXT]",

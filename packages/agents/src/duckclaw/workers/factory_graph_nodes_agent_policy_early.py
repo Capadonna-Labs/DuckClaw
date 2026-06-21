@@ -72,6 +72,8 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                         set_knowledge_tool_project_id,
                         set_knowledge_tool_tenant_id,
                         set_knowledge_tool_worker_uid,
+                        set_session_actor_email,
+                        set_session_chat_id,
                     )
 
                     set_goals_tool_chat_id(str(_chat_ctx))
@@ -79,7 +81,30 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     set_goals_tool_db_path(str(path))
                     set_knowledge_tool_tenant_id(_tenant_ctx)
                     set_knowledge_tool_project_id(str(state.get("project_id") or ""))
-                    set_knowledge_tool_worker_uid(worker_id)
+                    _worker_uid = ""
+                    try:
+                        import duckdb
+
+                        _con = duckdb.connect(str(path), read_only=True)
+                        try:
+                            _row = _con.execute(
+                                """
+                                SELECT worker_uid FROM main.admin_worker_catalog
+                                WHERE worker_id = ? AND tenant_id = ? AND active = true
+                                LIMIT 1
+                                """,
+                                [worker_id, _tenant_ctx],
+                            ).fetchone()
+                            if _row:
+                                _worker_uid = str(_row[0] or "").strip()
+                        finally:
+                            _con.close()
+                    except Exception:
+                        _worker_uid = ""
+                    set_knowledge_tool_worker_uid(_worker_uid)
+                    set_session_chat_id(str(_chat_ctx))
+                    username = str(state.get("username") or state.get("actor_email") or "").strip()
+                    set_session_actor_email(username or f"chat:{_chat_ctx}")
                 except Exception:
                     pass
                 _wl = _worker_log_label(worker_id)

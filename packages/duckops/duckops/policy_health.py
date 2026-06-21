@@ -125,14 +125,36 @@ class CatalogPromptHealth:
 
 
 def check_catalog_worker_system_prompts(db: Any) -> CatalogPromptHealth:
-    """Warn when active catalog workers lack an active ``system_prompt`` row."""
+    """Warn when **in-use** catalog workers lack an active ``system_prompt`` row.
+
+    Skips dormant catalog entries (p. ej. plantillas importadas sin proyecto ni
+    asignación) so document/report flows do not depend on agents like
+    ``aws-expert-agent`` sitting unused in the catalog.
+    """
 
     rows = db.execute(
         """
-        SELECT worker_id
-        FROM main.admin_worker_catalog
-        WHERE active = true AND worker_id != 'default'
-        ORDER BY worker_id
+        SELECT DISTINCT c.worker_id
+        FROM main.admin_worker_catalog c
+        WHERE c.active = true
+          AND c.worker_id != 'default'
+          AND (
+            c.source_kind = 'runtime'
+            OR EXISTS (
+              SELECT 1
+              FROM main.admin_project_agents pa
+              INNER JOIN main.admin_projects p ON p.project_id = pa.project_id
+              WHERE pa.worker_uid = c.worker_uid
+                AND pa.active = true
+                AND p.active = true
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM main.admin_worker_assignments wa
+              WHERE wa.worker_uid = c.worker_uid
+            )
+          )
+        ORDER BY c.worker_id
         """
     ).fetchall()
     missing: list[str] = []

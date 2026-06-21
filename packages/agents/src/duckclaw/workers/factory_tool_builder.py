@@ -216,10 +216,25 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     from duckclaw.forge.skills.list_project_knowledge_bridge import register_list_project_knowledge_tool
     from duckclaw.forge.skills.read_project_knowledge_bridge import register_read_project_knowledge_tool
     from duckclaw.forge.skills.search_project_knowledge_bridge import register_search_project_knowledge_tool
+    from duckclaw.forge.skills.extract_document_text_bridge import register_extract_document_text_tool
+    from duckclaw.forge.skills.render_docx_template_bridge import register_render_docx_template_tool
+    from duckclaw.forge.skills.convert_document_bridge import (
+        register_convert_document_tool,
+        register_export_output_document_tool,
+    )
     from duckclaw.forge.skills.write_output_document_bridge import register_write_output_document_tool
+    from duckclaw.forge.skills.get_project_context_bridge import register_get_project_context_tool
 
     register_search_project_knowledge_tool(tools)
     register_list_project_knowledge_tool(tools)
     register_read_project_knowledge_tool(tools)
+    register_extract_document_text_tool(tools)
     register_write_output_document_tool(tools)
+    register_render_docx_template_tool(tools)
+    register_convert_document_tool(tools)
+    register_export_output_document_tool(tools)
+    register_get_project_context_tool(tools)
+    from duckclaw.forge.skills.report_engine_bridge import register_report_engine_tools
+
+    register_report_engine_tools(tools)
     return tools

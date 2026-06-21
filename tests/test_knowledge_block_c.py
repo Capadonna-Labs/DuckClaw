@@ -109,6 +109,29 @@ def test_write_output_document_tool(tmp_path, monkeypatch) -> None:
     assert (out_root / "notes" / "answer.md").read_text(encoding="utf-8").startswith("# Respuesta")
 
 
+def test_write_output_document_respects_explicit_py_extension(tmp_path, monkeypatch) -> None:
+    from duckclaw.forge.skills.write_output_document_bridge import write_output_document
+
+    out_root = tmp_path / "vault-out"
+    out_root.mkdir()
+    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS", str(out_root))
+    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_AUTO_SYNC", "false")
+
+    raw = write_output_document("scripts/hola.py", "print('hola')")
+    payload = json.loads(raw)
+    assert payload["relative_path"] == "scripts/hola.py"
+    assert (out_root / "scripts" / "hola.py").read_text(encoding="utf-8") == "print('hola')"
+
+
+def test_normalize_output_relative_path() -> None:
+    from duckclaw.forge.rag.knowledge_paths import normalize_output_relative_path
+
+    assert normalize_output_relative_path("informe") == "informe.md"
+    assert normalize_output_relative_path("scripts/hola.py") == "scripts/hola.py"
+    with pytest.raises(ValueError, match="conversión"):
+        normalize_output_relative_path("scripts/hola.py", require_markdown=True)
+
+
 def test_folder_mtime_fingerprint_changes_on_edit(tmp_path) -> None:
     from duckclaw.forge.rag.knowledge_sync import folder_mtime_fingerprint
     import time

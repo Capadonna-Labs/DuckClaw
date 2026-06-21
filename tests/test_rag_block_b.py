@@ -16,7 +16,7 @@ def test_normalize_uploaded_pdf_uses_markitdown() -> None:
     from duckclaw.forge.rag.knowledge_core import normalize_uploaded_document
 
     with patch(
-        "duckclaw.forge.rag.markitdown_convert._convert_path",
+        "duckclaw.document_toolbox.extract._convert_path",
         return_value="# Doc\n\nConverted PDF text.",
     ):
         rel, text, mime = normalize_uploaded_document("docs/report.pdf", b"%PDF-fake")

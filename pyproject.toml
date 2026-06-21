@@ -31,7 +31,7 @@ dependencies = [
 [project.optional-dependencies]
 telegram = ["python-telegram-bot>=21.0"]
 google-trends = ["google-trends-mcp>=1.0.2; python_full_version >= '3.10'"]
-rag-docs = ["duckclaw-agents[rag-docs]"]
+# document-toolbox / rag-docs: incluidos en duckclaw-shared base — ``uv sync`` basta
 
 [tool.setuptools.packages.find]
 where = ["."]

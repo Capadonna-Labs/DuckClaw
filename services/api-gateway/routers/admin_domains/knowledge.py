@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import json
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
+
+_log = logging.getLogger(__name__)
 
 from routers.admin_domains.admin_common import (
     actor_from_header,
@@ -120,6 +122,74 @@ def _ingest_folder_payloads(
     )
 
 
+def _complete_folder_ingest(
+    *,
+    source_id: str,
+    tenant_id: str,
+    actor_email: str,
+    project_id: str,
+    worker_uid: str,
+    source_kind: str,
+    source_uri: str,
+    display_name: str,
+    metadata: dict[str, Any],
+    compute_embeddings: bool,
+    payloads: list[Any],
+    skipped_hidden: int,
+    skipped_unsupported: int,
+) -> None:
+    """Background ingest: evita HTTP 500 por timeout en vaults grandes."""
+    from duckclaw.write_commands import CreateKnowledgeSourceCommand
+
+    documents = len(payloads)
+    try:
+        _ingest_folder_payloads(
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            compute_embeddings=compute_embeddings,
+            payloads=payloads,
+        )
+        ingest_meta = {
+            "documents": documents,
+            "skipped_hidden": skipped_hidden,
+            "skipped_unsupported": skipped_unsupported,
+        }
+        ready_cmd = CreateKnowledgeSourceCommand(
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            source_kind=source_kind,  # type: ignore[arg-type]
+            source_uri=source_uri,
+            display_name=display_name,
+            status="ready",
+            metadata={**metadata, **ingest_meta},
+        )
+        _enqueue_knowledge_command(ready_cmd)
+    except Exception as exc:
+        _log.exception("folder ingest failed source_id=%s", source_id)
+        fail_cmd = CreateKnowledgeSourceCommand(
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            source_kind=source_kind,  # type: ignore[arg-type]
+            source_uri=source_uri,
+            display_name=display_name,
+            status="failed",
+            metadata={**metadata, "error": str(exc)[:500], "documents": documents},
+        )
+        try:
+            _enqueue_knowledge_command(fail_cmd)
+        except Exception:
+            _log.exception("could not mark knowledge source failed source_id=%s", source_id)
+
+
 @router.get("/knowledge/config", dependencies=[Depends(require_admin_key)])
 async def knowledge_config() -> dict[str, Any]:
     from duckclaw.forge.rag.knowledge_auto_sync import auto_sync_enabled, auto_sync_poll_seconds
@@ -189,6 +259,7 @@ async def preview_knowledge_folder(body: KnowledgeFolderPreviewBody) -> dict[str
 @router.post("/knowledge/sources", dependencies=[Depends(require_admin_key)])
 async def create_knowledge_source(
     body: KnowledgeSourceCreateBody,
+    background_tasks: BackgroundTasks,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
@@ -235,44 +306,32 @@ async def create_knowledge_source(
                 )
                 for file_path in scan.files
             ]
-            ingest_task_ids, chunks = _ingest_folder_payloads(
-                source_id=source_id,
-                tenant_id=profile["tenant_id"],
-                actor_email=profile["email"],
-                project_id=body.project_id.strip(),
-                worker_uid=body.worker_uid.strip(),
-                compute_embeddings=body.compute_embeddings,
-                payloads=payloads,
-            )
-            task_ids.extend(ingest_task_ids)
             documents = len(payloads)
             skipped_hidden = scan.skipped_hidden
             skipped_unsupported = scan.skipped_unsupported
-            ingest_meta = {
-                "documents": documents,
-                "chunks": chunks,
-                "skipped_hidden": skipped_hidden,
-                "skipped_unsupported": skipped_unsupported,
-            }
-            ready_cmd = CreateKnowledgeSourceCommand(
+            background_tasks.add_task(
+                _complete_folder_ingest,
                 source_id=source_id,
                 tenant_id=profile["tenant_id"],
                 actor_email=profile["email"],
                 project_id=body.project_id.strip(),
                 worker_uid=body.worker_uid.strip(),
-                source_kind=body.source_kind.strip() or "folder",  # type: ignore[arg-type]
+                source_kind=body.source_kind.strip() or "folder",
                 source_uri=body.source_uri.strip(),
                 display_name=body.display_name.strip(),
-                status="ready",
-                metadata={**body.metadata, **ingest_meta},
+                metadata=body.metadata,
+                compute_embeddings=body.compute_embeddings,
+                payloads=payloads,
+                skipped_hidden=skipped_hidden,
+                skipped_unsupported=skipped_unsupported,
             )
-            task_ids.append(_enqueue_knowledge_command(ready_cmd))
     except Exception as exc:
         raise problem(400, str(exc), "knowledge_source") from exc
 
     return {
         "ok": True,
         "source_id": source_id,
+        "status": "indexing" if body.ingest and documents > 0 else "pending",
         "task_ids": task_ids,
         "documents": documents,
         "chunks": chunks,

@@ -19,6 +19,9 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "duckdb>=0.10.0",
     "PyYAML>=6.0.1",
+    "markitdown[all]>=0.1.0",
+    "python-docx>=1.1.2",
+    "docxtpl>=0.18.0",
 ]
 
 [project.scripts]
@@ -30,7 +33,7 @@ where = ["src"]
 include = ["duckclaw*"]
 
 [tool.setuptools.package-data]
-"duckclaw" = ["seeds/*.json"]
+"duckclaw" = ["seeds/*.json", "seeds/document_templates/*.docx"]
 
 [tool.setuptools.package-dir]
 "" = "src"

@@ -29,6 +29,7 @@ import {
 import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
 import { workerOptionId, workerOptionLabel } from '@/lib/workerOptions';
+import { PlaygroundChatStudioHeader } from '@/components/playground/PlaygroundChatStudioHeader';
 
 export type AdminChatPanelProps = {
   chatId: string;
@@ -41,6 +42,8 @@ export type AdminChatPanelProps = {
   variant?: 'full' | 'compact';
   emptyHint?: string;
   showHeader?: boolean;
+  /** Cabecera AI Studio (título + tokens) cuando showHeader es false. */
+  showStudioHeader?: boolean;
   showWorkerLink?: boolean;
   /** Sección actual (p. ej. VNC, Tablero) → título «VNC/Asistente». */
   sectionTitle?: string;
@@ -84,6 +87,7 @@ export function AdminChatPanel({
   variant = 'full',
   emptyHint,
   showHeader = true,
+  showStudioHeader = false,
   showWorkerLink = true,
   sectionTitle,
   projectLabel,
@@ -133,6 +137,7 @@ export function AdminChatPanel({
     imageAttachments,
     vaultPath,
     setVaultPath,
+    sessionTokenTotal,
     reloadConfig,
   } = chat;
 
@@ -373,6 +378,14 @@ export function AdminChatPanel({
           )}
         </header>
       )}
+
+      {showStudioHeader && !showHeader ? (
+        <PlaygroundChatStudioHeader
+          conversationTitle={conversationTitle}
+          onRenameConversation={onRenameConversation}
+          tokenTotal={sessionTokenTotal}
+        />
+      ) : null}
 
       {config?.team_hint && showHeader && !isCompact && (
         <p

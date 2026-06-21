@@ -53,9 +53,9 @@ def register_convert_document_tool(tools_list: list[Any]) -> None:
             convert_document,
             name="convert_document",
             description=(
-                "Convierte un documento de texto (.md, .html, .txt) del vault a DOCX, PDF u HTML "
-                "usando pandoc. Para informes corporativos Word usa render_docx_template; "
-                "para PDF desde DOCX generado, pasa la ruta .docx con output_format=pdf si pandoc lo admite."
+                "Convierte .md/.html/.txt a DOCX/PDF/HTML vía pandoc (requiere pandoc en el host). "
+                "Solo para conversiones ad hoc sin plantilla Word. "
+                "Informes corporativos: Report Engine (render_report_instance), no pandoc."
             ),
         )
     )

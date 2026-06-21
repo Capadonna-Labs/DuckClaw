@@ -27,7 +27,9 @@ type Props = {
   catalog: CatalogItem[];
   onUpdated: () => void;
   disabled?: boolean;
+  /** @deprecated Usa `size="compact"` */
   compact?: boolean;
+  size?: 'compact' | 'default' | 'modal';
 };
 
 export function ChatLlmSelectors({
@@ -38,7 +40,9 @@ export function ChatLlmSelectors({
   onUpdated,
   disabled,
   compact,
+  size: sizeProp,
 }: Props) {
+  const size = sizeProp ?? (compact ? 'compact' : 'default');
   const [pending, setPending] = useState<'provider' | 'model' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,83 +95,101 @@ export function ChatLlmSelectors({
     }
   };
 
-  const selectCls = compact
-    ? 'text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg w-full max-w-full min-w-0 disabled:opacity-50'
-    : 'text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[160px] disabled:opacity-50';
+  const selectCls =
+    size === 'modal'
+      ? 'text-sm px-3 py-2.5 min-h-[2.75rem] border rounded-xl dark:border-dark-border dark:bg-dark-bg w-full max-w-full min-w-0 disabled:opacity-50'
+      : size === 'compact'
+        ? 'text-[10px] px-1.5 py-1 border rounded-md dark:border-dark-border dark:bg-dark-bg w-full max-w-full min-w-0 disabled:opacity-50'
+        : 'text-xs px-2 py-1.5 border rounded-lg dark:border-dark-border dark:bg-dark-bg max-w-[160px] disabled:opacity-50';
+
+  const labelCls =
+    size === 'modal'
+      ? 'text-xs font-semibold text-gov-gray-600 dark:text-dark-muted'
+      : 'sr-only';
 
   if (!chatId || selectableCatalog.length === 0) return null;
 
   return (
     <div
       className={`min-w-0 ${
-        compact ? 'flex flex-col items-stretch gap-1.5 w-full max-w-full' : 'flex flex-wrap items-center gap-2'
+        size === 'modal' || size === 'compact'
+          ? 'flex flex-col items-stretch gap-3 w-full max-w-full'
+          : 'flex flex-wrap items-center gap-2'
       }`}
       title="Proveedor y modelo de esta conversación"
     >
-      <label className="sr-only" htmlFor={`llm-provider-${chatId}`}>
-        Proveedor LLM
+      <label className={`flex flex-col gap-1.5 ${size === 'modal' ? 'w-full' : ''}`} htmlFor={`llm-provider-${chatId}`}>
+        <span className={labelCls}>Proveedor LLM</span>
+        <select
+          id={`llm-provider-${chatId}`}
+          value={activeProvider || selectableCatalog[0]?.id || ''}
+          disabled={disabled || Boolean(pending)}
+          onChange={(e) => void applyModel({ provider: e.target.value })}
+          className={selectCls}
+          aria-label="Proveedor LLM"
+        >
+          {selectableCatalog.map((p) => (
+            <option key={p.id} value={p.id} disabled={p.kind === 'api' && p.keys_ok === false}>
+              {size === 'modal'
+                ? p.label.replace(/\s*\(.*\)\s*$/, '')
+                : size === 'compact'
+                  ? p.id
+                  : p.label.replace(/\s*\(.*\)\s*$/, '')}
+            </option>
+          ))}
+        </select>
       </label>
-      <select
-        id={`llm-provider-${chatId}`}
-        value={activeProvider || selectableCatalog[0]?.id || ''}
-        disabled={disabled || Boolean(pending)}
-        onChange={(e) => void applyModel({ provider: e.target.value })}
-        className={selectCls}
-        aria-label="Proveedor LLM"
-      >
-        {selectableCatalog.map((p) => (
-          <option key={p.id} value={p.id} disabled={p.kind === 'api' && p.keys_ok === false}>
-            {compact ? p.id : p.label.replace(/\s*\(.*\)\s*$/, '')}
-          </option>
-        ))}
-      </select>
-      <label className="sr-only" htmlFor={`llm-model-${chatId}`}>
-        Modelo LLM
+      <label className={`flex flex-col gap-1.5 ${size === 'modal' ? 'w-full' : ''}`} htmlFor={`llm-model-${chatId}`}>
+        <span className={labelCls}>Modelo LLM</span>
+        <div className={`relative flex items-center min-w-0 ${size === 'modal' || size === 'compact' ? 'w-full' : ''}`}>
+          {openRouter ? (
+            <SearchableModelSelect
+              id={`llm-model-${chatId}`}
+              value={currentModel}
+              options={searchableOptions}
+              onChange={(v) => void applyModel({ model: v })}
+              disabled={disabled || Boolean(pending) || !activeProvider}
+              size={size === 'modal' ? 'modal' : size === 'compact' ? 'compact' : 'default'}
+              allowCustom
+              className={size === 'modal' || size === 'compact' ? 'w-full max-w-full' : undefined}
+              placeholder="Modelo OpenRouter"
+              searchPlaceholder="Buscar modelo…"
+              aria-label="Modelo OpenRouter"
+            />
+          ) : (
+            <select
+              id={`llm-model-${chatId}`}
+              value={currentModel}
+              disabled={disabled || Boolean(pending) || !activeProvider}
+              onChange={(e) => void applyModel({ model: e.target.value })}
+              className={selectCls}
+              aria-label="Modelo LLM"
+            >
+              {modelOptions.length === 0 && (
+                <option value={currentModel}>{currentModel || '—'}</option>
+              )}
+              {modelOptions.map((m) => (
+                <option key={m} value={m}>
+                  {modelLabelForOption(activeProvider, m)}
+                </option>
+              ))}
+            </select>
+          )}
+          {pending && (
+            <Loader2
+              size={size === 'modal' ? 16 : 12}
+              className={`absolute animate-spin text-gov-blue-600 dark:text-dark-cyan ${
+                size === 'modal' ? 'right-3' : '-right-4'
+              }`}
+              aria-hidden
+            />
+          )}
+        </div>
       </label>
-      <div className={`relative flex items-center min-w-0 ${compact ? 'w-full' : ''}`}>
-        {openRouter ? (
-          <SearchableModelSelect
-            id={`llm-model-${chatId}`}
-            value={currentModel}
-            options={searchableOptions}
-            onChange={(v) => void applyModel({ model: v })}
-            disabled={disabled || Boolean(pending) || !activeProvider}
-            compact={compact}
-            allowCustom
-            className={compact ? 'w-full max-w-full' : undefined}
-            placeholder="Modelo OpenRouter"
-            searchPlaceholder="Buscar modelo…"
-            aria-label="Modelo OpenRouter"
-          />
-        ) : (
-          <select
-            id={`llm-model-${chatId}`}
-            value={currentModel}
-            disabled={disabled || Boolean(pending) || !activeProvider}
-            onChange={(e) => void applyModel({ model: e.target.value })}
-            className={selectCls}
-            aria-label="Modelo LLM"
-          >
-            {modelOptions.length === 0 && (
-              <option value={currentModel}>{currentModel || '—'}</option>
-            )}
-            {modelOptions.map((m) => (
-              <option key={m} value={m}>
-                {modelLabelForOption(activeProvider, m)}
-              </option>
-            ))}
-          </select>
-        )}
-        {pending && (
-          <Loader2
-            size={12}
-            className="absolute -right-4 animate-spin text-gov-blue-600 dark:text-dark-cyan"
-            aria-hidden
-          />
-        )}
-      </div>
       {error && (
-        <p className="w-full text-[10px] text-red-500 dark:text-red-400">{error}</p>
+        <p className={`w-full ${size === 'modal' ? 'text-xs' : 'text-[10px]'} text-red-500 dark:text-red-400`}>
+          {error}
+        </p>
       )}
     </div>
   );

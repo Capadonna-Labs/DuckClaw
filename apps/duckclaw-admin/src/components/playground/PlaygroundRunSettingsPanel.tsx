@@ -30,6 +30,7 @@ export type PlaygroundRunSettingsPanelProps = {
   defaultsMsg: string | null;
   logsPanelOpen: boolean;
   onLogsToggle: () => void;
+  logsPanel?: React.ReactNode;
   onSaveDefault: () => void;
   onOpen: (modal: SettingsModalKey) => void;
 };
@@ -64,6 +65,7 @@ export function PlaygroundRunSettingsPanel({
   defaultsMsg,
   logsPanelOpen,
   onLogsToggle,
+  logsPanel,
   onSaveDefault,
   onOpen,
 }: PlaygroundRunSettingsPanelProps) {
@@ -77,7 +79,7 @@ export function PlaygroundRunSettingsPanel({
     activeVaultScope === 'chat' ? 'Por conversación' : 'Vault compartido (RAG + SQL)';
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-w-0 flex-col gap-4">
       <button
         type="button"
         onClick={() => onOpen('model')}
@@ -157,7 +159,7 @@ export function PlaygroundRunSettingsPanel({
       >
         <StudioToggleRow
           label="Logs PM2"
-          hint="Panel de logs bajo el chat"
+          hint="Panel en este sidebar"
           checked={logsPanelOpen}
           onChange={onLogsToggle}
           icon={<Terminal size={14} aria-hidden />}
@@ -169,6 +171,12 @@ export function PlaygroundRunSettingsPanel({
           icon={<MessageSquareText size={14} aria-hidden />}
         />
       </StudioCollapsible>
+
+      {logsPanelOpen && logsPanel ? (
+        <div className="flex max-h-[min(42vh,320px)] min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-slate-950/95 dark:border-dark-border">
+          {logsPanel}
+        </div>
+      ) : null}
 
       {invalidWorkers.length > 0 && (
         <p className="rounded-xl border border-amber-200/90 bg-amber-50/80 p-3 text-[11px] font-medium text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
@@ -211,7 +219,7 @@ function StudioCollapsible({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border border-gov-gray-200/90 bg-white dark:border-dark-border dark:bg-[#1e1f20]">
+    <section className="min-w-0 rounded-xl border border-gov-gray-200/90 bg-white dark:border-dark-border dark:bg-[#1e1f20]">
       <button
         type="button"
         onClick={onToggle}
@@ -227,7 +235,11 @@ function StudioCollapsible({
           aria-hidden
         />
       </button>
-      {open ? <div className="space-y-0.5 border-t border-gov-gray-100 px-1 py-1 dark:border-dark-border">{children}</div> : null}
+      {open ? (
+        <div className="space-y-0.5 border-t border-gov-gray-100 px-1 py-1 dark:border-dark-border">
+          {children}
+        </div>
+      ) : null}
     </section>
   );
 }

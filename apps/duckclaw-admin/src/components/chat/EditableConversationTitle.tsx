@@ -8,6 +8,8 @@ export type EditableConversationTitleProps = {
   onSave: (title: string) => Promise<void>;
   active?: boolean;
   compact?: boolean;
+  /** Cabecera Playground — texto más grande estilo AI Studio. */
+  variant?: 'default' | 'studio';
   className?: string;
 };
 
@@ -16,8 +18,12 @@ export function EditableConversationTitle({
   onSave,
   active = false,
   compact = false,
+  variant = 'default',
   className = '',
 }: EditableConversationTitleProps) {
+  const isStudio = variant === 'studio';
+  const textSize = isStudio ? 'text-base' : compact ? 'text-xs' : 'text-sm';
+  const iconSize = isStudio ? 15 : compact ? 12 : 14;
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
@@ -91,7 +97,7 @@ export function EditableConversationTitle({
             active
               ? 'bg-white/15 border-white/40 text-white placeholder:text-white/60'
               : 'dark:bg-dark-surface dark:border-dark-border dark:text-dark-text'
-          } ${compact ? 'text-xs' : 'text-sm'}`}
+          } ${textSize}`}
           aria-label="Nombre de conversación"
         />
         {err ? <p className="text-[10px] text-red-400 mt-0.5">{err}</p> : null}
@@ -106,9 +112,7 @@ export function EditableConversationTitle({
       onPointerDown={(e) => e.stopPropagation()}
     >
       <span
-        className={`font-semibold line-clamp-1 min-w-0 ${active ? '' : 'dark:text-dark-text'} ${
-          compact ? 'text-xs' : 'text-sm'
-        }`}
+        className={`font-semibold line-clamp-1 min-w-0 ${active ? '' : 'dark:text-dark-text'} ${textSize}`}
         onDoubleClick={() => setEditing(true)}
         title="Doble clic para renombrar"
       >
@@ -122,7 +126,7 @@ export function EditableConversationTitle({
         }`}
         aria-label="Renombrar conversación"
       >
-        <Pencil size={compact ? 12 : 14} />
+        <Pencil size={iconSize} />
       </button>
     </div>
   );

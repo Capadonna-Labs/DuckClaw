@@ -11,7 +11,9 @@ type Props = {
   options: SearchableModelOption[];
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** @deprecated Usa `size` */
   compact?: boolean;
+  size?: 'compact' | 'default' | 'modal';
   allowCustom?: boolean;
   placeholder?: string;
   searchPlaceholder?: string;
@@ -28,12 +30,14 @@ export function SearchableModelSelect({
   onChange,
   disabled,
   compact,
+  size: sizeProp,
   allowCustom,
   placeholder = 'Elegir modelo',
   searchPlaceholder = 'Buscar…',
   className,
   'aria-label': ariaLabel,
 }: Props) {
+  const size = sizeProp ?? (compact ? 'compact' : 'default');
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [coords, setCoords] = useState<MenuCoords | null>(null);
@@ -68,7 +72,7 @@ export function SearchableModelSelect({
     const el = triggerRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    const width = Math.max(r.width, compact ? 220 : 260);
+    const width = Math.max(r.width, size === 'modal' ? 280 : size === 'compact' ? 220 : 260);
     const left = Math.min(r.left, window.innerWidth - width - 8);
     setCoords({ top: r.bottom + 4, left: Math.max(8, left), width });
     setOpen(true);
@@ -108,8 +112,12 @@ export function SearchableModelSelect({
   }, [open]);
 
   const triggerCls = [
-    'flex items-center justify-between gap-1 border rounded-lg dark:border-dark-border dark:bg-dark-bg disabled:opacity-50 text-left',
-    compact ? 'text-[10px] px-1.5 py-1 max-w-[120px]' : 'text-xs px-2 py-1.5 max-w-[160px]',
+    'flex w-full items-center justify-between gap-2 border dark:border-dark-border dark:bg-dark-bg disabled:opacity-50 text-left',
+    size === 'modal'
+      ? 'text-sm px-3 py-2.5 min-h-[2.75rem] rounded-xl'
+      : size === 'compact'
+        ? 'text-[10px] px-1.5 py-1 max-w-[120px] rounded-lg'
+        : 'text-xs px-2 py-1.5 max-w-[160px] rounded-lg',
     className ?? '',
   ].join(' ');
 

@@ -7,6 +7,8 @@ from contextvars import ContextVar
 _knowledge_tenant_id: ContextVar[str] = ContextVar("duckclaw_knowledge_tenant_id", default="")
 _knowledge_project_id: ContextVar[str] = ContextVar("duckclaw_knowledge_project_id", default="")
 _knowledge_worker_uid: ContextVar[str] = ContextVar("duckclaw_knowledge_worker_uid", default="")
+_session_actor_email: ContextVar[str] = ContextVar("duckclaw_session_actor_email", default="")
+_session_chat_id: ContextVar[str] = ContextVar("duckclaw_session_chat_id", default="")
 
 
 def set_knowledge_tool_tenant_id(tenant_id: str) -> None:
@@ -31,3 +33,19 @@ def set_knowledge_tool_worker_uid(worker_uid: str) -> None:
 
 def get_knowledge_tool_worker_uid() -> str:
     return (_knowledge_worker_uid.get() or "").strip()
+
+
+def set_session_actor_email(actor_email: str) -> None:
+    _session_actor_email.set((actor_email or "").strip())
+
+
+def set_session_chat_id(chat_id: str) -> None:
+    _session_chat_id.set((chat_id or "").strip())
+
+
+def get_session_actor_email() -> str:
+    actor = (_session_actor_email.get() or "").strip()
+    if actor:
+        return actor
+    chat = (_session_chat_id.get() or "").strip()
+    return f"chat:{chat}" if chat else "system"

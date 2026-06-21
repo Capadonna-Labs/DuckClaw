@@ -880,6 +880,20 @@ wheels = [
 ]
 
 [[package]]
+name = "docxtpl"
+version = "0.20.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "lxml" },
+    { name = "python-docx" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b2/b4/4435f3fcb1357ec441079c4af1dda3ea926fad6dcead4aed2d93b369944e/docxtpl-0.20.2.tar.gz", hash = "sha256:eddf3350d70b4d123208e801d585bcb313d21044a377a14f75a66d0965841de1", size = 17890, upload-time = "2025-11-13T12:47:15.943Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a4/ad/e07939d8e020e513d3860400413ba1e0e06102c469639b440d921337efef/docxtpl-0.20.2-py3-none-any.whl", hash = "sha256:626d5c570a46a62b2ca73b4d08f1c240fa031a5bc45371e1466a4fe184923d10", size = 17881, upload-time = "2025-11-13T12:47:13.704Z" },
+]
+
+[[package]]
 name = "duckclaw"
 version = "0.0.1"
 source = { editable = "." }
@@ -907,9 +921,6 @@ dependencies = [
 google-trends = [
     { name = "google-trends-mcp" },
 ]
-rag-docs = [
-    { name = "duckclaw-agents", extra = ["rag-docs"] },
-]
 telegram = [
     { name = "python-telegram-bot" },
 ]
@@ -923,7 +934,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "duckclaw-agents", editable = "packages/agents" },
-    { name = "duckclaw-agents", extras = ["rag-docs"], marker = "extra == 'rag-docs'", editable = "packages/agents" },
     { name = "duckclaw-core", editable = "packages/core" },
     { name = "duckclaw-mcp", marker = "python_full_version >= '3.10'", editable = "packages/mcp/duckclaw" },
     { name = "duckclaw-shared", editable = "packages/shared" },
@@ -943,7 +953,7 @@ requires-dist = [
     { name = "redis", specifier = ">=5.0.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27.0" },
 ]
-provides-extras = ["telegram", "google-trends", "rag-docs"]
+provides-extras = ["telegram", "google-trends"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -974,11 +984,6 @@ dependencies = [
     { name = "yfinance" },
 ]
 
-[package.optional-dependencies]
-rag-docs = [
-    { name = "markitdown", extra = ["all"] },
-]
-
 [package.metadata]
 requires-dist = [
     { name = "docker" },
@@ -989,7 +994,6 @@ requires-dist = [
     { name = "google-trends-mcp", marker = "python_full_version >= '3.10' and extra == 'google-trends'", specifier = ">=1.0.2" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "langgraph", specifier = ">=0.2.0" },
-    { name = "markitdown", extras = ["all"], marker = "extra == 'rag-docs'", specifier = ">=0.1.0" },
     { name = "matplotlib", specifier = ">=3.8.0" },
     { name = "mcp", marker = "python_full_version >= '3.10'", specifier = ">=1.0.0" },
     { name = "mlx-lm", marker = "extra == 'train'", specifier = ">=0.31.2" },
@@ -1001,7 +1005,7 @@ requires-dist = [
     { name = "websockets", specifier = ">=12.0" },
     { name = "yfinance", specifier = ">=0.2.40" },
 ]
-provides-extras = ["rag-docs", "google-trends", "train"]
+provides-extras = ["google-trends", "train"]
 
 [[package]]
 name = "duckclaw-core"
@@ -1057,13 +1061,16 @@ version = "0.1.0"
 source = { editable = "packages/shared" }
 dependencies = [
     { name = "argon2-cffi" },
+    { name = "docxtpl" },
     { name = "duckdb" },
     { name = "httpx" },
     { name = "langchain-core" },
     { name = "langchain-google-genai" },
     { name = "langchain-openai" },
+    { name = "markitdown", extra = ["all"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
+    { name = "python-docx" },
     { name = "pyyaml" },
     { name = "redis" },
     { name = "requests" },
@@ -1072,13 +1079,16 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "argon2-cffi", specifier = ">=23.1.0" },
+    { name = "docxtpl", specifier = ">=0.18.0" },
     { name = "duckdb", specifier = ">=0.10.0" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "langchain-core", specifier = ">=0.3.0" },
     { name = "langchain-google-genai", specifier = ">=2.1.12" },
     { name = "langchain-openai", specifier = ">=0.3.35" },
+    { name = "markitdown", extras = ["all"], specifier = ">=0.1.0" },
     { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
+    { name = "python-docx", specifier = ">=1.1.2" },
     { name = "python-telegram-bot", marker = "extra == 'telegram'", specifier = ">=21.0" },
     { name = "pyyaml", specifier = ">=6.0.1" },
     { name = "redis", specifier = ">=5.0.0" },
@@ -3775,6 +3785,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
+]
+
+[[package]]
+name = "python-docx"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lxml" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/f7/eddfe33871520adab45aaa1a71f0402a2252050c14c7e3009446c8f4701c/python_docx-1.2.0.tar.gz", hash = "sha256:7bc9d7b7d8a69c9c02ca09216118c86552704edc23bac179283f2e38f86220ce", size = 5723256, upload-time = "2025-06-16T20:46:27.921Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d0/00/1e03a4989fa5795da308cd774f05b704ace555a70f9bf9d3be057b680bcf/python_docx-1.2.0-py3-none-any.whl", hash = "sha256:3fd478f3250fbbbfd3b94fe1e985955737c145627498896a8a6bf81f4baf66c7", size = 252987, upload-time = "2025-06-16T20:46:22.506Z" },
 ]
 
 [[package]]

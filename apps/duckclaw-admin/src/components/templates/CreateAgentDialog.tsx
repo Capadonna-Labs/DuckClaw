@@ -2,9 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Bot, Loader2, X } from 'lucide-react';
+import Link from 'next/link';
+import { Bot, Database, Loader2, MessageCircle, Sparkles, X } from 'lucide-react';
 import { adminService } from '@/services/adminService';
-import { clampInput, LIMITS } from '@/lib/validation';
+import { clampInput } from '@/lib/validation';
+import { knowledgeHref, playgroundHref, writeLastCreatedWorker } from '@/lib/onboardingFlow';
 
 function slugifyId(raw: string): string {
   return raw
@@ -28,10 +30,20 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createdId, setCreatedId] = useState<string | null>(null);
 
   if (!open) return null;
 
   const effectiveId = workerId.trim() || slugifyId(displayName);
+
+  const resetAndClose = () => {
+    setDisplayName('');
+    setWorkerId('');
+    setDescription('');
+    setError(null);
+    setCreatedId(null);
+    onClose();
+  };
 
   const submit = async () => {
     const name = displayName.trim();
@@ -49,15 +61,78 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
         description: description.trim(),
         source_template_id: 'default',
       });
+      writeLastCreatedWorker(id);
       onCreated?.();
-      onClose();
-      router.push(`/templates/${encodeURIComponent(id)}?focus=system_prompt.md`);
+      setCreatedId(id);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo crear el agente');
     } finally {
       setBusy(false);
     }
   };
+
+  if (createdId) {
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+        <div
+          role="dialog"
+          aria-modal
+          className="w-full max-w-lg rounded-3xl border border-emerald-200 bg-white p-6 shadow-xl dark:border-emerald-900 dark:bg-dark-surface"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="flex items-center gap-2 text-lg font-black text-emerald-800 dark:text-emerald-300">
+                <Sparkles size={20} />
+                Agente listo
+              </p>
+              <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
+                <strong className="font-mono">{createdId}</strong> incluye SQL, RAG, sandbox y exportación DOCX/PDF.
+              </p>
+            </div>
+            <button type="button" onClick={resetAndClose} className="rounded-lg p-1 hover:bg-gov-gray-100 dark:hover:bg-dark-bg">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="mt-5 grid gap-2">
+            <Link
+              href={knowledgeHref(undefined, createdId)}
+              onClick={resetAndClose}
+              className="flex items-center gap-3 rounded-2xl border border-gov-blue-100 bg-gov-blue-50 px-4 py-3 text-sm font-bold text-gov-blue-900 hover:bg-gov-blue-100 dark:border-dark-border dark:bg-dark-bg dark:text-dark-cyan"
+            >
+              <Database size={18} />
+              Conectar documentos (RAG)
+            </Link>
+            <Link
+              href={`/templates/${encodeURIComponent(createdId)}?focus=system_prompt.md&created=1`}
+              onClick={resetAndClose}
+              className="flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm font-bold hover:bg-gov-gray-50 dark:border-dark-border dark:hover:bg-dark-bg"
+            >
+              <Bot size={18} />
+              Editar instrucciones
+            </Link>
+            <Link
+              href={playgroundHref(undefined, createdId)}
+              onClick={resetAndClose}
+              className="flex items-center gap-3 rounded-2xl bg-gov-blue-700 px-4 py-3 text-sm font-bold text-white hover:bg-gov-blue-800"
+            >
+              <MessageCircle size={18} />
+              Probar en Playground
+            </Link>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              resetAndClose();
+              router.push('/templates');
+            }}
+            className="mt-4 w-full text-center text-xs font-semibold text-gov-gray-500 hover:underline"
+          >
+            Volver al listado de agentes
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -74,10 +149,10 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
               Nuevo agente
             </p>
             <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-              Incluye SQL, RAG, vault y sandbox base. Solo personaliza nombre e instrucciones.
+              Incluye SQL, RAG, vault, sandbox y exportación a Word/PDF.
             </p>
           </div>
-          <button type="button" onClick={onClose} className="rounded-lg p-1 hover:bg-gov-gray-100 dark:hover:bg-dark-bg">
+          <button type="button" onClick={resetAndClose} className="rounded-lg p-1 hover:bg-gov-gray-100 dark:hover:bg-dark-bg">
             <X size={18} />
           </button>
         </div>
@@ -120,7 +195,7 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
         <div className="mt-6 flex justify-end gap-2">
           <button
             type="button"
-            onClick={onClose}
+            onClick={resetAndClose}
             className="rounded-xl border px-4 py-2 text-sm font-semibold dark:border-dark-border"
           >
             Cancelar

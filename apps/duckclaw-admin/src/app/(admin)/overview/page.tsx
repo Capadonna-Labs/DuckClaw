@@ -90,10 +90,7 @@ export default function OverviewPage() {
       )}
 
       {isAdmin && (
-        <OverviewOpsPanel
-          gatewayStale={health != null && health.api_revision !== 2}
-          onHealthReload={reloadHealth}
-        />
+        <OverviewOpsPanel gatewayStale={health != null && health.api_revision !== 2} />
       )}
     </div>
   );
@@ -173,7 +170,8 @@ function GatewayErrorBanner({ message }: { message: string }) {
       <p className="font-bold text-amber-900 dark:text-amber-200">API Gateway no disponible</p>
       <p className="text-sm text-amber-800 dark:text-amber-300 mt-1">{message}</p>
       <p className="text-sm text-amber-800/90 dark:text-amber-400/90 mt-3">
-        Usa <strong>Iniciar plataforma</strong> en la sección de abajo.
+        Levanta el stack con <code className="font-mono text-xs">duckops up</code> o usa{' '}
+        <strong>Reiniciar stack</strong> en la barra superior.
       </p>
     </section>
   );

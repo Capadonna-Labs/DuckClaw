@@ -298,6 +298,52 @@ export default function PlaygroundPage() {
     },
     [activeVaultPath, config?.effective_tenant_id, conv.sessionId, workerId]
   );
+  const playgroundComposeChips = useMemo(
+    () =>
+      conv.sessionId && workerId ? (
+        <>
+          {projectId ? (
+            <span
+              className="inline-flex max-w-[min(100%,12rem)] items-center rounded-full border border-gov-blue-200 bg-gov-blue-50 px-2 py-1 text-[10px] font-bold text-gov-blue-900 dark:border-dark-border dark:bg-dark-surface dark:text-dark-cyan"
+              title={projectId}
+            >
+              <span className="truncate">{activeProject?.name || projectId}</span>
+            </span>
+          ) : null}
+          <SessionDatabaseChip
+            path={activeVaultPath}
+            scope={activeVaultScope}
+            onConfigure={() => setSettingsModal('vault')}
+          />
+          <PlaygroundSandboxChip
+            chatId={conv.sessionId}
+            workerId={workerId}
+            tenantId={config?.effective_tenant_id}
+            toggling={sandboxToggling}
+            refreshKey={sandboxRefreshKey}
+            onToggleCommand={handleSandboxToggle}
+          />
+          <PlaygroundRagProjectWarning
+            projectId={projectId}
+            indexedSourceCount={indexedKnowledgeSources}
+            onOpenRouting={() => setSettingsModal('routing')}
+          />
+        </>
+      ) : null,
+    [
+      activeProject?.name,
+      activeVaultPath,
+      activeVaultScope,
+      config?.effective_tenant_id,
+      conv.sessionId,
+      handleSandboxToggle,
+      indexedKnowledgeSources,
+      projectId,
+      sandboxRefreshKey,
+      sandboxToggling,
+      workerId,
+    ]
+  );
   const selectWorker = useCallback(
     (next: string) => {
       setWorkerId(next);
@@ -528,24 +574,6 @@ export default function PlaygroundPage() {
           </p>
         ) : (
           <>
-            <SessionDatabaseChip
-              path={activeVaultPath}
-              scope={activeVaultScope}
-              onConfigure={() => setSettingsModal('vault')}
-            />
-            <PlaygroundSandboxChip
-              chatId={conv.sessionId}
-              workerId={workerId}
-              tenantId={config?.effective_tenant_id}
-              toggling={sandboxToggling}
-              refreshKey={sandboxRefreshKey}
-              onToggleCommand={handleSandboxToggle}
-            />
-            <PlaygroundRagProjectWarning
-              projectId={projectId}
-              indexedSourceCount={indexedKnowledgeSources}
-              onOpenRouting={() => setSettingsModal('routing')}
-            />
             <AdminChatPanel
             key={`${conv.sessionId}-${workerId}`}
             chatId={conv.sessionId}
@@ -554,6 +582,7 @@ export default function PlaygroundPage() {
             variant="full"
             showHeader={false}
             showWorkerLink={false}
+            composeChips={playgroundComposeChips}
             conversationTitle={conv.conversationTitle}
             onRenameConversation={conv.renameConversation}
             emptyHint={
@@ -565,7 +594,7 @@ export default function PlaygroundPage() {
           />
           {logsPanelOpen && (
             <div className="shrink-0 border-t dark:border-dark-border bg-slate-950/95 p-3 max-h-[min(42vh,360px)] overflow-hidden flex flex-col min-w-0">
-              <Pm2LiveLogsPanel embedded showQuickActions />
+              <Pm2LiveLogsPanel embedded />
             </div>
           )}
           </>
@@ -837,7 +866,7 @@ function RunSettingsCard({
         />
         <RunSettingButton
           icon={<Database size={16} aria-hidden />}
-          title="Base de datos"
+          title="DuckDB"
           value={activeVaultPath || '—'}
           detail={activeVaultScope === 'chat' ? 'Por conversación' : 'Misma para RAG y SQL'}
           mono

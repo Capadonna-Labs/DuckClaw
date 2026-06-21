@@ -44,6 +44,35 @@ def normalize_source_uri(raw: str) -> str:
     return (raw or "").strip().strip("'\"")
 
 
+_MARKDOWN_EXTENSIONS = (".md", ".markdown", ".txt", ".html", ".htm")
+
+
+def _basename_has_extension(name: str) -> bool:
+    return "." in name and not name.endswith(".")
+
+
+def normalize_output_relative_path(
+    relative_path: str,
+    *,
+    default_extension: str = ".md",
+    require_markdown: bool = False,
+) -> str:
+    """Normaliza ruta relativa; añade extensión solo si el basename no tiene ninguna."""
+    rel = (relative_path or "").replace("\\", "/").strip().lstrip("/")
+    if not rel:
+        raise ValueError("relative_path vacío")
+    basename = rel.rsplit("/", 1)[-1]
+    if _basename_has_extension(basename):
+        if require_markdown and not rel.lower().endswith(_MARKDOWN_EXTENSIONS):
+            raise ValueError(
+                "La conversión solo admite fuentes .md, .markdown, .txt o .html. "
+                "Escribe el informe con write_output_document usando una de esas extensiones."
+            )
+        return rel
+    ext = default_extension if default_extension.startswith(".") else f".{default_extension}"
+    return f"{rel.rstrip('/')}{ext}"
+
+
 def resolve_knowledge_ingest_uri(source_uri: str) -> str:
     """Resolve vault path; auto-complete truncated paste or default single allowed root."""
     uri = normalize_source_uri(source_uri)
@@ -119,3 +148,34 @@ def resolve_knowledge_output_path(*, relative_path: str, output_root: str = "") 
     if not path_under_any_root(target.parent if target.suffix else target, roots):
         raise ValueError("ruta de salida fuera de raíces permitidas")
     return target
+
+
+def resolve_readable_document_path(*, relative_path: str, root_hint: str = "") -> Path:
+    """Resolve a file under ALLOWED or OUTPUT roots for agent read/extract."""
+    cleaned = (relative_path or "").replace("\\", "/").strip().lstrip("/")
+    if not cleaned:
+        raise ValueError("relative_path vacío")
+
+    ingest_roots = knowledge_allowed_roots()
+    output_roots = knowledge_output_roots()
+    roots = list(dict.fromkeys(ingest_roots + output_roots))
+    if not roots:
+        raise ValueError("No hay raíces de conocimiento configuradas")
+
+    if root_hint.strip():
+        bases = [Path(root_hint).expanduser().resolve()]
+        if not path_under_any_root(bases[0], roots):
+            raise ValueError("root_hint fuera de raíces permitidas")
+    else:
+        if len(roots) == 1:
+            bases = [roots[0]]
+        else:
+            bases = roots
+
+    for base in bases:
+        safe_relative_path(base, base / cleaned)
+        candidate = (base / cleaned).resolve()
+        if candidate.is_file() and path_under_any_root(candidate, roots):
+            return candidate
+
+    raise ValueError(f"No existe el archivo legible: {cleaned}")

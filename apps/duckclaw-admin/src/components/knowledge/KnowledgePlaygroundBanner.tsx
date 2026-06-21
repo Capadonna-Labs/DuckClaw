@@ -8,6 +8,7 @@ import { summarizeKnowledgeSources } from '@/components/knowledge/knowledgeStatu
 type KnowledgePlaygroundBannerProps = {
   projectId: string;
   projectName?: string;
+  workerId?: string;
   sources: KnowledgeSource[];
   loading: boolean;
 };
@@ -15,13 +16,16 @@ type KnowledgePlaygroundBannerProps = {
 export function KnowledgePlaygroundBanner({
   projectId,
   projectName,
+  workerId,
   sources,
   loading,
 }: KnowledgePlaygroundBannerProps) {
   if (!projectId || loading) return null;
 
   const { totalChunks, readyWithChunks, indexing, allReady } = summarizeKnowledgeSources(sources);
-  const playgroundHref = `/playground?project=${encodeURIComponent(projectId)}`;
+  const playgroundHref = `/playground?project=${encodeURIComponent(projectId)}${
+    workerId ? `&worker=${encodeURIComponent(workerId)}` : ''
+  }`;
   const label = projectName || 'este proyecto';
 
   if (sources.length === 0) {

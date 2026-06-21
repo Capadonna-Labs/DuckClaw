@@ -21,8 +21,12 @@ def test_load_framework_tool_pack_has_baseline() -> None:
     assert pack["pack_version"] == "framework_tool_pack_v1"
     baseline = pack["baseline_skills"]
     assert "read_sql" in baseline
+    assert "inspect_schema" in baseline
     assert "search_project_knowledge" in baseline
     assert "write_output_document" in baseline
+    assert "convert_document" in baseline
+    assert "extract_document_text" in baseline
+    assert "render_docx_template" in baseline
 
 
 def test_ensure_baseline_skills_merges_without_duplicates() -> None:

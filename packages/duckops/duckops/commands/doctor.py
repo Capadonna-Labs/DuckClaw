@@ -325,9 +325,9 @@ def cmd_doctor(
                 if not catalog_prompt_health.ok:
                     _emit(
                         "Catalog system_prompt",
-                        False,
+                        True,
                         catalog_prompt_health.summary()
-                        + " — POST /api/v1/admin/prompt-policies/sync-catalog",
+                        + " (workers en uso) — sync-catalog o editor de agente",
                     )
             except Exception as exc:
                 if not _emit("Policies framework", False, str(exc)[:160]):

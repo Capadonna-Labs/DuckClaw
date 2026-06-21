@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { adminService } from '@/services/adminService';
 import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
@@ -11,6 +11,7 @@ import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { WorkerCapabilitiesCard } from '@/components/templates/WorkerCapabilitiesCard';
 import { ManifestGuidedPanel } from '@/components/templates/ManifestGuidedPanel';
 import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
+import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBanner';
 
 type MarkdownViewMode = 'edit' | 'preview' | 'split';
 
@@ -33,7 +34,9 @@ const TAB_LABELS: Record<string, string> = {
 export default function TemplateEditorPage() {
   const { workerId } = useParams<{ workerId: string }>();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const focusFile = searchParams.get('focus');
+  const showCreatedBanner = searchParams.get('created') === '1';
   const { usuario } = useAuthStore();
   const canWrite = usuario?.rol === 'admin';
 
@@ -231,6 +234,13 @@ export default function TemplateEditorPage() {
           )}
         </div>
       </header>
+
+      {showCreatedBanner && workerId && (
+        <AgentOnboardingBanner
+          workerId={workerId}
+          onDismiss={() => router.replace(`/templates/${encodeURIComponent(workerId)}`, { scroll: false })}
+        />
+      )}
 
       <WorkerCapabilitiesCard
         workerId={workerId}

@@ -44,3 +44,21 @@ export function knowledgeSourceSecondaryLine(source: KnowledgeSource): string | 
   const uri = (source.source_uri || '').trim();
   return uri || null;
 }
+
+export function isFolderKnowledgeSource(source: KnowledgeSource): boolean {
+  return (
+    source.source_kind === 'folder' &&
+    Boolean(source.source_uri) &&
+    !source.source_uri.startsWith('upload://')
+  );
+}
+
+export function knowledgeSourceLastSyncLabel(source: KnowledgeSource): string | null {
+  const raw = source.metadata?.last_sync_at;
+  if (typeof raw !== 'string' || !raw) return null;
+  try {
+    return new Date(raw).toLocaleString();
+  } catch {
+    return raw;
+  }
+}

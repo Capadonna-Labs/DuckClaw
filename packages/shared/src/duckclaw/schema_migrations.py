@@ -1108,6 +1108,61 @@ _M022_FRAMEWORK_PACK_REFRESH = [
     "SELECT 1 AS framework_pack_refresh_v2_noop",
 ]
 
+_M023_REPORT_ENGINE = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_report_templates (
+        template_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL,
+        owner_email VARCHAR NOT NULL,
+        name VARCHAR NOT NULL,
+        description TEXT DEFAULT '',
+        template_uri TEXT NOT NULL,
+        section_schema_json TEXT NOT NULL DEFAULT '[]'
+            CHECK (json_valid(section_schema_json)),
+        analyzer_mode VARCHAR NOT NULL DEFAULT 'jinja'
+            CHECK (analyzer_mode IN ('jinja', 'headings', 'mixed')),
+        visibility VARCHAR NOT NULL DEFAULT 'private'
+            CHECK (visibility IN ('private', 'tenant')),
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_report_templates_tenant
+        ON main.admin_report_templates (tenant_id, owner_email, active)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_report_instances (
+        instance_id VARCHAR PRIMARY KEY,
+        template_id VARCHAR NOT NULL,
+        tenant_id VARCHAR NOT NULL,
+        owner_email VARCHAR NOT NULL,
+        project_id VARCHAR DEFAULT '',
+        title VARCHAR NOT NULL,
+        period_key VARCHAR DEFAULT '',
+        state_json TEXT NOT NULL DEFAULT '{"sections":{}}'
+            CHECK (json_valid(state_json)),
+        status VARCHAR NOT NULL DEFAULT 'draft'
+            CHECK (status IN ('draft', 'ready', 'archived')),
+        preview_html TEXT DEFAULT '',
+        rendered_docx_uri TEXT DEFAULT '',
+        conversation_id VARCHAR DEFAULT '',
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_report_instances_scope
+        ON main.admin_report_instances (tenant_id, owner_email, project_id, status)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_report_instances_template
+        ON main.admin_report_instances (template_id, period_key)
+    """,
+]
+
 
 def _migration_021_apply_framework_policy_pack(db: Any) -> None:
     from duckclaw.framework_policy_pack import apply_framework_policy_pack
@@ -1149,4 +1204,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (20, "framework_capability_policies", _M020_FRAMEWORK_CAPABILITY_POLICIES),
     (21, "framework_policy_pack_v1", _M021_FRAMEWORK_POLICY_PACK),
     (22, "framework_pack_refresh_v2", _M022_FRAMEWORK_PACK_REFRESH),
+    (23, "report_engine_v1", _M023_REPORT_ENGINE),
 ]

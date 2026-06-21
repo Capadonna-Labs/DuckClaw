@@ -136,17 +136,16 @@ def test_admin_sidebar_keeps_core_groups_and_data_access() -> None:
         "export const SYSTEM_NAV_GROUP", 1
     )[0]
 
-    assert "label: 'Inicio'" in operation_body
-    assert "label: 'Playground'" in playground_body
-    assert "label: 'Chat'" in playground_body
+    assert "label: 'Inicio'" in operation_body or "label: 'Conversar'" in nav
+    assert "label: 'Chat'" in playground_body or "href: '/playground'" in nav
     assert "label: 'Agentes'" in build_body
     assert "label: 'Datos'" in data_body
     assert "href: '/duckdb'" in data_body
     assert "label: 'Seguridad'" in security_body
-    assert "{ type: 'group', group: OPERATION_NAV_GROUP }" in structure_body
-    assert "{ type: 'group', group: PLAYGROUND_NAV_GROUP }" in structure_body
+    assert "{ type: 'group', group: CONVERSAR_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: BUILD_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: DATA_NAV_GROUP }" in structure_body
+    assert "{ type: 'group', group: INTEGRATIONS_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: SECURITY_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: SYSTEM_NAV_GROUP }" in structure_body
     assert "hint:" not in operation_body
@@ -163,8 +162,8 @@ def test_topbar_hamburger_toggles_desktop_sidebar() -> None:
     topbar = Path("apps/duckclaw-admin/src/components/layout/Topbar.tsx").read_text(encoding="utf-8")
 
     assert "toggleSidebar" in topbar
-    assert "lg:hidden" not in topbar
     assert "sidebarOpen ? 'Ocultar menú lateral' : 'Mostrar menú lateral'" in topbar
+    assert "PlatformStatusStrip" in topbar
 
 
 def test_user_logout_lives_in_topbar_user_menu_only() -> None:
@@ -239,7 +238,8 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
     assert "patchRuntimeSettings" in page
     assert "default_worker_id" in page
     assert "default_vault_db_path" in page
-    assert "DuckDB" in page
+    assert "PlaygroundSessionBar" in page
+    assert "sessionBarSummary" in page
     assert "Modelo fijado para esta conversación." not in page
     assert "DuckDB fijada para esta conversación" not in page
     assert "Run settings" in page
@@ -309,16 +309,12 @@ def test_overview_combines_operations_and_pm2_logs() -> None:
         encoding="utf-8"
     )
 
-    assert "Operaciones y logs" in overview_ops
-    assert "StackBootstrapPanel compact onConnected={onHealthReload}" in overview_ops
+    assert "Logs en vivo" in overview_ops
     assert "Pm2LiveLogsPanel embedded" in overview_ops
-    assert "Salida de la operación" in overview_ops
-    assert "Las acciones dejan huella aquí" in overview_ops
-    assert "items-start" in overview_ops
-    assert "max-h-[420px] overflow-y-auto pr-1" in overview_ops
-    assert "self-start xl:sticky xl:top-4" in overview_ops
-    assert 'titulo="Operaciones"' not in overview_ops
-    assert 'titulo="PM2 logs en vivo"' not in overview_ops
+    assert "StackBootstrapPanel" not in overview_ops
+    assert "showQuickActions" not in overview_ops
+    assert "Arranque y conexión" not in overview_ops
+    assert "Salida de la operación" not in overview_ops
     assert "SettingsSection" not in overview_ops
 
 

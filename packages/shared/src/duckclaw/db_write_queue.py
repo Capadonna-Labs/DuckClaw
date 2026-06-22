@@ -369,6 +369,25 @@ def enqueue_typed_command(
         enriched["user_id"] = producer_user_id
         enriched["db_write_user_id"] = producer_user_id
     enriched["tenant_id"] = enriched.get("tenant_id") or str(command.tenant_id or "default")
+    return _enqueue_enriched_payload(
+        enriched,
+        db_path=db_path,
+        user_id=producer_user_id,
+        queue_name=queue_name,
+    )
+
+
+def _enqueue_enriched_payload(
+    enriched: dict[str, Any],
+    *,
+    db_path: str,
+    user_id: str,
+    queue_name: str,
+) -> str:
+    tid = str(enriched.get("task_id") or uuid.uuid4())
+    enriched["task_id"] = tid
+    import json as _json
+
     payload = _json.dumps(enriched, ensure_ascii=False)
 
     if spawn_inline_writes_enabled():
@@ -421,6 +440,31 @@ def enqueue_typed_command(
     return tid
 
 
+def enqueue_dict_command(
+    command: dict[str, Any],
+    *,
+    db_path: str,
+    user_id: str = "default",
+    tenant_id: str = "default",
+    queue_name: str = DEFAULT_WRITE_QUEUE_NAME,
+) -> str:
+    """Encola un payload dict con command_type (p. ej. report engine desde agent tools)."""
+    enriched = dict(command)
+    producer_user_id = str(user_id or "default").strip() or "default"
+    enriched["task_id"] = str(enriched.get("task_id") or uuid.uuid4())
+    enriched["db_path"] = str(db_path or "")
+    enriched["db_write_user_id"] = producer_user_id
+    if not str(enriched.get("user_id") or "").strip():
+        enriched["user_id"] = producer_user_id
+    enriched["tenant_id"] = str(enriched.get("tenant_id") or tenant_id or "default")
+    return _enqueue_enriched_payload(
+        enriched,
+        db_path=db_path,
+        user_id=producer_user_id,
+        queue_name=queue_name,
+    )
+
+
 def enqueue_or_apply_duckdb_write_sync(
     *,
     db_path: str,
@@ -434,6 +478,14 @@ def enqueue_or_apply_duckdb_write_sync(
 ) -> str:
     """Enqueue a typed command or legacy raw SQL. Typed commands preferred."""
     if command is not None:
+        if isinstance(command, dict):
+            return enqueue_dict_command(
+                command,
+                db_path=db_path,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                queue_name=queue_name,
+            )
         return enqueue_typed_command(
             command, db_path=db_path, user_id=user_id, queue_name=queue_name,
         )

@@ -19,6 +19,24 @@ def _parse_json(raw: Any, default: Any) -> Any:
         return default
 
 
+def _sql_fetchall(db: Any, sql: str, params: list[Any] | None = None) -> list[Any]:
+    """Compatible con duckdb.Connection (.fetchall) y DuckClaw wrapper (lista directa)."""
+    result = db.execute(sql, params) if params is not None else db.execute(sql)
+    if isinstance(result, list):
+        return result
+    if result is None:
+        return []
+    fetchall = getattr(result, "fetchall", None)
+    if callable(fetchall):
+        return fetchall()
+    return list(result)
+
+
+def _sql_fetchone(db: Any, sql: str, params: list[Any] | None = None) -> Any | None:
+    rows = _sql_fetchall(db, sql, params)
+    return rows[0] if rows else None
+
+
 def list_report_templates(
     db: Any,
     *,
@@ -28,7 +46,8 @@ def list_report_templates(
 ) -> list[dict[str, Any]]:
     actor = (actor_email or "system").strip().lower()
     tid = (tenant_id or "default").strip() or "default"
-    rows = db.execute(
+    rows = _sql_fetchall(
+        db,
         """
         SELECT template_id, tenant_id, owner_email, name, description, template_uri,
                section_schema_json, analyzer_mode, visibility, created_at, updated_at
@@ -40,7 +59,7 @@ def list_report_templates(
         LIMIT ?
         """,
         [tid, actor, max(1, min(int(limit), 200))],
-    ).fetchall()
+    )
     out: list[dict[str, Any]] = []
     for row in rows:
         out.append(
@@ -60,7 +79,8 @@ def list_report_templates(
 
 
 def get_report_template(db: Any, *, template_id: str, tenant_id: str) -> dict[str, Any] | None:
-    row = db.execute(
+    row = _sql_fetchone(
+        db,
         """
         SELECT template_id, tenant_id, owner_email, name, description, template_uri,
                section_schema_json, analyzer_mode, visibility, active
@@ -69,7 +89,7 @@ def get_report_template(db: Any, *, template_id: str, tenant_id: str) -> dict[st
         LIMIT 1
         """,
         [template_id, tenant_id],
-    ).fetchone()
+    )
     if not row or not row[9]:
         return None
     return {
@@ -102,7 +122,8 @@ def list_report_instances(
         project_clause = " AND i.project_id = ?"
         params.append(pid)
     params.append(max(1, min(int(limit), 200)))
-    rows = db.execute(
+    rows = _sql_fetchall(
+        db,
         f"""
         SELECT i.instance_id, i.template_id, i.title, i.period_key, i.project_id,
                i.status, i.state_json, i.preview_html, i.rendered_docx_uri,
@@ -133,7 +154,7 @@ def list_report_instances(
         LIMIT ?
         """,
         params,
-    ).fetchall()
+    )
     out: list[dict[str, Any]] = []
     for row in rows:
         schema = _parse_json(row[12], [])
@@ -159,7 +180,8 @@ def list_report_instances(
 
 
 def get_report_instance(db: Any, *, instance_id: str, tenant_id: str) -> dict[str, Any] | None:
-    row = db.execute(
+    row = _sql_fetchone(
+        db,
         """
         SELECT instance_id, template_id, tenant_id, owner_email, project_id, title, period_key,
                state_json, status, preview_html, rendered_docx_uri, conversation_id, active
@@ -168,7 +190,7 @@ def get_report_instance(db: Any, *, instance_id: str, tenant_id: str) -> dict[st
         LIMIT 1
         """,
         [instance_id, tenant_id],
-    ).fetchone()
+    )
     if not row or not row[12]:
         return None
     return {
@@ -201,7 +223,8 @@ def actor_can_access_instance(
     project_id = str(instance.get("project_id") or "").strip()
     if not project_id:
         return False
-    row = db.execute(
+    row = _sql_fetchone(
+        db,
         """
         SELECT 1
         FROM main.admin_projects p
@@ -213,5 +236,5 @@ def actor_can_access_instance(
         LIMIT 1
         """,
         [actor, project_id, actor],
-    ).fetchone()
+    )
     return bool(row)

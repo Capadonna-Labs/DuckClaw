@@ -11,6 +11,19 @@ import pytest
 from duckclaw.forge.skills.report_engine_bridge import register_report_template
 
 
+def test_open_hub_db_reuses_worker_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.forge.skills.report_engine_bridge import _open_hub_db
+    from duckclaw.forge.skills.report_engine_hub_context import set_report_engine_hub_db
+
+    hub = "/tmp/hub-axis.duckdb"
+    worker_db = DuckClaw(hub, read_only=False, engine="python")
+    monkeypatch.setattr("duckclaw.forge.skills.report_engine_bridge._hub_db_path", lambda: hub)
+    set_report_engine_hub_db(worker_db)
+    opened = _open_hub_db()
+    assert opened is worker_db
+
+
 def test_register_report_template_surfaces_db_writer_failure(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     from docx import Document
 

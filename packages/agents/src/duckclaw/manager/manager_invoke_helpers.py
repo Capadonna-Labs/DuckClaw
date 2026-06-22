@@ -404,6 +404,12 @@ def finalize_invoke_worker_cleanup(
             clear_visual_state_delta_hub_db()
         except Exception:
             pass
+    try:
+        from duckclaw.forge.skills.report_engine_hub_context import clear_report_engine_hub_db
+
+        clear_report_engine_hub_db()
+    except Exception:
+        pass
     if slot_token:
         release_subagent_slot(tenant_id, assigned, slot_token, str(chat_id or ""))
     set_idle(chat_id)

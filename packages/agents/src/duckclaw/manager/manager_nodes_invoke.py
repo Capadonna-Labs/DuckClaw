@@ -249,6 +249,12 @@ def build_invoke_worker_node(
             db_display = vault_db_path or db_path or "(unknown)"
             if _will_suspend_ro:
                 db.suspend_readonly_file_handle()
+            try:
+                from duckclaw.forge.skills.report_engine_hub_context import set_report_engine_hub_db
+
+                set_report_engine_hub_db(db)
+            except Exception:
+                pass
             if _visual_lite_mcp:
                 try:
                     from duckclaw.forge.skills.visual_state_delta import set_visual_state_delta_hub_db

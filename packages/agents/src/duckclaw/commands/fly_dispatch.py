@@ -92,6 +92,20 @@ def _dispatch_fly_command(
         if sub in ("--status", "status", ""):
             return execute_uncertainty_status(db, chat_id, args)
         return "Uso: /uncertainty --status"
+    if name in ("approve_code", "approve-code", "reject_code", "reject-code"):
+        ext_out = dispatch_extension_fly_command(
+            name,
+            db,
+            chat_id,
+            args,
+            requester_id=requester_id,
+            tenant_id=tenant_id,
+            vault_user_id=vault_user_id,
+            username=username,
+            entry_worker_id=entry_worker_id,
+        )
+        if ext_out is not None:
+            return ext_out
     if name in ("approve_code", "approve-code"):
         return execute_code_approve(db, chat_id, args)
     if name in ("reject_code", "reject-code"):

@@ -22,7 +22,7 @@ _DEFAULT_OBJECTIVES = [
     "Aumentar ventas de cierta categoría",
     "Disminuir tiempo de respuesta",
     "Mejorar disponibilidad de stock",
-    "Optimizar presupuesto o tasa de ahorro",
+    "Optimizar un KPI operativo clave",
 ]
 
 

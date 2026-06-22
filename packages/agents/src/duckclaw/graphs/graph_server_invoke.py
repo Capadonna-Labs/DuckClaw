@@ -13,6 +13,7 @@ from duckclaw.graphs.graph_server_ephemeral import (
 from duckclaw.graphs.graph_server_llm_config import _ensure_llm_config
 from duckclaw.utils.langsmith_trace import get_tracing_config
 from duckclaw.utils.logger import extract_usage_from_messages
+from duckclaw.channels.integration_labels import resolve_integration_label
 
 
 def _parallel_chat_invocations_enabled() -> bool:
@@ -38,7 +39,7 @@ async def _ainvoke(
     is_system_prompt: bool | None = False,
     outbound_telegram_bot_token: str | None = None,
     entry_worker_id: str | None = None,
-    project_id: str | None = None,
+    integration_channel: str | None = None,
 ) -> dict:
     """
     Invoca el grafo y retorna {"reply": str, "messages": list | None}.
@@ -59,7 +60,6 @@ async def _ainvoke(
         "username": (username or "").strip(),
         "vault_db_path": (vault_db_path or "").strip() or "",
         "shared_db_path": (shared_db_path or "").strip() or "",
-        "project_id": (project_id or "").strip(),
     }
     if _tok:
         state["outbound_telegram_bot_token"] = _tok
@@ -68,6 +68,9 @@ async def _ainvoke(
     _ew = (entry_worker_id or "").strip()
     if _ew:
         state["entry_worker_id"] = _ew
+    _ich, _ilbl = resolve_integration_label(integration_channel, chat_id=chat_id)
+    state["integration_channel"] = _ich
+    state["integration_label"] = _ilbl
     loop = asyncio.get_event_loop()
 
     trace_cfg = get_tracing_config(tenant_id, "manager", chat_id)
@@ -114,7 +117,7 @@ async def ainvoke_manager_ephemeral(
     is_system_prompt: bool | None = False,
     outbound_telegram_bot_token: str | None = None,
     entry_worker_id: str | None = None,
-    project_id: str | None = None,
+    integration_channel: str | None = None,
 ) -> dict:
     """
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
@@ -139,7 +142,7 @@ async def ainvoke_manager_ephemeral(
             is_system_prompt=is_system_prompt,
             outbound_telegram_bot_token=outbound_telegram_bot_token,
             entry_worker_id=entry_worker_id,
-            project_id=project_id,
+            integration_channel=integration_channel,
         )
     finally:
         try:

@@ -2,7 +2,68 @@
 
 import { useCallback, useRef, useState } from 'react';
 
-const ALLOWED_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
+export const CHAT_IMAGE_MIME = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const ALLOWED_MIME = CHAT_IMAGE_MIME;
+
+export function imageFilesFromClipboardData(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const files: File[] = [];
+  const seen = new Set<string>();
+
+  const maybeAdd = (file: File | null) => {
+    if (!file) return;
+    const mime = (file.type || '').toLowerCase();
+    if (!ALLOWED_MIME.has(mime)) return;
+    const key = `${file.name}:${file.size}:${mime}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    files.push(file);
+  };
+
+  if (data.items?.length) {
+    for (let i = 0; i < data.items.length; i += 1) {
+      const item = data.items[i];
+      if (item.kind !== 'file') continue;
+      maybeAdd(item.getAsFile());
+    }
+  }
+
+  for (const file of Array.from(data.files ?? [])) {
+    maybeAdd(file);
+  }
+
+  return files;
+}
+
+export function nonImageFilesFromClipboardData(data: DataTransfer | null): File[] {
+  if (!data) return [];
+  const files: File[] = [];
+  const seen = new Set<string>();
+
+  const maybeAdd = (file: File | null) => {
+    if (!file) return;
+    const mime = (file.type || '').toLowerCase();
+    if (ALLOWED_MIME.has(mime)) return;
+    const key = `${file.name}:${file.size}:${mime || 'octet'}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    files.push(file);
+  };
+
+  if (data.items?.length) {
+    for (let i = 0; i < data.items.length; i += 1) {
+      const item = data.items[i];
+      if (item.kind !== 'file') continue;
+      maybeAdd(item.getAsFile());
+    }
+  }
+
+  for (const file of Array.from(data.files ?? [])) {
+    maybeAdd(file);
+  }
+
+  return files;
+}
 const DEFAULT_MAX_BYTES = 12 * 1024 * 1024;
 
 export type PendingChatImage = {
@@ -70,17 +131,22 @@ export function useChatImageAttachments(maxCount = 3, maxBytes = DEFAULT_MAX_BYT
     []
   );
 
-  const onPickFiles = useCallback(
-    async (files: FileList | null) => {
-      if (!files?.length) return;
+  const ingestFiles = useCallback(
+    async (files: FileList | readonly File[] | null) => {
+      const fileList = files
+        ? files instanceof FileList
+          ? Array.from(files)
+          : [...files]
+        : [];
+      if (fileList.length === 0) return;
       setAttachError(null);
       const next: PendingChatImage[] = [...pending];
-      for (let i = 0; i < files.length; i += 1) {
+      for (let i = 0; i < fileList.length; i += 1) {
         if (next.length >= maxCount) {
           setAttachError(`Máximo ${maxCount} imágenes por mensaje`);
           break;
         }
-        const file = files[i];
+        const file = fileList[i];
         const mime = (file.type || '').toLowerCase();
         if (!ALLOWED_MIME.has(mime)) {
           setAttachError('Solo JPEG, PNG o WebP');
@@ -109,6 +175,8 @@ export function useChatImageAttachments(maxCount = 3, maxBytes = DEFAULT_MAX_BYT
     [maxBytes, maxCount, pending]
   );
 
+  const onPickFiles = ingestFiles;
+
   const buildPayloadImages = useCallback(
     () =>
       pending.map((p) => ({
@@ -126,8 +194,10 @@ export function useChatImageAttachments(maxCount = 3, maxBytes = DEFAULT_MAX_BYT
   return {
     pendingImages: pending,
     attachError,
+    setAttachError,
     fileInputRef,
     onPickFiles,
+    ingestFiles,
     removeImage,
     clearImages,
     buildPayloadImages,

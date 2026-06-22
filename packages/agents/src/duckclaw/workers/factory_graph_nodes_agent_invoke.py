@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any, Optional
 
 try:
@@ -10,19 +11,6 @@ try:
 except ImportError:
     RunnableConfig = Any  # type: ignore[misc, assignment]
 
-from duckclaw.egress.tool_response_repair import (
-    clock_only_lone_url_no_repair as _clock_only_lone_url_no_repair,
-    latest_tool_json_since as _latest_tool_json_since,
-    parse_get_current_time_json as _parse_get_current_time_json,
-    post_tools_synthesis_needed as _post_tools_synthesis_needed,
-    reply_is_tool_json_echo as _reply_is_tool_json_echo,
-)
-from duckclaw.forge.rag.prompt_policy import rag_turn_system_prompt
-from duckclaw.forge.rag.tool_policy import (
-    should_prioritize_rag_over_storage_tools,
-    without_storage_tools,
-)
-from duckclaw.workers.db_intent_policy import explicit_duckdb_schema_request
 from duckclaw.workers.factory_agent_node_helpers import (
     _agent_node_llm_failure_user_message,
     _identity_fields,
@@ -30,6 +18,12 @@ from duckclaw.workers.factory_agent_node_helpers import (
     _raise_if_chat_cancelled_from_state,
     _worker_log_label,
 )
+from duckclaw.forge.rag.prompt_policy import rag_turn_system_prompt
+from duckclaw.forge.rag.tool_policy import (
+    should_prioritize_rag_over_storage_tools,
+    without_storage_tools,
+)
+from duckclaw.workers.db_intent_policy import explicit_duckdb_schema_request
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.factory_graph_nodes_agent_policy_early import make_agent_policy_early
 from duckclaw.workers.factory_graph_nodes_agent_policy_late import make_agent_policy_late
@@ -40,7 +34,7 @@ from duckclaw.workers.runtime_policy_helpers import worker_use_heuristic_first_t
 from duckclaw.workers.tool_surface_policy import (
     should_hide_sandbox_tools,
     should_hide_storage_identity_tools,
-    without_privileged_mutation_tools,
+    without_privileged_mutation_tools_for_auto_bind,
     without_sandbox_tools,
     without_storage_identity_tools,
 )
@@ -51,17 +45,16 @@ _log = logging.getLogger(__name__)
 
 def make_agent_invoke_node(ctx: WorkerGraphContext):
     (
-        worker_id, db, spec, path, provider, llm, tool_surface, is_market_analysis_worker,
+        worker_id, db, spec, path, provider, llm, tool_surface,
         tools, tools_by_name, tools_sandbox_off, tools_by_name_sandbox_off, prompt_policies, _lid,
         use_cm, _tools_for_llm_bind, _tools_sandbox_off_bind, _sandbox_enabled_for_state, b,
         llm_with_tools_on, llm_with_tools_off, llm_force_schema_on, llm_force_schema_off,
         llm_force_read_sql_on, llm_force_read_sql_off, llm_force_admin_sql_on, llm_force_admin_sql_off,
         llm_force_run_sandbox_on, llm_force_run_sandbox_off, llm_force_tavily_on, llm_force_tavily_off,
-        llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_fetch_market_on,
-        llm_force_fetch_market_off, llm_force_reddit_post_on, llm_force_reddit_post_off,
-        llm_force_reddit_search_on, llm_force_reddit_search_off, llm_force_reddit_fallback_on,
-        llm_force_reddit_fallback_off, has_read_sql, has_tavily, has_generate_visual, has_reddit_tools,
-        has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
+        llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_reddit_post_on,
+        llm_force_reddit_post_off, llm_force_reddit_search_on, llm_force_reddit_search_off,
+        llm_force_reddit_fallback_on, llm_force_reddit_fallback_off, has_read_sql, has_tavily,
+        has_generate_visual, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
         _incoming_has_reddit_share_path, _incoming_has_reddit_url, _incoming_looks_like_reddit_post_url,
         _is_latest_game_query, _is_schema_query, _patch_ai_reddit_share_tool_calls,
         _reddit_share_slug_from_incoming, _reddit_tool_message_no_data,
@@ -85,8 +78,8 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
         _wl = ctx.agent_turn['_wl']
         already_has_tool_result = ctx.agent_turn['already_has_tool_result']
         force_admin_sql = ctx.agent_turn['force_admin_sql']
-        force_fetch_market_data = ctx.agent_turn['force_fetch_market_data']
         force_read_sql = ctx.agent_turn['force_read_sql']
+        force_orch_tool = ctx.agent_turn.get('force_orch_tool')
         force_reddit = ctx.agent_turn['force_reddit']
         force_run_sandbox = ctx.agent_turn['force_run_sandbox']
         force_schema = ctx.agent_turn['force_schema']
@@ -107,6 +100,8 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
         forced_name = "auto"
         if force_admin_sql:
             forced_name = "admin_sql"
+        elif force_orch_tool:
+            forced_name = force_orch_tool
         elif force_read_sql:
             forced_name = "read_sql"
         elif force_schema:
@@ -117,8 +112,6 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             forced_name = "tavily_search"
         elif force_reddit:
             forced_name = "reddit"
-        elif force_fetch_market_data:
-            forced_name = "fetch_market_data"
         elif force_run_sandbox:
             forced_name = "run_sandbox"
         _log.info(
@@ -186,6 +179,30 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
         if force_admin_sql:
             _fa = llm_force_admin_sql_on if sandbox_enabled else llm_force_admin_sql_off
             _invoked_llm = _fa or llm_with_tools
+        elif force_orch_tool:
+            if force_orch_tool in ("execute_sandbox_script", "run_sandbox") and has_run_sandbox:
+                _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
+                _invoked_llm = _frs or llm_with_tools
+            else:
+                from duckclaw.workers.tool_binding import tool_choice_function as _tool_choice_function
+
+                _orch_bind_tools = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
+                _orch_llm_base = llm_with_tools_on if sandbox_enabled else llm_with_tools_off
+                if force_orch_tool not in {
+                    str(getattr(t, "name", "") or "") for t in _orch_bind_tools
+                }:
+                    _log.warning(
+                        "[%s] force_orch_tool=%s not in bind surface; falling back to auto",
+                        _wl,
+                        force_orch_tool,
+                    )
+                    _invoked_llm = llm_with_tools
+                else:
+                    _invoked_llm = _bind_tools(
+                        _orch_llm_base,
+                        _orch_bind_tools,
+                        tool_choice=_tool_choice_function(force_orch_tool),
+                    )
         elif force_schema and not force_read_sql:
             _invoked_llm = (
                 llm_force_schema_on if sandbox_enabled else llm_force_schema_off
@@ -218,9 +235,6 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             if _fr is None:
                 _fr = llm_force_reddit_fallback_on if sandbox_enabled else llm_force_reddit_fallback_off
             _invoked_llm = _fr or llm_with_tools
-        elif force_fetch_market_data:
-            _ffmd = llm_force_fetch_market_on if sandbox_enabled else llm_force_fetch_market_off
-            _invoked_llm = _ffmd or llm_with_tools
         elif force_run_sandbox:
             _frs = llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
             _invoked_llm = _frs or llm_with_tools
@@ -228,7 +242,11 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             _bind_base_identity = _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
             _auto_tools = list(_bind_base_identity)
             _auto_before = [str(getattr(t, "name", "") or "") for t in _auto_tools]
-            _auto_tools = without_privileged_mutation_tools(_auto_tools)
+            _auto_tools = without_privileged_mutation_tools_for_auto_bind(
+                _auto_tools,
+                spec=spec,
+            )
+            # #endregion
             _hide_sandbox = should_hide_sandbox_tools(incoming, _intent_incoming)
             if _hide_sandbox:
                 _auto_tools = without_sandbox_tools(_auto_tools)
@@ -256,7 +274,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
 
             resp = invoke_chat_model_with_transient_retries(_invoked_llm, _groq_msgs)
             if (
-                is_market_analysis_worker
+                has_reddit_tools
                 and resp is not None
                 and getattr(resp, "tool_calls", None)
             ):
@@ -304,84 +322,85 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             _resp_content = (lc_message_content_to_text(resp) or "").strip()
         except Exception:
             _resp_content = str(getattr(resp, "content", "") or "").strip()
-        _lh_gct_fix = _last_human_message_index(state.get("messages") or [])
-        _post_tools_synthesis = _post_tools_synthesis_needed(
-            state.get("messages") or [],
-            incoming,
-            last_human_idx=_lh_gct_fix,
-            already_has_tool_result=already_has_tool_result,
-        )
-        _json_echo = _reply_is_tool_json_echo(_resp_content)
-        _gct_lone_url_skip = _clock_only_lone_url_no_repair(
-            incoming,
-            state.get("messages") or [],
-            last_human_idx=_lh_gct_fix,
-        )
-        _inline_repair_gate = _post_tools_synthesis or (
-            _json_echo and not _gct_lone_url_skip
-        )
-        _inline_will_synth = bool(
-            not tool_calls
-            and _llm_invoke_exc is None
-            and is_market_analysis_worker
-            and _inline_repair_gate
-            and (not _resp_content or _json_echo)
-        )
-        _market_inline_synth_attempted = False
         if (
             not tool_calls
             and _llm_invoke_exc is None
-            and is_market_analysis_worker
-            and _inline_repair_gate
-            and (
-                not _resp_content
-                or _reply_is_tool_json_echo(_resp_content)
-            )
+            and force_orch_tool
         ):
-            _market_inline_synth_attempted = True
-            _gct_data = (
-                _parse_get_current_time_json(_resp_content)
-                or _latest_tool_json_since(
-                    state.get("messages") or [], _lh_gct_fix, "get_current_time"
-                )
-                or {}
+            from duckclaw.workers.sandbox_force_repair import (
+                extract_python_from_llm_text,
+                is_forced_sandbox_tool,
+                resolve_orchestration_fallback_code,
+                synthesize_sandbox_tool_call,
             )
-            _day = str(_gct_data.get("day_of_week") or "")
-            _tm = str(_gct_data.get("time") or "")[:5]
-            _clock_hint = f"{_day} {_tm} COT".strip() if (_day or _tm) else ""
-            _brand = (getattr(spec, "name", None) or _lid or "Worker").strip()
-            _tools_ran = [
-                str(getattr(m, "name", "") or "")
-                for m in (state.get("messages") or [])[max(0, _lh_gct_fix + 1) :]
-                if isinstance(m, ToolMessage)
-            ]
-            _tools_hint = ", ".join(dict.fromkeys(_tools_ran)) if _tools_ran else "herramientas"
-            _follow_sys = SystemMessage(
-                content=(
-                    f"Ya ejecutaste {_tools_hint} en este turno. "
-                    + (f"Encabezado {_brand} con {_clock_hint}. " if _clock_hint else "")
-                    + "Redacta la respuesta final completa en español integrando el contexto visual "
-                    "y los resultados de herramientas. PROHIBIDO pegar JSON crudo de herramientas."
-                )
-            )
-            try:
-                # Síntesis en prosa: sin bind_tools (evita re-forzar run_sandbox cuando el
-                # follow-up SystemMessage queda como último mensaje del batch).
-                resp = invoke_chat_model_with_transient_retries(
-                    llm, list(_groq_msgs) + [_follow_sys]
-                )
-                try:
-                    from duckclaw.integrations.llm_providers import lc_message_content_to_text
 
-                    _resp_content = (lc_message_content_to_text(resp) or "").strip()
-                except Exception:
-                    _resp_content = str(getattr(resp, "content", "") or "").strip()
-                tool_calls = getattr(resp, "tool_calls", None) or []
-            except Exception as exc:
-                _log.warning("[%s] post-tools synthesis retry failed: %s", _wl, exc)
+            if is_forced_sandbox_tool(force_orch_tool):
+                _sandbox_code = extract_python_from_llm_text(_resp_content)
+                if not _sandbox_code:
+                    _frs_repair = (
+                        llm_force_run_sandbox_on if sandbox_enabled else llm_force_run_sandbox_off
+                    )
+                    if _frs_repair is not None:
+                        _retry_sys = SystemMessage(
+                            content=(
+                                f"OBLIGATORIO: invoca únicamente `{force_orch_tool}` con "
+                                "argumento `code` (script Python completo). "
+                                "Prohibido responder en prosa sin tool_call."
+                            )
+                        )
+                        try:
+                            _retry_resp = invoke_chat_model_with_transient_retries(
+                                _frs_repair,
+                                list(_groq_msgs) + [_retry_sys],
+                            )
+                            _retry_calls = getattr(_retry_resp, "tool_calls", None) or []
+                            if _retry_calls:
+                                resp = _retry_resp
+                                tool_calls = _retry_calls
+                                try:
+                                    _resp_content = (
+                                        lc_message_content_to_text(resp) or ""
+                                    ).strip()
+                                except Exception:
+                                    _resp_content = str(
+                                        getattr(resp, "content", "") or ""
+                                    ).strip()
+                                _log.info(
+                                    "[%s] sandbox force repair: retry tool_calls=%s",
+                                    _wl,
+                                    [
+                                        tc.get("name")
+                                        if isinstance(tc, dict)
+                                        else getattr(tc, "name", None)
+                                        for tc in _retry_calls
+                                    ],
+                                )
+                        except Exception as _retry_exc:
+                            _log.warning(
+                                "[%s] sandbox force repair retry failed: %s",
+                                _wl,
+                                _retry_exc,
+                            )
+                _used_manifest_fallback = False
+                if not tool_calls:
+                    _fallback = resolve_orchestration_fallback_code(spec)
+                    if _fallback:
+                        _sandbox_code = _fallback
+                        _used_manifest_fallback = True
+                if not tool_calls and _sandbox_code:
+                    _repair_tc = synthesize_sandbox_tool_call(
+                        str(force_orch_tool),
+                        _sandbox_code,
+                    )
+                    resp = AIMessage(content="", tool_calls=[_repair_tc])
+                    tool_calls = [_repair_tc]
+                    _resp_content = ""
+                    _log.info(
+                        "[%s] sandbox orchestration repair → synthesized %s",
+                        _wl,
+                        force_orch_tool,
+                    )
         out = {**state, "messages": state["messages"] + [resp]}
-        if _market_inline_synth_attempted:
-            out["market_inline_synthesis_attempted"] = True
         if _llm_invoke_exc is not None:
             from duckclaw.integrations.llm_providers import is_transient_inference_connection_error
 

@@ -101,6 +101,8 @@ export function ConversationManagePanel({
         refreshToken={refreshToken}
         onSelect={handleSelect}
         onCreateNew={() => void handleCreate()}
+        conversationTitle={displayTitle}
+        onRenameConversation={onRename}
       />
 
       <section className="rounded-2xl border dark:border-dark-border p-3 space-y-3 bg-white dark:bg-dark-surface">

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { MessageSquarePlus } from 'lucide-react';
+import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import { adminService, type AdminConversation } from '@/services/adminService';
 
 type Props = {
@@ -9,23 +10,34 @@ type Props = {
   section?: string;
   activeSessionId: string | null;
   onSelect: (sessionId: string, meta?: AdminConversation) => void;
-  onCreateNew: () => void | Promise<void>;
+  onCreateNew?: () => void | Promise<void>;
+  /** Si false, oculta + (p. ej. burbuja: nueva conv en cabecera). Por defecto false cuando hay renombrar. */
+  showCreateButton?: boolean;
+  /** Título actual (para renombrar inline junto al desplegable). */
+  conversationTitle?: string | null;
+  onRenameConversation?: (title: string) => Promise<void>;
   refreshToken?: number;
   className?: string;
 };
 
-/** Selector nativo (móvil-friendly) para cambiar de conversación sin depender del inbox lateral. */
+/** Selector nativo (móvil-friendly) + editor de título inline (sin botón + cuando hay renombrar). */
 export function ConversationQuickPicker({
   tenantId = 'default',
   section = '',
   activeSessionId,
   onSelect,
   onCreateNew,
+  showCreateButton,
+  conversationTitle,
+  onRenameConversation,
   refreshToken = 0,
   className = '',
 }: Props) {
   const [items, setItems] = useState<AdminConversation[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const showNewButton =
+    (showCreateButton ?? !onRenameConversation) && Boolean(onCreateNew);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -47,12 +59,25 @@ export function ConversationQuickPicker({
     void load();
   }, [load, refreshToken]);
 
-  const labelFor = (c: AdminConversation) => {
+  const sessionIdLabel = (sessionId: string) =>
+    sessionId.length > 24 ? `${sessionId.slice(0, 10)}…${sessionId.slice(-8)}` : sessionId;
+
+  const labelFor = (c: Pick<AdminConversation, 'session_id' | 'title'>) => {
     const title = (c.title || '').trim();
     if (title) return title;
-    const sid = c.session_id || '';
-    return sid.length > 24 ? `${sid.slice(0, 10)}…${sid.slice(-8)}` : sid;
+    return sessionIdLabel(c.session_id || '');
   };
+
+  const activeTitle =
+    (conversationTitle || '').trim() ||
+    (activeSessionId
+      ? labelFor(
+          items.find((c) => c.session_id === activeSessionId) ?? {
+            session_id: activeSessionId,
+            title: '',
+          }
+        )
+      : '');
 
   return (
     <div
@@ -80,15 +105,24 @@ export function ConversationQuickPicker({
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          onClick={() => void onCreateNew()}
-          className="shrink-0 px-3 py-2.5 min-h-[44px] min-w-[44px] rounded-xl bg-gov-blue-700 text-white hover:bg-gov-blue-800 flex items-center justify-center gap-1 text-xs font-bold"
-          aria-label="Nueva conversación"
-          title="Nueva conversación"
-        >
-          <MessageSquarePlus size={16} aria-hidden />
-        </button>
+        {onRenameConversation && activeSessionId ? (
+          <EditableConversationTitle
+            value={activeTitle}
+            onSave={onRenameConversation}
+            trigger="iconButton"
+          />
+        ) : null}
+        {showNewButton ? (
+          <button
+            type="button"
+            onClick={() => void onCreateNew?.()}
+            className="shrink-0 px-3 py-2.5 min-h-[44px] min-w-[44px] rounded-xl bg-gov-blue-700 text-white hover:bg-gov-blue-800 flex items-center justify-center gap-1 text-xs font-bold"
+            aria-label="Nueva conversación"
+            title="Nueva conversación"
+          >
+            <MessageSquarePlus size={16} aria-hidden />
+          </button>
+        ) : null}
       </div>
     </div>
   );

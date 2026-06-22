@@ -20,6 +20,25 @@ Contrato canónico del singleton writer (`services/db-writer/`). Gateway, agente
 
 Nombres overrideables vía env (`DUCKCLAW_*_STATE_DELTA_QUEUE`, `QUEUE_NAME`). El writer consume las cinco en paralelo (`asyncio.gather`) con cola **reliable** (ver abajo).
 
+## Colas StateDelta de extensión (opcional)
+
+Productos externos (p. ej. repos que montan DuckClaw vía `DUCKCLAW_EXTENSION_ROOT`) pueden registrar **N** colas adicionales sin acoplar dominio al core:
+
+| Fuente | Variable / clave | Formato |
+|--------|------------------|---------|
+| Manifest | `state_delta_handlers` en `DUCKCLAW_FLY_MANIFEST` | Lista YAML |
+| Env | `DUCKCLAW_EXTRA_STATE_DELTA_HANDLERS` | JSON array |
+
+Cada entrada declara:
+
+- `entrypoint` (obligatorio): `module_stem:callable` resuelto bajo `lib_path` relativo al extension root.
+- `queue` **o** `queue_env` (+ opcional `default_queue` si la env no está definida).
+- `lib_path` (opcional): subdirectorio bajo el extension root; default = `lib_path` del manifest.
+
+El db-writer carga bindings vía `duckclaw.extensions.state_delta.load_state_delta_handler_bindings()` y arranca un loop reliable por cola (mismo contrato DLQ/reclaim que las colas core).
+
+Implementación del handler: vive **solo** en el repo extensión; el core no importa rutas ni nombres de producto.
+
 ## Cola Reliable (at-most-once → no pérdida en crash)
 
 Antes: `BRPOP` sacaba el mensaje de Redis antes de `COMMIT`; un crash del writer implicaba pérdida silenciosa.

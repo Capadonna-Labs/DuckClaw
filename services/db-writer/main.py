@@ -4,7 +4,9 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
+from typing import Any
 
 # Multi-Vault: rutas bajo db/ deben resolver igual que el Gateway (cwd suele ser services/db-writer).
 _writer_file = Path(__file__).resolve()
@@ -15,6 +17,11 @@ import sys
 _path_src = str(_repo_root / "packages" / "shared" / "src")
 if _path_src not in sys.path:
     sys.path.insert(0, _path_src)
+
+from duckclaw.extensions.state_delta import load_state_delta_handler_bindings
+
+# Resolve extension handlers before built-in handlers register the top-level ``models`` package.
+_extension_state_delta_bindings = load_state_delta_handler_bindings()
 
 import duckdb
 import redis.asyncio as redis
@@ -41,6 +48,7 @@ try:
     from visual_state_delta_handler import handle_visual_state_delta_message
 except ImportError:
     handle_visual_state_delta_message = None
+
 from duckclaw.db_write_queue import (
     TASK_STATUS_TTL_SEC,
     DbWriteTaskStatus,
@@ -94,6 +102,45 @@ def _ledger_insert_completed(
     )
 
 
+def _is_duckdb_lock_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "lock" in msg or "conflicting" in msg
+
+
+def _connect_duckdb_writable(
+    path: str,
+    *,
+    attempts: int = 12,
+    base_sleep_s: float = 0.25,
+) -> duckdb.DuckDBPyConnection:
+    """
+    Abre DuckDB RW con reintentos ante lock del gateway (RO/RW en el mismo archivo).
+
+    During a chat turn the gateway may hold a hub handle; the writer retries
+    until the lock clears instead of failing the ledger write.
+    """
+    last: BaseException | None = None
+    for i in range(max(1, attempts)):
+        try:
+            return duckdb.connect(path, read_only=False)
+        except Exception as exc:
+            last = exc
+            if _is_duckdb_lock_error(exc):
+                delay = base_sleep_s * min(i + 1, 8)
+                logger.warning(
+                    "db-writer DuckDB lock intento %s/%s, reintento en %.2fs: %s",
+                    i + 1,
+                    attempts,
+                    delay,
+                    exc,
+                )
+                time.sleep(delay)
+                continue
+            raise
+    assert last is not None
+    raise last
+
+
 def _run_typed_command_sync(
     task_id: str,
     command_type: str,
@@ -101,7 +148,7 @@ def _run_typed_command_sync(
     target_db_path: str,
 ) -> str:
     """Ejecuta comando tipado en DuckDB. Retorna 'completed' o 'already_completed'."""
-    conn = duckdb.connect(target_db_path, read_only=False)
+    conn = _connect_duckdb_writable(target_db_path)
     try:
         from duckclaw.schema_migrations import run_pending_migrations
 
@@ -149,7 +196,7 @@ def _run_legacy_sql_sync(
     payload: dict,
 ) -> str:
     """Ejecuta SQL legacy con transacción y ledger. Retorna 'completed' o 'already_completed'."""
-    conn = duckdb.connect(target_db_path, read_only=False)
+    conn = _connect_duckdb_writable(target_db_path)
     try:
         from duckclaw.schema_migrations import run_pending_migrations
 
@@ -551,7 +598,28 @@ async def _reports_state_delta_loop(redis_client: redis.Redis) -> None:
     )
 
 
-def _all_reliable_queues() -> list[str]:
+async def _extension_state_delta_loop(redis_client: redis.Redis, binding: Any) -> None:
+    q = str(binding.queue_name).strip()
+    label = str(binding.label or q).strip()
+    handler = binding.handler
+    logger.info("Escuchando cola extension StateDelta (reliable): %s [%s]", q, label)
+
+    async def _handler(redis_client: redis.Redis, message: str) -> None:
+        try:
+            await handler(redis_client, message)
+        except Exception as exc:  # noqa: BLE001
+            await push_dlq(redis_client, q, message, str(exc))
+            logger.exception("extension StateDelta handler no capturó excepción [%s]: %s", label, exc)
+
+    await run_reliable_queue_loop(
+        redis_client,
+        q,
+        _handler,
+        lease_sec=settings.PROCESSING_LEASE_SEC,
+    )
+
+
+def _all_reliable_queues(extra_bindings: list[Any] | None = None) -> list[str]:
     queues = [
         str(settings.QUEUE_NAME).strip(),
         str(settings.CONTEXT_INJECTION_QUEUE_NAME).strip(),
@@ -562,17 +630,24 @@ def _all_reliable_queues() -> list[str]:
         queues.append(str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip())
     if handle_reports_state_delta_message is not None:
         queues.append(str(settings.REPORTS_STATE_DELTA_QUEUE_NAME).strip())
+    for binding in extra_bindings or ():
+        queues.append(str(binding.queue_name).strip())
     return queues
 
 
 async def process_queue():
     """Consume cola SQL y colas transversales StateDelta en paralelo."""
+    extra_bindings = _extension_state_delta_bindings
     redis_client = redis.from_url(str(settings.REDIS_URL), decode_responses=True)
+    extension_tasks = [
+        _extension_state_delta_loop(redis_client, binding)
+        for binding in extra_bindings
+    ]
     try:
         await asyncio.gather(
             run_processing_reclaim_loop(
                 redis_client,
-                _all_reliable_queues(),
+                _all_reliable_queues(extra_bindings),
                 interval_sec=settings.PROCESSING_RECLAIM_INTERVAL_SEC,
             ),
             _sql_queue_loop(redis_client),
@@ -580,6 +655,7 @@ async def process_queue():
             _visual_state_delta_loop(redis_client),
             _meditate_state_delta_loop(redis_client),
             _reports_state_delta_loop(redis_client),
+            *extension_tasks,
         )
     except asyncio.CancelledError:
         logger.info("Señal de apagado recibida. Cerrando conexiones...")

@@ -18,6 +18,11 @@ _FORBIDDEN_SQL = re.compile(
     r"\b(insert|update|delete|drop|create|alter|attach|detach|copy|truncate|grant|revoke|call|execute)\b",
     re.IGNORECASE,
 )
+_DML_HEAD = re.compile(r"^(insert|update|delete)\b", re.IGNORECASE | re.DOTALL)
+_DDL_FORBIDDEN = re.compile(
+    r"\b(drop|create|alter|attach|detach|copy|truncate|grant|revoke|call|execute)\b",
+    re.IGNORECASE,
+)
 _LIMIT_RE = re.compile(r"\blimit\s+\d+", re.IGNORECASE)
 
 
@@ -93,6 +98,36 @@ def validate_readonly_sql(sql: str) -> None:
         raise ValueError("Solo se permiten consultas SELECT o WITH (read-only)")
 
 
+def classify_admin_explorer_sql(sql: str) -> str:
+    """Clasifica SQL del explorador admin: lectura (SELECT/WITH) o escritura DML."""
+    q = (sql or "").strip()
+    if not q:
+        raise ValueError("Query vacía")
+    if ";" in q.rstrip(";"):
+        raise ValueError("Solo se permite una sentencia SQL")
+    head = q.lstrip()[:12].lower()
+    if head.startswith("select") or head.startswith("with"):
+        return "read"
+    if _DML_HEAD.match(q.lstrip()):
+        return "write"
+    if _FORBIDDEN_SQL.search(q):
+        raise ValueError("Solo se permiten SELECT/WITH o DML (INSERT/UPDATE/DELETE)")
+    raise ValueError("Solo se permiten SELECT/WITH o DML (INSERT/UPDATE/DELETE)")
+
+
+def validate_admin_dml_sql(sql: str) -> None:
+    """Valida DML permitido en el explorador (INSERT/UPDATE/DELETE; sin DDL)."""
+    q = (sql or "").strip()
+    if not q:
+        raise ValueError("Query vacía")
+    if ";" in q.rstrip(";"):
+        raise ValueError("Solo se permite una sentencia SQL")
+    if not _DML_HEAD.match(q.lstrip()):
+        raise ValueError("Escritura admin: solo INSERT, UPDATE o DELETE")
+    if _DDL_FORBIDDEN.search(q):
+        raise ValueError("DDL no permitido desde el explorador (usa scripts de bootstrap)")
+
+
 def enforce_select_limit(sql: str, max_rows: int = _SELECT_LIMIT_DEFAULT) -> tuple[str, bool]:
     q = (sql or "").strip().rstrip(";")
     if _LIMIT_RE.search(q):
@@ -141,6 +176,7 @@ def execute_select(con: Any, sql: str) -> dict[str, Any]:
     raw_rows = cur.fetchall()
     rows = [[_json_cell(c) for c in row] for row in raw_rows]
     out: dict[str, Any] = {
+        "mode": "read",
         "columns": cols,
         "rows": rows,
         "row_count": len(rows),
@@ -148,6 +184,50 @@ def execute_select(con: Any, sql: str) -> dict[str, Any]:
     if limit_applied:
         out["limit_applied"] = _SELECT_LIMIT_DEFAULT
     return out
+
+
+def execute_admin_dml(
+    db_path: str,
+    sql: str,
+    *,
+    vault_user_id: str,
+    tenant_id: str,
+) -> dict[str, Any]:
+    """Encola DML tipado (RawSqlCommand) vía db-writer; no abre RW en el gateway."""
+    validate_admin_dml_sql(sql)
+    from duckclaw import db_write_queue
+    from duckclaw.write_commands import RawSqlCommand
+
+    command = RawSqlCommand(
+        query=sql.strip(),
+        params=[],
+        db_path=db_path,
+        user_id=vault_user_id,
+        tenant_id=tenant_id,
+    )
+    task_id = db_write_queue.enqueue_typed_command(
+        command,
+        db_path=db_path,
+        user_id=vault_user_id,
+    )
+    if not db_write_queue.spawn_inline_writes_enabled():
+        command_status = db_write_queue.poll_task_status_sync(
+            task_id,
+            timeout_sec=30.0,
+            interval_sec=0.05,
+        )
+        if command_status is None:
+            raise ValueError("timeout esperando db-writer")
+        if command_status.status != "success":
+            raise ValueError(command_status.detail or "db-writer rechazó la escritura")
+    return {
+        "mode": "write",
+        "status": "success",
+        "task_id": task_id,
+        "columns": [],
+        "rows": [],
+        "row_count": 0,
+    }
 
 
 def _table_exists(con: Any, name: str) -> bool:

@@ -238,18 +238,38 @@ def _append_success_audit(
     message: str,
     reply_plain_for_storage: str,
 ) -> None:
-    if not isinstance(result, dict) or result.get("_audit_done"):
-        return
-    try:
-        from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
-        from duckclaw.graphs.graph_server import get_db
+    if isinstance(result, dict) and not result.get("_audit_done"):
+        try:
+            from duckclaw.graphs.on_the_fly_commands import append_task_audit, get_worker_id_for_chat
+            from duckclaw.graphs.graph_server import get_db
 
-        db = get_db()
-        wid = get_worker_id_for_chat(db, prepared.session_id) or prepared.worker_id
-        plan_title = result.get("plan_title")
-        append_task_audit(db, prepared.session_id, wid, message, "SUCCESS", elapsed_ms, plan_title=plan_title)
-    except Exception:
-        pass
+            db = get_db()
+            wid = get_worker_id_for_chat(db, prepared.session_id) or prepared.worker_id
+            plan_title = result.get("plan_title")
+            append_task_audit(db, prepared.session_id, wid, message, "SUCCESS", elapsed_ms, plan_title=plan_title)
+        except Exception:
+            pass
+    _append_success_conversation_trace(
+        prepared,
+        result,
+        effective_worker_id,
+        elapsed_ms,
+        message,
+        reply_plain_for_storage,
+    )
+
+
+def _append_success_conversation_trace(
+    prepared: PreparedChatInvoke,
+    result: dict[str, Any] | Any,
+    effective_worker_id: str,
+    elapsed_ms: int,
+    message: str,
+    reply_plain_for_storage: str,
+) -> None:
+    """Persist SFT trace even when manager already wrote task_audit (_audit_done)."""
+    if not isinstance(result, dict):
+        return
     try:
         if os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower() not in (
             "true",

@@ -17,6 +17,7 @@ from duckclaw.workers.db_runtime import RUN_SANDBOX_TOOL_LLM_MAX_CHARS as _RUN_S
 from duckclaw.workers.factory_agent_node_helpers import (
     _identity_fields,
     _raise_if_chat_cancelled_from_state,
+    _spec_logical_worker_id,
     _worker_log_label,
 )
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
@@ -61,6 +62,23 @@ def make_tools_node(ctx: WorkerGraphContext):
         _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))
         set_log_context(tenant_id=_tenant_ctx, worker_id=worker_id, chat_id=_log_chat)
         _wl = _worker_log_label(worker_id)
+        try:
+            from duckclaw.extensions.tool_context import invoke_extension_worker_tool_context_hooks
+
+            invoke_extension_worker_tool_context_hooks(
+                state=state,
+                spec=spec,
+                db=db,
+                logical_worker_id=_spec_logical_worker_id(spec) or worker_id,
+                worker_path=path,
+                chat_id=str(state.get("chat_id") or state.get("session_id") or ""),
+                tenant_id=_tenant_ctx,
+                user_id=str(state.get("user_id") or ""),
+                integration_channel=str(state.get("integration_channel") or ""),
+                integration_label=str(state.get("integration_label") or ""),
+            )
+        except Exception:
+            _log.debug("worker tool context hooks skipped", exc_info=True)
         messages = state["messages"]
         last = messages[-1]
         tool_calls = getattr(last, "tool_calls", None) or []

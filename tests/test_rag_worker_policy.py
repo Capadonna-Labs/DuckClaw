@@ -16,6 +16,7 @@ from duckclaw.workers.tool_surface_policy import (
     tool_surface_intent_text,
     without_sandbox_tools,
     without_privileged_mutation_tools,
+    without_privileged_mutation_tools_for_auto_bind,
     without_storage_identity_tools,
 )
 
@@ -128,6 +129,25 @@ def test_auto_bind_hides_privileged_mutation_tools() -> None:
         "read_sql",
         "inspect_schema",
         "search_knowledge",
+    ]
+
+
+def test_manifest_can_expose_privileged_mutation_tools_in_auto_bind() -> None:
+    tools = [
+        ToolStub("read_sql"),
+        ToolStub("admin_sql"),
+        ToolStub("inspect_schema"),
+    ]
+    spec = type(
+        "Spec",
+        (),
+        {"tool_surface_config": {"expose_privileged_mutation_tools": ["admin_sql"]}},
+    )()
+
+    assert [tool.name for tool in without_privileged_mutation_tools_for_auto_bind(tools, spec=spec)] == [
+        "read_sql",
+        "admin_sql",
+        "inspect_schema",
     ]
 
 

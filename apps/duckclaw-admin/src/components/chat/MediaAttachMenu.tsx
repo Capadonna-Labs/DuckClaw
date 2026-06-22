@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Mic, Paperclip, Square, Volume2, VolumeX } from 'lucide-react';
+import { ImagePlus, Mic, Paperclip, ClipboardPaste, Square, Volume2, VolumeX } from 'lucide-react';
 
 export type MediaAttachMenuProps = {
   canSend: boolean;
@@ -15,6 +15,7 @@ export type MediaAttachMenuProps = {
   /** Botones sin borde para barra de composición tipo AI Studio. */
   variant?: 'default' | 'minimal';
   onPickImage: () => void;
+  onPaste?: () => void;
   onToggleVoiceResponse: () => void;
   onVoiceNoteClick: () => void;
 };
@@ -30,6 +31,7 @@ export function MediaAttachMenu({
   maxImages = 3,
   variant = 'default',
   onPickImage,
+  onPaste,
   onToggleVoiceResponse,
   onVoiceNoteClick,
 }: MediaAttachMenuProps) {
@@ -98,6 +100,21 @@ export function MediaAttachMenu({
             <ImagePlus size={16} aria-hidden />
             Imagen
           </button>
+          {onPaste ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={!canSend || loading || voiceRecording}
+              onClick={() => {
+                void onPaste();
+                setOpen(false);
+              }}
+              className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left hover:bg-gov-gray-100 dark:hover:bg-dark-bg disabled:opacity-50"
+            >
+              <ClipboardPaste size={16} aria-hidden />
+              Pegar
+            </button>
+          ) : null}
           <button
             type="button"
             role="menuitem"

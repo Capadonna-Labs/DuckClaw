@@ -37,7 +37,7 @@ def test_run_heartbeat_builds_payloads(monkeypatch: Any) -> None:
     anomalies: List[Dict[str, Any]] = [
         {
             "tenant_id": "analytics_worker",
-            "belief_key": "presupuesto_mensual",
+            "belief_key": "monthly_metric",
             "observed_value": 5000.0,
             "admin_chat_id": "12345",
         }

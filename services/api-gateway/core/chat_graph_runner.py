@@ -113,7 +113,7 @@ async def run_chat_graph(
                     is_system_prompt=prepared.is_system_prompt,
                     outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
                     entry_worker_id=(worker_id or "").strip() or None,
-                    project_id=prepared.payload.project_id,
+                    integration_channel=(dc.channel or "").strip() or None,
                 )
             except ChatCancelledError:
                 try:

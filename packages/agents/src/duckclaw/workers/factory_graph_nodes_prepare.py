@@ -46,7 +46,19 @@ def make_prepare_node(ctx: WorkerGraphContext):
             )
         else:
             prompt = effective_prompt
-        messages = [SystemMessage(content=prompt)]
+        integration_label = (state.get("integration_label") or "").strip()
+        integration_prefix = ""
+        if integration_label:
+            integration_prefix = f"Integración activa: **{integration_label}**"
+            if integration_label == "Interfaz":
+                integration_prefix += (
+                    " (Next.js Admin). Los comandos fly de Telegram no aplican; "
+                    "usa herramientas o `/approve-code` en el chat."
+                )
+        messages: list[Any] = []
+        if integration_prefix:
+            messages.append(SystemMessage(content=integration_prefix))
+        messages.append(SystemMessage(content=prompt))
         for h in (state.get("history") or []):
             role = (h.get("role") or "").lower()
             content = h.get("content") or ""

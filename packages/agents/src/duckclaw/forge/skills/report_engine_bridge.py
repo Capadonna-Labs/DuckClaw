@@ -9,17 +9,31 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
-from duckclaw.forge.skills.search_project_knowledge_bridge import _open_hub_db
-
 
 def _hub_db_path() -> str:
-    from duckclaw.gateway_db import get_gateway_db_path, get_session_db_path
+    from duckclaw.gateway_db import get_gateway_db_path
 
-    for resolver in (get_session_db_path, get_gateway_db_path):
-        path = (resolver() or "").strip()
-        if path:
-            return path
+    path = (get_gateway_db_path() or "").strip()
+    if path:
+        return path
     raise RuntimeError("No hay ruta DuckDB del gateway para Report Engine.")
+
+
+def _open_hub_db() -> Any:
+    """Reutiliza la conexión RW del worker si es el mismo hub (evita lock RO+RW)."""
+    from duckclaw.forge.skills.report_engine_hub_context import get_report_engine_hub_db
+    from duckclaw.state_delta_vault import _same_vault_db_path
+
+    hub_path = _hub_db_path()
+    reuse = get_report_engine_hub_db()
+    if reuse is not None:
+        rpath = str(getattr(reuse, "_path", "") or "").strip()
+        if rpath and _same_vault_db_path(rpath, hub_path):
+            return reuse
+
+    from duckclaw import DuckClaw
+
+    return DuckClaw(hub_path, read_only=True)
 
 
 def _session_scope() -> tuple[str, str, str]:
@@ -36,10 +50,32 @@ def _session_scope() -> tuple[str, str, str]:
     )
 
 
+def _apply_report_command_inline(db: Any, body: dict[str, Any]) -> None:
+    from duckclaw.write_command_handlers import dispatch_command
+
+    ensure = getattr(db, "_ensure_python_exec_connection", None)
+    if callable(ensure):
+        ensure()
+    con = getattr(db, "_con", None)
+    if con is None:
+        raise RuntimeError("Sin conexión DuckDB activa para Report Engine inline")
+    con.execute("BEGIN TRANSACTION")
+    try:
+        dispatch_command(con, body)
+        con.execute("COMMIT")
+    except Exception:
+        try:
+            con.execute("ROLLBACK")
+        except Exception:
+            pass
+        raise
+
+
 def _dispatch_write(payload: dict[str, Any]) -> None:
     """Encola comando tipado y espera confirmación del db-writer antes de continuar."""
     from duckclaw.db_write_queue import enqueue_or_apply_duckdb_write_sync, poll_task_status_sync
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
+    from duckclaw.state_delta_vault import _same_vault_db_path
 
     tenant_id, actor_email, _ = _session_scope()
     task_id = str(uuid.uuid4())
@@ -49,23 +85,60 @@ def _dispatch_write(payload: dict[str, Any]) -> None:
         "actor_email": actor_email,
         **payload,
     }
-    enqueue_or_apply_duckdb_write_sync(
-        db_path=_hub_db_path(),
-        command=body,
-        user_id=actor_email,
-        tenant_id=tenant_id,
+    hub_path = _hub_db_path()
+    reuse = None
+    try:
+        from duckclaw.forge.skills.report_engine_hub_context import get_report_engine_hub_db
+
+        reuse = get_report_engine_hub_db()
+    except Exception:
+        reuse = None
+
+    same_hub_open = bool(
+        reuse is not None
+        and _same_vault_db_path(str(getattr(reuse, "_path", "") or ""), hub_path)
     )
-    if spawn_inline_writes_enabled():
+
+    if spawn_inline_writes_enabled() and same_hub_open and reuse is not None:
+        _apply_report_command_inline(reuse, body)
         return
-    status = poll_task_status_sync(task_id, timeout_sec=10.0, interval_sec=0.08)
-    if status is None:
-        raise RuntimeError(
-            "Timeout esperando confirmación del db-writer. "
-            "Revisa que DuckClaw-DB-Writer esté activo (pm2) o habilita escrituras inline."
+
+    released = False
+    if same_hub_open and reuse is not None and not spawn_inline_writes_enabled():
+        release = getattr(reuse, "release_file_handle_for_external_writer", None)
+        if callable(release):
+            try:
+                release()
+                released = True
+            except Exception:
+                released = False
+
+    try:
+        enqueue_or_apply_duckdb_write_sync(
+            db_path=hub_path,
+            command=body,
+            user_id=actor_email,
+            tenant_id=tenant_id,
         )
-    if status.status != "success":
-        detail = (status.detail or "db-writer rechazó el comando").strip()
-        raise RuntimeError(detail)
+        if spawn_inline_writes_enabled():
+            return
+        status = poll_task_status_sync(task_id, timeout_sec=10.0, interval_sec=0.08)
+        if status is None:
+            raise RuntimeError(
+                "Timeout esperando confirmación del db-writer. "
+                "Revisa que DuckClaw-DB-Writer esté activo (pm2) o habilita escrituras inline."
+            )
+        if status.status != "success":
+            detail = (status.detail or "db-writer rechazó el comando").strip()
+            raise RuntimeError(detail)
+    finally:
+        if released and reuse is not None:
+            resume = getattr(reuse, "resume_file_handle", None)
+            if callable(resume):
+                try:
+                    resume()
+                except Exception:
+                    pass
 
 
 def list_report_templates(limit: int = 50) -> str:

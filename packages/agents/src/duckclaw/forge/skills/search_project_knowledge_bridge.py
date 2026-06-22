@@ -24,6 +24,17 @@ def _open_hub_db() -> Any:
     path = _resolve_hub_db_path()
     if not path:
         raise RuntimeError("No hay ruta DuckDB del gateway disponible para búsqueda RAG.")
+    try:
+        from duckclaw.forge.skills.report_engine_hub_context import get_report_engine_hub_db
+        from duckclaw.state_delta_vault import _same_vault_db_path
+
+        reuse = get_report_engine_hub_db()
+        if reuse is not None:
+            rpath = str(getattr(reuse, "_path", "") or "").strip()
+            if rpath and _same_vault_db_path(rpath, path):
+                return reuse
+    except Exception:
+        pass
     from duckclaw import DuckClaw
 
     return DuckClaw(path, read_only=True)

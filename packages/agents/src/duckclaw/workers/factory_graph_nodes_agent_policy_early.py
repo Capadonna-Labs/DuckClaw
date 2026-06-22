@@ -105,6 +105,12 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     set_session_chat_id(str(_chat_ctx))
                     username = str(state.get("username") or state.get("actor_email") or "").strip()
                     set_session_actor_email(username or f"chat:{_chat_ctx}")
+                    try:
+                        from duckclaw.forge.skills.report_engine_hub_context import set_report_engine_hub_db
+
+                        set_report_engine_hub_db(db)
+                    except Exception:
+                        pass
                 except Exception:
                     pass
                 _wl = _worker_log_label(worker_id)

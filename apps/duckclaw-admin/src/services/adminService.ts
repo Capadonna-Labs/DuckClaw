@@ -314,6 +314,9 @@ export interface DuckdbQueryResult {
   vault_user_id?: string;
   actor_email?: string;
   tenant_id?: string;
+  mode?: 'read' | 'write';
+  status?: string;
+  task_id?: string;
   columns: string[];
   rows: unknown[][];
   row_count: number;

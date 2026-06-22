@@ -24,6 +24,7 @@ class ToolChainDef:
     after_tools: frozenset[str]
     when_intents: frozenset[str]
     force_next: str
+    force_next_alternates: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,8 @@ class AffirmFollowupDef:
     short_affirm_patterns: tuple[re.Pattern[str], ...]
     pending_action_patterns: tuple[str, ...]
     planned_task_guardrail: str
+    force_tool_when_pending: str | None = None
+    force_tool_alternates: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -38,6 +41,8 @@ class ReplanRuleDef:
     when_intent: str
     require_tool: str
     unless_tools: frozenset[str]
+    after_tools: frozenset[str] = frozenset()
+    require_tool_alternates: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,7 @@ class ToolOrchestration:
     tool_chains: tuple[ToolChainDef, ...]
     affirm_followup: AffirmFollowupDef | None
     replan_rules: tuple[ReplanRuleDef, ...]
+    sandbox_force_fallback_snippet: str | None = None
 
 
 def _compile_patterns(raw: Any) -> tuple[re.Pattern[str], ...]:
@@ -106,6 +112,8 @@ def parse_tool_orchestration(spec: Any) -> ToolOrchestration | None:
                 str(x).strip() for x in (after if isinstance(after, list) else []) if str(x).strip()
             )
             wi = c.get("when_intent")
+            if wi is None:
+                wi = c.get("when_intents")
             if isinstance(wi, str):
                 intent_set = frozenset({wi.strip()}) if wi.strip() else frozenset()
             elif isinstance(wi, list):
@@ -113,9 +121,20 @@ def parse_tool_orchestration(spec: Any) -> ToolOrchestration | None:
             else:
                 intent_set = frozenset()
             fn = (str(c.get("force_next") or "").strip() or "")
+            alt_raw = c.get("force_next_alternates")
+            alt_set = frozenset(
+                str(x).strip()
+                for x in (alt_raw if isinstance(alt_raw, list) else [])
+                if str(x).strip()
+            )
             if after_set and intent_set and fn:
                 chains.append(
-                    ToolChainDef(after_tools=after_set, when_intents=intent_set, force_next=fn)
+                    ToolChainDef(
+                        after_tools=after_set,
+                        when_intents=intent_set,
+                        force_next=fn,
+                        force_next_alternates=alt_set,
+                    )
                 )
 
     affirm: AffirmFollowupDef | None = None
@@ -129,11 +148,20 @@ def parse_tool_orchestration(spec: Any) -> ToolOrchestration | None:
             if str(x).strip()
         )
         guard = (str(af.get("planned_task_guardrail") or "").strip() or "")
+        force_pending = (str(af.get("force_tool_when_pending") or "").strip() or None)
+        alt_raw = af.get("force_tool_alternates")
+        alt_set = frozenset(
+            str(x).strip()
+            for x in (alt_raw if isinstance(alt_raw, list) else [])
+            if str(x).strip()
+        )
         if sap and pap and guard:
             affirm = AffirmFollowupDef(
                 short_affirm_patterns=sap,
                 pending_action_patterns=pap,
                 planned_task_guardrail=guard,
+                force_tool_when_pending=force_pending,
+                force_tool_alternates=alt_set,
             )
 
     replan_rules: list[ReplanRuleDef] = []
@@ -150,12 +178,39 @@ def parse_tool_orchestration(spec: Any) -> ToolOrchestration | None:
                 ut_set = frozenset(
                     str(x).strip() for x in (ut if isinstance(ut, list) else []) if str(x).strip()
                 )
+                at = r.get("after_tools")
+                at_set = frozenset(
+                    str(x).strip() for x in (at if isinstance(at, list) else []) if str(x).strip()
+                )
+                alt_raw = r.get("require_tool_alternates")
+                alt_set = frozenset(
+                    str(x).strip()
+                    for x in (alt_raw if isinstance(alt_raw, list) else [])
+                    if str(x).strip()
+                )
                 if wi and rt:
                     replan_rules.append(
-                        ReplanRuleDef(when_intent=wi, require_tool=rt, unless_tools=ut_set)
+                        ReplanRuleDef(
+                            when_intent=wi,
+                            require_tool=rt,
+                            unless_tools=ut_set,
+                            after_tools=at_set,
+                            require_tool_alternates=alt_set,
+                        )
                     )
 
-    if not intents and not chains and not affirm and not replan_rules and not clock_tool:
+    fallback_snippet = (
+        str(raw.get("sandbox_force_fallback_snippet") or "").strip() or None
+    )
+
+    if (
+        not intents
+        and not chains
+        and not affirm
+        and not replan_rules
+        and not clock_tool
+        and not fallback_snippet
+    ):
         return None
 
     return ToolOrchestration(
@@ -165,6 +220,7 @@ def parse_tool_orchestration(spec: Any) -> ToolOrchestration | None:
         tool_chains=tuple(chains),
         affirm_followup=affirm,
         replan_rules=tuple(replan_rules),
+        sandbox_force_fallback_snippet=fallback_snippet,
     )
 
 
@@ -193,6 +249,19 @@ def _last_human_index(messages: list[Any]) -> int:
     return max(0, len(messages) - 1)
 
 
+def _first_bindable_tool(
+    candidates: list[str],
+    tools_by_name: dict[str, Any],
+    ran: set[str] | frozenset[str],
+) -> str | None:
+    """Return first candidate present in ``tools_by_name`` and not yet run."""
+    for name in candidates:
+        n = (name or "").strip()
+        if n and n in tools_by_name and n not in ran:
+            return n
+    return None
+
+
 def _tools_since(messages: list[Any], from_idx: int) -> list[str]:
     names: list[str] = []
     for m in messages[max(0, from_idx + 1) :]:
@@ -205,6 +274,77 @@ def _tools_since(messages: list[Any], from_idx: int) -> list[str]:
 
 def _tool_called_since(messages: list[Any], from_idx: int, tool_name: str) -> bool:
     return tool_name in _tools_since(messages, from_idx)
+
+
+def _messages_have_pending_actions(messages: list[Any], markers: tuple[str, ...]) -> bool:
+    """True if any assistant message in history matches pending-action markers."""
+    from langchain_core.messages import AIMessage
+
+    for msg in reversed(messages or []):
+        if not isinstance(msg, AIMessage):
+            continue
+        body = str(getattr(msg, "content", "") or "").strip()
+        if body and _assistant_has_pending_actions(body, markers):
+            return True
+    return False
+
+
+def _force_tool_on_affirm_pending(
+    orch: ToolOrchestration,
+    incoming: str,
+    messages: list[Any],
+    tools_by_name: dict[str, Any],
+) -> str | None:
+    """
+    Manifest ``affirm_followup.force_tool_when_pending``: short affirm + pending assistant
+    action → force named tool (worker declares tool id; framework stays domain-agnostic).
+    """
+    af = orch.affirm_followup
+    pending_tool = (af.force_tool_when_pending or "").strip() if af else ""
+    if not af or not pending_tool or not _is_short_affirm(incoming, af.short_affirm_patterns):
+        return None
+    lh = _last_human_index(messages)
+    ran = set(_tools_since(messages, lh))
+    candidates = [pending_tool, *list(af.force_tool_alternates or ())]
+    forced = _first_bindable_tool(candidates, tools_by_name, ran)
+    if not forced:
+        return None
+    if not _messages_have_pending_actions(messages, af.pending_action_patterns):
+        return None
+    return forced
+
+
+def _force_replan_require_tool_after_prereqs(
+    orch: ToolOrchestration,
+    incoming: str,
+    messages: list[Any],
+    tools_by_name: dict[str, Any],
+) -> str | None:
+    """
+    Manifest ``replan.rules[].after_tools``: once prereqs ran for ``when_intent``, force
+    ``require_tool`` before the turn ends (same contract as ``tool_chains``, replan-shaped).
+    """
+    intent = match_intent(incoming, orch)
+    if not intent:
+        return None
+    lh = _last_human_index(messages)
+    ran = set(_tools_since(messages, lh))
+    for rule in orch.replan_rules:
+        if rule.when_intent != intent:
+            continue
+        required = (rule.require_tool or "").strip()
+        if not required or required in ran:
+            continue
+        if rule.unless_tools and ran.intersection(rule.unless_tools):
+            continue
+        prereqs = list(rule.after_tools)
+        if not prereqs or not all(tool in ran for tool in prereqs):
+            continue
+        candidates = [required, *list(rule.require_tool_alternates or ())]
+        forced = _first_bindable_tool(candidates, tools_by_name, ran)
+        if forced:
+            return forced
+    return None
 
 
 def chain_after_tool(
@@ -224,36 +364,72 @@ def chain_after_tool(
     for chain in orch.tool_chains:
         if intent not in chain.when_intents:
             continue
-        if ran != list(chain.after_tools):
+        prereqs = list(chain.after_tools)
+        if not prereqs or not all(tool in ran for tool in prereqs):
             continue
-        nxt = chain.force_next
-        if nxt in tools_by_name and nxt not in ran:
-            return nxt
+        candidates = [chain.force_next, *list(chain.force_next_alternates or ())]
+        forced = _first_bindable_tool(candidates, tools_by_name, set(ran))
+        if forced:
+            return forced
     return None
 
 
-def resolve_forced_tool(
+def _sandbox_affirm_prereqs_met(
+    orch: ToolOrchestration,
+    incoming: str,
+    pending_tool: str,
+    messages: list[Any],
+) -> bool:
+    """
+    Manifest ``tool_chains``: do not affirm-force sandbox until ``after_tools`` ran
+    (e.g. ``read_sql`` before ``execute_sandbox_script``).
+    """
+    if pending_tool not in ("execute_sandbox_script", "run_sandbox"):
+        return True
+    intent = match_intent(incoming, orch)
+    if not intent:
+        return True
+    lh = _last_human_index(messages)
+    ran = set(_tools_since(messages, lh))
+    for chain in orch.tool_chains:
+        if intent not in chain.when_intents:
+            continue
+        candidates = {chain.force_next, *chain.force_next_alternates}
+        if pending_tool not in candidates:
+            continue
+        prereqs = list(chain.after_tools)
+        if prereqs and not all(tool in ran for tool in prereqs):
+            return False
+    return True
+
+
+def _resolve_intent_force_first_tool(
     orch: ToolOrchestration,
     incoming: str,
     messages: list[Any],
     tools_by_name: dict[str, Any],
 ) -> str | None:
-    """
-    Priority: tool_chains (post gct) > clock_anchor > intent force_first_tool (may run after prior tools).
-    Returns tool name to force, or None.
-    """
-    chained = chain_after_tool(orch, incoming, messages, tools_by_name)
-    if chained:
-        return chained
-
-    intent = match_intent(incoming, orch)
-    if not intent:
-        return None
-
+    """Clock anchor + manifest intent ``force_first_tool`` for the current turn."""
     lh = _last_human_index(messages)
     ran = _tools_since(messages, lh)
     last_msg = messages[-1] if messages else None
     already_tool = isinstance(last_msg, ToolMessage)
+
+    intent = match_intent(incoming, orch)
+    if not intent:
+        anchor = orch.clock_anchor_tool
+        text = (incoming or "").strip()
+        if (
+            anchor
+            and anchor in tools_by_name
+            and anchor not in ran
+            and not already_tool
+            and text
+            and "[system_directive:" not in text.lower()
+            and not orch.clock_before_intents
+        ):
+            return anchor
+        return None
 
     if orch.clock_anchor_tool:
         anchor = orch.clock_anchor_tool
@@ -276,9 +452,41 @@ def resolve_forced_tool(
     if not already_tool:
         return ft
 
-    # Encadenar intent tool tras tools previas del mismo turno (p. ej. read_sql → admin_sql).
     if already_tool and ft not in ran:
         return ft
+
+    return None
+
+
+def resolve_forced_tool(
+    orch: ToolOrchestration,
+    incoming: str,
+    messages: list[Any],
+    tools_by_name: dict[str, Any],
+) -> str | None:
+    """
+    Priority: tool_chains > replan prereqs > clock/intent first tools > affirm follow-up.
+    Returns tool name to force, or None.
+    """
+    chained = chain_after_tool(orch, incoming, messages, tools_by_name)
+    if chained:
+        return chained
+
+    replan_after_prereqs = _force_replan_require_tool_after_prereqs(
+        orch, incoming, messages, tools_by_name
+    )
+    if replan_after_prereqs:
+        return replan_after_prereqs
+
+    intent_first = _resolve_intent_force_first_tool(orch, incoming, messages, tools_by_name)
+    if intent_first:
+        return intent_first
+
+    affirm_pending = _force_tool_on_affirm_pending(orch, incoming, messages, tools_by_name)
+    if affirm_pending and _sandbox_affirm_prereqs_met(
+        orch, incoming, affirm_pending, messages
+    ):
+        return affirm_pending
 
     return None
 
@@ -369,15 +577,20 @@ def replan_rule_triggered(
     orch: ToolOrchestration,
     incoming: str,
     tools_used: list[str] | None,
+    *,
+    user_incoming: str | None = None,
 ) -> tuple[bool, str]:
     intent = match_intent(incoming, orch)
+    if not intent and user_incoming:
+        intent = match_intent(user_incoming, orch)
     if not intent:
         return False, ""
     used = {str(t).strip() for t in (tools_used or []) if str(t).strip()}
     for rule in orch.replan_rules:
         if rule.when_intent != intent:
             continue
-        if rule.require_tool in used:
+        satisfied_tools = {rule.require_tool, *rule.require_tool_alternates}
+        if used.intersection(satisfied_tools):
             continue
         if rule.unless_tools and used.intersection(rule.unless_tools):
             continue

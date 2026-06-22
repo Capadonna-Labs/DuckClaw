@@ -84,7 +84,6 @@ def initialize_worker_graph_context(
             )
         except Exception as exc:
             _log.debug("worker runtime policy unavailable for %s: %s", worker_id, exc)
-    ctx.is_market_analysis_worker = _worker_has_runtime_capability(spec, "market_analysis")
     path = _get_db_path(worker_id, instance_name, db_path)
     ctx.path = path
     shared_resolved = _resolve_shared_db_path(spec, shared_db_path)
@@ -347,4 +346,7 @@ def initialize_worker_graph_context(
     ctx.tools_sandbox_off_bind = _tools_sandbox_off_bind
     if llm is not None:
         build_agent_llm_bind(ctx)
+    _manifest_max_rounds = getattr(spec, "agent_node_max_tool_rounds", None)
+    if _manifest_max_rounds:
+        ctx.max_tool_rounds = max(1, int(_manifest_max_rounds))
     return ctx

@@ -213,7 +213,15 @@ def evaluate_worker_replan(
 
             orch_replan = parse_tool_orchestration(spec_inv)
             if orch_replan:
-                orch_trig, orch_reason = replan_rule_triggered(orch_replan, combined, tools_list)
+                _user_in = ""
+                if isinstance(worker_invoke, dict):
+                    _user_in = str(worker_invoke.get("user_incoming") or "").strip()
+                orch_trig, orch_reason = replan_rule_triggered(
+                    orch_replan,
+                    combined,
+                    tools_list,
+                    user_incoming=_user_in or None,
+                )
                 if orch_trig:
                     reasons_acc = merge_failure_reasons(reasons_acc, orch_reason)
                     if pa + 1 < max_a:
@@ -285,6 +293,12 @@ def prepare_worker_invoke_state(
         worker_state["project_id"] = project_id
     if out_tok:
         worker_state["outbound_telegram_bot_token"] = out_tok
+    ich = (state.get("integration_channel") or "").strip()
+    ilbl = (state.get("integration_label") or "").strip()
+    if ich:
+        worker_state["integration_channel"] = ich
+    if ilbl:
+        worker_state["integration_label"] = ilbl
     mission = state.get("active_mission")
     if isinstance(mission, dict) and _worker_matches_id(assigned, mission.get("target_worker")):
         worker_state["suppress_subagent_egress"] = True

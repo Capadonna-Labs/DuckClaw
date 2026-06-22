@@ -259,7 +259,6 @@ export function FloatingAdminChat() {
           onSelect: (id, meta) => selectConversation(id, meta?.title),
           onCreateNew: () => void createConversation(),
         }}
-        projectLabel={projectId || undefined}
         className="flex-1 min-h-0 w-full"
       />
     );

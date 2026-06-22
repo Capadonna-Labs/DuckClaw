@@ -53,8 +53,11 @@ def _llm_plan(incoming: str) -> tuple[str, list[str]]:
         is not None
     ):
         title = "Consulta de Contenido de Tabla"
-    elif "saldo" in lower or "dinero" in lower or "cuenta" in lower:
-        title = "Consulta de Saldo Total"
+    elif re.search(
+        r"\b(duckdb|base\s+de\s+datos|read_sql|registros?|datos\s+locales|tabla\s+local)\b",
+        lower,
+    ):
+        title = "Consulta de Datos Locales"
     elif "tabla" in lower or "tablas" in lower or "schema" in lower or "esquema" in lower:
         title = "Inspección de Esquema de DB"
     elif "hora" in lower or "fecha" in lower or "hoy" in lower:

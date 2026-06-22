@@ -104,40 +104,46 @@ def resilience_escalation_wants_read_sql(incoming: str, plan_attempt_index: int)
     if plan_attempt_index < 1:
         return False
     low = (incoming or "").lower()
-    if plan_attempt_index >= 2:
-        keys = (
-            "cuenta",
-            "cuentas",
-            "saldo",
-            "balance",
-            "iban",
-            "duckdb",
-            "tabla",
-            "datos",
-            "accounts",
-            "extracto",
-            "movimiento",
-        )
-        return any(k in low for k in keys)
-    keys = (
-        "cuenta",
-        "cuentas",
-        "saldo",
-        "balance",
-        "extracto",
-        "movimiento",
-        "iban",
-        "deuda",
-        "deudas",
-        "cuota",
-        "presupuesto",
-        "gasto",
-        "transacc",
-        "ajuste",
-        "aplica",
-        "procede",
+    db_markers = (
+        "duckdb",
+        "base de datos",
+        "en la base",
+        "en la db",
+        "en el hub",
+        "read_sql",
+        "inspect_schema",
+        "tabla",
+        "tablas",
+        "registro",
+        "registros",
+        "filas",
+        "schema",
+        "datos locales",
+        "registros locales",
+        "persistid",
+        "sql",
     )
-    return any(k in low for k in keys)
+    if plan_attempt_index >= 2:
+        return any(k in low for k in db_markers) or "datos" in low
+    read_intent = (
+        "consulta",
+        "resumen",
+        "estado",
+        "lista",
+        "muestra",
+        "detalle",
+        "total",
+        "cuánto",
+        "cuanto",
+        "verifica",
+        "valida",
+        "confirma",
+    )
+    if not any(k in low for k in read_intent):
+        return False
+    return any(k in low for k in db_markers) or any(
+        k in low for k in ("datos", "registros", "filas", "tablas")
+    )
 
 
 def merge_failure_reasons(prev: Any, new: str) -> list[str]:

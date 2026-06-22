@@ -6,10 +6,6 @@ from typing import Any
 
 from langchain_core.messages import AIMessage
 
-from duckclaw.egress.tool_response_repair import (
-    deterministic_tool_response_summary as _deterministic_tool_response_summary,
-    reply_is_tool_json_echo as _reply_is_tool_json_echo,
-)
 from duckclaw.workers.factory_agent_node_helpers import (
     _last_human_message_index,
     _spec_logical_worker_id,
@@ -42,16 +38,8 @@ def maybe_reply_for_tool_cap_exhausted(
 
     spec_lid = _spec_logical_worker_id(spec)
     lh = _last_human_message_index(list(msgs))
-    det = _deterministic_tool_response_summary(
-        list(msgs),
-        lh,
-        spec_lid,
-        incoming,
-        worker_display_name=str(getattr(spec, "name", None) or ""),
-    )
+    _ = lh, spec_lid, incoming  # síntesis NL en set_reply vía repair_tool_response_egress_reply
     reply = TOOL_CAP_EXHAUSTED_REPLY
-    if (det or "").strip() and not _reply_is_tool_json_echo(det):
-        reply = f"{det.strip()}\n\n{reply}"
 
     stripped_msgs: list[Any] | None = None
     if isinstance(last, AIMessage):

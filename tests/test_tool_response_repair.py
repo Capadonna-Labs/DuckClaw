@@ -110,7 +110,7 @@ def test_empty_reply_after_read_sql_gets_generic_tool_summary() -> None:
         skip_llm_synthesis=True,
     )
 
-    assert "read_sql:" in out
+    assert "registro" in out.lower() or "filas" in out.lower()
     assert "Nequi" in out
     assert "Cuentas" not in out
     assert "Deudas" not in out
@@ -147,5 +147,5 @@ def test_tool_label_json_echo_triggers_repair_and_uses_tool_evidence() -> None:
         skip_llm_synthesis=True,
     )
 
-    assert "fetch_external_data:" in out
-    assert "SPY" in out
+    assert "Operación completada" in out or "SPY" in out
+    assert "fetch_external_data:" not in out

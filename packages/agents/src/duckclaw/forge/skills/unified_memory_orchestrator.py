@@ -19,7 +19,7 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 _SQL_HINT = re.compile(
-    r"\b(cuántos|cuantos|conteo|count|suma|saldo|tabla|roles|usuarios|permisos|unidades|workflow|"
+    r"\b(cuántos|cuantos|conteo|count|suma|tabla|roles|usuarios|permisos|unidades|workflow|"
     r"transacc|listar|total|cuántas|cuantas|datos\s+de|select)\b",
     re.IGNORECASE,
 )

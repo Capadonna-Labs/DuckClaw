@@ -24,7 +24,17 @@ def _repo_root() -> Path:
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(argv, capture_output=True, text=True, check=False)
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:
+        cmd = argv[0] if argv else "comando"
+        typer.echo(
+            f"No se encontró '{cmd}' en PATH. "
+            "Instala PM2: npm install -g pm2 (o: uv run duckops up / duckops prerequisites). "
+            "Sin PM2: uv run duckops serve --gateway en otra terminal.",
+            err=True,
+        )
+        raise typer.Exit(127) from exc
 
 
 def _resolve_provider(provider: str) -> str:

@@ -241,14 +241,50 @@ async def duckdb_run_query(
     body: DuckdbQueryBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    from core.admin_duckdb_readonly import execute_select
+    from core.admin_duckdb_readonly import (
+        classify_admin_explorer_sql,
+        execute_admin_dml,
+        execute_select,
+    )
 
     try:
-        con, resolved, _scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+        sql_kind = classify_admin_explorer_sql(body.query)
+    except ValueError as exc:
+        raise _problem(400, "Consulta no permitida", str(exc)) from exc
+
+    try:
+        con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
         raise _problem(403, "Vault no autorizado", str(exc)) from exc
+
+    if sql_kind == "write":
+        con.close()
+        try:
+            result = execute_admin_dml(
+                resolved,
+                body.query,
+                vault_user_id=scope["vault_user_id"],
+                tenant_id=scope["tenant_id"],
+            )
+        except ValueError as exc:
+            raise _problem(400, "Escritura no permitida", str(exc)) from exc
+        except Exception as exc:
+            raise _problem(400, "Error SQL", str(exc)) from exc
+        _admin_audit(
+            "duckdb.query.write",
+            resolved,
+            body.query.strip()[:500],
+            actor=actor,
+            meta={
+                "tenant_id": scope["tenant_id"],
+                "task_id": result.get("task_id"),
+                "vault_user_id": scope["vault_user_id"],
+            },
+        )
+        return {"vault_path": resolved, **result}
+
     try:
         try:
             result = execute_select(con, body.query)

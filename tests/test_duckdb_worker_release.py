@@ -25,6 +25,25 @@ def test_release_file_handle_for_external_writer_closes_rw_python(tmp_path: Path
         con2.close()
 
 
+def test_query_uses_ephemeral_read_while_writer_defer_active(tmp_path: Path) -> None:
+    path = str(tmp_path / "vault.duckdb")
+    con = duckdb.connect(path)
+    try:
+        con.execute("CREATE TABLE t1(x INTEGER)")
+        con.execute("INSERT INTO t1 VALUES (42)")
+    finally:
+        con.close()
+    db = DuckClaw(path, read_only=True, engine="python")
+    db.release_file_handle_for_external_writer()
+    assert db._con is None
+    assert db._external_writer_defer_active()
+    out = db.query("SELECT x FROM t1")
+    assert "42" in out
+    assert db._con is None
+    db.resume_file_handle()
+    assert db._con is not None
+
+
 def test_release_worker_db_handle_closes_and_pops_cache(tmp_path: Path) -> None:
     from duckclaw.graphs import manager_graph as mg
     from duckclaw.manager import manager_worker_cache as mwc

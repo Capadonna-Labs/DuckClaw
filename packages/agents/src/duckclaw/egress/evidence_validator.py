@@ -10,39 +10,31 @@ from typing import Any, Optional, Tuple
 
 from langchain_core.messages import SystemMessage, ToolMessage
 
-from duckclaw.workers.runtime_policy_helpers import worker_has_runtime_capability
-
 _TICKER_PAT = re.compile(r"\b([A-Z]{1,5})\b")
 # Probable quote-like figure: decimal with at least 2 fractional digits or a $ prefix.
 _PRICE_PAT = re.compile(r"(?:\$\s*)?(\d{1,6}\.\d{2,6})\b")
 _VLM_MARKER = "VLM_CONTEXT"
-_EVIDENCE_TOOLS = {"fetch_market_data", "fetch_ib_gateway_ohlcv", "fetch_lake_ohlcv", "read_sql"}
+_EVIDENCE_TOOLS = {"read_sql", "verify_visual_claim"}
 _NUMERIC_VERIFY_STATUSES = frozenset({"verified", "mismatch", "no_evidence"})
 
 VISUAL_EVIDENCE_RETRY_REASON = "missing_tool_evidence_for_vlm_claim"
 
 _VISUAL_EVIDENCE_USER_ERROR = (
-    "❌ Regla de Evidencia Única: detecté contexto visual y cifras de mercado sin tool call válido en este turno. "
-    "Ejecuta fetch_market_data/fetch_ib_gateway_ohlcv/fetch_lake_ohlcv o read_sql primero y luego recalculo."
+    "❌ Regla de Evidencia Única: detecté contexto visual y cifras numéricas sin tool call válido en este turno. "
+    "Ejecuta read_sql o verify_visual_claim primero y luego recalculo."
 )
 
 _VISUAL_EVIDENCE_RETRY_DIRECTIVE = (
-    "Contexto VLM con cifras de mercado detectadas en tu borrador. "
-    "Ejecuta read_sql o fetch_market_data/fetch_ib_gateway_ohlcv/fetch_lake_ohlcv en este turno "
-    "antes de redactar cotizaciones. No cites precios sin un ToolMessage válido de evidencia."
+    "Contexto VLM con cifras numéricas detectadas en tu borrador. "
+    "Ejecuta read_sql o verify_visual_claim en este turno "
+    "antes de redactar cifras. No cites números sin un ToolMessage válido de evidencia."
 )
 
 
-def _spec_uses_market_evidence_scope(spec: Any) -> bool:
-    return worker_has_runtime_capability(spec, "market_analysis") or worker_has_runtime_capability(
-        spec,
-        "market_data_bridge",
-    )
-
-
 def spec_requires_bracket_citations(spec: Any) -> bool:
-    """Workers with market evidence capabilities must cite figures with ``[tool/symbol]``."""
-    return _spec_uses_market_evidence_scope(spec)
+    """Vertical extensions may override via worker egress hooks; core DuckClaw does not."""
+    _ = spec
+    return False
 
 
 _BRACKET_CITATION_RE = re.compile(r"\[[a-z][a-z0-9_]*(?:/[A-Za-z0-9][\w.-]*)?\]", re.IGNORECASE)
@@ -53,81 +45,70 @@ def _count_bracket_citations(text: str) -> int:
     return len(_BRACKET_CITATION_RE.findall(text or ""))
 
 
-def _price_in_non_market_context(text: str, match_start: int, match_end: int, *, window: int = 140) -> bool:
+def _price_in_local_data_context(text: str, match_start: int, match_end: int, *, window: int = 140) -> bool:
     """
-    Avoid treating account/broker balances as current symbol quotes.
+    Avoid treating persisted local ledger figures as uncited market-style quotes.
     """
     lo = max(0, match_start - window)
     hi = min(len(text), match_end + window)
     chunk = text[lo:hi].lower()
     needles = (
-        "interactive brokers",
-        "broker:",
-        "broker (",
-        "gateway",
-        "cuentas locales",
-        "cuenta broker",
-        "bancolombia",
-        "nequi",
-        "global66",
-        "tarjeta cívica",
-        "tarjeta civica",
-        "nu:",
-        "liquidez total",
-        "total cuentas",
-        "saldo:",
-        "usd efectivo",
-        "efectivo ($",
-        "resumen de cuentas",
-        "estado actual de cuentas",
+        "datos locales",
+        "registros locales",
+        "read_sql",
+        "duckdb",
+        "base de datos",
+        "en la base",
+        "ledger",
+        "resumen de registros",
+        "estado en la base",
+        "tabla local",
+        "total:",
+        "balance:",
     )
     return any(n in chunk for n in needles)
 
 
-def _price_in_vix_or_index_context(
+def _price_in_benchmark_context(
     text: str, match_start: int, match_end: int, *, window: int = 120
 ) -> bool:
-    """VIX and broad index levels are not automatically share quotes."""
+    """Benchmark/index figures are not automatically treated as uncited entity quotes."""
     lo = max(0, match_start - window)
     hi = min(len(text), match_end + window)
     chunk = text[lo:hi].lower()
     needles = (
-        "vix",
+        "benchmark",
+        "índice",
+        "indice",
+        "index level",
         "volatility index",
-        "índice vix",
-        "indice vix",
-        "volatilidad implícita",
-        "volatilidad (vix",
-        "s&p 500",
-        "s&p500",
-        "sp500",
-        "dow jones",
-        "promedio industrial",
-        "nasdaq composite",
+        "volatilidad",
+        "composite",
+        "promedio",
     )
     return any(n in chunk for n in needles)
 
 
-def _count_market_figures(text: str) -> int:
+def _count_citable_numeric_figures(text: str) -> int:
     t = text or ""
     prices = sum(
         1
         for m in _PRICE_PAT.finditer(t)
-        if not _price_in_non_market_context(t, m.start(), m.end())
-        and not _price_in_vix_or_index_context(t, m.start(), m.end())
+        if not _price_in_local_data_context(t, m.start(), m.end())
+        and not _price_in_benchmark_context(t, m.start(), m.end())
     )
     pcts = len(_PCT_FIGURE_RE.findall(t))
     return prices + pcts
 
 
-def _ticker_tool_map_from_messages(messages: list[Any]) -> dict[str, str]:
-    """Map uppercase ticker -> tool name from ToolMessages in this turn."""
+def _symbol_tool_map_from_messages(messages: list[Any]) -> dict[str, str]:
+    """Map uppercase symbol/id -> tool name from ToolMessages in this turn."""
     out: dict[str, str] = {}
     for m in messages or []:
         if not isinstance(m, ToolMessage):
             continue
         nm = str(getattr(m, "name", "") or "").strip()
-        if nm not in _EVIDENCE_TOOLS and nm not in {"tavily_search", "get_current_time"} and "portfolio" not in nm.lower():
+        if nm not in _EVIDENCE_TOOLS and nm not in {"tavily_search", "get_current_time"}:
             continue
         content = str(getattr(m, "content", "") or "")
         if "error" in content.lower()[:200]:
@@ -155,14 +136,14 @@ def _ticker_tool_map_from_messages(messages: list[Any]) -> dict[str, str]:
 def _inject_bracket_citations(
     text: str,
     *,
-    ticker_tool_map: dict[str, str],
+    symbol_tool_map: dict[str, str],
     tools_used: set[str],
 ) -> str:
-    """Append ``[tool/ticker]`` after uncited figures when same-turn evidence exists."""
+    """Append ``[tool/symbol]`` after uncited figures when same-turn evidence exists."""
     if not text:
         return text
     out = text
-    for sym, tool in sorted(ticker_tool_map.items(), key=lambda kv: -len(kv[0])):
+    for sym, tool in sorted(symbol_tool_map.items(), key=lambda kv: -len(kv[0])):
         esc = re.escape(sym)
         out = re.sub(
             rf"(\|\s*{esc}\s*\|\s*)(\$?\d[\d.,]*)(\s*\|)",
@@ -205,7 +186,7 @@ def bracket_citation_audit(
     spec: Any = None,
 ) -> Tuple[str, Optional[str]]:
     """
-    Repair uncited market figures when same-turn tool evidence is available.
+    Repair uncited numeric figures when same-turn tool evidence is available.
     """
     if spec is None or not spec_requires_bracket_citations(spec):
         return reply, None
@@ -214,49 +195,30 @@ def bracket_citation_audit(
         return reply, None
 
     bracket_n = _count_bracket_citations(text)
-    figure_n = _count_market_figures(text)
+    figure_n = _count_citable_numeric_figures(text)
     if figure_n == 0:
         return reply, None
     if bracket_n >= max(1, figure_n // 2):
         return reply, None
 
-    ticker_map = _ticker_tool_map_from_messages(list(messages or []))
+    symbol_map = _symbol_tool_map_from_messages(list(messages or []))
     tools_used: set[str] = set()
     for m in messages or []:
         if isinstance(m, ToolMessage):
             nm = str(getattr(m, "name", "") or "").strip()
             if nm:
                 tools_used.add(nm)
-    if not ticker_map and not tools_used:
+    if not symbol_map and not tools_used:
         return reply, None
 
     repaired = _inject_bracket_citations(
         text,
-        ticker_tool_map=ticker_map,
+        symbol_tool_map=symbol_map,
         tools_used=tools_used,
     )
     if repaired == text:
         return reply, None
     return repaired, f"injected_brackets figures={figure_n} before={bracket_n} after={_count_bracket_citations(repaired)}"
-
-
-def _known_tickers(db: Any) -> set[str]:
-    try:
-        raw = db.query(
-            "SELECT DISTINCT UPPER(ticker) AS t FROM market_data.ohlcv_data LIMIT 500"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else raw
-        if not rows or not isinstance(rows, list):
-            return set()
-        out: set[str] = set()
-        for row in rows:
-            if isinstance(row, dict):
-                t = row.get("t") or row.get("ticker")
-                if t:
-                    out.add(str(t).strip().upper())
-        return out
-    except Exception:
-        return set()
 
 
 def market_price_consistency_audit(
@@ -307,7 +269,7 @@ def enforce_visual_evidence_rule(
     spec: Any = None,
 ) -> Tuple[str, Optional[str]]:
     """
-    Require same-turn tool evidence before quoting visual-context market figures.
+    Require same-turn tool evidence before quoting visual-context numeric figures.
     """
     inc = (incoming or "").strip()
     text = (reply or "").strip()
@@ -315,14 +277,6 @@ def enforce_visual_evidence_rule(
         return reply, None
     if not _PRICE_PAT.search(text):
         return reply, None
-
-    if db is not None and spec is not None and _spec_uses_market_evidence_scope(spec):
-        known = _known_tickers(db)
-        if not known:
-            return reply, None
-        mentioned = {m.group(1) for m in _TICKER_PAT.finditer(text) if m.group(1) in known}
-        if not mentioned:
-            return reply, None
 
     for m in messages or []:
         if isinstance(m, ToolMessage) and _tool_message_satisfies_visual_evidence(m):

@@ -28,7 +28,6 @@ AGENT_BINDING_NAMES: tuple[str, ...] = (
     "provider",
     "llm",
     "tool_surface",
-    "is_market_analysis_worker",
     "tools",
     "tools_by_name",
     "tools_sandbox_off",
@@ -54,8 +53,6 @@ AGENT_BINDING_NAMES: tuple[str, ...] = (
     "llm_force_tavily_off",
     "llm_force_generate_visual_on",
     "llm_force_generate_visual_off",
-    "llm_force_fetch_market_on",
-    "llm_force_fetch_market_off",
     "llm_force_reddit_post_on",
     "llm_force_reddit_post_off",
     "llm_force_reddit_search_on",
@@ -94,7 +91,6 @@ AGENT_CTX_UNPACK = textwrap.dedent(
     provider = ctx.provider
     llm = ctx.llm
     tool_surface = ctx.tool_surface
-    is_market_analysis_worker = ctx.is_market_analysis_worker
     tools = ctx.tools
     tools_by_name = ctx.tools_by_name
     tools_sandbox_off = ctx.tools_sandbox_off
@@ -120,8 +116,6 @@ AGENT_CTX_UNPACK = textwrap.dedent(
     llm_force_tavily_off = b.get("llm_force_tavily_off")
     llm_force_generate_visual_on = b.get("llm_force_generate_visual_on")
     llm_force_generate_visual_off = b.get("llm_force_generate_visual_off")
-    llm_force_fetch_market_on = b.get("llm_force_fetch_market_on")
-    llm_force_fetch_market_off = b.get("llm_force_fetch_market_off")
     llm_force_reddit_post_on = b.get("llm_force_reddit_post_on")
     llm_force_reddit_post_off = b.get("llm_force_reddit_post_off")
     llm_force_reddit_search_on = b.get("llm_force_reddit_search_on")

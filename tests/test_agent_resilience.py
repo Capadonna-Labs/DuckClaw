@@ -47,7 +47,7 @@ def test_worker_reply_suggests_replan() -> None:
 
 
 def test_resilience_escalation_wants_read_sql() -> None:
-    assert ar.resilience_escalation_wants_read_sql("¿Cuánto tengo en la cuenta corriente?", 1) is True
+    assert ar.resilience_escalation_wants_read_sql("Resumen de registros en DuckDB", 1) is True
     assert ar.resilience_escalation_wants_read_sql("hola", 1) is False
     assert ar.resilience_escalation_wants_read_sql("datos duckdb tablas", 2) is True
 

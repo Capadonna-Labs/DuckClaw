@@ -19,7 +19,6 @@ from duckclaw.workers.runtime_policy_helpers import (
 from duckclaw.workers.tool_binding import tool_called_since as _tool_called_since
 from duckclaw.workers.tool_invocation_policy import (
     decide_current_time_tool_invocation as _decide_current_time_tool_invocation,
-    decide_market_data_tool_invocation as _decide_market_data_tool_invocation,
 )
 from langchain_core.messages import AIMessage
 
@@ -31,17 +30,16 @@ _log = logging.getLogger(__name__)
 
 def make_agent_policy_late(ctx: WorkerGraphContext):
     (
-        worker_id, db, spec, path, provider, llm, tool_surface, is_market_analysis_worker,
+        worker_id, db, spec, path, provider, llm, tool_surface,
         tools, tools_by_name, tools_sandbox_off, tools_by_name_sandbox_off, prompt_policies, _lid,
         use_cm, _tools_for_llm_bind, _tools_sandbox_off_bind, _sandbox_enabled_for_state, b,
         llm_with_tools_on, llm_with_tools_off, llm_force_schema_on, llm_force_schema_off,
         llm_force_read_sql_on, llm_force_read_sql_off, llm_force_admin_sql_on, llm_force_admin_sql_off,
         llm_force_run_sandbox_on, llm_force_run_sandbox_off, llm_force_tavily_on, llm_force_tavily_off,
-        llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_fetch_market_on,
-        llm_force_fetch_market_off, llm_force_reddit_post_on, llm_force_reddit_post_off,
-        llm_force_reddit_search_on, llm_force_reddit_search_off, llm_force_reddit_fallback_on,
-        llm_force_reddit_fallback_off, has_read_sql, has_tavily, has_generate_visual, has_reddit_tools,
-        has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
+        llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_reddit_post_on,
+        llm_force_reddit_post_off, llm_force_reddit_search_on, llm_force_reddit_search_off,
+        llm_force_reddit_fallback_on, llm_force_reddit_fallback_off, has_read_sql, has_tavily,
+        has_generate_visual, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
         _incoming_has_reddit_share_path, _incoming_has_reddit_url, _incoming_looks_like_reddit_post_url,
         _is_latest_game_query, _is_schema_query, _patch_ai_reddit_share_tool_calls,
         _reddit_share_slug_from_incoming, _reddit_tool_message_no_data,
@@ -70,22 +68,6 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
                 state = ctx.agent_turn['state']
                 summarize_stored_directive = ctx.agent_turn['summarize_stored_directive']
                 telegram_context_summarize_directive = ctx.agent_turn['telegram_context_summarize_directive']
-                market_data_tool_decision = _decide_market_data_tool_invocation(
-                    spec=spec,
-                    incoming=incoming,
-                    available_tools=tools_by_name,
-                    already_has_tool_result=already_has_tool_result,
-                    summarize_ok_for_forced_ohlcv=not telegram_context_summarize_directive,
-                    blocked_by_prior_decision=bool(
-                        force_schema
-                        or force_admin_sql
-                        or force_read_sql
-                        or force_tavily
-                        or force_reddit
-                    ),
-                    heuristic_first_tool_enabled=_worker_use_heuristic_first_tool(spec),
-                )
-                force_fetch_market_data = market_data_tool_decision.is_tool("fetch_market_data")
 
                 _incoming_l = (incoming or "").lower()
                 _is_graph_request = any(
@@ -129,7 +111,6 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
                         or force_admin_sql
                         or force_read_sql
                         or force_reddit
-                        or force_fetch_market_data
                     )
                     and not already_has_tool_result
                 )
@@ -145,7 +126,6 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
                         or force_tavily
                         or force_plot_docs
                         or force_reddit
-                        or force_fetch_market_data
                     )
                     and not already_has_tool_result
                 )
@@ -197,27 +177,6 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
 
                 sandbox_enabled = _sandbox_enabled_for_state(state)
 
-                _force_vlm_evidence_retry = bool(
-                    int(state.get("visual_evidence_retry_count") or 0) > 0
-                    and is_market_analysis_worker
-                    and has_read_sql
-                    and _worker_use_heuristic_first_tool(spec)
-                    and not telegram_context_summarize_directive
-                    and not summarize_stored_directive
-                    and not already_has_tool_result
-                    and not (
-                        force_schema
-                        or force_admin_sql
-                        or force_read_sql
-                        or force_tavily
-                        or force_reddit
-                        or force_fetch_market_data
-                        or force_plot_docs
-                        or force_run_sandbox
-                    )
-                )
-                if _force_vlm_evidence_retry:
-                    force_read_sql = True
                 _reddit_http_prefetch_ctx: Optional[str] = None
 
                 if (
@@ -250,7 +209,7 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
                     _out_vis.update(_identity_fields(state))
                     return _out_vis
 
-                ctx.agent_turn.update({'force_fetch_market_data': force_fetch_market_data, 'force_read_sql': force_read_sql, 'force_run_sandbox': force_run_sandbox, 'force_tavily': force_tavily, 'sandbox_enabled': sandbox_enabled})
+                ctx.agent_turn.update({'force_orch_tool': ctx.agent_turn.get('force_orch_tool'), 'force_read_sql': force_read_sql, 'force_run_sandbox': force_run_sandbox, 'force_tavily': force_tavily, 'sandbox_enabled': sandbox_enabled})
                 return None
 
     return run

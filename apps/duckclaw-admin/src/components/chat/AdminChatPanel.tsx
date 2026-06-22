@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import Link from 'next/link';
 import {
   Bot,
@@ -9,6 +9,7 @@ import {
   ChevronRight,
   MessageSquarePlus,
   Send,
+  Settings2,
   X,
 } from 'lucide-react';
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
@@ -90,6 +91,7 @@ export function AdminChatPanel({
   className = '',
 }: AdminChatPanelProps) {
   const { usuario } = useAuthStore();
+  const [compactConfigOpen, setCompactConfigOpen] = useState(false);
   const internalChat = useAdminChat({
     chatId,
     initialWorker,
@@ -183,7 +185,7 @@ export function AdminChatPanel({
           }`}
         >
           {isCompact ? (
-            <div className="flex flex-col items-stretch gap-2 w-full min-w-0 max-sm:max-h-[10.5rem] max-sm:overflow-y-auto max-sm:overscroll-contain">
+            <div className="flex flex-col items-stretch gap-2 w-full min-w-0">
               <div className="flex items-center justify-between gap-2 w-full">
                 <div className="min-w-0">
                   <p className="text-sm font-black dark:text-dark-text truncate">
@@ -205,6 +207,20 @@ export function AdminChatPanel({
                       <MessageSquarePlus size={16} />
                     </button>
                   ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setCompactConfigOpen((v) => !v)}
+                    className={`p-1.5 rounded-lg hover:bg-gov-gray-100 dark:hover:bg-dark-bg ${
+                      compactConfigOpen
+                        ? 'text-gov-blue-700 bg-gov-blue-50 dark:bg-dark-bg'
+                        : 'text-gov-gray-500'
+                    }`}
+                    title="Configuración del chat"
+                    aria-label="Configuración del chat"
+                    aria-expanded={compactConfigOpen}
+                  >
+                    <Settings2 size={16} />
+                  </button>
                   {headerActions}
                 </div>
               </div>
@@ -220,64 +236,68 @@ export function AdminChatPanel({
                   onRenameConversation={onRenameConversation}
                 />
               )}
-              {chatId && (
-                <ConversationVaultSelector
-                  chatId={chatId}
-                  tenantId={config?.effective_tenant_id}
-                  value={vaultPath}
-                  effectivePath={config?.vault?.effective_path}
-                  scope={config?.vault?.scope}
-                  options={config?.vault_options}
-                  onChange={setVaultPath}
-                  onUpdated={() => reloadConfig()}
-                  disabled={config?.authorized === false}
-                  compact
-                />
-              )}
-              {chatId && (config?.catalog?.length ?? 0) > 0 && (
-                <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
-                  <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
-                    <Brain size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
-                    Modelo
-                  </span>
-                  <ChatLlmSelectors
-                    chatId={chatId}
-                    provider={config?.llm?.provider ?? ''}
-                    model={config?.llm?.model ?? ''}
-                    catalog={config?.catalog ?? []}
-                    onUpdated={() => reloadConfig()}
-                    disabled={config?.authorized === false || loading}
-                    compact
-                  />
-                </label>
-              )}
-              <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
-                <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
-                  <Bot size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
-                  Worker
-                </span>
-                <select
-                  value={workerId}
-                  onChange={(e) => setWorkerId(e.target.value, { persist: true })}
-                  disabled={
-                    workerLocked ||
-                    !config?.workers?.length ||
-                    config?.authorized === false
-                  }
-                  className="text-[10px] px-1.5 py-2 min-h-[40px] border rounded-md dark:border-dark-border dark:bg-dark-bg w-full max-w-full disabled:opacity-50"
-                  aria-label="Worker"
-                >
-                  {(config?.workers ?? []).map((w) => {
-                    const id = workerOptionId(w);
-                    const label = workerOptionLabel(w);
-                    return (
-                      <option key={id} value={id}>
-                        {label}
-                      </option>
-                    );
-                  })}
-                </select>
-              </label>
+              {compactConfigOpen ? (
+                <div className="rounded-xl border border-gov-blue-50 bg-gov-gray-50/80 p-2 space-y-2 dark:border-dark-border dark:bg-dark-bg">
+                  {chatId ? (
+                    <ConversationVaultSelector
+                      chatId={chatId}
+                      tenantId={config?.effective_tenant_id}
+                      value={vaultPath}
+                      effectivePath={config?.vault?.effective_path}
+                      scope={config?.vault?.scope}
+                      options={config?.vault_options}
+                      onChange={setVaultPath}
+                      onUpdated={() => reloadConfig()}
+                      disabled={config?.authorized === false}
+                      compact
+                    />
+                  ) : null}
+                  {chatId && (config?.catalog?.length ?? 0) > 0 ? (
+                    <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
+                      <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
+                        <Brain size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
+                        Modelo
+                      </span>
+                      <ChatLlmSelectors
+                        chatId={chatId}
+                        provider={config?.llm?.provider ?? ''}
+                        model={config?.llm?.model ?? ''}
+                        catalog={config?.catalog ?? []}
+                        onUpdated={() => reloadConfig()}
+                        disabled={config?.authorized === false || loading}
+                        compact
+                      />
+                    </label>
+                  ) : null}
+                  <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
+                    <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
+                      <Bot size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
+                      Worker
+                    </span>
+                    <select
+                      value={workerId}
+                      onChange={(e) => setWorkerId(e.target.value, { persist: true })}
+                      disabled={
+                        workerLocked ||
+                        !config?.workers?.length ||
+                        config?.authorized === false
+                      }
+                      className="text-[10px] px-1.5 py-2 min-h-[40px] border rounded-md dark:border-dark-border dark:bg-dark-bg w-full max-w-full disabled:opacity-50"
+                      aria-label="Worker"
+                    >
+                      {(config?.workers ?? []).map((w) => {
+                        const id = workerOptionId(w);
+                        const label = workerOptionLabel(w);
+                        return (
+                          <option key={id} value={id}>
+                            {label}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </label>
+                </div>
+              ) : null}
             </div>
           ) : (
             <>

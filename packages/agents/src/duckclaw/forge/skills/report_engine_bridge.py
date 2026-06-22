@@ -253,6 +253,218 @@ def patch_report_section(
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
+def _discover_markdown_relative_path(*, report_title: str) -> str:
+    """Busca el .md del informe en raíces OUTPUT (p. ej. Informes/INFORME*.md)."""
+    import re
+
+    from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
+
+    roots = knowledge_output_roots()
+    if not roots:
+        raise ValueError(
+            "No hay DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS. "
+            "Indica markdown_relative_path explícitamente."
+        )
+
+    title_tokens = {
+        tok
+        for tok in re.findall(r"[a-zA-Z0-9áéíóúñ]+", (report_title or "").lower())
+        if len(tok) >= 3
+    }
+    scored: list[tuple[int, str]] = []
+
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in root.rglob("*.md"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(root).as_posix()
+            rel_lower = rel.lower()
+            score = 0
+            if rel_lower.startswith("informes/") or "/informes/" in rel_lower:
+                score += 20
+            elif "informe" in rel_lower:
+                score += 10
+            for tok in title_tokens:
+                if tok in rel_lower:
+                    score += 6
+            if "mensual" in rel_lower and "mensual" in title_tokens:
+                score += 8
+            if score > 0:
+                scored.append((score, rel))
+
+    if not scored:
+        raise ValueError(
+            "No hay .md de informe en el vault OUTPUT. "
+            "Indica markdown_relative_path (ej. Informes/INFORME MENSUAL N°4 - JUNIO 2026.md)."
+        )
+    scored.sort(key=lambda item: (-item[0], item[1]))
+    return scored[0][1]
+
+
+def _read_markdown_for_report(
+    *,
+    markdown_relative_path: str,
+    markdown_content: str,
+    report_title: str = "",
+) -> tuple[str, str]:
+    text = (markdown_content or "").strip()
+    if text:
+        return text, "inline"
+
+    rel = (markdown_relative_path or "").strip()
+    if not rel:
+        rel = _discover_markdown_relative_path(report_title=report_title)
+
+    from duckclaw.forge.rag.knowledge_paths import resolve_readable_document_path
+
+    path = resolve_readable_document_path(relative_path=rel)
+    return path.read_text(encoding="utf-8", errors="replace").strip(), rel
+
+
+def _resolve_registered_template_id(
+    *,
+    template_docx_path: str,
+    template_name: str,
+    template_id: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    from duckclaw.report_engine.admin_report_read import list_report_templates as _list
+
+    tid_hint = (template_id or "").strip()
+    if tid_hint:
+        tenant_id, actor_email, _ = _session_scope()
+        db = _open_hub_db()
+        try:
+            rows = _list(db, tenant_id=tenant_id, actor_email=actor_email, limit=200)
+        finally:
+            db.close()
+        for row in rows:
+            if str(row.get("template_id")) == tid_hint:
+                schema = row.get("section_schema") or []
+                return tid_hint, schema if isinstance(schema, list) else []
+        raise ValueError(f"Plantilla registrada no encontrada: {tid_hint}")
+
+    docx_name = Path(template_docx_path).name.lower()
+    name_hint = (template_name or "").strip().lower()
+    tenant_id, actor_email, _ = _session_scope()
+    db = _open_hub_db()
+    try:
+        rows = _list(db, tenant_id=tenant_id, actor_email=actor_email, limit=200)
+    finally:
+        db.close()
+    for row in rows:
+        uri = str(row.get("template_uri") or "").lower()
+        row_name = str(row.get("name") or "").strip().lower()
+        if docx_name and uri.endswith(docx_name):
+            schema = row.get("section_schema") or []
+            return str(row["template_id"]), schema if isinstance(schema, list) else []
+        if name_hint and row_name == name_hint:
+            schema = row.get("section_schema") or []
+            return str(row["template_id"]), schema if isinstance(schema, list) else []
+    return "", []
+
+
+def _primary_section_id(section_schema: list[dict[str, Any]]) -> str:
+    preferred = ("resumen_ejecutivo", "body", "contenido", "informe", "resumen")
+    ids = [str(s.get("id") or "").strip() for s in section_schema if isinstance(s, dict)]
+    for pid in preferred:
+        if pid in ids:
+            return pid
+    return ids[0] if ids else "body"
+
+
+def generate_report_docx_from_markdown(
+    template_docx_path: str,
+    report_title: str,
+    markdown_relative_path: str = "",
+    markdown_content: str = "",
+    period_key: str = "",
+    template_name: str = "",
+    template_id: str = "",
+) -> str:
+    """Flujo one-shot: plantilla vault + markdown → instancia + render DOCX (Report Engine)."""
+    try:
+        markdown, markdown_source = _read_markdown_for_report(
+            markdown_relative_path=markdown_relative_path,
+            markdown_content=markdown_content,
+            report_title=report_title,
+        )
+        if not markdown:
+            raise ValueError("El markdown está vacío")
+
+        resolved_id, schema = _resolve_registered_template_id(
+            template_docx_path=template_docx_path,
+            template_name=template_name,
+            template_id=template_id,
+        )
+        if not resolved_id:
+            reg_raw = register_report_template(
+                template_docx_path=template_docx_path,
+                name=(template_name or Path(template_docx_path).stem).strip(),
+                template_id=template_id,
+            )
+            reg = json.loads(reg_raw)
+            if reg.get("error"):
+                return reg_raw
+            resolved_id = str(reg["template_id"])
+            schema = reg.get("sections") or []
+
+        create_raw = create_report_instance(
+            template_id=resolved_id,
+            title=report_title,
+            period_key=period_key,
+        )
+        created = json.loads(create_raw)
+        if created.get("error"):
+            return create_raw
+        instance_id = str(created["instance_id"])
+
+        section_id = _primary_section_id(schema if isinstance(schema, list) else [])
+        patch_raw = patch_report_section(
+            instance_id=instance_id,
+            section_id=section_id,
+            content=markdown,
+            mode="replace",
+            mark_complete=True,
+        )
+        patched = json.loads(patch_raw)
+        if patched.get("error"):
+            return patch_raw
+
+        render_raw = render_report_instance(instance_id)
+        rendered = json.loads(render_raw)
+        if rendered.get("error"):
+            return render_raw
+
+        return json.dumps(
+            {
+                "instance_id": instance_id,
+                "template_id": resolved_id,
+                "section_id": section_id,
+                "title": report_title,
+                "period_key": period_key,
+                "markdown_source": markdown_source,
+                **rendered,
+            },
+            ensure_ascii=False,
+        )
+    except Exception as exc:
+        payload: dict[str, Any] = {"error": str(exc)}
+        msg = str(exc).lower()
+        if "markdown" in msg or "output_roots" in msg:
+            payload["hint"] = (
+                "Pasa markdown_relative_path=Informes/NOMBRE.md o el contenido en markdown_content. "
+                "No uses pandoc ni run_sandbox."
+            )
+        if "sección desconocida" in msg:
+            payload["hint"] = (
+                "La plantilla no tiene esa sección. Revisa section_schema con list_report_templates "
+                "y usa patch_report_section con un section_id válido."
+            )
+        return json.dumps(payload, ensure_ascii=False)
+
+
 def render_report_instance(instance_id: str) -> str:
     """Genera el DOCX del informe desde plantilla + estado actual."""
     from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
@@ -356,6 +568,17 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                     "Genera el Word final (docxtpl) en el vault de salida. "
                     "Paso final del Report Engine — preferir sobre convert_document/pandoc "
                     "cuando hay plantilla corporativa registrada."
+                ),
+            ),
+            StructuredTool.from_function(
+                generate_report_docx_from_markdown,
+                name="generate_report_docx_from_markdown",
+                description=(
+                    "Atajo Report Engine cuando ya tienes el .md listo: registra/reutiliza "
+                    "plantilla del vault (ej. INFORME MENSUAL.docx), crea instancia, "
+                    "rellena sección principal y renderiza DOCX. "
+                    "markdown_relative_path es opcional si hay un .md en Informes/ que coincida con report_title. "
+                    "Preferir sobre render_docx_template/pandoc para informes mensuales."
                 ),
             ),
         ]

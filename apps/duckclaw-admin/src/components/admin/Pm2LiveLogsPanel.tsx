@@ -1,12 +1,19 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { AnsiLogText } from '@/lib/ansiLog';
 import { PM2_LOGGABLE_APPS } from '@/lib/pm2LogApps';
 import { Radio, Square, Terminal } from 'lucide-react';
 
 const MAX_LINES = 6_000;
-const MAX_SELECTED = 2;
 
 import { mutationHeaders } from '@/lib/csrfClient';
 
@@ -14,13 +21,39 @@ function sessionHeaders(method = 'GET'): HeadersInit {
   return mutationHeaders(method);
 }
 
-type Props = {
-  /** Sin cabecera ni borde exterior (p. ej. dentro de SettingsSection). */
-  embedded?: boolean;
+type Pm2LogsContextValue = {
+  selectedApp: string;
+  setSelectedApp: (app: string) => void;
+  runningApps: string[];
+  offlineApps: string[];
+  streaming: boolean;
+  logText: string;
+  error: string | null;
+  autoScroll: boolean;
+  setAutoScroll: (value: boolean) => void;
+  start: () => Promise<void>;
+  stop: () => void;
+  clear: () => void;
+  tailRef: React.RefObject<HTMLDivElement | null>;
 };
 
-export function Pm2LiveLogsPanel({ embedded = false }: Props) {
-  const [selected, setSelected] = useState<string[]>(['DuckClaw-Gateway']);
+const Pm2LogsContext = createContext<Pm2LogsContextValue | null>(null);
+
+function usePm2LogsContext(): Pm2LogsContextValue {
+  const ctx = useContext(Pm2LogsContext);
+  if (!ctx) {
+    throw new Error('Pm2LiveLogsProvider requerido');
+  }
+  return ctx;
+}
+
+type ProviderProps = {
+  children: ReactNode;
+  autoStart?: boolean;
+};
+
+export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderProps) {
+  const [selectedApp, setSelectedApp] = useState<string>('DuckClaw-Gateway');
   const [runningApps, setRunningApps] = useState<string[]>([...PM2_LOGGABLE_APPS]);
   const [offlineApps, setOfflineApps] = useState<string[]>([]);
   const [streaming, setStreaming] = useState(false);
@@ -29,6 +62,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
   const [autoScroll, setAutoScroll] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
   const tailRef = useRef<HTMLDivElement>(null);
+  const autoStartedRef = useRef(false);
 
   const appendLog = useCallback((chunk: string) => {
     setLogText((prev) => {
@@ -39,27 +73,17 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
     });
   }, []);
 
-  const toggle = (name: string) => {
-    setSelected((prev) => {
-      if (prev.includes(name)) {
-        return prev.filter((x) => x !== name);
-      }
-      if (prev.length >= MAX_SELECTED) {
-        return prev;
-      }
-      return [...prev, name];
-    });
-  };
-
   const stop = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;
     setStreaming(false);
   }, []);
 
+  const clear = useCallback(() => setLogText(''), []);
+
   const start = useCallback(async () => {
-    if (selected.length === 0) {
-      setError('Elige 1 o 2 servicios');
+    if (!selectedApp || !runningApps.includes(selectedApp)) {
+      setError('Elige un servicio activo en PM2');
       return;
     }
     stop();
@@ -70,7 +94,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
     const ac = new AbortController();
     abortRef.current = ac;
 
-    const url = `/api/admin/ops/logs/stream?apps=${encodeURIComponent(selected.join(','))}`;
+    const url = `/api/admin/ops/logs/stream?apps=${encodeURIComponent(selectedApp)}`;
 
     try {
       const res = await fetch(url, {
@@ -111,7 +135,7 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
         setStreaming(false);
       }
     }
-  }, [appendLog, selected, stop]);
+  }, [appendLog, runningApps, selectedApp, stop]);
 
   useEffect(() => {
     if (!autoScroll || !tailRef.current) return;
@@ -135,7 +159,9 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
         const offline = Array.isArray(data.offline) ? data.offline : [];
         setRunningApps(running);
         setOfflineApps(offline);
-        setSelected((prev) => prev.filter((name) => running.includes(name)));
+        if (running.length > 0) {
+          setSelectedApp((prev) => (running.includes(prev) ? prev : running[0]));
+        }
       } catch {
         /* keep defaults */
       }
@@ -145,68 +171,127 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
     };
   }, []);
 
-  const body = (
-    <>
-      <div className="flex flex-wrap gap-2">
-        {PM2_LOGGABLE_APPS.map((name) => {
-          const on = selected.includes(name);
-          const isRunning = runningApps.includes(name);
-          const disabled = !isRunning || streaming || (!on && selected.length >= MAX_SELECTED);
-          return (
-            <button
-              key={name}
-              type="button"
-              disabled={disabled}
-              onClick={() => toggle(name)}
-              title={
-                isRunning
-                  ? name
-                  : `${name}: no está en PM2 de este host (p. ej. GPU en Mac Mini)`
-              }
-              className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-xs sm:text-sm font-semibold border transition-colors max-w-full truncate ${
-                on
-                  ? 'bg-gov-blue-700 text-white border-gov-blue-700'
-                  : isRunning
-                    ? 'dark:border-dark-border hover:border-gov-blue-500 disabled:opacity-40'
-                    : 'opacity-40 line-through dark:border-dark-border cursor-not-allowed'
-              }`}
-            >
-              {on ? '✓ ' : ''}
-              {name}
-            </button>
-          );
-        })}
-      </div>
+  useEffect(() => {
+    if (!autoStart || autoStartedRef.current) return;
+    if (!runningApps.includes(selectedApp)) return;
+    autoStartedRef.current = true;
+    void start();
+  }, [autoStart, runningApps, selectedApp, start]);
 
-      <div className="flex flex-wrap gap-2 items-center">
+  useEffect(() => {
+    if (!autoStart) {
+      autoStartedRef.current = false;
+    }
+  }, [autoStart]);
+
+  const value: Pm2LogsContextValue = {
+    selectedApp,
+    setSelectedApp,
+    runningApps,
+    offlineApps,
+    streaming,
+    logText,
+    error,
+    autoScroll,
+    setAutoScroll,
+    start,
+    stop,
+    clear,
+    tailRef,
+  };
+
+  return <Pm2LogsContext.Provider value={value}>{children}</Pm2LogsContext.Provider>;
+}
+
+type ControlsProps = {
+  variant?: 'studio' | 'dark';
+};
+
+export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
+  const {
+    selectedApp,
+    setSelectedApp,
+    runningApps,
+    offlineApps,
+    streaming,
+    error,
+    autoScroll,
+    setAutoScroll,
+    start,
+    stop,
+    clear,
+  } = usePm2LogsContext();
+
+  const studio = variant === 'studio';
+
+  return (
+    <div
+      className={`space-y-2 border-t px-2 py-2 dark:border-dark-border ${
+        studio ? 'border-gov-gray-100' : 'border-slate-800/80 sm:px-3'
+      }`}
+    >
+      <div className="flex min-w-0 items-center gap-1.5">
+        <label className="sr-only" htmlFor="pm2-log-app-select">
+          Servicio PM2
+        </label>
+        <select
+          id="pm2-log-app-select"
+          value={selectedApp}
+          disabled={streaming}
+          onChange={(e) => setSelectedApp(e.target.value)}
+          className={
+            studio
+              ? 'min-w-0 flex-1 truncate rounded-lg border border-gov-gray-200 bg-gov-gray-50 px-2 py-1.5 text-[11px] font-semibold text-gov-gray-900 disabled:opacity-60 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text'
+              : 'min-w-0 flex-1 truncate rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs font-semibold text-slate-100 disabled:opacity-60'
+          }
+        >
+          {PM2_LOGGABLE_APPS.map((name) => {
+            const isRunning = runningApps.includes(name);
+            return (
+              <option key={name} value={name} disabled={!isRunning}>
+                {isRunning ? name : `${name} (offline)`}
+              </option>
+            );
+          })}
+        </select>
         {!streaming ? (
           <button
             type="button"
-            onClick={start}
-            disabled={selected.length === 0}
-            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-gov-blue-700 text-white font-semibold text-sm hover:bg-gov-blue-800 disabled:opacity-50"
+            onClick={() => void start()}
+            disabled={!runningApps.includes(selectedApp)}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-gov-blue-700 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-gov-blue-800 disabled:opacity-50"
+            title="Iniciar stream"
           >
-            <Radio size={16} />
-            Iniciar stream
+            <Radio size={13} />
           </button>
         ) : (
           <button
             type="button"
             onClick={stop}
-            className="inline-flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl bg-red-600 text-white font-semibold text-sm hover:bg-red-700"
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-red-600 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-red-700"
+            title="Detener stream"
           >
-            <Square size={16} />
-            Detener
+            <Square size={13} />
           </button>
         )}
         <button
           type="button"
-          onClick={() => setLogText('')}
-          className="px-3 py-2 text-sm rounded-xl border dark:border-dark-border"
+          onClick={clear}
+          className={
+            studio
+              ? 'shrink-0 rounded-lg border border-gov-gray-200 px-2 py-1.5 text-[11px] text-gov-gray-600 hover:bg-gov-gray-50 dark:border-dark-border dark:text-dark-muted dark:hover:bg-dark-bg'
+              : 'shrink-0 rounded-lg border border-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-800'
+          }
         >
           Limpiar
         </button>
-        <label className="flex items-center gap-2 text-xs sm:text-sm text-gov-gray-500">
+      </div>
+      <div
+        className={`flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] ${
+          studio ? 'text-gov-gray-500 dark:text-dark-muted' : 'text-slate-400'
+        }`}
+      >
+        <label className="inline-flex items-center gap-1">
           <input
             type="checkbox"
             checked={autoScroll}
@@ -214,50 +299,76 @@ export function Pm2LiveLogsPanel({ embedded = false }: Props) {
           />
           Auto-scroll
         </label>
-        {streaming && (
-          <span className="text-xs text-emerald-600 font-semibold animate-pulse">● En vivo</span>
-        )}
-      </div>
-
-      {offlineApps.length > 0 && (
-        <p className="text-xs text-amber-700 dark:text-amber-300 break-words">
-          No disponibles en este host: {offlineApps.join(', ')} (MLX-Vision/ComfyUI suelen estar en la Mac GPU).
-        </p>
-      )}
-
-      {error && <p className="text-sm text-red-600">{error}</p>}
-
-      <div
-        ref={tailRef}
-        className="p-3 sm:p-4 bg-slate-950 rounded-xl overflow-auto max-h-[min(50vh,420px)] min-h-[160px]"
-      >
-        {logText ? (
-          <AnsiLogText text={logText} />
-        ) : (
-          <span className="text-slate-400 text-xs font-mono">
-            {streaming ? 'Esperando líneas…' : 'Pulsa Iniciar stream para ver logs.'}
+        {streaming ? (
+          <span className="font-semibold text-emerald-600 dark:text-emerald-400 animate-pulse">
+            ● En vivo
           </span>
-        )}
+        ) : null}
+        {offlineApps.length > 0 ? (
+          <span className="text-amber-700 dark:text-amber-400">
+            Offline: {offlineApps.join(', ')}
+          </span>
+        ) : null}
       </div>
-    </>
+      {error ? (
+        <p className={`text-[11px] ${studio ? 'text-red-600' : 'text-red-400'}`}>{error}</p>
+      ) : null}
+    </div>
   );
+}
 
-  if (embedded) {
-    return <div className="space-y-3 sm:space-y-4 min-w-0">{body}</div>;
-  }
+export function Pm2LiveLogsViewport() {
+  const { logText, streaming, tailRef } = usePm2LogsContext();
 
   return (
-    <section className="mt-8 space-y-4 border-t dark:border-dark-border pt-8">
-      <div className="flex items-center gap-2">
-        <Terminal size={22} className="text-gov-blue-700" />
-        <div>
-          <h2 className="text-lg font-bold">PM2 logs en vivo</h2>
-          <p className="text-sm text-gov-gray-500">
-            Elige hasta 2 servicios PM2 de este host y sigue la salida en vivo.
-          </p>
+    <div
+      ref={tailRef}
+      className="min-h-0 flex-1 overflow-auto p-2 font-mono text-[10px] leading-relaxed sm:p-3 sm:text-[11px]"
+    >
+      {logText ? (
+        <AnsiLogText text={logText} />
+      ) : (
+        <span className="text-slate-500">
+          {streaming ? 'Esperando líneas…' : 'Activa Stream en Herramientas.'}
+        </span>
+      )}
+    </div>
+  );
+}
+
+type Props = {
+  embedded?: boolean;
+  autoStart?: boolean;
+};
+
+/** Panel completo (Overview u otros). Playground usa Provider + Controls + Viewport. */
+export function Pm2LiveLogsPanel({ embedded = false, autoStart = false }: Props) {
+  return (
+    <Pm2LiveLogsProvider autoStart={autoStart}>
+      {embedded ? (
+        <div className="flex h-full min-h-0 min-w-0 flex-col">
+          <Pm2LiveLogsControls />
+          <Pm2LiveLogsViewport />
         </div>
-      </div>
-      {body}
-    </section>
+      ) : (
+        <section className="mt-8 space-y-4 border-t dark:border-dark-border pt-8">
+          <div className="flex items-center gap-2">
+            <Terminal size={22} className="text-gov-blue-700" />
+            <div>
+              <h2 className="text-lg font-bold">PM2 logs en vivo</h2>
+              <p className="text-sm text-gov-gray-500">
+                Elige un servicio PM2 de este host y sigue la salida en vivo.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-0 rounded-xl border dark:border-dark-border bg-slate-950/95">
+            <Pm2LiveLogsControls />
+            <div className="max-h-[min(50vh,420px)] min-h-[160px]">
+              <Pm2LiveLogsViewport />
+            </div>
+          </div>
+        </section>
+      )}
+    </Pm2LiveLogsProvider>
   );
 }

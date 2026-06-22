@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -56,4 +57,68 @@ def test_framework_pack_includes_report_engine_guidance() -> None:
     assert content
     assert "REPORT ENGINE" in content
     assert "render_report_instance" in content
+    assert "generate_report_docx_from_markdown" in content
+    assert "render_docx_template" in content
     assert "pandoc" in content.lower()
+
+
+def test_generate_report_docx_discovers_markdown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw.forge.skills.report_engine_bridge import _discover_markdown_relative_path
+
+    out_root = tmp_path / "vault"
+    informes = out_root / "Informes"
+    informes.mkdir(parents=True)
+    target = informes / "INFORME MENSUAL N°4 - JUNIO 2026.md"
+    target.write_text("# Informe", encoding="utf-8")
+    other = informes / "borrador.md"
+    other.write_text("x", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "duckclaw.forge.rag.knowledge_paths.knowledge_output_roots",
+        lambda: [out_root],
+    )
+
+    rel = _discover_markdown_relative_path(report_title="INFORME MENSUAL N°4 - JUNIO 2026")
+    assert rel == "Informes/INFORME MENSUAL N°4 - JUNIO 2026.md"
+
+
+def test_generate_report_docx_from_markdown_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw.forge.skills.report_engine_bridge import generate_report_docx_from_markdown
+
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.report_engine_bridge._resolve_registered_template_id",
+        lambda **_: ("rtpl_existing", [{"id": "resumen_ejecutivo", "label": "Resumen"}]),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.report_engine_bridge._read_markdown_for_report",
+        lambda **_: ("# Informe\n\nContenido mensual", "Informes/informe.md"),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.report_engine_bridge.create_report_instance",
+        lambda **_: json.dumps({"instance_id": "rpt_abc", "template_id": "rtpl_existing", "status": "draft"}),
+    )
+
+    def _patch(**kwargs: object) -> str:
+        calls.append(str(kwargs.get("section_id")))
+        return json.dumps({"status": "updated", "section_id": kwargs.get("section_id")})
+
+    monkeypatch.setattr("duckclaw.forge.skills.report_engine_bridge.patch_report_section", _patch)
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.report_engine_bridge.render_report_instance",
+        lambda iid: json.dumps(
+            {"path": "/out/reports/rpt_abc.docx", "relative_path": "reports/rpt_abc.docx", "format": "docx"}
+        ),
+    )
+
+    raw = generate_report_docx_from_markdown(
+        template_docx_path="INFORME MENSUAL.docx",
+        report_title="Informe N°4",
+        markdown_relative_path="Informes/informe.md",
+        period_key="2026-06",
+    )
+    payload = json.loads(raw)
+    assert payload["instance_id"] == "rpt_abc"
+    assert payload["relative_path"] == "reports/rpt_abc.docx"
+    assert calls == ["resumen_ejecutivo"]

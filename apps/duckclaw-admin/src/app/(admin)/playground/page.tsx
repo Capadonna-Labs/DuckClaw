@@ -28,7 +28,11 @@ import { SessionDatabaseChip } from '@/components/playground/SessionDatabaseChip
 import { PlaygroundSandboxChip } from '@/components/playground/PlaygroundSandboxChip';
 import { PlaygroundRagProjectWarning } from '@/components/playground/PlaygroundRagProjectWarning';
 import { PlaygroundRunSettingsPanel } from '@/components/playground/PlaygroundRunSettingsPanel';
-import { Pm2LiveLogsPanel } from '@/components/admin/Pm2LiveLogsPanel';
+import {
+  Pm2LiveLogsControls,
+  Pm2LiveLogsProvider,
+  Pm2LiveLogsViewport,
+} from '@/components/admin/Pm2LiveLogsPanel';
 import { writeLastProjectId } from '@/lib/floatingChatProject';
 import type { FlyCommandEntry } from '@/types/admin';
 
@@ -48,8 +52,6 @@ export default function PlaygroundPage() {
   const [config, setConfig] = useState<PlaygroundConfig | null>(null);
   const [workerId, setWorkerId] = useState(initialWorker);
   const [projectId, setProjectId] = useState(initialProject);
-  const [defaultsSaving, setDefaultsSaving] = useState(false);
-  const [defaultsMsg, setDefaultsMsg] = useState<string | null>(null);
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [sandboxToggling, setSandboxToggling] = useState(false);
@@ -357,55 +359,30 @@ export default function PlaygroundPage() {
     },
     [config?.effective_tenant_id, conv.sessionId]
   );
-  const savePlaygroundDefaults = useCallback(async () => {
-    if (!config) return;
-    setDefaultsSaving(true);
-    setDefaultsMsg(null);
-    try {
-      await adminService.patchRuntimeSettings([
-        { domain: 'llm', key: 'provider', value: config.llm?.provider || '', scope: 'actor' },
-        { domain: 'llm', key: 'model', value: config.llm?.model || '', scope: 'actor' },
-        { domain: 'llm', key: 'base_url', value: config.llm?.base_url || '', scope: 'actor' },
-        { domain: 'playground', key: 'default_worker_id', value: workerId || '', scope: 'actor' },
-        {
-          domain: 'playground',
-          key: 'default_vault_db_path',
-          value: activeVaultPath || '',
-          scope: 'actor',
-        },
-      ]);
-      setDefaultsMsg('Defaults guardados en DuckDB.');
-      loadConfig();
-    } catch (e) {
-      setDefaultsMsg(e instanceof Error ? e.message : 'No se pudieron guardar defaults');
-    } finally {
-      setDefaultsSaving(false);
-    }
-  }, [activeVaultPath, config, loadConfig, workerId]);
   const panelToggleTitle = panelOpen ? 'Ocultar panel de configuración' : 'Mostrar panel de configuración';
 
   const runSettingsPanel = (
-    <PlaygroundRunSettingsPanel
-      config={config}
-      activeVaultPath={activeVaultPath}
-      activeVaultScope={activeVaultScope}
-      workerLabel={
-        workerOptionLabel(
-          selectableWorkers.find((worker) => workerOptionId(worker) === workerId) ?? workerId
-        ) || workerId || '—'
-      }
-      projectLabel={activeProject?.name || 'Todos los agentes'}
-      systemPreview={systemPreview}
-      systemReady={Boolean(systemPreview.trim())}
-      invalidWorkers={config?.workers_invalid ?? []}
-      defaultsSaving={defaultsSaving}
-      defaultsMsg={defaultsMsg}
-      logsPanelOpen={logsPanelOpen}
-      onLogsToggle={() => setLogsPanelOpen((open) => !open)}
-      logsPanel={<Pm2LiveLogsPanel embedded />}
-      onSaveDefault={savePlaygroundDefaults}
-      onOpen={setSettingsModal}
-    />
+    <Pm2LiveLogsProvider autoStart={logsPanelOpen}>
+      <PlaygroundRunSettingsPanel
+        config={config}
+        activeVaultPath={activeVaultPath}
+        activeVaultScope={activeVaultScope}
+        workerLabel={
+          workerOptionLabel(
+            selectableWorkers.find((worker) => workerOptionId(worker) === workerId) ?? workerId
+          ) || workerId || '—'
+        }
+        projectLabel={activeProject?.name || 'Todos los agentes'}
+        systemPreview={systemPreview}
+        systemReady={Boolean(systemPreview.trim())}
+        invalidWorkers={config?.workers_invalid ?? []}
+        logsPanelOpen={logsPanelOpen}
+        onLogsToggle={() => setLogsPanelOpen((open) => !open)}
+        logsControls={logsPanelOpen ? <Pm2LiveLogsControls variant="studio" /> : null}
+        logsViewport={logsPanelOpen ? <Pm2LiveLogsViewport /> : null}
+        onOpen={setSettingsModal}
+      />
+    </Pm2LiveLogsProvider>
   );
 
   const settingsDialog = (
@@ -644,7 +621,7 @@ export default function PlaygroundPage() {
             <h2 className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">Run settings</h2>
             <Settings2 size={15} className="text-gov-gray-400 dark:text-dark-muted" aria-hidden />
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain pt-3 [scrollbar-gutter:stable]">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
             {runSettingsPanel}
           </div>
         </div>

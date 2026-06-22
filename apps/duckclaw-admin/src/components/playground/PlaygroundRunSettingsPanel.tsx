@@ -26,12 +26,10 @@ export type PlaygroundRunSettingsPanelProps = {
   systemPreview: string;
   systemReady: boolean;
   invalidWorkers: string[];
-  defaultsSaving: boolean;
-  defaultsMsg: string | null;
   logsPanelOpen: boolean;
   onLogsToggle: () => void;
-  logsPanel?: React.ReactNode;
-  onSaveDefault: () => void;
+  logsControls?: React.ReactNode;
+  logsViewport?: React.ReactNode;
   onOpen: (modal: SettingsModalKey) => void;
 };
 
@@ -61,12 +59,10 @@ export function PlaygroundRunSettingsPanel({
   systemPreview,
   systemReady,
   invalidWorkers,
-  defaultsSaving,
-  defaultsMsg,
   logsPanelOpen,
   onLogsToggle,
-  logsPanel,
-  onSaveDefault,
+  logsControls,
+  logsViewport,
   onOpen,
 }: PlaygroundRunSettingsPanelProps) {
   const [contextOpen, setContextOpen] = useState(true);
@@ -79,130 +75,117 @@ export function PlaygroundRunSettingsPanel({
     activeVaultScope === 'chat' ? 'Por conversación' : 'Vault compartido (RAG + SQL)';
 
   return (
-    <div className="flex min-w-0 flex-col gap-4">
-      <button
-        type="button"
-        onClick={() => onOpen('model')}
-        className="w-full rounded-xl border border-gov-gray-200/90 bg-white p-3 text-left transition-colors hover:border-gov-blue-200 hover:bg-gov-blue-50/30 dark:border-dark-border dark:bg-[#1e1f20] dark:hover:border-gov-blue-800 dark:hover:bg-dark-surface"
+    <div className="flex h-full min-h-0 min-w-0 flex-col gap-2">
+      <div
+        className={`min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] ${
+          logsPanelOpen ? 'max-h-[42%] shrink-0 space-y-3' : 'flex-1 space-y-4'
+        }`}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">{model}</p>
-            <p className="mt-0.5 font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
-              {provider}
-            </p>
-            <p className="mt-2 text-[11px] leading-relaxed text-gov-gray-500 dark:text-dark-muted">
-              Modelo LLM activo en esta conversación. Clic para cambiar proveedor o modelo.
-            </p>
+        <button
+          type="button"
+          onClick={() => onOpen('model')}
+          className="w-full rounded-xl border border-gov-gray-200/90 bg-white p-3 text-left transition-colors hover:border-gov-blue-200 hover:bg-gov-blue-50/30 dark:border-dark-border dark:bg-[#1e1f20] dark:hover:border-gov-blue-800 dark:hover:bg-dark-surface"
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">{model}</p>
+              <p className="mt-0.5 font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
+                {provider}
+              </p>
+              <p className="mt-2 text-[11px] leading-relaxed text-gov-gray-500 dark:text-dark-muted">
+                Modelo LLM activo en esta conversación. Clic para cambiar proveedor o modelo.
+              </p>
+            </div>
+            <Brain size={16} className="shrink-0 text-gov-gray-400 dark:text-dark-muted" aria-hidden />
           </div>
-          <Brain size={16} className="shrink-0 text-gov-gray-400 dark:text-dark-muted" aria-hidden />
-        </div>
-      </button>
+        </button>
 
-      <div>
-        <p className="mb-1.5 text-xs font-medium text-gov-gray-600 dark:text-dark-muted">
-          System instructions
-        </p>
-        <button
-          type="button"
-          onClick={() => onOpen('instructions')}
-          className="w-full min-h-[5.5rem] rounded-xl border border-gov-gray-200/90 bg-white p-3 text-left transition-colors hover:border-gov-blue-200 dark:border-dark-border dark:bg-[#1e1f20] dark:hover:border-gov-blue-800"
-        >
-          <p
-            className={`text-xs leading-relaxed whitespace-pre-wrap break-words ${
-              systemReady
-                ? 'text-gov-gray-700 dark:text-dark-text'
-                : 'text-gov-gray-400 dark:text-dark-muted'
-            }`}
+        <div>
+          <p className="mb-1.5 text-xs font-medium text-gov-gray-600 dark:text-dark-muted">
+            System instructions
+          </p>
+          <button
+            type="button"
+            onClick={() => onOpen('instructions')}
+            className="w-full min-h-[5.5rem] rounded-xl border border-gov-gray-200/90 bg-white p-3 text-left transition-colors hover:border-gov-blue-200 dark:border-dark-border dark:bg-[#1e1f20] dark:hover:border-gov-blue-800"
           >
-            {systemReady
-              ? truncatePreview(systemPreview)
-              : 'Opcional: tono y comportamiento del agente para este worker.'}
-          </p>
-          <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gov-blue-700 dark:text-dark-cyan">
-            <FileText size={11} aria-hidden />
-            {systemReady ? 'Editar instrucciones' : 'Configurar prompt'}
-          </span>
-        </button>
-      </div>
-
-      <StudioCollapsible
-        title="Contexto"
-        open={contextOpen}
-        onToggle={() => setContextOpen((v) => !v)}
-      >
-        <StudioFieldRow
-          label="DuckDB"
-          value={vaultLabel}
-          hint={vaultScope}
-          mono
-          onClick={() => onOpen('vault')}
-        />
-        <StudioFieldRow
-          label="Proyecto"
-          value={projectLabel}
-          hint="Filtro de agentes y RAG"
-          onClick={() => onOpen('routing')}
-        />
-        <StudioFieldRow
-          label="Agente"
-          value={workerLabel}
-          hint="Worker de esta conversación"
-          onClick={() => onOpen('routing')}
-        />
-      </StudioCollapsible>
-
-      <StudioCollapsible
-        title="Herramientas"
-        open={toolsOpen}
-        onToggle={() => setToolsOpen((v) => !v)}
-      >
-        <StudioToggleRow
-          label="Logs PM2"
-          hint="Panel en este sidebar"
-          checked={logsPanelOpen}
-          onChange={onLogsToggle}
-          icon={<Terminal size={14} aria-hidden />}
-        />
-        <StudioLinkRow
-          label="Comandos"
-          hint="/model · /vault · /workers"
-          onClick={() => onOpen('commands')}
-          icon={<MessageSquareText size={14} aria-hidden />}
-        />
-      </StudioCollapsible>
-
-      {logsPanelOpen && logsPanel ? (
-        <div className="flex max-h-[min(42vh,320px)] min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-slate-950/95 dark:border-dark-border">
-          {logsPanel}
+            <p
+              className={`text-xs leading-relaxed whitespace-pre-wrap break-words ${
+                systemReady
+                  ? 'text-gov-gray-700 dark:text-dark-text'
+                  : 'text-gov-gray-400 dark:text-dark-muted'
+              }`}
+            >
+              {systemReady
+                ? truncatePreview(systemPreview)
+                : 'Opcional: tono y comportamiento del agente para este worker.'}
+            </p>
+            <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gov-blue-700 dark:text-dark-cyan">
+              <FileText size={11} aria-hidden />
+              {systemReady ? 'Editar instrucciones' : 'Configurar prompt'}
+            </span>
+          </button>
         </div>
-      ) : null}
 
-      {invalidWorkers.length > 0 && (
-        <p className="rounded-xl border border-amber-200/90 bg-amber-50/80 p-3 text-[11px] font-medium text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
-          Agentes no disponibles: {invalidWorkers.join(', ')}.
-        </p>
-      )}
-
-      <div className="rounded-xl border border-gov-gray-200/90 bg-white p-3 dark:border-dark-border dark:bg-[#1e1f20]">
-        <button
-          type="button"
-          onClick={onSaveDefault}
-          disabled={!config || defaultsSaving}
-          className="w-full rounded-lg border border-gov-gray-200 bg-gov-gray-50 px-3 py-2 text-xs font-semibold text-gov-gray-800 transition-colors hover:bg-gov-gray-100 disabled:opacity-50 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text dark:hover:bg-dark-surface"
+        <StudioCollapsible
+          title="Contexto"
+          open={contextOpen}
+          onToggle={() => setContextOpen((v) => !v)}
         >
-          {defaultsSaving ? 'Guardando…' : 'Guardar como default'}
-        </button>
-        {defaultsMsg ? (
-          <p className="mt-2 text-[10px] font-medium text-gov-blue-700 dark:text-dark-cyan">
-            {defaultsMsg}
-          </p>
-        ) : (
-          <p className="mt-2 text-[10px] text-gov-gray-500 dark:text-dark-muted">
-            Modelo, vault y worker por defecto del Playground.
+          <StudioFieldRow
+            label="DuckDB"
+            value={vaultLabel}
+            hint={vaultScope}
+            mono
+            onClick={() => onOpen('vault')}
+          />
+          <StudioFieldRow
+            label="Proyecto"
+            value={projectLabel}
+            hint="Filtro de agentes y RAG"
+            onClick={() => onOpen('routing')}
+          />
+          <StudioFieldRow
+            label="Agente"
+            value={workerLabel}
+            hint="Worker de esta conversación"
+            onClick={() => onOpen('routing')}
+          />
+        </StudioCollapsible>
+
+        <StudioCollapsible
+          title="Herramientas"
+          open={toolsOpen}
+          onToggle={() => setToolsOpen((v) => !v)}
+        >
+          <StudioToggleRow
+            label="Logs PM2"
+            hint={logsPanelOpen ? 'Consola abajo' : 'Mostrar consola de logs'}
+            checked={logsPanelOpen}
+            onChange={onLogsToggle}
+            icon={<Terminal size={14} aria-hidden />}
+          />
+          {logsPanelOpen && logsControls ? logsControls : null}
+          <StudioLinkRow
+            label="Comandos"
+            hint="/model · /vault · /workers"
+            onClick={() => onOpen('commands')}
+            icon={<MessageSquareText size={14} aria-hidden />}
+          />
+        </StudioCollapsible>
+
+        {invalidWorkers.length > 0 && (
+          <p className="rounded-xl border border-amber-200/90 bg-amber-50/80 p-3 text-[11px] font-medium text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+            Agentes no disponibles: {invalidWorkers.join(', ')}.
           </p>
         )}
       </div>
+
+      {logsPanelOpen && logsViewport ? (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-slate-950 dark:border-dark-border">
+          {logsViewport}
+        </div>
+      ) : null}
     </div>
   );
 }

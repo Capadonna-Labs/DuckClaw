@@ -20,7 +20,7 @@ def test_migrations_create_expected_tables() -> None:
     con = duckdb.connect(str(tmp / "test.duckdb"))
 
     applied = run_pending_migrations(con)
-    assert len(applied) == 24, f"Expected 24 migrations, got {len(applied)}: {applied}"
+    assert len(applied) == 25, f"Expected 25 migrations, got {len(applied)}: {applied}"
 
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"

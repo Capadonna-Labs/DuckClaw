@@ -1169,7 +1169,18 @@ _M024_FRAMEWORK_REPORT_ENGINE_POLICY = [
 ]
 
 
+_M025_FRAMEWORK_REPORT_ENGINE_TOOL_ROUTING = [
+    "SELECT 1 AS framework_report_engine_tool_routing_noop",
+]
+
+
 def _migration_024_framework_report_engine_policy(db: Any) -> None:
+    from duckclaw.framework_policy_pack import apply_framework_policy_pack
+
+    apply_framework_policy_pack(db)
+
+
+def _migration_025_framework_report_engine_tool_routing(db: Any) -> None:
     from duckclaw.framework_policy_pack import apply_framework_policy_pack
 
     apply_framework_policy_pack(db)
@@ -1191,6 +1202,7 @@ _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     21: _migration_021_apply_framework_policy_pack,
     22: _migration_022_refresh_framework_packs,
     24: _migration_024_framework_report_engine_policy,
+    25: _migration_025_framework_report_engine_tool_routing,
 }
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
@@ -1218,4 +1230,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (22, "framework_pack_refresh_v2", _M022_FRAMEWORK_PACK_REFRESH),
     (23, "report_engine_v1", _M023_REPORT_ENGINE),
     (24, "framework_report_engine_policy", _M024_FRAMEWORK_REPORT_ENGINE_POLICY),
+    (25, "framework_report_engine_tool_routing", _M025_FRAMEWORK_REPORT_ENGINE_TOOL_ROUTING),
 ]

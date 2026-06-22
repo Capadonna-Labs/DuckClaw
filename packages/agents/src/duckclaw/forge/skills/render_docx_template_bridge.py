@@ -51,10 +51,10 @@ def register_render_docx_template_tool(tools_list: list[Any]) -> None:
             render_docx_template_tool,
             name="render_docx_template",
             description=(
-                "Genera un Word corporativo desde plantilla (docxtpl). "
-                "Plantilla built-in: corporate_report con variables "
-                "title, subtitle, author, tenant_name, body, date (JSON en context_json). "
-                "Guarda bajo OUTPUT vault; opcional convert_document a PDF después."
+                "SOLO plantilla built-in corporate_report (one-pager genérico). "
+                "NO usar para INFORME MENSUAL ni .docx del vault del proyecto — "
+                "usa generate_report_docx_from_markdown o render_report_instance. "
+                "Variables: title, subtitle, author, tenant_name, body, date (context_json)."
             ),
         )
     )

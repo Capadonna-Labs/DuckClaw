@@ -231,15 +231,11 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
     assert "sin agentes asignados, se muestran todos" in page
     assert "activeVaultPath={activeVaultPath}" in page
     assert "effectivePath={activeVaultPath}" in page
-    assert "RunSettingsCard" in page
-    assert "Control de conversación, sin ocupar chat." in page
-    assert "Guardar como default" in page
-    assert "savePlaygroundDefaults" in page
-    assert "patchRuntimeSettings" in page
-    assert "default_worker_id" in page
-    assert "default_vault_db_path" in page
-    assert "PlaygroundSessionBar" in page
-    assert "sessionBarSummary" in page
+    assert "PlaygroundRunSettingsPanel" in page
+    assert "Guardar como default" not in page
+    assert "savePlaygroundDefaults" not in page
+    assert "Pm2LiveLogsControls" in page
+    assert "Pm2LiveLogsViewport" in page
     assert "Modelo fijado para esta conversación." not in page
     assert "DuckDB fijada para esta conversación" not in page
     assert "Run settings" in page
@@ -258,18 +254,22 @@ def test_playground_config_panel_uses_compact_cards_and_modals() -> None:
         encoding="utf-8"
     )
 
+    panel = Path("apps/duckclaw-admin/src/components/playground/PlaygroundRunSettingsPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+
     assert "type PlaygroundSettingsModal = 'commands' | 'vault' | 'model' | 'instructions' | 'routing' | null" in page
     assert "const [settingsModal, setSettingsModal] = useState<PlaygroundSettingsModal>(null)" in page
-    assert "function RunSettingsCard" in page
+    assert "export const RunSettingsCard = PlaygroundRunSettingsPanel" in panel
     assert "function SettingsModal" in page
     assert "function ConfigAccordionSection" not in page
     assert "type PlaygroundConfigSection" not in page
     assert "title=\"Comandos\"" in page
-    assert "title=\"DuckDB\"" in page
-    assert "title=\"Modelo\"" in page
+    assert "title=\"Model selection\"" in page
     assert "title=\"System instructions\"" in page
-    assert "title=\"Proyecto\"" in page
-    assert "title=\"Agente\"" in page
+    assert 'label="DuckDB"' in panel
+    assert 'label="Proyecto"' in panel
+    assert 'label="Agente"' in panel
     assert "iconOnly?: boolean" in toggle
     assert "aria-label={label}" in toggle
     assert "{!iconOnly && label}" in toggle

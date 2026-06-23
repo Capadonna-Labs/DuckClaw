@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any, Optional
 
 try:
@@ -32,23 +34,28 @@ from duckclaw.workers.tool_invocation_policy import (
 from duckclaw.workers.tool_surface_policy import tool_surface_intent_text
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from duckclaw.workers.factory_graph_nodes_agent_policy_early_context import (
+    bind_agent_turn_tool_context,
+    maybe_force_get_current_time_orchestration,
+)
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.factory_graph_nodes_agent_shared import load_agent_env, unpack_agent_bindings
+
+_log = logging.getLogger(__name__)
 
 
 def make_agent_policy_early(ctx: WorkerGraphContext):
     (
-        worker_id, db, spec, path, provider, llm, tool_surface, is_market_analysis_worker,
+        worker_id, db, spec, path, provider, llm, tool_surface,
         tools, tools_by_name, tools_sandbox_off, tools_by_name_sandbox_off, prompt_policies, _lid,
         use_cm, _tools_for_llm_bind, _tools_sandbox_off_bind, _sandbox_enabled_for_state, b,
         llm_with_tools_on, llm_with_tools_off, llm_force_schema_on, llm_force_schema_off,
         llm_force_read_sql_on, llm_force_read_sql_off, llm_force_admin_sql_on, llm_force_admin_sql_off,
         llm_force_run_sandbox_on, llm_force_run_sandbox_off, llm_force_tavily_on, llm_force_tavily_off,
-        llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_fetch_market_on,
-        llm_force_fetch_market_off, llm_force_reddit_post_on, llm_force_reddit_post_off,
-        llm_force_reddit_search_on, llm_force_reddit_search_off, llm_force_reddit_fallback_on,
-        llm_force_reddit_fallback_off, has_read_sql, has_tavily, has_generate_visual, has_reddit_tools,
-        has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
+        llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_reddit_post_on,
+        llm_force_reddit_post_off, llm_force_reddit_search_on, llm_force_reddit_search_off,
+        llm_force_reddit_fallback_on, llm_force_reddit_fallback_off, has_read_sql, has_tavily,
+        has_generate_visual, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
         _incoming_has_reddit_share_path, _incoming_has_reddit_url, _incoming_looks_like_reddit_post_url,
         _is_latest_game_query, _is_schema_query, _patch_ai_reddit_share_tool_calls,
         _reddit_share_slug_from_incoming, _reddit_tool_message_no_data,
@@ -62,57 +69,14 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                 _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
                 _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))
                 set_log_context(tenant_id=_tenant_ctx, worker_id=worker_id, chat_id=_log_chat)
-                try:
-                    from duckclaw.forge.skills.goals_tool_context import (
-                        set_goals_tool_chat_id,
-                        set_goals_tool_db_path,
-                        set_goals_tool_worker_id,
-                    )
-                    from duckclaw.forge.skills.knowledge_tool_context import (
-                        set_knowledge_tool_project_id,
-                        set_knowledge_tool_tenant_id,
-                        set_knowledge_tool_worker_uid,
-                        set_session_actor_email,
-                        set_session_chat_id,
-                    )
-
-                    set_goals_tool_chat_id(str(_chat_ctx))
-                    set_goals_tool_worker_id(worker_id)
-                    set_goals_tool_db_path(str(path))
-                    set_knowledge_tool_tenant_id(_tenant_ctx)
-                    set_knowledge_tool_project_id(str(state.get("project_id") or ""))
-                    _worker_uid = ""
-                    try:
-                        import duckdb
-
-                        _con = duckdb.connect(str(path), read_only=True)
-                        try:
-                            _row = _con.execute(
-                                """
-                                SELECT worker_uid FROM main.admin_worker_catalog
-                                WHERE worker_id = ? AND tenant_id = ? AND active = true
-                                LIMIT 1
-                                """,
-                                [worker_id, _tenant_ctx],
-                            ).fetchone()
-                            if _row:
-                                _worker_uid = str(_row[0] or "").strip()
-                        finally:
-                            _con.close()
-                    except Exception:
-                        _worker_uid = ""
-                    set_knowledge_tool_worker_uid(_worker_uid)
-                    set_session_chat_id(str(_chat_ctx))
-                    username = str(state.get("username") or state.get("actor_email") or "").strip()
-                    set_session_actor_email(username or f"chat:{_chat_ctx}")
-                    try:
-                        from duckclaw.forge.skills.report_engine_hub_context import set_report_engine_hub_db
-
-                        set_report_engine_hub_db(db)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                bind_agent_turn_tool_context(
+                    state=state,
+                    worker_id=worker_id,
+                    path=str(path),
+                    db=db,
+                    chat_ctx=str(_chat_ctx),
+                    tenant_ctx=_tenant_ctx,
+                )
                 _wl = _worker_log_label(worker_id)
                 cfg = config or {}
                 incoming = (
@@ -174,6 +138,7 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
 
                 _orch = None
                 _orch_forced: str | None = None
+                _orch_incoming = (state.get("user_incoming") or "").strip() or incoming
                 try:
                     from duckclaw.workers.tool_orchestration import (
                         parse_tool_orchestration,
@@ -184,7 +149,7 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     if _orch and not telegram_context_summarize_directive:
                         _orch_forced = resolve_forced_tool(
                             _orch,
-                            incoming,
+                            _orch_incoming,
                             state.get("messages") or [],
                             tools_by_name,
                         )
@@ -192,32 +157,15 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     _orch = None
                     _orch_forced = None
 
-                if (
-                    _orch_forced == "get_current_time"
-                    and "get_current_time" in tools_by_name
-                    and not telegram_context_summarize_directive
-                ):
-                    _lh_orch_gct = _last_human_message_index(state.get("messages") or [])
-                    if not _tool_called_since(
-                        state.get("messages") or [], _lh_orch_gct, "get_current_time"
-                    ):
-                        _forced_tid_orch_gct = f"call_orch_get_current_time_{int(time.time() * 1000)}"
-                        _forced_tc_orch_gct = [
-                            {
-                                "name": "get_current_time",
-                                "args": {},
-                                "id": _forced_tid_orch_gct,
-                                "type": "tool_call",
-                            }
-                        ]
-                        _log.info("[%s] tool_orchestration → get_current_time", _wl)
-                        _out_orch_gct = {
-                            **state,
-                            "messages": state["messages"]
-                            + [AIMessage(content="", tool_calls=_forced_tc_orch_gct)],
-                        }
-                        _out_orch_gct.update(_identity_fields(state))
-                        return _out_orch_gct
+                _orch_forced_out = maybe_force_get_current_time_orchestration(
+                    state=state,
+                    orch_forced=_orch_forced,
+                    tools_by_name=tools_by_name,
+                    telegram_context_summarize_directive=telegram_context_summarize_directive,
+                    worker_log_label=_wl,
+                )
+                if _orch_forced_out is not None:
+                    return _orch_forced_out
 
                 db_first_tool_decision = _decide_db_first_tool_invocation(
                     spec=spec,
@@ -391,7 +339,56 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     force_reddit = False
                     force_visual = False
 
-                ctx.agent_turn = {'_intent_incoming': _intent_incoming, '_orch': _orch, '_reddit_resolved_comments_url': _reddit_resolved_comments_url, '_reddit_share_mcp_exhausted': _reddit_share_mcp_exhausted, '_visual_tool_already_ok': _visual_tool_already_ok, '_wl': _wl, 'already_has_tool_result': already_has_tool_result, 'force_admin_sql': force_admin_sql, 'force_read_sql': force_read_sql, 'force_reddit': force_reddit, 'force_schema': force_schema, 'force_tavily': force_tavily, 'force_visual': force_visual, 'incoming': incoming, 'incoming_for_reddit': incoming_for_reddit, 'is_latest_game': is_latest_game, 'is_schema': is_schema, 'is_table_content': is_table_content, 'reddit_search_tool_count': reddit_search_tool_count, 'state': state, 'summarize_stored_directive': summarize_stored_directive, 'telegram_context_summarize_directive': telegram_context_summarize_directive}
+                force_orch_tool: str | None = None
+                if _orch_forced and _orch_forced != "get_current_time":
+                    if _orch_forced == "read_sql" and force_read_sql:
+                        pass
+                    elif _orch_forced == "admin_sql" and force_admin_sql:
+                        pass
+                    else:
+                        from duckclaw.workers.tool_orchestration import (
+                            _first_bindable_tool,
+                            _last_human_index,
+                            _tools_since,
+                        )
+
+                        _orch_candidates = [_orch_forced]
+                        if _orch and _orch_forced in (
+                            "execute_sandbox_script",
+                            "run_sandbox",
+                        ):
+                            _orch_candidates = [
+                                "execute_sandbox_script",
+                                "run_sandbox",
+                            ]
+                        _orch_msgs = state.get("messages") or []
+                        _orch_lh = _last_human_index(list(_orch_msgs))
+                        _orch_ran = set(_tools_since(list(_orch_msgs), _orch_lh))
+                        _bindable_orch = _first_bindable_tool(
+                            _orch_candidates,
+                            tools_by_name,
+                            _orch_ran,
+                        )
+                        if _bindable_orch:
+                            force_orch_tool = _bindable_orch
+                            if force_orch_tool != "read_sql":
+                                force_read_sql = False
+                        elif _orch_forced in (
+                            "execute_sandbox_script",
+                            "run_sandbox",
+                        ):
+                            _log.warning(
+                                "[%s] orchestration wanted sandbox tool %s but none bindable; tools=%s",
+                                _wl,
+                                _orch_forced,
+                                sorted(
+                                    n
+                                    for n in tools_by_name
+                                    if "sandbox" in n or n == "execute_sandbox_script"
+                                ),
+                            )
+
+                ctx.agent_turn = {'_intent_incoming': _intent_incoming, '_orch': _orch, '_orch_forced': _orch_forced, '_reddit_resolved_comments_url': _reddit_resolved_comments_url, '_reddit_share_mcp_exhausted': _reddit_share_mcp_exhausted, '_visual_tool_already_ok': _visual_tool_already_ok, '_wl': _wl, 'already_has_tool_result': already_has_tool_result, 'force_admin_sql': force_admin_sql, 'force_orch_tool': force_orch_tool, 'force_read_sql': force_read_sql, 'force_reddit': force_reddit, 'force_schema': force_schema, 'force_tavily': force_tavily, 'force_visual': force_visual, 'incoming': incoming, 'incoming_for_reddit': incoming_for_reddit, 'is_latest_game': is_latest_game, 'is_schema': is_schema, 'is_table_content': is_table_content, 'reddit_search_tool_count': reddit_search_tool_count, 'state': state, 'summarize_stored_directive': summarize_stored_directive, 'telegram_context_summarize_directive': telegram_context_summarize_directive}
                 return None
 
     return run

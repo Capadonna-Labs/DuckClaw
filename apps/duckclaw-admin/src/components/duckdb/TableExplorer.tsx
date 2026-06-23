@@ -30,6 +30,7 @@ export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
   const [loading, setLoading] = useState(false);
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [writeOk, setWriteOk] = useState<string | null>(null);
   const [catalogMeta, setCatalogMeta] = useState<DuckdbTableCatalog | null>(null);
 
   const loadCatalog = useCallback(async () => {
@@ -52,14 +53,22 @@ export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
       if (!query.trim()) return;
       setLoading(true);
       setError(null);
+      setWriteOk(null);
       setSql(query);
       try {
         const data = await adminService.runDuckdbQuery({
           query,
           vault_path: vaultPath || undefined,
         });
-        setColumns(data.columns);
-        setRows(data.rows);
+        if (data.mode === 'write') {
+          setColumns([]);
+          setRows([]);
+          setWriteOk(`Escritura aplicada (task_id: ${data.task_id ?? 'ok'})`);
+          void loadCatalog();
+        } else {
+          setColumns(data.columns);
+          setRows(data.rows);
+        }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Error SQL');
         setColumns([]);
@@ -68,7 +77,7 @@ export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
         setLoading(false);
       }
     },
-    [vaultPath]
+    [vaultPath, loadCatalog]
   );
 
   useEffect(() => {
@@ -121,7 +130,7 @@ export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void runQuery(sql);
           }}
-          placeholder="SELECT … (Ctrl+Enter para ejecutar)"
+          placeholder="SELECT o INSERT … (Ctrl+Enter para ejecutar)"
           className="flex-1 font-mono text-xs px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-100"
         />
         <button
@@ -134,6 +143,12 @@ export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
           Run Query
         </button>
       </div>
+
+      {writeOk && (
+        <p className="text-sm text-emerald-300 bg-emerald-950/40 border border-emerald-900/50 rounded-xl px-3 py-2">
+          {writeOk}
+        </p>
+      )}
 
       {error && (
         <p className="text-sm text-red-400 bg-red-950/40 border border-red-900/50 rounded-xl px-3 py-2">
@@ -191,7 +206,7 @@ export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
             <div className="flex justify-center items-center h-full">
               <Loader2 className="animate-spin text-slate-500" size={32} />
             </div>
-          ) : rows.length === 0 ? (
+          ) : rows.length === 0 && !writeOk ? (
             <p className="text-slate-500 text-sm p-6">Selecciona una tabla o ejecuta SQL.</p>
           ) : (
             <table className="w-full text-xs border-collapse">

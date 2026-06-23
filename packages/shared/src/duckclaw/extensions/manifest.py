@@ -9,6 +9,17 @@ from typing import Any, Optional
 
 
 @dataclass(frozen=True)
+class StateDeltaHandlerEntry:
+    """Declarative binding for an extension-owned StateDelta Redis queue."""
+
+    entrypoint: str
+    queue: str = ""
+    queue_env: str = ""
+    default_queue: str = ""
+    lib_path: str = ""
+
+
+@dataclass(frozen=True)
 class FlyExtensionManifest:
     """Declarative fly extension config supplied by an external repo."""
 
@@ -16,8 +27,10 @@ class FlyExtensionManifest:
     package_name: str = ""
     fly_dispatchers: tuple[str, ...] = ()
     worker_skill_hooks: tuple[str, ...] = ()
+    worker_tool_context_hooks: tuple[str, ...] = ()
     read_only_commands: tuple[str, ...] = ()
     help_entries: tuple[tuple[str, str], ...] = ()
+    state_delta_handlers: tuple[StateDeltaHandlerEntry, ...] = ()
     source_path: Optional[Path] = None
 
 
@@ -50,10 +63,34 @@ def _parse_hook_list(raw: Any) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _parse_state_delta_handlers(raw: Any) -> tuple[StateDeltaHandlerEntry, ...]:
+    if not isinstance(raw, list):
+        return ()
+    out: list[StateDeltaHandlerEntry] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        entrypoint = str(item.get("entrypoint") or "").strip()
+        if not entrypoint:
+            continue
+        out.append(
+            StateDeltaHandlerEntry(
+                queue=str(item.get("queue") or "").strip(),
+                queue_env=str(item.get("queue_env") or "").strip(),
+                default_queue=str(item.get("default_queue") or "").strip(),
+                entrypoint=entrypoint,
+                lib_path=str(item.get("lib_path") or "").strip(),
+            )
+        )
+    return tuple(out)
+
+
 def _parse_manifest_dict(data: dict[str, Any], *, source: Path | None) -> FlyExtensionManifest:
     dispatchers_raw = data.get("fly_dispatchers") or []
     hooks_raw = data.get("worker_skill_hooks") or []
+    tool_context_hooks_raw = data.get("worker_tool_context_hooks") or []
     read_only_raw = data.get("read_only_commands") or []
+    state_delta_raw = data.get("state_delta_handlers") or []
     dispatchers: list[str] = []
     if isinstance(dispatchers_raw, list):
         for item in dispatchers_raw:
@@ -73,8 +110,10 @@ def _parse_manifest_dict(data: dict[str, Any], *, source: Path | None) -> FlyExt
         package_name=package_name,
         fly_dispatchers=tuple(dispatchers),
         worker_skill_hooks=_parse_hook_list(hooks_raw),
+        worker_tool_context_hooks=_parse_hook_list(tool_context_hooks_raw),
         read_only_commands=tuple(read_only),
         help_entries=_parse_help_entries(data.get("help_entries")),
+        state_delta_handlers=_parse_state_delta_handlers(state_delta_raw),
         source_path=source,
     )
 

@@ -23,11 +23,16 @@ def build_agent_llm_bind(ctx: WorkerGraphContext) -> None:
 
     has_read_sql = "read_sql" in tools_by_name
     has_admin_sql = "admin_sql" in tools_by_name
-    has_run_sandbox = "run_sandbox" in tools_by_name
+    _sandbox_exec_tool = (
+        "execute_sandbox_script"
+        if "execute_sandbox_script" in tools_by_name
+        else "run_sandbox"
+    )
+    has_run_sandbox = _sandbox_exec_tool in tools_by_name
     tool_choice_inspect_schema = _tool_choice_function("inspect_schema")
     tool_choice_read_sql = _tool_choice_function("read_sql")
     tool_choice_admin_sql = _tool_choice_function("admin_sql")
-    tool_choice_run_sandbox = _tool_choice_function("run_sandbox")
+    tool_choice_run_sandbox = _tool_choice_function(_sandbox_exec_tool)
 
     llm_force_schema_on = _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_inspect_schema)
     llm_force_schema_off = _bind_tools(
@@ -73,19 +78,6 @@ def build_agent_llm_bind(ctx: WorkerGraphContext) -> None:
     llm_force_generate_visual_off = (
         _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_generate_visual)
         if "generate_visual_asset" in tools_by_name_sandbox_off
-        else None
-    )
-
-    has_fetch_market = "fetch_market_data" in tools_by_name
-    tool_choice_fetch_market = _tool_choice_function("fetch_market_data")
-    llm_force_fetch_market_on = (
-        _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_fetch_market)
-        if has_fetch_market
-        else None
-    )
-    llm_force_fetch_market_off = (
-        _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_fetch_market)
-        if has_fetch_market
         else None
     )
 
@@ -142,8 +134,6 @@ def build_agent_llm_bind(ctx: WorkerGraphContext) -> None:
         "llm_force_tavily_off": llm_force_tavily_off,
         "llm_force_generate_visual_on": llm_force_generate_visual_on,
         "llm_force_generate_visual_off": llm_force_generate_visual_off,
-        "llm_force_fetch_market_on": llm_force_fetch_market_on,
-        "llm_force_fetch_market_off": llm_force_fetch_market_off,
         "llm_force_reddit_post_on": llm_force_reddit_post_on,
         "llm_force_reddit_post_off": llm_force_reddit_post_off,
         "llm_force_reddit_search_on": llm_force_reddit_search_on,

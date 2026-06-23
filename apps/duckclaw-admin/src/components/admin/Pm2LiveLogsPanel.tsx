@@ -8,14 +8,25 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { AnsiLogText } from '@/lib/ansiLog';
+import { mutationHeaders } from '@/lib/csrfClient';
 import { PM2_LOGGABLE_APPS } from '@/lib/pm2LogApps';
 import { Radio, Square, Terminal } from 'lucide-react';
 
 const MAX_LINES = 6_000;
 
-import { mutationHeaders } from '@/lib/csrfClient';
+/** Contenedor con altura acotada; el viewport hace scroll dentro. */
+const LOG_VIEWPORT_SHELL_CLASS =
+  'flex min-h-[180px] max-h-[min(50vh,420px)] min-w-0 flex-col overflow-hidden';
+
+const LOG_VIEWPORT_SCROLL_CLASS =
+  'h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-2 font-mono text-[10px] leading-relaxed sm:p-3 sm:text-[11px]';
+
+/** Clases compartidas para viewport PM2 con scroll interno acotado. */
+export const PM2_LOG_VIEWPORT_SHELL_CLASS = LOG_VIEWPORT_SHELL_CLASS;
+export const PM2_LOG_VIEWPORT_SCROLL_CLASS = LOG_VIEWPORT_SCROLL_CLASS;
 
 function sessionHeaders(method = 'GET'): HeadersInit {
   return mutationHeaders(method);
@@ -34,7 +45,7 @@ type Pm2LogsContextValue = {
   start: () => Promise<void>;
   stop: () => void;
   clear: () => void;
-  tailRef: React.RefObject<HTMLDivElement | null>;
+  tailRef: RefObject<HTMLDivElement>;
 };
 
 const Pm2LogsContext = createContext<Pm2LogsContextValue | null>(null);
@@ -226,7 +237,7 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
 
   return (
     <div
-      className={`space-y-2 border-t px-2 py-2 dark:border-dark-border ${
+      className={`shrink-0 space-y-2 border-t px-2 py-2 dark:border-dark-border ${
         studio ? 'border-gov-gray-100' : 'border-slate-800/80 sm:px-3'
       }`}
     >
@@ -317,13 +328,13 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
   );
 }
 
-export function Pm2LiveLogsViewport() {
+export function Pm2LiveLogsViewport({ className = '' }: { className?: string }) {
   const { logText, streaming, tailRef } = usePm2LogsContext();
 
   return (
     <div
       ref={tailRef}
-      className="min-h-0 flex-1 overflow-auto p-2 font-mono text-[10px] leading-relaxed sm:p-3 sm:text-[11px]"
+      className={`${LOG_VIEWPORT_SCROLL_CLASS}${className ? ` ${className}` : ''}`}
     >
       {logText ? (
         <AnsiLogText text={logText} />
@@ -346,9 +357,11 @@ export function Pm2LiveLogsPanel({ embedded = false, autoStart = false }: Props)
   return (
     <Pm2LiveLogsProvider autoStart={autoStart}>
       {embedded ? (
-        <div className="flex h-full min-h-0 min-w-0 flex-col">
+        <div className="flex min-w-0 flex-col">
           <Pm2LiveLogsControls />
-          <Pm2LiveLogsViewport />
+          <div className={LOG_VIEWPORT_SHELL_CLASS}>
+            <Pm2LiveLogsViewport />
+          </div>
         </div>
       ) : (
         <section className="mt-8 space-y-4 border-t dark:border-dark-border pt-8">
@@ -361,9 +374,9 @@ export function Pm2LiveLogsPanel({ embedded = false, autoStart = false }: Props)
               </p>
             </div>
           </div>
-          <div className="space-y-0 rounded-xl border dark:border-dark-border bg-slate-950/95">
+          <div className="space-y-0 overflow-hidden rounded-xl border dark:border-dark-border bg-slate-950/95">
             <Pm2LiveLogsControls />
-            <div className="max-h-[min(50vh,420px)] min-h-[160px]">
+            <div className={LOG_VIEWPORT_SHELL_CLASS}>
               <Pm2LiveLogsViewport />
             </div>
           </div>

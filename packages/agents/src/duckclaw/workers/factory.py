@@ -120,7 +120,6 @@ from duckclaw.workers.tool_binding import (
 from duckclaw.workers.tool_invocation_policy import (
     decide_current_time_tool_invocation as _decide_current_time_tool_invocation,
     decide_db_first_tool_invocation as _decide_db_first_tool_invocation,
-    decide_market_data_tool_invocation as _decide_market_data_tool_invocation,
 )
 from duckclaw.workers.tool_output_truncation import (
     compact_run_sandbox_tool_content_for_llm as _compact_run_sandbox_tool_content_for_llm,

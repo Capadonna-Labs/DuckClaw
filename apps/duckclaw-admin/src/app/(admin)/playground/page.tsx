@@ -33,6 +33,7 @@ import {
   Pm2LiveLogsControls,
   Pm2LiveLogsProvider,
   Pm2LiveLogsViewport,
+  PM2_LOG_VIEWPORT_SHELL_CLASS,
 } from '@/components/admin/Pm2LiveLogsPanel';
 import { writeLastProjectId } from '@/lib/floatingChatProject';
 import type { FlyCommandEntry } from '@/types/admin';
@@ -695,10 +696,12 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
   );
 
   useEffect(() => {
+    if (!tenantId?.trim()) return;
     let cancelled = false;
     setLoading(true);
     setError(null);
-    adminService.listConversations({ tenant_id: tenantId, section: 'playground', limit: 80 })
+    // admin-conv-* indexa section="" (filtrar section=playground ocultaba hilos reales del tenant).
+    adminService.listConversations({ tenant_id: tenantId, limit: 80 })
       .then((res) => {
         if (!cancelled) setConversations(res.conversations ?? []);
       })
@@ -754,17 +757,20 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
         </Link>
       </header>
       <div className="h-full min-h-0 overflow-y-auto p-4">
-        {loading && (
+        {!tenantId?.trim() && (
+          <p className="text-sm text-gov-gray-400 text-center py-10">Cargando perfil…</p>
+        )}
+        {tenantId?.trim() && loading && (
           <p className="text-sm text-gov-gray-400 text-center py-10">Cargando historial…</p>
         )}
-        {error && <p className="text-sm text-red-600 text-center py-10">{error}</p>}
-        {!loading && !error && uniqueConversations.length === 0 && (
+        {tenantId?.trim() && error && <p className="text-sm text-red-600 text-center py-10">{error}</p>}
+        {tenantId?.trim() && !loading && !error && uniqueConversations.length === 0 && (
           <div className="rounded-3xl border border-dashed dark:border-dark-border p-10 text-center">
             <p className="font-bold dark:text-dark-text">Sin conversaciones</p>
             <p className="text-sm text-gov-gray-500 mt-1">Crea una conversación para verla aquí.</p>
           </div>
         )}
-        {!loading && !error && uniqueConversations.length > 0 && (
+        {tenantId?.trim() && !loading && !error && uniqueConversations.length > 0 && (
           <ul className="grid gap-2">
             {uniqueConversations.map((conversation) => (
               <li key={conversation.session_id}>

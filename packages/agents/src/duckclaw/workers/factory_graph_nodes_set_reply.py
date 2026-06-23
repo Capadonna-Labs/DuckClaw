@@ -37,7 +37,6 @@ def make_set_reply_node(ctx: WorkerGraphContext):
     spec = ctx.spec
     llm = ctx.llm
     tool_surface = ctx.tool_surface
-    is_market_analysis_worker = ctx.is_market_analysis_worker
     tools_by_name = ctx.tools_by_name
     tools_by_name_sandbox_off = ctx.tools_by_name_sandbox_off
     use_cm = ctx.use_context_monitor
@@ -97,12 +96,57 @@ def make_set_reply_node(ctx: WorkerGraphContext):
 
         msgs = state.get("messages") or []
         _inc_for_ctx = (state.get("incoming") or state.get("input") or "").strip()
+
+        def _nl_user_ask() -> str:
+            inc = state.get("incoming") or state.get("input") or ""
+            return (inc.strip() if isinstance(inc, str) else str(inc or "")).strip()
+
+        def _apply_nl_synthesis(candidate: str, *, for_admin: bool = False) -> str:
+            return maybe_synthesize_reply(
+                llm,
+                spec=spec,
+                user_ask=_nl_user_ask(),
+                reply_candidate=candidate,
+                for_admin_console=for_admin,
+            )
+
         _cap_reply, _cap_msgs = maybe_reply_for_tool_cap_exhausted(
             state, ctx, list(msgs), _inc_for_ctx, spec
         )
         if _cap_reply is not None:
             msgs = _cap_msgs if _cap_msgs is not None else msgs
-            reply = sanitize_worker_reply_text(_cap_reply)
+            from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+            _cid_cap = str(state.get("chat_id") or state.get("session_id") or "").strip()
+            _for_admin_cap = is_admin_ui_chat_session(_cid_cap)
+            _lh_cap = _last_human_message_index(list(msgs))
+            _spec_lid_cap = _spec_logical_worker_id(spec)
+            _body_cap = _repair_tool_response_egress_reply(
+                llm,
+                spec,
+                _inc_for_ctx,
+                "",
+                msgs,
+                skip_llm_synthesis=llm is None,
+                worker_display_name=str(getattr(spec, "name", None) or ""),
+            )
+            if not (_body_cap or "").strip() or _reply_is_tool_json_echo(_body_cap or ""):
+                _det_cap = _deterministic_tool_response_summary(
+                    list(msgs),
+                    _lh_cap,
+                    _spec_lid_cap,
+                    _inc_for_ctx,
+                    worker_display_name=str(getattr(spec, "name", None) or ""),
+                )
+                if (_det_cap or "").strip() and not _reply_is_tool_json_echo(_det_cap):
+                    _body_cap = _det_cap
+            _parts_cap: list[str] = []
+            if (_body_cap or "").strip():
+                _parts_cap.append((_body_cap or "").strip())
+            _parts_cap.append(_cap_reply.strip())
+            reply = sanitize_worker_reply_text(
+                _apply_nl_synthesis("\n\n".join(_parts_cap), for_admin=_for_admin_cap)
+            )
             suppress_egress = bool(state.get("suppress_subagent_egress"))
             if suppress_egress:
                 out = {**state, "reply": "", "internal_reply": reply, "messages": msgs}
@@ -119,13 +163,6 @@ def make_set_reply_node(ctx: WorkerGraphContext):
         reply = repair_summarize_new_context_egress(reply, incoming=_inc_for_ctx)
         reply = format_reddit_mcp_reply_if_applicable(reply)
         suppress_egress = bool(state.get("suppress_subagent_egress"))
-
-        def _nl_user_ask() -> str:
-            inc = state.get("incoming") or state.get("input") or ""
-            return (inc.strip() if isinstance(inc, str) else str(inc or "")).strip()
-
-        def _apply_nl_synthesis(candidate: str) -> str:
-            return maybe_synthesize_reply(llm, spec=spec, user_ask=_nl_user_ask(), reply_candidate=candidate)
 
         if not msgs:
             out_empty = {**state, "reply": "Sin respuesta generada."}
@@ -200,18 +237,16 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                 _inc_for_ctx,
                 reply or "",
                 last_human_idx=_lh_repair,
-                repair_enabled=is_market_analysis_worker,
+                repair_enabled=False,
             )
             if _egress_needs_repair:
-                _inline_synth_done = bool(state.get("market_inline_synthesis_attempted"))
-                _skip_llm_synth = _inline_synth_done and bool((reply or "").strip())
                 reply = _repair_tool_response_egress_reply(
                     llm,
                     spec,
                     _inc_for_ctx,
                     reply or "",
                     msgs,
-                    skip_llm_synthesis=_skip_llm_synth,
+                    skip_llm_synthesis=False,
                     worker_display_name=str(getattr(spec, "name", None) or ""),
                 )
                 if _reply_is_tool_json_echo(reply or ""):
@@ -291,22 +326,10 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                     )
                     if _det_ve:
                         reply = sanitize_worker_reply_text(_det_ve)
-                    elif is_market_analysis_worker and llm is not None:
-                        _repaired = _repair_tool_response_egress_reply(
-                            llm,
-                            spec,
-                            _inc_for_ctx,
-                            "",
-                            list(msgs),
-                            skip_llm_synthesis=False,
-                            worker_display_name=str(getattr(spec, "name", None) or ""),
-                        )
-                        if (_repaired or "").strip():
-                            reply = sanitize_worker_reply_text(_repaired)
                     if not (reply or "").strip():
                         reply = (
-                            "No pude validar las cifras de mercado de la imagen con datos del ledger. "
-                            "Intenta de nuevo o especifica el símbolo."
+                            "No pude validar las cifras del contexto visual con datos verificables. "
+                            "Intenta de nuevo o especifica qué dato necesitas confirmar."
                         )
                 elif vreason:
                     _log.warning("Visual evidence audit: %s", vreason)

@@ -81,7 +81,7 @@ _BROWSER_SANDBOX_STDOUT_TAIL = 4000
 _BROWSER_SANDBOX_STDERR_TAIL = 1500
 _FALLBACK_IMAGE = "python:3.12-slim"
 _SANDBOX_MEMORY = "768m"
-_SANDBOX_TIMEOUT = 30          # segundos de timeout por ejecución
+_SANDBOX_TIMEOUT = 120          # segundos de timeout por ejecución
 _MAX_RETRIES_DEFAULT = 3
 
 # Directorio base de sesiones en el host

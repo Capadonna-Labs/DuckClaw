@@ -16,6 +16,7 @@ from duckclaw.workers.tool_surface_policy import (
     tool_surface_intent_text,
     without_sandbox_tools,
     without_privileged_mutation_tools,
+    without_privileged_mutation_tools_for_auto_bind,
     without_storage_identity_tools,
 )
 
@@ -128,6 +129,25 @@ def test_auto_bind_hides_privileged_mutation_tools() -> None:
         "read_sql",
         "inspect_schema",
         "search_knowledge",
+    ]
+
+
+def test_manifest_can_expose_privileged_mutation_tools_in_auto_bind() -> None:
+    tools = [
+        ToolStub("read_sql"),
+        ToolStub("admin_sql"),
+        ToolStub("inspect_schema"),
+    ]
+    spec = type(
+        "Spec",
+        (),
+        {"tool_surface_config": {"expose_privileged_mutation_tools": ["admin_sql"]}},
+    )()
+
+    assert [tool.name for tool in without_privileged_mutation_tools_for_auto_bind(tools, spec=spec)] == [
+        "read_sql",
+        "admin_sql",
+        "inspect_schema",
     ]
 
 
@@ -249,10 +269,10 @@ def test_factory_uses_extracted_rag_policy_for_get_db_path() -> None:
     assert "should_prioritize_rag_over_storage_tools(" in factory_invoke
     assert "should_hide_storage_identity_tools(" in factory_invoke
     assert "_auto_tools = without_storage_identity_tools(_auto_tools)" in factory_invoke
-    assert "_auto_tools = without_privileged_mutation_tools(_auto_tools)" in factory_invoke
+    assert "without_privileged_mutation_tools_for_auto_bind(" in factory_invoke
     assert "_auto_tools = without_sandbox_tools(_auto_tools)" in factory_invoke
     assert "_auto_tools = without_storage_tools(_auto_tools)" in factory_invoke
-    assert "rag_turn_system_prompt(prompt_policies, _lid)" in factory_invoke
+    assert "rag_turn_system_prompt(" in factory_invoke
 
 
 def test_rag_tool_policy_lives_in_rag_package_not_workers() -> None:

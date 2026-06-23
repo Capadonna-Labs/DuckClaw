@@ -21,7 +21,6 @@ class WorkerGraphContext:
     tool_surface: Literal["full", "context_synthesis", "visual_generation", "url_research"] = "full"
     tenant_id: str = "default"
     instance_name: Optional[str] = None
-    is_market_analysis_worker: bool = False
     system_prompt: str = ""
     effective_prompt: str = ""
     context_prompt_base: Optional[str] = None

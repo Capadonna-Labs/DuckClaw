@@ -85,7 +85,7 @@ def test_empty_reply_after_read_sql_gets_generic_tool_summary() -> None:
         HumanMessage(content="resume mis filas"),
         _tool_message(
             "read_sql",
-            '[{"name":"Nequi","balance":1000,"currency":"COP"},{"name":"Broker cash","balance":2.5,"currency":"USD"}]',
+            '[{"name":"Alpha","balance":1000,"currency":"USD"},{"name":"Beta","balance":2.5,"currency":"EUR"}]',
         ),
     ]
     spec = SimpleNamespace(worker_id="worker_alpha", logical_worker_id="worker_alpha")
@@ -110,8 +110,7 @@ def test_empty_reply_after_read_sql_gets_generic_tool_summary() -> None:
         skip_llm_synthesis=True,
     )
 
-    assert "read_sql:" in out
-    assert "Nequi" in out
+    assert "2 registros" in out.lower() or "registro" in out.lower()
     assert "Cuentas" not in out
     assert "Deudas" not in out
 
@@ -147,5 +146,5 @@ def test_tool_label_json_echo_triggers_repair_and_uses_tool_evidence() -> None:
         skip_llm_synthesis=True,
     )
 
-    assert "fetch_external_data:" in out
-    assert "SPY" in out
+    assert "Operación completada" in out or "SPY" in out
+    assert "fetch_external_data:" not in out

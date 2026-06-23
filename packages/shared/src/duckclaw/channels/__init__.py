@@ -1,6 +1,7 @@
 """Contratos agnósticos al canal de chat (Telegram, Discord, …)."""
 
 from duckclaw.channels.delivery import GatewayDeliveryContext
+from duckclaw.channels.integration_labels import resolve_integration_label
 from duckclaw.channels.routes import (
     ChannelRouteBinding,
     load_channel_route_bindings,
@@ -12,6 +13,7 @@ from duckclaw.channels.urn import build_discord_session_id, build_telegram_sessi
 
 __all__ = [
     "GatewayDeliveryContext",
+    "resolve_integration_label",
     "ChannelRouteBinding",
     "load_channel_route_bindings",
     "resolve_discord_route",

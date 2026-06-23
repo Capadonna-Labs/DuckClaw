@@ -35,7 +35,7 @@ def test_playground_rag_project_warning_component() -> None:
     )
     assert "PlaygroundRagProjectWarning" in page
     assert "indexedKnowledgeSources" in page
-    assert "Hay documentos indexados" in warn
+    assert "Sin proyecto RAG" in warn
 
 
 def test_knowledge_page_semantic_search_toggle() -> None:

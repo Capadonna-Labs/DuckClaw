@@ -15,7 +15,6 @@ import {
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
 import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
 import type { ConversationManagePanelProps } from '@/components/chat/ConversationManagePanel';
-import { ConversationQuickPicker } from '@/components/chat/ConversationQuickPicker';
 import { useAuthStore } from '@/store/authStore';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
@@ -27,9 +26,11 @@ import {
   type AdminChatController,
 } from '@/components/chat/useAdminChat';
 import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
+import { ConversationQuickPicker } from '@/components/chat/ConversationQuickPicker';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
 import { workerOptionId, workerOptionLabel } from '@/lib/workerOptions';
 import { PlaygroundChatStudioHeader } from '@/components/playground/PlaygroundChatStudioHeader';
+import { useComposeClipboard } from '@/components/chat/useComposeClipboard';
 
 export type AdminChatPanelProps = {
   chatId: string;
@@ -47,8 +48,6 @@ export type AdminChatPanelProps = {
   showWorkerLink?: boolean;
   /** Sección actual (p. ej. VNC, Tablero) → título «VNC/Asistente». */
   sectionTitle?: string;
-  /** Proyecto RAG activo (muestra chip en modo compacto). */
-  projectLabel?: string;
   /** Título de la conversación activa (inbox). */
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
@@ -72,13 +71,6 @@ function chatPanelTitle(sectionTitle?: string): string {
   return `${section}/${base}`;
 }
 
-function subtitleForConversation(title?: string | null): string {
-  const t = (title || '').trim();
-  if (!t || t.includes('[PROJECT_CONTEXT]')) return 'Respuestas en vivo';
-  if (t.length > 48) return `${t.slice(0, 45)}…`;
-  return t;
-}
-
 export function AdminChatPanel({
   chatId,
   initialWorker,
@@ -90,7 +82,6 @@ export function AdminChatPanel({
   showStudioHeader = false,
   showWorkerLink = true,
   sectionTitle,
-  projectLabel,
   conversationTitle,
   onRenameConversation,
   headerActions,
@@ -100,7 +91,7 @@ export function AdminChatPanel({
   className = '',
 }: AdminChatPanelProps) {
   const { usuario } = useAuthStore();
-  const [compactSettingsOpen, setCompactSettingsOpen] = useState(false);
+  const [compactConfigOpen, setCompactConfigOpen] = useState(false);
   const internalChat = useAdminChat({
     chatId,
     initialWorker,
@@ -142,6 +133,12 @@ export function AdminChatPanel({
   } = chat;
 
   const isCompact = variant === 'compact';
+  const compactConversationLabel =
+    conversationTitle?.trim() ||
+    (chatId && chatId.length > 28
+      ? `${chatId.slice(0, 12)}…${chatId.slice(-10)}`
+      : chatId) ||
+    'Sin título';
   const isStudioCompose = composeLayout === 'studio';
   const canSend = usuario?.rol === 'admin';
   const canSubmit =
@@ -151,6 +148,15 @@ export function AdminChatPanel({
     (input.trim().length > 0 || imageAttachments.hasImages);
 
   const voice = useVoiceNoteRecorder();
+
+  const { onTextareaPaste, pasteFromClipboard } = useComposeClipboard({
+    canSend,
+    input,
+    setInput,
+    inputRef,
+    ingestFiles: imageAttachments.ingestFiles,
+    setAttachError: imageAttachments.setAttachError,
+  });
 
   const handleVoiceClick = useCallback(async () => {
     if (voice.recording) {
@@ -180,22 +186,17 @@ export function AdminChatPanel({
         >
           {isCompact ? (
             <div className="flex flex-col items-stretch gap-2 w-full min-w-0">
-              <div className="flex items-center justify-between gap-2 w-full min-w-0">
-                <div className="min-w-0 flex-1">
+              <div className="flex items-center justify-between gap-2 w-full">
+                <div className="min-w-0">
                   <p className="text-sm font-black dark:text-dark-text truncate">
                     {chatPanelTitle(sectionTitle)}
                   </p>
                   <p className="text-[10px] text-gov-gray-500 truncate">
-                    {subtitleForConversation(conversationTitle)}
-                    {projectLabel ? (
-                      <span className="ml-1 inline-flex rounded bg-gov-blue-100 px-1 py-0.5 text-[9px] font-bold text-gov-blue-800 dark:bg-dark-bg dark:text-dark-cyan">
-                        RAG
-                      </span>
-                    ) : null}
+                    {workerId || '…'}
                   </p>
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0">
-                  {conversationManage?.onCreateNew && (
+                  {conversationManage?.onCreateNew ? (
                     <button
                       type="button"
                       onClick={() => void conversationManage.onCreateNew?.()}
@@ -205,25 +206,25 @@ export function AdminChatPanel({
                     >
                       <MessageSquarePlus size={16} />
                     </button>
-                  )}
+                  ) : null}
                   <button
                     type="button"
-                    onClick={() => setCompactSettingsOpen((v) => !v)}
+                    onClick={() => setCompactConfigOpen((v) => !v)}
                     className={`p-1.5 rounded-lg hover:bg-gov-gray-100 dark:hover:bg-dark-bg ${
-                      compactSettingsOpen
+                      compactConfigOpen
                         ? 'text-gov-blue-700 bg-gov-blue-50 dark:bg-dark-bg'
                         : 'text-gov-gray-500'
                     }`}
-                    title="Ajustes del chat"
-                    aria-label="Ajustes del chat"
-                    aria-expanded={compactSettingsOpen}
+                    title="Configuración del chat"
+                    aria-label="Configuración del chat"
+                    aria-expanded={compactConfigOpen}
                   >
                     <Settings2 size={16} />
                   </button>
                   {headerActions}
                 </div>
               </div>
-              {conversationManage && chatId && (
+              {conversationManage && (
                 <ConversationQuickPicker
                   tenantId={conversationManage.tenantId}
                   section={conversationManage.section}
@@ -231,11 +232,13 @@ export function AdminChatPanel({
                   refreshToken={conversationManage.refreshToken}
                   onSelect={conversationManage.onSelect}
                   onCreateNew={conversationManage.onCreateNew}
+                  conversationTitle={compactConversationLabel}
+                  onRenameConversation={onRenameConversation}
                 />
               )}
-              {compactSettingsOpen && (
+              {compactConfigOpen ? (
                 <div className="rounded-xl border border-gov-blue-50 bg-gov-gray-50/80 p-2 space-y-2 dark:border-dark-border dark:bg-dark-bg">
-                  {chatId && (
+                  {chatId ? (
                     <ConversationVaultSelector
                       chatId={chatId}
                       tenantId={config?.effective_tenant_id}
@@ -248,8 +251,8 @@ export function AdminChatPanel({
                       disabled={config?.authorized === false}
                       compact
                     />
-                  )}
-                  {chatId && (config?.catalog?.length ?? 0) > 0 && (
+                  ) : null}
+                  {chatId && (config?.catalog?.length ?? 0) > 0 ? (
                     <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
                       <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
                         <Brain size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
@@ -265,11 +268,11 @@ export function AdminChatPanel({
                         compact
                       />
                     </label>
-                  )}
+                  ) : null}
                   <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
                     <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
                       <Bot size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
-                      Agente
+                      Worker
                     </span>
                     <select
                       value={workerId}
@@ -279,8 +282,8 @@ export function AdminChatPanel({
                         !config?.workers?.length ||
                         config?.authorized === false
                       }
-                      className="text-[10px] px-1.5 py-2 min-h-[36px] border rounded-md dark:border-dark-border dark:bg-dark-surface w-full max-w-full disabled:opacity-50"
-                      aria-label="Agente"
+                      className="text-[10px] px-1.5 py-2 min-h-[40px] border rounded-md dark:border-dark-border dark:bg-dark-bg w-full max-w-full disabled:opacity-50"
+                      aria-label="Worker"
                     >
                       {(config?.workers ?? []).map((w) => {
                         const id = workerOptionId(w);
@@ -294,7 +297,7 @@ export function AdminChatPanel({
                     </select>
                   </label>
                 </div>
-              )}
+              ) : null}
             </div>
           ) : (
             <>
@@ -539,6 +542,7 @@ export function AdminChatPanel({
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={onTextareaPaste}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -563,6 +567,7 @@ export function AdminChatPanel({
                   voiceResponseAvailable={voiceResponseAvailable}
                   imageCount={imageAttachments.pendingImages.length}
                   onPickImage={() => imageAttachments.fileInputRef.current?.click()}
+                  onPaste={() => void pasteFromClipboard()}
                   onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
                   onVoiceNoteClick={() => void handleVoiceClick()}
                 />
@@ -628,6 +633,7 @@ export function AdminChatPanel({
                 voiceResponseAvailable={voiceResponseAvailable}
                 imageCount={imageAttachments.pendingImages.length}
                 onPickImage={() => imageAttachments.fileInputRef.current?.click()}
+                onPaste={() => void pasteFromClipboard()}
                 onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
                 onVoiceNoteClick={() => void handleVoiceClick()}
               />
@@ -635,6 +641,7 @@ export function AdminChatPanel({
                 ref={inputRef}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onPaste={onTextareaPaste}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();

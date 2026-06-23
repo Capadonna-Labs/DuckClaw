@@ -26,6 +26,8 @@ _LOG = logging.getLogger(__name__)
 
 def reply_needs_nl_synthesis(text: str) -> bool:
     """True si el texto es JSON puro o bloques ``### tool`` + JSON o prosa de tool (MLX / egress)."""
+    from duckclaw.egress.tool_response_repair import reply_is_tool_label_json_echo
+
     s = (text or "").strip()
     if len(s) < 2:
         return False
@@ -41,7 +43,12 @@ def reply_needs_nl_synthesis(text: str) -> bool:
             pass
     if _combined_tool_blocks_contain_json(s):
         return True
-    return _combined_tool_blocks_snake_prose(s)
+    if _combined_tool_blocks_snake_prose(s):
+        return True
+    for line in s.splitlines():
+        if reply_is_tool_label_json_echo(line.strip()):
+            return True
+    return False
 
 
 def _truncate_evidence(s: str, max_chars: int) -> str:

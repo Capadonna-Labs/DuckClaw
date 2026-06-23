@@ -92,6 +92,40 @@ def without_privileged_mutation_tools(tools: Iterable[Any]) -> list[Any]:
     return without_tools_named(tools, set(PRIVILEGED_MUTATION_TOOL_NAMES))
 
 
+def expose_privileged_mutation_tool_names(spec: Any | None) -> frozenset[str]:
+    """
+    Manifest ``tool_surface.expose_privileged_mutation_tools`` opt-in list.
+
+    Workers that register privileged tools via extensions can expose them in auto-bind
+    without hardcoding domain logic in the framework.
+    """
+    if spec is None:
+        return frozenset()
+    raw = getattr(spec, "tool_surface_config", None) or {}
+    if not isinstance(raw, dict):
+        return frozenset()
+    items = raw.get("expose_privileged_mutation_tools") or ()
+    if isinstance(items, str):
+        items = [items]
+    if not isinstance(items, (list, tuple)):
+        return frozenset()
+    return frozenset(str(name).strip() for name in items if str(name).strip())
+
+
+def without_privileged_mutation_tools_for_auto_bind(
+    tools: Iterable[Any],
+    *,
+    spec: Any = None,
+) -> list[Any]:
+    """Hide privileged mutation tools except those listed in the worker manifest."""
+
+    exempt = expose_privileged_mutation_tool_names(spec)
+    hidden = set(PRIVILEGED_MUTATION_TOOL_NAMES) - set(exempt)
+    if not hidden:
+        return list(tools)
+    return without_tools_named(tools, hidden)
+
+
 def explicit_sandbox_intent(text: str | None) -> bool:
     """Return True when the user asks for code, browser, plotting, or sandbox execution."""
 

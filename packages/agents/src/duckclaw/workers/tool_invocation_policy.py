@@ -9,8 +9,6 @@ from typing import Any, Collection, Mapping
 from duckclaw.workers.runtime_policy_helpers import worker_has_runtime_capability
 
 LOCAL_LEDGER_CAPABILITY = "local_ledger"
-MARKET_DATA_CAPABILITY = "market_data_bridge"
-BROKER_MARKET_DATA_CAPABILITY = "broker_market_data"
 
 
 @dataclass(frozen=True)
@@ -49,10 +47,6 @@ def _has_local_ledger_capability(spec: Any) -> bool:
     return _has_any_capability(spec, LOCAL_LEDGER_CAPABILITY)
 
 
-def _has_broker_market_data_capability(spec: Any) -> bool:
-    return _has_any_capability(spec, BROKER_MARKET_DATA_CAPABILITY)
-
-
 def _looks_like_system_or_non_data_turn(text: str) -> bool:
     value = (text or "").strip().lower()
     if not value:
@@ -70,67 +64,55 @@ def _looks_like_system_or_non_data_turn(text: str) -> bool:
     return False
 
 
+def _mentions_local_db(text: str) -> bool:
+    return any(
+        marker in text
+        for marker in (
+            "duckdb",
+            "base de datos",
+            "en la base",
+            "en la db",
+            "en el hub",
+            "tabla local",
+            "datos locales",
+            "registros locales",
+        )
+    )
+
+
 def _local_record_write_intent(text: str) -> bool:
     value = (text or "").strip().lower()
     if _looks_like_system_or_non_data_turn(value):
         return False
     if not re.search(
         r"\b(actualiza|actualizar|cambia|cambiar|modifica|modificar|ajusta|ajustar|"
+        r"inserta|insertar|borra|borrar|elimina|eliminar|"
         r"pone|poner|ponga|pon\b|establece|establecer|fija|fijar|deja|dejar|"
-        r"corrige|corregir|setea|setear)\b",
+        r"corrige|corregir|setea|setear|persiste|persistir|guarda|guardar)\b",
         value,
     ):
         return False
     return bool(
-        "saldo" in value
-        or "balance" in value
-        or ("cuenta" in value and re.search(r"\b(cop|pesos?|cero|0|\d[\d.,]*)\b", value))
+        _mentions_local_db(value)
+        or re.search(r"\b(registro|fila|tabla|columna|valor|campo|sql)\b", value)
     )
 
 
-def _local_records_query(text: str) -> bool:
+def _local_data_query(text: str) -> bool:
     value = (text or "").strip().lower()
     if _looks_like_system_or_non_data_turn(value):
         return False
-    return bool(
-        re.search(
-            r"\b(resumen\s+(de\s+)?(mis\s+)?cuentas|saldos?\s+(de\s+)?(mis\s+)?cuentas|"
-            r"cuentas\s+bancarias|estado\s+actual\s+de\s+mis\s+cuentas|"
-            r"estatus\s+de\s+mis\s+cuentas)\b",
-            value,
-        )
+    if re.search(r"\b(read_sql|inspect_schema)\b", value):
+        return True
+    read_verbs = re.search(
+        r"\b(consulta|muestra|lista|resume|resumen|estado|detalle|cu[aá]nto|total)\b",
+        value,
     )
-
-
-def _obligations_query(text: str) -> bool:
-    value = (text or "").strip().lower()
-    if _looks_like_system_or_non_data_turn(value):
+    if not read_verbs:
         return False
     return bool(
-        re.search(
-            r"\b(resumen\s+(de\s+)?(mis\s+)?deudas|mis\s+deudas|"
-            r"deudas\s+(activas|pendientes|registradas)|cu[aá]nto\s+debo\b|"
-            r"cu[aá]ntas\s+deudas|estado\s+(de\s+)?(mis\s+)?deudas|"
-            r"listado\s+(de\s+)?(mis\s+)?deudas|qu[eé]\s+deudas\s+tengo|"
-            r"total\s+(de\s+)?(mis\s+)?deudas|deudas\s+en\s+(la\s+)?(base|db|duckdb))\b",
-            value,
-        )
-    )
-
-
-def _budget_query(text: str) -> bool:
-    value = (text or "").strip().lower()
-    if _looks_like_system_or_non_data_turn(value):
-        return False
-    return bool(
-        re.search(
-            r"\b(resumen\s+(de\s+)?(mis\s+)?presupuestos?|mis\s+presupuestos?|"
-            r"presupuestos?\s+(del\s+)?mes|estado\s+(de\s+)?(mis\s+)?presupuestos?|"
-            r"listado\s+(de\s+)?(mis\s+)?presupuestos?|presupuesto\s+vs\s+real|"
-            r"cu[aá]nto\s+llevo\s+(gastad[oa]\s+)?(de\s+)?(mis\s+)?presupuestos?|"
-            r"presupuestos?\s+en\s+(la\s+)?(base|db|duckdb))\b",
-            value,
-        )
+        _mentions_local_db(value)
+        or re.search(r"\b(registros?|datos|filas?|tablas?|persistid[oa]s?|schema)\b", value)
     )
 
 
@@ -164,31 +146,15 @@ def _current_time_anchor_intent(text: str) -> bool:
     value = (text or "").strip().lower()
     if _looks_like_system_or_non_data_turn(value):
         return False
-    if _obligations_query(value) or _local_records_query(value) or _budget_query(value):
+    if _local_data_query(value):
         return True
     return bool(
         re.search(
-            r"\b(pasar\s+(la\s+)?deuda|mover\s+(la\s+)?(deuda|cuota)|"
-            r"vencimient|cuota\s+(de|del))\b",
+            r"\b(fecha|hoy|ma[nñ]ana|vencimient|caduc|plazo|deadline|calendario|"
+            r"esta\s+semana|este\s+mes|pr[oó]ximo\s+mes)\b",
             value,
         )
     )
-
-
-def _market_data_ingest_intent(text: str) -> bool:
-    raw = (text or "").strip()
-    if not raw:
-        return False
-    low = raw.lower()
-    if low.startswith("[meta:"):
-        return False
-    if "ohlcv" in low and any(
-        marker in low for marker in ("trae", "descarga", "importa", "ingesta", "actualiza", "bajar", "pull")
-    ):
-        return True
-    if not any(marker in low for marker in ("vela", "ohlcv", "candle", "fetch_market", "fetch market")):
-        return False
-    return bool(re.search(r"\b[A-Z]{1,5}\b", raw))
 
 
 def decide_db_first_tool_invocation(
@@ -221,9 +187,7 @@ def decide_db_first_tool_invocation(
         return _no_tool_invocation()
 
     read_sql_reasons = (
-        ("local_records", _local_records_query),
-        ("obligations", _obligations_query),
-        ("budgets", _budget_query),
+        ("local_data", _local_data_query),
         ("db_validation", _db_validation_intent),
     )
     for reason_suffix, predicate in read_sql_reasons:
@@ -250,12 +214,13 @@ def decide_current_time_tool_invocation(
     """Choose deterministic current-time anchoring from runtime policy."""
 
     tool_names = _tool_names(available_tools)
+    gct_called = "get_current_time" in set(called_tools_since_last_human)
     if (
         already_has_tool_result
         or summarize_directive
-        or orchestration_active
+        or (orchestration_active and gct_called)
         or "get_current_time" not in tool_names
-        or "get_current_time" in set(called_tools_since_last_human)
+        or gct_called
         or not _has_local_ledger_capability(spec)
         or not _current_time_anchor_intent(incoming)
     ):
@@ -266,67 +231,4 @@ def decide_current_time_tool_invocation(
         reason=f"{LOCAL_LEDGER_CAPABILITY}.current_time",
         direct_tool_call=True,
         tool_args={},
-    )
-
-
-def decide_market_data_tool_invocation(
-    *,
-    spec: Any,
-    incoming: str,
-    available_tools: Collection[str] | Mapping[str, Any],
-    already_has_tool_result: bool = False,
-    summarize_ok_for_forced_ohlcv: bool = True,
-    blocked_by_prior_decision: bool = False,
-    heuristic_first_tool_enabled: bool = True,
-) -> ToolInvocationDecision:
-    """Choose market-data forcing from runtime policy and explicit OHLCV intent."""
-
-    tool_names = _tool_names(available_tools)
-    if (
-        already_has_tool_result
-        or blocked_by_prior_decision
-        or not heuristic_first_tool_enabled
-        or not summarize_ok_for_forced_ohlcv
-        or "fetch_market_data" not in tool_names
-        or not worker_has_runtime_capability(spec, MARKET_DATA_CAPABILITY)
-        or not _market_data_ingest_intent(incoming)
-    ):
-        return _no_tool_invocation()
-
-    return ToolInvocationDecision(
-        tool_name="fetch_market_data",
-        reason=f"{MARKET_DATA_CAPABILITY}.fetch_market_data.ohlcv",
-    )
-
-
-def decide_broker_market_data_tool_invocation(
-    *,
-    spec: Any,
-    incoming: str,
-    available_tools: Collection[str] | Mapping[str, Any],
-    broker_market_data_enabled: bool,
-    broker_tool_name: str = "fetch_broker_ohlcv",
-    already_has_tool_result: bool = False,
-    summarize_ok_for_forced_ohlcv: bool = True,
-    blocked_by_prior_decision: bool = False,
-    heuristic_first_tool_enabled: bool = True,
-) -> ToolInvocationDecision:
-    """Choose a dedicated broker OHLCV tool from runtime policy."""
-
-    tool_names = _tool_names(available_tools)
-    if (
-        already_has_tool_result
-        or blocked_by_prior_decision
-        or not heuristic_first_tool_enabled
-        or not summarize_ok_for_forced_ohlcv
-        or not broker_market_data_enabled
-        or broker_tool_name not in tool_names
-        or not _has_broker_market_data_capability(spec)
-        or not _market_data_ingest_intent(incoming)
-    ):
-        return _no_tool_invocation()
-
-    return ToolInvocationDecision(
-        tool_name=broker_tool_name,
-        reason=f"{BROKER_MARKET_DATA_CAPABILITY}.{broker_tool_name}.ohlcv",
     )

@@ -12,6 +12,13 @@ export const SELECTABLE_LLM_PROVIDERS = new Set([
 
 /** Slugs OpenRouter con etiqueta legible (id = valor enviado al gateway). */
 export const OPENROUTER_MODEL_PRESETS: { id: string; label: string }[] = [
+  { id: 'openrouter/free', label: 'OpenRouter Free (auto-routing)' },
+  { id: 'nvidia/nemotron-3-nano-30b-a3b:free', label: 'Nemotron 3 Nano 30B (free)' },
+  { id: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'Nemotron 3 Super 120B (free)' },
+  { id: 'nvidia/nemotron-3-ultra-550b-a55b:free', label: 'Nemotron 3 Ultra 550B (free)' },
+  { id: 'google/gemma-2-9b-it:free', label: 'Gemma 2 9B (free)' },
+  { id: 'meta-llama/llama-3.2-3b-instruct:free', label: 'Llama 3.2 3B Instruct (free)' },
+  { id: 'arcee-ai/trinity-large-preview:free', label: 'Trinity Large Preview (free)' },
   { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
   { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
   { id: 'deepseek/deepseek-chat', label: 'DeepSeek Chat (legacy)' },

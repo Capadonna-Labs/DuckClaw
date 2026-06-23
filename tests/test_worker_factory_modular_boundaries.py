@@ -827,3 +827,47 @@ def test_tools_node_wires_tool_lookup_from_context(tmp_path: Path) -> None:
 
     assert captured.get("args") == {"q": "x"}
     assert any(isinstance(m, ToolMessage) for m in out.get("messages") or [])
+
+
+def test_manifest_agent_node_max_tool_rounds_applied_to_context(tmp_path: Path) -> None:
+    from duckclaw.workers.factory_graph_setup import initialize_worker_graph_context
+
+    templates_root = tmp_path / "layout"
+    worker_dir = templates_root / "templates" / "workers" / "default"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    worker_dir.joinpath("manifest.yaml").write_text(
+        "name: smoke-default\nid: default\ntopology: general\nskills: []\n"
+        "agent_node:\n  max_tool_rounds: 20\n",
+        encoding="utf-8",
+    )
+    worker_dir.joinpath("system_prompt.md").write_text("Eres un agente de prueba.", encoding="utf-8")
+
+    ctx = initialize_worker_graph_context(
+        "default",
+        ":memory:",
+        None,
+        templates_root=templates_root,
+        llm_provider="none_llm",
+    )
+    assert ctx.max_tool_rounds == 20
+
+
+def test_first_bindable_tool_skips_sandbox_already_in_ran() -> None:
+    from duckclaw.workers.tool_orchestration import _first_bindable_tool
+
+    tools_by_name = {"execute_sandbox_script": object(), "run_sandbox": object()}
+    ran = {"execute_sandbox_script", "read_sql"}
+    assert _first_bindable_tool(
+        ["execute_sandbox_script", "run_sandbox"],
+        tools_by_name,
+        ran,
+    ) == "run_sandbox"
+    ran_with_both = {"execute_sandbox_script", "run_sandbox", "read_sql"}
+    assert (
+        _first_bindable_tool(
+            ["execute_sandbox_script", "run_sandbox"],
+            tools_by_name,
+            ran_with_both,
+        )
+        is None
+    )

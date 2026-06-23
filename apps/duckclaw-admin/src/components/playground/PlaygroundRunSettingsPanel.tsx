@@ -194,8 +194,8 @@ export function PlaygroundRunSettingsPanel({
       </div>
 
       {logsPanelOpen && logsViewport ? (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-slate-950 dark:border-dark-border">
-          {logsViewport}
+        <div className="flex min-h-[140px] max-h-[min(42vh,380px)] min-w-0 shrink-0 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-slate-950 dark:border-dark-border">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{logsViewport}</div>
         </div>
       ) : null}
     </div>

@@ -281,7 +281,7 @@ _NON_ALNUM_TOKEN_RE = re.compile(r"[^\w<>/-]", re.UNICODE)
 def _deterministic_new_context_summary(evidence: str) -> str:
     """
     Viñetas solo desde el cuerpo del usuario en ``SUMMARIZE_NEW_CONTEXT`` (sin ``--- registro ---``).
-    Último recurso cuando el modelo emite STORED, saldos ficticios o plantillas de cuentas.
+    Último recurso cuando el modelo emite STORED, cifras ficticias o plantillas genéricas.
     """
     s = (evidence or "").strip()
     if not s:

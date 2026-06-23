@@ -38,7 +38,7 @@ SCHEMA_TABLE_NEAR_DB = re.compile(
 )
 CONCRETE_TASK_KEYWORDS = re.compile(
     r"\b(db|database|base\s+de\s+datos|tablas?|tables?|esquema|schema|nombre\s+de\s+la\s+db|"
-    r"qu[eé]\s+tablas|estructura|get_db_path|read_sql|admin_sql|consultar|cuenta|saldo|portfolio)\b",
+    r"qu[eé]\s+tablas|estructura|get_db_path|read_sql|admin_sql|consultar|registros?|datos\s+locales)\b",
     re.IGNORECASE,
 )
 PLANNED_TASK_PREFIX = (

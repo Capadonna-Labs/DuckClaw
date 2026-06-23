@@ -269,10 +269,10 @@ def test_factory_uses_extracted_rag_policy_for_get_db_path() -> None:
     assert "should_prioritize_rag_over_storage_tools(" in factory_invoke
     assert "should_hide_storage_identity_tools(" in factory_invoke
     assert "_auto_tools = without_storage_identity_tools(_auto_tools)" in factory_invoke
-    assert "_auto_tools = without_privileged_mutation_tools(_auto_tools)" in factory_invoke
+    assert "without_privileged_mutation_tools_for_auto_bind(" in factory_invoke
     assert "_auto_tools = without_sandbox_tools(_auto_tools)" in factory_invoke
     assert "_auto_tools = without_storage_tools(_auto_tools)" in factory_invoke
-    assert "rag_turn_system_prompt(prompt_policies, _lid)" in factory_invoke
+    assert "rag_turn_system_prompt(" in factory_invoke
 
 
 def test_rag_tool_policy_lives_in_rag_package_not_workers() -> None:

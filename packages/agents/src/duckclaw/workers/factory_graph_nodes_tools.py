@@ -21,8 +21,11 @@ from duckclaw.workers.factory_agent_node_helpers import (
     _worker_log_label,
 )
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
+from duckclaw.workers.factory_graph_nodes_tools_notify import (
+    notify_admin_tool_phase as _notify_admin_tool_phase,
+    schedule_tool_heartbeat_or_admin_start as _schedule_tool_heartbeat,
+)
 from duckclaw.workers.factory_sandbox_notify import (
-    _heartbeat_elapsed_sec,
     _sandbox_heartbeat_allowed,
     _schedule_run_browser_novnc_tool_heartbeat,
     _send_sandbox_heartbeat_telegram,
@@ -50,11 +53,6 @@ def make_tools_node(ctx: WorkerGraphContext):
     def tools_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         _cid_tools = str(state.get("chat_id") or state.get("session_id") or "").strip()
         _raise_if_chat_cancelled_from_state(state)
-        from duckclaw.graphs.chat_heartbeat import (
-            format_tool_heartbeat,
-            heartbeat_message_for_tool,
-            schedule_chat_heartbeat_dm,
-        )
         from duckclaw.workers.reddit_formatters import format_reddit_mcp_reply_if_applicable
 
         _chat_ctx = state.get("chat_id") or state.get("session_id") or "default"
@@ -96,73 +94,38 @@ def make_tools_node(ctx: WorkerGraphContext):
         _hb_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
 
         _duck_exts = list(getattr(spec, "duckdb_extensions", None) or [])
-        # DuckDB mismo PID: sesión principal RW (read_only=False) + connect RO efímero al mismo archivo →
-        # "different configuration than existing". Workers RO pueden desactivar pool vía manifest
-        # por contención con db-writer.
         use_ephemeral_parallel = (
             read_pool.read_pool_active_for_worker(spec)
             and read_pool.should_parallelize_ephemeral_tool_calls(tool_calls)
             and bool(getattr(spec, "read_only", False))
         )
 
-        def _notify_admin_tool_phase(
+        def _tool_notify(
             tool_name: str,
             phase: str,
             detail: str = "",
             *,
             elapsed_ms: float | None = None,
         ) -> None:
-            _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
-            if not _hcid:
-                return
-            try:
-                from duckclaw.graphs.chat_heartbeat import (
-                    is_admin_ui_chat_session,
-                    publish_admin_tool_event,
-                )
+            _notify_admin_tool_phase(
+                state=state,
+                tool_name=tool_name,
+                phase=phase,
+                detail=detail,
+                elapsed_ms=elapsed_ms,
+                worker_id=worker_id,
+                heartbeat_head=_hb_head,
+            )
 
-                if not is_admin_ui_chat_session(_hcid):
-                    return
-                publish_admin_tool_event(
-                    _hcid,
-                    tool_name,
-                    phase,
-                    worker_id=(_hb_head or worker_id or "").strip() or None,
-                    detail=detail,
-                    elapsed_ms=elapsed_ms,
-                )
-            except Exception:
-                pass
-
-        def _schedule_tool_heartbeat(tool_name: str) -> None:
-            _htid = (state.get("tenant_id") or "default").strip() or "default"
-            _hcid = str(state.get("chat_id") or state.get("session_id") or "").strip()
-            _huid = str(state.get("user_id") or "").strip() or _hcid
-            try:
-                from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
-
-                _admin_ui = is_admin_ui_chat_session(_hcid)
-            except Exception:
-                _admin_ui = False
-            if _admin_ui:
-                _notify_admin_tool_phase(tool_name, "start")
-                return
-            _elapsed = _heartbeat_elapsed_sec(state)
-            schedule_chat_heartbeat_dm(
-                _htid,
-                _hcid,
-                _huid,
-                format_tool_heartbeat(
-                    _hb_head,
-                    heartbeat_message_for_tool(tool_name),
-                    plan_title=_hb_plan,
-                    elapsed_sec=_elapsed,
-                ),
-                log_worker_id=_hb_head,
-                log_username=_hb_uname,
-                log_plan_title=_hb_plan,
-                outbound_bot_token=_hb_tok,
-                routing_worker_id=worker_id,
+        def _tool_heartbeat(tool_name: str) -> None:
+            _schedule_tool_heartbeat(
+                state=state,
+                tool_name=tool_name,
+                worker_id=worker_id,
+                heartbeat_head=_hb_head,
+                heartbeat_username=_hb_uname,
+                heartbeat_plan=_hb_plan,
+                heartbeat_token=_hb_tok,
             )
 
         if use_ephemeral_parallel:
@@ -174,7 +137,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                 name = (tc.get("name") or "").strip()
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
-                _schedule_tool_heartbeat(name)
+                _tool_heartbeat(name)
                 _tool_t0 = time.perf_counter()
                 try:
                     if name == "read_sql":
@@ -191,14 +154,14 @@ def make_tools_node(ctx: WorkerGraphContext):
                 except Exception as e:
                     content = f"Error: {e}"
                     _log.warning("[%s] ephemeral tool=%s failed: %s", _wl, name, e)
-                    _notify_admin_tool_phase(
+                    _tool_notify(
                         name,
                         "error",
                         str(e)[:240],
                         elapsed_ms=(time.perf_counter() - _tool_t0) * 1000,
                     )
                 else:
-                    _notify_admin_tool_phase(
+                    _tool_notify(
                         name,
                         "done",
                         "",
@@ -287,7 +250,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                                 vnc_url=_vnc_pre,
                                 novnc_session_id=_sid or "",
                             )
-                        _schedule_tool_heartbeat(name)
+                        _tool_heartbeat(name)
                         if (
                             name == "run_sandbox"
                             and _sandbox_heartbeat_allowed(spec)
@@ -374,7 +337,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                                     _admin_detail = str(_bp.get("hint") or _admin_detail)[:240]
                             except (json.JSONDecodeError, TypeError):
                                 pass
-                        _notify_admin_tool_phase(
+                        _tool_notify(
                             name,
                             "done",
                             _admin_detail,
@@ -383,7 +346,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                     except Exception as e:
                         content = f"Error: {e}"
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
-                        _notify_admin_tool_phase(
+                        _tool_notify(
                             name,
                             "error",
                             str(e)[:240],

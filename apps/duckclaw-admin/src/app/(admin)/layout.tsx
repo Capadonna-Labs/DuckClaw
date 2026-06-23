@@ -6,7 +6,7 @@ import { useAuthStore } from '@/store/authStore';
 import { Sidebar, Topbar } from '@/components/layout';
 import { FloatingAdminChat } from '@/components/chat/FloatingAdminChat';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
-import { Loader2, PanelLeftOpen } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -14,7 +14,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
-  const { sidebarOpen, setSidebarOpen } = useLayoutUiStore();
+  const { sidebarOpen } = useLayoutUiStore();
   const isWorkspaceRoute =
     pathname === '/playground' ||
     pathname.startsWith('/sandbox') ||
@@ -44,16 +44,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       >
         <Sidebar />
       </div>
-      {!sidebarOpen && (
-        <button
-          type="button"
-          onClick={() => setSidebarOpen(true)}
-          className="hidden lg:flex fixed left-0 top-1/2 -translate-y-1/2 z-30 items-center gap-1 px-2 py-3 rounded-r-2xl bg-gov-blue-900 dark:bg-dark-sidebar border border-l-0 border-gov-blue-700 dark:border-dark-border shadow-md text-xs font-bold text-white hover:bg-gov-blue-800"
-          title="Mostrar menú lateral"
-        >
-          <PanelLeftOpen size={18} />
-        </button>
-      )}
       {isSidebarOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
           <SidebarOverlay onClose={() => setIsSidebarOpen(false)} />

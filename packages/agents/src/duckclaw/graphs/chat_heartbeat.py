@@ -330,7 +330,9 @@ def publish_admin_chat_heartbeat(
     swarm_slot: int | None = None,
     instance_label: str | None = None,
     artifact_id: str | None = None,
+    artifact_ids: list[str] | None = None,
     artifact_tenant_id: str | None = None,
+    sandbox_run_id: str | None = None,
     tool_name: str | None = None,
     tool_phase: str | None = None,
     elapsed_ms: float | int | None = None,
@@ -362,6 +364,12 @@ def publish_admin_chat_heartbeat(
     aid = (artifact_id or "").strip()
     if aid:
         body["artifact_id"] = aid
+    aids = [str(x).strip() for x in (artifact_ids or []) if str(x).strip()]
+    if aids:
+        body["artifact_ids"] = aids
+    srid = (sandbox_run_id or "").strip()
+    if srid:
+        body["sandbox_run_id"] = srid
     tid = (artifact_tenant_id or "").strip()
     if tid:
         body["artifact_tenant_id"] = tid

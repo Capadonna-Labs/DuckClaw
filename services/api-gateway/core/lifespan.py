@@ -256,6 +256,18 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _log.debug("catalog seed skipped: %s", exc)
 
+    try:
+        from duckclaw.sandbox_artifacts import purge_expired_runs
+
+        purge_result = purge_expired_runs()
+        if purge_result.get("purged"):
+            _log.info(
+                "sandbox artifacts: purged %s expired run(s)",
+                purge_result.get("purged"),
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("sandbox artifacts: purge at startup failed: %s", exc)
+
     yield
 
     _gt = getattr(app.state, "goals_ticker_task", None)

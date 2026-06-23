@@ -70,7 +70,9 @@ def test_framework_pack_includes_report_engine_guidance() -> None:
     assert content
     assert "REPORT ENGINE" in content
     assert "render_report_instance" in content
-    assert "generate_report_docx_from_markdown" in content
+    assert "DOCUMENT LANES" in content
+    assert "MarkItDown" in content
+    assert "patch_report_section" in content
     assert "render_docx_template" in content
     assert "pandoc" in content.lower()
 

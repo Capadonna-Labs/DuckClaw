@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   Monitor,
   UserCircle,
+  Box,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import {
@@ -47,6 +48,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/skills': Blocks,
   '/mcp': Cable,
   '/playground': MessageCircle,
+  '/sandbox': Box,
   '/integrations': Cable,
   '/gen/image': Image,
   '/runtime': Radio,
@@ -63,6 +65,9 @@ const NAV_ICONS: Record<string, LucideIcon> = {
 
 const GROUP_ICONS: Record<string, LucideIcon> = {
   'user-workspace': UserCircle,
+  work: MessageCircle,
+  studio: Hammer,
+  platform: ServerCog,
   conversar: MessageCircle,
   operation: LayoutDashboard,
   playground: MessageCircle,
@@ -78,8 +83,13 @@ function isNavActive(pathname: string, href: string): boolean {
 }
 
 function groupHasActive(pathname: string, group: AdminNavGroup): boolean {
-  if (group.id === 'conversar' || group.id === 'playground') {
-    return pathname.startsWith('/playground') || pathname === '/kanban';
+  if (group.id === 'work' || group.id === 'conversar' || group.id === 'playground' || group.id === 'user-workspace') {
+    return (
+      pathname.startsWith('/playground') ||
+      pathname.startsWith('/sandbox') ||
+      pathname === '/kanban' ||
+      pathname === '/overview'
+    );
   }
   return group.items.some((item) => {
     if (item.href === '/integrations') {
@@ -101,7 +111,7 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
     () => navEntriesForRole(usuario?.rol),
     [usuario?.rol]
   );
-  const [openGroupId, setOpenGroupId] = useState<string | null>('conversar');
+  const [openGroupId, setOpenGroupId] = useState<string | null>('work');
 
   useEffect(() => {
     const activeGroup = entries.find(

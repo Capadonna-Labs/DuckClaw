@@ -218,13 +218,30 @@ def execute_folder_sync(
 
 
 def _open_hub_db() -> Any | None:
-    from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
 
     path = (get_gateway_db_path() or "").strip()
     if not path:
         return None
-    return DuckClaw(path, read_only=True)
+    try:
+        from duckclaw.forge.skills.report_engine_hub_context import get_report_engine_hub_db
+        from duckclaw.state_delta_vault import _same_vault_db_path
+
+        reuse = get_report_engine_hub_db()
+        if reuse is not None and _same_vault_db_path(str(getattr(reuse, "_path", "") or ""), path):
+            return reuse
+    except Exception:
+        pass
+    try:
+        from duckclaw import DuckClaw
+
+        return DuckClaw(path, read_only=True)
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "lock" in msg or "conflicting" in msg:
+            _log.debug("knowledge auto-sync: hub db ocupado, omitiendo ciclo: %s", exc)
+            return None
+        raise
 
 
 def _folder_sources_containing_file(

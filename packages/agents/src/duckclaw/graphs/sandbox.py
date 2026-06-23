@@ -96,13 +96,15 @@ class ExecutionResult:
     timed_out: bool = False
     artifacts: list[str] = field(default_factory=list)
     attempts: int = 1
+    sandbox_run_id: str | None = None
+    artifact_ids: list[str] = field(default_factory=list)
 
     @property
     def success(self) -> bool:
         return self.exit_code == 0 and not self.timed_out
 
     def to_dict(self) -> dict:
-        return {
+        out = {
             "exit_code": self.exit_code,
             "stdout": self.stdout[:8000],
             "stderr": self.stderr[:4000],
@@ -110,6 +112,11 @@ class ExecutionResult:
             "artifacts": self.artifacts,
             "attempts": self.attempts,
         }
+        if self.sandbox_run_id:
+            out["sandbox_run_id"] = self.sandbox_run_id
+        if self.artifact_ids:
+            out["artifact_ids"] = list(self.artifact_ids)
+        return out
 
 
 def _docker_client():
@@ -453,6 +460,11 @@ class StrixSandboxManager:
         secret_env: dict[str, str] | None = None,
         timeout_seconds: int | None = None,
         image_override: str | None = None,
+        *,
+        chat_id: str | None = None,
+        sandbox_run_id: str | None = None,
+        tenant_id: str = "default",
+        worker_id: str = "default",
     ) -> ExecutionResult:
         """Ejecuta código arbitrario en el sandbox del session_id dado.
 
@@ -542,7 +554,15 @@ class StrixSandboxManager:
         except Exception as e:
             return ExecutionResult(exit_code=1, stdout="", stderr=f"Error de ejecución: {e}")
 
-        artifacts = self._collect_artifacts(out_dir, session_id=session_id)
+        artifacts, registered_run_id, artifact_ids = self._collect_artifacts(
+            out_dir,
+            session_id=session_id,
+            chat_id=chat_id,
+            run_id=sandbox_run_id,
+            tenant_id=tenant_id,
+            worker_id=worker_id,
+            exit_code=int(exec_result.exit_code or 0),
+        )
 
         return ExecutionResult(
             exit_code=exec_result.exit_code or 0,
@@ -550,19 +570,57 @@ class StrixSandboxManager:
             stderr=stderr,
             timed_out=timed_out,
             artifacts=artifacts,
+            sandbox_run_id=registered_run_id,
+            artifact_ids=artifact_ids,
         )
 
-    def _collect_artifacts(self, out_dir: Path, *, session_id: str = "") -> list[str]:
-        """Mueve artefactos del directorio de salida a la carpeta de plots del proyecto."""
-        artifacts = []
+    def _collect_artifacts(
+        self,
+        out_dir: Path,
+        *,
+        session_id: str = "",
+        chat_id: str | None = None,
+        run_id: str | None = None,
+        tenant_id: str = "default",
+        worker_id: str = "default",
+        exit_code: int = 0,
+    ) -> tuple[list[str], str | None, list[str]]:
+        """Copia artefactos a scratch por chat (manifest) y legacy ``output/sandbox/default/``."""
+        del session_id
+        source_files = [f for f in out_dir.iterdir() if f.is_file()]
+        artifacts: list[str] = []
         plots_dir = Path("output") / "sandbox" / "default"
         plots_dir.mkdir(parents=True, exist_ok=True)
-        for f in out_dir.iterdir():
-            if f.is_file():
-                dest = plots_dir / f.name
-                shutil.copy2(f, dest)
-                artifacts.append(str(dest.resolve()))
-        return artifacts
+        for f in source_files:
+            dest = plots_dir / f.name
+            shutil.copy2(f, dest)
+            artifacts.append(str(dest.resolve()))
+
+        registered_run_id: str | None = None
+        artifact_ids: list[str] = []
+        cid = (chat_id or "").strip()
+        rid = (run_id or "").strip()
+        if cid and rid and source_files:
+            try:
+                from duckclaw.sandbox_artifacts import register_run_artifacts
+
+                manifest = register_run_artifacts(
+                    cid,
+                    tenant_id,
+                    worker_id,
+                    rid,
+                    exit_code,
+                    source_files,
+                )
+                registered_run_id = rid
+                artifact_ids = [
+                    str(a.get("artifact_id") or "").strip()
+                    for a in (manifest.get("artifacts") or [])
+                    if isinstance(a, dict) and str(a.get("artifact_id") or "").strip()
+                ]
+            except Exception as exc:
+                _log.warning("sandbox artifact registry failed chat_id=%s run_id=%s: %s", cid, rid, exc)
+        return artifacts, registered_run_id, artifact_ids
 
     def _refresh_browser_novnc(self, session_id: str, container: Any) -> None:
         """Publica/registra puerto host→6080 para noVNC (token + TTL)."""
@@ -908,6 +966,7 @@ def run_in_sandbox(
     image_override: str | None = None,
     inject_python_header: bool = True,
     chat_id: str | None = None,
+    tenant_id: str = "default",
 ) -> ExecutionResult:
     """Bucle de auto-corrección del spec (sección 5).
 
@@ -948,11 +1007,13 @@ def run_in_sandbox(
     if image_override:
         tags = tags + ["execution_environment:strix_browser"]
 
+    tid = (tenant_id or "default").strip() or "default"
     for attempt in range(1, max_retries + 1):
         if lang == "python" and inject_python_header:
             exec_code = _inject_sandbox_python_header(current_code)
         else:
             exec_code = current_code
+        attempt_run_id = uuid.uuid4().hex
         result = manager.execute(
             sid,
             exec_code,
@@ -961,6 +1022,10 @@ def run_in_sandbox(
             secret_env=secret_env,
             timeout_seconds=timeout_sec,
             image_override=image_override,
+            chat_id=chat_id,
+            sandbox_run_id=attempt_run_id,
+            tenant_id=tid,
+            worker_id=wid,
         )
         result.attempts = attempt
 
@@ -1600,6 +1665,10 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             )
         if result.artifacts:
             out["artifacts"] = result.artifacts
+        if result.sandbox_run_id:
+            out["sandbox_run_id"] = result.sandbox_run_id
+        if result.artifact_ids:
+            out["artifact_ids"] = result.artifact_ids
         if result.timed_out:
             out["warning"] = "Timeout alcanzado"
         if result.attempts > 1:
@@ -1630,6 +1699,8 @@ def browser_sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "stdout_tail",
             "stderr_tail",
             "artifacts",
+            "sandbox_run_id",
+            "artifact_ids",
             "warning",
             "auto_corrected_attempts",
             "hint",
@@ -1754,6 +1825,10 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
             "stdout": result.stdout or "",
             "figure_base64": None,
         }
+        if result.sandbox_run_id:
+            out["sandbox_run_id"] = result.sandbox_run_id
+        if result.artifact_ids:
+            out["artifact_ids"] = result.artifact_ids
         if result.artifacts:
             out["artifacts"] = result.artifacts
             for art in result.artifacts:

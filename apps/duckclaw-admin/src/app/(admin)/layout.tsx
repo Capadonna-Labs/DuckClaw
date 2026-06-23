@@ -7,6 +7,7 @@ import { Sidebar, Topbar } from '@/components/layout';
 import { FloatingAdminChat } from '@/components/chat/FloatingAdminChat';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { Loader2, PanelLeftOpen } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, hasHydrated, setReturnTo } = useAuthStore();
@@ -14,6 +15,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const { sidebarOpen, setSidebarOpen } = useLayoutUiStore();
+  const isWorkspaceRoute =
+    pathname === '/playground' ||
+    pathname.startsWith('/sandbox') ||
+    pathname === '/kanban';
 
   useEffect(() => {
     if (!hasHydrated) return;
@@ -61,9 +66,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <Topbar onMenuClick={() => setIsSidebarOpen(true)} />
         <main
           id="admin-main-scroll"
-          className="flex-1 overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-10 max-lg:overscroll-none"
+          className={cn(
+            'flex-1 max-lg:overscroll-none',
+            isWorkspaceRoute
+              ? 'overflow-hidden p-2 lg:p-3'
+              : 'overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-10'
+          )}
         >
-          <div className="max-w-[1600px] mx-auto">{children}</div>
+          <div className={isWorkspaceRoute ? 'h-full w-full min-h-0' : 'max-w-[1600px] mx-auto'}>
+            {children}
+          </div>
         </main>
         <FloatingAdminChat />
       </div>

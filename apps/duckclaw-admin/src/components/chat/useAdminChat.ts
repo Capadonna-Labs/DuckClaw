@@ -50,6 +50,11 @@ export type UseAdminChatOptions = {
   enabled?: boolean;
   /** Tras cada turno completado (para refrescar inbox). */
   onConversationActivity?: () => void;
+  /** Tras heartbeat visual de sandbox con artefactos nuevos. */
+  onSandboxArtifacts?: (payload: {
+    sandbox_run_id?: string;
+    artifact_ids?: string[];
+  }) => void;
 };
 
 function artifactImagePreview(
@@ -189,6 +194,7 @@ export function useAdminChat({
   projectId = '',
   enabled = true,
   onConversationActivity,
+  onSandboxArtifacts,
 }: UseAdminChatOptions) {
   const pinnedWorker = (lockWorker || '').trim();
   const [config, setConfig] = useState<Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null>(
@@ -543,11 +549,22 @@ export function useAdminChat({
       swarm_slot?: number;
       artifact_id?: string;
       artifact_tenant_id?: string;
+      sandbox_run_id?: string;
+      artifact_ids?: string[];
       tool_name?: string;
       tool_phase?: 'start' | 'done' | 'error';
       elapsed_ms?: number;
     }) => {
       const kind = payload.kind ?? 'status';
+      if (
+        kind === 'visual' &&
+        (payload.sandbox_run_id?.trim() || (payload.artifact_ids?.length ?? 0) > 0)
+      ) {
+        onSandboxArtifacts?.({
+          sandbox_run_id: payload.sandbox_run_id,
+          artifact_ids: payload.artifact_ids,
+        });
+      }
       const hbWorker = (payload.worker_id || workerId || '').trim();
       const hbSlot =
         payload.swarm_slot != null && Number.isFinite(payload.swarm_slot)
@@ -845,6 +862,7 @@ export function useAdminChat({
       config?.telegram_user_id,
       finalizeCancelledGeneration,
       onConversationActivity,
+      onSandboxArtifacts,
       workerId,
       projectId,
       vaultPath,

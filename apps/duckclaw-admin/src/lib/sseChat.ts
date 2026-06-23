@@ -24,6 +24,8 @@ export type SseChatEvent =
       swarm_slot?: number;
       artifact_id?: string;
       artifact_tenant_id?: string;
+      sandbox_run_id?: string;
+      artifact_ids?: string[];
       tool_name?: string;
       tool_phase?: 'start' | 'done' | 'error';
       elapsed_ms?: number;
@@ -117,6 +119,10 @@ function parseDataLine(data: string): SseChatEvent | null {
         artifact_id: typeof j.artifact_id === 'string' ? j.artifact_id : undefined,
         artifact_tenant_id:
           typeof j.artifact_tenant_id === 'string' ? j.artifact_tenant_id : undefined,
+        sandbox_run_id: typeof j.sandbox_run_id === 'string' ? j.sandbox_run_id : undefined,
+        artifact_ids: Array.isArray(j.artifact_ids)
+          ? j.artifact_ids.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+          : undefined,
         tool_name: typeof j.tool_name === 'string' ? j.tool_name : undefined,
         tool_phase,
         elapsed_ms: Number.isFinite(elapsed_ms) ? elapsed_ms : undefined,

@@ -43,6 +43,7 @@ from routers.admin_domains.project_bootstrap_routes import router as project_boo
 from routers.admin_domains.prompt_policies import router as prompt_policies_router
 from routers.admin_domains.report_engine import router as report_engine_router
 from routers.admin_domains.runtime_config import router as runtime_config_router
+from routers.admin_domains.sandbox_artifacts import router as sandbox_artifacts_router
 from routers.admin_domains.sandbox_sessions import router as sandbox_sessions_router
 from routers.admin_domains.telegram_routes import router as telegram_routes_router
 from routers.admin_domains.template_contexts import router as template_contexts_router
@@ -95,6 +96,7 @@ router.include_router(project_bootstrap_router)
 router.include_router(prompt_policies_router)
 router.include_router(report_engine_router)
 router.include_router(runtime_config_router)
+router.include_router(sandbox_artifacts_router)
 router.include_router(sandbox_sessions_router)
 router.include_router(telegram_routes_router)
 router.include_router(template_contexts_router)

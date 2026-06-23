@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { adminService, type AdminConversation } from '@/services/adminService';
 import {
+  FolderOpen,
   Settings2,
   Bot,
   ChevronRight,
@@ -45,7 +46,7 @@ export default function PlaygroundPage() {
   const searchParams = useSearchParams();
   const initialWorker = searchParams.get('worker') || '';
   const initialProject = searchParams.get('project') || '';
-  const [panelOpen, setPanelOpen] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(true);
   const [mainScrollEl, setMainScrollEl] = useState<HTMLElement | null>(null);
   const [systemPreview, setSystemPreview] = useState('');
   const [settingsModal, setSettingsModal] = useState<PlaygroundSettingsModal>(null);
@@ -96,6 +97,14 @@ export default function PlaygroundPage() {
     projectId,
     enabled: Boolean(conv.sessionId),
     onConversationActivity: conv.bumpRefresh,
+    onSandboxArtifacts: (payload) => {
+      const chat = conv.sessionId ?? '';
+      const run = payload.sandbox_run_id?.trim() ?? '';
+      const q = new URLSearchParams({ tab: 'files' });
+      if (chat) q.set('chat', chat);
+      if (run) q.set('run', run);
+      router.push(`/sandbox?${q.toString()}`);
+    },
   });
 
   useEffect(() => {
@@ -296,6 +305,9 @@ export default function PlaygroundPage() {
     },
     [activeVaultPath, config?.effective_tenant_id, conv.sessionId, workerId]
   );
+  const handleLogsToggle = useCallback(() => {
+    setLogsPanelOpen((open) => !open);
+  }, []);
   const playgroundComposeChips = useMemo(
     () =>
       conv.sessionId && workerId ? (
@@ -377,9 +389,14 @@ export default function PlaygroundPage() {
         systemReady={Boolean(systemPreview.trim())}
         invalidWorkers={config?.workers_invalid ?? []}
         logsPanelOpen={logsPanelOpen}
-        onLogsToggle={() => setLogsPanelOpen((open) => !open)}
+        onLogsToggle={handleLogsToggle}
         logsControls={logsPanelOpen ? <Pm2LiveLogsControls variant="studio" /> : null}
         logsViewport={logsPanelOpen ? <Pm2LiveLogsViewport /> : null}
+        sandboxHref={
+          conv.sessionId
+            ? `/sandbox?tab=files&chat=${encodeURIComponent(conv.sessionId)}`
+            : '/sandbox'
+        }
         onOpen={setSettingsModal}
       />
     </Pm2LiveLogsProvider>
@@ -492,7 +509,7 @@ export default function PlaygroundPage() {
   );
 
   return (
-    <div className="flex flex-col lg:flex-row gap-4 min-h-0 max-lg:h-[calc(100dvh-4rem)] max-lg:overflow-hidden lg:h-[calc(100vh-8rem)] lg:min-h-0 lg:overflow-hidden relative -mx-4 px-4 md:mx-0 md:px-0">
+    <div className="flex flex-col lg:flex-row gap-3 min-h-0 h-full max-lg:h-[calc(100dvh-4rem)] max-lg:overflow-hidden w-full relative">
       <ScrollFabPair
         showScrollTop={pageScroll.showScrollTop}
         showScrollBottom={pageScroll.showScrollBottom}
@@ -504,8 +521,20 @@ export default function PlaygroundPage() {
         <PlaygroundHistoryView tenantId={config?.effective_tenant_id} />
       ) : (
         <>
-      <div className="relative flex-1 flex flex-col min-w-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
+      <div className="relative flex flex-1 flex-col min-w-0 min-h-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
         <div className="lg:hidden absolute right-3 top-3 z-20 flex items-center gap-2">
+          <Link
+            href={
+              conv.sessionId
+                ? `/sandbox?tab=files&chat=${encodeURIComponent(conv.sessionId)}`
+                : '/sandbox'
+            }
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-2 text-[11px] font-black shadow-sm backdrop-blur border-gov-blue-100 bg-white/90 text-gov-blue-800 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan`}
+            aria-label="Abrir sandbox"
+          >
+            <FolderOpen size={14} />
+            <span className="sr-only sm:not-sr-only">Sandbox</span>
+          </Link>
           <button
             type="button"
             onClick={() => {
@@ -611,8 +640,8 @@ export default function PlaygroundPage() {
       )}
 
       <aside
-        className={`hidden lg:flex shrink-0 min-h-0 overflow-hidden transition-[width,opacity] duration-300 ease-out ${
-          panelOpen ? 'w-80 h-full opacity-100' : 'w-0 max-w-0 opacity-0 pointer-events-none'
+        className={`hidden lg:flex shrink-0 flex-col min-h-0 overflow-hidden transition-[width,opacity] duration-300 ease-out ${
+          panelOpen ? 'w-80 opacity-100' : 'w-0 max-w-0 opacity-0 pointer-events-none'
         }`}
         aria-hidden={!panelOpen}
       >

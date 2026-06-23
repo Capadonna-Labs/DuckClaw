@@ -127,7 +127,7 @@ def register_homeostasis_skill(
             name="homeostasis_check",
             description=(
                 "Compara un valor observado con las creencias del agente (homeostasis). "
-                "Recibe belief_key (ej. presupuesto_mensual, test_coverage) y observed_value. "
+                "Recibe belief_key (ej. monthly_metric, test_coverage) y observed_value. "
                 "Devuelve Action_Plan: restore si hay anomalía, maintain si está en equilibrio."
             ),
         )

@@ -241,9 +241,17 @@ def build_spec_from_manifest(
         field_reflection_config = {"enabled": False}
 
     agent_node_heuristic_first_tool: bool | None = None
+    agent_node_max_tool_rounds: int | None = None
     _anc = data.get("agent_node")
-    if isinstance(_anc, dict) and "heuristic_first_tool" in _anc:
-        agent_node_heuristic_first_tool = bool(_anc.get("heuristic_first_tool"))
+    if isinstance(_anc, dict):
+        if "heuristic_first_tool" in _anc:
+            agent_node_heuristic_first_tool = bool(_anc.get("heuristic_first_tool"))
+        _mtr = _anc.get("max_tool_rounds")
+        if _mtr is not None:
+            try:
+                agent_node_max_tool_rounds = max(1, int(_mtr))
+            except (TypeError, ValueError):
+                agent_node_max_tool_rounds = None
 
     # Telegram / egress: síntesis LLM para evitar JSON crudo (default on; spec: worker-telegram-natural-language-egress.md)
     _enl = data.get("egress_natural_language_synthesis")
@@ -257,6 +265,10 @@ def build_spec_from_manifest(
     tool_orchestration_config: Optional[dict] = None
     if isinstance(data.get("tool_orchestration"), dict):
         tool_orchestration_config = data["tool_orchestration"]
+
+    tool_surface_config: Optional[dict] = None
+    if isinstance(data.get("tool_surface"), dict):
+        tool_surface_config = data["tool_surface"]
 
     return WorkerSpec(
         worker_id=worker_id,
@@ -285,8 +297,10 @@ def build_spec_from_manifest(
         browser_sandbox=browser_sandbox,
         field_reflection_config=field_reflection_config,
         agent_node_heuristic_first_tool=agent_node_heuristic_first_tool,
+        agent_node_max_tool_rounds=agent_node_max_tool_rounds,
         egress_natural_language_synthesis=egress_natural_language_synthesis,
         tool_orchestration_config=tool_orchestration_config,
+        tool_surface_config=tool_surface_config,
     )
 
 
@@ -351,8 +365,10 @@ class WorkerSpec:
         "browser_sandbox",
         "field_reflection_config",
         "agent_node_heuristic_first_tool",
+        "agent_node_max_tool_rounds",
         "egress_natural_language_synthesis",
         "tool_orchestration_config",
+        "tool_surface_config",
         "runtime_policy",
     )
 
@@ -384,8 +400,10 @@ class WorkerSpec:
         browser_sandbox: bool = False,
         field_reflection_config: Optional[dict] = None,
         agent_node_heuristic_first_tool: bool | None = None,
+        agent_node_max_tool_rounds: int | None = None,
         egress_natural_language_synthesis: bool = True,
         tool_orchestration_config: Optional[dict] = None,
+        tool_surface_config: Optional[dict] = None,
         runtime_policy: Any = None,
     ):
         self.worker_id = worker_id
@@ -418,6 +436,8 @@ class WorkerSpec:
         self.browser_sandbox = bool(browser_sandbox)
         self.field_reflection_config = field_reflection_config
         self.agent_node_heuristic_first_tool = agent_node_heuristic_first_tool
+        self.agent_node_max_tool_rounds = agent_node_max_tool_rounds
         self.egress_natural_language_synthesis = bool(egress_natural_language_synthesis)
         self.tool_orchestration_config = tool_orchestration_config
+        self.tool_surface_config = tool_surface_config
         self.runtime_policy = runtime_policy

@@ -631,7 +631,7 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 name="patch_report_section",
                 description=(
                     "Actualiza una sección del informe (mode append|replace). "
-                    "Ej.: agregar notas a obligaciones_1 del informe mensual."
+                    "Ej.: agregar notas a section_notes del informe mensual."
                 ),
             ),
             StructuredTool.from_function(

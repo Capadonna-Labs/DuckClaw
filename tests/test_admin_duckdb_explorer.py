@@ -41,9 +41,9 @@ def test_duckdb_actor_scope_falls_back_to_actor_tenant_not_gateway_tenant(
 def explorer_db(tmp_path: Path) -> Path:
     dbf = tmp_path / "explorer.duckdb"
     con = duckdb.connect(str(dbf))
-    con.execute("CREATE SCHEMA finance_worker")
-    con.execute("CREATE TABLE finance_worker.sample (id INTEGER, name VARCHAR)")
-    con.execute("INSERT INTO finance_worker.sample VALUES (1, 'alpha')")
+    con.execute("CREATE SCHEMA sample_schema")
+    con.execute("CREATE TABLE sample_schema.rows (id INTEGER, name VARCHAR)")
+    con.execute("INSERT INTO sample_schema.rows VALUES (1, 'alpha')")
     con.execute(
         """
         CREATE TABLE memory_nodes (
@@ -93,7 +93,7 @@ def explorer_db(tmp_path: Path) -> Path:
         """
         INSERT INTO main.semantic_memory (id, content, source, embedding_status)
         VALUES ('r1', 'older chunk about markets', 'seed', 'READY'),
-               ('r2', 'newer chunk about ibkr', 'seed', 'PENDING')
+               ('r2', 'newer chunk about trends', 'seed', 'PENDING')
         """
     )
     con.close()
@@ -107,8 +107,8 @@ def test_duckdb_tables(admin_client: TestClient, explorer_db: Path) -> None:
     )
     assert r.status_code == 200
     data = r.json()
-    assert "finance_worker" in data.get("schemas", {})
-    assert "sample" in data["schemas"]["finance_worker"]
+    assert "sample_schema" in data.get("schemas", {})
+    assert "rows" in data["schemas"]["sample_schema"]
 
 
 def test_duckdb_tables_default_to_authenticated_actor_vault(
@@ -365,7 +365,7 @@ def test_duckdb_query_select(admin_client: TestClient, explorer_db: Path) -> Non
         headers=_ADMIN_HEADERS,
         json={
             "vault_path": str(explorer_db),
-            "query": "SELECT * FROM finance_worker.sample",
+            "query": "SELECT * FROM sample_schema.rows",
         },
     )
     assert r.status_code == 200
@@ -374,11 +374,58 @@ def test_duckdb_query_select(admin_client: TestClient, explorer_db: Path) -> Non
     assert data["rows"] == [[1, "alpha"]]
 
 
-def test_duckdb_query_rejects_insert(admin_client: TestClient, explorer_db: Path) -> None:
+def test_duckdb_query_insert(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    user_dir = repo_root / "db" / "private" / "owner123"
+    user_dir.mkdir(parents=True)
+    user_db = user_dir / "axis.duckdb"
+    con = duckdb.connect(str(user_db))
+    con.execute("CREATE SCHEMA sample_schema")
+    con.execute("CREATE TABLE sample_schema.rows (id INTEGER, name VARCHAR)")
+    con.execute("INSERT INTO sample_schema.rows VALUES (1, 'alpha')")
+    con.close()
+    monkeypatch.delenv("DUCKCLAW_EXTENSION_ROOT", raising=False)
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
+    monkeypatch.setattr("duckclaw.spawn_profile.spawn_inline_writes_enabled", lambda: True)
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "owner@example.com"}
+
+    r = gateway_admin_client.post(
+        "/api/v1/admin/duckdb/query",
+        headers=headers,
+        json={
+            "vault_path": "db/private/owner123/axis.duckdb",
+            "query": "INSERT INTO sample_schema.rows VALUES (2, 'beta')",
+        },
+    )
+    if r.status_code != 200:
+        raise AssertionError(f"{r.status_code} {r.json()}")
+    data = r.json()
+    assert data.get("mode") == "write"
+    assert data.get("status") == "success"
+    verify = gateway_admin_client.post(
+        "/api/v1/admin/duckdb/query",
+        headers=headers,
+        json={
+            "vault_path": "db/private/owner123/axis.duckdb",
+            "query": "SELECT id, name FROM sample_schema.rows ORDER BY id",
+        },
+    )
+    assert verify.status_code == 200
+    assert [2, "beta"] in verify.json()["rows"]
+
+
+def test_duckdb_query_rejects_drop(admin_client: TestClient, explorer_db: Path) -> None:
     r = admin_client.post(
         "/api/v1/admin/duckdb/query",
         headers=_ADMIN_HEADERS,
-        json={"vault_path": str(explorer_db), "query": "INSERT INTO finance_worker.sample VALUES (2, 'x')"},
+        json={"vault_path": str(explorer_db), "query": "DROP TABLE sample_schema.rows"},
     )
     assert r.status_code == 400
 
@@ -389,7 +436,7 @@ def test_duckdb_query_enforces_limit(admin_client: TestClient, explorer_db: Path
         headers=_ADMIN_HEADERS,
         json={
             "vault_path": str(explorer_db),
-            "query": "SELECT * FROM finance_worker.sample",
+            "query": "SELECT * FROM sample_schema.rows",
         },
     )
     assert r.status_code == 200
@@ -425,7 +472,7 @@ def test_duckdb_vector_lexical(admin_client: TestClient, explorer_db: Path) -> N
     r = admin_client.post(
         "/api/v1/admin/duckdb/vector-search",
         headers=_ADMIN_HEADERS,
-        json={"vault_path": str(explorer_db), "query": "ibkr markets", "limit": 5},
+        json={"vault_path": str(explorer_db), "query": "vector search trends", "limit": 5},
     )
     assert r.status_code == 200
     data = r.json()

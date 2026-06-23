@@ -37,11 +37,6 @@ def _duckdb_admin_write_intent(text: str) -> bool:
         return True
     if re.search(r"\bupdate\s+[a-z_][\w.]*\b", t):
         return True
-    if re.search(
-        r"\b(insert_deuda|insert_transaction|insert_cuenta|insert_presupuesto)\b",
-        t,
-    ):
-        return True
     return False
 
 

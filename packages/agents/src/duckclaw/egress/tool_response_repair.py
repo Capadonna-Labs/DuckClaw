@@ -166,6 +166,52 @@ def _parse_json_preview(raw: str) -> str | None:
     return None
 
 
+def _humanize_tool_line(tool_name: str, tool_content: str) -> str:
+    """Una línea legible por tool; evita volcar JSON crudo al usuario."""
+    stripped = strip_tool_label_prefix(tool_content or "").strip()
+    if not stripped:
+        return ""
+    if stripped.startswith("{"):
+        try:
+            parsed = json.loads(stripped)
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if isinstance(parsed, dict):
+            err_txt = str(parsed.get("error") or "").strip()
+            if err_txt:
+                return f"No se pudo completar: {err_txt[:200]}"
+            status = str(parsed.get("status") or "").strip().lower()
+            if status in ("success", "ok"):
+                label = (
+                    str(parsed.get("item") or parsed.get("name") or parsed.get("title") or "").strip()
+                )
+                if label:
+                    return f"Operación completada ({label})."
+                return "Operación completada."
+            preview = parsed.get("preview")
+            if isinstance(preview, str) and preview.strip():
+                return preview.strip()[:220]
+    if stripped.startswith("["):
+        try:
+            rows = json.loads(stripped)
+        except (json.JSONDecodeError, TypeError):
+            rows = None
+        if isinstance(rows, list):
+            if not rows:
+                return "Sin registros en el resultado."
+            if len(rows) == 1 and isinstance(rows[0], dict):
+                keys = list(rows[0].keys())[:4]
+                return f"1 registro ({', '.join(keys)}…)."
+            return f"{len(rows)} registros."
+    first_line = stripped.split("\n", 1)[0].strip()
+    if first_line and not first_line.startswith(("{", "[")):
+        return first_line[:220]
+    preview = _parse_json_preview(tool_content)
+    if preview and not preview.startswith(("{", "[")):
+        return preview[:220]
+    return ""
+
+
 def deterministic_tool_response_summary(
     messages: list[Any],
     last_human_idx: int,
@@ -194,15 +240,15 @@ def deterministic_tool_response_summary(
         tool_content = str(getattr(message, "content", "") or "").strip()
         if not tool_content or tool_name == "get_current_time":
             continue
-        preview = _parse_json_preview(tool_content)
-        if preview is None:
-            preview = tool_content.split("\n", 1)[0].strip()[:240]
-        if preview:
-            summaries.append(f"{tool_name}: {preview}")
+        line = _humanize_tool_line(tool_name, tool_content)
+        if line:
+            summaries.append(line)
+        if len(summaries) >= 6:
+            break
 
     if not summaries:
         return ""
-    body = ". ".join(summaries)
+    body = " ".join(summaries)
     if not body.endswith("."):
         body += "."
     if header:

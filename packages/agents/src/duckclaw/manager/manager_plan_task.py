@@ -21,7 +21,7 @@ def _user_demands_tool_evidence_from_db(text_lower: str) -> bool:
             r"\b(usar?\s+(las\s+)?tools|usa(?:r)?\s+las\s+herramientas|no\s+usaste|ninguna\s+tool|ningún\s+tool|"
             r"ninguna\s+herramienta|insert(?:ar)?\s+(los\s+|la\s+)?(?:datos\s+)?en\s+la\s+(db|base)|persistencia\b|"
             r"solo\s+(?:lo\s+)?(?:está|estas|guardas)\s+en\s+memoria|solo\s+memoria|"
-            r"\bread_sql\b|\badmin_sql\b|\binsert_deuda\b)\b",
+            r"\bread_sql\b|\badmin_sql\b)\b",
             text_lower,
         )
     )

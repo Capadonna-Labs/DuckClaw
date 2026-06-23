@@ -32,9 +32,6 @@ _sem: Optional[threading.BoundedSemaphore] = None
 _sem_lock = threading.Lock()
 
 
-_RE_INSTALLMENT_ROW = re.compile(r"^.+\s+-\s+Cuota\s+", re.IGNORECASE)
-
-
 def _row_amount(row: dict[str, str], amount_field: str) -> float:
     try:
         return float(row.get(amount_field) or 0)
@@ -42,56 +39,86 @@ def _row_amount(row: dict[str, str], amount_field: str) -> float:
         return 0.0
 
 
-def _installment_ids_to_exclude(
+def _child_row_ids_to_exclude(
     rows: list[dict[str, str]],
     *,
     amount_field: str,
-    creditor_field: str,
+    group_field: str,
     description_field: str,
     id_field: str,
+    child_row_pattern: re.Pattern[str] | None,
+    aggregate_markers: tuple[str, ...],
 ) -> set[str]:
     """
-    Si coexisten fila agregada de un crédito y filas de cuotas mensuales del mismo,
-    excluye esas cuotas del total para no doblar el mismo crédito.
+    When aggregate and child rows coexist for the same group key, exclude child rows from totals.
+    Patterns come from the worker ``read_summary_dedup`` runtime policy.
     """
-    creditor_groups: dict[str, dict] = {}
+    groups: dict[str, dict] = {}
     for r in rows:
         if _row_amount(r, amount_field) <= 0:
             continue
-        cred = (r.get(creditor_field) or "").strip()
+        key = (r.get(group_field) or "").strip()
         desc = (r.get(description_field) or "").strip()
-        if not cred or not desc:
+        if not key or not desc:
             continue
-        if cred not in creditor_groups:
-            creditor_groups[cred] = {"first_description": desc, "installment_ids": [], "has_aggregate": False}
-        if _RE_INSTALLMENT_ROW.match(desc):
-            creditor_groups[cred]["installment_ids"].append(str(r.get(id_field, "")))
+        if key not in groups:
+            groups[key] = {"child_ids": [], "has_aggregate": False}
+        if child_row_pattern and child_row_pattern.match(desc):
+            groups[key]["child_ids"].append(str(r.get(id_field, "")))
         else:
             dlow = desc.lower()
-            if "cuotas" in dlow or "cuotas mensuales" in dlow:
-                creditor_groups[cred]["has_aggregate"] = True
-    for cred, info in creditor_groups.items():
-        if info["has_aggregate"] and len(info["installment_ids"]) >= 2:
-            return {i for i in info["installment_ids"] if i}
-    return set()
+            if aggregate_markers and any(marker in dlow for marker in aggregate_markers):
+                groups[key]["has_aggregate"] = True
+    excluded: set[str] = set()
+    for info in groups.values():
+        if info["has_aggregate"] and len(info["child_ids"]) >= 2:
+            excluded.update(i for i in info["child_ids"] if i)
+    return excluded
 
 
-def _maybe_wrap_debt_summary_read_sql(spec: WorkerSpec, query: str, raw: str) -> str:
-    """Anexa totales deduplicados cuando una capability DB define cómo resumir la tabla."""
-    policy = _worker_runtime_capability_policy(spec, "debt_summary_dedup")
+def _read_summary_dedup_policy(spec: WorkerSpec) -> dict[str, Any] | None:
+    policy = _worker_runtime_capability_policy(spec, "read_summary_dedup")
     if not policy:
-        return raw
+        return None
     table_name = str(policy.get("table_name") or "").strip().lower()
-    schema_name = str(policy.get("schema_name") or "").strip().lower()
     amount_field = str(policy.get("amount_field") or "").strip()
-    creditor_field = str(policy.get("creditor_field") or "").strip()
+    group_field = str(policy.get("group_field") or policy.get("creditor_field") or "").strip()
     description_field = str(policy.get("description_field") or "").strip()
     id_field = str(policy.get("id_field") or "").strip()
-    if not all((table_name, amount_field, creditor_field, description_field, id_field)):
+    if not all((table_name, amount_field, group_field, description_field, id_field)):
+        return None
+    child_pattern_raw = str(policy.get("child_row_pattern") or "").strip()
+    child_pattern = re.compile(child_pattern_raw, re.IGNORECASE) if child_pattern_raw else None
+    aggregate_markers_raw = policy.get("aggregate_markers")
+    if isinstance(aggregate_markers_raw, str):
+        aggregate_markers = tuple(m.strip().lower() for m in aggregate_markers_raw.split(",") if m.strip())
+    elif isinstance(aggregate_markers_raw, (list, tuple)):
+        aggregate_markers = tuple(str(m).strip().lower() for m in aggregate_markers_raw if str(m).strip())
+    else:
+        aggregate_markers = ()
+    schema_name = str(policy.get("schema_name") or "").strip().lower()
+    return {
+        "table_name": table_name,
+        "schema_name": schema_name,
+        "amount_field": amount_field,
+        "group_field": group_field,
+        "description_field": description_field,
+        "id_field": id_field,
+        "child_row_pattern": child_pattern,
+        "aggregate_markers": aggregate_markers,
+    }
+
+
+def _maybe_wrap_summary_dedup_read_sql(spec: WorkerSpec, query: str, raw: str) -> str:
+    """Anexa totales deduplicados cuando una capability DB define reglas de resumen."""
+    policy = _read_summary_dedup_policy(spec)
+    if not policy:
         return raw
+    table_name = policy["table_name"]
     qlow = query.lower()
     if table_name not in qlow:
         return raw
+    schema_name = policy["schema_name"]
     sch = (getattr(spec, "schema_name", None) or "").strip().lower()
     if schema_name and schema_name not in qlow and sch != schema_name:
         return raw
@@ -103,15 +130,19 @@ def _maybe_wrap_debt_summary_read_sql(spec: WorkerSpec, query: str, raw: str) ->
         return raw
     if not isinstance(parsed, list) or not parsed:
         return raw
-    exclude = _installment_ids_to_exclude(
+    exclude = _child_row_ids_to_exclude(
         parsed,
-        amount_field=amount_field,
-        creditor_field=creditor_field,
-        description_field=description_field,
-        id_field=id_field,
+        amount_field=policy["amount_field"],
+        group_field=policy["group_field"],
+        description_field=policy["description_field"],
+        id_field=policy["id_field"],
+        child_row_pattern=policy["child_row_pattern"],
+        aggregate_markers=policy["aggregate_markers"],
     )
     if not exclude:
         return raw
+    amount_field = policy["amount_field"]
+    id_field = policy["id_field"]
     naive = sum(_row_amount(r, amount_field) for r in parsed if _row_amount(r, amount_field) > 0)
     deduped = sum(
         _row_amount(r, amount_field)
@@ -119,15 +150,15 @@ def _maybe_wrap_debt_summary_read_sql(spec: WorkerSpec, query: str, raw: str) ->
         if _row_amount(r, amount_field) > 0 and str(r.get(id_field, "")) not in exclude
     )
     meta = {
-        "suma_todas_las_filas_cop": naive,
-        "total_recomendado_resumen_cop": deduped,
-        "regla_aplicada": (
-            "Excluidas del total las filas de cuotas mensuales porque coexisten "
-            "con la fila agregada del mismo crédito; no sumar ambas en un único total."
+        "sum_all_rows": naive,
+        "recommended_total": deduped,
+        "rule_applied": (
+            "Excluded child rows that duplicate an aggregate row in the same group; "
+            "do not sum both in a single total."
         ),
-        "ids_excluidos_del_total": sorted(exclude),
+        "excluded_ids": sorted(exclude),
     }
-    return json.dumps({"deudas_filas": parsed, "_totales_resumen_cop": meta}, ensure_ascii=False)
+    return json.dumps({"rows": parsed, "_summary_totals": meta}, ensure_ascii=False)
 
 
 def _truncate_read_sql_result_for_llm(raw: str) -> str:
@@ -275,7 +306,7 @@ def run_worker_read_sql(run_query: Callable[[str], str], spec: WorkerSpec, q: st
     upper = q.upper()
     try:
         raw = _truncate_read_sql_result_for_llm(run_query(q))
-        return _maybe_wrap_debt_summary_read_sql(spec, q, raw)
+        return _maybe_wrap_summary_dedup_read_sql(spec, q, raw)
     except Exception as e:
         err = str(e)
         if spec.allowed_tables and any(k in upper for k in ("FROM", "JOIN")):
@@ -284,7 +315,7 @@ def run_worker_read_sql(run_query: Callable[[str], str], spec: WorkerSpec, q: st
                 if try_q != q:
                     try:
                         raw2 = _truncate_read_sql_result_for_llm(run_query(try_q))
-                        return _maybe_wrap_debt_summary_read_sql(spec, try_q, raw2)
+                        return _maybe_wrap_summary_dedup_read_sql(spec, try_q, raw2)
                     except Exception:
                         pass
         return json.dumps({"error": err})

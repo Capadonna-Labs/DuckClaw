@@ -59,6 +59,10 @@ export function useActiveConversation(
   }, [tenantId, selectConversation, bumpRefresh]);
 
   useEffect(() => {
+    if (tenantId === undefined) {
+      setBootstrapping(true);
+      return;
+    }
     let cancelled = false;
     const tid = tenantId || 'default';
 

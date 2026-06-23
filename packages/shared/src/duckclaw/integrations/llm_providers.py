@@ -313,28 +313,6 @@ def _openrouter_attribution_wire_snapshot(llm: Any) -> dict[str, str | bool]:
     }
 
 
-def _debug_agent_openrouter_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
-    """NDJSON de depuración (sesión 480705); ruta vía DUCKCLAW_DEBUG_LOG_PATH."""
-    log_path = (os.environ.get("DUCKCLAW_DEBUG_LOG_PATH") or "").strip()
-    if not log_path:
-        return
-    try:
-        import json
-
-        payload = {
-            "sessionId": "480705",
-            "hypothesisId": hypothesis_id,
-            "location": "llm_providers.py:invoke_chat_model_with_transient_retries",
-            "message": message,
-            "data": data,
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(log_path, "a", encoding="utf-8") as debug_file:
-            debug_file.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
 def invoke_chat_model_with_transient_retries(
     llm: Any,
     messages: Any,
@@ -358,14 +336,6 @@ def invoke_chat_model_with_transient_retries(
             "con el uso de esta sesión."
         )
         _or_attribution_logged = True
-    if provider == "openrouter":
-        # #region agent log
-        _debug_agent_openrouter_log(
-            "H1",
-            "openrouter_invoke_attribution_snapshot",
-            _openrouter_attribution_wire_snapshot(llm),
-        )
-        # #endregion
     cooldown_until = _PROVIDER_COOLDOWN_UNTIL.get(provider, 0.0)
     now = time.time()
     if cooldown_until > now:

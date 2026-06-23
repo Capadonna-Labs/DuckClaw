@@ -17,7 +17,31 @@ uv run duckops serve --gateway
 Diagnóstico: `uv run python scripts/doctor.py`  
 Operación (Redis, PM2, Telegram, variables): [`docs/COMANDOS.md`](docs/COMANDOS.md)
 
-**VPS (actualizar):** `bash scripts/deploy/vps-deploy.sh` · primera vez: `--install` · remoto: `--remote user@host`
+---
+
+## Admin UI
+
+Con el **gateway** en marcha (`uv run duckops serve --gateway` → `:8000`):
+
+```bash
+pnpm admin:install          # primera vez
+pnpm admin:dev              # dev → http://localhost:3001
+```
+
+Stack local (gateway + db-writer + admin):
+
+```bash
+pnpm dev:local              # http://localhost:3001
+```
+
+**Producción** (PM2, puerto `:3000`):
+
+```bash
+pm2 start config/ecosystem.spawn.config.cjs    # gateway :8000 + admin :3000
+pm2 save
+```
+
+`.env.local` en `apps/duckclaw-admin/`: `DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000` y `DUCKCLAW_ADMIN_API_KEY` (misma clave que el gateway).
 
 ---
 

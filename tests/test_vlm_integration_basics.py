@@ -147,12 +147,12 @@ def test_visual_evidence_retry_system_message_content() -> None:
     msg = visual_evidence_retry_system_message()
     text = str(getattr(msg, "content", "") or "")
     assert "read_sql" in text
-    assert "fetch_market_data" in text
+    assert "verify_visual_claim" in text
     assert "ToolMessage" in text
 
 
 def test_visual_evidence_rule_allows_when_tool_evidence_exists() -> None:
-    tool_msg = ToolMessage(content='{"status":"ok"}', tool_call_id="1", name="fetch_market_data")
+    tool_msg = ToolMessage(content='{"status":"ok"}', tool_call_id="1", name="read_sql")
     reply, reason = enforce_visual_evidence_rule(
         incoming="Usuario dice: x\n[VLM_CONTEXT image_hash=abc confidence=0.8]",
         messages=[tool_msg],
@@ -162,43 +162,21 @@ def test_visual_evidence_rule_allows_when_tool_evidence_exists() -> None:
     assert reason is None
 
 
-def test_visual_evidence_rule_relaxed_when_no_tracked_ticker_in_reply() -> None:
-    class _FakeDB:
-        def query(self, _q: str) -> str:
-            return '[{"t": "AAPL"}]'
-
-    class _FakeSpec:
-        worker_id = "market-worker"
-        logical_worker_id = "market-worker"
-        runtime_policy = _FakeRuntimePolicy("market_analysis")
-
+def test_visual_evidence_rule_relaxed_when_no_price_figure_in_reply() -> None:
     reply, reason = enforce_visual_evidence_rule(
         incoming="Usuario dice: x\n[VLM_CONTEXT image_hash=abc confidence=0.8]",
         messages=[],
-        reply="SpaceX podría recaudar 75.00 billones; valoración 1.75 billones (noticia).",
-        db=_FakeDB(),
-        spec=_FakeSpec(),
+        reply="SpaceX podría recaudar billones; valoración elevada (noticia).",
     )
     assert reason is None
     assert "SpaceX" in reply
 
 
-def test_visual_evidence_rule_blocks_known_ticker_price_without_tools() -> None:
-    class _FakeDB:
-        def query(self, _q: str) -> str:
-            return '[{"t": "AAPL"}]'
-
-    class _FakeSpec:
-        worker_id = "market-worker"
-        logical_worker_id = "market-worker"
-        runtime_policy = _FakeRuntimePolicy("market_analysis")
-
+def test_visual_evidence_rule_blocks_price_without_tools() -> None:
     reply, reason = enforce_visual_evidence_rule(
         incoming="Usuario dice: x\n[VLM_CONTEXT image_hash=abc confidence=0.8]",
         messages=[],
         reply="En la imagen AAPL cotiza 150.2500 respecto al cierre (ejemplo).",
-        db=_FakeDB(),
-        spec=_FakeSpec(),
     )
     assert reason == VISUAL_EVIDENCE_RETRY_REASON
     assert "Regla de Evidencia" in reply
@@ -210,21 +188,11 @@ def test_visual_evidence_rule_accepts_verify_visual_claim_numeric() -> None:
         tool_call_id="1",
         name="verify_visual_claim",
     )
-    class _FakeDB:
-        def query(self, _q: str) -> str:
-            return '[{"t": "AAPL"}]'
-
-    class _FakeSpec:
-        worker_id = "market-worker"
-        logical_worker_id = "market-worker"
-        runtime_policy = _FakeRuntimePolicy("market_analysis")
 
     reply, reason = enforce_visual_evidence_rule(
         incoming="Usuario dice: x\n[VLM_CONTEXT image_hash=abc confidence=0.8]",
         messages=[tool_msg],
         reply="En la imagen AAPL cotiza 150.2500.",
-        db=_FakeDB(),
-        spec=_FakeSpec(),
     )
     assert reason is None
     assert "150.2500" in reply

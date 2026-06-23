@@ -10,6 +10,8 @@ export type EditableConversationTitleProps = {
   compact?: boolean;
   /** Cabecera Playground — texto más grande estilo AI Studio. */
   variant?: 'default' | 'studio';
+  /** Solo botón lápiz (junto al desplegable de conversación). */
+  trigger?: 'default' | 'iconButton';
   className?: string;
 };
 
@@ -19,6 +21,7 @@ export function EditableConversationTitle({
   active = false,
   compact = false,
   variant = 'default',
+  trigger = 'default',
   className = '',
 }: EditableConversationTitleProps) {
   const isStudio = variant === 'studio';
@@ -70,9 +73,13 @@ export function EditableConversationTitle({
   }, [cancel, draft, onSave, value]);
 
   if (editing) {
+    const editWrap =
+      trigger === 'iconButton'
+        ? `min-w-[8rem] flex-1 max-w-[52%] ${className}`
+        : `min-w-0 flex-1 ${className}`;
     return (
       <div
-        className={`min-w-0 flex-1 ${className}`}
+        className={editWrap}
         onClick={(e) => e.stopPropagation()}
         onPointerDown={(e) => e.stopPropagation()}
       >
@@ -102,6 +109,24 @@ export function EditableConversationTitle({
         />
         {err ? <p className="text-[10px] text-red-400 mt-0.5">{err}</p> : null}
       </div>
+    );
+  }
+
+  if (trigger === 'iconButton') {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setEditing(true);
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        className={`shrink-0 px-3 py-2.5 min-h-[44px] min-w-[44px] rounded-xl bg-gov-blue-700 text-white hover:bg-gov-blue-800 flex items-center justify-center ${className}`}
+        aria-label="Renombrar conversación"
+        title="Renombrar conversación"
+      >
+        <Pencil size={16} aria-hidden />
+      </button>
     );
   }
 

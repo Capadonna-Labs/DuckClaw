@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from langchain_core.messages import ToolMessage
 
-from duckclaw.egress.evidence_validator import bracket_citation_audit
+from duckclaw.egress.evidence_validator import bracket_citation_audit, spec_requires_bracket_citations
 
 
 class _RuntimePolicy:
@@ -17,49 +17,29 @@ class _RuntimePolicy:
         return capability in self._capabilities
 
 
-def _market_spec() -> SimpleNamespace:
+def _extension_spec() -> SimpleNamespace:
     return SimpleNamespace(
-        worker_id="market-worker",
-        logical_worker_id="market-worker",
-        runtime_policy=_RuntimePolicy("market_analysis"),
+        worker_id="sample-worker",
+        logical_worker_id="sample-worker",
+        runtime_policy=_RuntimePolicy("extension_evidence"),
     )
 
 
-def test_injects_brackets_into_market_table_row() -> None:
+def test_core_skips_bracket_citation_injection() -> None:
     reply = (
         "## Impacto\n"
-        "| Ticker | Precio |\n"
-        "|--------|--------|\n"
-        "| NVDA | $123.45 |\n"
-        "| AVGO | $456.78 |\n"
+        "| Item | Valor |\n"
+        "|------|-------|\n"
+        "| A1 | $123.45 |\n"
     )
     msgs = [
         ToolMessage(
-            content='{"status":"ok","ticker":"NVDA","rows_upserted":4}',
-            name="fetch_market_data",
-            tool_call_id="1",
-        ),
-        ToolMessage(
-            content='{"status":"ok","ticker":"AVGO","rows_upserted":4}',
-            name="fetch_market_data",
-            tool_call_id="2",
-        ),
-    ]
-    out, reason = bracket_citation_audit(reply, messages=msgs, spec=_market_spec())
-    assert reason
-    assert "[fetch_market_data/NVDA]" in out
-    assert "[fetch_market_data/AVGO]" in out
-
-
-def test_skips_when_brackets_already_present() -> None:
-    reply = "NVDA $123.45 [fetch_market_data/NVDA]"
-    msgs = [
-        ToolMessage(
-            content='{"status":"ok","ticker":"NVDA"}',
-            name="fetch_market_data",
+            content='{"status":"ok","symbol":"A1","rows_upserted":4}',
+            name="read_sql",
             tool_call_id="1",
         ),
     ]
-    out, reason = bracket_citation_audit(reply, messages=msgs, spec=_market_spec())
+    assert not spec_requires_bracket_citations(_extension_spec())
+    out, reason = bracket_citation_audit(reply, messages=msgs, spec=_extension_spec())
     assert reason is None
     assert out == reply

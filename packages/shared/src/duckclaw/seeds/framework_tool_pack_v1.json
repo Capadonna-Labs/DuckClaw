@@ -1,0 +1,59 @@
+{
+  "pack_version": "framework_tool_pack_v1",
+  "metadata": {
+    "seed": "framework_tool_pack_v1",
+    "scope": "framework",
+    "locale": "es"
+  },
+  "baseline_skills": [
+    "get_current_time",
+    "read_sql",
+    "inspect_schema",
+    "list_project_knowledge",
+    "read_project_knowledge",
+    "search_project_knowledge",
+    "write_output_document",
+    "convert_document",
+    "extract_document_text",
+    "render_docx_template"
+  ],
+  "optional_skills": {
+    "research": {
+      "env_any": ["TAVILY_API_KEY"],
+      "default_config": {
+        "tavily_enabled": true,
+        "search_depth": "basic",
+        "max_results": 5,
+        "include_answer": true
+      }
+    }
+  },
+  "framework_tools": {
+    "always_registered": [
+      "read_sql",
+      "inspect_schema",
+      "get_db_path",
+      "list_project_knowledge",
+      "read_project_knowledge",
+      "search_project_knowledge",
+      "write_output_document",
+      "convert_document",
+      "extract_document_text",
+      "render_docx_template"
+    ],
+    "sandbox": ["run_sandbox"],
+    "sandbox_opt_in": ["run_browser_sandbox", "get_browser_session_url"],
+    "privileged": ["admin_sql"]
+  },
+  "profiles": {
+    "general": "baseline_skills",
+    "minimal": ["get_current_time", "read_sql"],
+    "rag_only": [
+      "get_current_time",
+      "list_project_knowledge",
+      "read_project_knowledge",
+      "search_project_knowledge",
+      "write_output_document"
+    ]
+  }
+}

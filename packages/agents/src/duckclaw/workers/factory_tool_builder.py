@@ -128,7 +128,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
             ro = bool(getattr(db, "_read_only", False))
             # Worker RW: este proceso ya mantiene ``duckdb.connect(..., read_only=False)`` al archivo.
             # Encolar un segundo RW en db-writer falla con lock en el mismo PID (gateway); ver logs db-writer.
-            # Alineado con ``insert_transaction``: mutar en el handle actual.
+            # Mutaciones RW en el handle actual del worker (sin encolar un segundo writer).
             if not ro and db_path_str != ":memory:":
                 try:
                     db.execute(q)

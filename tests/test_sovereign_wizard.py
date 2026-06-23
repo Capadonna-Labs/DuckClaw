@@ -197,11 +197,13 @@ def test_fresh_draft_uses_neutral_defaults() -> None:
 
 
 def test_build_neutral_duckdb_picker(tmp_path: Path) -> None:
+    from duckops.sovereign.wizard_reset import NEUTRAL_DUCKDB_VAULT
+
     (tmp_path / "db").mkdir()
     (tmp_path / "db" / "a.duckdb").write_bytes(b"x")
     labels, values, _ = build_neutral_duckdb_picker(tmp_path)
     assert any("a.duckdb" in v for v in values)
-    assert any("sovereign_memory" in v for v in values)
+    assert NEUTRAL_DUCKDB_VAULT in values
     assert "← sugerido" not in "\n".join(labels)
 
 
@@ -230,7 +232,7 @@ def test_discover_duckdb_files(tmp_path: Path) -> None:
     p.write_bytes(b"x" * 10)
     picks = discover_duckdb_files(tmp_path)
     assert len(picks) == 1
-    assert picks[0].rel_path == "db/system.duckdb"
+    assert picks[0].rel_path.replace("\\", "/") == "db/system.duckdb"
 
 
 def test_human_bytes() -> None:

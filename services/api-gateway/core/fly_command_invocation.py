@@ -216,6 +216,11 @@ async def invoke_legacy_fly_command(
                 pass
 
     if cmd_reply is None:
+        _log.warning(
+            "fly command unhandled (graph fallback): chat=%s head=%s",
+            format_chat_id_for_terminal(session_id),
+            (message or "").split()[0] if (message or "").strip() else "?",
+        )
         return None
 
     fly_response: dict[str, Any] = {

@@ -290,6 +290,32 @@ def make_tools_node(ctx: WorkerGraphContext):
                                     fb = payload.get("figure_base64")
                                     if isinstance(fb, str) and len(fb) > 32:
                                         sandbox_b64 = fb
+                                    sandbox_run_id = str(payload.get("sandbox_run_id") or "").strip()
+                                    raw_artifact_ids = payload.get("artifact_ids")
+                                    artifact_ids: list[str] = []
+                                    if isinstance(raw_artifact_ids, list):
+                                        artifact_ids = [
+                                            str(a).strip() for a in raw_artifact_ids if str(a).strip()
+                                        ]
+                                    if sandbox_run_id and artifact_ids:
+                                        try:
+                                            from duckclaw.graphs.chat_heartbeat import (
+                                                is_admin_ui_chat_session,
+                                                publish_admin_chat_heartbeat,
+                                            )
+
+                                            _cid = str(state.get("chat_id") or "").strip()
+                                            if _cid and is_admin_ui_chat_session(_cid):
+                                                n = len(artifact_ids)
+                                                publish_admin_chat_heartbeat(
+                                                    _cid,
+                                                    f"Sandbox: {n} artefacto{'s' if n != 1 else ''}",
+                                                    kind="visual",
+                                                    sandbox_run_id=sandbox_run_id,
+                                                    artifact_ids=artifact_ids,
+                                                )
+                                        except Exception:
+                                            pass
                             except (json.JSONDecodeError, TypeError):
                                 pass
                         if name in ("generate_visual_asset", "edit_visual_asset"):

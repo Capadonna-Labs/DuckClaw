@@ -91,6 +91,52 @@ export interface ReportInstanceDetail {
   progress: ReportInstanceProgress;
 }
 
+export interface SandboxArtifactMeta {
+  artifact_id: string;
+  filename: string;
+  relative_path: string;
+  mime: string;
+  byte_size: number;
+  previewable: boolean;
+}
+
+export interface SandboxRunSummary {
+  run_id: string;
+  chat_id?: string;
+  chat_session_id?: string;
+  tenant_id?: string;
+  worker_id?: string;
+  created_at?: number;
+  expires_at?: number;
+  exit_code?: number;
+  artifact_count: number;
+}
+
+export interface SandboxRunDetail {
+  run_id: string;
+  chat_id?: string;
+  chat_session_id?: string;
+  tenant_id?: string;
+  worker_id?: string;
+  created_at?: number;
+  expires_at?: number;
+  exit_code?: number;
+  artifacts: SandboxArtifactMeta[];
+}
+
+export type SandboxArtifactPreviewPayload = {
+  preview_kind: 'markdown' | 'text' | 'json' | 'tabular' | 'parquet';
+  mime?: string;
+  content?: string;
+  truncated?: boolean;
+  valid_json?: boolean;
+  columns?: string[];
+  rows?: unknown[][];
+  schema?: { name: string; type: string }[];
+  row_count_shown?: number;
+  source_ext?: string;
+};
+
 export interface ManagedWorkspaceDraft {
   project: {
     name: string;
@@ -1357,6 +1403,88 @@ export const adminService = {
       }),
     }),
 
+  listSandboxRuns: (chatId: string, limit = 20) => {
+    const q = new URLSearchParams();
+    q.set('chat_id', chatId);
+    q.set('limit', String(limit));
+    return adminFetch<{ runs: SandboxRunSummary[]; count: number }>(
+      `/sandbox/artifacts/runs?${q.toString()}`
+    );
+  },
+
+  listAllSandboxRuns: (limit = 50) => {
+    const q = new URLSearchParams();
+    q.set('limit', String(limit));
+    return adminFetch<{ runs: SandboxRunSummary[]; count: number; scope: string }>(
+      `/sandbox/artifacts/runs?${q.toString()}`
+    );
+  },
+
+  getSandboxRun: async (runId: string, chatId: string) => {
+    const q = new URLSearchParams();
+    q.set('chat_id', chatId);
+    const res = await adminFetch<{ run: SandboxRunDetail }>(
+      `/sandbox/artifacts/runs/${encodeURIComponent(runId)}?${q.toString()}`
+    );
+    return res.run;
+  },
+
+  sandboxArtifactPreviewUrl: (artifactId: string, chatId: string) => {
+    const q = new URLSearchParams();
+    if (chatId.trim()) q.set('chat_id', chatId);
+    const qs = q.toString();
+    return `/api/admin/sandbox-artifacts/${encodeURIComponent(artifactId)}/preview${qs ? `?${qs}` : ''}`;
+  },
+
+  sandboxArtifactDownloadUrl: (artifactId: string, chatId: string) => {
+    const q = new URLSearchParams();
+    if (chatId.trim()) q.set('chat_id', chatId);
+    return `/api/admin/sandbox-artifacts/${encodeURIComponent(artifactId)}/download?${q.toString()}`;
+  },
+
+  deleteSandboxArtifact: (artifactId: string, chatId = '') => {
+    const q = new URLSearchParams();
+    if (chatId.trim()) q.set('chat_id', chatId);
+    const qs = q.toString();
+    return adminFetch<{ deleted: boolean; run_removed?: boolean }>(
+      `/sandbox/artifacts/${encodeURIComponent(artifactId)}${qs ? `?${qs}` : ''}`,
+      { method: 'DELETE' }
+    );
+  },
+
+  deleteSandboxRun: (runId: string, chatId: string) => {
+    const q = new URLSearchParams();
+    q.set('chat_id', chatId);
+    return adminFetch<{ deleted: boolean }>(
+      `/sandbox/artifacts/runs/${encodeURIComponent(runId)}?${q.toString()}`,
+      { method: 'DELETE' }
+    );
+  },
+
+  saveSandboxArtifactToVault: (body: {
+    artifactId: string;
+    chatId?: string;
+    relativeDest?: string;
+    syncRag?: boolean;
+    tenantId?: string;
+    projectId?: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      relative_path: string;
+      path: string;
+      rag_sync?: Record<string, unknown>;
+    }>(`/sandbox/artifacts/${encodeURIComponent(body.artifactId)}/save-to-vault`, {
+      method: 'POST',
+      body: JSON.stringify({
+        chat_id: body.chatId ?? '',
+        relative_dest: body.relativeDest ?? '',
+        sync_rag: body.syncRag ?? true,
+        tenant_id: body.tenantId,
+        project_id: body.projectId,
+      }),
+    }),
+
   prepareNovncSession: (body: { chatId?: string; workerId?: string; tenantId?: string }) =>
     adminFetch<{
       session_id: string;
@@ -1780,6 +1908,8 @@ export const adminService = {
         swarm_slot?: number;
         artifact_id?: string;
         artifact_tenant_id?: string;
+        sandbox_run_id?: string;
+        artifact_ids?: string[];
         tool_name?: string;
         tool_phase?: 'start' | 'done' | 'error';
         elapsed_ms?: number;
@@ -1833,6 +1963,8 @@ export const adminService = {
             swarm_slot: ev.swarm_slot,
             artifact_id: ev.artifact_id,
             artifact_tenant_id: ev.artifact_tenant_id,
+            sandbox_run_id: ev.sandbox_run_id,
+            artifact_ids: ev.artifact_ids,
             tool_name: ev.tool_name,
             tool_phase: ev.tool_phase,
             elapsed_ms: ev.elapsed_ms,

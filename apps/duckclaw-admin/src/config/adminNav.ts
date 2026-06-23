@@ -25,6 +25,7 @@ export type AdminNavEntry =
   | { type: 'item'; item: AdminNavItem }
   | { type: 'group'; group: AdminNavGroup };
 
+/** Usuario no-admin: flujo mínimo crear → chatear → sandbox. */
 export const USER_WORKSPACE_NAV_GROUP: AdminNavGroup = {
   id: 'user-workspace',
   label: 'Tu espacio',
@@ -32,117 +33,83 @@ export const USER_WORKSPACE_NAV_GROUP: AdminNavGroup = {
   items: [
     { href: '/overview', label: 'Inicio', section: 'core', audience: 'user' },
     { href: '/playground', label: 'Chat', section: 'core', audience: 'user' },
+    { href: '/sandbox', label: 'Sandbox', section: 'core', audience: 'user' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
     { href: '/projects', label: 'Proyectos', section: 'core', audience: 'user' },
+    { href: '/settings', label: 'Ajustes', section: 'footer', audience: 'user' },
   ],
 };
 
-export const CONVERSAR_NAV_GROUP: AdminNavGroup = {
-  id: 'conversar',
-  label: 'Conversar',
-  hint: 'Chat, historial y tablero',
+/** Admin — 3 grupos en lugar de 7 (Trabajo · Estudio · Plataforma). */
+export const WORK_NAV_GROUP: AdminNavGroup = {
+  id: 'work',
+  label: 'Trabajo',
+  hint: 'Operación diaria',
   items: [
     { href: '/overview', label: 'Inicio', section: 'core', audience: 'admin' },
     { href: '/playground', label: 'Chat', section: 'core', audience: 'admin' },
+    { href: '/sandbox', label: 'Sandbox', section: 'core', audience: 'admin' },
+    { href: '/kanban', label: 'Tablero', section: 'core', audience: 'admin' },
   ],
 };
 
-export const OPERATION_NAV_GROUP: AdminNavGroup = {
-  id: 'operation',
-  label: 'Inicio',
-  items: [
-    { href: '/overview', label: 'Inicio', section: 'core', audience: 'admin' },
-  ],
-};
-
-export const PLAYGROUND_NAV_GROUP: AdminNavGroup = {
-  id: 'playground',
-  label: 'Playground',
-  items: [
-    { href: '/playground', label: 'Chat', section: 'core', audience: 'admin' },
-  ],
-};
-
-export const BUILD_NAV_GROUP: AdminNavGroup = {
-  id: 'build',
-  label: 'Agentes',
+export const STUDIO_NAV_GROUP: AdminNavGroup = {
+  id: 'studio',
+  label: 'Estudio',
+  hint: 'Agentes, conocimiento e informes',
   items: [
     { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/projects', label: 'Proyectos', section: 'core', audience: 'admin' },
-    { href: '/knowledge', label: 'RAG', section: 'core', audience: 'admin' },
+    { href: '/knowledge', label: 'Conocimiento', section: 'core', audience: 'admin' },
+    { href: '/reports', label: 'Reportes', section: 'core', audience: 'admin' },
+  ],
+};
+
+export const PLATFORM_NAV_GROUP: AdminNavGroup = {
+  id: 'platform',
+  label: 'Plataforma',
+  hint: 'Runtime, integraciones y seguridad',
+  items: [
     { href: '/skills', label: 'Skills', section: 'core', audience: 'admin' },
     { href: '/mcp', label: 'MCP', section: 'core', audience: 'admin' },
     { href: '/gen/image', label: 'Imágenes', section: 'core', audience: 'admin' },
-    { href: '/vnc', label: 'VNC', section: 'core', audience: 'admin', adminOnly: true },
-  ],
-};
-
-export const DATA_NAV_GROUP: AdminNavGroup = {
-  id: 'data',
-  label: 'Datos',
-  hint: 'Memoria y configuración avanzada',
-  items: [
-    { href: '/reports', label: 'Reportes', section: 'core', audience: 'admin' },
     { href: '/duckdb', label: 'DuckDB', section: 'core', audience: 'admin' },
-    { href: '/runtime', label: 'Runtime overrides', section: 'core', audience: 'admin' },
+    { href: '/runtime', label: 'Runtime', section: 'core', audience: 'admin' },
     { href: '/policies', label: 'Instrucciones', section: 'core', audience: 'admin' },
-  ],
-};
-
-export const INTEGRATIONS_NAV_GROUP: AdminNavGroup = {
-  id: 'integrations',
-  label: 'Dispositivos',
-  hint: 'Edge y nodos sensoriales',
-  items: [
     { href: '/integrations/edge-devices', label: 'Edge devices', section: 'integrations', audience: 'admin' },
     { href: '/integrations/sensory-node', label: 'Sensory node', section: 'integrations', audience: 'admin' },
-  ],
-};
-
-export const SECURITY_NAV_GROUP: AdminNavGroup = {
-  id: 'security',
-  label: 'Seguridad',
-  items: [
-    { href: '/admin/access', label: 'Usuarios y roles', section: 'admin', audience: 'admin', adminOnly: true },
-    { href: '/audit', label: 'Auditoría', section: 'admin', audience: 'admin', adminOnly: true },
-  ],
-};
-
-export const SYSTEM_NAV_GROUP: AdminNavGroup = {
-  id: 'system',
-  label: 'Canales avanzados',
-  hint: 'Integraciones opcionales fuera del flujo web',
-  items: [
     { href: '/telegram', label: 'Telegram', section: 'integrations', audience: 'admin', adminOnly: true },
+    { href: '/admin/access', label: 'Acceso', section: 'admin', audience: 'admin', adminOnly: true },
+    { href: '/audit', label: 'Auditoría', section: 'admin', audience: 'admin', adminOnly: true },
+    { href: '/settings', label: 'Ajustes', section: 'footer', audience: 'admin' },
   ],
 };
 
-/** Orden del sidebar para usuarios que crean y usan agentes. */
+/** @deprecated aliases — tests y imports legacy */
+export const CONVERSAR_NAV_GROUP = WORK_NAV_GROUP;
+export const BUILD_NAV_GROUP = STUDIO_NAV_GROUP;
+export const DATA_NAV_GROUP = STUDIO_NAV_GROUP;
+export const OPERATION_NAV_GROUP = WORK_NAV_GROUP;
+export const PLAYGROUND_NAV_GROUP = WORK_NAV_GROUP;
+export const INTEGRATIONS_NAV_GROUP = PLATFORM_NAV_GROUP;
+export const SECURITY_NAV_GROUP = PLATFORM_NAV_GROUP;
+export const SYSTEM_NAV_GROUP = PLATFORM_NAV_GROUP;
+
 export const USER_NAV_STRUCTURE: readonly AdminNavEntry[] = [
   { type: 'group', group: USER_WORKSPACE_NAV_GROUP },
 ];
 
-/** Orden del sidebar admin: grupos semánticos para reducir carga cognitiva. */
 export const ADMIN_NAV_STRUCTURE: readonly AdminNavEntry[] = [
-  { type: 'group', group: CONVERSAR_NAV_GROUP },
-  { type: 'group', group: BUILD_NAV_GROUP },
-  { type: 'group', group: DATA_NAV_GROUP },
-  { type: 'group', group: INTEGRATIONS_NAV_GROUP },
-  { type: 'group', group: SECURITY_NAV_GROUP },
-  { type: 'group', group: SYSTEM_NAV_GROUP },
+  { type: 'group', group: WORK_NAV_GROUP },
+  { type: 'group', group: STUDIO_NAV_GROUP },
+  { type: 'group', group: PLATFORM_NAV_GROUP },
 ];
 
-/** Lista plana (compat tests / búsquedas). */
 export const ADMIN_NAV: readonly AdminNavItem[] = [
   ...USER_WORKSPACE_NAV_GROUP.items,
-  ...CONVERSAR_NAV_GROUP.items,
-  ...OPERATION_NAV_GROUP.items,
-  ...PLAYGROUND_NAV_GROUP.items,
-  ...BUILD_NAV_GROUP.items,
-  ...DATA_NAV_GROUP.items,
-  ...INTEGRATIONS_NAV_GROUP.items,
-  ...SECURITY_NAV_GROUP.items,
-  ...SYSTEM_NAV_GROUP.items,
+  ...WORK_NAV_GROUP.items,
+  ...STUDIO_NAV_GROUP.items,
+  ...PLATFORM_NAV_GROUP.items,
 ];
 
 function itemVisible(item: AdminNavItem, role: AdminRole | undefined): boolean {
@@ -169,19 +136,21 @@ export function navEntriesForRole(role: AdminRole | undefined): AdminNavEntry[] 
   return out;
 }
 
-/** Títulos del Topbar; incluye prefijos de rutas anidadas. */
 export const ADMIN_PAGE_TITLES: Record<string, string> = {
-  ...Object.fromEntries(ADMIN_NAV_STRUCTURE.flatMap((entry) =>
-    entry.type === 'item'
-      ? [[entry.item.href, entry.item.label]]
-      : entry.group.items.map((item) => [item.href, item.label])
-  )),
+  ...Object.fromEntries(
+    ADMIN_NAV_STRUCTURE.flatMap((entry) =>
+      entry.type === 'item'
+        ? [[entry.item.href, entry.item.label]]
+        : entry.group.items.map((item) => [item.href, item.label])
+    )
+  ),
   '/ops': 'Overview',
   '/commands': 'Overview',
   '/overview': 'Inicio',
   '/playground': 'Playground',
+  '/sandbox': 'Sandbox',
   '/projects': 'Proyectos',
-  '/knowledge': 'RAG',
+  '/knowledge': 'Conocimiento',
   '/policies': 'Instrucciones',
   '/integrations': 'Integraciones',
   '/gen': 'Gen',
@@ -189,8 +158,11 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/telegram': 'Telegram',
   '/integrations/edge-devices': 'Edge devices',
   '/integrations/sensory-node': 'Sensory node',
-  '/admin/access': 'Usuarios y roles',
+  '/admin/access': 'Acceso',
   '/admin': 'Administración',
+  '/vnc': 'Sandbox',
+  '/kanban': 'Tablero',
+  '/settings': 'Ajustes',
 };
 
 export function titleForAdminPath(pathname: string): string {

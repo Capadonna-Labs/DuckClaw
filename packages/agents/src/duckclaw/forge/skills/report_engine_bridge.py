@@ -647,11 +647,10 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 generate_report_docx_from_markdown,
                 name="generate_report_docx_from_markdown",
                 description=(
-                    "Atajo Report Engine cuando ya tienes el .md listo: registra/reutiliza "
-                    "plantilla del vault (ej. INFORME MENSUAL.docx), crea instancia, "
-                    "rellena sección principal y renderiza DOCX. "
-                    "markdown_relative_path es opcional si hay un .md en Informes/ que coincida con report_title. "
-                    "Preferir sobre render_docx_template/pandoc para informes mensuales."
+                    "ÚLTIMO RECURSO — one-pager con una sola sección body. "
+                    "NO usar para INFORME MENSUAL ni informes tabulares con obligaciones. "
+                    "Flujo correcto: patch_report_section por cada campo + render_report_instance. "
+                    "No es pandoc; no convierte md→docx con formato contractual."
                 ),
             ),
         ]

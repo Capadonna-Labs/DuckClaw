@@ -1,11 +1,13 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import {
   Brain,
   ChevronDown,
   ChevronRight,
   FileText,
+  FolderOpen,
   MessageSquareText,
   Terminal,
 } from 'lucide-react';
@@ -30,6 +32,7 @@ export type PlaygroundRunSettingsPanelProps = {
   onLogsToggle: () => void;
   logsControls?: React.ReactNode;
   logsViewport?: React.ReactNode;
+  sandboxHref?: string;
   onOpen: (modal: SettingsModalKey) => void;
 };
 
@@ -63,6 +66,7 @@ export function PlaygroundRunSettingsPanel({
   onLogsToggle,
   logsControls,
   logsViewport,
+  sandboxHref = '/sandbox',
   onOpen,
 }: PlaygroundRunSettingsPanelProps) {
   const [contextOpen, setContextOpen] = useState(true);
@@ -74,11 +78,13 @@ export function PlaygroundRunSettingsPanel({
   const vaultScope =
     activeVaultScope === 'chat' ? 'Por conversación' : 'Vault compartido (RAG + SQL)';
 
+  const bottomPanelOpen = logsPanelOpen;
+
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col gap-2">
       <div
         className={`min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] ${
-          logsPanelOpen ? 'max-h-[42%] shrink-0 space-y-3' : 'flex-1 space-y-4'
+          bottomPanelOpen ? 'max-h-[42%] shrink-0 space-y-3' : 'flex-1 space-y-4'
         }`}
       >
         <button
@@ -166,6 +172,12 @@ export function PlaygroundRunSettingsPanel({
             icon={<Terminal size={14} aria-hidden />}
           />
           {logsPanelOpen && logsControls ? logsControls : null}
+          <StudioLinkRow
+            label="Sandbox"
+            hint="Archivos, config y navegador"
+            href={sandboxHref}
+            icon={<FolderOpen size={14} aria-hidden />}
+          />
           <StudioLinkRow
             label="Comandos"
             hint="/model · /vault · /workers"
@@ -318,19 +330,17 @@ function StudioLinkRow({
   label,
   hint,
   onClick,
+  href,
   icon,
 }: {
   label: string;
   hint: string;
-  onClick: () => void;
+  onClick?: () => void;
+  href?: string;
   icon?: React.ReactNode;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="group flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-gov-gray-50 dark:hover:bg-dark-bg/80"
-    >
+  const inner = (
+    <>
       <div className="flex min-w-0 items-start gap-2">
         {icon ? (
           <span className="mt-0.5 text-gov-gray-400 dark:text-dark-muted">{icon}</span>
@@ -345,6 +355,20 @@ function StudioLinkRow({
         className="shrink-0 text-gov-gray-300 group-hover:text-gov-blue-600 dark:text-dark-muted"
         aria-hidden
       />
+    </>
+  );
+  const className =
+    'group flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-gov-gray-50 dark:hover:bg-dark-bg/80';
+  if (href) {
+    return (
+      <Link href={href} className={className}>
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <button type="button" onClick={onClick} className={className}>
+      {inner}
     </button>
   );
 }

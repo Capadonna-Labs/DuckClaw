@@ -34,6 +34,10 @@ from duckclaw.workers.tool_invocation_policy import (
 from duckclaw.workers.tool_surface_policy import tool_surface_intent_text
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
+from duckclaw.workers.factory_graph_nodes_agent_policy_early_context import (
+    bind_agent_turn_tool_context,
+    maybe_force_get_current_time_orchestration,
+)
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.factory_graph_nodes_agent_shared import load_agent_env, unpack_agent_bindings
 
@@ -65,57 +69,14 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                 _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
                 _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))
                 set_log_context(tenant_id=_tenant_ctx, worker_id=worker_id, chat_id=_log_chat)
-                try:
-                    from duckclaw.forge.skills.goals_tool_context import (
-                        set_goals_tool_chat_id,
-                        set_goals_tool_db_path,
-                        set_goals_tool_worker_id,
-                    )
-                    from duckclaw.forge.skills.knowledge_tool_context import (
-                        set_knowledge_tool_project_id,
-                        set_knowledge_tool_tenant_id,
-                        set_knowledge_tool_worker_uid,
-                        set_session_actor_email,
-                        set_session_chat_id,
-                    )
-
-                    set_goals_tool_chat_id(str(_chat_ctx))
-                    set_goals_tool_worker_id(worker_id)
-                    set_goals_tool_db_path(str(path))
-                    set_knowledge_tool_tenant_id(_tenant_ctx)
-                    set_knowledge_tool_project_id(str(state.get("project_id") or ""))
-                    _worker_uid = ""
-                    try:
-                        import duckdb
-
-                        _con = duckdb.connect(str(path), read_only=True)
-                        try:
-                            _row = _con.execute(
-                                """
-                                SELECT worker_uid FROM main.admin_worker_catalog
-                                WHERE worker_id = ? AND tenant_id = ? AND active = true
-                                LIMIT 1
-                                """,
-                                [worker_id, _tenant_ctx],
-                            ).fetchone()
-                            if _row:
-                                _worker_uid = str(_row[0] or "").strip()
-                        finally:
-                            _con.close()
-                    except Exception:
-                        _worker_uid = ""
-                    set_knowledge_tool_worker_uid(_worker_uid)
-                    set_session_chat_id(str(_chat_ctx))
-                    username = str(state.get("username") or state.get("actor_email") or "").strip()
-                    set_session_actor_email(username or f"chat:{_chat_ctx}")
-                    try:
-                        from duckclaw.forge.skills.report_engine_hub_context import set_report_engine_hub_db
-
-                        set_report_engine_hub_db(db)
-                    except Exception:
-                        pass
-                except Exception:
-                    pass
+                bind_agent_turn_tool_context(
+                    state=state,
+                    worker_id=worker_id,
+                    path=str(path),
+                    db=db,
+                    chat_ctx=str(_chat_ctx),
+                    tenant_ctx=_tenant_ctx,
+                )
                 _wl = _worker_log_label(worker_id)
                 cfg = config or {}
                 incoming = (
@@ -196,32 +157,15 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     _orch = None
                     _orch_forced = None
 
-                if (
-                    _orch_forced == "get_current_time"
-                    and "get_current_time" in tools_by_name
-                    and not telegram_context_summarize_directive
-                ):
-                    _lh_orch_gct = _last_human_message_index(state.get("messages") or [])
-                    if not _tool_called_since(
-                        state.get("messages") or [], _lh_orch_gct, "get_current_time"
-                    ):
-                        _forced_tid_orch_gct = f"call_orch_get_current_time_{int(time.time() * 1000)}"
-                        _forced_tc_orch_gct = [
-                            {
-                                "name": "get_current_time",
-                                "args": {},
-                                "id": _forced_tid_orch_gct,
-                                "type": "tool_call",
-                            }
-                        ]
-                        _log.info("[%s] tool_orchestration → get_current_time", _wl)
-                        _out_orch_gct = {
-                            **state,
-                            "messages": state["messages"]
-                            + [AIMessage(content="", tool_calls=_forced_tc_orch_gct)],
-                        }
-                        _out_orch_gct.update(_identity_fields(state))
-                        return _out_orch_gct
+                _orch_forced_out = maybe_force_get_current_time_orchestration(
+                    state=state,
+                    orch_forced=_orch_forced,
+                    tools_by_name=tools_by_name,
+                    telegram_context_summarize_directive=telegram_context_summarize_directive,
+                    worker_log_label=_wl,
+                )
+                if _orch_forced_out is not None:
+                    return _orch_forced_out
 
                 db_first_tool_decision = _decide_db_first_tool_invocation(
                     spec=spec,

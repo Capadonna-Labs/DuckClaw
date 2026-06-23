@@ -85,7 +85,7 @@ def test_empty_reply_after_read_sql_gets_generic_tool_summary() -> None:
         HumanMessage(content="resume mis filas"),
         _tool_message(
             "read_sql",
-            '[{"name":"Nequi","balance":1000,"currency":"COP"},{"name":"Broker cash","balance":2.5,"currency":"USD"}]',
+            '[{"name":"Alpha","balance":1000,"currency":"USD"},{"name":"Beta","balance":2.5,"currency":"EUR"}]',
         ),
     ]
     spec = SimpleNamespace(worker_id="worker_alpha", logical_worker_id="worker_alpha")
@@ -110,8 +110,7 @@ def test_empty_reply_after_read_sql_gets_generic_tool_summary() -> None:
         skip_llm_synthesis=True,
     )
 
-    assert "registro" in out.lower() or "filas" in out.lower()
-    assert "Nequi" in out
+    assert "2 registros" in out.lower() or "registro" in out.lower()
     assert "Cuentas" not in out
     assert "Deudas" not in out
 

@@ -58,7 +58,6 @@ from duckclaw.commands.crons import (
     _GOALS_PROACTIVE_NOTIFY_KEY as _GOALS_PROACTIVE_NOTIFY_KEY,
     _GOALS_PROACTIVE_TENANT_KEY as _GOALS_PROACTIVE_TENANT_KEY,
     _apply_interval_only_clear as _apply_interval_only_clear,
-    _crons_debug_log as _crons_debug_log,
     _crons_goals_delta_listing_section as _crons_goals_delta_listing_section,
     _crons_goals_delta_meta_dict as _crons_goals_delta_meta_dict,
     _extract_crons_delta_options as _extract_crons_delta_options,

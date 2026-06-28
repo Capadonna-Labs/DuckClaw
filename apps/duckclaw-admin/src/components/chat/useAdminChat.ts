@@ -202,6 +202,7 @@ export function useAdminChat({
   );
   const [voiceResponseMode, setVoiceResponseModeState] = useState(false);
   const voiceResponseAvailable = Boolean(config?.voice?.available);
+  const liveVoiceAvailable = Boolean(config?.realtime_voice?.available);
   const setVoiceResponseMode = useCallback(
     (next: boolean | ((prev: boolean) => boolean)) => {
       setVoiceResponseModeState((prev) => {
@@ -394,6 +395,30 @@ export function useAdminChat({
   }, [chatId, initialWorker, pinnedWorker, setWorkerId]);
 
   const historyTenantId = (config?.effective_tenant_id || 'default').trim() || 'default';
+
+  const reloadHistory = useCallback(() => {
+    if (!enabled || !chatId || loadingRef.current) return;
+    setHistoryLoading(true);
+    adminService
+      .getConversation(chatId, historyTenantId)
+      .then((data) => {
+        if (loadingRef.current) return;
+        const fromServer = historyToChatMessages(data.messages, historyTenantId);
+        const activeWorker = workerId || initialWorker || '';
+        const storedEphemeral = readEphemeralHeartbeats(chatId, activeWorker);
+        setMessages((prev) => {
+          const liveEphemeral = filterEphemeralForWorker(
+            collectEphemeralMessages(prev),
+            activeWorker
+          );
+          const ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
+          const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
+          return mergeHistoryWithEphemeral(withImages, ephemeral);
+        });
+      })
+      .catch(() => undefined)
+      .finally(() => setHistoryLoading(false));
+  }, [chatId, enabled, historyTenantId, initialWorker, workerId]);
 
   useEffect(() => {
     if (!enabled || !chatId) {
@@ -1038,6 +1063,7 @@ export function useAdminChat({
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,
+    liveVoiceAvailable,
     setVoiceResponseMode,
     retryFromMessage,
     editFromMessage,
@@ -1049,5 +1075,6 @@ export function useAdminChat({
     setVaultPath,
     sessionTokenTotal,
     reloadConfig: loadConfig,
+    reloadHistory,
   };
 }

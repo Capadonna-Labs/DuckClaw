@@ -12,7 +12,7 @@ from duckclaw.commands.chat_state import (
     set_chat_state,
 )
 from duckclaw.commands.comfyui import execute_comfyui_provider
-from duckclaw.commands.crons import _crons_debug_log, execute_crons_schedule
+from duckclaw.commands.crons import execute_crons_schedule
 from duckclaw.commands.fly_misc import (
     execute_approve_reject,
     execute_help,
@@ -259,12 +259,6 @@ def handle_command(
                 canonical = _resolve_template_id(list_workers(), ew)
                 if canonical:
                     set_chat_state(db, chat_id, "worker_id", canonical)
-                    _crons_debug_log(
-                        "fly_dispatch.py:handle_command",
-                        "entry_worker_synced",
-                        {"chat_id": cid, "worker_id": canonical},
-                        hypothesis_id="B",
-                    )
             except Exception:
                 pass
         out = _dispatch_fly_command(

@@ -211,3 +211,31 @@ async def playground_voice_status() -> dict[str, bool]:
         "available": configured and tts_loaded,
         "tts_loaded": tts_loaded,
     }
+
+
+async def playground_realtime_voice_status() -> dict[str, bool | str]:
+    """Pipecat SmallWebRTC availability for admin live voice (distinct from Sensory batch)."""
+    import httpx
+
+    enabled = (os.environ.get("DUCKCLAW_VOICE_ENABLED") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    transport = (os.environ.get("DUCKCLAW_VOICE_TRANSPORT") or "small_webrtc").strip()
+    base = (os.environ.get("DUCKCLAW_VOICE_INTERNAL_URL") or "").strip().rstrip("/")
+    available = False
+    if enabled and base:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                response = await client.get(f"{base}/health")
+                if response.status_code == 200:
+                    payload = response.json()
+                    available = bool((payload or {}).get("ok"))
+        except Exception:
+            available = False
+    return {
+        "configured": enabled and bool(base),
+        "available": available,
+        "transport": transport,
+    }

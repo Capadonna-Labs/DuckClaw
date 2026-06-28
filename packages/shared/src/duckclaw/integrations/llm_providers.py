@@ -85,7 +85,7 @@ def build_openrouter_llm(model: str = "", base_url: str = "") -> Any:
         _mt = max(256, min(int(_or_out), 8192))
     except ValueError:
         _mt = 2048
-    return ChatOpenAI(
+    llm = ChatOpenAI(
         model=resolved_model,
         temperature=0,
         base_url=or_base,
@@ -93,6 +93,7 @@ def build_openrouter_llm(model: str = "", base_url: str = "") -> Any:
         max_tokens=_mt,
         default_headers=dict(OPENROUTER_ATTRIBUTION_HEADERS),
     )
+    return ensure_openrouter_attribution_headers(llm)
 
 
 def mlx_openai_compatible_base_url() -> str:
@@ -313,6 +314,133 @@ def _openrouter_attribution_wire_snapshot(llm: Any) -> dict[str, str | bool]:
     }
 
 
+def _llm_openrouter_base_urls(llm: Any) -> list[str]:
+    """URLs base candidatas que indican endpoint OpenRouter."""
+    urls: list[str] = []
+    seen: set[str] = set()
+    nodes: list[Any] = [llm]
+    visited: set[int] = set()
+    while nodes:
+        node = nodes.pop()
+        nid = id(node)
+        if nid in visited:
+            continue
+        visited.add(nid)
+        for attr in ("openai_api_base", "base_url"):
+            raw = getattr(node, attr, None)
+            if raw is None:
+                continue
+            text = str(raw).strip().lower()
+            if text and text not in seen:
+                seen.add(text)
+                urls.append(text)
+        for attr in ("client", "async_client", "root_client", "root_async_client"):
+            client = getattr(node, attr, None)
+            if client is None:
+                continue
+            bu = getattr(client, "base_url", None)
+            if bu is None:
+                continue
+            text = str(bu).strip().lower()
+            if text and text not in seen:
+                seen.add(text)
+                urls.append(text)
+        bound = getattr(node, "bound", None)
+        if bound is not None and bound is not node:
+            nodes.append(bound)
+    return urls
+
+
+def llm_targets_openrouter_endpoint(llm: Any) -> bool:
+    """True si el cliente LangChain apunta a openrouter.ai (aunque el label del provider sea otro)."""
+    if llm is None:
+        return False
+    if (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower() == "openrouter":
+        return True
+    return any("openrouter.ai" in url for url in _llm_openrouter_base_urls(llm))
+
+
+def _patch_openrouter_default_headers_on_client(client: Any) -> bool:
+    """Fusiona headers de atribución OpenRouter en un cliente HTTP OpenAI-compatible."""
+    if client is None:
+        return False
+    base = str(getattr(client, "base_url", "") or "").strip().lower()
+    if "openrouter.ai" not in base:
+        return False
+    existing = getattr(client, "default_headers", None)
+    merged = dict(OPENROUTER_ATTRIBUTION_HEADERS)
+    if isinstance(existing, dict):
+        merged = {**existing, **OPENROUTER_ATTRIBUTION_HEADERS}
+    try:
+        client.default_headers = merged
+        return True
+    except Exception:
+        return False
+
+
+def _install_openrouter_invoke_guard(llm: Any) -> None:
+    """Envuelve invoke/ainvoke para re-aplicar headers antes de cada request OpenRouter."""
+    if llm is None or getattr(llm, "_duckclaw_or_invoke_guard", False):
+        return
+    if not llm_targets_openrouter_endpoint(llm):
+        return
+    original_invoke = getattr(llm, "invoke", None)
+    if callable(original_invoke):
+
+        def guarded_invoke(messages: Any, *args: Any, **kwargs: Any) -> Any:
+            ensure_openrouter_attribution_headers(llm)
+            return original_invoke(messages, *args, **kwargs)
+
+        try:
+            object.__setattr__(llm, "invoke", guarded_invoke)
+        except Exception:
+            pass
+    original_ainvoke = getattr(llm, "ainvoke", None)
+    if callable(original_ainvoke):
+
+        async def guarded_ainvoke(messages: Any, *args: Any, **kwargs: Any) -> Any:
+            ensure_openrouter_attribution_headers(llm)
+            return await original_ainvoke(messages, *args, **kwargs)
+
+        try:
+            object.__setattr__(llm, "ainvoke", guarded_ainvoke)
+        except Exception:
+            pass
+    try:
+        object.__setattr__(llm, "_duckclaw_or_invoke_guard", True)
+    except Exception:
+        pass
+
+
+def ensure_openrouter_attribution_headers(llm: Any) -> Any:
+    """
+    Garantiza headers de app attribution en todo invoke/bind hacia OpenRouter.
+
+    OpenRouter solo acumula tokens en openrouter.ai/apps cuando cada request incluye
+    HTTP-Referer + X-OpenRouter-Title. LangChain puede perderlos tras bind_tools;
+    este helper re-aplica la política antes de cada llamada.
+    """
+    if llm is None:
+        return llm
+    if not llm_targets_openrouter_endpoint(llm):
+        return llm
+    nodes: list[Any] = [llm]
+    visited: set[int] = set()
+    while nodes:
+        node = nodes.pop()
+        nid = id(node)
+        if nid in visited:
+            continue
+        visited.add(nid)
+        for attr in ("root_client", "root_async_client", "client", "async_client"):
+            _patch_openrouter_default_headers_on_client(getattr(node, attr, None))
+        bound = getattr(node, "bound", None)
+        if bound is not None and bound is not node:
+            nodes.append(bound)
+    _install_openrouter_invoke_guard(llm)
+    return llm
+
+
 def invoke_chat_model_with_transient_retries(
     llm: Any,
     messages: Any,
@@ -329,12 +457,29 @@ def invoke_chat_model_with_transient_retries(
     rate_limit_base_delay = _llm_rate_limit_base_delay_sec_from_env()
     rate_limit_max_sleep = _llm_rate_limit_max_sleep_sec_from_env()
     provider = (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower() or "unknown"
+    llm = ensure_openrouter_attribution_headers(llm)
+    if llm_targets_openrouter_endpoint(llm):
+        provider = "openrouter"
     global _or_attribution_logged
     if provider == "openrouter" and not _or_attribution_logged:
-        _log.info(
-            "OpenRouter attribution activa — DuckClaw aparecerá en openrouter.ai/rankings "
-            "con el uso de esta sesión."
-        )
+        snap = _openrouter_attribution_wire_snapshot(llm)
+        from duckclaw.utils.logger import get_obs_logger
+
+        obs_log = get_obs_logger()
+        if not snap.get("has_referer") or not snap.get("title"):
+            obs_log.warning(
+                "[SYS] OpenRouter attribution headers missing before invoke (referer=%s title=%s)",
+                snap.get("referer"),
+                snap.get("title"),
+            )
+        else:
+            obs_log.info(
+                "[SYS] OpenRouter attribution activa — referer=%s title=%s model=%s "
+                "(tokens reportados en openrouter.ai/apps)",
+                snap.get("referer"),
+                snap.get("title"),
+                snap.get("model") or "(unknown)",
+            )
         _or_attribution_logged = True
     cooldown_until = _PROVIDER_COOLDOWN_UNTIL.get(provider, 0.0)
     now = time.time()
@@ -961,7 +1106,7 @@ def bind_tools_with_parallel_default(llm: Any, tools: Sequence[Any], **kwargs: A
     try:
         sig = inspect.signature(llm.bind_tools)
     except (TypeError, ValueError):
-        return llm.bind_tools(tools, **kwargs)
+        return ensure_openrouter_attribution_headers(llm.bind_tools(tools, **kwargs))
     bind_kwargs = dict(kwargs)
     if (
         "parallel_tool_calls" in sig.parameters
@@ -984,7 +1129,8 @@ def bind_tools_with_parallel_default(llm: Any, tools: Sequence[Any], **kwargs: A
             bind_kwargs["parallel_tool_calls"] = "gemma" not in model_hint
         else:
             bind_kwargs["parallel_tool_calls"] = True
-    return llm.bind_tools(tools, **bind_kwargs)
+    bound = llm.bind_tools(tools, **bind_kwargs)
+    return ensure_openrouter_attribution_headers(bound)
 
 
 def build_llm(

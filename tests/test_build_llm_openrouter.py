@@ -49,6 +49,28 @@ def test_build_openrouter_llm_default_headers(monkeypatch: pytest.MonkeyPatch) -
     assert headers.get("X-OpenRouter-Title") == OPENROUTER_ATTRIBUTION_HEADERS["X-OpenRouter-Title"]
 
 
+def test_bind_tools_preserves_openrouter_attribution(monkeypatch: pytest.MonkeyPatch) -> None:
+    from langchain_core.tools import tool
+
+    from duckclaw.integrations.llm_providers import (
+        _openrouter_attribution_wire_snapshot,
+        bind_tools_with_parallel_default,
+    )
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
+
+    @tool
+    def probe_tool() -> str:
+        """Probe."""
+        return "ok"
+
+    llm = build_openrouter_llm("deepseek/deepseek-v4-flash")
+    bound = bind_tools_with_parallel_default(llm, [probe_tool])
+    snap = _openrouter_attribution_wire_snapshot(bound)
+    assert snap.get("has_referer") is True
+    assert snap.get("title") == OPENROUTER_ATTRIBUTION_HEADERS["X-OpenRouter-Title"]
+
+
 def test_build_llm_openrouter_alias_or(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
     monkeypatch.delenv("DUCKCLAW_LLM_PROVIDER", raising=False)

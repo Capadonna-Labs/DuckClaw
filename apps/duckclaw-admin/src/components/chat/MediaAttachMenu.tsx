@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Mic, Paperclip, ClipboardPaste, Square, Volume2, VolumeX } from 'lucide-react';
+import { ImagePlus, Mic, Paperclip, ClipboardPaste, PhoneCall, Square, Volume2, VolumeX } from 'lucide-react';
 
 export type MediaAttachMenuProps = {
   canSend: boolean;
@@ -10,6 +10,8 @@ export type MediaAttachMenuProps = {
   voiceBusy: boolean;
   voiceResponseMode: boolean;
   voiceResponseAvailable: boolean;
+  liveVoiceAvailable?: boolean;
+  liveVoiceActive?: boolean;
   imageCount: number;
   maxImages?: number;
   /** Botones sin borde para barra de composición tipo AI Studio. */
@@ -18,6 +20,7 @@ export type MediaAttachMenuProps = {
   onPaste?: () => void;
   onToggleVoiceResponse: () => void;
   onVoiceNoteClick: () => void;
+  onLiveVoiceClick?: () => void;
 };
 
 export function MediaAttachMenu({
@@ -27,6 +30,8 @@ export function MediaAttachMenu({
   voiceBusy,
   voiceResponseMode,
   voiceResponseAvailable,
+  liveVoiceAvailable = false,
+  liveVoiceActive = false,
   imageCount,
   maxImages = 3,
   variant = 'default',
@@ -34,6 +39,7 @@ export function MediaAttachMenu({
   onPaste,
   onToggleVoiceResponse,
   onVoiceNoteClick,
+  onLiveVoiceClick,
 }: MediaAttachMenuProps) {
   const isMinimal = variant === 'minimal';
   const [open, setOpen] = useState(false);
@@ -54,7 +60,11 @@ export function MediaAttachMenu({
   const ttsUnavailableTitle = voiceResponseAvailable
     ? undefined
     : 'Sensory TTS no disponible (configura DUCKCLAW_SENSORY_BASE_URL y arranca sensory_node)';
-  const micDisabled = !canSend || (loading && !voiceRecording) || voiceBusy;
+  const micDisabled = !canSend || (loading && !voiceRecording) || voiceBusy || liveVoiceActive;
+  const liveVoiceDisabled = !canSend || loading || voiceRecording || voiceBusy;
+  const liveVoiceUnavailableTitle = liveVoiceAvailable
+    ? undefined
+    : 'Pipecat no disponible (DUCKCLAW_VOICE_ENABLED + DuckClaw-Voice PM2)';
 
   return (
     <div ref={rootRef} className="relative shrink-0">
@@ -131,6 +141,22 @@ export function MediaAttachMenu({
           >
             {voiceResponseMode ? <Volume2 size={16} aria-hidden /> : <VolumeX size={16} aria-hidden />}
             Voz automática
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            disabled={liveVoiceDisabled || !liveVoiceAvailable}
+            title={liveVoiceUnavailableTitle}
+            onClick={() => {
+              onLiveVoiceClick?.();
+              setOpen(false);
+            }}
+            className={`w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left hover:bg-gov-gray-100 dark:hover:bg-dark-bg disabled:opacity-50 ${
+              liveVoiceActive ? 'text-red-700 dark:text-red-400 font-semibold' : ''
+            }`}
+          >
+            <PhoneCall size={16} aria-hidden />
+            {liveVoiceActive ? 'Colgar voz en vivo' : 'Voz en vivo'}
           </button>
           <button
             type="button"

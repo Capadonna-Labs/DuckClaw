@@ -18,6 +18,7 @@ from routers.admin_domains.admin_common import actor_from_header, problem, repo_
 from routers.admin_domains.env_config import env_file
 from routers.admin_domains.playground.llm_settings import (
     playground_llm_catalog,
+    playground_realtime_voice_status,
     playground_runtime_defaults,
     playground_voice_status,
     resolved_llm_for_chat,
@@ -113,6 +114,7 @@ async def playground_config(
     )
     vault_options = playground_vault_options_for_team(team_ctx)
     voice = await playground_voice_status()
+    realtime_voice = await playground_realtime_voice_status()
     return {
         "llm": llm,
         "catalog": catalog,
@@ -132,6 +134,7 @@ async def playground_config(
         "vault_options": vault_options,
         "selected_worker_id": selected_worker_id or default_wid,
         "voice": voice,
+        "realtime_voice": realtime_voice,
         "chat_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_endpoint": "/api/v1/admin/playground/chat",
         "chat_stream_hint": "POST con stream=true o Accept: text/event-stream",

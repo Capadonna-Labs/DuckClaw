@@ -16,6 +16,28 @@ from duckclaw.utils.logger import extract_usage_from_messages
 from duckclaw.channels.integration_labels import resolve_integration_label
 
 
+def _model_id_from_messages(messages: list[Any] | None) -> str | None:
+    """Extrae model id del último AIMessage (OpenRouter/OpenAI response_metadata)."""
+    try:
+        from langchain_core.messages import AIMessage
+    except Exception:
+        return None
+    for message in reversed(list(messages or [])):
+        if not isinstance(message, AIMessage):
+            continue
+        response_meta = getattr(message, "response_metadata", None) or {}
+        if isinstance(response_meta, dict):
+            for key in ("model", "model_name"):
+                raw = response_meta.get(key)
+                if raw:
+                    return str(raw).strip()
+        for attr in ("model_name", "model"):
+            raw = getattr(message, attr, None)
+            if raw:
+                return str(raw).strip()
+    return None
+
+
 def _parallel_chat_invocations_enabled() -> bool:
     """Alineado con services/api-gateway/main.py (incl. alias CHAT_PARALLEL_INVOCATIONS)."""
     for key in ("DUCKCLAW_CHAT_PARALLEL_INVOCATIONS", "CHAT_PARALLEL_INVOCATIONS"):
@@ -89,6 +111,9 @@ async def _ainvoke(
     out: dict[str, Any] = {"reply": reply, "messages": messages}
     if usage:
         out["usage_tokens"] = usage
+    model_id = _model_id_from_messages(messages)
+    if model_id:
+        out["model"] = model_id
     # Manager -> subagente: propagar para logs/auditoria en el API Gateway.
     for _k in (
         "assigned_worker_id",

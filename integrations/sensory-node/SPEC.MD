@@ -12,7 +12,7 @@ Edge inference microservice on Apple Silicon (Mac mini). Listens **only** on the
 
 ## Identity Lock (anti-deepfake)
 
-- TTS accepts only `voice_id` from `Literal["campus_legal_main", "leila_assistant", "finanz_alert"]`.
+- TTS accepts only `voice_id` values registered in `voices/manifest.json` (Identity Lock).
 - **Forbidden** in any payload: `ref_audio`, `reference_audio`, `ref_text`, `ref_tokens`, `voice_embedding`.
 - Voice tensors are prepared offline via `scripts/prepare_voice.py` and stored under `voices/`.
 

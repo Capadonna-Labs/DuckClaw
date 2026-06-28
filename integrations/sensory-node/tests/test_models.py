@@ -36,6 +36,10 @@ def test_sensory_voice_defaults_do_not_embed_vertical_voice_ids():
     repo = Path(__file__).resolve().parents[3]
     checked_paths = [
         repo / "integrations/sensory-node/scripts/prepare_voice.py",
+        repo / "integrations/sensory-node/scripts/prepare_default_voices.sh",
+        repo / "integrations/sensory-node/scripts/check_tts_amplitude.py",
+        repo / "integrations/sensory-node/scripts/test_live_synthesize.sh",
+        repo / "integrations/sensory-node/SPEC.MD",
         repo / "integrations/sensory-node/voices/manifest.json",
         repo / "integrations/sensory-node/voices/README.md",
         repo / "scripts/deployment/regen_voices_mac.py",

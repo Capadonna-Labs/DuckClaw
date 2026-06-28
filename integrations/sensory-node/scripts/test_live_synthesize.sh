@@ -2,10 +2,13 @@
 set -euo pipefail
 export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH:-/usr/bin:/bin}"
 
-python3 - <<'PY'
+export VOICE_ID="${DUCKCLAW_SENSORY_TEST_VOICE_ID:-default_assistant}"
+
+python3 - <<PY
 import json
+import os
 json.dump(
-    {"text": "Hola prueba", "voice_id": "leila_assistant", "output_format": "wav"},
+    {"text": "Hola prueba", "voice_id": os.environ["VOICE_ID"], "output_format": "wav"},
     open("/tmp/tts_req.json", "w"),
 )
 PY

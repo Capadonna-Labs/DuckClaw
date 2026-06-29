@@ -128,10 +128,11 @@ def _apply_forget_chat_state(conn: Any, payload: dict) -> None:
             )
 
     _ensure_agent_config_table(conn)
-    conn.execute(
-        "DELETE FROM agent_config WHERE key = ?",
-        [_chat_agent_config_key(raw_chat_id, "last_audit")[:128]],
-    )
+    for suffix in ("last_audit", "context_fold_summary"):
+        conn.execute(
+            "DELETE FROM agent_config WHERE key = ?",
+            [_chat_agent_config_key(raw_chat_id, suffix)[:128]],
+        )
 
 
 _TASK_AUDIT_TABLE_DDL = """

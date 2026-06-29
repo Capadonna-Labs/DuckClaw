@@ -132,6 +132,7 @@ export function AdminChatPanel({
     vaultPath,
     setVaultPath,
     sessionTokenTotal,
+    contextTokensEstimated,
     reloadConfig,
     reloadHistory,
   } = chat;
@@ -427,6 +428,7 @@ export function AdminChatPanel({
           conversationTitle={conversationTitle}
           onRenameConversation={onRenameConversation}
           tokenTotal={sessionTokenTotal}
+          contextEstimated={contextTokensEstimated}
         />
       ) : null}
 

@@ -84,8 +84,9 @@ def forget_chat_state(db: Any, chat_id: Any) -> None:
             pass
     try:
         _ensure_agent_config(db)
-        key = _chat_key(chat_id, "last_audit").replace("'", "''")[:128]
-        db.execute(f"DELETE FROM {_AGENT_CONFIG_TABLE} WHERE key = '{key}'")
+        for suffix in ("last_audit", "context_fold_summary"):
+            key = _chat_key(chat_id, suffix).replace("'", "''")[:128]
+            db.execute(f"DELETE FROM {_AGENT_CONFIG_TABLE} WHERE key = '{key}'")
     except Exception:
         pass
 

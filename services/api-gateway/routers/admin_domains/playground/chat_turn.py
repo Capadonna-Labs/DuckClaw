@@ -380,6 +380,9 @@ def format_playground_chat_payload(
             "usage_tokens": result.get("usage_tokens"),
             "rag_context_count": prepared.rag_context_count,
         }
+        ctx_est = result.get("context_estimated_tokens")
+        if isinstance(ctx_est, (int, float)) and ctx_est >= 0:
+            payload["context_estimated_tokens"] = int(ctx_est)
         if visual:
             payload.update(visual)
         return payload

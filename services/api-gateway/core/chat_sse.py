@@ -125,8 +125,12 @@ async def invoke_chat_sse_body(
                 except (TypeError, ValueError):
                     elapsed_ms = None
             admin_visual = admin_visual_fields_from_invoke_result(session_id, result, tenant_id)
+            sse_extra: dict[str, Any] = {}
             if admin_visual:
-                sse_extra = dict(admin_visual)
+                sse_extra.update(admin_visual)
+            ctx_est = result.get("context_estimated_tokens")
+            if isinstance(ctx_est, (int, float)) and ctx_est >= 0:
+                sse_extra["context_estimated_tokens"] = int(ctx_est)
         else:
             reply = str(result or "")
         want_tts = voice_response and bool((reply or "").strip())

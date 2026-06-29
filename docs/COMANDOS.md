@@ -66,6 +66,21 @@ Variables en `apps/duckclaw-admin/.env.local`: `DUCKCLAW_GATEWAY_URL`, `DUCKCLAW
 
 Servicios: Redis + DuckClaw-DB-Writer + DuckClaw-Gateway.
 
+### Context monitor (compactación LLM del hilo)
+
+Por defecto activo en el gateway. Variables en `.env` (ver `.env.example`):
+
+```bash
+DUCKCLAW_CONTEXT_PRUNE_ENABLED=1
+DUCKCLAW_CONTEXT_PRUNE_MAX_TOKENS_M=4
+DUCKCLAW_CONTEXT_FOLD_PERSIST=1
+pm2 restart DuckClaw-Gateway --update-env
+```
+
+El resumen compactado se persiste en la bóveda DuckDB conectada por conversación (`agent_config`, clave `context_fold_summary`). Opt-out global: `DUCKCLAW_CONTEXT_PRUNE_ENABLED=0`. Opt-out por worker: `context_pruning: { enabled: false }` en manifest.
+
+**Compactación manual:** `/summarize` en playground, Telegram o cualquier canal con fly commands. Usa el historial Redis (gateway) o `api_conversation`/`telegram_conversation` en la bóveda, ejecuta el fold LLM y guarda el resumen sin esperar al umbral automático.
+
 ---
 
 ## ComfyUI (opcional)

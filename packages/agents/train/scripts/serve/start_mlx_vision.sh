@@ -65,8 +65,30 @@ if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"${VISION_PORT}" -sTCP:LIST
   exit 1
 fi
 
+export TMPDIR="${MLX_VISION_TMPDIR:-${HOME}/Library/Caches/duckclaw-mlx-tmp}"
+mkdir -p "${TMPDIR}"
+
+if [ -n "${MLX_VISION_REQUIRE_DISK_PCT:-}" ]; then
+  _disk_avail_kb="$(
+    df -k / | awk 'NR==2 {print $4}'
+  )"
+  _disk_total_kb="$(
+    df -k / | awk 'NR==2 {print $2}'
+  )"
+  if [ "${_disk_total_kb:-0}" -gt 0 ]; then
+    _disk_free_pct="$(
+      awk "BEGIN {printf \"%.1f\", (${_disk_avail_kb} / ${_disk_total_kb}) * 100}"
+    )"
+    if awk "BEGIN {exit !(${_disk_free_pct} < ${MLX_VISION_REQUIRE_DISK_PCT})}"; then
+      echo "Error: disco libre ${_disk_free_pct}% < MLX_VISION_REQUIRE_DISK_PCT=${MLX_VISION_REQUIRE_DISK_PCT}"
+      exit 1
+    fi
+  fi
+fi
+
 echo "[start_mlx_vision] REPO_ROOT=${REPO_ROOT}"
 echo "[start_mlx_vision] python=${PYTHON_PATH}"
+echo "[start_mlx_vision] TMPDIR=${TMPDIR}"
 echo "[start_mlx_vision] http://127.0.0.1:${VISION_PORT}/v1 model=${MODEL_PATH}"
 
 exec "${MLX_OPENAI_SERVER}" launch \

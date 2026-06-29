@@ -55,6 +55,7 @@ _CORE_READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
         "sandbox",
         "sandox",
         "setup",
+        "summarize",
         "system",
         "system_prompt",
         "team",

@@ -215,3 +215,36 @@ def test_ensure_uv_available_skips_install_when_present(monkeypatch) -> None:
     )
     assert ensure_uv_available() is True
     assert called == []
+
+
+def test_explain_prerequisite_failures_lists_missing_tools(monkeypatch) -> None:
+    from duckops.prerequisites import explain_prerequisite_failures
+
+    monkeypatch.setattr(
+        "duckops.prerequisites.check_all",
+        lambda **_k: [
+            ToolCheck("Redis", False, "", "no ping"),
+            ToolCheck("PM2", False, "", "missing"),
+        ],
+    )
+    lines: list[str] = []
+    explain_prerequisite_failures(lines.append, failed_step="Redis")
+    text = "\n".join(lines)
+    assert "FALLO EN PREREQUISITOS" in text
+    assert "Paso que fallo: Redis" in text
+    assert "[FALTA] Redis" in text
+    assert "[FALTA] PM2" in text
+    assert "Solucion:" in text
+
+
+def test_find_redis_server_windows_uses_program_files(monkeypatch, tmp_path: Path) -> None:
+    from duckops.prerequisites import _find_redis_server_windows
+
+    redis_dir = tmp_path / "Redis"
+    redis_dir.mkdir()
+    (redis_dir / "redis-server.exe").write_text("", encoding="utf-8")
+    monkeypatch.setattr("duckops.prerequisites._is_windows", lambda: True)
+    monkeypatch.setattr("duckops.prerequisites._windows_redis_dirs", lambda: [redis_dir])
+    monkeypatch.setattr("duckops.prerequisites.shutil.which", lambda _name: None)
+    found = _find_redis_server_windows()
+    assert found == str(redis_dir / "redis-server.exe")

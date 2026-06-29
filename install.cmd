@@ -67,7 +67,19 @@ set "EC=!ERRORLEVEL!"
 call :step 5 5 Fin codigo !EC!
 if not "!EC!"=="0" (
   echo.
-  echo Algo fallo. Lee el mensaje de arriba.
+  echo ====================================================
+  echo   INSTALACION FALLIDA ^(codigo !EC!^)
+  echo ====================================================
+  echo.
+  echo   Busca arriba el bloque:
+  echo     FALLO EN PREREQUISITOS
+  echo   o lineas que empiezan con ERROR
+  echo.
+  echo   Windows - soluciones rapidas:
+  echo     Redis:  net start Redis
+  echo     Node:   cierra ventana y ejecuta install.cmd otra vez
+  echo     Carpeta: debe existir pyproject.toml en %CD%
+  echo.
   pause
 )
 exit /b !EC!

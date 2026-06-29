@@ -6,6 +6,7 @@ import os
 import platform
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -50,8 +51,8 @@ def redis_start_hint() -> str:
         )
     if system == "Windows":
         return (
-            "En Windows: winget install tporadowski.redis y ejecuta redis-server, "
-            "o usa Docker: docker run -d -p 6379:6379 redis"
+            "En Windows: net start Redis  o  ejecuta install.cmd de nuevo "
+            "(arranca redis-server desde Program Files\\Redis)"
         )
     return "Arranca Redis en localhost:6379"
 
@@ -179,12 +180,14 @@ def _winget_path() -> str | None:
     return shutil.which("winget")
 
 
-def _winget_install(package_id: str, print_fn: PrintFn) -> bool:
+def _winget_install(package_id: str, print_fn: PrintFn, *, quiet: bool = False) -> bool:
     winget = _winget_path()
     if not winget:
-        print_fn("winget no disponible.")
+        if not quiet:
+            print_fn("winget no disponible.")
         return False
-    print_fn(f"winget install --id {package_id} ...")
+    if not quiet:
+        print_fn(f"winget install --id {package_id} ...")
     code = _run_interactive(
         [
             winget,
@@ -197,7 +200,137 @@ def _winget_install(package_id: str, print_fn: PrintFn) -> bool:
         ],
         timeout=1200,
     )
+    if code != 0 and not quiet:
+        print_fn(f"winget: paquete {package_id} no instalado (codigo {code}).")
     return code == 0
+
+
+def _refresh_windows_user_path() -> None:
+    if not _is_windows():
+        return
+    try:
+        import winreg
+    except ImportError:
+        return
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
+            user_path = str(winreg.QueryValueEx(key, "Path")[0])
+        if user_path.strip():
+            os.environ["PATH"] = user_path + os.pathsep + os.environ.get("PATH", "")
+    except OSError:
+        pass
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        ) as key:
+            machine_path = str(winreg.QueryValueEx(key, "Path")[0])
+        if machine_path.strip():
+            os.environ["PATH"] = machine_path + os.pathsep + os.environ.get("PATH", "")
+    except OSError:
+        pass
+
+
+def _windows_program_files() -> Path:
+    return Path(os.environ.get("ProgramFiles", r"C:\Program Files"))
+
+
+def _windows_redis_dirs() -> list[Path]:
+    return [_windows_program_files() / "Redis"]
+
+
+def _windows_node_dirs() -> list[Path]:
+    return [_windows_program_files() / "nodejs"]
+
+
+def _prepend_path_dirs(dirs: list[Path]) -> None:
+    existing = os.environ.get("PATH", "")
+    parts = [str(d) for d in dirs if d.is_dir()]
+    if parts:
+        os.environ["PATH"] = os.pathsep.join(parts) + os.pathsep + existing
+
+
+def augment_path_for_windows_tools() -> None:
+    """Tras winget, expone Node, npm y Redis en la sesion actual."""
+    if not _is_windows():
+        return
+    _refresh_windows_user_path()
+    _prepend_path_dirs(_windows_node_dirs() + _windows_redis_dirs() + _uv_bin_dirs())
+
+
+def _uv_bin_dirs() -> list[Path]:
+    home = Path.home()
+    dirs = [home / ".local" / "bin", home / ".cargo" / "bin"]
+    if _is_windows():
+        local_app = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app:
+            dirs.append(Path(local_app) / "Programs" / "uv")
+        program_files = os.environ.get("ProgramFiles", "").strip()
+        if program_files:
+            dirs.append(Path(program_files) / "uv")
+    return dirs
+
+
+def _find_redis_server_windows() -> str | None:
+    augment_path_for_windows_tools()
+    found = shutil.which("redis-server")
+    if found:
+        return found
+    for redis_dir in _windows_redis_dirs():
+        for name in ("redis-server.exe", "redis-server"):
+            candidate = redis_dir / name
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+def _wait_redis_ping(*, attempts: int = 15, delay_seconds: float = 0.5) -> bool:
+    for _ in range(attempts):
+        if check_redis().ok:
+            return True
+        time.sleep(delay_seconds)
+    return False
+
+
+def _start_redis_windows_service(print_fn: PrintFn) -> bool:
+    for service_name in ("Redis", "redis"):
+        proc = _run(["net", "start", service_name], timeout=60)
+        if proc.returncode == 0:
+            print_fn(f"Servicio Windows '{service_name}' iniciado.")
+            return _wait_redis_ping()
+    return False
+
+
+def _try_start_redis_windows(print_fn: PrintFn) -> bool:
+    augment_path_for_windows_tools()
+    if check_redis().ok:
+        return True
+    if _start_redis_windows_service(print_fn):
+        return True
+    redis_server = _find_redis_server_windows()
+    if not redis_server:
+        print_fn(
+            "Redis instalado pero redis-server no esta en PATH. "
+            "Reinicia la terminal o ejecuta: net start Redis"
+        )
+        return False
+    print_fn(f"Iniciando Redis en segundo plano ({redis_server})...")
+    try:
+        redis_dir = str(Path(redis_server).parent)
+        subprocess.Popen(
+            [redis_server],
+            cwd=redis_dir,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception as exc:
+        print_fn(f"No se pudo arrancar redis-server: {exc}")
+        return False
+    if _wait_redis_ping():
+        return True
+    print_fn("Redis no respondio en localhost:6379 tras arrancar redis-server.")
+    return False
 
 
 def ensure_homebrew(print_fn: PrintFn, *, assume_yes: bool) -> bool:
@@ -256,39 +389,14 @@ def _linux_apt_install(packages: list[str], print_fn: PrintFn) -> bool:
     return _run_interactive(["sudo", "apt-get", "install", "-y", *packages], timeout=900) == 0
 
 
-def _uv_bin_dirs() -> list[Path]:
-    home = Path.home()
-    dirs = [home / ".local" / "bin", home / ".cargo" / "bin"]
-    if _is_windows():
-        local_app = os.environ.get("LOCALAPPDATA", "").strip()
-        if local_app:
-            dirs.append(Path(local_app) / "Programs" / "uv")
-        program_files = os.environ.get("ProgramFiles", "").strip()
-        if program_files:
-            dirs.append(Path(program_files) / "uv")
-    return dirs
-
-
-def _refresh_windows_user_path() -> None:
-    if not _is_windows():
-        return
-    try:
-        import winreg
-
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Environment") as key:
-            user_path = str(winreg.QueryValueEx(key, "Path")[0])
-        if user_path.strip():
-            os.environ["PATH"] = user_path + os.pathsep + os.environ.get("PATH", "")
-    except OSError:
-        pass
-
-
 def _augment_path_for_uv() -> None:
     """Tras instalar uv, añade rutas típicas al PATH de la sesión actual."""
-    _refresh_windows_user_path()
-    uv_name = "uv.exe" if _is_windows() else "uv"
+    if _is_windows():
+        augment_path_for_windows_tools()
+        return
+    uv_name = "uv"
     for candidate in _uv_bin_dirs():
-        if (candidate / uv_name).is_file() or (candidate / "uv").is_file():
+        if (candidate / uv_name).is_file():
             os.environ["PATH"] = str(candidate) + os.pathsep + os.environ.get("PATH", "")
             return
 
@@ -350,24 +458,6 @@ def install_uv(print_fn: PrintFn = _default_print) -> bool:
     return False
 
 
-def _try_start_redis_windows(print_fn: PrintFn) -> bool:
-    redis_server = shutil.which("redis-server")
-    if redis_server:
-        print_fn("Iniciando redis-server en segundo plano...")
-        try:
-            subprocess.Popen(
-                [redis_server],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-        except Exception as exc:
-            print_fn(f"No se pudo arrancar redis-server: {exc}")
-            return False
-        return check_redis().ok
-    return False
-
-
 def install_redis(print_fn: PrintFn = _default_print, *, assume_yes: bool = False) -> bool:
     if check_redis().ok:
         return True
@@ -393,18 +483,25 @@ def install_redis(print_fn: PrintFn = _default_print, *, assume_yes: bool = Fals
                 break
         return check_redis().ok
     if system == "Windows":
-        for package_id in ("tporadowski.redis", "Redis.Redis"):
-            if _winget_install(package_id, print_fn):
-                break
-        else:
+        installed = _winget_install("Redis.Redis", print_fn)
+        if not installed:
+            installed = _winget_install("tporadowski.redis", print_fn, quiet=True)
+        if not installed:
             print_fn(
-                "Redis en Windows: instala manualmente con "
-                "'winget install tporadowski.redis' o usa Docker."
+                "ERROR Redis: winget no pudo instalar Redis.Redis. "
+                "Prueba: winget install Redis.Redis  o  Docker: docker run -d -p 6379:6379 redis"
             )
             return False
+        augment_path_for_windows_tools()
         if check_redis().ok:
             return True
-        return _try_start_redis_windows(print_fn)
+        if _try_start_redis_windows(print_fn):
+            return True
+        print_fn(
+            "ERROR Redis: instalado pero no responde en localhost:6379. "
+            "Prueba en una ventana CMD como admin: net start Redis"
+        )
+        return False
     print_fn(f"Redis auto-install no soportado en {system}. Usa Docker o instala Redis manualmente.")
     return False
 
@@ -424,13 +521,20 @@ def install_pnpm(print_fn: PrintFn = _default_print) -> bool:
             return True
     npm = shutil.which("npm")
     if not npm:
+        print_fn("ERROR pnpm: npm no esta en PATH. Instala Node.js y reinicia la terminal.")
         return False
     print_fn("npm install -g pnpm@9 ...")
     code = _run_interactive([npm, "install", "-g", "pnpm@9"], timeout=600)
     if code != 0 and not _is_windows():
         print_fn("pnpm: prueba con sudo npm install -g pnpm@9 si falló por permisos.")
         code = _run_interactive(["sudo", npm, "install", "-g", "pnpm@9"], timeout=600)
-    return code == 0 and check_pnpm().ok
+    if code != 0:
+        print_fn(f"ERROR pnpm: npm install -g pnpm fallo (codigo {code}).")
+        return False
+    if not check_pnpm().ok:
+        print_fn("ERROR pnpm: instalado pero no aparece en PATH.")
+        return False
+    return True
 
 
 def install_node(print_fn: PrintFn = _default_print, *, assume_yes: bool = False) -> bool:
@@ -445,11 +549,16 @@ def install_node(print_fn: PrintFn = _default_print, *, assume_yes: bool = False
         return _linux_apt_install(["nodejs", "npm"], print_fn)
     if system == "Windows":
         if _winget_install("OpenJS.NodeJS.LTS", print_fn):
-            return check_node().ok and check_npm().ok
-        print_fn(
-            "Node en Windows: instala manualmente con "
-            "'winget install OpenJS.NodeJS.LTS' o desde https://nodejs.org"
-        )
+            augment_path_for_windows_tools()
+            if check_node().ok and check_npm().ok:
+                return True
+            node_ok = check_node().ok
+            npm_ok = check_npm().ok
+            print_fn(
+                f"ERROR Node.js: winget OK pero node={'si' if node_ok else 'NO'} npm={'si' if npm_ok else 'NO'} en PATH."
+            )
+            return False
+        print_fn("ERROR Node.js: winget install OpenJS.NodeJS.LTS fallo.")
         return False
     print_fn(f"Node auto-install no soportado en {system}.")
     return False
@@ -460,13 +569,20 @@ def install_pm2(print_fn: PrintFn = _default_print) -> bool:
         return True
     npm = shutil.which("npm")
     if not npm:
+        print_fn("ERROR PM2: npm no esta en PATH. Instala Node.js primero.")
         return False
     print_fn("npm install -g pm2 ...")
     code = _run_interactive([npm, "install", "-g", "pm2"], timeout=600)
     if code != 0 and not _is_windows():
         print_fn("PM2: prueba con sudo npm install -g pm2 si falló por permisos.")
         code = _run_interactive(["sudo", npm, "install", "-g", "pm2"], timeout=600)
-    return code == 0 and check_pm2().ok
+    if code != 0:
+        print_fn(f"ERROR PM2: npm install -g pm2 fallo (codigo {code}).")
+        return False
+    if not check_pm2().ok:
+        print_fn("ERROR PM2: instalado pero no aparece en PATH.")
+        return False
+    return True
 
 
 def run_uv_sync(repo_root: Path, print_fn: PrintFn = _default_print) -> bool:
@@ -479,7 +595,10 @@ def run_uv_sync(repo_root: Path, print_fn: PrintFn = _default_print) -> bool:
         return False
     print_fn(f"uv sync en {repo_root} ...")
     code = _run_interactive([uv, "sync"], cwd=repo_root, timeout=1800)
-    return code == 0
+    if code != 0:
+        print_fn(f"ERROR uv sync: fallo con codigo {code}. Revisa red o permisos de escritura.")
+        return False
+    return True
 
 
 def _install_missing_tools(
@@ -490,31 +609,59 @@ def _install_missing_tools(
     print_fn: PrintFn,
     redis_url: str,
 ) -> bool:
+    if _is_windows():
+        augment_path_for_windows_tools()
+
+    print_fn("  [prereq] Redis (cola de mensajes, puerto 6379)...")
     if not check_redis(redis_url).ok:
         if not install_redis(print_fn, assume_yes=assume_yes):
-            return False
+            return _report_prerequisite_failure("Redis", print_fn, redis_url=redis_url)
+    else:
+        print_fn("  [prereq] Redis OK")
+
+    print_fn("  [prereq] Node.js + npm (consola admin)...")
     if not check_node().ok or not check_npm().ok:
         if not install_node(print_fn, assume_yes=assume_yes):
-            return False
+            return _report_prerequisite_failure("Node.js / npm", print_fn, redis_url=redis_url)
+    else:
+        print_fn("  [prereq] Node.js + npm OK")
+
+    if _is_windows():
+        augment_path_for_windows_tools()
+
+    print_fn("  [prereq] pnpm (gestor de paquetes admin)...")
     if not check_pnpm().ok:
         if not install_pnpm(print_fn):
-            return False
+            return _report_prerequisite_failure("pnpm", print_fn, redis_url=redis_url)
+    else:
+        print_fn("  [prereq] pnpm OK")
+
+    print_fn("  [prereq] PM2 (gateway + db-writer en segundo plano)...")
     if not check_pm2().ok:
         if not install_pm2(print_fn):
-            return False
+            return _report_prerequisite_failure("PM2", print_fn, redis_url=redis_url)
+    else:
+        print_fn("  [prereq] PM2 OK")
 
     if sync_python and shutil.which("uv"):
+        print_fn("  [prereq] uv sync (entorno virtual Python + dependencias)...")
         if not run_uv_sync(repo_root, print_fn):
-            print_fn("uv sync falló; revisa el log arriba.")
-            return False
+            return _report_prerequisite_failure("uv sync", print_fn, redis_url=redis_url)
+    elif sync_python:
+        return _report_prerequisite_failure("uv (no encontrado para uv sync)", print_fn, redis_url=redis_url)
 
     final = check_all(redis_url=redis_url)
     all_ok = all(c.ok for c in final)
+    print_fn("")
+    print_fn("  Resumen prerequisitos:")
     for c in final:
         mark = "OK" if c.ok else "FALTA"
         ver = f" ({c.version})" if c.version else ""
-        print_fn(f"  [{mark}] {c.name}{ver} — {c.detail}")
-    return all_ok
+        print_fn(f"    [{mark}] {c.name}{ver} — {c.detail}")
+    if not all_ok:
+        return _report_prerequisite_failure("chequeo final", print_fn, redis_url=redis_url)
+    print_fn("  Todos los prerequisitos OK.")
+    return True
 
 
 def ensure_development_prerequisites(
@@ -542,7 +689,7 @@ def ensure_development_prerequisites(
 
     if install and not check_uv().ok:
         if not ensure_uv_available(print_fn):
-            return False
+            return _report_prerequisite_failure("uv", print_fn, redis_url=redis_url)
 
     checks = check_all(redis_url=redis_url)
     missing = [c for c in checks if not c.ok]
@@ -578,3 +725,67 @@ def format_prerequisite_hint() -> str:
         "Prerequisitos: uv, Redis, Node.js, npm, pnpm, PM2. "
         "Instálalos con: uv run duckops bootstrap --yes"
     )
+
+
+def _remediation_hint(tool_name: str) -> str:
+    system = platform.system()
+    hints: dict[str, str] = {
+        "uv": "winget install astral-sh.uv  o  ejecuta install.cmd / ./duckops-up.sh de nuevo",
+        "Redis": redis_start_hint(),
+        "Node.js": (
+            "winget install OpenJS.NodeJS.LTS  y  cierra y reabre la terminal (o install.cmd otra vez)"
+            if system == "Windows"
+            else "brew install node  o  apt install nodejs npm"
+        ),
+        "npm": (
+            "Viene con Node.js; en Windows cierra la ventana y ejecuta install.cmd otra vez"
+            if system == "Windows"
+            else "Instala Node.js (incluye npm)"
+        ),
+        "pnpm": "npm install -g pnpm@9  (requiere npm en PATH)",
+        "PM2": "npm install -g pm2  (requiere npm en PATH)",
+    }
+    return hints.get(tool_name, "uv run duckops bootstrap --yes")
+
+
+def explain_prerequisite_failures(
+    print_fn: PrintFn = _default_print,
+    *,
+    redis_url: str = _DEFAULT_REDIS_URL,
+    failed_step: str = "",
+) -> None:
+    """Resumen accionable de herramientas que siguen fallando."""
+    checks = check_all(redis_url=redis_url)
+    missing = [c for c in checks if not c.ok]
+    print_fn("")
+    print_fn("=" * 52)
+    print_fn("  FALLO EN PREREQUISITOS")
+    if failed_step:
+        print_fn(f"  Paso que fallo: {failed_step}")
+    print_fn("=" * 52)
+    if missing:
+        for c in missing:
+            print_fn(f"  [FALTA] {c.name}")
+            if c.detail:
+                print_fn(f"          Detalle: {c.detail}")
+            print_fn(f"          Solucion: {_remediation_hint(c.name)}")
+    else:
+        print_fn("  Todas las herramientas responden OK en el chequeo final.")
+        print_fn("  Revisa el log anterior (uv sync, permisos o red).")
+    if _is_windows():
+        print_fn("")
+        print_fn("  Windows: si acabas de instalar Node o Redis con winget,")
+        print_fn("  cierra esta ventana y ejecuta install.cmd otra vez.")
+    print_fn("=" * 52)
+    print_fn("")
+
+
+def _report_prerequisite_failure(
+    failed_step: str,
+    print_fn: PrintFn,
+    *,
+    redis_url: str = _DEFAULT_REDIS_URL,
+) -> bool:
+    print_fn(f"ERROR: fallo en prerequisito — {failed_step}")
+    explain_prerequisite_failures(print_fn, redis_url=redis_url, failed_step=failed_step)
+    return False

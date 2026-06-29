@@ -123,6 +123,37 @@ def test_doctor_strict_fails_on_hub_vault_split(monkeypatch, tmp_path: Path) -> 
     assert "FAIL Session DB unificada" in result.output
 
 
+def test_doctor_repair_session_db_archives_legacy(monkeypatch, tmp_path: Path) -> None:
+    _patch_doctor_basics(monkeypatch, tmp_path)
+    legacy = tmp_path / "db" / "duckclaw.duckdb"
+    vault = tmp_path / "db" / "private" / "default" / "duckclaw.duckdb"
+    _make_duckdb(legacy)
+    _make_duckdb(vault)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DUCKCLAW_GATEWAY_DB="
+        + str(legacy).replace("\\", "/")
+        + "\nDUCKCLAW_REPO_ROOT="
+        + str(tmp_path).replace("\\", "/")
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "duckclaw.gateway_db.get_gateway_db_path",
+        lambda: str(vault),
+    )
+
+    from duckops.commands.doctor import repair_legacy_session_db
+
+    ok, detail = repair_legacy_session_db(tmp_path)
+    assert ok, detail
+    assert not legacy.is_file()
+    assert any(tmp_path.glob(".duckops/migrate-backups/duckclaw.legacy_hub_*.duckdb.bak"))
+    env_text = env_file.read_text(encoding="utf-8")
+    assert "DUCKCLAW_GATEWAY_DB_PATH=db/private/default/duckclaw.duckdb" in env_text
+    assert "DUCKCLAW_GATEWAY_DB=" not in env_text
+
+
 def test_doctor_warns_when_knowledge_sources_split(monkeypatch, tmp_path: Path) -> None:
     _patch_doctor_basics(monkeypatch, tmp_path)
     legacy = tmp_path / "db" / "duckclaw.duckdb"

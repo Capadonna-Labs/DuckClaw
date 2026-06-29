@@ -14,6 +14,7 @@ function resolveRepoPython(root) {
     throw new Error("DUCKCLAW_PM2_PYTHON no existe: " + fromEnv);
   }
   const candidates = [
+    path.join(root, ".venv", "Scripts", "pythonw.exe"),
     path.join(root, ".venv", "Scripts", "python.exe"),
     path.join(root, ".venv", "bin", "python3"),
     path.join(root, ".venv", "bin", "python"),

@@ -145,9 +145,10 @@ def check_npm() -> ToolCheck:
 
 
 def check_pnpm() -> ToolCheck:
-    from duckclaw.ops.toolchain import refresh_session_path, resolve_pnpm
+    from duckclaw.ops.toolchain import ensure_node_available_for_npm_shims, refresh_session_path, resolve_pnpm
 
     refresh_session_path()
+    ensure_node_available_for_npm_shims()
     pnpm = resolve_pnpm()
     if not pnpm:
         return ToolCheck("pnpm", False, "", "no está en PATH (consola admin)")
@@ -158,9 +159,10 @@ def check_pnpm() -> ToolCheck:
 
 
 def check_pm2() -> ToolCheck:
-    from duckclaw.ops.toolchain import refresh_session_path, resolve_pm2_executable
+    from duckclaw.ops.toolchain import ensure_node_available_for_npm_shims, refresh_session_path, resolve_pm2_executable
 
     refresh_session_path()
+    ensure_node_available_for_npm_shims()
     pm2 = resolve_pm2_executable()
     if not pm2:
         return ToolCheck("PM2", False, "", "no está en PATH (gateway + db-writer)")
@@ -788,6 +790,9 @@ def ensure_development_prerequisites(
             "Instala uv, Redis, Node y PM2 manualmente."
         )
         return False
+
+    if _is_windows():
+        augment_path_for_windows_tools()
 
     if install and not check_uv().ok:
         if not ensure_uv_available(print_fn):

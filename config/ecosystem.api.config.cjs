@@ -4,10 +4,10 @@
  * pm2 start config/ecosystem.api.config.cjs --only "NombreGateway"
  */
 const path = require("path");
+const fs = require("fs");
 const root = path.resolve(__dirname, "..");
 const { resolveRepoPython } = require("./ecosystem.runtime.cjs");
 const python = resolveRepoPython(root);
-
 module.exports = {
   apps: [
     {
@@ -19,10 +19,12 @@ module.exports = {
       interpreter: "none",
       autorestart: true,
       watch: false,
+      windowsHide: true,
       max_restarts: 10,
       env: {
         PYTHONPATH: root,
-        DUCKCLAW_PM2_PROCESS_NAME: "DuckClaw-Gateway",
+        PYTHONUNBUFFERED: "1",
+        "DUCKCLAW_PM2_PROCESS_NAME": "DuckClaw-Gateway",
       },
     },
   ],

@@ -89,41 +89,8 @@ async def get_rendered_report(
                 "SELECT html_content FROM main.custom_reports WHERE report_id = ?",
                 [rid],
             )
-        except Exception as table_exc:
-            # region agent log
-            try:
-                from core.reports_debug import reports_debug_log
-
-                reports_debug_log(
-                    hypothesis_id="H5",
-                    location="reports.py:get_rendered_report",
-                    message="custom_reports_query_failed",
-                    data={"report_id": rid, "vault": vp[-120:], "error": str(table_exc)[:200]},
-                )
-            except Exception:
-                pass
-            # endregion
-            return HTMLResponse(content=_PLACEHOLDER_HTML, headers={"Content-Security-Policy": _CSP})
-        # region agent log
-        try:
-            from core.reports_debug import reports_debug_log
-
-            html_preview = _html_from_custom_report_rows(rows)
-            reports_debug_log(
-                hypothesis_id="H10",
-                location="reports.py:get_rendered_report",
-                message="report_fetch",
-                data={
-                    "report_id": rid,
-                    "vault": vp[-120:],
-                    "row_count": len(rows or []),
-                    "html_len": len(html_preview or ""),
-                    "placeholder": not html_preview,
-                },
-            )
         except Exception:
-            pass
-        # endregion
+            return HTMLResponse(content=_PLACEHOLDER_HTML, headers={"Content-Security-Policy": _CSP})
     finally:
         try:
             db.close()

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import platform
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -220,12 +221,20 @@ def ensure_db_writer_pm2(
         )
         return 0
     if pm2_process_online(DB_WRITER_PM2_NAME):
-        console_print(f"[green]DB-Writer[/] {DB_WRITER_PM2_NAME} ya en ejecución.")
-        return 0
+        if platform.system() != "Windows":
+            console_print(f"[green]DB-Writer[/] {DB_WRITER_PM2_NAME} ya en ejecución.")
+            return 0
+        try:
+            from duckclaw.ops.toolchain import run_pm2
+
+            run_pm2("delete", DB_WRITER_PM2_NAME, cwd=str(repo_root), timeout=60)
+        except (subprocess.TimeoutExpired, OSError) as e:
+            console_print(f"[yellow]DB-Writer PM2:[/] no se pudo recrear: {e}")
+            return 1
     eco = db_writer_ecosystem_path(repo_root)
-    if eco is None:
-        eco = write_db_writer_ecosystem(repo_root, draft)
-        console_print(f"[dim]Generado[/] {eco.relative_to(repo_root)}")
+    eco = write_db_writer_ecosystem(repo_root, draft)
+    if eco and eco.is_file():
+        console_print(f"[dim]Ecosystem[/] {eco.relative_to(repo_root)}")
     try:
         from duckclaw.ops.toolchain import run_pm2
 

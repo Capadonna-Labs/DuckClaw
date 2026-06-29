@@ -261,7 +261,7 @@ def cmd_up(
         return
 
     root = (repo or _repo_root()).resolve()
-    typer.secho("🦆 DuckClaw up", fg=typer.colors.CYAN, bold=True)
+    typer.secho("DuckClaw up", fg=typer.colors.CYAN, bold=True)
     typer.echo(f"Repo: {root}\n")
 
     from duckclaw.ops.ecosystem_pm2 import ensure_ecosystem_runtime

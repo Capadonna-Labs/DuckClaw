@@ -61,6 +61,8 @@ def _path_candidate_dirs(*, repo_root: Path | None) -> list[Path]:
 def _refresh_windows_registry_path() -> None:
     if platform.system() != "Windows":
         return
+    if getattr(_refresh_windows_registry_path, "_merged", False):
+        return
     try:
         import winreg
     except ImportError:
@@ -84,12 +86,26 @@ def _refresh_windows_registry_path() -> None:
     except OSError:
         pass
     if chunks:
-        os.environ["PATH"] = os.pathsep.join(chunks) + os.pathsep + os.environ.get("PATH", "")
+        registry_path = os.pathsep.join(chunks)
+        current = os.environ.get("PATH", "")
+        if current.strip():
+            os.environ["PATH"] = registry_path + os.pathsep + current
+        else:
+            os.environ["PATH"] = registry_path
+        _refresh_windows_registry_path._merged = True  # type: ignore[attr-defined]
 
 
 def _prepend_path_dirs(dirs: Sequence[Path]) -> None:
     existing = os.environ.get("PATH", "")
-    parts = [str(d) for d in dirs if d.is_dir()]
+    existing_parts = {part.strip().lower() for part in existing.split(os.pathsep) if part.strip()}
+    parts: list[str] = []
+    for directory in dirs:
+        text = str(directory)
+        key = text.strip().lower()
+        if not key or key in existing_parts:
+            continue
+        existing_parts.add(key)
+        parts.append(text)
     if parts:
         os.environ["PATH"] = os.pathsep.join(parts) + os.pathsep + existing
 
@@ -176,6 +192,14 @@ def prepend_executable_dir(executable: str | None) -> None:
         _prepend_path_dirs([bin_dir])
 
 
+def ensure_node_available_for_npm_shims() -> None:
+    """Los .cmd de npm global invocan ``node``; debe estar en PATH de la sesión."""
+    refresh_session_path()
+    node = resolve_node()
+    if node:
+        prepend_executable_dir(node)
+
+
 def refresh_session_path(*, repo_root: Path | None = None) -> None:
     """Actualiza PATH de la sesión actual (idempotente, seguro en cualquier OS)."""
     _refresh_windows_registry_path()
@@ -197,8 +221,13 @@ def refresh_session_path(*, repo_root: Path | None = None) -> None:
 
 def dot_venv_python_candidates(root: Path) -> list[Path]:
     root = root.resolve()
+    if platform.system() == "Windows":
+        # pythonw.exe: subsistema GUI, sin ventana de consola bajo PM2.
+        return [
+            root / ".venv" / "Scripts" / "pythonw.exe",
+            root / ".venv" / "Scripts" / "python.exe",
+        ]
     return [
-        root / ".venv" / "Scripts" / "python.exe",
         root / ".venv" / "bin" / "python3",
         root / ".venv" / "bin" / "python",
     ]
@@ -269,6 +298,8 @@ def run_pm2(
             argv,
             capture_output=capture_output,
             text=text,
+            encoding="utf-8",
+            errors="replace",
             timeout=timeout,
             cwd=str(cwd) if cwd else None,
             check=check,

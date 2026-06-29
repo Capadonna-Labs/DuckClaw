@@ -66,6 +66,42 @@ def test_resolve_pnpm_finds_bin_even_when_not_on_path(monkeypatch, tmp_path: Pat
     assert resolve_pnpm_executable() == str(cmd)
 
 
+def test_prepend_path_dirs_skips_existing_entries(monkeypatch, tmp_path: Path) -> None:
+    from duckclaw.ops import toolchain
+
+    first = tmp_path / "a"
+    second = tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    monkeypatch.setenv("PATH", str(first))
+    toolchain._prepend_path_dirs([first, second])
+    parts = toolchain.os.environ["PATH"].split(toolchain.os.pathsep)
+    assert parts.count(str(first)) == 1
+    assert str(second) in parts
+
+
+def test_refresh_session_path_does_not_grow_path_on_repeat(monkeypatch, tmp_path: Path) -> None:
+    from duckclaw.ops import toolchain
+
+    npm_dir = tmp_path / "npm"
+    npm_dir.mkdir()
+    monkeypatch.setattr(toolchain.platform, "system", lambda: "Windows")
+    monkeypatch.setenv("PATH", r"C:\seed\bin")
+    monkeypatch.setattr(toolchain, "_refresh_windows_registry_path", lambda: None)
+    monkeypatch.setattr(
+        toolchain,
+        "_npm_global_bin_dirs",
+        lambda: [npm_dir],
+    )
+    monkeypatch.setattr(toolchain, "_path_candidate_dirs", lambda repo_root=None: [])
+
+    toolchain.refresh_session_path()
+    once = len(toolchain.os.environ["PATH"])
+    toolchain.refresh_session_path()
+    twice = len(toolchain.os.environ["PATH"])
+    assert twice == once
+
+
 def test_run_pm2_checked_raises_on_nonzero(monkeypatch) -> None:
     from duckclaw.ops.toolchain import ToolchainError, run_pm2_checked
 

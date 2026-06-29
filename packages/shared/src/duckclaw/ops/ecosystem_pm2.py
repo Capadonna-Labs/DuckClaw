@@ -28,6 +28,7 @@ function resolveRepoPython(root) {
     throw new Error("DUCKCLAW_PM2_PYTHON no existe: " + fromEnv);
   }
   const candidates = [
+    path.join(root, ".venv", "Scripts", "pythonw.exe"),
     path.join(root, ".venv", "Scripts", "python.exe"),
     path.join(root, ".venv", "bin", "python3"),
     path.join(root, ".venv", "bin", "python"),
@@ -61,3 +62,16 @@ def ecosystem_repo_python_js_lines() -> list[str]:
         'const { resolveRepoPython } = require("./ecosystem.runtime.cjs");',
         "const python = resolveRepoPython(root);",
     ]
+
+
+def ecosystem_pm2_fork_app_options_js_lines(*, max_restarts: int | None = 10) -> list[str]:
+    """Opciones PM2 para procesos Python en fork (sin ventana de consola en Windows)."""
+    lines = [
+        '      interpreter: "none",',
+        "      autorestart: true,",
+        "      watch: false,",
+        "      windowsHide: true,",
+    ]
+    if max_restarts is not None:
+        lines.append(f"      max_restarts: {max_restarts},")
+    return lines

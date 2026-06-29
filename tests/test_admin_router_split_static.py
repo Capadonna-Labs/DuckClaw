@@ -582,6 +582,7 @@ def test_template_catalog_router_uses_typed_commands_for_mutators() -> None:
     )
 
     for handler_name in (
+        "patch_template",
         "put_template_file",
         "delete_template",
         "reactivate_template",
@@ -595,6 +596,7 @@ def test_template_catalog_router_uses_typed_commands_for_mutators() -> None:
         assert "task_id" in segment
 
     assert "enqueue_typed_command" in templates
+    assert "UpsertWorkerCommand" in templates
     assert "UpdateCatalogWorkerFileCommand" in templates
     assert "DeactivateCatalogWorkerCommand" in templates
     assert "ReactivateCatalogWorkerCommand" in templates

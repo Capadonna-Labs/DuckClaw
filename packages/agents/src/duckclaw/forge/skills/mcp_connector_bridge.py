@@ -1,0 +1,214 @@
+"""DB-first MCP connector bridge for worker LangGraph tools."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Optional
+
+from duckclaw.admin_mcp_connectors import (
+    list_worker_mcp_connectors,
+    resolve_connector_bearer_token,
+    resolve_worker_uid,
+    tool_allowed_by_policy,
+    validate_connector_egress,
+)
+from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool, mcp_stdio_list_tools
+
+_log = logging.getLogger(__name__)
+
+
+def _run_async_from_sync(coro: Any) -> Any:
+    try:
+        import asyncio
+
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(lambda: asyncio.run(coro)).result()
+
+
+def _mcp_available() -> bool:
+    try:
+        import mcp  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def _public_tool_name(connector_id: str, tool_name: str) -> str:
+    safe_connector = connector_id.replace("-", "_").replace(".", "_")
+    safe_tool = tool_name.replace("-", "_").replace(".", "_")
+    return f"mcp__{safe_connector}__{safe_tool}"
+
+
+def _build_stdio_params(connector: dict[str, Any]) -> Any:
+    from mcp.client.stdio import StdioServerParameters
+
+    command = str(connector.get("launch_command") or "").strip()
+    if not command:
+        raise ValueError("launch_command required for stdio connector")
+    args = [str(x) for x in connector.get("launch_args") or []]
+    env = {str(k): str(v) for k, v in (connector.get("launch_env") or {}).items()}
+    merged_env = {**dict(os.environ), **env}
+    return StdioServerParameters(command=command, args=args, env=merged_env)
+
+
+def _http_headers(db: Any, connector: dict[str, Any]) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    kind = str(connector.get("auth_kind") or "none").strip().lower()
+    if kind == "bearer":
+        token = resolve_connector_bearer_token(db, connector)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+async def _list_connector_tools(db: Any, connector: dict[str, Any]) -> list[Any]:
+    validate_connector_egress(connector)
+    transport = str(connector.get("transport") or "").strip().lower()
+    if transport == "stdio":
+        params = _build_stdio_params(connector)
+        return await mcp_stdio_list_tools(params)
+    if transport == "streamable_http":
+        from duckclaw.forge.skills.mcp_http_util import mcp_http_list_tools
+
+        url = str(connector.get("endpoint_url") or "").strip()
+        return await mcp_http_list_tools(url, headers=_http_headers(db, connector))
+    raise ValueError(f"unsupported transport: {transport}")
+
+
+async def _call_connector_tool(
+    db: Any,
+    connector: dict[str, Any],
+    tool_name: str,
+    arguments: dict[str, Any],
+) -> str:
+    validate_connector_egress(connector)
+    transport = str(connector.get("transport") or "").strip().lower()
+    if transport == "stdio":
+        params = _build_stdio_params(connector)
+        return await mcp_stdio_call_tool(params, tool_name, arguments)
+    if transport == "streamable_http":
+        from duckclaw.forge.skills.mcp_http_util import mcp_http_call_tool
+
+        url = str(connector.get("endpoint_url") or "").strip()
+        return await mcp_http_call_tool(
+            url,
+            tool_name,
+            arguments,
+            headers=_http_headers(db, connector),
+        )
+    raise ValueError(f"unsupported transport: {transport}")
+
+
+def _wrap_connector_tool(
+    db: Any,
+    connector: dict[str, Any],
+    tool_spec: Any,
+) -> Optional[Any]:
+    from duckclaw.forge.skills.mcp_tool_args_schema import mcp_input_schema_to_args_model
+    from langchain_core.tools import StructuredTool
+
+    remote_name = getattr(tool_spec, "name", None) or str(tool_spec)
+    if not tool_allowed_by_policy(connector, str(remote_name)):
+        return None
+
+    public_name = _public_tool_name(str(connector.get("connector_id") or ""), str(remote_name))
+    raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
+    args_model = mcp_input_schema_to_args_model(
+        raw_schema if isinstance(raw_schema, dict) else None,
+        public_name,
+    )
+
+    def _sync_call(**kwargs: Any) -> str:
+        validated = args_model(**kwargs)
+        payload = validated.model_dump(exclude_none=True)
+        raw = _run_async_from_sync(_call_connector_tool(db, connector, str(remote_name), payload))
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict) and parsed.get("error"):
+                return raw
+        except json.JSONDecodeError:
+            pass
+        return raw
+
+    desc = getattr(tool_spec, "description", None) or f"MCP {connector.get('display_name')}: {remote_name}"
+    return StructuredTool.from_function(
+        _sync_call,
+        name=public_name,
+        description=str(desc),
+        args_schema=args_model,
+        infer_schema=False,
+    )
+
+
+async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: str = "default") -> list[Any]:
+    if not _mcp_available():
+        return []
+    connectors = list_worker_mcp_connectors(db, worker_uid=worker_uid, tenant_id=tenant_id)
+    tools: list[Any] = []
+    for connector in connectors:
+        try:
+            specs = await _list_connector_tools(db, connector)
+        except Exception as exc:
+            _log.warning(
+                "MCP connector list_tools failed connector=%s: %s",
+                connector.get("connector_id"),
+                exc,
+            )
+            continue
+        for spec in specs:
+            wrapped = _wrap_connector_tool(db, connector, spec)
+            if wrapped is not None:
+                tools.append(wrapped)
+    return tools
+
+
+def register_worker_mcp_connector_tools(
+    tools_list: list[Any],
+    *,
+    db: Any,
+    worker_id: str,
+    tenant_id: str = "default",
+) -> None:
+    if db is None or not worker_id:
+        return
+    worker_uid = resolve_worker_uid(db, worker_id=worker_id, tenant_id=tenant_id)
+    if not worker_uid:
+        return
+    try:
+        connector_tools = _run_async_from_sync(
+            connect_worker_mcp_connectors(db, worker_uid=worker_uid, tenant_id=tenant_id)
+        )
+        if connector_tools:
+            tools_list.extend(connector_tools)
+            _log.info(
+                "MCP connectors registered %d tools for worker=%s",
+                len(connector_tools),
+                worker_id,
+            )
+    except Exception:
+        _log.warning("register_worker_mcp_connector_tools failed worker=%s", worker_id, exc_info=True)
+
+
+async def test_mcp_connector(db: Any, connector: dict[str, Any]) -> dict[str, Any]:
+    specs = await _list_connector_tools(db, connector)
+    tools: list[dict[str, str]] = []
+    for spec in specs:
+        name = str(getattr(spec, "name", "") or spec)
+        if not tool_allowed_by_policy(connector, name):
+            continue
+        desc = str(getattr(spec, "description", "") or "")
+        tools.append({"name": name, "description": desc})
+    return {
+        "ok": True,
+        "connector_id": str(connector.get("connector_id") or ""),
+        "transport": str(connector.get("transport") or ""),
+        "tool_count": len(tools),
+        "tools": tools[:50],
+    }

@@ -4,9 +4,8 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
-import type { AdminHealth, OverviewMetrics } from '@/types/admin';
+import type { OverviewMetrics } from '@/types/admin';
 import { MessageCircle, PlusCircle, Users } from 'lucide-react';
-import { OverviewOpsPanel } from '@/components/admin/OverviewOpsPanel';
 import { PlatformQuickStart } from '@/components/admin/PlatformQuickStart';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { useAuthStore } from '@/store/authStore';
@@ -18,7 +17,6 @@ const TokenUsageChart = dynamic(() => import('@/components/dashboard/TokenUsageC
 export default function OverviewPage() {
   const { usuario } = useAuthStore();
   const isAdmin = isAdminRole(usuario?.rol);
-  const [health, setHealth] = useState<AdminHealth | null>(null);
   const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
@@ -26,7 +24,6 @@ export default function OverviewPage() {
   useEffect(() => {
     adminService
       .health()
-      .then(setHealth)
       .catch((e) =>
         setError(friendlyGatewayError(e instanceof Error ? e.message : 'Sin conexión'))
       );
@@ -39,25 +36,6 @@ export default function OverviewPage() {
         )
       );
   }, []);
-
-  const reloadHealth = () => {
-    setError(null);
-    setMetricsError(null);
-    adminService
-      .health()
-      .then(setHealth)
-      .catch((e) =>
-        setError(friendlyGatewayError(e instanceof Error ? e.message : 'Sin conexión'))
-      );
-    adminService
-      .getOverviewMetrics()
-      .then(setMetrics)
-      .catch((e) =>
-        setMetricsError(
-          e instanceof Error ? e.message : 'No se pudieron cargar las métricas'
-        )
-      );
-  };
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
@@ -89,9 +67,6 @@ export default function OverviewPage() {
         </>
       )}
 
-      {isAdmin && (
-        <OverviewOpsPanel gatewayStale={health != null && health.api_revision !== 2} />
-      )}
     </div>
   );
 }

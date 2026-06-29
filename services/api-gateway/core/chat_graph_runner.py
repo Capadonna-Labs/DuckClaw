@@ -60,8 +60,10 @@ async def run_chat_graph(
                 from duckclaw.commands.context_fold_store import save_context_fold_summary
                 from duckclaw.commands.context_summarize import execute_summarize_with_meta
                 from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+                from duckclaw.graphs.conversation_traces import append_context_fold_conversation_trace
                 from core.chat_history import redis_save_chat_history
 
+                t_summarize = time.monotonic()
                 vpath = (prepared.vault_db_path or "").strip()
                 fly_db = GatewayDbEphemeralReadonly(vpath) if vpath else None
                 sum_meta: dict[str, Any] = {}
@@ -86,8 +88,9 @@ async def run_chat_graph(
                     )
                     cmd_reply = f"⚠️ Error al compactar: {exc}"
                 vault_summary = (sum_meta.get("summary_for_vault") or "").strip()
+                vault_saved = False
                 if vault_summary and vpath:
-                    save_context_fold_summary(
+                    vault_saved = save_context_fold_summary(
                         vpath,
                         session_id,
                         vault_summary,
@@ -105,13 +108,33 @@ async def run_chat_graph(
                         session_id,
                         kept_history,
                     )
+                elapsed_summarize = int((time.monotonic() - t_summarize) * 1000)
                 ctx_tokens = sum_meta.get("context_estimated_tokens")
+                trace_status = "SUCCESS" if not str(cmd_reply).startswith("⚠️") else "FAILED"
+                try:
+                    append_context_fold_conversation_trace(
+                        session_id,
+                        message,
+                        cmd_reply,
+                        worker_id=worker_id,
+                        elapsed_ms=elapsed_summarize,
+                        status=trace_status,
+                        context_estimated_tokens=int(ctx_tokens)
+                        if isinstance(ctx_tokens, (int, float))
+                        else None,
+                        messages_before=len(prepared.history_for_model or []),
+                        kept_history=kept_history if isinstance(kept_history, list) else None,
+                        summary_chars=len(vault_summary) if vault_summary else None,
+                        vault_saved=vault_saved if vault_summary else None,
+                    )
+                except Exception:
+                    pass
                 return (
                     {
                         "response": cmd_reply,
                         "session_id": session_id,
                         "worker_id": worker_id,
-                        "elapsed_ms": 0,
+                        "elapsed_ms": elapsed_summarize,
                         "context_estimated_tokens": int(ctx_tokens)
                         if isinstance(ctx_tokens, (int, float))
                         else None,

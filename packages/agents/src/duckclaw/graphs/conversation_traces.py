@@ -299,3 +299,96 @@ def append_conversation_trace(
                 f.write(line)
         except Exception:
             pass
+
+
+def append_context_fold_conversation_trace(
+    session_id: str,
+    user_message: str,
+    assistant_reply: str,
+    *,
+    worker_id: Optional[str] = None,
+    elapsed_ms: Optional[int] = None,
+    status: str = "SUCCESS",
+    context_estimated_tokens: Optional[int] = None,
+    messages_before: Optional[int] = None,
+    kept_history: Optional[list[dict[str, Any]]] = None,
+    summary_chars: Optional[int] = None,
+    vault_saved: Optional[bool] = None,
+) -> None:
+    """
+    Registra en el datalake un turno sintético de compactación de contexto (/summarize).
+
+    Conserva métricas pre/post fold para auditoría SFT sin depender del invoke LLM completo.
+    """
+    if os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES", "true").strip().lower() not in (
+        "true",
+        "1",
+        "yes",
+    ):
+        return
+
+    path = _path_for_today_utc()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ts_str = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    user_content = (user_message or "/summarize")[:4096]
+    assistant_content = sanitize_worker_reply_text(assistant_reply or "")[:8192]
+    wid = (worker_id or "").strip()[:64] if worker_id else None
+    kept = list(kept_history) if isinstance(kept_history, list) else []
+    messages_after = len(kept) if kept else None
+
+    fold_meta: dict[str, Any] = {
+        "command": "/summarize",
+    }
+    if isinstance(context_estimated_tokens, (int, float)) and context_estimated_tokens >= 0:
+        fold_meta["context_estimated_tokens"] = int(context_estimated_tokens)
+    if isinstance(messages_before, int) and messages_before >= 0:
+        fold_meta["messages_before"] = messages_before
+    if messages_after is not None:
+        fold_meta["messages_after"] = messages_after
+    if isinstance(summary_chars, int) and summary_chars >= 0:
+        fold_meta["summary_chars"] = summary_chars
+    if vault_saved is not None:
+        fold_meta["vault_saved"] = bool(vault_saved)
+
+    fmt = _get_trace_format()
+    if fmt == "grpo":
+        record: dict[str, Any] = {
+            "event": "context_fold",
+            "prompt": [
+                {"role": "user", "content": user_content},
+            ],
+            "reward_metadata": {
+                "worker_id": wid or "",
+                "context_fold": fold_meta,
+            },
+            "session_id": (session_id or "")[:128],
+            "timestamp": ts_str,
+            "elapsed_ms": int(elapsed_ms) if elapsed_ms is not None else None,
+            "status": (status or "SUCCESS").upper()[:32],
+            "context_fold": fold_meta,
+        }
+        if wid:
+            record["worker_id"] = wid
+    else:
+        record = {
+            "event": "context_fold",
+            "messages": [
+                {"role": "user", "content": user_content},
+                {"role": "assistant", "content": assistant_content},
+            ],
+            "session_id": (session_id or "")[:128],
+            "timestamp": ts_str,
+            "elapsed_ms": int(elapsed_ms) if elapsed_ms is not None else None,
+            "status": (status or "SUCCESS").upper()[:32],
+            "context_fold": fold_meta,
+        }
+        if wid:
+            record["worker_id"] = wid
+
+    line = json.dumps(record, ensure_ascii=False) + "\n"
+    with _lock:
+        try:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except Exception:
+            pass

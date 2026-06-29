@@ -50,7 +50,7 @@ def load_context_fold_summary(vault_db_path: str, chat_id: str) -> str:
     """
     Lee el resumen compactado previo desde ``agent_config`` de la bóveda.
 
-    Econofísica: estado narrativo condensado del hilo, rehidratado antes del fold.
+    Se rehidrata antes del fold manual o automático.
     """
     if not context_fold_persist_enabled():
         return ""

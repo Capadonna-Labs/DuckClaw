@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import shutil
 import subprocess
 from datetime import datetime
@@ -334,6 +335,10 @@ def cmd_up(
 
     # —— 4/6 Stack ——
     typer.secho("[4/6] Gateway + DB-Writer (PM2)", fg=typer.colors.BLUE, bold=True)
+    if platform.system() == "Windows":
+        from duckops.prerequisites import augment_path_for_windows_tools
+
+        augment_path_for_windows_tools()
     if not _run_serve_stack(root, typer.echo):
         typer.secho("serve falló.", fg=typer.colors.RED)
         raise typer.Exit(1)

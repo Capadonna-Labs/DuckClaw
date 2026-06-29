@@ -58,3 +58,28 @@ def test_upsert_mcp_connector_command_registered() -> None:
         preset_id="higgsfield",
     )
     assert cmd.command_type == "upsert_mcp_connector"
+
+
+def test_ensure_admin_mcp_connectors_schema_skips_migrations_on_read_only() -> None:
+    from duckclaw.admin_mcp_connectors import ensure_admin_mcp_connectors_schema
+
+    class _RoDb:
+        _read_only = True
+
+        def execute(self, sql: str) -> None:
+            raise AssertionError(f"read-only path must not execute DDL: {sql!r}")
+
+    ensure_admin_mcp_connectors_schema(_RoDb())
+
+
+def test_list_mcp_connectors_accepts_list_from_duckclaw_execute() -> None:
+    from duckclaw.admin_mcp_connectors import list_mcp_connectors
+
+    class _Db:
+        _read_only = True
+
+        def execute(self, sql: str, params: list[Any] | None = None) -> list[tuple[Any, ...]]:
+            assert "admin_mcp_connectors" in sql
+            return []
+
+    assert list_mcp_connectors(_Db(), tenant_id="default") == []

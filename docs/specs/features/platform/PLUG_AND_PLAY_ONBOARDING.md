@@ -23,11 +23,12 @@ Un clon del monorepo debe llevar a un **stack local funcional** (gateway + DB-wr
 
 ## Flujo recomendado (seguro / probable)
 
-Orden canónico para un dev nuevo en **macOS o Linux**:
+Orden canónico para un dev nuevo en **macOS, Linux o Windows**:
 
 | Paso | Comando | Qué hace |
 |------|---------|----------|
-| **0** | `uv run duckops up` | **Todo en uno:** prerequisitos, wizard (1ª vez), migrate, PM2 stack, admin dev, navegador. |
+| **0** | `./duckops-up.sh` o `.\duckops-up.ps1` | **Todo en uno desde cero** (instala uv + `duckops up`). |
+| **0b** | `uv run duckops up` | Igual si `uv` ya está en PATH. |
 | 1 | (alternativa) `uv run duckops bootstrap --yes` | Solo prerequisitos + `uv sync`. |
 | 2 | `uv run duckops init` | TUI si no usaste `up` o reconfiguras. |
 | 3 | `uv run duckops smoke` | Verificar `/health` tras cambios. |
@@ -40,7 +41,7 @@ Alternativas:
 - `uv run duckops doctor --bootstrap --yes` — bootstrap + diagnóstico en un comando.
 - `uv run duckops bootstrap --check` — lista prerequisitos sin instalar.
 
-**Plataformas:** auto-install en macOS (Homebrew) y Linux (apt + sudo). Windows nativo: no soportado; usar WSL2.
+**Plataformas:** auto-install en macOS (Homebrew), Linux (apt + sudo) y Windows (winget + instaladores oficiales). WSL2 se trata como Linux.
 
 **Atajo clásico:** `uv run duckops init --classic` → `scripts/duckclaw_setup_wizard.py` (Rich).
 

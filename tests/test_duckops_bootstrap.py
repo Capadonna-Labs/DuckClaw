@@ -91,3 +91,127 @@ def test_init_no_bootstrap_flag_skips_prereq(monkeypatch, tmp_path: Path) -> Non
     result = runner.invoke(app, ["init", "--no-bootstrap", "-C", str(tmp_path)])
     assert result.exit_code == 0, result.output
     assert called == []
+
+
+def test_ensure_windows_check_only_does_not_block(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("duckops.prerequisites.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "duckops.prerequisites.check_all",
+        lambda **_k: [
+            ToolCheck("uv", True, "0.5", "uv"),
+            ToolCheck("Redis", True, "pong", "redis://127.0.0.1:6379/0"),
+            ToolCheck("Node.js", True, "v20", "node"),
+            ToolCheck("npm", True, "10", "npm"),
+            ToolCheck("pnpm", True, "9", "pnpm"),
+            ToolCheck("PM2", True, "5", "pm2"),
+        ],
+    )
+    out: list[str] = []
+    ok = ensure_development_prerequisites(
+        tmp_path,
+        install=False,
+        assume_yes=False,
+        sync_python=False,
+        print_fn=out.append,
+    )
+    assert ok is True
+    assert any("[OK] uv" in line for line in out)
+
+
+def test_ensure_windows_install_with_yes_runs_uv_sync(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("duckops.prerequisites.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "duckops.prerequisites.check_uv",
+        lambda: ToolCheck("uv", True, "0.5", "uv"),
+    )
+    ok_tool = lambda name, ver="1", detail="ok": ToolCheck(name, True, ver, detail)
+    monkeypatch.setattr("duckops.prerequisites.check_redis", lambda *a, **k: ok_tool("Redis", "pong"))
+    monkeypatch.setattr("duckops.prerequisites.check_node", lambda: ok_tool("Node.js", "v20"))
+    monkeypatch.setattr("duckops.prerequisites.check_npm", lambda: ok_tool("npm", "10"))
+    monkeypatch.setattr("duckops.prerequisites.check_pnpm", lambda: ok_tool("pnpm", "9"))
+    monkeypatch.setattr("duckops.prerequisites.check_pm2", lambda: ok_tool("PM2", "5"))
+    monkeypatch.setattr(
+        "duckops.prerequisites.check_all",
+        lambda **_k: [
+            ok_tool("uv", "0.5"),
+            ok_tool("Redis", "pong"),
+            ok_tool("Node.js", "v20"),
+            ok_tool("npm", "10"),
+            ok_tool("pnpm", "9"),
+            ok_tool("PM2", "5"),
+        ],
+    )
+    synced: list[Path] = []
+
+    def _fake_sync(repo_root: Path, print_fn) -> bool:
+        synced.append(repo_root)
+        return True
+
+    monkeypatch.setattr("duckops.prerequisites.run_uv_sync", _fake_sync)
+    out: list[str] = []
+    ok = ensure_development_prerequisites(
+        tmp_path,
+        install=True,
+        assume_yes=True,
+        sync_python=True,
+        print_fn=out.append,
+    )
+    assert ok is True
+    assert synced == [tmp_path]
+
+
+def test_install_uv_windows_uses_powershell(monkeypatch) -> None:
+    from duckops.prerequisites import install_uv
+
+    monkeypatch.setattr("duckops.prerequisites.platform.system", lambda: "Windows")
+    monkeypatch.setattr("duckops.prerequisites._winget_path", lambda: None)
+    monkeypatch.setattr("duckops.prerequisites.shutil.which", lambda _name: None)
+    calls: list[list[str]] = []
+
+    def _fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        return 0
+
+    monkeypatch.setattr("duckops.prerequisites._run_interactive", _fake_run)
+    monkeypatch.setattr("duckops.prerequisites._augment_path_for_uv", lambda: None)
+    assert install_uv(lambda _m: None) is False
+    assert calls and calls[0][0] == "powershell"
+
+
+def test_install_uv_windows_prefers_winget(monkeypatch) -> None:
+    from duckops.prerequisites import install_uv
+
+    winget_calls: list[str] = []
+    which_calls = {"n": 0}
+
+    def _fake_winget(package_id, print_fn):
+        winget_calls.append(package_id)
+        return True
+
+    def _which(name: str):
+        if name != "uv":
+            return None
+        which_calls["n"] += 1
+        return "uv" if which_calls["n"] > 1 else None
+
+    monkeypatch.setattr("duckops.prerequisites.platform.system", lambda: "Windows")
+    monkeypatch.setattr("duckops.prerequisites._winget_path", lambda: "winget")
+    monkeypatch.setattr("duckops.prerequisites._winget_install", _fake_winget)
+    monkeypatch.setattr("duckops.prerequisites.shutil.which", _which)
+    monkeypatch.setattr("duckops.prerequisites._augment_path_for_uv", lambda: None)
+
+    assert install_uv(lambda _m: None) is True
+    assert winget_calls == ["astral-sh.uv"]
+
+
+def test_ensure_uv_available_skips_install_when_present(monkeypatch) -> None:
+    from duckops.prerequisites import ensure_uv_available
+
+    monkeypatch.setattr("duckops.prerequisites.shutil.which", lambda name: "uv" if name == "uv" else None)
+    called: list[bool] = []
+    monkeypatch.setattr(
+        "duckops.prerequisites.install_uv",
+        lambda print_fn: called.append(True) or True,
+    )
+    assert ensure_uv_available() is True
+    assert called == []

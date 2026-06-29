@@ -26,7 +26,7 @@ app.add_typer(
 app.add_typer(
     bootstrap.app,
     name="bootstrap",
-    help="Instala prerequisitos: uv, Redis, Node, PM2 y uv sync (macOS/Linux).",
+    help="Instala prerequisitos: uv, Redis, Node, PM2 y uv sync (macOS/Linux/Windows).",
 )
 app.add_typer(
     doctor.app,

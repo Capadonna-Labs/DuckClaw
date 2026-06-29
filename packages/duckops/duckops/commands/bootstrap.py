@@ -36,7 +36,7 @@ def cmd_bootstrap(
         help="No ejecutar uv sync tras instalar.",
     ),
 ) -> None:
-    """Verifica e instala uv, Redis, Node.js, npm y PM2 (macOS/Linux)."""
+    """Verifica e instala uv, Redis, Node.js, npm y PM2 (macOS/Linux/Windows)."""
     if ctx.invoked_subcommand is not None:
         return
 

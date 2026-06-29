@@ -1,14 +1,14 @@
 -------- PARA LEVANTAR EL SISTEMA --------
 
-./duckops-up.sh                            # macOS/Linux/WSL — instala uv si falta
-.\duckops-up.ps1                           # Windows PowerShell — instala uv si falta
+install.cmd                                # Windows: doble clic en el Explorador (o .\install.cmd)
+./duckops-up.sh                            # macOS / Linux / WSL
 
-uv run duckops up                          # si ya tienes uv: prereqs + migrate + PM2 + admin
+uv run duckops up                          # si ya tienes uv
 uv run duckops doctor --strict
-uv run duckops configure                   # primera vez o cambio de .env
+uv run duckops configure
 
 uv run duckops down --all
-uv run duckclaw-migrate                    # tras down si hay lock DuckDB
+uv run duckclaw-migrate
 uv run duckops up
 
 --------- INTERFAZ GRAFICA ----------

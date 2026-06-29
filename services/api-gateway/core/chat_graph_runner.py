@@ -6,6 +6,7 @@ import logging
 import os
 import time
 import traceback
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
@@ -52,6 +53,72 @@ async def run_chat_graph(
     skip_lock = prepared.skip_session_lock
     async with maybe_chat_lock_for_request(redis_client, session_id, skip_lock):
         if message.startswith("/"):
+            from duckclaw.graphs.on_the_fly_commands import parse_command
+
+            cmd_name, cmd_args = parse_command(message)
+            if cmd_name == "summarize":
+                from duckclaw.commands.context_fold_store import save_context_fold_summary
+                from duckclaw.commands.context_summarize import execute_summarize_with_meta
+                from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+                from core.chat_history import redis_save_chat_history
+
+                vpath = (prepared.vault_db_path or "").strip()
+                fly_db = GatewayDbEphemeralReadonly(vpath) if vpath else None
+                sum_meta: dict[str, Any] = {}
+                cmd_reply = ""
+                try:
+                    if vpath:
+                        Path(vpath).parent.mkdir(parents=True, exist_ok=True)
+                    cmd_reply, sum_meta = execute_summarize_with_meta(
+                        fly_db,
+                        session_id,
+                        cmd_args,
+                        tenant_id=prepared.tenant_id,
+                        history=prepared.history_for_model,
+                        vault_db_path=vpath or None,
+                        worker_id=worker_id,
+                    )
+                except Exception as exc:
+                    _gateway_log.error(
+                        "summarize command failed chat=%s: %s",
+                        format_chat_id_for_terminal(session_id),
+                        exc,
+                    )
+                    cmd_reply = f"⚠️ Error al compactar: {exc}"
+                vault_summary = (sum_meta.get("summary_for_vault") or "").strip()
+                if vault_summary and vpath:
+                    save_context_fold_summary(
+                        vpath,
+                        session_id,
+                        vault_summary,
+                        tenant_id=prepared.tenant_id,
+                    )
+                kept_history = sum_meta.get("kept_history")
+                if (
+                    redis_client is not None
+                    and isinstance(kept_history, list)
+                    and kept_history
+                ):
+                    await redis_save_chat_history(
+                        redis_client,
+                        prepared.tenant_id,
+                        session_id,
+                        kept_history,
+                    )
+                ctx_tokens = sum_meta.get("context_estimated_tokens")
+                return (
+                    {
+                        "response": cmd_reply,
+                        "session_id": session_id,
+                        "worker_id": worker_id,
+                        "elapsed_ms": 0,
+                        "context_estimated_tokens": int(ctx_tokens)
+                        if isinstance(ctx_tokens, (int, float))
+                        else None,
+                    },
+                    time.monotonic(),
+                )
+
             fly_response = await invoke_legacy_fly_command(
                 message=message,
                 session_id=session_id,

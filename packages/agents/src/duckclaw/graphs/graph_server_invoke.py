@@ -93,6 +93,16 @@ async def _ainvoke(
     _ich, _ilbl = resolve_integration_label(integration_channel, chat_id=chat_id)
     state["integration_channel"] = _ich
     state["integration_label"] = _ilbl
+    _vault = (vault_db_path or "").strip()
+    if _vault:
+        try:
+            from duckclaw.commands.context_fold_store import load_context_fold_summary
+
+            _fold = load_context_fold_summary(_vault, chat_id)
+            if _fold:
+                state["analytical_summary"] = _fold
+        except Exception:
+            pass
     loop = asyncio.get_event_loop()
 
     trace_cfg = get_tracing_config(tenant_id, "manager", chat_id)
@@ -122,9 +132,25 @@ async def _ainvoke(
         "sandbox_photo_base64",
         "visual_artifact_id",
         "outbound_image_paths",
+        "analytical_summary",
     ):
         if _k in result:
             out[_k] = result[_k]
+    _vault_save = (vault_db_path or "").strip()
+    if _vault_save:
+        _summary = (result.get("analytical_summary") or "").strip()
+        if _summary:
+            try:
+                from duckclaw.commands.context_fold_store import save_context_fold_summary
+
+                save_context_fold_summary(
+                    _vault_save,
+                    chat_id,
+                    _summary,
+                    tenant_id=tenant_id,
+                )
+            except Exception:
+                pass
     return out
 
 

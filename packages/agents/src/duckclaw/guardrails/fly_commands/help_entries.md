@@ -13,6 +13,7 @@
 /models|Listar modelos disponibles de un provider (ej. gemini)
 /skills <worker_id>|Herramientas del template
 /forget|Borrar historial de la conversación
+/summarize|Compactar hilo manualmente (context monitor → bóveda)
 /context|on|off (historial); en Telegram: --add / --summary (memoria semántica)
 /comfyui|Proveedor visual: --provider local|fal (ComfyUI Mac vs Fal.ai cloud)
 /sandbox|Toggle ejecución de código (true|false) para esta sesión

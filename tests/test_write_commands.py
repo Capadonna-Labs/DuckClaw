@@ -1273,6 +1273,12 @@ class TestCommandHandlers:
         )
         con.execute("INSERT INTO agent_config (key, value) VALUES ('chat_12345_last_audit', '{\"latency_ms\": 1}')")
         con.execute("INSERT INTO agent_config (key, value) VALUES ('chat_default_last_audit', '{\"latency_ms\": 2}')")
+        con.execute(
+            "INSERT INTO agent_config (key, value) VALUES ('chat_12345_context_fold_summary', 'folded')"
+        )
+        con.execute(
+            "INSERT INTO agent_config (key, value) VALUES ('chat_default_context_fold_summary', 'folded')"
+        )
 
         telegram_payload = {
             "command_type": "forget_chat_state",
@@ -1300,7 +1306,10 @@ class TestCommandHandlers:
         ).fetchone()[0]
         audit_rows = con.execute(
             "SELECT key, value FROM agent_config "
-            "WHERE key IN ('chat_12345_last_audit', 'chat_default_last_audit') "
+            "WHERE key IN ("
+            "'chat_12345_last_audit', 'chat_default_last_audit', "
+            "'chat_12345_context_fold_summary', 'chat_default_context_fold_summary'"
+            ") "
             "ORDER BY key"
         ).fetchall()
 

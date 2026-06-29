@@ -11,6 +11,7 @@ from duckclaw.commands.chat_state import (
     get_chat_state,
     set_chat_state,
 )
+from duckclaw.commands.context_summarize import execute_summarize
 from duckclaw.commands.comfyui import execute_comfyui_provider
 from duckclaw.commands.crons import execute_crons_schedule
 from duckclaw.commands.fly_misc import (
@@ -140,6 +141,16 @@ def _dispatch_fly_command(
         return execute_forget(db, chat_id, tenant_id=tenant_id)
     if name == "context":
         return execute_context_toggle(db, chat_id, args, tenant_id=tenant_id)
+    if name == "summarize":
+        resolved_wid = (entry_worker_id or "").strip() or get_worker_id_for_chat(db, chat_id)
+        return execute_summarize(
+            db,
+            chat_id,
+            args,
+            tenant_id=tenant_id,
+            vault_db_path=str(getattr(db, "_path", "") or "").strip() or None,
+            worker_id=resolved_wid,
+        )
     if name == "comfyui":
         return execute_comfyui_provider(db, chat_id, args, tenant_id=tenant_id)
     if name in ("sandbox", "sandox"):

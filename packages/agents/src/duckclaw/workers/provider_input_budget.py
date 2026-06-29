@@ -65,17 +65,93 @@ def _runtime_budget_int(
     return default
 
 
+def context_prune_globally_enabled() -> bool:
+    """Context monitor activo por defecto; desactivar con DUCKCLAW_CONTEXT_PRUNE_ENABLED=0."""
+    raw = (os.environ.get("DUCKCLAW_CONTEXT_PRUNE_ENABLED") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+def context_prune_max_estimated_tokens() -> int:
+    """
+    Umbral de compactación LLM en tokens estimados (chars/4).
+
+    Configurable en millones vía ``DUCKCLAW_CONTEXT_PRUNE_MAX_TOKENS_M`` (default 4).
+    """
+    raw_m = (os.environ.get("DUCKCLAW_CONTEXT_PRUNE_MAX_TOKENS_M") or "4").strip()
+    try:
+        millions = float(raw_m)
+    except ValueError:
+        millions = 4.0
+    millions = max(0.5, min(millions, 32.0))
+    return int(millions * 1_000_000)
+
+
+def context_prune_max_messages_default() -> int:
+    """Alto por defecto para que el fold dispare casi solo por tokens, no por conteo de msgs."""
+    return _runtime_budget_int(
+        "context_prune.max_messages",
+        env_key="DUCKCLAW_CONTEXT_PRUNE_MAX_MESSAGES",
+        default=10_000,
+        minimum=2,
+        maximum=100_000,
+    )
+
+
+def context_prune_keep_last_messages_default() -> int:
+    raw = (os.environ.get("DUCKCLAW_CONTEXT_PRUNE_KEEP_LAST_MESSAGES") or "6").strip()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return 6
+
+
+def context_prune_tool_content_max_chars_default() -> int:
+    raw = (os.environ.get("DUCKCLAW_CONTEXT_PRUNE_TOOL_MAX_CHARS") or "8000").strip()
+    try:
+        return max(500, int(raw))
+    except ValueError:
+        return 8000
+
+
 def normalized_context_pruning(spec: Any) -> dict[str, Any]:
+    """
+    Política de context monitor: ON por defecto (env global), opt-out en manifest.
+
+    ``context_pruning: { enabled: false }`` en manifest desactiva solo ese worker.
+    """
     raw = getattr(spec, "context_pruning_config", None)
-    if not isinstance(raw, dict) or not raw.get("enabled"):
+    manifest = raw if isinstance(raw, dict) else {}
+    if manifest.get("enabled") is False:
         return {}
+    if not context_prune_globally_enabled():
+        return {}
+
+    cfg = {
+        "enabled": True,
+        "max_messages": context_prune_max_messages_default(),
+        "max_estimated_tokens": context_prune_max_estimated_tokens(),
+        "keep_last_messages": context_prune_keep_last_messages_default(),
+        "tool_content_max_chars": context_prune_tool_content_max_chars_default(),
+        "sandbox_heartbeat": bool(manifest.get("sandbox_heartbeat", True)),
+    }
+    if manifest.get("enabled") is True:
+        for key in (
+            "max_messages",
+            "max_estimated_tokens",
+            "keep_last_messages",
+            "tool_content_max_chars",
+            "sandbox_heartbeat",
+        ):
+            if key in manifest:
+                cfg[key] = manifest[key]
+
     return {
         "enabled": True,
-        "max_messages": max(2, int(raw.get("max_messages", 10))),
-        "max_estimated_tokens": max(500, int(raw.get("max_estimated_tokens", 4000))),
-        "keep_last_messages": max(1, int(raw.get("keep_last_messages", 3))),
-        "tool_content_max_chars": max(500, int(raw.get("tool_content_max_chars", 8000))),
-        "sandbox_heartbeat": bool(raw.get("sandbox_heartbeat", True)),
+        "max_messages": max(2, int(cfg["max_messages"])),
+        "max_estimated_tokens": max(500, int(cfg["max_estimated_tokens"])),
+        "keep_last_messages": max(1, int(cfg["keep_last_messages"])),
+        "tool_content_max_chars": max(500, int(cfg["tool_content_max_chars"])),
+        "sandbox_heartbeat": bool(cfg["sandbox_heartbeat"]),
     }
 
 
@@ -250,6 +326,8 @@ __all__ = [
     "apply_mlx_message_budget",
     "apply_provider_input_budget",
     "configure_provider_budget_runtime_db_provider",
+    "context_prune_globally_enabled",
+    "context_prune_max_estimated_tokens",
     "estimate_tokens_from_messages",
     "groq_max_estimated_input_tokens",
     "groq_tool_message_max_chars",

@@ -217,30 +217,47 @@ def execute_folder_sync(
     return result
 
 
-def _open_hub_db() -> Any | None:
+def _is_duckdb_lock_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "lock" in msg or "conflicting" in msg
+
+
+def _vault_write_session_active() -> bool:
+    try:
+        from duckclaw.forge.skills.report_engine_hub_context import get_report_engine_hub_db
+
+        reuse = get_report_engine_hub_db()
+        if reuse is None:
+            return False
+        return not bool(getattr(reuse, "_read_only", True))
+    except Exception:
+        return False
+
+
+def _open_hub_db() -> tuple[Any | None, bool]:
+    """Return (connection, should_close). Reuses active hub without closing it."""
     from duckclaw.gateway_db import get_gateway_db_path
 
     path = (get_gateway_db_path() or "").strip()
     if not path:
-        return None
+        return None, False
     try:
         from duckclaw.forge.skills.report_engine_hub_context import get_report_engine_hub_db
         from duckclaw.state_delta_vault import _same_vault_db_path
 
         reuse = get_report_engine_hub_db()
         if reuse is not None and _same_vault_db_path(str(getattr(reuse, "_path", "") or ""), path):
-            return reuse
+            return reuse, False
     except Exception:
         pass
     try:
         from duckclaw import DuckClaw
 
-        return DuckClaw(path, read_only=True)
+        return DuckClaw(path, read_only=True), True
     except Exception as exc:
-        msg = str(exc).lower()
-        if "lock" in msg or "conflicting" in msg:
+        if _is_duckdb_lock_error(exc):
             _log.debug("knowledge auto-sync: hub db ocupado, omitiendo ciclo: %s", exc)
-            return None
+            return None, False
         raise
 
 
@@ -274,7 +291,10 @@ def sync_file_after_write(
     if not auto_sync_enabled():
         return {"synced": False, "reason": "auto_sync_disabled"}
 
-    db = _open_hub_db()
+    if _vault_write_session_active():
+        return {"synced": False, "reason": "vault_write_session_active"}
+
+    db, close_db = _open_hub_db()
     if db is None:
         return {"synced": False, "reason": "no_hub_db"}
 
@@ -327,10 +347,11 @@ def sync_file_after_write(
             )
         return {"synced": bool(results), "sources": results}
     finally:
-        try:
-            db.close()
-        except Exception:
-            pass
+        if close_db:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 def _sync_single_file_source(
@@ -393,7 +414,11 @@ def run_auto_sync_poll(*, compute_embeddings: bool = True) -> list[SyncResult]:
     if not auto_sync_enabled():
         return []
 
-    db = _open_hub_db()
+    if _vault_write_session_active():
+        _log.debug("knowledge auto-sync: vault RW en sesión activa, omitiendo ciclo")
+        return []
+
+    db, close_db = _open_hub_db()
     if db is None:
         return []
 
@@ -425,10 +450,18 @@ def run_auto_sync_poll(*, compute_embeddings: bool = True) -> list[SyncResult]:
                     )
                 outcomes.append(outcome)
             except Exception as exc:
+                if _is_duckdb_lock_error(exc):
+                    _log.debug(
+                        "knowledge auto-sync deferred for %s (vault lock): %s",
+                        source_id,
+                        exc,
+                    )
+                    continue
                 _log.warning("knowledge auto-sync failed for %s: %s", source_id, exc)
     finally:
-        try:
-            db.close()
-        except Exception:
-            pass
+        if close_db:
+            try:
+                db.close()
+            except Exception:
+                pass
     return outcomes

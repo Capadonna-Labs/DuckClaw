@@ -3,15 +3,20 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from duckclaw import db_write_queue
+from duckclaw.admin_user_profiles import ensure_profile_for_user
+from duckclaw.admin_worker_catalog import get_visible_worker_for_actor
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.write_commands import (
     DeactivateCatalogWorkerCommand,
     HardDeleteCatalogWorkerCommand,
     ReactivateCatalogWorkerCommand,
     UpdateCatalogWorkerFileCommand,
+    UpsertWorkerCommand,
 )
+from core.admin_identity import effective_actor_email, open_gateway_db
 from routers.admin_domains.template_lifecycle import (
     FileWriteBody,
     TemplateCreateBody,
@@ -26,6 +31,10 @@ from routers.admin_domains.template_lifecycle import (
 )
 
 router = APIRouter(prefix="/templates", tags=["admin-templates"])
+
+
+class TemplatePatchBody(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=128)
 
 
 def _problem(status_code: int, title: str, detail: str) -> HTTPException:
@@ -90,6 +99,40 @@ async def get_template(
         include_content=include_content,
         actor=actor,
     )
+
+
+@router.patch("/{worker_id}", dependencies=[Depends(require_admin_key)])
+async def patch_template(
+    worker_id: str,
+    body: TemplatePatchBody,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    wid = _template_worker_id(worker_id)
+    actor_email = effective_actor_email(actor)
+    with open_gateway_db(read_only=True) as db:
+        profile = ensure_profile_for_user(db, email=actor_email)
+        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+    if not worker:
+        raise _problem(404, "Worker no visible en catálogo", wid)
+    display_name = body.display_name.strip()
+    command = UpsertWorkerCommand(
+        tenant_id=str(profile.get("tenant_id") or worker.get("tenant_id") or "default"),
+        actor_email=str(profile.get("email") or actor_email),
+        worker_id=wid,
+        display_name=display_name,
+        source_kind=str(worker.get("source_kind") or "runtime"),
+        source_template_id=str(worker.get("source_template_id") or "default"),
+        visibility=str(worker.get("visibility") or "private"),
+    )
+    task_id = _enqueue_template_catalog_command(command)
+    _admin_audit(
+        "template.patch",
+        f"templates/{wid}",
+        f"display_name={display_name}",
+        actor=actor,
+        task_id=task_id,
+    )
+    return {"ok": True, "worker_id": wid, "display_name": display_name, "task_id": task_id}
 
 
 @router.put("/{worker_id}/files/{file_path:path}", dependencies=[Depends(require_admin_key)])

@@ -1,8 +1,14 @@
 import Link from 'next/link';
 import { PageShell } from '@/components/admin/PageShell';
-import { Cable, Circle, Database, Package, Terminal } from 'lucide-react';
+import { Cable, Circle, Database, Link2, Package, Terminal } from 'lucide-react';
 
 const MCP_ROUTES = [
+  {
+    href: "/mcp/connectors",
+    title: 'Conectores MCP',
+    description: 'Registry DB-first, Higgsfield, grants por worker.',
+    icon: Link2,
+  },
   {
     href: "/mcp/runtime",
     title: 'Estado runtime MCP',

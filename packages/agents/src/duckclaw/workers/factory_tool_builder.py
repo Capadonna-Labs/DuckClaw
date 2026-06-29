@@ -237,4 +237,15 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     from duckclaw.forge.skills.report_engine_bridge import register_report_engine_tools
 
     register_report_engine_tools(tools)
+    try:
+        from duckclaw.forge.skills.mcp_connector_bridge import register_worker_mcp_connector_tools
+
+        register_worker_mcp_connector_tools(
+            tools,
+            db=db,
+            worker_id=str(getattr(spec, "id", None) or getattr(spec, "name", "") or ""),
+            tenant_id=str(getattr(spec, "tenant_id", None) or "default"),
+        )
+    except Exception:
+        _log.warning("MCP connector tools registration skipped", exc_info=True)
     return tools

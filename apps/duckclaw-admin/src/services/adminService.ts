@@ -16,6 +16,54 @@ import type {
   WorkerCapabilitiesPayload,
 } from '@/types/admin';
 
+export type { TemplateSummary, TemplateDetail } from '@/types/admin';
+
+export interface McpConnectorSummary {
+  connector_id: string;
+  tenant_id: string;
+  display_name: string;
+  transport: string;
+  endpoint_url?: string;
+  launch_command?: string;
+  launch_args?: string[];
+  auth_kind: string;
+  has_auth: boolean;
+  tool_allowlist: string[];
+  tool_denylist: string[];
+  read_only: boolean;
+  egress_hosts: string[];
+  preset_id?: string;
+  enabled: boolean;
+  active: boolean;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface McpConnectorPreset {
+  preset_id: string;
+  display_name: string;
+  transport: string;
+  endpoint_url?: string;
+  launch_command?: string;
+  launch_args?: string[];
+  auth_kind: string;
+  read_only: boolean;
+  egress_hosts: string[];
+  tool_allowlist: string[];
+  tool_denylist: string[];
+  metadata?: Record<string, unknown>;
+}
+
+export interface McpConnectorTestResult {
+  ok: boolean;
+  connector_id: string;
+  transport: string;
+  tool_count: number;
+  tools: { name: string; description?: string }[];
+  error?: string;
+}
+
 export interface AuditEntry {
   ts: string;
   actor: string;
@@ -618,6 +666,15 @@ export const adminService = {
 
   getTemplate: (id: string) => adminFetch<TemplateDetail>(`/templates/${encodeURIComponent(id)}`),
 
+  patchTemplate: (workerId: string, body: { display_name: string }) =>
+    adminFetch<{ ok: boolean; worker_id: string; display_name: string; task_id?: string }>(
+      `/templates/${encodeURIComponent(workerId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }
+    ),
+
   getWorkerCapabilities: (workerId: string) =>
     adminFetchOptional<WorkerCapabilities>(
       `/workers/${encodeURIComponent(workerId)}/capabilities`
@@ -1195,6 +1252,52 @@ export const adminService = {
     adminFetch<{
       topologies: { id: string; label: string; description: string }[];
     }>('/catalog/topologies'),
+
+  listMcpConnectors: () =>
+    adminFetch<{ connectors: McpConnectorSummary[] }>('/mcp/connectors').then((r) => r.connectors),
+
+  listMcpConnectorPresets: () =>
+    adminFetch<{ presets: McpConnectorPreset[] }>('/mcp/connectors/presets').then((r) => r.presets),
+
+  createMcpConnector: (body: { preset_id: string; connector_id?: string; display_name?: string }) =>
+    adminFetch<{ ok: boolean; task_id: string; connector: McpConnectorSummary | null }>(
+      '/mcp/connectors',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }
+    ),
+
+  setMcpConnectorAuth: (connectorId: string, bearerToken: string) =>
+    adminFetch<{ ok: boolean; task_id: string }>(`/mcp/connectors/${encodeURIComponent(connectorId)}/auth`, {
+      method: 'POST',
+      body: JSON.stringify({ bearer_token: bearerToken }),
+    }),
+
+  testMcpConnector: (connectorId: string) =>
+    adminFetch<McpConnectorTestResult>(`/mcp/connectors/${encodeURIComponent(connectorId)}/test`, {
+      method: 'POST',
+    }),
+
+  grantMcpConnector: (connectorId: string, workerId: string) =>
+    adminFetch<{ ok: boolean; task_id: string; worker_id: string; worker_uid: string }>(
+      `/mcp/connectors/${encodeURIComponent(connectorId)}/grants`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ worker_id: workerId }),
+      }
+    ),
+
+  revokeMcpConnectorGrant: (connectorId: string, workerId: string) =>
+    adminFetch<{ ok: boolean; task_id: string }>(
+      `/mcp/connectors/${encodeURIComponent(connectorId)}/grants/${encodeURIComponent(workerId)}`,
+      { method: 'DELETE' }
+    ),
+
+  deactivateMcpConnector: (connectorId: string) =>
+    adminFetch<{ ok: boolean; task_id: string }>(`/mcp/connectors/${encodeURIComponent(connectorId)}`, {
+      method: 'DELETE',
+    }),
 
   getMcpCatalog: () =>
     adminFetch<{

@@ -29,6 +29,7 @@ def test_mcp_page_separates_runtime_tools_reference_and_stdio_sections() -> None
     tools = Path("apps/duckclaw-admin/src/app/(admin)/mcp/tools/page.tsx").read_text(encoding="utf-8")
     catalog = Path("apps/duckclaw-admin/src/app/(admin)/mcp/catalog/page.tsx").read_text(encoding="utf-8")
 
+    assert 'href: "/mcp/connectors"' in hub
     assert 'href: "/mcp/runtime"' in hub
     assert 'href: "/mcp/config"' in hub
     assert 'href: "/mcp/server"' in hub

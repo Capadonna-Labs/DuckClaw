@@ -11,6 +11,9 @@ import {
   knowledgeSourcePrimaryLabel,
   knowledgeSourceSecondaryLine,
 } from '@/components/knowledge/knowledgeSourceLabel';
+import { ProjectAgentsSection } from '@/components/projects/ProjectAgentsSection';
+import { useAuthStore } from '@/store/authStore';
+import { isAdminRole } from '@/lib/roles';
 
 type ProjectDetailResponse = Awaited<ReturnType<typeof adminService.getWorkspaceProject>>;
 
@@ -23,6 +26,8 @@ function fmt(value?: string): string {
 
 export default function ProjectDetailPage() {
   const { projectId } = useParams<{ projectId: string }>();
+  const { usuario } = useAuthStore();
+  const canWrite = isAdminRole(usuario?.rol);
   const [detail, setDetail] = useState<ProjectDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -186,20 +191,12 @@ export default function ProjectDetailPage() {
         )}
       </section>
 
-      <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-        <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Agentes asignados</h2>
-        {agents.length === 0 ? (
-          <p className="mt-3 text-sm text-gov-gray-500 dark:text-dark-muted">
-            Este proyecto aún no tiene agentes asignados.
-          </p>
-        ) : (
-          <div className="mt-4 grid gap-3">
-            {agents.map((agent) => (
-              <ProjectAgentCard key={`${agent.worker_uid}-${agent.worker_id}`} project={project} agent={agent} />
-            ))}
-          </div>
-        )}
-      </section>
+      <ProjectAgentsSection
+        project={project}
+        agents={agents}
+        canWrite={canWrite}
+        onChanged={load}
+      />
     </div>
   );
 }
@@ -244,38 +241,6 @@ function InfoCard({ label, value, mono = false }: { label: string; value: string
       <p className={`mt-1 text-sm font-bold text-gov-gray-900 dark:text-dark-text ${mono ? 'font-mono break-all' : ''}`}>
         {value || '—'}
       </p>
-    </div>
-  );
-}
-
-function ProjectAgentCard({
-  project,
-  agent,
-}: {
-  project: WorkspaceProjectSummary;
-  agent: NonNullable<WorkspaceProjectSummary['agents']>[number];
-}) {
-  return (
-    <div className="flex flex-col gap-3 rounded-2xl border border-gov-blue-50 p-4 dark:border-dark-border md:flex-row md:items-center md:justify-between">
-      <div>
-        <p className="font-black text-gov-gray-900 dark:text-dark-text">{agent.display_name || agent.worker_id}</p>
-        <p className="font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">{agent.worker_id}</p>
-        <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">Rol: {agent.role || 'member'}</p>
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <Link
-          href={`/templates/${encodeURIComponent(agent.worker_id)}?focus=system_prompt.md`}
-          className="rounded-xl border border-gov-blue-100 px-3 py-2 text-xs font-bold text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
-        >
-          Editar worker
-        </Link>
-        <Link
-          href={`/playground?worker=${encodeURIComponent(agent.worker_id)}&project=${encodeURIComponent(project.project_id)}`}
-          className="rounded-xl bg-gov-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-gov-blue-900"
-        >
-          Probar en Playground
-        </Link>
-      </div>
     </div>
   );
 }

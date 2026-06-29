@@ -6,7 +6,7 @@ import pytest
 
 
 def test_resolve_pm2_executable_prefers_cmd_on_windows(monkeypatch, tmp_path: Path) -> None:
-    from duckclaw.ops.providers.pm2 import pm2_argv, resolve_pm2_executable
+    from duckclaw.ops.toolchain import pm2_argv, resolve_pm2_executable
 
     npm_dir = tmp_path / "npm"
     npm_dir.mkdir()
@@ -16,8 +16,8 @@ def test_resolve_pm2_executable_prefers_cmd_on_windows(monkeypatch, tmp_path: Pa
     cmd.write_text("@echo pm2\n", encoding="utf-8")
 
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    monkeypatch.setattr("duckclaw.ops.providers.pm2.platform.system", lambda: "Windows")
-    monkeypatch.setattr("duckclaw.ops.providers.pm2.shutil.which", lambda _name: None)
+    monkeypatch.setattr("duckclaw.ops.toolchain.platform.system", lambda: "Windows")
+    monkeypatch.setattr("duckclaw.ops.toolchain.shutil.which", lambda _name: None)
 
     resolved = resolve_pm2_executable()
     assert resolved == str(cmd)
@@ -25,9 +25,12 @@ def test_resolve_pm2_executable_prefers_cmd_on_windows(monkeypatch, tmp_path: Pa
 
 
 def test_resolve_pm2_executable_unix_uses_which(monkeypatch) -> None:
-    from duckclaw.ops.providers.pm2 import resolve_pm2_executable
+    from duckclaw.ops.toolchain import resolve_pm2_executable
 
-    monkeypatch.setattr("duckclaw.ops.providers.pm2.platform.system", lambda: "Linux")
-    monkeypatch.setattr("duckclaw.ops.providers.pm2.shutil.which", lambda name: "/usr/bin/pm2" if name == "pm2" else None)
+    monkeypatch.setattr("duckclaw.ops.toolchain.platform.system", lambda: "Linux")
+    monkeypatch.setattr(
+        "duckclaw.ops.toolchain.shutil.which",
+        lambda name: "/usr/bin/pm2" if name == "pm2" else None,
+    )
 
     assert resolve_pm2_executable() == "/usr/bin/pm2"

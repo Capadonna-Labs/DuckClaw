@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import platform
 import shutil
 import subprocess
 from datetime import datetime
@@ -265,6 +264,12 @@ def cmd_up(
     typer.secho("🦆 DuckClaw up", fg=typer.colors.CYAN, bold=True)
     typer.echo(f"Repo: {root}\n")
 
+    from duckclaw.ops.ecosystem_pm2 import ensure_ecosystem_runtime
+    from duckclaw.ops.toolchain import refresh_session_path
+
+    refresh_session_path(repo_root=root)
+    ensure_ecosystem_runtime(root)
+
     from duckops.admin_dev_server import admin_login_url, resolve_admin_port, wait_admin_http
     from duckops.post_up import run_post_up_loop
     from duckops.prerequisites import ensure_development_prerequisites, platform_label
@@ -335,10 +340,8 @@ def cmd_up(
 
     # —— 4/6 Stack ——
     typer.secho("[4/6] Gateway + DB-Writer (PM2)", fg=typer.colors.BLUE, bold=True)
-    if platform.system() == "Windows":
-        from duckops.prerequisites import augment_path_for_windows_tools
-
-        augment_path_for_windows_tools()
+    refresh_session_path(repo_root=root)
+    ensure_ecosystem_runtime(root)
     if not _run_serve_stack(root, typer.echo):
         typer.secho("serve falló.", fg=typer.colors.RED)
         raise typer.Exit(1)

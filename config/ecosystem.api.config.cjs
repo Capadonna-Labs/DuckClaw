@@ -4,11 +4,10 @@
  * pm2 start config/ecosystem.api.config.cjs --only "NombreGateway"
  */
 const path = require("path");
-const fs = require("fs");
 const root = path.resolve(__dirname, "..");
-const python = fs.existsSync(path.join(root, ".venv/bin/python3"))
-  ? path.join(root, ".venv/bin/python3")
-  : path.join(root, ".venv/bin/python");
+const { resolveRepoPython } = require("./ecosystem.runtime.cjs");
+const python = resolveRepoPython(root);
+
 module.exports = {
   apps: [
     {
@@ -23,7 +22,7 @@ module.exports = {
       max_restarts: 10,
       env: {
         PYTHONPATH: root,
-        "DUCKCLAW_PM2_PROCESS_NAME": "DuckClaw-Gateway",
+        DUCKCLAW_PM2_PROCESS_NAME: "DuckClaw-Gateway",
       },
     },
   ],

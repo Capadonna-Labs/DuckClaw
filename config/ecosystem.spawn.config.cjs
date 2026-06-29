@@ -1,17 +1,11 @@
 /**
  * PM2 — Perfil genérico Spawn (Gateway + Admin UI).
  * Spec: specs/features/platform/SPAWN_GENERIC_DEPLOY.md
- * Secretos: solo .env (env_file).
- *
- * pm2 start config/ecosystem.spawn.config.cjs
  */
 const path = require("path");
-const fs = require("fs");
-
 const root = path.resolve(__dirname, "..");
-const python = fs.existsSync(path.join(root, ".venv/bin/python3"))
-  ? path.join(root, ".venv/bin/python3")
-  : path.join(root, ".venv/bin/python");
+const { resolveRepoPython } = require("./ecosystem.runtime.cjs");
+const python = resolveRepoPython(root);
 const envFile = path.join(root, ".env");
 
 module.exports = {

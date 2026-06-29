@@ -252,20 +252,16 @@ def test_find_redis_server_windows_uses_program_files(monkeypatch, tmp_path: Pat
 
 
 def test_augment_path_for_windows_includes_npm_global(monkeypatch, tmp_path: Path) -> None:
+    from duckclaw.ops import toolchain
     from duckops.prerequisites import augment_path_for_windows_tools
 
-    npm_global = tmp_path / "npm-global"
+    npm_global = tmp_path / "npm"
     npm_global.mkdir()
     monkeypatch.setenv("APPDATA", str(tmp_path))
-    monkeypatch.setattr("duckops.prerequisites._is_windows", lambda: True)
-    monkeypatch.setattr("duckops.prerequisites._refresh_windows_user_path", lambda: None)
-    monkeypatch.setattr("duckops.prerequisites._windows_node_dirs", lambda: [])
-    monkeypatch.setattr("duckops.prerequisites._windows_redis_dirs", lambda: [])
-    monkeypatch.setattr("duckops.prerequisites._uv_bin_dirs", lambda: [])
-    monkeypatch.setattr(
-        "duckops.prerequisites._windows_npm_global_dirs",
-        lambda: [npm_global],
-    )
+    monkeypatch.setattr(toolchain.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(toolchain, "_refresh_windows_registry_path", lambda: None)
+    monkeypatch.setattr(toolchain, "_uv_bin_dirs", lambda: [])
+    monkeypatch.setattr(toolchain, "_npm_global_prefix_bin", lambda: None)
     monkeypatch.setenv("PATH", "")
     augment_path_for_windows_tools()
     assert str(npm_global) in os.environ["PATH"]

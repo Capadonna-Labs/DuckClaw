@@ -1,61 +1,28 @@
-"""PM2 provider: detect pm2, run with current Python interpreter."""
+"""PM2 provider — delega resolución de binario a ``duckclaw.ops.toolchain``."""
 
 from __future__ import annotations
 
-import os
-import platform
-import shutil
 import subprocess
-from pathlib import Path
 from typing import Any
 
+from duckclaw.ops.toolchain import (
+    ToolchainError,
+    is_pm2_available,
+    pm2_argv,
+    resolve_pm2_executable,
+    run_pm2,
+    run_pm2_checked,
+)
 
-def resolve_pm2_executable() -> str | None:
-    """
-    Ruta absoluta al binario PM2.
-
-    En Windows, ``shutil.which('pm2')`` suele devolver un shim sin extensión que
-    ``CreateProcess`` no ejecuta; preferimos ``pm2.cmd`` en ``%APPDATA%\\npm``.
-    """
-    if platform.system() == "Windows":
-        candidates: list[str] = []
-        appdata = (os.environ.get("APPDATA") or "").strip()
-        if appdata:
-            npm_dir = Path(appdata) / "npm"
-            for name in ("pm2.cmd", "pm2.exe", "pm2"):
-                path = npm_dir / name
-                if path.is_file():
-                    candidates.append(str(path))
-        for name in ("pm2.cmd", "pm2.exe", "pm2"):
-            found = shutil.which(name)
-            if found:
-                candidates.append(found)
-        seen: set[str] = set()
-        for path in candidates:
-            norm = str(Path(path).resolve())
-            if norm in seen:
-                continue
-            seen.add(norm)
-            suffix = Path(path).suffix.lower()
-            if suffix in (".cmd", ".exe"):
-                return path
-            cmd_sibling = Path(path).with_suffix(".cmd")
-            if cmd_sibling.is_file():
-                return str(cmd_sibling)
-        return candidates[0] if candidates else None
-    return shutil.which("pm2")
-
-
-def pm2_argv(*args: str) -> list[str]:
-    """Lista ``argv`` para ``subprocess`` con el ejecutable PM2 resuelto."""
-    exe = resolve_pm2_executable()
-    if not exe:
-        return ["pm2", *args]
-    return [exe, *args]
-
-
-def is_pm2_available() -> bool:
-    return resolve_pm2_executable() is not None
+__all__ = [
+    "ToolchainError",
+    "deploy_pm2",
+    "is_pm2_available",
+    "pm2_argv",
+    "resolve_pm2_executable",
+    "run_pm2",
+    "run_pm2_checked",
+]
 
 
 def deploy_pm2(

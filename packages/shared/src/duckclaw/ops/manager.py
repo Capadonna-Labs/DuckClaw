@@ -56,23 +56,9 @@ def _resolve_python() -> str:
 
 
 def resolve_repo_pm2_python(repo_root: str | Path) -> str:
-    """
-    Intérprete para procesos PM2 ligados al monorepo (p. ej. db-writer).
+    from duckclaw.ops.ecosystem_pm2 import resolve_repo_pm2_python as _resolve
 
-    ``uv run duckops …`` puede resolver ``sys.executable`` al Python del sistema
-    sin dependencias del proyecto. Si existe ``<repo>/.venv/bin/python(3)``,
-    úsese para que PM2 cargue ``duckdb`` y el resto del venv.
-    """
-    root = Path(repo_root).resolve()
-    bindir = root / ".venv" / "bin"
-    for name in ("python3", "python"):
-        cand = bindir / name
-        try:
-            if cand.is_file() and os.access(cand, os.X_OK):
-                return str(cand.resolve())
-        except OSError:
-            continue
-    return str(Path(sys.executable).resolve())
+    return _resolve(repo_root)
 
 
 def _resolve_command(command: str, cwd: Optional[str] = None) -> str:
@@ -166,7 +152,7 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
 
     prov = provider.strip().lower()
     if prov == "auto":
-        from duckclaw.ops.providers.pm2 import is_pm2_available, pm2_argv
+        from duckclaw.ops.toolchain import is_pm2_available
 
         if is_pm2_available():
             prov = "pm2"
@@ -180,12 +166,11 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
 
     if prov == "pm2":
         import json
-        import subprocess as sp
 
-        from duckclaw.ops.providers.pm2 import pm2_argv, resolve_pm2_executable
+        from duckclaw.ops.toolchain import run_pm2, resolve_pm2_executable
 
         try:
-            result = sp.run(pm2_argv("jlist"), capture_output=True, text=True, timeout=10)
+            result = run_pm2("jlist", timeout=10)
             processes: list[dict] = json.loads(result.stdout or "[]")
         except Exception as e:
             _print(f"[red]Error consultando pm2: {e}[/]")
@@ -469,12 +454,12 @@ def analyze_gateway_cluster_conflicts(effective_cwd: str) -> dict[str, Any]:
 
 
 def _pm2_jlist_processes() -> list[dict[str, Any]]:
-    import subprocess as sp
+    import json
 
-    from duckclaw.ops.providers.pm2 import pm2_argv
+    from duckclaw.ops.toolchain import run_pm2
 
     try:
-        result = sp.run(pm2_argv("jlist"), capture_output=True, text=True, timeout=12)
+        result = run_pm2("jlist", timeout=12)
         data = json.loads(result.stdout or "[]")
         return data if isinstance(data, list) else []
     except Exception:
@@ -506,19 +491,20 @@ def pm2_start_or_recreate_gateway(
     ``pm2 restart`` no actualiza ``args`` (p. ej. ``--port``).
     Si el puerto en ejecución difiere del ecosystem, delete + start.
     """
-    import subprocess as sp
-
-    from duckclaw.ops.providers.pm2 import pm2_argv
+    from duckclaw.ops.toolchain import ToolchainError, run_pm2, run_pm2_checked
 
     name = (process_name or "").strip()
     if not name:
         return
-    existing = sp.run(pm2_argv("id", name), capture_output=True, text=True)
+    try:
+        existing = run_pm2("id", name, timeout=30)
+    except ToolchainError:
+        raise
     running = existing.returncode == 0 and (existing.stdout or "").strip() not in ("", "[]")
     if running:
         live = pm2_gateway_listening_port(name)
         if live is not None and int(live) != int(desired_port):
-            sp.run(pm2_argv("delete", name), capture_output=True, text=True, check=False)
+            run_pm2("delete", name, timeout=60)
             print(
                 f"🔄  PM2: {name} recreado (puerto {live} → {desired_port}; "
                 "restart no cambia --port).",
@@ -526,13 +512,10 @@ def pm2_start_or_recreate_gateway(
             )
             running = False
     if running:
-        sp.run(pm2_argv("restart", name, "--update-env"), check=False)
+        run_pm2_checked("restart", name, "--update-env", timeout=120)
         print(f"🔄  PM2: {name} reiniciado.", flush=True)
     else:
-        sp.run(
-            pm2_argv("start", str(config_path), "--only", name),
-            check=False,
-        )
+        run_pm2_checked("start", str(config_path), "--only", name, timeout=120)
         print(f"🚀  PM2: {name} iniciado (ecosystem.api.config.cjs).", flush=True)
 
 
@@ -586,6 +569,8 @@ def _render_gateway_ecosystem_cjs(
 ) -> str:
     """Genera ecosystem PM2 con varios gateways (mismo código, distinto nombre/puerto/env)."""
     _ = python_path  # script relativo a ``root`` (portable entre clones)
+    from duckclaw.ops.ecosystem_pm2 import ecosystem_repo_python_js_lines
+
     lines = [
         "/**",
         " * PM2 — API Gateways DuckClaw (generado). Secretos: solo .env (env_file).",
@@ -595,9 +580,7 @@ def _render_gateway_ecosystem_cjs(
         'const path = require("path");',
         'const fs = require("fs");',
         'const root = path.resolve(__dirname, "..");',
-        'const python = fs.existsSync(path.join(root, ".venv/bin/python3"))',
-        '  ? path.join(root, ".venv/bin/python3")',
-        '  : path.join(root, ".venv/bin/python");',
+        *ecosystem_repo_python_js_lines(),
         "module.exports = {",
         "  apps: [",
     ]
@@ -644,35 +627,37 @@ def _render_gateway_ecosystem_cjs(
 
 def render_db_writer_ecosystem_cjs() -> str:
     """Plantilla portable PM2 DB-Writer: secretos y rutas solo en ``.env`` (env_file)."""
-    return """/**
- * PM2 — DuckClaw DB-Writer. Variables: solo .env (env_file).
- * Regenerar: duckops init / stack_health.write_db_writer_ecosystem
- */
-const path = require("path");
-const fs = require("fs");
-const root = path.resolve(__dirname, "..");
-const python = fs.existsSync(path.join(root, ".venv/bin/python3"))
-  ? path.join(root, ".venv/bin/python3")
-  : path.join(root, ".venv/bin/python");
+    from duckclaw.ops.ecosystem_pm2 import ecosystem_repo_python_js_lines
 
-module.exports = {
-  apps: [
-    {
-      name: "DuckClaw-DB-Writer",
-      script: python,
-      args: "main.py",
-      cwd: path.join(root, "services/db-writer"),
-      env_file: path.join(root, ".env"),
-      interpreter: "none",
-      autorestart: true,
-      watch: false,
-      env: {
-        PYTHONPATH: root,
-      },
-    },
-  ],
-};
-"""
+    lines = [
+        "/**",
+        " * PM2 — DuckClaw DB-Writer. Variables: solo .env (env_file).",
+        " * Regenerar: duckops init / stack_health.write_db_writer_ecosystem",
+        " */",
+        'const path = require("path");',
+        'const fs = require("fs");',
+        'const root = path.resolve(__dirname, "..");',
+        *ecosystem_repo_python_js_lines(),
+        "module.exports = {",
+        "  apps: [",
+        "    {",
+        '      name: "DuckClaw-DB-Writer",',
+        "      script: python,",
+        '      args: "main.py",',
+        '      cwd: path.join(root, "services/db-writer"),',
+        '      env_file: path.join(root, ".env"),',
+        '      interpreter: "none",',
+        "      autorestart: true,",
+        "      watch: false,",
+        "      env: {",
+        "        PYTHONPATH: root,",
+        "      },",
+        "    },",
+        "  ],",
+        "};",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def pm2_delete_named_app(name: Optional[str]) -> bool:
@@ -683,13 +668,16 @@ def pm2_delete_named_app(name: Optional[str]) -> bool:
         return False
     import subprocess as sp
 
-    from duckclaw.ops.providers.pm2 import is_pm2_available, pm2_argv
+    from duckclaw.ops.toolchain import ToolchainError, is_pm2_available, run_pm2_checked
 
     if not is_pm2_available():
         return False
     n = str(name).strip()
-    r = sp.run(pm2_argv("delete", n), capture_output=True, text=True, timeout=30)
-    return r.returncode == 0
+    try:
+        run_pm2_checked("delete", n, timeout=30)
+        return True
+    except ToolchainError:
+        return False
 
 
 def serve(
@@ -716,9 +704,10 @@ def serve(
     effective_cwd = str(Path(cwd or os.getcwd()).resolve())
 
     if pm2:
-        from duckclaw.ops.providers.pm2 import is_pm2_available, pm2_argv
-        import subprocess as sp
+        from duckclaw.ops.ecosystem_pm2 import ensure_ecosystem_runtime
+        from duckclaw.ops.toolchain import ToolchainError, is_pm2_available
 
+        ensure_ecosystem_runtime(Path(effective_cwd))
         if not is_pm2_available():
             print("PM2 no está instalado. Instala con: npm install -g pm2")
             return 1
@@ -838,11 +827,15 @@ def serve(
                     except Exception as _e:
                         print(f"⚠️  No se pudo crear la BD en {_db_file}: {_e}", flush=True)
 
-            pm2_start_or_recreate_gateway(
-                config_path=config_path,
-                process_name=effective_name,
-                desired_port=gw_port,
-            )
+            try:
+                pm2_start_or_recreate_gateway(
+                    config_path=config_path,
+                    process_name=effective_name,
+                    desired_port=gw_port,
+                )
+            except ToolchainError as exc:
+                print(f"❌  PM2 Gateway: {exc}", flush=True)
+                return 1
 
             print(f"\n   API →  http://localhost:{gw_port}", flush=True)
             print(f"   Docs → http://localhost:{gw_port}/docs", flush=True)
@@ -904,16 +897,14 @@ module.exports = {{
                 except Exception as _e:
                     print(f"⚠️  No se pudo crear la BD en {_db_file}: {_e}", flush=True)
 
-        import subprocess as sp
+        from duckclaw.ops.toolchain import run_pm2, run_pm2_checked
 
-        from duckclaw.ops.providers.pm2 import pm2_argv
-
-        existing = sp.run(pm2_argv("id", effective_name), capture_output=True, text=True)
+        existing = run_pm2("id", effective_name, timeout=30)
         if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
-            sp.run(pm2_argv("restart", effective_name, "--update-env"), check=False)
+            run_pm2_checked("restart", effective_name, "--update-env", timeout=120)
             print(f"🔄  PM2: {effective_name} reiniciado.", flush=True)
         else:
-            sp.run(pm2_argv("start", str(graph_api_config_path)), check=False)
+            run_pm2_checked("start", str(graph_api_config_path), timeout=120)
             print(f"🚀  PM2: {effective_name} iniciado.", flush=True)
 
         print(f"\n   API →  http://localhost:{port}", flush=True)
@@ -940,7 +931,7 @@ def hire(
     import json
     import subprocess as sp
 
-    from duckclaw.ops.providers.pm2 import is_pm2_available, pm2_argv
+    from duckclaw.ops.toolchain import is_pm2_available, run_pm2, run_pm2_checked
     from duckclaw.workers.factory import WorkerFactory
     from duckclaw.workers.manifest import load_manifest
 
@@ -1009,12 +1000,12 @@ module.exports = {{
     config_path.write_text(config_content, encoding="utf-8")
     print(f"✅  {config_path}", flush=True)
 
-    existing = sp.run(pm2_argv("id", instance), capture_output=True, text=True, cwd=effective_cwd)
+    existing = run_pm2("id", instance, timeout=30, cwd=effective_cwd)
     if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
-        sp.run(pm2_argv("restart", instance, "--update-env"), check=False, cwd=effective_cwd)
+        run_pm2_checked("restart", instance, "--update-env", timeout=120, cwd=effective_cwd)
         print(f"🔄  PM2: {instance} reiniciado.", flush=True)
     else:
-        sp.run(pm2_argv("start", str(config_path), "--only", instance), check=False, cwd=effective_cwd)
+        run_pm2_checked("start", str(config_path), "--only", instance, timeout=120, cwd=effective_cwd)
         print(f"🚀  PM2: {instance} iniciado.", flush=True)
     print(f"   Worker → http://localhost:{port}/invoke", flush=True)
     print(f"   Logs   → pm2 logs {instance}", flush=True)

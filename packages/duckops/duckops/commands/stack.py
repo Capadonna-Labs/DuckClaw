@@ -24,10 +24,19 @@ def _repo_root() -> Path:
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    from duckclaw.ops.providers.pm2 import pm2_argv
+    from duckclaw.ops.toolchain import ToolchainError, run_pm2
 
     if argv and argv[0] == "pm2":
-        argv = pm2_argv(*argv[1:])
+        try:
+            return run_pm2(*argv[1:])
+        except ToolchainError as exc:
+            cmd = argv[0] if argv else "pm2"
+            typer.echo(
+                f"No se encontró '{cmd}' en PATH. "
+                "Instala PM2: npm install -g pm2 (o: uv run duckops up).",
+                err=True,
+            )
+            raise typer.Exit(127) from exc
     try:
         return subprocess.run(argv, capture_output=True, text=True, check=False)
     except FileNotFoundError as exc:
@@ -173,6 +182,18 @@ def up(
         raise typer.Exit(1)
 
     _print_status(_service_report(provider=selected, host=host, port=port))
+
+
+@app.command("codegen")
+def stack_codegen(
+    repo: Path | None = typer.Option(None, "--repo", "-C", help="Raíz del monorepo."),
+) -> None:
+    """Regenera ``config/ecosystem.runtime.cjs`` (runtime PM2 cross-platform)."""
+    from duckclaw.ops.ecosystem_pm2 import ensure_ecosystem_runtime
+
+    root = (repo or _repo_root()).resolve()
+    path = ensure_ecosystem_runtime(root)
+    typer.secho(f"OK: {path.relative_to(root)}", fg=typer.colors.GREEN)
 
 
 @app.command("down")

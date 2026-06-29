@@ -1,13 +1,10 @@
 /**
  * LEGACY — Bot Telegram (core.integrations.telegram_bot). Secretos: .env (env_file).
- * Regenerar manualmente o ignorar si no usas DuckClaw-Brain.
  */
 const path = require("path");
-const fs = require("fs");
 const root = path.resolve(__dirname, "..");
-const python = fs.existsSync(path.join(root, ".venv/bin/python3"))
-  ? path.join(root, ".venv/bin/python3")
-  : path.join(root, ".venv/bin/python");
+const { resolveRepoPython } = require("./ecosystem.runtime.cjs");
+const python = resolveRepoPython(root);
 
 module.exports = {
   apps: [

@@ -23,18 +23,18 @@ def test_root_package_exposes_stack_launcher_scripts() -> None:
 
 def test_duckops_stack_status_reports_pm2_processes_as_json(monkeypatch) -> None:
     import duckops.commands.stack as stack
-    from duckclaw.ops.providers.pm2 import pm2_argv
+    from duckclaw.ops.toolchain import pm2_argv
 
     payload = [
         {"name": "DuckClaw-Gateway", "pm2_env": {"status": "online"}},
         {"name": "DuckClaw-DB-Writer", "pm2_env": {"status": "stopped"}},
     ]
 
-    def fake_run(argv, **_kwargs):
-        assert argv == pm2_argv("jlist")
+    def fake_run_pm2(*args, **_kwargs):
+        assert list(args) == ["jlist"]
         return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
 
-    monkeypatch.setattr(stack.subprocess, "run", fake_run)
+    monkeypatch.setattr("duckclaw.ops.toolchain.run_pm2", fake_run_pm2)
     monkeypatch.setattr(stack, "_gateway_health_ok", lambda *_args, **_kwargs: True)
 
     result = runner.invoke(app, ["stack", "status", "--json"])
@@ -46,11 +46,12 @@ def test_duckops_stack_status_reports_pm2_processes_as_json(monkeypatch) -> None
     assert data["services"]["DuckClaw-Gateway"]["health_ok"] is True
     assert data["services"]["DuckClaw-DB-Writer"]["status"] == "stopped"
     assert data["all_ok"] is False
+    _ = pm2_argv  # toolchain entrypoint usado en producción
 
 
 def test_duckops_stack_up_starts_gateway_and_db_writer_then_saves(monkeypatch, tmp_path: Path) -> None:
     import duckops.commands.stack as stack
-    from duckclaw.ops.providers.pm2 import pm2_argv
+    from duckclaw.ops.toolchain import pm2_argv
 
     root = tmp_path
     config = root / "config"
@@ -59,20 +60,33 @@ def test_duckops_stack_up_starts_gateway_and_db_writer_then_saves(monkeypatch, t
     (config / "ecosystem.db-writer.config.cjs").write_text("module.exports = { apps: [] };\n", encoding="utf-8")
     calls: list[list[str]] = []
 
-    def fake_run(argv, **_kwargs):
-        calls.append(list(argv))
-        if argv == pm2_argv("jlist"):
+    def fake_run_pm2(*args, **_kwargs):
+        calls.append(list(args))
+        if list(args) == ["jlist"]:
             return SimpleNamespace(returncode=0, stdout="[]", stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
+    monkeypatch.setattr("duckclaw.ops.toolchain.run_pm2", fake_run_pm2)
     monkeypatch.setattr(stack, "_repo_root", lambda: root)
-    monkeypatch.setattr(stack.subprocess, "run", fake_run)
     monkeypatch.setattr(stack, "_wait_for_gateway_health", lambda *_args, **_kwargs: True)
 
     result = runner.invoke(app, ["stack", "up", "--provider", "pm2", "--no-wait"])
 
     assert result.exit_code == 0, result.output
-    assert pm2_argv("start", str(config / "ecosystem.api.config.cjs"), "--only", "DuckClaw-Gateway", "--update-env") in calls
-    assert pm2_argv("start", str(config / "ecosystem.db-writer.config.cjs"), "--only", "DuckClaw-DB-Writer", "--update-env") in calls
-    assert pm2_argv("save") in calls
+    assert [
+        "start",
+        str(config / "ecosystem.api.config.cjs"),
+        "--only",
+        "DuckClaw-Gateway",
+        "--update-env",
+    ] in calls
+    assert [
+        "start",
+        str(config / "ecosystem.db-writer.config.cjs"),
+        "--only",
+        "DuckClaw-DB-Writer",
+        "--update-env",
+    ] in calls
+    assert ["save"] in calls
+    _ = pm2_argv
 

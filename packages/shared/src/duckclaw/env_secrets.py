@@ -10,6 +10,7 @@ import re
 SECRET_ENV_KEYS: frozenset[str] = frozenset(
     {
         "DEEPSEEK_API_KEY",
+        "OPENROUTER_API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
         "GROQ_API_KEY",

@@ -266,7 +266,7 @@ def cmd_up(
 
     from duckops.admin_dev_server import admin_login_url, resolve_admin_port, wait_admin_http
     from duckops.post_up import run_post_up_loop
-    from duckops.prerequisites import check_redis, ensure_development_prerequisites, platform_label
+    from duckops.prerequisites import ensure_development_prerequisites, platform_label
     from duckops.stack_readiness import admin_credentials_hint, needs_wizard_init
 
     # —— 1/6 Prerequisitos ——
@@ -278,16 +278,12 @@ def cmd_up(
         sync_python=True,
         print_fn=typer.echo,
     ):
-        if not check_redis().ok:
-            from duckops.prerequisites import redis_start_hint
-
-            typer.secho(
-                "Redis no responde. Sin Redis DuckClaw no puede guardar datos ni procesar colas. "
-                f"{redis_start_hint()}. "
-                "O deja que lo instalemos: uv run duckops bootstrap --yes",
-                fg=typer.colors.RED,
-                err=True,
-            )
+        typer.secho(
+            "Instalacion abortada en paso 1/6 (prerequisitos del sistema). "
+            "Lee el bloque FALLO EN PREREQUISITOS arriba.",
+            fg=typer.colors.RED,
+            err=True,
+        )
         raise typer.Exit(1)
     typer.echo("")
 

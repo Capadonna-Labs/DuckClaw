@@ -50,6 +50,18 @@ def _flat_env(repo_root: Path) -> dict[str, str]:
     return merged_root_and_proposed_flat_env(repo_root)
 
 
+def _duckdb_adapter(con: Any) -> Any:
+    """Adaptador DuckDB: ``execute`` debe devolver el cursor para SELECT/upsert."""
+
+    class _Adapter:
+        def execute(self, sql: str, params: list | None = None) -> Any:
+            if params:
+                return con.execute(sql, params)
+            return con.execute(sql)
+
+    return _Adapter()
+
+
 def hydrate_draft_admin_from_repo(repo_root: Path, draft: SovereignDraft) -> None:
     """Rellena el borrador desde .env existente (re-run idempotente)."""
     env = _flat_env(repo_root)
@@ -169,15 +181,7 @@ def seed_admin_console_users(repo_root: Path, db_rel_path: str, draft: Sovereign
     ]
     con = duckdb.connect(str(db_path), read_only=False)
     try:
-
-        class _Adapter:
-            def execute(self, sql: str, params: list | None = None) -> None:
-                if params:
-                    con.execute(sql, params)
-                else:
-                    con.execute(sql)
-
-        return seed_admin_console_users_if_empty(_Adapter(), users)
+        return seed_admin_console_users_if_empty(_duckdb_adapter(con), users)
     finally:
         con.close()
 
@@ -207,16 +211,8 @@ def sync_admin_console_user_from_env(
 
     con = duckdb.connect(str(resolved), read_only=False)
     try:
-
-        class _Adapter:
-            def execute(self, sql: str, params: list | None = None) -> None:
-                if params:
-                    con.execute(sql, params)
-                else:
-                    con.execute(sql)
-
         upsert_console_user(
-            _Adapter(),
+            _duckdb_adapter(con),
             email=email,
             nombre="Administrador DuckClaw",
             rol="admin",

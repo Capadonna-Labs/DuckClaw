@@ -6,6 +6,10 @@ uv run duckops doctor --strict             # health check antes de probar
 uv run duckops configure                   # si es primera vez o cambiaste .env
 uv run duckops up                          # uv sync + gateway + redis + servicios
 
+uv run duckops down --all               
+uv run duckops stack down               
+
 --------- INTERFAZ GRAFICA ----------
 cd apps/duckclaw-admin
-pnpm dev
+pnpm install                             
+pnpm dev                                  

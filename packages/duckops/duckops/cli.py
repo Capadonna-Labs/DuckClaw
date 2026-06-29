@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from duckops.commands import audit, bootstrap, comfyui, configure, db, deploy, doctor, ingress, init, mcp, serve, smoke, stack, train, up
+from duckops.commands import audit, bootstrap, comfyui, configure, db, deploy, doctor, down, ingress, init, mcp, serve, smoke, stack, train, up
 
 app = typer.Typer(
     name="duckops",
@@ -17,6 +17,11 @@ app.add_typer(
     up.app,
     name="up",
     help="Plug-and-play: prerequisitos, init, migrate, stack PM2 y consola admin.",
+)
+app.add_typer(
+    down.app,
+    name="down",
+    help="Apaga PM2, libera locks DuckDB y consola admin (antes de migrate).",
 )
 app.add_typer(
     bootstrap.app,

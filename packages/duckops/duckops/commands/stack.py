@@ -170,3 +170,18 @@ def up(
 
     _print_status(_service_report(provider=selected, host=host, port=port))
 
+
+@app.command("down")
+def stack_down(
+    all_services: bool = typer.Option(
+        False,
+        "--all",
+        help="Detener también Voice, MCP, Sensory y demás procesos DuckClaw en PM2.",
+    ),
+) -> None:
+    """Alias de ``duckops down`` — apaga stack local y libera locks DuckDB."""
+    from duckops.stack_shutdown import run_stack_down
+
+    code = run_stack_down(all_services=all_services, print_fn=typer.echo)
+    raise typer.Exit(code)
+

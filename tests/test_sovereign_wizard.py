@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 
 import pytest
+
+from duckclaw.integrations.telegram.telegram_agent_token import telegram_agent_token_env_name
 
 from duckops.sovereign.atomic import atomic_write
 from duckops.sovereign.draft import SovereignDraft
@@ -43,6 +46,11 @@ from duckops.sovereign.duckdb_health import audit_duckdb, format_duckdb_health_r
 from duckops.sovereign.stack_health import audit_stack, format_stack_health_rich
 from duckops.sovereign.ui import _express_apply_confirm
 from duckops.sovereign.validate import private_db_dir_writable, suggest_gateway_port
+
+
+def _ephemeral_worker_id() -> str:
+    """Id de worker solo para aserciones de test; no implica catálogo ni plantilla del producto."""
+    return f"wrk-test-{uuid.uuid4().hex[:10]}"
 
 
 def test_tailscale_funnel_panel_mentions_port_and_docs() -> None:
@@ -393,6 +401,8 @@ def test_patch_pm2_preserves_shared_when_draft_has_no_secondary(tmp_path: Path) 
 
 def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> None:
     root = tmp_path / "repo"
+    worker_id = _ephemeral_worker_id()
+    token_env = telegram_agent_token_env_name(worker_id)
     (root / "config").mkdir(parents=True)
     cfg = {
         "apps": [
@@ -400,7 +410,7 @@ def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> N
                 "name": "Research-Gateway",
                 "env": {
                     "DUCKDB_PATH": "/old.duckdb",
-                    "TELEGRAM_RESEARCH_WORKER_TOKEN": "stale_token",
+                    token_env: "stale_token",
                 },
             }
         ]
@@ -411,26 +421,28 @@ def test_patch_api_gateways_pm2_merges_telegram_env_updates(tmp_path: Path) -> N
     draft = SovereignDraft(
         gateway_pm2_name="Research-Gateway",
         duckdb_shared_path="db/private/research.duckdb",
-        default_worker_id="research-worker",
+        default_worker_id=worker_id,
     )
     patch_api_gateways_pm2_for_draft(
         root,
         draft,
         lambda _m: None,
-        env_updates={"TELEGRAM_RESEARCH_WORKER_TOKEN": "fresh_token", "DUCKCLAW_TELEGRAM_MCP_ENABLED": "1"},
+        env_updates={token_env: "fresh_token", "DUCKCLAW_TELEGRAM_MCP_ENABLED": "1"},
     )
     out = json.loads((root / "config" / "api_gateways_pm2.json").read_text(encoding="utf-8"))
     env = out["apps"][0]["env"]
-    assert "TELEGRAM_RESEARCH_WORKER_TOKEN" not in env
+    assert token_env not in env
     assert env["DUCKCLAW_TELEGRAM_MCP_ENABLED"] == "1"
     assert "DUCKDB_PATH" not in env
 
 
 def test_patch_api_gateways_pm2_new_app_includes_proposed_telegram(tmp_path: Path) -> None:
     root = tmp_path / "repo"
+    worker_id = _ephemeral_worker_id()
+    token_env = telegram_agent_token_env_name(worker_id)
     (root / "config").mkdir(parents=True)
     (root / "config" / "dotenv_wizard_proposed.env").write_text(
-        "TELEGRAM_RESEARCH_WORKER_TOKEN=token_from_proposed\n",
+        f"{token_env}=token_from_proposed\n",
         encoding="utf-8",
     )
     (root / "config" / "api_gateways_pm2.json").write_text(
@@ -440,36 +452,38 @@ def test_patch_api_gateways_pm2_new_app_includes_proposed_telegram(tmp_path: Pat
         gateway_pm2_name="Research-Gateway",
         gateway_port=8484,
         duckdb_shared_path="db/private/research.duckdb",
-        default_worker_id="research-worker",
+        default_worker_id=worker_id,
         redis_url="redis://localhost:6379/1",
     )
     patch_api_gateways_pm2_for_draft(
         root,
         draft,
         lambda _m: None,
-        env_updates={"DUCKCLAW_DEFAULT_WORKER_ID": "research-worker"},
+        env_updates={"DUCKCLAW_DEFAULT_WORKER_ID": worker_id},
     )
     out = json.loads((root / "config" / "api_gateways_pm2.json").read_text(encoding="utf-8"))
     assert len(out["apps"]) == 1
     env = out["apps"][0]["env"]
-    assert "TELEGRAM_RESEARCH_WORKER_TOKEN" not in env
+    assert token_env not in env
     assert "DUCKCLAW_DEFAULT_WORKER_ID" not in env
     assert "DUCKDB_PATH" not in env
 
 
 def test_effective_telegram_reads_proposed_when_root_env_empty(tmp_path: Path) -> None:
     root = tmp_path / "repo"
+    worker_id = _ephemeral_worker_id()
+    token_env = telegram_agent_token_env_name(worker_id)
     (root / "config").mkdir(parents=True)
     (root / ".env").write_text("# minimal\n", encoding="utf-8")
     (root / "config" / "dotenv_wizard_proposed.env").write_text(
-        "TELEGRAM_RESEARCH_WORKER_TOKEN=secret_from_proposed\n"
+        f"{token_env}=secret_from_proposed\n"
         "TELEGRAM_WEBHOOK_SECRET=whsec_proposed\n",
         encoding="utf-8",
     )
     d = SovereignDraft(
         telegram_bot_token="",
         telegram_webhook_secret="",
-        default_worker_id="research-worker",
+        default_worker_id=worker_id,
     )
     assert _effective_telegram_bot_token(root, d) == "secret_from_proposed"
     assert _effective_telegram_webhook_secret(root, d) == "whsec_proposed"
@@ -494,11 +508,12 @@ def test_wizard_config_default_worker_id_roundtrip(
     cfg = tmp_path / "duckclaw"
     cfg.mkdir()
     monkeypatch.setattr(m, "_wizard_config_path", lambda: cfg / "wizard_config.json")
-    d = SovereignDraft(default_worker_id="research-worker")
+    worker_id = _ephemeral_worker_id()
+    d = SovereignDraft(default_worker_id=worker_id)
     m.save_wizard_config_json(d)
     data = json.loads((cfg / "wizard_config.json").read_text(encoding="utf-8"))
-    assert data.get("default_worker_id") == "research-worker"
-    assert m.load_last_default_worker_id_from_wizard_config() == "research-worker"
+    assert data.get("default_worker_id") == worker_id
+    assert m.load_last_default_worker_id_from_wizard_config() == worker_id
 
 
 def test_wizard_config_gateway_port_roundtrip(
@@ -534,8 +549,9 @@ def test_default_worker_id_hint_from_repo_env(tmp_path: Path) -> None:
 
     root = tmp_path / "repo"
     root.mkdir()
-    (root / ".env").write_text("DUCKCLAW_DEFAULT_WORKER_ID=platform-orchestrator\n", encoding="utf-8")
-    assert m.load_default_worker_id_hint_from_repo_env(root) == "platform-orchestrator"
+    worker_id = _ephemeral_worker_id()
+    (root / ".env").write_text(f"DUCKCLAW_DEFAULT_WORKER_ID={worker_id}\n", encoding="utf-8")
+    assert m.load_default_worker_id_hint_from_repo_env(root) == worker_id
 
 
 def test_duck_mascot_frames_and_states() -> None:
@@ -601,7 +617,7 @@ def test_render_header_includes_version_and_repo(tmp_path: Path) -> None:
     from duckops.sovereign.draft import SovereignDraft
     from duckops.sovereign.tui_shell import StepInfo, render_header
 
-    draft = SovereignDraft(tenant_id="TestTenant", default_worker_id="default")
+    draft = SovereignDraft(tenant_id="TestTenant", default_worker_id="")
     panel_wizard = render_header(
         draft,
         tmp_path,
@@ -629,17 +645,18 @@ def test_render_header_includes_version_and_repo(tmp_path: Path) -> None:
 def test_playground_chat_client_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
     from duckops.sovereign.tui_chat import GatewayChatConfig, PlaygroundChatClient
 
+    worker_id = _ephemeral_worker_id()
     cfg = GatewayChatConfig(
         base_url="http://127.0.0.1:9999",
         admin_key="secret",
         tenant_id="default",
         telegram_user_id="1",
-        default_worker_id="default",
+        default_worker_id=worker_id,
     )
     client = PlaygroundChatClient(cfg)
 
     async def _fake_post(*_a: object, **_k: object) -> dict:
-        return {"ok": True, "response": "hola-mock", "worker_id": "default"}
+        return {"ok": True, "response": "hola-mock", "worker_id": worker_id}
 
     monkeypatch.setattr(client, "_post_chat_async", _fake_post)
     out = client.post_chat("ping")
@@ -657,35 +674,66 @@ def test_load_gateway_chat_config_from_env(
     import duckops.sovereign.tui_chat as tui_chat
 
     monkeypatch.setattr(tui_chat, "load_draft_json", lambda: None)
+    worker_id = _ephemeral_worker_id()
     (tmp_path / ".env").write_text(
         "DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8484\n"
         "DUCKCLAW_ADMIN_API_KEY=adm\n"
-        "DUCKCLAW_DEFAULT_WORKER_ID=default\n"
+        f"DUCKCLAW_DEFAULT_WORKER_ID={worker_id}\n"
         "DUCKCLAW_OWNER_ID=42\n",
         encoding="utf-8",
     )
     cfg = load_gateway_chat_config(tmp_path)
     assert cfg.base_url == "http://127.0.0.1:8484"
     assert cfg.admin_key == "adm"
-    assert cfg.default_worker_id == "default"
+    assert cfg.default_worker_id == worker_id
     assert cfg.telegram_user_id == "42"
 
 
-def test_workers_catalog_lists_forge_templates(catalog_db) -> None:
+def test_workers_catalog_lists_db_seeded_workers(tmp_path: Path) -> None:
+    import duckdb
+
+    from duckclaw.admin_worker_catalog import create_worker, ensure_admin_worker_catalog_schema
     from duckops.sovereign.workers_catalog import (
         list_worker_picks,
         resolve_worker_choice,
         suggest_default_worker_id,
     )
 
-    repo = Path(__file__).resolve().parent.parent
-    picks = list_worker_picks(repo, db=catalog_db)
+    worker_id = _ephemeral_worker_id()
+    display_name = f"Catalog {worker_id}"
+    con = duckdb.connect(str(tmp_path / "catalog.duckdb"))
+    try:
+        ensure_admin_worker_catalog_schema(con)
+        create_worker(
+            con,
+            owner_email="test@duckclaw.local",
+            worker_id=worker_id,
+            display_name=display_name,
+        )
+        repo = Path(__file__).resolve().parent.parent
+        picks = list_worker_picks(
+            repo,
+            db=con,
+            actor_email="test@duckclaw.local",
+            source="catalog",
+        )
+    finally:
+        con.close()
+
     ids = {p.worker_id for p in picks}
-    assert "default" in ids
-    assert len(ids) == 1
-    assert resolve_worker_choice("1", picks, repo) == picks[0].worker_id
-    assert resolve_worker_choice("default", picks, repo) == "default"
-    assert suggest_default_worker_id(picks, "nope") in ids
+    assert ids == {worker_id}
+    assert resolve_worker_choice("1", picks, repo) == worker_id
+    assert resolve_worker_choice(worker_id, picks, repo) == worker_id
+    assert suggest_default_worker_id(picks, "nope") == worker_id
+
+
+def test_workers_catalog_lists_forge_templates_without_db() -> None:
+    from duckops.sovereign.workers_catalog import list_worker_picks
+
+    repo = Path(__file__).resolve().parent.parent
+    picks = list_worker_picks(repo, source="templates")
+    assert picks
+    assert all(p.worker_id.strip() and p.label.strip() for p in picks)
 
 
 def test_materialize_writes_owner_and_team_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -695,10 +743,12 @@ def test_materialize_writes_owner_and_team_env(tmp_path: Path, monkeypatch: pyte
     root.mkdir()
     (root / ".env").write_text("EXISTING=1\n", encoding="utf-8")
     (root / "config").mkdir()
+    worker_a = _ephemeral_worker_id()
+    worker_b = _ephemeral_worker_id()
     d = SovereignDraft(
         wizard_creator_telegram_user_id="123456789",
-        gateway_team_templates="Worker-A,Worker-B",
-        default_worker_id="Worker-A",
+        gateway_team_templates=f"{worker_a},{worker_b}",
+        default_worker_id=worker_a,
         redis_url="redis://localhost:6379/0",
         duckdb_vault_path="db/test.duckdb",
         tenant_id="test-tenant",
@@ -715,4 +765,5 @@ def test_materialize_writes_owner_and_team_env(tmp_path: Path, monkeypatch: pyte
     assert rc == 0
     text = (root / ".env").read_text(encoding="utf-8")
     assert "DUCKCLAW_OWNER_ID=123456789" in text
-    assert "DUCKCLAW_TEAM_MEMBERS=Worker-A,Worker-B" in text
+    assert "DUCKCLAW_TEAM_MEMBERS=" in text
+    assert worker_a in text and worker_b in text

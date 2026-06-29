@@ -307,22 +307,10 @@ def list_visible_workers_for_actor(
     actor_email: str,
     include_inactive: bool = False,
 ) -> list[dict[str, str]]:
-    """Return the public default worker plus DB-catalog workers visible to actor."""
+    """Workers del catalogo DB visibles para el actor (sin worker «default» sintetico)."""
     ensure_admin_worker_catalog_schema(db)
     actor = (actor_email or "").strip().lower()
-    workers: list[dict[str, str]] = [
-        {
-            "id": "default",
-            "worker_id": "default",
-            "name": "Default",
-            "display_name": "Default",
-            "source": "template",
-            "visibility": "public",
-            "source_template_id": "default",
-            "status": "active",
-            "active": True,
-        }
-    ]
+    workers: list[dict[str, str]] = []
     if "@" not in actor:
         return workers
 

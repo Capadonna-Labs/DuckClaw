@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Literal
 
 try:
     import yaml
 except ImportError:
     yaml = None  # type: ignore[assignment]
+
+WorkerPickSource = Literal["auto", "catalog", "templates"]
 
 
 @dataclass(frozen=True)
@@ -56,14 +59,73 @@ def _scan_template_ids(templates_dir: Path) -> list[str]:
     )
 
 
+def list_catalog_worker_picks(db: Any, *, tenant_id: str = "default") -> list[WorkerPick]:
+    """Solo filas activas de ``admin_worker_catalog`` (DB-first, sin plantilla «default»)."""
+    try:
+        from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema
+        from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
+
+        ensure_admin_worker_catalog_schema(db)
+        tid = (tenant_id or "default").strip() or "default"
+        rows = _query_all_dicts(
+            db,
+            "SELECT worker_id, display_name FROM main.admin_worker_catalog "
+            f"WHERE tenant_id = '{_sql_lit(tid, 128)}' AND active = true "
+            "ORDER BY display_name, worker_id",
+        )
+        picks: list[WorkerPick] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            wid = str(row.get("worker_id") or "").strip()
+            if not wid:
+                continue
+            label = str(row.get("display_name") or wid).strip()
+            picks.append(WorkerPick(worker_id=wid, label=label))
+        return picks
+    except Exception:
+        return []
+
+
 def list_worker_picks(
     repo_root: Path | None = None,
     *,
     db: object = None,
     tenant_id: str = "default",
     actor_email: str = "",
+    source: WorkerPickSource = "auto",
 ) -> list[WorkerPick]:
-    """Lista workers del catálogo DuckDB; fallback a plantillas forge si no hay DB."""
+    """Lista workers del catalogo DuckDB; fallback a plantillas forge solo si ``source`` lo permite."""
+
+    if source in ("auto", "catalog") and db is not None:
+        catalog_picks = list_catalog_worker_picks(db, tenant_id=tenant_id)
+        if catalog_picks or source == "catalog":
+            if source == "catalog":
+                import os
+
+                email = (actor_email or os.environ.get("DUCKCLAW_ADMIN_EMAIL") or "").strip()
+                if email and "@" in email:
+                    try:
+                        from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
+
+                        rows = list_visible_workers_for_actor(db, actor_email=email)
+                        visible: list[WorkerPick] = []
+                        seen: set[str] = set()
+                        for row in rows:
+                            wid = str(row.get("id") or row.get("worker_id") or "").strip()
+                            if not wid or wid in seen:
+                                continue
+                            seen.add(wid)
+                            label = str(row.get("display_name") or row.get("name") or wid).strip()
+                            visible.append(WorkerPick(worker_id=wid, label=label))
+                        return visible
+                    except Exception:
+                        pass
+                return catalog_picks
+            return catalog_picks
+
+    if source == "catalog":
+        return []
 
     import os
 
@@ -122,8 +184,8 @@ def format_worker_picker_block(
     """Texto Rich para mostrar opciones numeradas."""
     if not picks:
         return (
-            "[yellow]No se encontraron agentes en el catálogo.[/]\n"
-            "[dim]Comprueba que el monorepo esté completo o escribe el id del worker a mano.[/]"
+            "[yellow]No hay workers en el catálogo DuckDB.[/]\n"
+            "[dim]Crea agentes en la consola admin (/workers) o indica el id con /worker <id>.[/]"
         )
     lines: list[str] = []
     hid = (highlight_id or "").strip().lower()
@@ -180,9 +242,9 @@ def suggest_default_worker_id(
     picks: list[WorkerPick],
     current: str,
     *,
-    prefer: tuple[str, ...] = ("default", "axis-maestro", "platform-orchestrator"),
+    prefer: tuple[str, ...] = ("axis-maestro", "platform-orchestrator"),
 ) -> str:
-    """Mantiene el borrador si es válido; si no, elige el primer preferido presente."""
+    """Mantiene el borrador si es válido; si no, elige el primer preferido presente en catálogo."""
     cur = (current or "").strip()
     ids = {p.worker_id for p in picks}
     if cur and cur in ids:
@@ -190,4 +252,4 @@ def suggest_default_worker_id(
     for cand in prefer:
         if cand in ids:
             return cand
-    return picks[0].worker_id if picks else cur or "default"
+    return picks[0].worker_id if picks else ""

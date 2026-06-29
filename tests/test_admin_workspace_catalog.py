@@ -108,7 +108,7 @@ def test_worker_catalog_does_not_seed_non_default_platform_worker(gateway_db: Pa
     finally:
         con.close()
 
-    assert [worker["worker_id"] for worker in visible] == ["default"]
+    assert [worker["worker_id"] for worker in visible] == []
     assert catalog_count == 0
 
 
@@ -120,7 +120,7 @@ def test_gateway_templates_do_not_auto_seed_platform_worker(gateway_admin_client
 
     assert response.status_code == 200, response.text
     templates = {item["id"]: item for item in response.json()["templates"]}
-    assert "default" in templates
+    assert "default" not in templates
     assert "platform" + "-orchestrator" not in templates
 
 
@@ -796,7 +796,7 @@ def test_workspace_catalog_migration_and_bootstrap_are_idempotent(gateway_db: Pa
     assert expected_tables.issubset(tables)
 
 
-def test_gateway_templates_lists_default_and_actor_catalog_not_all_filesystem_templates(
+def test_gateway_templates_lists_actor_catalog_not_filesystem_templates(
     gateway_admin_client,
 ) -> None:
     from duckclaw import DuckClaw
@@ -821,7 +821,7 @@ def test_gateway_templates_lists_default_and_actor_catalog_not_all_filesystem_te
 
     assert response.status_code == 200
     templates = {item["id"]: item for item in response.json()["templates"]}
-    assert "default" in templates
+    assert "default" not in templates
     assert templates["axis-coder"]["name"] == "AXIS Coder"
     assert templates["axis-coder"]["worker_uid"]
     assert templates["axis-coder"]["visibility"] == "private"
@@ -1126,7 +1126,7 @@ def test_playground_config_uses_db_first_visible_workers_not_all_filesystem_temp
 
     assert response.status_code == 200
     workers = {item["id"]: item for item in response.json()["workers"]}
-    assert "default" in workers
+    assert "default" not in workers
     assert workers["axis-coder"]["label"] == "AXIS Coder"
     assert "BI-Analyst" not in workers
 
@@ -1162,8 +1162,8 @@ def test_admin_health_uses_actor_visible_db_first_workers(
 
     assert response.status_code == 200
     data = response.json()
-    assert data["workers_count"] == 2
-    assert set(data["workers"]) == {"default", "axis-coder"}
+    assert data["workers_count"] == 1
+    assert set(data["workers"]) == {"axis-coder"}
 
 
 def test_playground_llm_scope_does_not_report_legacy(gateway_admin_client) -> None:

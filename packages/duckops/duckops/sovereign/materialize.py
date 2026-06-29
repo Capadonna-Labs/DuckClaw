@@ -776,12 +776,14 @@ def materialize(
             f"{int(draft.gateway_port)}"
         ),
         "DUCKCLAW_GATEWAY_TENANT_ID": draft.tenant_id.strip(),
-        "DUCKCLAW_DEFAULT_WORKER_ID": draft.default_worker_id.strip(),
         "DUCKCLAW_LLM_PROVIDER": draft.llm_provider.strip(),
         "DUCKCLAW_LLM_MODEL": draft.llm_model.strip(),
         "DUCKCLAW_LLM_BASE_URL": draft.llm_base_url.strip(),
         "DUCKCLAW_PM2_PROCESS_NAME": draft.gateway_pm2_name.strip(),
     }
+    _default_worker = (draft.default_worker_id or "").strip()
+    if _default_worker:
+        updates["DUCKCLAW_DEFAULT_WORKER_ID"] = _default_worker
     if creator_id.isdigit():
         updates["DUCKCLAW_OWNER_ID"] = creator_id
     team_raw = (draft.gateway_team_templates or "").strip()
@@ -807,10 +809,11 @@ def materialize(
     if tok:
         from duckclaw.integrations.telegram.telegram_agent_token import telegram_agent_token_env_name
 
-        _wid = (draft.default_worker_id or "default").strip()
-        _std_key = telegram_agent_token_env_name(_wid)
-        if _std_key:
-            updates[_std_key] = tok
+        _wid = (draft.default_worker_id or "").strip()
+        if _wid:
+            _std_key = telegram_agent_token_env_name(_wid)
+            if _std_key:
+                updates[_std_key] = tok
         updates["TELEGRAM_BOT_TOKEN"] = tok
     sec = draft.telegram_webhook_secret.strip()
     if sec:

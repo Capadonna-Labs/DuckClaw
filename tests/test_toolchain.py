@@ -31,6 +31,41 @@ def test_refresh_session_path_prepends_uv_bin(monkeypatch, tmp_path: Path) -> No
     assert str(uv_dir) in toolchain.os.environ["PATH"].split(toolchain.os.pathsep)
 
 
+def test_resolve_pnpm_executable_prefers_cmd_on_windows(monkeypatch, tmp_path: Path) -> None:
+    from duckclaw.ops.toolchain import resolve_pnpm_executable
+
+    npm_dir = tmp_path / "npm"
+    npm_dir.mkdir()
+    cmd = npm_dir / "pnpm.cmd"
+    cmd.write_text("@echo pnpm\n", encoding="utf-8")
+
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr("duckclaw.ops.toolchain.platform.system", lambda: "Windows")
+    monkeypatch.setattr("duckclaw.ops.toolchain.shutil.which", lambda _name: None)
+
+    assert resolve_pnpm_executable() == str(cmd)
+
+
+def test_resolve_pnpm_finds_bin_even_when_not_on_path(monkeypatch, tmp_path: Path) -> None:
+    from duckclaw.ops.toolchain import resolve_pnpm_executable
+
+    npm_dir = tmp_path / "npm-global"
+    npm_dir.mkdir()
+    cmd = npm_dir / "pnpm.cmd"
+    cmd.write_text("@echo pnpm\n", encoding="utf-8")
+
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr("duckclaw.ops.toolchain.platform.system", lambda: "Windows")
+    monkeypatch.setattr(
+        "duckclaw.ops.toolchain._npm_global_bin_dirs",
+        lambda: [npm_dir],
+    )
+    monkeypatch.setattr("duckclaw.ops.toolchain.shutil.which", lambda _name: None)
+
+    assert resolve_pnpm_executable() == str(cmd)
+
+
 def test_run_pm2_checked_raises_on_nonzero(monkeypatch) -> None:
     from duckclaw.ops.toolchain import ToolchainError, run_pm2_checked
 

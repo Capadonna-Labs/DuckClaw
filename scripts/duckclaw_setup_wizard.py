@@ -185,6 +185,35 @@ def _ensure_shared_import_path(repo_root: Path) -> Path:
     return rr
 
 
+def _wizard_repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _pm2_available() -> bool:
+    _ensure_shared_import_path(_wizard_repo_root())
+    from duckclaw.ops.toolchain import is_pm2_available
+
+    return is_pm2_available()
+
+
+def _run_pm2(
+    *args: str,
+    timeout: int | None = None,
+    cwd: str | Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    _ensure_shared_import_path(_wizard_repo_root())
+    from duckclaw.ops.toolchain import ToolchainError, run_pm2
+
+    try:
+        return run_pm2(*args, timeout=timeout, cwd=cwd)
+    except ToolchainError as exc:
+        return subprocess.CompletedProcess(
+            ["pm2", *args],
+            returncode=127,
+            stdout="",
+            stderr=str(exc),
+        )
+
 def _repo_dotenv_immutable(repo_root: Path) -> bool:
     try:
         from duckclaw.dotenv_immutable import is_repo_dotenv_immutable
@@ -354,7 +383,7 @@ def load_config() -> dict[str, Any] | None:
 def _detect_available_deploy_providers() -> list[str]:
     """Detecta qué proveedores de persistencia están disponibles en este equipo."""
     available: list[str] = []
-    if shutil.which("pm2") is not None:
+    if _pm2_available():
         available.append("pm2")
     if platform.system() == "Linux" and (shutil.which("systemctl") or (os.path.exists("/run/systemd/system"))):
         available.append("systemd")
@@ -381,13 +410,8 @@ def _save_available_deploy_providers(providers: list[str]) -> None:
 
 def _is_deploy_service_running(name: str) -> tuple[bool, str]:
     """Comprueba si ya existe un servicio con este nombre. Devuelve (existe, proveedor)."""
-    if shutil.which("pm2") is not None:
-        r = subprocess.run(
-            ["pm2", "describe", name],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
+    if _pm2_available():
+        r = _run_pm2("describe", name, timeout=5)
         if r.returncode == 0 and name in (r.stdout or ""):
             return True, "pm2"
     if platform.system() == "Linux" and shutil.which("systemctl") is not None:
@@ -404,7 +428,7 @@ def _is_deploy_service_running(name: str) -> tuple[bool, str]:
 
 def _ensure_pm2_inference_service(script_path: Path, cwd: Path) -> str:
     """Arranca MLX-Inference (start_mlx.sh) con PM2 si no está ya en marcha. Devuelve mensaje para el usuario."""
-    if not shutil.which("pm2"):
+    if not _pm2_available():
         return "pm2 no encontrado; no se pudo crear el servicio de inferencia."
     exists, _ = _is_deploy_service_running(INFERENCE_SERVICE_NAME)
     if exists:
@@ -412,10 +436,15 @@ def _ensure_pm2_inference_service(script_path: Path, cwd: Path) -> str:
     script_str = str(script_path.resolve())
     try:
         # PM2: usar bash para .sh por si no tiene +x; -- no interpretar opciones en el script
-        r = subprocess.run(
-            ["pm2", "start", "bash", "--name", INFERENCE_SERVICE_NAME, "--cwd", str(cwd), "--", script_str],
-            capture_output=True,
-            text=True,
+        r = _run_pm2(
+            "start",
+            "bash",
+            "--name",
+            INFERENCE_SERVICE_NAME,
+            "--cwd",
+            str(cwd),
+            "--",
+            script_str,
             timeout=15,
             cwd=str(cwd),
         )
@@ -530,10 +559,10 @@ def _pm2_pids_for_app_name(name: str) -> set[int]:
     """PIDs que PM2 asocia a esta app (nombre del proceso)."""
     out: set[int] = set()
     n = (name or "").strip()
-    if not n or shutil.which("pm2") is None:
+    if not n or not _pm2_available():
         return out
     try:
-        r = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=5)
+        r = _run_pm2("jlist", timeout=5)
         if r.returncode != 0:
             return out
         import json as _json
@@ -754,20 +783,14 @@ def _wizard_resolve_gateway_conflicts(console: Console, repo_root: Path) -> None
         console.print(f"[red]Error al guardar: {e}[/]")
         return
 
-    if shutil.which("pm2") and Confirm.ask(
+    if _pm2_available() and Confirm.ask(
         "¿Reiniciar en PM2 cada gateway con --update-env?",
         default=True,
     ):
         for a in apps:
             if isinstance(a, dict) and (a.get("name") or "").strip():
                 nm = (a.get("name") or "").strip()
-                r = subprocess.run(
-                    ["pm2", "restart", nm, "--update-env"],
-                    capture_output=True,
-                    text=True,
-                    timeout=90,
-                    cwd=cwd,
-                )
+                r = _run_pm2("restart", nm, "--update-env", timeout=90, cwd=cwd)
                 if r.returncode == 0:
                     console.print(f"[green]✓[/] pm2 restart {escape(nm)}")
                 else:
@@ -984,7 +1007,7 @@ def _offer_gateway_pm2_if_pm2(console: Console, state: dict[str, Any], repo_root
     Tras la configuración completa: ofrece abrir el flujo del API Gateway (nombre PM2, BD, Redis).
     No depende de haber elegido un proceso en el menú inicial (opción 0).
     """
-    if not shutil.which("pm2"):
+    if not _pm2_available():
         return
     merged = load_config() or {}
     if not isinstance(merged, dict):
@@ -1105,26 +1128,21 @@ module.exports = {{
     console.print(action_table)
     action = Prompt.ask("Acción", choices=["1", "2", "3", "s"], default="s").strip().lower()
     if action == "1":
-        subprocess.run(
-            ["pm2", "delete", DB_WRITER_SERVICE_NAME],
-            timeout=15,
-            capture_output=True,
-            text=True,
-        )
-        subprocess.run(["pm2", "start", str(config_path)], timeout=20)
+        _run_pm2("delete", DB_WRITER_SERVICE_NAME, timeout=15)
+        _run_pm2("start", str(config_path), timeout=20)
         console.print("[green]✓[/] Recreado desde ecosystem (delete+start; PM2 no actualiza ``script`` con restart).")
     elif action == "2":
-        subprocess.run(["pm2", "start", str(config_path)], timeout=15)
+        _run_pm2("start", str(config_path), timeout=15)
         console.print("[green]✓[/] Iniciado.")
     elif action == "3":
-        subprocess.run(["pm2", "stop", DB_WRITER_SERVICE_NAME], timeout=10)
+        _run_pm2("stop", DB_WRITER_SERVICE_NAME, timeout=10)
         console.print("[green]✓[/] Detenido.")
 
 
 def _pm2_app_status(name: str) -> str:
     """Return PM2 status string for a named app, or 'no registrado'."""
     try:
-        r = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=5)
+        r = _run_pm2("jlist", timeout=5)
         if r.returncode == 0:
             import json as _json
             procs = _json.loads(r.stdout or "[]")
@@ -1359,13 +1377,13 @@ module.exports = {{
     
     if provider == "pm2":
         if action == "1":
-            subprocess.run(["pm2", "restart", new_name, "--update-env"], timeout=10)
+            _run_pm2("restart", new_name, "--update-env", timeout=10)
             console.print(f"[green]✓[/] Reiniciado.")
         elif action == "2":
-            subprocess.run(["pm2", "start", str(config_path)], timeout=15)
+            _run_pm2("start", str(config_path), timeout=15)
             console.print(f"[green]✓[/] Iniciado.")
         elif action == "3":
-            subprocess.run(["pm2", "stop", new_name], timeout=10)
+            _run_pm2("stop", new_name, timeout=10)
             console.print(f"[green]✓[/] Detenido.")
     elif provider == "systemd":
         unit = new_name.lower().replace(" ", "-") + ".service"
@@ -2265,7 +2283,7 @@ def _run_section(
             use_pm2_inference = deploy_provider == "pm2" or (
                 deploy_provider == "auto" and platform.system() != "Windows"
             )
-            if use_pm2_inference and shutil.which("pm2"):
+            if use_pm2_inference and _pm2_available():
                 msg = _ensure_pm2_inference_service(start_mlx, repo_root)
                 console.print(Panel(msg, title=f"Servicio {INFERENCE_SERVICE_NAME} (MLX)", border_style="blue"))
             else:
@@ -2280,7 +2298,7 @@ def _run_section(
                     console.print(f"[yellow]No se pudo ejecutar start_mlx.sh: {e}[/]")
         # API Gateway (PM2): ofrecer aquí si hay PM2 y el bot ya estaba o acaba de desplegarse (antes de "arrancar ahora").
         # Así no depende de responder "no" a arrancar el bot ni de terminar el polling en primer plano.
-        if shutil.which("pm2") and (service_exists or deploy_yes):
+        if _pm2_available() and (service_exists or deploy_yes):
             _offer_gateway_pm2_if_pm2(console, state, repo_root)
         if service_exists:
             console.print("[dim]Configuración guardada. El bot ya está en marcha con el servicio; no se arranca otra instancia.[/]")
@@ -2417,11 +2435,11 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
                 _ensure_default_mcp_telegram_integration(repo_root, console)
             return 0
 
-    elif shutil.which("pm2") is not None:
+    elif _pm2_available():
         # Buscar cualquier proceso PM2 registrado (no solo nombres conocidos)
         pm2_procs: list[dict[str, Any]] = []
         try:
-            r = subprocess.run(["pm2", "jlist"], capture_output=True, text=True, timeout=5)
+            r = _run_pm2("jlist", timeout=5)
             if r.returncode == 0:
                 import json as _json
                 pm2_procs = _json.loads(r.stdout or "[]")

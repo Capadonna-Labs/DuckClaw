@@ -212,20 +212,16 @@ def check_spawn_orphan_queue() -> str | None:
     if ro_flags:
         lines.append(f"⚠️ Env fuerza solo lectura: {', '.join(sorted(ro_flags)[:8])}")
 
-    if shutil.which("pm2"):
+    from duckclaw.ops.toolchain import ToolchainError, is_pm2_available, run_pm2
+
+    if is_pm2_available():
         try:
-            proc = subprocess.run(
-                ["pm2", "jlist"],
-                capture_output=True,
-                text=True,
-                timeout=12,
-                check=False,
-            )
+            proc = run_pm2("jlist", timeout=12)
             if proc.returncode == 0 and "DuckClaw-DB-Writer" in (proc.stdout or ""):
                 lines.append(
                     "PM2 tiene DuckClaw-DB-Writer (opcional; con inline spawn puede duplicar escritores)."
                 )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
+        except ToolchainError:
             pass
 
     try:

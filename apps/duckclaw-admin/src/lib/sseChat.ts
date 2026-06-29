@@ -7,6 +7,7 @@ export type SseChatEvent =
       response: string;
       assigned_worker_id?: string;
       usage_tokens?: Record<string, number>;
+      context_estimated_tokens?: number;
       worker_id?: string;
       elapsed_ms?: number;
       figure_base64?: string;
@@ -55,6 +56,12 @@ function parseDataLine(data: string): SseChatEvent | null {
         response: String(j.response ?? ''),
         assigned_worker_id: j.assigned_worker_id as string | undefined,
         usage_tokens: j.usage_tokens as Record<string, number> | undefined,
+        context_estimated_tokens:
+          typeof j.context_estimated_tokens === 'number'
+            ? j.context_estimated_tokens
+            : j.context_estimated_tokens != null
+              ? Number(j.context_estimated_tokens)
+              : undefined,
         worker_id: j.worker_id as string | undefined,
         elapsed_ms:
           typeof j.elapsed_ms === 'number'

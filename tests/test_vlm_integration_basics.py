@@ -633,3 +633,64 @@ def test_telegram_vlm_collect_album_caps_at_three_unique(monkeypatch: pytest.Mon
         assert len({x["file_id"] for x in leader[0]}) == 3
 
     asyncio.run(_run())
+
+
+def test_vlm_mlx_disk_preflight_skipped_without_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_DISK_HEALTH_URL", raising=False)
+
+    async def _run() -> None:
+        await vlm_mod._mlx_disk_preflight_or_raise()
+
+    asyncio.run(_run())
+
+
+def test_vlm_mlx_disk_preflight_blocks_when_low(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_VLM_MLX_DISK_HEALTH_URL", "http://127.0.0.1:9082/health/disk")
+    monkeypatch.setenv("DUCKCLAW_VLM_MLX_DISK_MIN_FREE_PCT", "10")
+
+    class _Resp:
+        content = b'{"ok": false, "free_pct": 3.2}'
+
+        def json(self) -> dict:
+            return {"ok": False, "free_pct": 3.2}
+
+    class _Client:
+        async def __aenter__(self) -> "_Client":
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            return None
+
+        async def get(self, _url: str) -> _Resp:
+            return _Resp()
+
+    monkeypatch.setattr(vlm_mod.httpx, "AsyncClient", lambda **kwargs: _Client())
+
+    async def _run() -> None:
+        with pytest.raises(vlm_mod.VlmMlxDiskUnavailable):
+            await vlm_mod._mlx_disk_preflight_or_raise()
+
+    asyncio.run(_run())
+
+
+def test_vlm_mlx_enospc_hint_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_VLM_MLX_ENOSPC_HINT", raising=False)
+    import httpx
+
+    req = httpx.Request("POST", "http://127.0.0.1:8081/v1/chat/completions")
+    resp = httpx.Response(500, request=req, text="No space left on device")
+    exc = httpx.HTTPStatusError("server error", request=req, response=resp)
+    out = vlm_mod._vlm_mlx_exception_with_enospc_hint(exc)
+    assert out is exc
+
+
+def test_vlm_mlx_enospc_hint_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_VLM_MLX_ENOSPC_HINT", "1")
+    import httpx
+
+    req = httpx.Request("POST", "http://127.0.0.1:8081/v1/chat/completions")
+    resp = httpx.Response(500, request=req, text="Errno 28 No space left on device")
+    exc = httpx.HTTPStatusError("server error", request=req, response=resp)
+    out = vlm_mod._vlm_mlx_exception_with_enospc_hint(exc)
+    assert out is not exc
+    assert "macmini_disk_drain" in str(out).lower() or "drenaje" in str(out).lower()

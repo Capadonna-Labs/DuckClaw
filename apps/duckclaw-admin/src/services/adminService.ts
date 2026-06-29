@@ -2029,6 +2029,7 @@ export const adminService = {
         response: string;
         assigned_worker_id?: string;
         usage_tokens?: Record<string, number>;
+        context_estimated_tokens?: number;
         elapsed_ms?: number;
         figure_base64?: string;
         fly_charts_b64?: string[];
@@ -2085,6 +2086,7 @@ export const adminService = {
             response: ev.response || full,
             assigned_worker_id: ev.assigned_worker_id,
             usage_tokens: ev.usage_tokens,
+            context_estimated_tokens: ev.context_estimated_tokens,
             elapsed_ms: ev.elapsed_ms,
             figure_base64: ev.figure_base64,
             fly_charts_b64: ev.fly_charts_b64,

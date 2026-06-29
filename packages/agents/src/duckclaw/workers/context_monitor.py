@@ -119,6 +119,7 @@ def apply_context_monitor_state(
     llm_summary: Any = None,
     identity_fields: Callable[[dict], dict] | None = None,
     summary_state_key: str = "analytical_summary",
+    force_prune: bool = False,
 ) -> dict:
     if not pruning_config.get("enabled"):
         return state
@@ -131,7 +132,7 @@ def apply_context_monitor_state(
         int(pruning_config.get("tool_content_max_chars", 8000)),
     )
     estimated_tokens = estimate_tokens_from_messages(messages)
-    needs_pruning = (
+    needs_pruning = bool(force_prune) or (
         len(messages) > int(pruning_config.get("max_messages", 10))
         or estimated_tokens > int(pruning_config.get("max_estimated_tokens", 4000))
     )
@@ -141,7 +142,11 @@ def apply_context_monitor_state(
         return _with_identity_fields(state, {**state, "messages": messages}, identity_fields)
 
     rest = messages[1:]
-    head, tail = split_for_pruning(rest, int(pruning_config.get("keep_last_messages", 3)))
+    keep_last = int(pruning_config.get("keep_last_messages", 3))
+    if force_prune and len(rest) >= 2:
+        keep_last = min(keep_last, len(rest) - 1)
+        keep_last = max(1, keep_last)
+    head, tail = split_for_pruning(rest, keep_last)
     prior = _summary_value(state, summary_state_key)
     if not head:
         trimmed = list(rest)

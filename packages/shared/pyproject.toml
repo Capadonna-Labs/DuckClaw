@@ -33,7 +33,7 @@ where = ["src"]
 include = ["duckclaw*"]
 
 [tool.setuptools.package-data]
-"duckclaw" = ["seeds/*.json", "seeds/document_templates/*.docx"]
+"duckclaw" = ["seeds/*.json", "seeds/*.yaml", "seeds/document_templates/*.docx"]
 
 [tool.setuptools.package-dir]
 "" = "src"

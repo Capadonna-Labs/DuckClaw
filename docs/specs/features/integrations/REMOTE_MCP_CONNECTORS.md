@@ -19,6 +19,22 @@ Registry DB-first de conectores MCP (stdio + Streamable HTTP) con grants por wor
 
 Secrets: `admin_runtime_settings` domain `mcp_connector`, key `{connector_id}.bearer`, `secret=true`.
 
+## Presets empaquetados (YAML)
+
+Definición en [`packages/shared/src/duckclaw/seeds/mcp_connector_presets.yaml`](../../../../packages/shared/src/duckclaw/seeds/mcp_connector_presets.yaml). Loader: `duckclaw.mcp_connector_presets`.
+
+| Prioridad | Origen |
+|-----------|--------|
+| 1 | `DUCKCLAW_MCP_PRESETS_PATH` — override explícito (forks, Capadonna-Driller) |
+| 2 | `{DUCKCLAW_REPO_ROOT}/config/mcp_connector_presets.yaml` — edición en monorepo |
+| 3 | `duckclaw/seeds/mcp_connector_presets.yaml` — bundled en `duckclaw-shared` |
+
+Perfiles reutilizables (`profiles.stdio_npx_ro`) evitan duplicar stdio/npx. API Python:
+
+```python
+from duckclaw.mcp_connector_presets import list_mcp_connector_presets, preset_payload
+```
+
 ## API (gateway, admin key)
 
 Prefix: `/api/v1/admin/mcp/connectors`

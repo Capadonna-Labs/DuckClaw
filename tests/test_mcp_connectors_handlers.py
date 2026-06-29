@@ -21,6 +21,7 @@ def test_presets_include_higgsfield_and_stdio_profiles() -> None:
     assert presets["higgsfield"]["endpoint_url"] == "https://mcp.higgsfield.ai/mcp"
     assert "mcp_fetch" in presets
     assert presets["mcp_fetch"]["transport"] == "stdio"
+    assert presets["mcp_fetch"]["launch_command"] == "npx"
     assert preset_payload("unknown") is None
 
 

@@ -398,6 +398,96 @@ class VlmIngestAllFailed(Exception):
         super().__init__(str(cause))
 
 
+class VlmMlxDiskUnavailable(Exception):
+    """MLX VLM omitido: disco Mac por debajo del umbral (preflight opt-in)."""
+
+    def __init__(self, message: str, *, free_pct: float | None = None) -> None:
+        self.free_pct = free_pct
+        super().__init__(message)
+
+
+def _vlm_mlx_disk_health_url() -> str:
+    """URL de health disco Mac; vacío = sin preflight (comportamiento legacy)."""
+    return (os.environ.get("DUCKCLAW_VLM_MLX_DISK_HEALTH_URL") or "").strip()
+
+
+def _vlm_mlx_disk_min_free_pct() -> float:
+    raw = (os.environ.get("DUCKCLAW_VLM_MLX_DISK_MIN_FREE_PCT") or "10").strip()
+    try:
+        return float(raw)
+    except ValueError:
+        return 10.0
+
+
+def _vlm_mlx_enospc_hint_enabled() -> bool:
+    return (os.environ.get("DUCKCLAW_VLM_MLX_ENOSPC_HINT") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def _vlm_mlx_exception_with_enospc_hint(exc: BaseException) -> BaseException:
+    """Enriquece errores MLX ENOSPC solo con ``DUCKCLAW_VLM_MLX_ENOSPC_HINT=1``."""
+    if not _vlm_mlx_enospc_hint_enabled():
+        return exc
+    body = ""
+    if isinstance(exc, httpx.HTTPStatusError) and exc.response is not None:
+        try:
+            body = exc.response.text or ""
+        except Exception:
+            body = ""
+    msg = str(exc)
+    needles = ("No space left on device", "Errno 28")
+    if any(n in body or n in msg for n in needles):
+        hint = (
+            "MLX-Vision en Mac Mini sin espacio en disco (ENOSPC). "
+            "Ejecuta drenaje en Mac Mini (macmini_disk_drain.sh) antes de reintentar."
+        )
+        return RuntimeError(f"{hint} Detalle: {vlm_exception_for_log(exc)}")
+    return exc
+
+
+async def _mlx_disk_preflight_or_raise() -> None:
+    """
+    Preflight disco Mac Mini antes de MLX HTTP.
+
+    Opt-in: solo si ``DUCKCLAW_VLM_MLX_DISK_HEALTH_URL`` está definida.
+    Si el endpoint no responde, no bloquea MLX (fail-open).
+    """
+    url = _vlm_mlx_disk_health_url()
+    if not url:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
+            response = await client.get(url)
+            payload = response.json() if response.content else {}
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("VLM MLX disk preflight no disponible (%s): %s", url, exc)
+        return
+    if not isinstance(payload, dict):
+        return
+    if payload.get("ok") is True:
+        return
+    free_pct_raw = payload.get("free_pct")
+    free_pct: float | None
+    try:
+        free_pct = float(free_pct_raw) if free_pct_raw is not None else None
+    except (TypeError, ValueError):
+        free_pct = None
+    min_pct = _vlm_mlx_disk_min_free_pct()
+    free_label = f"{free_pct}%" if free_pct is not None else "desconocido"
+    raise VlmMlxDiskUnavailable(
+        (
+            f"VLM MLX omitido: disco Mac Mini por debajo del umbral "
+            f"({free_label} libre, mínimo {min_pct}%). "
+            f"Ejecuta macmini_disk_drain.sh en la Mac GPU."
+        ),
+        free_pct=free_pct,
+    )
+
+
 def _mlx_vlm_model_id() -> str:
     """
     VLM local (mlx_vlm) y el LLM de texto (mlx_lm) usan **identificadores distintos** salvo
@@ -911,6 +1001,7 @@ async def _run_vlm_single_from_bytes(
                             "o DUCKCLAW_VLM_MLX_HTTP_ALLOW_DEFAULT_LOOPBACK=1."
                         )
                         continue
+                    await _mlx_disk_preflight_or_raise()
                     summary = await _call_openai_vision(
                         base_url=mlx_base,
                         api_key=(os.environ.get("DUCKCLAW_VLM_MLX_API_KEY") or "").strip(),
@@ -994,12 +1085,12 @@ async def _run_vlm_single_from_bytes(
                     confidence = 0.75
                 break
             except Exception as exc:  # noqa: BLE001
-                last_exc = exc
+                last_exc = _vlm_mlx_exception_with_enospc_hint(exc) if kind == "mlx" else exc
                 if kind == "mlx":
                     _log.warning(
                         "VLM vía MLX falló (base_url=%s): %s",
                         mlx_base,
-                        vlm_exception_for_log(exc),
+                        vlm_exception_for_log(last_exc),
                     )
                     if isinstance(exc, httpx.ConnectError) and _is_loopback_openai_base(mlx_base):
                         _log.info(
@@ -1159,6 +1250,7 @@ async def _run_vlm_album_from_bytes(
                             "mlx_lm no sirve visión OpenAI en ese endpoint."
                         )
                         continue
+                    await _mlx_disk_preflight_or_raise()
                     summary = await _call_openai_vision_multi(
                         base_url=mlx_base,
                         api_key=(os.environ.get("DUCKCLAW_VLM_MLX_API_KEY") or "").strip(),
@@ -1238,12 +1330,12 @@ async def _run_vlm_album_from_bytes(
                     confidence = 0.75
                 break
             except Exception as exc:  # noqa: BLE001
-                last_exc = exc
+                last_exc = _vlm_mlx_exception_with_enospc_hint(exc) if kind == "mlx" else exc
                 if kind == "mlx":
                     _log.warning(
                         "VLM (álbum) vía MLX falló (base_url=%s): %s",
                         mlx_base,
-                        vlm_exception_for_log(exc),
+                        vlm_exception_for_log(last_exc),
                     )
                     if isinstance(exc, httpx.ConnectError) and _is_loopback_openai_base(mlx_base):
                         _log.info(

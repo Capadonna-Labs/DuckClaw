@@ -7,6 +7,7 @@ type PlaygroundChatStudioHeaderProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
   tokenTotal?: number;
+  contextEstimated?: boolean;
   fallbackTitle?: string;
 };
 
@@ -15,6 +16,7 @@ export function PlaygroundChatStudioHeader({
   conversationTitle,
   onRenameConversation,
   tokenTotal = 0,
+  contextEstimated = false,
   fallbackTitle = 'Nueva conversación',
 }: PlaygroundChatStudioHeaderProps) {
   const displayTitle = (conversationTitle || '').trim() || fallbackTitle;
@@ -36,7 +38,11 @@ export function PlaygroundChatStudioHeader({
         )}
         <span
           className="shrink-0 text-xs tabular-nums text-gov-gray-500 dark:text-dark-muted"
-          title="Tokens acumulados en esta conversación (turnos con métricas del LLM)"
+          title={
+            contextEstimated
+              ? 'Tokens estimados del contexto activo tras compactar el hilo'
+              : 'Tokens acumulados en esta conversación (turnos con métricas del LLM)'
+          }
         >
           {formatTokenCount(tokenTotal)}
         </span>

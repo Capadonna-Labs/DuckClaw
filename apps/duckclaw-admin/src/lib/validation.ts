@@ -3,6 +3,7 @@
 export const LIMITS = {
   searchQuery: 50,
   workerId: 64,
+  displayName: 128,
   templatePath: 120,
   runtimeKey: 128,
   runtimeValue: 8000,

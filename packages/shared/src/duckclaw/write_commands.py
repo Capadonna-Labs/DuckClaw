@@ -569,6 +569,59 @@ class DropLegacyDuckDbObjectsCommand(WriteCommand):
     main_tables: list[str] = Field(default_factory=list)
 
 
+class DeactivateMcpConnectorCommand(WriteCommand):
+    """Soft-delete MCP connector and revoke grants."""
+
+    command_type: Literal["deactivate_mcp_connector"] = "deactivate_mcp_connector"
+    connector_id: str
+
+
+class UpsertMcpConnectorCommand(WriteCommand):
+    """Create or update MCP connector registry row."""
+
+    command_type: Literal["upsert_mcp_connector"] = "upsert_mcp_connector"
+    connector_id: str = ""
+    display_name: str = ""
+    transport: str = ""
+    endpoint_url: str = ""
+    launch_command: str = ""
+    launch_args: list[str] = Field(default_factory=list)
+    launch_env: dict[str, str] = Field(default_factory=dict)
+    auth_kind: str = "none"
+    tool_allowlist: list[str] = Field(default_factory=list)
+    tool_denylist: list[str] = Field(default_factory=list)
+    read_only: bool | None = None
+    egress_hosts: list[str] = Field(default_factory=list)
+    preset_id: str = ""
+    enabled: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SetMcpConnectorAuthCommand(WriteCommand):
+    """Store bearer token for remote MCP connector (secret runtime setting)."""
+
+    command_type: Literal["set_mcp_connector_auth"] = "set_mcp_connector_auth"
+    connector_id: str
+    bearer_token: str
+
+
+class GrantWorkerMcpConnectorCommand(WriteCommand):
+    """Grant worker access to MCP connector tools."""
+
+    command_type: Literal["grant_worker_mcp_connector"] = "grant_worker_mcp_connector"
+    connector_id: str
+    worker_uid: str
+    permission: str = "use"
+
+
+class RevokeWorkerMcpConnectorCommand(WriteCommand):
+    """Revoke worker MCP connector grant."""
+
+    command_type: Literal["revoke_worker_mcp_connector"] = "revoke_worker_mcp_connector"
+    connector_id: str
+    worker_uid: str
+
+
 # ---------------------------------------------------------------------------
 # Raw SQL (legacy — keep for admin_sql tool)
 # ---------------------------------------------------------------------------

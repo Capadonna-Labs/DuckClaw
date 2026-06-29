@@ -12,6 +12,7 @@ import { WorkerCapabilitiesCard } from '@/components/templates/WorkerCapabilitie
 import { ManifestGuidedPanel } from '@/components/templates/ManifestGuidedPanel';
 import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
 import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBanner';
+import { WorkerDisplayNameEditor } from '@/components/templates/WorkerDisplayNameEditor';
 
 type MarkdownViewMode = 'edit' | 'preview' | 'split';
 
@@ -199,9 +200,15 @@ export default function TemplateEditorPage() {
 
       <header className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-black dark:text-dark-text">
-            {detail?.display_name || workerId}
-          </h1>
+          <WorkerDisplayNameEditor
+            workerId={workerId}
+            displayName={detail?.display_name || workerId}
+            canEdit={canEditFiles && isCatalogWorker}
+            onSaved={(next) => {
+              setDetail((prev) => (prev ? { ...prev, display_name: next } : prev));
+              setMsg('Nombre actualizado.');
+            }}
+          />
           {isCatalogWorker && (
             <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
               Snapshot importado desde DuckDB. Los cambios se versionan en el catálogo y no modifican

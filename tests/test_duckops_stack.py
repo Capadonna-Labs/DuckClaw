@@ -23,6 +23,7 @@ def test_root_package_exposes_stack_launcher_scripts() -> None:
 
 def test_duckops_stack_status_reports_pm2_processes_as_json(monkeypatch) -> None:
     import duckops.commands.stack as stack
+    from duckclaw.ops.providers.pm2 import pm2_argv
 
     payload = [
         {"name": "DuckClaw-Gateway", "pm2_env": {"status": "online"}},
@@ -30,7 +31,7 @@ def test_duckops_stack_status_reports_pm2_processes_as_json(monkeypatch) -> None
     ]
 
     def fake_run(argv, **_kwargs):
-        assert argv == ["pm2", "jlist"]
+        assert argv == pm2_argv("jlist")
         return SimpleNamespace(returncode=0, stdout=json.dumps(payload), stderr="")
 
     monkeypatch.setattr(stack.subprocess, "run", fake_run)
@@ -49,6 +50,7 @@ def test_duckops_stack_status_reports_pm2_processes_as_json(monkeypatch) -> None
 
 def test_duckops_stack_up_starts_gateway_and_db_writer_then_saves(monkeypatch, tmp_path: Path) -> None:
     import duckops.commands.stack as stack
+    from duckclaw.ops.providers.pm2 import pm2_argv
 
     root = tmp_path
     config = root / "config"
@@ -59,7 +61,7 @@ def test_duckops_stack_up_starts_gateway_and_db_writer_then_saves(monkeypatch, t
 
     def fake_run(argv, **_kwargs):
         calls.append(list(argv))
-        if argv == ["pm2", "jlist"]:
+        if argv == pm2_argv("jlist"):
             return SimpleNamespace(returncode=0, stdout="[]", stderr="")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -70,7 +72,7 @@ def test_duckops_stack_up_starts_gateway_and_db_writer_then_saves(monkeypatch, t
     result = runner.invoke(app, ["stack", "up", "--provider", "pm2", "--no-wait"])
 
     assert result.exit_code == 0, result.output
-    assert ["pm2", "start", str(config / "ecosystem.api.config.cjs"), "--only", "DuckClaw-Gateway", "--update-env"] in calls
-    assert ["pm2", "start", str(config / "ecosystem.db-writer.config.cjs"), "--only", "DuckClaw-DB-Writer", "--update-env"] in calls
-    assert ["pm2", "save"] in calls
+    assert pm2_argv("start", str(config / "ecosystem.api.config.cjs"), "--only", "DuckClaw-Gateway", "--update-env") in calls
+    assert pm2_argv("start", str(config / "ecosystem.db-writer.config.cjs"), "--only", "DuckClaw-DB-Writer", "--update-env") in calls
+    assert pm2_argv("save") in calls
 

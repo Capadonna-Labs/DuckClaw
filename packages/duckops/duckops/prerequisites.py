@@ -146,7 +146,9 @@ def check_pnpm() -> ToolCheck:
 
 
 def check_pm2() -> ToolCheck:
-    pm2 = shutil.which("pm2")
+    from duckclaw.ops.providers.pm2 import resolve_pm2_executable
+
+    pm2 = resolve_pm2_executable()
     if not pm2:
         return ToolCheck("PM2", False, "", "no está en PATH (gateway + db-writer)")
     proc = _run([pm2, "-v"], timeout=15)

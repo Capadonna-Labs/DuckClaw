@@ -24,6 +24,10 @@ def _repo_root() -> Path:
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    from duckclaw.ops.providers.pm2 import pm2_argv
+
+    if argv and argv[0] == "pm2":
+        argv = pm2_argv(*argv[1:])
     try:
         return subprocess.run(argv, capture_output=True, text=True, check=False)
     except FileNotFoundError as exc:

@@ -166,7 +166,9 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
 
     prov = provider.strip().lower()
     if prov == "auto":
-        if shutil.which("pm2"):
+        from duckclaw.ops.providers.pm2 import is_pm2_available, pm2_argv
+
+        if is_pm2_available():
             prov = "pm2"
         elif platform.system() == "Linux" and shutil.which("systemctl"):
             prov = "systemd"
@@ -180,8 +182,10 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
         import json
         import subprocess as sp
 
+        from duckclaw.ops.providers.pm2 import pm2_argv, resolve_pm2_executable
+
         try:
-            result = sp.run(["pm2", "jlist"], capture_output=True, text=True, timeout=10)
+            result = sp.run(pm2_argv("jlist"), capture_output=True, text=True, timeout=10)
             processes: list[dict] = json.loads(result.stdout or "[]")
         except Exception as e:
             _print(f"[red]Error consultando pm2: {e}[/]")
@@ -261,7 +265,7 @@ def status(provider: str = "auto", name: Optional[str] = None) -> int:
 
             console.print()
             console.print(table)
-            pm2_bin = shutil.which("pm2") or "pm2"
+            pm2_bin = resolve_pm2_executable() or "pm2"
             console.print(Panel(
                 f"[dim]Proveedor:[/] [bold]PM2[/]  [dim]·[/]  [dim]bin:[/] {pm2_bin}\n"
                 "[dim]Comandos:[/]  pm2 logs <nombre>  ·  pm2 restart <nombre>  ·  pm2 save",
@@ -467,8 +471,10 @@ def analyze_gateway_cluster_conflicts(effective_cwd: str) -> dict[str, Any]:
 def _pm2_jlist_processes() -> list[dict[str, Any]]:
     import subprocess as sp
 
+    from duckclaw.ops.providers.pm2 import pm2_argv
+
     try:
-        result = sp.run(["pm2", "jlist"], capture_output=True, text=True, timeout=12)
+        result = sp.run(pm2_argv("jlist"), capture_output=True, text=True, timeout=12)
         data = json.loads(result.stdout or "[]")
         return data if isinstance(data, list) else []
     except Exception:
@@ -502,15 +508,17 @@ def pm2_start_or_recreate_gateway(
     """
     import subprocess as sp
 
+    from duckclaw.ops.providers.pm2 import pm2_argv
+
     name = (process_name or "").strip()
     if not name:
         return
-    existing = sp.run(["pm2", "id", name], capture_output=True, text=True)
+    existing = sp.run(pm2_argv("id", name), capture_output=True, text=True)
     running = existing.returncode == 0 and (existing.stdout or "").strip() not in ("", "[]")
     if running:
         live = pm2_gateway_listening_port(name)
         if live is not None and int(live) != int(desired_port):
-            sp.run(["pm2", "delete", name], capture_output=True, text=True, check=False)
+            sp.run(pm2_argv("delete", name), capture_output=True, text=True, check=False)
             print(
                 f"🔄  PM2: {name} recreado (puerto {live} → {desired_port}; "
                 "restart no cambia --port).",
@@ -518,11 +526,11 @@ def pm2_start_or_recreate_gateway(
             )
             running = False
     if running:
-        sp.run(["pm2", "restart", name, "--update-env"], check=False)
+        sp.run(pm2_argv("restart", name, "--update-env"), check=False)
         print(f"🔄  PM2: {name} reiniciado.", flush=True)
     else:
         sp.run(
-            ["pm2", "start", str(config_path), "--only", name],
+            pm2_argv("start", str(config_path), "--only", name),
             check=False,
         )
         print(f"🚀  PM2: {name} iniciado (ecosystem.api.config.cjs).", flush=True)
@@ -673,13 +681,14 @@ def pm2_delete_named_app(name: Optional[str]) -> bool:
     """
     if not name or not str(name).strip():
         return False
-    import shutil
     import subprocess as sp
 
-    if shutil.which("pm2") is None:
+    from duckclaw.ops.providers.pm2 import is_pm2_available, pm2_argv
+
+    if not is_pm2_available():
         return False
     n = str(name).strip()
-    r = sp.run(["pm2", "delete", n], capture_output=True, text=True, timeout=30)
+    r = sp.run(pm2_argv("delete", n), capture_output=True, text=True, timeout=30)
     return r.returncode == 0
 
 
@@ -707,8 +716,7 @@ def serve(
     effective_cwd = str(Path(cwd or os.getcwd()).resolve())
 
     if pm2:
-        from duckclaw.ops.providers.pm2 import is_pm2_available
-        import shutil
+        from duckclaw.ops.providers.pm2 import is_pm2_available, pm2_argv
         import subprocess as sp
 
         if not is_pm2_available():
@@ -896,12 +904,16 @@ module.exports = {{
                 except Exception as _e:
                     print(f"⚠️  No se pudo crear la BD en {_db_file}: {_e}", flush=True)
 
-        existing = sp.run(["pm2", "id", effective_name], capture_output=True, text=True)
+        import subprocess as sp
+
+        from duckclaw.ops.providers.pm2 import pm2_argv
+
+        existing = sp.run(pm2_argv("id", effective_name), capture_output=True, text=True)
         if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
-            sp.run(["pm2", "restart", effective_name, "--update-env"], check=False)
+            sp.run(pm2_argv("restart", effective_name, "--update-env"), check=False)
             print(f"🔄  PM2: {effective_name} reiniciado.", flush=True)
         else:
-            sp.run(["pm2", "start", str(graph_api_config_path)], check=False)
+            sp.run(pm2_argv("start", str(graph_api_config_path)), check=False)
             print(f"🚀  PM2: {effective_name} iniciado.", flush=True)
 
         print(f"\n   API →  http://localhost:{port}", flush=True)
@@ -928,7 +940,7 @@ def hire(
     import json
     import subprocess as sp
 
-    from duckclaw.ops.providers.pm2 import is_pm2_available
+    from duckclaw.ops.providers.pm2 import is_pm2_available, pm2_argv
     from duckclaw.workers.factory import WorkerFactory
     from duckclaw.workers.manifest import load_manifest
 
@@ -997,12 +1009,12 @@ module.exports = {{
     config_path.write_text(config_content, encoding="utf-8")
     print(f"✅  {config_path}", flush=True)
 
-    existing = sp.run(["pm2", "id", instance], capture_output=True, text=True, cwd=effective_cwd)
+    existing = sp.run(pm2_argv("id", instance), capture_output=True, text=True, cwd=effective_cwd)
     if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
-        sp.run(["pm2", "restart", instance, "--update-env"], check=False, cwd=effective_cwd)
+        sp.run(pm2_argv("restart", instance, "--update-env"), check=False, cwd=effective_cwd)
         print(f"🔄  PM2: {instance} reiniciado.", flush=True)
     else:
-        sp.run(["pm2", "start", str(config_path), "--only", instance], check=False, cwd=effective_cwd)
+        sp.run(pm2_argv("start", str(config_path), "--only", instance), check=False, cwd=effective_cwd)
         print(f"🚀  PM2: {instance} iniciado.", flush=True)
     print(f"   Worker → http://localhost:{port}/invoke", flush=True)
     print(f"   Logs   → pm2 logs {instance}", flush=True)

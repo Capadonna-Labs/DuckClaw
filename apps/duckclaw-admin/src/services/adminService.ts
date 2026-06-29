@@ -1663,6 +1663,11 @@ export const adminService = {
         available: boolean;
         tts_loaded: boolean;
       };
+      realtime_voice?: {
+        configured: boolean;
+        available: boolean;
+        transport: string;
+      };
       note: string;
     }>(`/playground/config${qs ? `?${qs}` : ''}`);
   },

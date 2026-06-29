@@ -24,6 +24,18 @@ def peak_rms_from_wav_b64(b64: str) -> tuple[int, float, float]:
     return peak, rms, dur
 
 
+DEFAULT_VOICE_ID = "default_assistant"
+
+
+def _pick_voice_id(eng) -> str:
+    if eng._voices.get(DEFAULT_VOICE_ID):
+        return DEFAULT_VOICE_ID
+    keys = list(eng._voices.keys())
+    if not keys:
+        raise RuntimeError("no voice profiles loaded")
+    return keys[0]
+
+
 def main() -> int:
     from duckclaw_sensory_node.engines.tts import TTSEngine
     from duckclaw_sensory_node.audio_io import mlx_array_to_numpy
@@ -33,10 +45,11 @@ def main() -> int:
     eng.warm()
     print("loaded", eng.loaded, "sr", eng._sample_rate)
     print("voices", list(eng._voices.keys()))
-    vp = eng._voices.get("leila_assistant")
+    voice_id = _pick_voice_id(eng)
+    vp = eng._voices.get(voice_id)
     if vp:
         print(
-            "leila ref_tokens",
+            f"{voice_id} ref_tokens",
             type(vp.ref_tokens),
             getattr(vp.ref_tokens, "shape", None),
             "ref_text_len",
@@ -46,7 +59,7 @@ def main() -> int:
         )
 
     # Inspect raw model output before encode
-    profile = eng._voices["leila_assistant"]
+    profile = eng._voices[voice_id]
     gen_kwargs = {
         "text": "Hola prueba uno dos tres",
         "language": "spanish",
@@ -81,7 +94,7 @@ def main() -> int:
         )
         break
 
-    out = eng.synthesize("Hola prueba uno dos tres", "leila_assistant", output_format="wav")
+    out = eng.synthesize("Hola prueba uno dos tres", voice_id, output_format="wav")
     peak, rms, dur = peak_rms_from_wav_b64(out["audio_base64"])
     print("encoded peak", peak, "rms", round(rms, 2), "dur", round(dur, 2))
     return 0 if peak > 500 else 1

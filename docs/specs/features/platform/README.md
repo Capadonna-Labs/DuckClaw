@@ -13,6 +13,7 @@
 | [`RAG_TRANSVERSAL_DB_FIRST.md`](RAG_TRANSVERSAL_DB_FIRST.md) | **canonical** | Knowledge sources, ingest y RAG transversal |
 | [`MULTI_VAULT_SYSTEM.md`](MULTI_VAULT_SYSTEM.md) | **canonical** | `/vault`, bóvedas por chat y ATTACH |
 | [`SPAWN_GENERIC_DEPLOY.md`](SPAWN_GENERIC_DEPLOY.md) | operational | Despliegue VM con spawn / bootstrap core-only |
+| [`PIPECAT_VOICE_REALTIME.md`](PIPECAT_VOICE_REALTIME.md) | **canonical** | Voz realtime WebRTC (Pipecat) — core genérico, catálogo de workers después |
 
 ## Otros dominios
 

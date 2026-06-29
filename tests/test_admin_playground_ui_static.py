@@ -375,6 +375,42 @@ def test_admin_chat_composer_has_voice_note_button() -> None:
     assert "Escuchar respuesta" in bubble
 
 
+def test_admin_chat_has_live_voice_menu_item() -> None:
+    panel = Path("apps/duckclaw-admin/src/components/chat/AdminChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    media_menu = Path("apps/duckclaw-admin/src/components/chat/MediaAttachMenu.tsx").read_text(
+        encoding="utf-8"
+    )
+    hook = Path("apps/duckclaw-admin/src/components/chat/usePipecatLiveVoice.ts").read_text(
+        encoding="utf-8"
+    )
+    bar = Path("apps/duckclaw-admin/src/components/chat/LiveVoiceBar.tsx").read_text(
+        encoding="utf-8"
+    )
+    chat_hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(
+        encoding="utf-8"
+    )
+    llm_settings = Path(
+        "services/api-gateway/routers/admin_domains/playground/llm_settings.py"
+    ).read_text(encoding="utf-8")
+    offer_route = Path(
+        "apps/duckclaw-admin/src/app/api/admin/playground/voice/realtime/offer/route.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "Voz en vivo" in media_menu
+    assert "Nota de voz" in media_menu
+    assert "usePipecatLiveVoice" in panel
+    assert "LiveVoiceBar" in panel
+    assert "liveVoiceAvailable" in chat_hook
+    assert "realtime_voice" in chat_hook
+    assert "SmallWebRTCTransport" in hook
+    assert "sendClientMessage('app_state'" in hook
+    assert "Colgar" in bar
+    assert "playground_realtime_voice_status" in llm_settings
+    assert "mergeVoiceOfferRequestData" in offer_route
+
+
 def test_admin_chat_voice_response_defaults_off_and_gates_tts_toggle() -> None:
     hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(
         encoding="utf-8"

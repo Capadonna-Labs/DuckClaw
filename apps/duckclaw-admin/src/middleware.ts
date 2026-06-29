@@ -27,8 +27,8 @@ export function middleware(request: NextRequest) {
   // Next.js App Router injects inline bootstrap scripts; strict nonce-only CSP
   // blocks hydration (dead buttons, no fetch). Nonce wiring needs layout integration.
   const scriptSrc = isDev
-    ? "script-src 'self' 'unsafe-eval' 'unsafe-inline'"
-    : "script-src 'self' 'unsafe-inline'";
+    ? "script-src 'self' 'unsafe-eval' 'unsafe-inline' blob:"
+    : "script-src 'self' 'unsafe-inline' blob:";
 
   const csp = [
     "default-src 'self'",
@@ -38,6 +38,8 @@ export function middleware(request: NextRequest) {
     "media-src 'self' blob: data:",
     "font-src 'self' data:",
     "connect-src 'self'",
+    // Pipecat WavMediaManager: audioWorklet.addModule(blob:...)
+    "worker-src 'self' blob:",
     "frame-ancestors 'none'",
   ].join('; ');
 

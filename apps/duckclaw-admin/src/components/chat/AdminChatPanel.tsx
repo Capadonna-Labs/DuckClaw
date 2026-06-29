@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   Bot,
@@ -13,6 +13,8 @@ import {
   X,
 } from 'lucide-react';
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
+import { LiveVoiceBar } from '@/components/chat/LiveVoiceBar';
+import { usePipecatLiveVoice } from '@/components/chat/usePipecatLiveVoice';
 import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
 import type { ConversationManagePanelProps } from '@/components/chat/ConversationManagePanel';
 import { useAuthStore } from '@/store/authStore';
@@ -120,6 +122,7 @@ export function AdminChatPanel({
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,
+    liveVoiceAvailable,
     setVoiceResponseMode,
     retryFromMessage,
     editFromMessage,
@@ -130,9 +133,40 @@ export function AdminChatPanel({
     setVaultPath,
     sessionTokenTotal,
     reloadConfig,
+    reloadHistory,
   } = chat;
 
   const isCompact = variant === 'compact';
+
+  const liveVoice = usePipecatLiveVoice({
+    enabled: liveVoiceAvailable,
+    onDisconnected: () => reloadHistory(),
+  });
+
+  const voiceAppState = useMemo(
+    () => ({
+      chat_id: chatId,
+      worker_id: workerId,
+      tenant_id: (config?.effective_tenant_id || 'default').trim() || 'default',
+      vault_path: vaultPath || undefined,
+      section: sectionTitle,
+      variant: isCompact ? ('bubble' as const) : ('playground' as const),
+    }),
+    [chatId, workerId, config?.effective_tenant_id, vaultPath, sectionTitle, isCompact]
+  );
+
+  useEffect(() => {
+    if (liveVoice.isConnected) {
+      void liveVoice.endCall();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- colgar al cambiar conversación o worker
+  }, [chatId, workerId]);
+
+  useEffect(() => {
+    if (!liveVoice.isConnected) return;
+    liveVoice.sendAppState(voiceAppState);
+  }, [liveVoice, liveVoice.isConnected, voiceAppState]);
+
   const compactConversationLabel =
     conversationTitle?.trim() ||
     (chatId && chatId.length > 28
@@ -145,9 +179,15 @@ export function AdminChatPanel({
     canSend &&
     workerId &&
     !loading &&
+    !liveVoice.isActive &&
     (input.trim().length > 0 || imageAttachments.hasImages);
 
   const voice = useVoiceNoteRecorder();
+
+  const handleLiveVoiceClick = useCallback(async () => {
+    if (!workerId || !chatId) return;
+    await liveVoice.toggleCall(voiceAppState);
+  }, [chatId, liveVoice, voiceAppState, workerId]);
 
   const { onTextareaPaste, pasteFromClipboard } = useComposeClipboard({
     canSend,
@@ -505,6 +545,16 @@ export function AdminChatPanel({
             : 'border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50'
         }`}
       >
+        <LiveVoiceBar
+          status={liveVoice.status}
+          speakingPhase={liveVoice.speakingPhase}
+          workerLabel={workerId || '…'}
+          elapsedLabel={liveVoice.elapsedLabel}
+          userSubtitle={liveVoice.userSubtitle}
+          botSubtitle={liveVoice.botSubtitle}
+          error={liveVoice.error}
+          onHangUp={() => void liveVoice.endCall()}
+        />
         <input
           ref={imageAttachments.fileInputRef}
           type="file"
@@ -552,7 +602,7 @@ export function AdminChatPanel({
               rows={2}
               placeholder="Escribe un mensaje…"
               className="w-full min-h-[3rem] max-h-40 resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-gov-gray-900 placeholder:text-gov-gray-400 focus:outline-none dark:text-dark-text dark:placeholder:text-dark-muted"
-              disabled={!canSend}
+              disabled={!canSend || liveVoice.isActive}
             />
             <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-0.5">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">{composeChips}</div>
@@ -565,11 +615,14 @@ export function AdminChatPanel({
                   voiceBusy={voice.busy}
                   voiceResponseMode={voiceResponseMode}
                   voiceResponseAvailable={voiceResponseAvailable}
+                  liveVoiceAvailable={liveVoiceAvailable}
+                  liveVoiceActive={liveVoice.isActive}
                   imageCount={imageAttachments.pendingImages.length}
                   onPickImage={() => imageAttachments.fileInputRef.current?.click()}
                   onPaste={() => void pasteFromClipboard()}
                   onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
                   onVoiceNoteClick={() => void handleVoiceClick()}
+                  onLiveVoiceClick={() => void handleLiveVoiceClick()}
                 />
                 {loading ? (
                   <button
@@ -631,11 +684,14 @@ export function AdminChatPanel({
                 voiceBusy={voice.busy}
                 voiceResponseMode={voiceResponseMode}
                 voiceResponseAvailable={voiceResponseAvailable}
+                liveVoiceAvailable={liveVoiceAvailable}
+                liveVoiceActive={liveVoice.isActive}
                 imageCount={imageAttachments.pendingImages.length}
                 onPickImage={() => imageAttachments.fileInputRef.current?.click()}
                 onPaste={() => void pasteFromClipboard()}
                 onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
                 onVoiceNoteClick={() => void handleVoiceClick()}
+                onLiveVoiceClick={() => void handleLiveVoiceClick()}
               />
               <textarea
                 ref={inputRef}
@@ -651,7 +707,7 @@ export function AdminChatPanel({
                 rows={isCompact ? 1 : 2}
                 placeholder="Mensaje…"
                 className="flex-1 px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none"
-                disabled={!canSend}
+                disabled={!canSend || liveVoice.isActive}
               />
               {loading ? (
                 <button
@@ -680,9 +736,9 @@ export function AdminChatPanel({
         ) : loading && voice.busy ? (
           <p className="text-xs text-gov-gray-500 mt-1.5">Transcribiendo nota de voz y generando respuesta…</p>
         ) : null}
-        {(imageAttachments.attachError || error || voice.error) && (
+        {(imageAttachments.attachError || error || voice.error || liveVoice.error) && (
           <p className="text-xs text-red-600 mt-1.5">
-            {imageAttachments.attachError || error || voice.error}
+            {imageAttachments.attachError || error || voice.error || liveVoice.error}
           </p>
         )}
       </footer>

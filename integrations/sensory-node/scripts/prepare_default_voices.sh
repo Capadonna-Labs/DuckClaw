@@ -26,8 +26,8 @@ prepare_one() {
     --ref-text "$ref_text"
 }
 
-prepare_one leila_assistant Monica "Hola soy Leila tu asistente de DuckClaw"
-prepare_one finanz_alert Paulina "Alerta financiera DuckClaw revisa tu portafolio"
+prepare_one default_assistant Monica "Hola, soy tu asistente de DuckClaw"
+prepare_one default_alt Paulina "Aviso de DuckClaw, tienes una actualizacion pendiente"
 prepare_one campus_legal_main Jorge "Asesoria legal campus DuckClaw"
 
 ls -la "$VOICES"/*.safetensors

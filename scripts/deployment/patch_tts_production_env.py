@@ -16,9 +16,7 @@ MAC_VARS: dict[str, str] = {
 
 VPS_VARS: dict[str, str] = {
     "DUCKCLAW_SENSORY_TIMEOUT_TTS": "90.0",
-    "DUCKCLAW_TTS_VOICE_MAP": (
-        '{"quant-trader":"finanz_alert","finanz":"finanz_alert","default":"leila_assistant"}'
-    ),
+    "DUCKCLAW_TTS_DEFAULT_VOICE_ID": "default",
 }
 
 

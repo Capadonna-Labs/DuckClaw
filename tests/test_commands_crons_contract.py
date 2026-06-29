@@ -13,7 +13,6 @@ from duckclaw.graphs import on_the_fly_commands
 
 CANONICAL_MODULE = "duckclaw.commands.crons"
 CRON_FUNCTION_EXPORTS = (
-    "_crons_debug_log",
     "_normalize_cron_rm_id",
     "_extract_crons_delta_options",
     "parse_goals_delta_arg",

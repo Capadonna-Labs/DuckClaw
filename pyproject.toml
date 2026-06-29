@@ -40,6 +40,7 @@ include = ["duckclaw_workspace*"]
 [tool.uv.sources]
 duckclaw-edge-devices = { path = "integrations/edge-devices", editable = true }
 duckclaw-sensory-node = { path = "integrations/sensory-node", editable = true }
+duckclaw-pipecat-voice = { path = "integrations/pipecat-voice", editable = true }
 duckops = { path = "packages/duckops", editable = true }
 duckclaw-agents = { path = "packages/agents", editable = true }
 duckclaw-core = { path = "packages/core", editable = true }

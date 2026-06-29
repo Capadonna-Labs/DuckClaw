@@ -178,7 +178,7 @@ async def prepare_playground_chat_turn(
         project_id=body.project_id,
     )
     msg = (body.message or "").strip()
-    original_user_message = msg
+    original_user_message = ((body.user_incoming or "").strip() or msg)
     if not msg and not body.images:
         raise problem(400, "message o images requeridos", "")
     if body.images:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -248,3 +249,34 @@ def test_find_redis_server_windows_uses_program_files(monkeypatch, tmp_path: Pat
     monkeypatch.setattr("duckops.prerequisites.shutil.which", lambda _name: None)
     found = _find_redis_server_windows()
     assert found == str(redis_dir / "redis-server.exe")
+
+
+def test_augment_path_for_windows_includes_npm_global(monkeypatch, tmp_path: Path) -> None:
+    from duckops.prerequisites import augment_path_for_windows_tools
+
+    npm_global = tmp_path / "npm-global"
+    npm_global.mkdir()
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    monkeypatch.setattr("duckops.prerequisites._is_windows", lambda: True)
+    monkeypatch.setattr("duckops.prerequisites._refresh_windows_user_path", lambda: None)
+    monkeypatch.setattr("duckops.prerequisites._windows_node_dirs", lambda: [])
+    monkeypatch.setattr("duckops.prerequisites._windows_redis_dirs", lambda: [])
+    monkeypatch.setattr("duckops.prerequisites._uv_bin_dirs", lambda: [])
+    monkeypatch.setattr(
+        "duckops.prerequisites._windows_npm_global_dirs",
+        lambda: [npm_global],
+    )
+    monkeypatch.setenv("PATH", "")
+    augment_path_for_windows_tools()
+    assert str(npm_global) in os.environ["PATH"]
+
+
+def test_run_interactive_missing_command_returns_127(monkeypatch) -> None:
+    from duckops.prerequisites import _run_interactive
+
+    monkeypatch.setattr("duckops.prerequisites.subprocess.run", _missing_subprocess_run)
+    assert _run_interactive(["comando-inexistente-duckclaw-test"]) == 127
+
+
+def _missing_subprocess_run(*_args, **_kwargs):
+    raise FileNotFoundError(2, "El sistema no puede encontrar el archivo especificado")

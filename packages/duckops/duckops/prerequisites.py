@@ -68,14 +68,22 @@ def _run(
     cwd: Path | None = None,
     check: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        cmd,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        cwd=str(cwd) if cwd else None,
-        check=check,
-    )
+    try:
+        return subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=str(cwd) if cwd else None,
+            check=check,
+        )
+    except FileNotFoundError as exc:
+        missing = cmd[0] if cmd else "comando"
+        raise FileNotFoundError(
+            f"No se encontro '{missing}' en PATH. "
+            f"En Windows: cierra la ventana y ejecuta install.cmd otra vez "
+            f"(Node/PM2 suelen quedar en %APPDATA%\\npm)."
+        ) from exc
 
 
 def _run_interactive(cmd: list[str], *, timeout: int = 900, cwd: Path | None = None) -> int:
@@ -89,6 +97,8 @@ def _run_interactive(cmd: list[str], *, timeout: int = 900, cwd: Path | None = N
         return int(proc.returncode)
     except subprocess.TimeoutExpired:
         return 124
+    except FileNotFoundError:
+        return 127
 
 
 def _version_line(proc: subprocess.CompletedProcess[str]) -> str:
@@ -243,6 +253,33 @@ def _windows_node_dirs() -> list[Path]:
     return [_windows_program_files() / "nodejs"]
 
 
+def _windows_npm_global_dirs() -> list[Path]:
+    """Binarios globales de npm (pnpm, pm2) tras ``npm install -g`` en Windows."""
+    dirs: list[Path] = []
+    appdata = os.environ.get("APPDATA", "").strip()
+    if appdata:
+        dirs.append(Path(appdata) / "npm")
+    npm = shutil.which("npm")
+    if npm:
+        try:
+            proc = subprocess.run(
+                [npm, "prefix", "-g"],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            proc = None
+        if proc is not None and proc.returncode == 0:
+            prefix = (proc.stdout or "").strip().strip('"')
+            if prefix:
+                global_bin = Path(prefix)
+                if global_bin.is_dir():
+                    dirs.append(global_bin)
+    return dirs
+
+
 def _prepend_path_dirs(dirs: list[Path]) -> None:
     existing = os.environ.get("PATH", "")
     parts = [str(d) for d in dirs if d.is_dir()]
@@ -255,7 +292,12 @@ def augment_path_for_windows_tools() -> None:
     if not _is_windows():
         return
     _refresh_windows_user_path()
-    _prepend_path_dirs(_windows_node_dirs() + _windows_redis_dirs() + _uv_bin_dirs())
+    _prepend_path_dirs(
+        _windows_node_dirs()
+        + _windows_redis_dirs()
+        + _windows_npm_global_dirs()
+        + _uv_bin_dirs()
+    )
 
 
 def _uv_bin_dirs() -> list[Path]:
@@ -512,13 +554,18 @@ def install_pnpm(print_fn: PrintFn = _default_print) -> bool:
     corepack = shutil.which("corepack")
     if corepack:
         print_fn("corepack enable + pnpm@9 (packageManager del monorepo)...")
-        if _run_interactive([corepack, "enable"], timeout=120) != 0:
+        enable_code = _run_interactive([corepack, "enable"], timeout=120)
+        if enable_code == 127:
+            print_fn("corepack no encontrado; se usara npm install -g pnpm.")
+        elif enable_code != 0:
             print_fn("corepack enable falló.")
         elif _run_interactive(
             [corepack, "prepare", "pnpm@9.15.0", "--activate"],
             timeout=300,
-        ) == 0 and check_pnpm().ok:
-            return True
+        ) == 0:
+            augment_path_for_windows_tools()
+            if check_pnpm().ok:
+                return True
     npm = shutil.which("npm")
     if not npm:
         print_fn("ERROR pnpm: npm no esta en PATH. Instala Node.js y reinicia la terminal.")
@@ -528,11 +575,18 @@ def install_pnpm(print_fn: PrintFn = _default_print) -> bool:
     if code != 0 and not _is_windows():
         print_fn("pnpm: prueba con sudo npm install -g pnpm@9 si falló por permisos.")
         code = _run_interactive(["sudo", npm, "install", "-g", "pnpm@9"], timeout=600)
+    if code == 127:
+        print_fn("ERROR pnpm: npm no se pudo ejecutar (no esta en PATH).")
+        return False
     if code != 0:
         print_fn(f"ERROR pnpm: npm install -g pnpm fallo (codigo {code}).")
         return False
+    augment_path_for_windows_tools()
     if not check_pnpm().ok:
-        print_fn("ERROR pnpm: instalado pero no aparece en PATH.")
+        print_fn(
+            "ERROR pnpm: instalado pero no aparece en PATH. "
+            "Cierra la ventana y ejecuta install.cmd otra vez."
+        )
         return False
     return True
 
@@ -576,11 +630,18 @@ def install_pm2(print_fn: PrintFn = _default_print) -> bool:
     if code != 0 and not _is_windows():
         print_fn("PM2: prueba con sudo npm install -g pm2 si falló por permisos.")
         code = _run_interactive(["sudo", npm, "install", "-g", "pm2"], timeout=600)
+    if code == 127:
+        print_fn("ERROR PM2: npm no se pudo ejecutar (no esta en PATH).")
+        return False
     if code != 0:
         print_fn(f"ERROR PM2: npm install -g pm2 fallo (codigo {code}).")
         return False
+    augment_path_for_windows_tools()
     if not check_pm2().ok:
-        print_fn("ERROR PM2: instalado pero no aparece en PATH.")
+        print_fn(
+            "ERROR PM2: instalado pero no aparece en PATH. "
+            "Cierra la ventana y ejecuta install.cmd otra vez."
+        )
         return False
     return True
 

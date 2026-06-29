@@ -56,6 +56,9 @@ if not defined UV_EXE (
 )
 
 set "PATH=%UV_DIR%;%USERPROFILE%\.cargo\bin;%LOCALAPPDATA%\Programs\uv;%PATH%"
+if exist "%ProgramFiles%\nodejs\" set "PATH=%ProgramFiles%\nodejs;%PATH%"
+if exist "%APPDATA%\npm\" set "PATH=%APPDATA%\npm;%PATH%"
+if exist "%ProgramFiles%\Redis\" set "PATH=%ProgramFiles%\Redis;%PATH%"
 call :step 3 5 uv listo
 echo        %UV_EXE%
 
@@ -77,7 +80,8 @@ if not "!EC!"=="0" (
   echo.
   echo   Windows - soluciones rapidas:
   echo     Redis:  net start Redis
-  echo     Node:   cierra ventana y ejecuta install.cmd otra vez
+  echo     Node/PM2/pnpm: cierra ventana y ejecuta install.cmd otra vez
+  echo     Si ves FileNotFoundError: falta algo en PATH ^(npm global en %%APPDATA%%\npm^)
   echo     Carpeta: debe existir pyproject.toml en %CD%
   echo.
   pause

@@ -56,7 +56,9 @@ if not defined UV_EXE (
 )
 
 set "PATH=%UV_DIR%;%USERPROFILE%\.cargo\bin;%LOCALAPPDATA%\Programs\uv;%PATH%"
-REM PATH de Node/npm/Redis lo completa duckops (toolchain.refresh_session_path) tras uv run
+if defined APPDATA set "PATH=%APPDATA%\npm;%PATH%"
+if defined ProgramFiles set "PATH=%ProgramFiles%\nodejs;%PATH%"
+REM duckops (toolchain.refresh_session_path) refina PATH; lo anterior evita fallos pnpm/pm2 en sesion nueva
 call :step 3 5 uv listo
 echo        %UV_EXE%
 

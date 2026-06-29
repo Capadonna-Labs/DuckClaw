@@ -506,17 +506,21 @@ def pm2_start_or_recreate_gateway(
         if live is not None and int(live) != int(desired_port):
             run_pm2("delete", name, timeout=60)
             print(
-                f"🔄  PM2: {name} recreado (puerto {live} → {desired_port}; "
+                f"[PM2] {name} recreado (puerto {live} -> {desired_port}; "
                 "restart no cambia --port).",
                 flush=True,
             )
             running = False
+        elif platform.system() == "Windows":
+            # restart no aplica opciones de spawn (p. ej. windowsHide).
+            run_pm2("delete", name, timeout=60)
+            running = False
     if running:
         run_pm2_checked("restart", name, "--update-env", timeout=120)
-        print(f"🔄  PM2: {name} reiniciado.", flush=True)
+        print(f"[PM2] {name} reiniciado.", flush=True)
     else:
         run_pm2_checked("start", str(config_path), "--only", name, timeout=120)
-        print(f"🚀  PM2: {name} iniciado (ecosystem.api.config.cjs).", flush=True)
+        print(f"[PM2] {name} iniciado (ecosystem.api.config.cjs).", flush=True)
 
 
 def save_gateway_cluster_config(effective_cwd: str, apps: list[dict[str, Any]]) -> None:
@@ -532,7 +536,7 @@ def save_gateway_cluster_config(effective_cwd: str, apps: list[dict[str, Any]]) 
     config_content = _render_gateway_ecosystem_cjs(python_path, effective_cwd, apps)
     config_path.write_text(config_content, encoding="utf-8")
     print(
-        f"✅  {API_GATEWAYS_PM2_JSON} + ecosystem.api.config.cjs ({len(apps)} gateway(s))",
+        f"[OK] {API_GATEWAYS_PM2_JSON} + ecosystem.api.config.cjs ({len(apps)} gateway(s))",
         flush=True,
     )
 
@@ -569,7 +573,7 @@ def _render_gateway_ecosystem_cjs(
 ) -> str:
     """Genera ecosystem PM2 con varios gateways (mismo código, distinto nombre/puerto/env)."""
     _ = python_path  # script relativo a ``root`` (portable entre clones)
-    from duckclaw.ops.ecosystem_pm2 import ecosystem_repo_python_js_lines
+    from duckclaw.ops.ecosystem_pm2 import ecosystem_pm2_fork_app_options_js_lines, ecosystem_repo_python_js_lines
 
     lines = [
         "/**",
@@ -607,12 +611,10 @@ def _render_gateway_ecosystem_cjs(
         lines.append(f"      args: {json.dumps(args_cmd)},")
         lines.append("      cwd: root,")
         lines.append('      env_file: path.join(root, ".env"),')
-        lines.append("      interpreter: \"none\",")
-        lines.append("      autorestart: true,")
-        lines.append("      watch: false,")
-        lines.append("      max_restarts: 10,")
+        lines.extend(ecosystem_pm2_fork_app_options_js_lines(max_restarts=10))
         lines.append("      env: {")
         lines.append("        PYTHONPATH: root,")
+        lines.append('        PYTHONUNBUFFERED: "1",')
         for ek, ev in sorted(env.items()):
             if ek == "PYTHONPATH":
                 continue
@@ -627,7 +629,7 @@ def _render_gateway_ecosystem_cjs(
 
 def render_db_writer_ecosystem_cjs() -> str:
     """Plantilla portable PM2 DB-Writer: secretos y rutas solo en ``.env`` (env_file)."""
-    from duckclaw.ops.ecosystem_pm2 import ecosystem_repo_python_js_lines
+    from duckclaw.ops.ecosystem_pm2 import ecosystem_pm2_fork_app_options_js_lines, ecosystem_repo_python_js_lines
 
     lines = [
         "/**",
@@ -646,11 +648,10 @@ def render_db_writer_ecosystem_cjs() -> str:
         '      args: "main.py",',
         '      cwd: path.join(root, "services/db-writer"),',
         '      env_file: path.join(root, ".env"),',
-        '      interpreter: "none",',
-        "      autorestart: true,",
-        "      watch: false,",
+        *ecosystem_pm2_fork_app_options_js_lines(max_restarts=None),
         "      env: {",
         "        PYTHONPATH: root,",
+        '        PYTHONUNBUFFERED: "1",',
         "      },",
         "    },",
         "  ],",
@@ -796,7 +797,7 @@ def serve(
             dn = (delete_pm2_name or "").strip()
             if dn and dn != effective_name and pm2_delete_named_app(dn):
                 print(
-                    f"🗑️  PM2: proceso eliminado ({dn}) antes de arrancar '{effective_name}'.",
+                    f"[PM2] proceso eliminado ({dn}) antes de arrancar '{effective_name}'.",
                     flush=True,
                 )
 
@@ -834,7 +835,7 @@ def serve(
                     desired_port=gw_port,
                 )
             except ToolchainError as exc:
-                print(f"❌  PM2 Gateway: {exc}", flush=True)
+                print(f"[ERROR] PM2 Gateway: {exc}", flush=True)
                 return 1
 
             print(f"\n   API →  http://localhost:{gw_port}", flush=True)
@@ -860,18 +861,19 @@ module.exports = {{
       autorestart: true,
       watch: false,
       max_restarts: 10,
+      windowsHide: true,
       env: {env_str},
     }},
   ],
 }};
 """
         graph_api_config_path.write_text(config_content, encoding="utf-8")
-        print(f"✅  config/ecosystem.graph_api.config.cjs generado: {graph_api_config_path}", flush=True)
+        print(f"[OK] config/ecosystem.graph_api.config.cjs generado: {graph_api_config_path}", flush=True)
 
         dn = (delete_pm2_name or "").strip()
         if dn and dn != effective_name and pm2_delete_named_app(dn):
             print(
-                f"🗑️  PM2: proceso anterior eliminado ({dn}) → ahora '{effective_name}'.",
+                f"[PM2] proceso anterior eliminado ({dn}) -> ahora '{effective_name}'.",
                 flush=True,
             )
 
@@ -902,10 +904,10 @@ module.exports = {{
         existing = run_pm2("id", effective_name, timeout=30)
         if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
             run_pm2_checked("restart", effective_name, "--update-env", timeout=120)
-            print(f"🔄  PM2: {effective_name} reiniciado.", flush=True)
+            print(f"[PM2] {effective_name} reiniciado.", flush=True)
         else:
             run_pm2_checked("start", str(graph_api_config_path), timeout=120)
-            print(f"🚀  PM2: {effective_name} iniciado.", flush=True)
+            print(f"[PM2] {effective_name} iniciado.", flush=True)
 
         print(f"\n   API →  http://localhost:{port}", flush=True)
         print(f"   Docs → http://localhost:{port}/docs", flush=True)
@@ -998,15 +1000,15 @@ module.exports = {{
 }};
 """
     config_path.write_text(config_content, encoding="utf-8")
-    print(f"✅  {config_path}", flush=True)
+    print(f"[OK] {config_path}", flush=True)
 
     existing = run_pm2("id", instance, timeout=30, cwd=effective_cwd)
     if existing.returncode == 0 and existing.stdout.strip() not in ("", "[]"):
         run_pm2_checked("restart", instance, "--update-env", timeout=120, cwd=effective_cwd)
-        print(f"🔄  PM2: {instance} reiniciado.", flush=True)
+        print(f"[PM2] {instance} reiniciado.", flush=True)
     else:
         run_pm2_checked("start", str(config_path), "--only", instance, timeout=120, cwd=effective_cwd)
-        print(f"🚀  PM2: {instance} iniciado.", flush=True)
+        print(f"[PM2] {instance} iniciado.", flush=True)
     print(f"   Worker → http://localhost:{port}/invoke", flush=True)
     print(f"   Logs   → pm2 logs {instance}", flush=True)
     return 0

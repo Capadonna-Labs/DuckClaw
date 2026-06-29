@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
@@ -13,6 +15,7 @@ import typer
 from duckops.admin_bootstrap import (
     admin_bootstrap_ready,
     is_admin_key_valid,
+    sync_admin_console_user_from_env,
 )
 
 app = typer.Typer()
@@ -158,6 +161,67 @@ def _check_hub_vault_split(gateway_path: str, *, strict: bool) -> bool:
     )
 
 
+def repair_legacy_session_db(repo: Path) -> tuple[bool, str]:
+    """
+    Archiva ``db/duckclaw.duckdb`` huérfano cuando la bóveda canónica ya es el hub activo.
+
+    También reemplaza la clave obsoleta ``DUCKCLAW_GATEWAY_DB`` en ``.env`` por
+    ``DUCKCLAW_GATEWAY_DB_PATH`` apuntando a la bóveda playground.
+    """
+    root = repo.resolve()
+    _load_dotenv(root)
+    from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH, get_gateway_db_path
+
+    gateway = (get_gateway_db_path() or "").strip()
+    vault_path = _expected_playground_vault_path()
+    legacy_path = _legacy_hub_path()
+    legacy_file = Path(legacy_path)
+    vault_file = Path(vault_path)
+
+    if not legacy_file.is_file():
+        return True, "sin legacy db/duckclaw.duckdb"
+    if not vault_file.is_file():
+        return False, f"bóveda ausente: {vault_path}"
+    if _duckdb_paths_same(legacy_path, vault_path):
+        return True, "legacy y bóveda son el mismo archivo"
+    if gateway and _duckdb_paths_same(gateway, legacy_path):
+        return (
+            False,
+            "gateway aún apunta al legacy hub; fija DUCKCLAW_GATEWAY_DB_PATH "
+            f"a {DEFAULT_SESSION_DB_RELPATH} y vuelve a ejecutar --repair-session-db",
+        )
+
+    backup_dir = root / ".duckops" / "migrate-backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    backup_path = backup_dir / f"duckclaw.legacy_hub_{stamp}.duckdb.bak"
+    shutil.move(str(legacy_file), str(backup_path))
+
+    env_path = root / ".env"
+    if env_path.is_file():
+        text = env_path.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        out: list[str] = []
+        saw_gateway_path = False
+        legacy_keys = ("DUCKCLAW_GATEWAY_DB=", "DUCKCLAW_GATEWAY_DB_PATH=", "DUCKDB_PATH=")
+        for line in lines:
+            if any(line.startswith(key) for key in legacy_keys):
+                if line.startswith("DUCKCLAW_GATEWAY_DB_PATH="):
+                    out.append(f"DUCKCLAW_GATEWAY_DB_PATH={DEFAULT_SESSION_DB_RELPATH}")
+                    saw_gateway_path = True
+                elif line.startswith("DUCKCLAW_GATEWAY_DB="):
+                    if not saw_gateway_path:
+                        out.append(f"DUCKCLAW_GATEWAY_DB_PATH={DEFAULT_SESSION_DB_RELPATH}")
+                        saw_gateway_path = True
+                continue
+            out.append(line)
+        if not saw_gateway_path:
+            out.append(f"DUCKCLAW_GATEWAY_DB_PATH={DEFAULT_SESSION_DB_RELPATH}")
+        env_path.write_text("\n".join(out).rstrip() + "\n", encoding="utf-8")
+
+    return True, f"legacy archivado en {backup_path.name}; .env -> {DEFAULT_SESSION_DB_RELPATH}"
+
+
 def _check_db_writer() -> tuple[bool, str]:
     """PM2 DuckClaw-DB-Writer, cola duckdb_write_queue y métrica processed."""
     from duckops.sovereign.stack_health import DB_WRITER_PM2_NAME, pm2_available, pm2_process_online
@@ -232,6 +296,11 @@ def cmd_doctor(
         "--strict",
         help="Falla si hub y bóveda DuckDB están desalineados (split RAG/SQL).",
     ),
+    repair_session_db: bool = typer.Option(
+        False,
+        "--repair-session-db",
+        help="Archiva db/duckclaw.duckdb legacy si la bóveda canónica ya existe.",
+    ),
 ) -> None:
     """Comprueba Redis, migraciones, admin key y puerto gateway."""
     if ctx.invoked_subcommand is not None:
@@ -255,6 +324,14 @@ def cmd_doctor(
 
     _load_dotenv(root)
     typer.secho("DuckClaw doctor", fg=typer.colors.CYAN)
+
+    if repair_session_db:
+        ok, detail = repair_legacy_session_db(root)
+        mark = typer.style("OK", fg=typer.colors.GREEN) if ok else typer.style("FAIL", fg=typer.colors.RED)
+        typer.echo(f"  {mark} Reparar session DB — {detail}")
+        if not ok:
+            raise typer.Exit(1)
+        typer.echo("")
 
     critical_ok = True
 
@@ -360,6 +437,13 @@ def cmd_doctor(
         seed_ok,
         admin_email if seed_ok else "DUCKCLAW_ADMIN_EMAIL/PASSWORD incompletos o placeholder",
     )
+    if seed_ok:
+        sync_ok, sync_detail = sync_admin_console_user_from_env(root)
+        _emit(
+            "Admin login DuckDB",
+            sync_ok,
+            sync_detail if sync_ok else sync_detail,
+        )
 
     gateway_listening = False
     gateway_port = 8000
@@ -397,7 +481,8 @@ def cmd_doctor(
 
     if not critical_ok:
         typer.secho(
-            "Corrige lo anterior. Instala prerequisitos: uv run duckops bootstrap --yes",
+            "Corrige lo anterior. Prerequisitos: uv run duckops bootstrap --yes. "
+            "Session DB split: uv run duckops doctor --repair-session-db",
             fg=typer.colors.YELLOW,
         )
         raise typer.Exit(1)

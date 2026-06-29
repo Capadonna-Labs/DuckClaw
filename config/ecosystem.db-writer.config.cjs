@@ -18,8 +18,10 @@ module.exports = {
       interpreter: "none",
       autorestart: true,
       watch: false,
+      windowsHide: true,
       env: {
         PYTHONPATH: root,
+        PYTHONUNBUFFERED: "1",
       },
     },
   ],

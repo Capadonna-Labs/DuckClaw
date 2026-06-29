@@ -1,5 +1,5 @@
 {
-  "db_path": "/Users/workstation/Developer/duckclaw/db/private/7822026745/axis.duckdb",
-  "backup_path": "/Users/workstation/Developer/duckclaw/.duckops/migrate-backups/axis.pre_migrate_20260629_120414.duckdb.bak",
-  "created_at": "20260629_120414"
+  "db_path": "C:\\Users\\DELL\\Desktop\\duckclaw\\db\\private\\default\\duckclaw.duckdb",
+  "backup_path": "C:\\Users\\DELL\\Desktop\\duckclaw\\.duckops\\migrate-backups\\duckclaw.pre_migrate_20260629_154232.duckdb.bak",
+  "created_at": "20260629_154232"
 }

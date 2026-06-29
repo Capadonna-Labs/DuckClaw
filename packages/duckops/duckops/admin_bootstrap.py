@@ -182,6 +182,53 @@ def seed_admin_console_users(repo_root: Path, db_rel_path: str, draft: Sovereign
         con.close()
 
 
+def sync_admin_console_user_from_env(
+    repo_root: Path,
+    db_path: str | Path | None = None,
+) -> tuple[bool, str]:
+    """Upsert admin console user from DUCKCLAW_ADMIN_EMAIL/PASSWORD when credentials are valid."""
+    import duckdb
+
+    from duckclaw.admin_console_users import upsert_console_user
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    env = _flat_env(repo_root)
+    email = (env.get("DUCKCLAW_ADMIN_EMAIL") or "").strip()
+    password = (env.get("DUCKCLAW_ADMIN_PASSWORD") or "").strip()
+    api_key = (env.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
+    if not admin_bootstrap_ready(email, password, api_key):
+        return False, "credenciales .env incompletas o placeholder"
+
+    resolved = Path(db_path) if db_path else Path((get_gateway_db_path() or "").strip())
+    if not resolved.is_absolute():
+        resolved = (repo_root / resolved).resolve()
+    if not resolved.is_file():
+        return False, f"bóveda ausente: {resolved}"
+
+    con = duckdb.connect(str(resolved), read_only=False)
+    try:
+
+        class _Adapter:
+            def execute(self, sql: str, params: list | None = None) -> None:
+                if params:
+                    con.execute(sql, params)
+                else:
+                    con.execute(sql)
+
+        upsert_console_user(
+            _Adapter(),
+            email=email,
+            nombre="Administrador DuckClaw",
+            rol="admin",
+            password=password,
+            initials="DC",
+            active=True,
+        )
+    finally:
+        con.close()
+    return True, email
+
+
 def ensure_admin_env_merged(
     repo_root: Path,
     draft: SovereignDraft | None = None,

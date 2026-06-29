@@ -12,14 +12,15 @@ Core genérico LangGraph/LangChain — sin verticales hardcodeadas en Python. Mu
 
 **Un comando, sin instalar nada antes** (instala `uv` automáticamente si falta):
 
+```powershell
+# Windows — doble clic en install.cmd en el Explorador de archivos
+# o en terminal:
+install.cmd
+```
+
 ```bash
 # macOS / Linux / WSL
 ./duckops-up.sh
-```
-
-```powershell
-# Windows (PowerShell)
-.\duckops-up.ps1
 ```
 
 Si ya tienes `uv` en PATH:

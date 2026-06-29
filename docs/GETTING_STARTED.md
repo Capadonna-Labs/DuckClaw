@@ -20,13 +20,8 @@ Soportado: **macOS** (Homebrew), **Linux** (apt) y **Windows** (winget). WSL2 ta
 ```bash
 git clone <repo> duckclaw && cd duckclaw
 
-# macOS / Linux / WSL — instala uv si falta
-./duckops-up.sh
-```
-
-```powershell
-# Windows nativo — instala uv si falta
-.\duckops-up.ps1
+# Windows: doble clic en install.cmd
+# macOS/Linux: ./duckops-up.sh
 ```
 
 Si ya tienes `uv`:

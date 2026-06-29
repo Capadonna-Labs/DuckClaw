@@ -552,11 +552,34 @@ def install_redis(print_fn: PrintFn = _default_print, *, assume_yes: bool = Fals
     return False
 
 
+def _windows_node_under_program_files() -> bool:
+    """Node en Program Files suele bloquear corepack sin permisos de administrador."""
+    if not _is_windows():
+        return False
+    node = shutil.which("node")
+    if not node:
+        return False
+    try:
+        parent = Path(node).resolve().parent
+        pf = _windows_program_files().resolve()
+        return parent == pf or pf in parent.parents
+    except OSError:
+        return False
+
+
+def _ensure_npm_global_tool_visible(resolve_executable: Callable[[], str | None]) -> None:
+    """Tras ``npm install -g``, expone el binario en la sesión actual."""
+    from duckclaw.ops.toolchain import prepend_executable_dir, refresh_session_path
+
+    refresh_session_path()
+    prepend_executable_dir(resolve_executable())
+
+
 def install_pnpm(print_fn: PrintFn = _default_print) -> bool:
     if check_pnpm().ok:
         return True
     corepack = shutil.which("corepack")
-    if corepack:
+    if corepack and not _windows_node_under_program_files():
         print_fn("corepack enable + pnpm@9 (packageManager del monorepo)...")
         enable_code = _run_interactive([corepack, "enable"], timeout=120)
         if enable_code == 127:
@@ -568,8 +591,16 @@ def install_pnpm(print_fn: PrintFn = _default_print) -> bool:
             timeout=300,
         ) == 0:
             augment_path_for_windows_tools()
+            from duckclaw.ops.toolchain import resolve_pnpm_executable
+
+            _ensure_npm_global_tool_visible(resolve_pnpm_executable)
             if check_pnpm().ok:
                 return True
+    elif corepack and _windows_node_under_program_files():
+        print_fn(
+            "Node en Program Files: se omite corepack (requiere admin); "
+            "usando npm install -g pnpm@9."
+        )
     npm = shutil.which("npm")
     if not npm:
         print_fn("ERROR pnpm: npm no esta en PATH. Instala Node.js y reinicia la terminal.")
@@ -586,6 +617,9 @@ def install_pnpm(print_fn: PrintFn = _default_print) -> bool:
         print_fn(f"ERROR pnpm: npm install -g pnpm fallo (codigo {code}).")
         return False
     augment_path_for_windows_tools()
+    from duckclaw.ops.toolchain import resolve_pnpm_executable
+
+    _ensure_npm_global_tool_visible(resolve_pnpm_executable)
     if not check_pnpm().ok:
         print_fn(
             "ERROR pnpm: instalado pero no aparece en PATH. "
@@ -641,6 +675,9 @@ def install_pm2(print_fn: PrintFn = _default_print) -> bool:
         print_fn(f"ERROR PM2: npm install -g pm2 fallo (codigo {code}).")
         return False
     augment_path_for_windows_tools()
+    from duckclaw.ops.toolchain import resolve_pm2_executable
+
+    _ensure_npm_global_tool_visible(resolve_pm2_executable)
     if not check_pm2().ok:
         print_fn(
             "ERROR PM2: instalado pero no aparece en PATH. "

@@ -261,7 +261,7 @@ def test_augment_path_for_windows_includes_npm_global(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(toolchain.platform, "system", lambda: "Windows")
     monkeypatch.setattr(toolchain, "_refresh_windows_registry_path", lambda: None)
     monkeypatch.setattr(toolchain, "_uv_bin_dirs", lambda: [])
-    monkeypatch.setattr(toolchain, "_npm_global_prefix_bin", lambda: None)
+    monkeypatch.setattr(toolchain.shutil, "which", lambda _name: None)
     monkeypatch.setenv("PATH", "")
     augment_path_for_windows_tools()
     assert str(npm_global) in os.environ["PATH"]

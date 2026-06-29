@@ -204,9 +204,11 @@ def _validate_lora_config_data(cfg_path: Path, repo: Path) -> None:
 
 def _pm2_run(args: list[str]) -> int:
     """Ejecuta pm2; no lanza. Devuelve código de salida (127 si pm2 no existe)."""
+    from duckclaw.ops.toolchain import ToolchainError, run_pm2
+
     try:
-        r = subprocess.run(["pm2", *args], check=False, capture_output=True, text=True)
-    except FileNotFoundError:
+        r = run_pm2(*args)
+    except ToolchainError:
         typer.secho(
             "pm2 no está en PATH; omite guardrail o instala PM2.",
             fg=typer.colors.YELLOW,

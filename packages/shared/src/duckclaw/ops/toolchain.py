@@ -94,13 +94,10 @@ def _prepend_path_dirs(dirs: Sequence[Path]) -> None:
         os.environ["PATH"] = os.pathsep.join(parts) + os.pathsep + existing
 
 
-def _npm_global_prefix_bin() -> Path | None:
-    npm = shutil.which("npm")
-    if not npm:
-        return None
+def _npm_query_path(npm: str, flag: str) -> Path | None:
     try:
         proc = subprocess.run(
-            [npm, "prefix", "-g"],
+            [npm, flag, "-g"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -110,20 +107,92 @@ def _npm_global_prefix_bin() -> Path | None:
         return None
     if proc.returncode != 0:
         return None
-    prefix = (proc.stdout or "").strip().strip('"')
-    if not prefix:
+    raw = (proc.stdout or "").strip().strip('"')
+    if not raw:
         return None
-    return Path(prefix)
+    path = Path(raw)
+    return path if path.is_dir() else None
+
+
+def _npm_global_bin_dirs() -> list[Path]:
+    """Directorios donde ``npm install -g`` coloca ejecutables (pnpm, pm2, …)."""
+    dirs: list[Path] = []
+    seen: set[str] = set()
+
+    def _add(path: Path | None) -> None:
+        if path is None or not path.is_dir():
+            return
+        try:
+            key = str(path.resolve())
+        except OSError:
+            key = str(path)
+        if key in seen:
+            return
+        seen.add(key)
+        dirs.append(path)
+
+    if platform.system() == "Windows":
+        appdata = os.environ.get("APPDATA", "").strip()
+        if appdata:
+            _add(Path(appdata) / "npm")
+        _add(_windows_program_files() / "nodejs")
+
+    npm = shutil.which("npm")
+    if npm:
+        _add(_npm_query_path(npm, "bin"))
+        _add(_npm_query_path(npm, "prefix"))
+
+    return dirs
+
+
+def _resolve_windows_npm_shim(tool_name: str) -> str | None:
+    """Resuelve pnpm.cmd / pm2.cmd aunque el directorio no esté aún en PATH."""
+    for directory in _npm_global_bin_dirs():
+        for name in (f"{tool_name}.cmd", f"{tool_name}.exe", tool_name):
+            path = directory / name
+            if not path.is_file():
+                continue
+            if path.suffix.lower() in (".cmd", ".exe"):
+                return str(path)
+            cmd_sibling = path.with_suffix(".cmd")
+            if cmd_sibling.is_file():
+                return str(cmd_sibling)
+    for name in (f"{tool_name}.cmd", f"{tool_name}.exe", tool_name):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def prepend_executable_dir(executable: str | None) -> None:
+    """Añade al PATH el directorio de un ejecutable ya resuelto (p. ej. tras npm install -g)."""
+    if not executable:
+        return
+    try:
+        bin_dir = Path(executable).resolve().parent
+    except OSError:
+        bin_dir = Path(executable).parent
+    if bin_dir.is_dir():
+        _prepend_path_dirs([bin_dir])
 
 
 def refresh_session_path(*, repo_root: Path | None = None) -> None:
     """Actualiza PATH de la sesión actual (idempotente, seguro en cualquier OS)."""
     _refresh_windows_registry_path()
-    dirs = _path_candidate_dirs(repo_root=repo_root)
-    prefix_bin = _npm_global_prefix_bin()
-    if prefix_bin is not None and prefix_bin.is_dir():
-        dirs.insert(0, prefix_bin)
-    _prepend_path_dirs(dirs)
+    ordered: list[Path] = []
+    seen: set[str] = set()
+    for candidate in (*_npm_global_bin_dirs(), *_path_candidate_dirs(repo_root=repo_root)):
+        if not candidate.is_dir():
+            continue
+        try:
+            key = str(candidate.resolve())
+        except OSError:
+            key = str(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(candidate)
+    _prepend_path_dirs(ordered)
 
 
 def dot_venv_python_candidates(root: Path) -> list[Path]:
@@ -163,31 +232,7 @@ def resolve_repo_python(repo_root: str | Path) -> str:
 def resolve_pm2_executable() -> str | None:
     refresh_session_path()
     if platform.system() == "Windows":
-        candidates: list[str] = []
-        appdata = (os.environ.get("APPDATA") or "").strip()
-        if appdata:
-            npm_dir = Path(appdata) / "npm"
-            for name in ("pm2.cmd", "pm2.exe", "pm2"):
-                path = npm_dir / name
-                if path.is_file():
-                    candidates.append(str(path))
-        for name in ("pm2.cmd", "pm2.exe", "pm2"):
-            found = shutil.which(name)
-            if found:
-                candidates.append(found)
-        seen: set[str] = set()
-        for path in candidates:
-            norm = str(Path(path).resolve())
-            if norm in seen:
-                continue
-            seen.add(norm)
-            suffix = Path(path).suffix.lower()
-            if suffix in (".cmd", ".exe"):
-                return path
-            cmd_sibling = Path(path).with_suffix(".cmd")
-            if cmd_sibling.is_file():
-                return str(cmd_sibling)
-        return candidates[0] if candidates else None
+        return _resolve_windows_npm_shim("pm2")
     found = shutil.which("pm2")
     return found if found else None
 
@@ -264,9 +309,16 @@ def resolve_npm() -> str | None:
     return shutil.which("npm")
 
 
-def resolve_pnpm() -> str | None:
+def resolve_pnpm_executable() -> str | None:
     refresh_session_path()
-    return shutil.which("pnpm")
+    if platform.system() == "Windows":
+        return _resolve_windows_npm_shim("pnpm")
+    found = shutil.which("pnpm")
+    return found if found else None
+
+
+def resolve_pnpm() -> str | None:
+    return resolve_pnpm_executable()
 
 
 def tool_version(argv: list[str]) -> str:

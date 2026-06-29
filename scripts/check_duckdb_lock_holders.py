@@ -18,13 +18,9 @@ def _repo_root() -> Path:
 
 def _pm2_pids() -> set[int]:
     try:
-        out = subprocess.run(
-            ["pm2", "jlist"],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
+        from duckclaw.ops.toolchain import ToolchainError, run_pm2
+
+        out = run_pm2("jlist", timeout=15)
         if out.returncode != 0 or not out.stdout.strip():
             return set()
         data = json.loads(out.stdout)
@@ -34,6 +30,8 @@ def _pm2_pids() -> set[int]:
             if isinstance(pid, int) and pid > 0:
                 pids.add(pid)
         return pids
+    except ToolchainError:
+        return set()
     except Exception:
         return set()
 

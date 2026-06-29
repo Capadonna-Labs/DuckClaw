@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from typing import Any
 
 from duckclaw.ops.toolchain import (
@@ -35,12 +34,20 @@ def deploy_pm2(
     if not is_pm2_available():
         return "Error: pm2 is not installed or not in PATH. Install it (e.g. npm install -g pm2) and retry."
 
-    args = pm2_argv("start", python_path, "--name", name, "--cwd", cwd, "--") + command.split()
-
     try:
-        r = subprocess.run(args, capture_output=True, text=True, cwd=cwd)
+        r = run_pm2(
+            "start",
+            python_path,
+            "--name",
+            name,
+            "--cwd",
+            cwd,
+            "--",
+            *command.split(),
+            cwd=cwd,
+        )
         if r.returncode != 0:
             return f"Error: pm2 start failed. stderr: {r.stderr or r.stdout or 'unknown'}"
         return f"pm2: started '{name}'. Use 'pm2 logs {name}' and 'pm2 save' to persist."
-    except Exception as e:
+    except ToolchainError as e:
         return f"Error running pm2: {e}"

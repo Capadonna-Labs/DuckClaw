@@ -122,7 +122,7 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     assert detail_page.exists()
     detail_text = detail_page.read_text(encoding="utf-8")
     assert "getWorkspaceProject" in detail_text
-    assert "Agentes asignados" in detail_text
+    assert "ProjectAgentsSection" in detail_text
     assert "Contexto del proyecto" in detail_text
     assert "Conocimiento RAG" in detail_text
     assert "listKnowledgeSources" in detail_text

@@ -54,6 +54,7 @@ from duckclaw.write_handlers import (  # noqa: F401
     workspace,
     reports,
 )
+from duckclaw.write_handlers import mcp_connectors as _mcp_connectors  # noqa: F401
 from duckclaw.write_handlers.admin_auth import (
     _apply_clear_admin_login_failures,
     _apply_deactivate_console_user,

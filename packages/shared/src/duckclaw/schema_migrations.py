@@ -1178,6 +1178,53 @@ _M026_FRAMEWORK_DOCUMENT_LANES = [
     "SELECT 1 AS framework_document_lanes_noop",
 ]
 
+_M027_MCP_CONNECTORS = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_mcp_connectors (
+        connector_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'default',
+        owner_email VARCHAR NOT NULL,
+        display_name VARCHAR NOT NULL,
+        transport VARCHAR NOT NULL,
+        endpoint_url VARCHAR,
+        launch_command VARCHAR,
+        launch_args_json VARCHAR DEFAULT '[]',
+        launch_env_json VARCHAR DEFAULT '{}',
+        auth_kind VARCHAR NOT NULL DEFAULT 'none',
+        auth_secret_key VARCHAR,
+        tool_allowlist_json VARCHAR DEFAULT '[]',
+        tool_denylist_json VARCHAR DEFAULT '[]',
+        read_only BOOLEAN NOT NULL DEFAULT true,
+        egress_hosts_json VARCHAR DEFAULT '[]',
+        preset_id VARCHAR,
+        enabled BOOLEAN NOT NULL DEFAULT true,
+        active BOOLEAN NOT NULL DEFAULT true,
+        metadata_json VARCHAR DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_mcp_connectors_tenant
+        ON main.admin_mcp_connectors (tenant_id, active, enabled)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_worker_mcp_grants (
+        worker_uid VARCHAR NOT NULL,
+        connector_id VARCHAR NOT NULL,
+        permission VARCHAR NOT NULL DEFAULT 'use',
+        active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (worker_uid, connector_id)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_worker_mcp_grants_connector
+        ON main.admin_worker_mcp_grants (connector_id, active)
+    """,
+]
+
 
 def _migration_024_framework_report_engine_policy(db: Any) -> None:
     from duckclaw.framework_policy_pack import apply_framework_policy_pack
@@ -1244,4 +1291,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (24, "framework_report_engine_policy", _M024_FRAMEWORK_REPORT_ENGINE_POLICY),
     (25, "framework_report_engine_tool_routing", _M025_FRAMEWORK_REPORT_ENGINE_TOOL_ROUTING),
     (26, "framework_document_lanes", _M026_FRAMEWORK_DOCUMENT_LANES),
+    (27, "mcp_connectors_v1", _M027_MCP_CONNECTORS),
 ]

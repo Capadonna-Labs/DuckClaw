@@ -243,7 +243,11 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
         register_worker_mcp_connector_tools(
             tools,
             db=db,
-            worker_id=str(getattr(spec, "id", None) or getattr(spec, "name", "") or ""),
+            worker_id=str(
+                getattr(spec, "worker_id", None)
+                or getattr(spec, "logical_worker_id", None)
+                or ""
+            ),
             tenant_id=str(getattr(spec, "tenant_id", None) or "default"),
         )
     except Exception:

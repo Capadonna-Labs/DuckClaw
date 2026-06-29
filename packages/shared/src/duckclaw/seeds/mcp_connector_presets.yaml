@@ -1,0 +1,40 @@
+# Packaged MCP connector presets (T1 profiles).
+# Override: DUCKCLAW_MCP_PRESETS_PATH or {DUCKCLAW_REPO_ROOT}/config/mcp_connector_presets.yaml
+
+defaults:
+  tool_allowlist: ["*"]
+  tool_denylist: []
+  egress_hosts: []
+
+profiles:
+  stdio_npx_ro:
+    transport: stdio
+    launch_command: npx
+    auth_kind: none
+    read_only: true
+
+presets:
+  higgsfield:
+    display_name: Higgsfield (imagen/video)
+    transport: streamable_http
+    endpoint_url: https://mcp.higgsfield.ai/mcp
+    auth_kind: bearer
+    read_only: false
+    egress_hosts: [mcp.higgsfield.ai]
+    metadata:
+      docs_url: https://higgsfield.ai/mcp
+      auth_hint: OAuth Higgsfield → Bearer manual en Admin (v1)
+
+  mcp_fetch:
+    profile: stdio_npx_ro
+    display_name: MCP Fetch (local stdio)
+    launch_args: ["-y", "@modelcontextprotocol/server-fetch"]
+    metadata:
+      install: npx -y @modelcontextprotocol/server-fetch
+
+  mcp_time:
+    profile: stdio_npx_ro
+    display_name: MCP Time (local stdio)
+    launch_args: ["-y", "@modelcontextprotocol/server-time"]
+    metadata:
+      install: npx -y @modelcontextprotocol/server-time

@@ -32,15 +32,11 @@ class StackHealthReport:
 
 
 def _pm2_jlist() -> list[dict]:
+    from duckclaw.ops.toolchain import ToolchainError, run_pm2
+
     try:
-        proc = subprocess.run(
-            ["pm2", "jlist"],
-            capture_output=True,
-            text=True,
-            timeout=12,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        proc = run_pm2("jlist", timeout=12)
+    except (ToolchainError, subprocess.TimeoutExpired, OSError):
         return []
     if proc.returncode != 0 or not (proc.stdout or "").strip():
         return []
@@ -67,16 +63,12 @@ def pm2_process_online(name: str) -> bool:
 
 
 def pm2_available() -> bool:
+    from duckclaw.ops.toolchain import ToolchainError, run_pm2
+
     try:
-        proc = subprocess.run(
-            ["pm2", "-v"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
+        proc = run_pm2("-v", timeout=5)
         return proc.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+    except (ToolchainError, subprocess.TimeoutExpired, OSError):
         return False
 
 
@@ -235,14 +227,9 @@ def ensure_db_writer_pm2(
         eco = write_db_writer_ecosystem(repo_root, draft)
         console_print(f"[dim]Generado[/] {eco.relative_to(repo_root)}")
     try:
-        proc = subprocess.run(
-            ["pm2", "start", str(eco)],
-            cwd=str(repo_root),
-            capture_output=True,
-            text=True,
-            timeout=60,
-            check=False,
-        )
+        from duckclaw.ops.toolchain import run_pm2
+
+        proc = run_pm2("start", str(eco), cwd=str(repo_root), timeout=60)
     except (subprocess.TimeoutExpired, OSError) as e:
         console_print(f"[yellow]DB-Writer PM2:[/] {e}")
         return 1

@@ -37,10 +37,13 @@ def _default_print(msg: str) -> None:
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
-    from duckclaw.ops.providers.pm2 import pm2_argv
+    from duckclaw.ops.toolchain import ToolchainError, run_pm2
 
     if argv and argv[0] == "pm2":
-        argv = pm2_argv(*argv[1:])
+        try:
+            return run_pm2(*argv[1:])
+        except ToolchainError:
+            return subprocess.CompletedProcess(argv, returncode=127, stdout="", stderr="pm2 not found")
     return subprocess.run(argv, capture_output=True, text=True, check=False)
 
 

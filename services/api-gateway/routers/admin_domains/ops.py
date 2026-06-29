@@ -125,6 +125,22 @@ async def list_ops_commands() -> dict[str, Any]:
     }
 
 
+def _resolve_ops_argv(argv: list[str]) -> list[str]:
+    if not argv:
+        return argv
+    if argv[0] == "pm2":
+        from duckclaw.ops.toolchain import pm2_argv
+
+        return pm2_argv(*argv[1:])
+    if argv[0] == "uv":
+        from duckclaw.ops.toolchain import resolve_uv
+
+        uv = resolve_uv()
+        if uv:
+            return [uv, *argv[1:]]
+    return argv
+
+
 @router.post("/run", dependencies=[Depends(require_admin_key)])
 async def run_ops_command(
     body: OpsRunBody,
@@ -135,9 +151,11 @@ async def run_ops_command(
     if not argv:
         raise _problem(400, "Comando no permitido", op_id)
 
+    resolved = _resolve_ops_argv(argv)
+
     def _run() -> dict[str, Any]:
         proc = subprocess.run(
-            argv,
+            resolved,
             cwd=str(_repo_root()),
             capture_output=True,
             text=True,

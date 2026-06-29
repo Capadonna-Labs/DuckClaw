@@ -106,7 +106,10 @@ def _version_line(proc: subprocess.CompletedProcess[str]) -> str:
 
 
 def check_uv() -> ToolCheck:
-    uv = shutil.which("uv")
+    from duckclaw.ops.toolchain import refresh_session_path, resolve_uv
+
+    refresh_session_path()
+    uv = resolve_uv()
     if not uv:
         return ToolCheck("uv", False, "", "no está en PATH")
     proc = _run([uv, "--version"], timeout=15)
@@ -116,7 +119,10 @@ def check_uv() -> ToolCheck:
 
 
 def check_node() -> ToolCheck:
-    node = shutil.which("node")
+    from duckclaw.ops.toolchain import refresh_session_path, resolve_node
+
+    refresh_session_path()
+    node = resolve_node()
     if not node:
         return ToolCheck("Node.js", False, "", "no está en PATH (consola admin)")
     proc = _run([node, "--version"], timeout=15)
@@ -126,7 +132,10 @@ def check_node() -> ToolCheck:
 
 
 def check_npm() -> ToolCheck:
-    npm = shutil.which("npm")
+    from duckclaw.ops.toolchain import refresh_session_path, resolve_npm
+
+    refresh_session_path()
+    npm = resolve_npm()
     if not npm:
         return ToolCheck("npm", False, "", "no está en PATH")
     proc = _run([npm, "--version"], timeout=15)
@@ -136,7 +145,10 @@ def check_npm() -> ToolCheck:
 
 
 def check_pnpm() -> ToolCheck:
-    pnpm = shutil.which("pnpm")
+    from duckclaw.ops.toolchain import refresh_session_path, resolve_pnpm
+
+    refresh_session_path()
+    pnpm = resolve_pnpm()
     if not pnpm:
         return ToolCheck("pnpm", False, "", "no está en PATH (consola admin)")
     proc = _run([pnpm, "--version"], timeout=15)
@@ -146,8 +158,9 @@ def check_pnpm() -> ToolCheck:
 
 
 def check_pm2() -> ToolCheck:
-    from duckclaw.ops.providers.pm2 import resolve_pm2_executable
+    from duckclaw.ops.toolchain import refresh_session_path, resolve_pm2_executable
 
+    refresh_session_path()
     pm2 = resolve_pm2_executable()
     if not pm2:
         return ToolCheck("PM2", False, "", "no está en PATH (gateway + db-writer)")
@@ -290,16 +303,10 @@ def _prepend_path_dirs(dirs: list[Path]) -> None:
 
 
 def augment_path_for_windows_tools() -> None:
-    """Tras winget, expone Node, npm y Redis en la sesion actual."""
-    if not _is_windows():
-        return
-    _refresh_windows_user_path()
-    _prepend_path_dirs(
-        _windows_node_dirs()
-        + _windows_redis_dirs()
-        + _windows_npm_global_dirs()
-        + _uv_bin_dirs()
-    )
+    """Tras winget, expone herramientas en la sesión actual (delega en toolchain)."""
+    from duckclaw.ops.toolchain import refresh_session_path
+
+    refresh_session_path()
 
 
 def _uv_bin_dirs() -> list[Path]:
@@ -435,14 +442,9 @@ def _linux_apt_install(packages: list[str], print_fn: PrintFn) -> bool:
 
 def _augment_path_for_uv() -> None:
     """Tras instalar uv, añade rutas típicas al PATH de la sesión actual."""
-    if _is_windows():
-        augment_path_for_windows_tools()
-        return
-    uv_name = "uv"
-    for candidate in _uv_bin_dirs():
-        if (candidate / uv_name).is_file():
-            os.environ["PATH"] = str(candidate) + os.pathsep + os.environ.get("PATH", "")
-            return
+    from duckclaw.ops.toolchain import refresh_session_path
+
+    refresh_session_path()
 
 
 def ensure_uv_available(print_fn: PrintFn = _default_print) -> bool:

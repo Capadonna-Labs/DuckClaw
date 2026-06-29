@@ -56,9 +56,7 @@ if not defined UV_EXE (
 )
 
 set "PATH=%UV_DIR%;%USERPROFILE%\.cargo\bin;%LOCALAPPDATA%\Programs\uv;%PATH%"
-if exist "%ProgramFiles%\nodejs\" set "PATH=%ProgramFiles%\nodejs;%PATH%"
-if exist "%APPDATA%\npm\" set "PATH=%APPDATA%\npm;%PATH%"
-if exist "%ProgramFiles%\Redis\" set "PATH=%ProgramFiles%\Redis;%PATH%"
+REM PATH de Node/npm/Redis lo completa duckops (toolchain.refresh_session_path) tras uv run
 call :step 3 5 uv listo
 echo        %UV_EXE%
 

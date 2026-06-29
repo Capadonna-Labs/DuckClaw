@@ -18,7 +18,9 @@ def cloudflared_available() -> bool:
 
 
 def pm2_available() -> bool:
-    return shutil.which("pm2") is not None
+    from duckclaw.ops.toolchain import is_pm2_available
+
+    return is_pm2_available()
 
 
 def sanitize_pm2_name(raw: str, *, suffix: str, max_len: int = 45) -> str:
@@ -35,12 +37,9 @@ def extract_last_trycloudflare_url(blob: str) -> str | None:
 
 
 def _pm2_delete(name: str) -> None:
-    subprocess.run(
-        ["pm2", "delete", name],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
+    from duckclaw.ops.toolchain import run_pm2
+
+    run_pm2("delete", name, timeout=30)
 
 
 def _start_cloudflared_via_pm2(
@@ -48,22 +47,19 @@ def _start_cloudflared_via_pm2(
     pm2_name: str,
     port: int,
 ) -> Tuple[str | None, str]:
+    from duckclaw.ops.toolchain import run_pm2
+
     _pm2_delete(pm2_name)
-    start = subprocess.run(
-        [
-            "pm2",
-            "start",
-            cloudflared_bin,
-            "--name",
-            pm2_name,
-            "--",
-            "tunnel",
-            "--no-autoupdate",
-            "--url",
-            f"http://127.0.0.1:{port}",
-        ],
-        capture_output=True,
-        text=True,
+    start = run_pm2(
+        "start",
+        cloudflared_bin,
+        "--name",
+        pm2_name,
+        "--",
+        "tunnel",
+        "--no-autoupdate",
+        "--url",
+        f"http://127.0.0.1:{port}",
         timeout=45,
     )
     if start.returncode != 0:
@@ -72,12 +68,7 @@ def _start_cloudflared_via_pm2(
 
     time.sleep(5.0)
     for _ in range(6):
-        logs = subprocess.run(
-            ["pm2", "logs", pm2_name, "--lines", "150", "--nostream"],
-            capture_output=True,
-            text=True,
-            timeout=35,
-        )
+        logs = run_pm2("logs", pm2_name, "--lines", "150", "--nostream", timeout=35)
         blob = (logs.stdout or "") + (logs.stderr or "")
         url = extract_last_trycloudflare_url(blob)
         if url:

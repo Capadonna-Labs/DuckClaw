@@ -47,4 +47,5 @@ Las rutas **`/api/v1/admin/train/*`** y la pestaña **`/train`** del admin **fue
 - Índice plataforma: [`docs/specs/features/platform/README.md`](specs/features/platform/README.md)
 - Admin UI (spec): [`DUCKCLAW_ADMIN_UI.md`](specs/features/platform/DUCKCLAW_ADMIN_UI.md)
 - Telegram: [`docs/specs/features/telegram-gateway/TELEGRAM.md`](specs/features/telegram-gateway/TELEGRAM.md)
+- MCP conectores remotos: [`docs/specs/features/integrations/REMOTE_MCP_CONNECTORS.md`](specs/features/integrations/REMOTE_MCP_CONNECTORS.md)
 - Tests de guardrail docs: `tests/test_db_first_guardrails_static.py`, `tests/test_forge_legacy_cleanup.py`

@@ -49,7 +49,7 @@ export function PlatformStatusStrip() {
           className={`inline-block w-2 h-2 rounded-full shrink-0 ${online ? 'bg-emerald-500' : 'bg-red-500'}`}
           aria-hidden
         />
-        <span className="hidden sm:inline text-[10px] uppercase tracking-wide opacity-70">Gateway</span>
+        <span className="hidden sm:inline text-[10px] uppercase tracking-wide opacity-70">Sistema</span>
         <span>{gatewayLabel}</span>
       </span>
 

@@ -40,6 +40,7 @@ from duckclaw.commands.chat_state import (
     get_chat_state as get_chat_state,
     set_chat_state as set_chat_state,
 )
+from duckclaw.commands.context_summarize import execute_summarize as execute_summarize
 from duckclaw.commands.audit import (
     execute_audit as execute_audit,
     save_last_audit as save_last_audit,

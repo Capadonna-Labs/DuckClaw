@@ -172,6 +172,17 @@ function writeStoredChatTokens(chatId: string, total: number): void {
   }
 }
 
+function applyContextEstimatedTokens(
+  chatId: string,
+  setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
+  contextEstimated?: number | null
+): void {
+  if (contextEstimated == null || !Number.isFinite(contextEstimated) || contextEstimated < 0) return;
+  const next = Math.floor(contextEstimated);
+  setSessionTokenTotal(next);
+  writeStoredChatTokens(chatId, next);
+}
+
 function applySessionTokenDelta(
   chatId: string,
   setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
@@ -288,6 +299,7 @@ export function useAdminChat({
   const [error, setError] = useState<string | null>(null);
   const [vaultPath, setVaultPathState] = useState('');
   const [sessionTokenTotal, setSessionTokenTotal] = useState(0);
+  const [contextTokensEstimated, setContextTokensEstimated] = useState(false);
   const thinkingStartedAt = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -337,6 +349,7 @@ export function useAdminChat({
 
   useEffect(() => {
     setSessionTokenTotal(readStoredChatTokens(chatId));
+    setContextTokensEstimated(false);
   }, [chatId]);
 
   const loadConfig = useCallback(() => {
@@ -752,7 +765,15 @@ export function useAdminChat({
             };
           },
           onDone: (meta) => {
-            applySessionTokenDelta(chatId, setSessionTokenTotal, meta.usage_tokens);
+            if (
+              meta.context_estimated_tokens != null &&
+              Number.isFinite(meta.context_estimated_tokens)
+            ) {
+              applyContextEstimatedTokens(chatId, setSessionTokenTotal, meta.context_estimated_tokens);
+              setContextTokensEstimated(true);
+            } else {
+              applySessionTokenDelta(chatId, setSessionTokenTotal, meta.usage_tokens);
+            }
             if ((meta.response || '').trim()) {
               authoritativeResponse = meta.response.trim();
             }
@@ -1074,6 +1095,7 @@ export function useAdminChat({
     vaultPath,
     setVaultPath,
     sessionTokenTotal,
+    contextTokensEstimated,
     reloadConfig: loadConfig,
     reloadHistory,
   };

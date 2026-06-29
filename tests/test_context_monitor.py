@@ -47,6 +47,38 @@ def test_llm_fold_conversation_summary_uses_generic_compression_prompt() -> None
     assert "tool_read_sql" in human_prompt
 
 
+def test_context_monitor_node_folds_at_million_token_threshold() -> None:
+    llm = _FakeSummaryLLM()
+    node = build_context_monitor_node(
+        pruning_config={
+            "enabled": True,
+            "max_messages": 10_000,
+            "max_estimated_tokens": 50_000,
+            "keep_last_messages": 2,
+            "tool_content_max_chars": 8000,
+        },
+        prompt_base="Sistema base",
+        llm_summary=llm,
+        identity_fields=lambda state: {"chat_id": state["chat_id"]},
+    )
+    bulky = "x" * 210_000
+    state = {
+        "chat_id": "chat-m",
+        "messages": [
+            SystemMessage(content="Sistema base"),
+            HumanMessage(content=bulky),
+            HumanMessage(content="reciente-1"),
+            HumanMessage(content="reciente-2"),
+        ],
+    }
+
+    out = node(state)
+
+    assert out["analytical_summary"] == "Resumen nuevo"
+    assert len(out["messages"]) == 3
+    assert out["messages"][-1].content == "reciente-2"
+
+
 def test_context_monitor_node_compacts_any_worker_with_enabled_policy() -> None:
     llm = _FakeSummaryLLM()
     node = build_context_monitor_node(

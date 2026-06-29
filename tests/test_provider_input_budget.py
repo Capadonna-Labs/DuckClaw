@@ -8,6 +8,8 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from duckclaw.workers.provider_input_budget import (
     apply_provider_input_budget,
     configure_provider_budget_runtime_db_provider,
+    context_prune_globally_enabled,
+    context_prune_max_estimated_tokens,
     estimate_tokens_from_messages,
     groq_max_estimated_input_tokens,
     groq_tool_message_max_chars,
@@ -26,6 +28,51 @@ class _DuckDbAdapter:
         if params is not None:
             return self._con.execute(sql, params)
         return self._con.execute(sql)
+
+
+def test_normalized_context_pruning_default_on_without_manifest(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_CONTEXT_PRUNE_ENABLED", raising=False)
+    spec = SimpleNamespace(context_pruning_config=None)
+
+    out = normalized_context_pruning(spec)
+
+    assert out.get("enabled") is True
+    assert out["max_estimated_tokens"] == 4_000_000
+    assert out["max_messages"] >= 10_000
+
+
+def test_normalized_context_pruning_respects_max_tokens_m_env(monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_CONTEXT_PRUNE_MAX_TOKENS_M", "2")
+    spec = SimpleNamespace(context_pruning_config={})
+
+    out = normalized_context_pruning(spec)
+
+    assert out["max_estimated_tokens"] == 2_000_000
+
+
+def test_normalized_context_pruning_global_off(monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_CONTEXT_PRUNE_ENABLED", "0")
+    spec = SimpleNamespace(context_pruning_config={"enabled": True})
+
+    assert normalized_context_pruning(spec) == {}
+
+
+def test_normalized_context_pruning_manifest_opt_out() -> None:
+    spec = SimpleNamespace(context_pruning_config={"enabled": False})
+
+    assert normalized_context_pruning(spec) == {}
+
+
+def test_context_prune_max_estimated_tokens_clamps(monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_CONTEXT_PRUNE_MAX_TOKENS_M", "100")
+    assert context_prune_max_estimated_tokens() == 32_000_000
+    monkeypatch.setenv("DUCKCLAW_CONTEXT_PRUNE_MAX_TOKENS_M", "0.1")
+    assert context_prune_max_estimated_tokens() == 500_000
+
+
+def test_context_prune_globally_enabled_default(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_CONTEXT_PRUNE_ENABLED", raising=False)
+    assert context_prune_globally_enabled() is True
 
 
 def test_normalized_context_pruning_clamps_config_values() -> None:

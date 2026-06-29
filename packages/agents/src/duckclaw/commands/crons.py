@@ -22,8 +22,6 @@ from duckclaw.runtime.scheduling.cron_wall_schedule import (
 )
 from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
 
-_CRONS_DEBUG_LOG = "/Users/juanjosearevalocamargo/Desktop/duckclaw/.cursor/debug-fd1dbb.log"
-
 # Revisión proactiva /crons --delta (agent_config; claves internas goals_* sin cambiar)
 _GOALS_DELTA_SECONDS_KEY = "goals_delta_seconds"
 _GOALS_PROACTIVE_LAST_FIRE_KEY = "goals_proactive_last_fire_epoch"
@@ -39,35 +37,6 @@ GOALS_DELTA_MAX_SECONDS = 7 * 24 * 3600
 # IDs mostrados en /crons para quitar un schedule con /crons --rm <cron-id>
 CRON_SCHEDULE_ID_DELTA = "delta"
 CRON_SCHEDULE_ID_WALL = "wall"
-
-
-def _crons_debug_log(
-    location: str,
-    message: str,
-    data: dict[str, Any],
-    *,
-    hypothesis_id: str = "crons",
-) -> None:
-    # #region agent log
-    try:
-        with open(_CRONS_DEBUG_LOG, "a", encoding="utf-8") as _f:
-            _f.write(
-                json.dumps(
-                    {
-                        "sessionId": "fd1dbb",
-                        "location": location,
-                        "message": message,
-                        "data": data,
-                        "timestamp": int(time.time() * 1000),
-                        "hypothesisId": hypothesis_id,
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
 
 
 def _normalize_cron_rm_id(token: str) -> Optional[str]:
@@ -642,17 +611,6 @@ def execute_crons_schedule(
 
     raw = (args or "").strip()
     toks = raw.split()
-    _crons_debug_log(
-        "commands/crons.py:execute_crons_schedule",
-        "execute_crons_entry",
-        {
-            "args_preview": raw[:120],
-            "chat_id": str(chat_id),
-            "tenant_id": tid,
-            "goals_count": goals_count,
-        },
-        hypothesis_id="A",
-    )
 
     if toks and toks[0] == "--delta":
         if len(toks) < 2:
@@ -711,18 +669,6 @@ def execute_crons_schedule(
         if not ok:
             return f"No se pudo guardar: {persist_err}"
         human = format_goals_delta_interval_human(secs)
-        _crons_debug_log(
-            "commands/crons.py:execute_crons_schedule",
-            "delta_schedule_persisted",
-            {
-                "secs": secs,
-                "chat_id": str(chat_id),
-                "trigger": "goals_cli",
-                "mode": mode,
-                "notify": notify_ch,
-            },
-            hypothesis_id="A",
-        )
         goals_note = (
             f"Metas homeostasis cargadas: {goals_count}. Define o edita con /goals."
             if goals_count

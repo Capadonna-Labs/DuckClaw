@@ -40,7 +40,6 @@ from duckclaw.graphs.on_the_fly_commands import (
     _MEDITATE_LAST_FIRE_KEY,
     _MEDITATE_TENANT_KEY,
     _MEDITATE_WORKER_KEY,
-    _crons_debug_log,
     _GOALS_PROACTIVE_LAST_FIRE_KEY,
     _GOALS_PROACTIVE_TENANT_KEY,
     build_goals_proactive_system_event_message,
@@ -494,16 +493,6 @@ async def _run_goals_proactive_tick_one_db(
             "notify_channel": notify_channel,
         }
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
-        _crons_debug_log(
-            "heartbeat/main.py:_run_goals_proactive_tick_one_db",
-            "goals_proactive_http_post",
-            {
-                "chat_id": str(chat_id),
-                "worker_id": worker_id,
-                "db_path_tail": str(Path(db_path).name),
-            },
-            hypothesis_id="C",
-        )
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -523,12 +512,6 @@ async def _run_goals_proactive_tick_one_db(
             continue
 
         if 200 <= resp.status_code < 300:
-            _crons_debug_log(
-                "heartbeat/main.py:_run_goals_proactive_tick_one_db",
-                "goals_proactive_http_ok",
-                {"chat_id": str(chat_id), "status_code": resp.status_code},
-                hypothesis_id="C",
-            )
             await _enqueue_chat_state_write(
                 db_path=db_path,
                 chat_id=chat_id,

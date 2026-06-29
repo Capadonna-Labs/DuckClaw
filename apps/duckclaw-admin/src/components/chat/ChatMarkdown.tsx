@@ -25,7 +25,8 @@ function isLeadingWorkerIdentityLine(line: string): boolean {
 }
 
 /**
- * Manager puede anteponer «Quant-Trader 1» y el modelo Caveman «**Quant-Trader · … COT**».
+ * El manager puede anteponer una línea de identidad del worker (p. ej. «Worker 1»)
+ * y el modelo Caveman otra con COT («**Worker · … COT**»).
  * Deja una sola línea de identidad al inicio (prioriza la que incluye COT).
  */
 export function dedupeAssistantWorkerHeaders(text: string): string {

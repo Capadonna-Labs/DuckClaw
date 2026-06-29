@@ -144,6 +144,11 @@ class PlaygroundChatBody(BaseModel):
         default=False,
         description="Si true (con stream), sintetiza TTS tras la respuesta y emite evento SSE audio.",
     )
+    user_incoming: str | None = Field(
+        default=None,
+        max_length=16000,
+        description="Texto STT original para historial cuando message incluye contexto inyectado (voz en vivo).",
+    )
 
     @model_validator(mode="after")
     def _message_or_images(self) -> PlaygroundChatBody:

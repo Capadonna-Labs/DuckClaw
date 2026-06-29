@@ -13,20 +13,31 @@ No necesitas memorizar la lista: el CLI instala lo que falte.
 | **Node + npm** | Consola admin |
 | **PM2** | Gateway y db-writer en segundo plano |
 
-Soportado: **macOS** (Homebrew) y **Linux** (apt). Windows nativo: usa WSL2.
+Soportado: **macOS** (Homebrew), **Linux** (apt) y **Windows** (winget). WSL2 también funciona como Linux.
 
 ## Camino plug & play (un comando)
 
 ```bash
 git clone <repo> duckclaw && cd duckclaw
 
-# Si no tienes uv aún: curl -LsSf https://astral.sh/uv/install.sh | sh
+# macOS / Linux / WSL — instala uv si falta
+./duckops-up.sh
+```
+
+```powershell
+# Windows nativo — instala uv si falta
+.\duckops-up.ps1
+```
+
+Si ya tienes `uv`:
+
+```bash
 uv run duckops up
 ```
 
 `duckops up` hace en orden:
 
-1. Instala **uv**, **Redis**, **Node**, **pnpm**, **PM2** si faltan (macOS/Linux) + `uv sync`
+1. Instala **uv**, **Redis**, **Node**, **pnpm**, **PM2** si faltan (macOS/Linux/Windows) + `uv sync`
 2. Abre el **wizard TUI** la primera vez (admin + `.env` + PM2)
 3. `duckclaw-migrate`
 4. Gateway + DB-Writer en PM2

@@ -1,15 +1,17 @@
 -------- PARA LEVANTAR EL SISTEMA --------
 
-source .venv/bin/activate                  # activa venv (opcional; uv run no lo exige)
-uv sync                                    # deps Python del monorepo (también lo hace duckops up)
-uv run duckops doctor --strict             # health check antes de probar
-uv run duckops configure                   # si es primera vez o cambiaste .env
-uv run duckops up                          # uv sync + gateway + redis + servicios
+./duckops-up.sh                            # macOS/Linux/WSL — instala uv si falta
+.\duckops-up.ps1                           # Windows PowerShell — instala uv si falta
 
-uv run duckops down --all               
-uv run duckops stack down               
+uv run duckops up                          # si ya tienes uv: prereqs + migrate + PM2 + admin
+uv run duckops doctor --strict
+uv run duckops configure                   # primera vez o cambio de .env
+
+uv run duckops down --all
+uv run duckclaw-migrate                    # tras down si hay lock DuckDB
+uv run duckops up
 
 --------- INTERFAZ GRAFICA ----------
 cd apps/duckclaw-admin
-pnpm install                             
-pnpm dev                                  
+pnpm install
+pnpm dev

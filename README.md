@@ -10,10 +10,25 @@ Core genérico LangGraph/LangChain — sin verticales hardcodeadas en Python. Mu
 
 ## Inicio rápido
 
+**Un comando, sin instalar nada antes** (instala `uv` automáticamente si falta):
+
 ```bash
-uv sync
-uv run duckops up          # plug-and-play: migrate + PM2 + menú TUI/web
+# macOS / Linux / WSL
+./duckops-up.sh
 ```
+
+```powershell
+# Windows (PowerShell)
+.\duckops-up.ps1
+```
+
+Si ya tienes `uv` en PATH:
+
+```bash
+uv run duckops up          # prereqs + migrate + PM2 + admin
+```
+
+`duckops up` instala en el paso 1: **uv**, **Redis**, **Node**, **pnpm**, **PM2** y ejecuta **`uv sync`** (crea `.venv` con todas las deps Python).
 
 Alternativa manual:
 

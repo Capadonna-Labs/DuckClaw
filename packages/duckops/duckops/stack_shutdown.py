@@ -1,0 +1,249 @@
+"""Apagar stack local DuckClaw: PM2, locks DuckDB y consola admin dev."""
+
+from __future__ import annotations
+
+import os
+import signal
+import subprocess
+import time
+from pathlib import Path
+from typing import Callable
+
+PrintFn = Callable[[str], None]
+
+# Núcleo que duckops up arranca (ecosystem.api + db-writer).
+CORE_PM2_NAMES: tuple[str, ...] = (
+    "DuckClaw-Gateway",
+    "duckclaw-gateway",
+    "DuckClaw-DB-Writer",
+)
+
+# Perfil spawn / servicios opcionales del monorepo.
+OPTIONAL_PM2_PREFIXES: tuple[str, ...] = (
+    "DuckClaw-",
+    "duckclaw-",
+    "Sensory-",
+    "MLX-",
+    "ComfyUI",
+)
+
+
+def repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent.parent.parent
+
+
+def _default_print(msg: str) -> None:
+    print(msg, flush=True)
+
+
+def _run(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(argv, capture_output=True, text=True, check=False)
+
+
+def _pm2_processes() -> list[dict]:
+    proc = _run(["pm2", "jlist"])
+    if proc.returncode != 0:
+        return []
+    try:
+        import json
+
+        data = json.loads(proc.stdout or "[]")
+    except json.JSONDecodeError:
+        return []
+    return data if isinstance(data, list) else []
+
+
+def _pm2_names_matching(*, all_services: bool) -> list[str]:
+    names: list[str] = []
+    for item in _pm2_processes():
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        if name in CORE_PM2_NAMES:
+            names.append(name)
+            continue
+        if all_services and any(name.startswith(p) or name == p for p in OPTIONAL_PM2_PREFIXES):
+            names.append(name)
+    # Preservar orden estable; core primero.
+    ordered: list[str] = []
+    for core in CORE_PM2_NAMES:
+        if core in names and core not in ordered:
+            ordered.append(core)
+    for name in sorted(set(names) - set(ordered)):
+        ordered.append(name)
+    if not ordered and not all_services:
+        return list(CORE_PM2_NAMES)
+    return ordered
+
+
+def stop_pm2_services(
+    *,
+    all_services: bool = False,
+    print_fn: PrintFn = _default_print,
+) -> list[str]:
+    """pm2 stop de procesos DuckClaw registrados. Devuelve nombres parados."""
+    names = _pm2_names_matching(all_services=all_services)
+    stopped: list[str] = []
+    for name in names:
+        status = "missing"
+        for item in _pm2_processes():
+            if str(item.get("name") or "") != name:
+                continue
+            env = item.get("pm2_env") if isinstance(item.get("pm2_env"), dict) else {}
+            status = str(env.get("status") or "unknown")
+            break
+        if status == "missing":
+            continue
+        if status == "stopped":
+            print_fn(f"PM2 {name}: ya detenido")
+            stopped.append(name)
+            continue
+        proc = _run(["pm2", "stop", name])
+        if proc.returncode == 0:
+            print_fn(f"PM2 stop {name}")
+            stopped.append(name)
+        else:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            print_fn(f"PM2 stop {name} falló: {detail or proc.returncode}")
+    if not stopped:
+        print_fn("Ningún proceso PM2 DuckClaw activo (o PM2 no instalado).")
+    return stopped
+
+
+def duckdb_paths_to_unlock(repo: Path) -> list[Path]:
+    paths: list[Path] = []
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path
+
+        raw = (get_gateway_db_path() or "").strip()
+        if raw:
+            path = Path(raw).expanduser()
+            if path.is_file():
+                paths.append(path)
+    except Exception:
+        pass
+    private = repo / "db" / "private"
+    if private.is_dir():
+        for vault_db in sorted(private.glob("*/axis.duckdb")):
+            if vault_db.is_file():
+                paths.append(vault_db)
+    # Dedup preservando orden
+    seen: set[str] = set()
+    out: list[Path] = []
+    for path in paths:
+        key = str(path.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(path)
+    return out
+
+
+def _pids_holding_path(path: Path) -> list[int]:
+    proc = _run(["lsof", "-t", str(path)])
+    if proc.returncode != 0:
+        return []
+    pids: list[int] = []
+    for line in (proc.stdout or "").splitlines():
+        text = line.strip()
+        if text.isdigit():
+            pids.append(int(text))
+    return sorted(set(pids))
+
+
+def kill_processes(pids: list[int], *, sig: int, print_fn: PrintFn, reason: str) -> int:
+    killed = 0
+    for pid in pids:
+        try:
+            os.kill(pid, sig)
+            print_fn(f"kill -{sig} {pid} ({reason})")
+            killed += 1
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            print_fn(f"Sin permiso para matar PID {pid}")
+    return killed
+
+
+def release_duckdb_locks(
+    repo: Path,
+    *,
+    print_fn: PrintFn = _default_print,
+) -> int:
+    """Termina procesos que aún bloquean hub/vault DuckDB tras pm2 stop."""
+    total = 0
+    paths = duckdb_paths_to_unlock(repo)
+    if not paths:
+        print_fn("Sin rutas DuckDB conocidas para liberar locks.")
+        return 0
+    for path in paths:
+        pids = _pids_holding_path(path)
+        if not pids:
+            continue
+        print_fn(f"Lock en {path} → PIDs {pids}")
+        total += kill_processes(pids, sig=signal.SIGTERM, print_fn=print_fn, reason=path.name)
+    if total:
+        time.sleep(0.6)
+    for path in paths:
+        survivors = _pids_holding_path(path)
+        if survivors:
+            print_fn(f"Forzando lock restante en {path} → {survivors}")
+            total += kill_processes(survivors, sig=signal.SIGKILL, print_fn=print_fn, reason=f"{path.name} (force)")
+    if total == 0:
+        print_fn("Sin locks DuckDB activos.")
+    return total
+
+
+def kill_admin_dev_server(
+    repo: Path,
+    *,
+    print_fn: PrintFn = _default_print,
+) -> int:
+    from duckops.admin_dev_server import resolve_admin_port
+
+    port = resolve_admin_port(repo)
+    proc = _run(["lsof", "-ti", f":{port}"])
+    if proc.returncode != 0 or not (proc.stdout or "").strip():
+        return 0
+    pids = [int(x) for x in proc.stdout.split() if x.strip().isdigit()]
+    if not pids:
+        return 0
+    print_fn(f"Consola admin :{port} → PIDs {pids}")
+    return kill_processes(pids, sig=signal.SIGTERM, print_fn=print_fn, reason=f"admin:{port}")
+
+
+def run_stack_down(
+    repo: Path | None = None,
+    *,
+    all_services: bool = False,
+    stop_pm2: bool = True,
+    release_locks: bool = True,
+    stop_admin: bool = True,
+    print_fn: PrintFn = _default_print,
+) -> int:
+    """Apaga stack local. Código 0 si no hubo error fatal de PM2."""
+    root = (repo or repo_root()).resolve()
+    print_fn("🦆 DuckClaw down")
+    print_fn(f"Repo: {root}\n")
+
+    if stop_pm2:
+        print_fn("[1/3] PM2 stop")
+        stop_pm2_services(all_services=all_services, print_fn=print_fn)
+        time.sleep(0.8)
+    else:
+        print_fn("[1/3] PM2 omitido")
+
+    if release_locks:
+        print_fn("\n[2/3] Liberar locks DuckDB")
+        release_duckdb_locks(root, print_fn=print_fn)
+    else:
+        print_fn("\n[2/3] Locks omitidos")
+
+    if stop_admin:
+        print_fn("\n[3/3] Consola admin dev")
+        kill_admin_dev_server(root, print_fn=print_fn)
+    else:
+        print_fn("\n[3/3] Admin dev omitido")
+
+    print_fn("\n✓ Stack detenido. Ahora puedes: uv run duckclaw-migrate  o  uv run duckops up")
+    return 0

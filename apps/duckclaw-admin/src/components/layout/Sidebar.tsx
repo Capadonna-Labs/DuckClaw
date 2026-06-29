@@ -241,7 +241,7 @@ function NavGroup({
                   key={item.href}
                   item={item}
                   icon={Icon}
-                  active={childActive || pathname === '/kanban'}
+                  active={childActive}
                   onNavigate={onNavigate}
                 />
               );
@@ -385,13 +385,6 @@ function PlaygroundNavSelector({
             className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
           >
             Historial
-          </Link>
-          <Link
-            href="/kanban"
-            onClick={() => onNavigate?.()}
-            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
-          >
-            Tablero
           </Link>
           <Link
             href="/playground?new=1"

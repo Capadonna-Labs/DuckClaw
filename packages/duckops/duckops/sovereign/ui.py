@@ -44,7 +44,7 @@ from duckops.sovereign.duckdb_catalog import (
     ensure_duckdb_vault,
     format_db_folder_summary,
 )
-from duckops.sovereign.duckdb_health import audit_duckdb, format_duckdb_health_rich
+from duckops.sovereign.duckdb_health import audit_duckdb, format_duckdb_health_rich, open_repo_duckdb_readonly
 from duckops.sovereign.stack_health import audit_stack, format_stack_health_rich
 from duckops.sovereign.state_machine import (
     next_step_in,
@@ -206,8 +206,34 @@ def _sovereignty_line(draft: SovereignDraft) -> str:
     return f"[dim]{os_friendly} · {cpu}[/]"
 
 
+def _catalog_worker_picks(repo_root: Path, draft: SovereignDraft) -> list:
+    """Workers visibles solo desde ``admin_worker_catalog`` (DB-first, sin plantilla «default»)."""
+    import os
+
+    db = open_repo_duckdb_readonly(repo_root, draft)
+    if db is None:
+        return []
+    tenant = (draft.tenant_id or "default").strip() or "default"
+    email = (os.environ.get("DUCKCLAW_ADMIN_EMAIL") or "").strip()
+    try:
+        return list_worker_picks(
+            repo_root,
+            db=db,
+            tenant_id=tenant,
+            actor_email=email,
+            source="catalog",
+        )
+    finally:
+        if hasattr(db, "close"):
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
 def _fresh_draft_for_repo(repo_root: Path) -> SovereignDraft:
-    picks = list_worker_picks(repo_root)
+    draft = fresh_sovereign_draft()
+    picks = _catalog_worker_picks(repo_root, draft)
     return fresh_sovereign_draft(
         worker_id=default_worker_for_fresh([p.worker_id for p in picks]),
     )
@@ -285,8 +311,14 @@ def _pick_worker(
     *,
     title: str = "Worker por defecto",
 ) -> None:
-    picks = list_worker_picks(repo_root)
+    picks = _catalog_worker_picks(repo_root, draft)
     if not picks:
+        console.print(
+            "[yellow]No hay workers en el catálogo DuckDB.[/]\n"
+            "[dim]Crea agentes en la consola admin (/workers) y vuelve a ejecutar el wizard, "
+            "o continúa sin worker por defecto.[/]\n"
+        )
+        draft.default_worker_id = ""
         return
     labels = [f"{p.worker_id} — {p.label}" for p in picks]
     values = [p.worker_id for p in picks]
@@ -331,8 +363,8 @@ def _make_session(on_test: Callable[[], None] | None) -> PromptSession:
     return PromptSession(key_bindings=build_key_bindings(on_service_test=on_test))
 
 
-def _worker_picks_for_repo(repo_root: Path) -> list:
-    return list_worker_picks(repo_root)
+def _worker_picks_for_repo(repo_root: Path, draft: SovereignDraft) -> list:
+    return _catalog_worker_picks(repo_root, draft)
 
 
 def _prompt_default_worker(
@@ -357,7 +389,7 @@ def _prompt_gateway_team_optional(
     repo_root: Path,
 ) -> tuple[str | None, bool]:
     """Equipo inicial opcional (coma-separado)."""
-    picks = _worker_picks_for_repo(repo_root)
+    picks = _worker_picks_for_repo(repo_root, draft)
     hint = draft.gateway_team_templates or "(vacío = todas las plantillas)"
     tok, val = _ask_until(
         session,
@@ -715,7 +747,8 @@ def run_wizard_loop(
                     "[bold]Al aplicar se iniciará en PM2:[/]\n"
                     f"  · Gateway [cyan]{draft.gateway_pm2_name}[/] → puerto {draft.gateway_port}\n"
                     f"  · DuckClaw-DB-Writer → Redis → [cyan]{duck_rel}[/]\n\n"
-                    "[dim]Elige el worker por defecto (playground / Telegram en consola admin).[/]"
+                    "[dim]Si hay workers en el catálogo DuckDB, elige uno para playground/Telegram. "
+                    "Si no, créalos después en la consola admin.[/]"
                 )
                 shell.print_content_panel(body, title="Servicios")
                 try:

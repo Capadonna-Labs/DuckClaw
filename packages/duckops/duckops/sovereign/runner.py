@@ -12,6 +12,7 @@ from duckops.sovereign.materialize import load_draft_json, materialize
 from duckops.sovereign.tui_chat import run_tui_chat
 from duckops.sovereign.tui_shell import TuiShell
 from duckops.sovereign.ui import run_wizard_loop
+from duckops.sovereign.duckdb_health import open_repo_duckdb_readonly
 from duckops.sovereign.wizard_reset import default_worker_for_fresh, fresh_sovereign_draft
 from duckops.sovereign.workers_catalog import list_worker_picks
 
@@ -49,7 +50,26 @@ def run_sovereign_wizard(repo_root: Path | None = None, *, manual: bool = False)
     except Exception:
         w = 100
     console = Console(width=w)
-    picks = list_worker_picks(rr)
+    picks: list = []
+    draft_seed = fresh_sovereign_draft()
+    db = open_repo_duckdb_readonly(rr, draft_seed)
+    if db is not None:
+        import os
+
+        try:
+            picks = list_worker_picks(
+                rr,
+                db=db,
+                tenant_id=draft_seed.tenant_id,
+                actor_email=(os.environ.get("DUCKCLAW_ADMIN_EMAIL") or "").strip(),
+                source="catalog",
+            )
+        finally:
+            if hasattr(db, "close"):
+                try:
+                    db.close()
+                except Exception:
+                    pass
     draft = fresh_sovereign_draft(
         worker_id=default_worker_for_fresh([p.worker_id for p in picks]),
     )

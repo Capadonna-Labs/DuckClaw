@@ -58,7 +58,7 @@ async def playground_config(
         "tenant_id": gateway_effective_tenant_id("default"),
         "telegram_user_id": "",
     }
-    workers_list: list[dict[str, str]] = [{"id": "default", "label": "Default"}]
+    workers_list: list[dict[str, str]] = []
     projects: list[dict[str, Any]] = []
     try:
         with open_gateway_db(read_only=True) as db:

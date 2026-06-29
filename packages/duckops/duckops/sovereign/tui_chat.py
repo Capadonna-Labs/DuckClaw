@@ -89,11 +89,11 @@ def load_gateway_chat_config(
     env = merged_root_and_proposed_flat_env(repo_root)
     if draft is not None:
         tenant = (draft.tenant_id or "default").strip() or "default"
-        worker = (draft.default_worker_id or "default").strip() or "default"
+        worker = (draft.default_worker_id or "").strip()
         owner = (draft.wizard_creator_telegram_user_id or "").strip()
     else:
         tenant = "default"
-        worker = "default"
+        worker = ""
         owner = ""
     base = (
         os.environ.get("DUCKCLAW_GATEWAY_URL")
@@ -111,10 +111,10 @@ def load_gateway_chat_config(
             draft = saved
     if draft is not None:
         tenant = (draft.tenant_id or tenant).strip() or "default"
-        worker = (draft.default_worker_id or worker).strip() or "default"
+        worker = (draft.default_worker_id or worker).strip()
         owner = owner or (draft.wizard_creator_telegram_user_id or "").strip()
     tenant = (env.get("DUCKCLAW_GATEWAY_TENANT_ID") or env.get("DUCKCLAW_TELEGRAM_DEFAULT_TENANT") or tenant).strip()
-    worker = (env.get("DUCKCLAW_DEFAULT_WORKER_ID") or worker).strip() or "default"
+    worker = (env.get("DUCKCLAW_DEFAULT_WORKER_ID") or worker).strip()
     owner = owner or (env.get("DUCKCLAW_OWNER_ID") or env.get("DUCKCLAW_ADMIN_CHAT_ID") or "").strip()
     return GatewayChatConfig(
         base_url=base,
@@ -349,6 +349,7 @@ def run_tui_chat(
             db=db,
             tenant_id=cfg.tenant_id,
             actor_email=admin_email,
+            source="catalog",
         )
     finally:
         if db is not None and hasattr(db, "close"):

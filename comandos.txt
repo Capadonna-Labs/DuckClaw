@@ -1,6 +1,8 @@
 -------- PARA LEVANTAR EL SISTEMA --------
 
-install.cmd                                # Windows: doble clic en el Explorador (o .\install.cmd)
+install.cmd                                # Windows Explorador: doble clic
+.\install.cmd                              # Windows PowerShell (obligatorio el .\)
+cmd /c install.cmd                         # Windows PowerShell alternativa
 ./duckops-up.sh                            # macOS / Linux / WSL
 
 uv run duckops up                          # si ya tienes uv

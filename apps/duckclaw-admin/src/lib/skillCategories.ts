@@ -105,7 +105,7 @@ function mapPayloadCategory(category: SkillCategoryPayload): SkillCategory {
     id: category.id,
     title: category.title,
     description: category.description ?? undefined,
-    readOnly: category.read_only,
+    readOnly: false,
     skills: (category.skills ?? []).map((skill) => ({
       id: skill.id,
       label: skill.label || skill.id,

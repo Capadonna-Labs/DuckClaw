@@ -93,40 +93,47 @@ function SkillCheckboxRow({
   readOnly?: boolean;
   onChange?: (enabled: boolean) => void;
 }) {
-  if (readOnly) {
-    return (
-      <div className="flex items-start gap-2 rounded-lg px-2 py-1.5">
-        <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-gov-gray-300 dark:bg-dark-muted" />
-        <span>
-          <span className="block font-mono text-[11px] font-bold text-gov-gray-600 dark:text-dark-muted">
-            {entry.label}
-          </span>
-          {entry.hint ? (
-            <span className="block text-[10px] text-gov-gray-400 dark:text-dark-muted">{entry.hint}</span>
-          ) : null}
-        </span>
-      </div>
-    );
-  }
+  const locked = Boolean(readOnly);
   return (
-    <label className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 hover:bg-gov-gray-50 dark:hover:bg-dark-bg/80">
+    <label
+      className={`flex items-start gap-2 rounded-lg px-2 py-1.5 ${
+        locked
+          ? 'cursor-default opacity-80'
+          : 'cursor-pointer hover:bg-gov-gray-50 dark:hover:bg-dark-bg/80'
+      }`}
+    >
       <input
         type="checkbox"
         className="mt-1"
         checked={checked}
-        disabled={disabled}
+        disabled={disabled || locked}
         onChange={(e) => onChange?.(e.target.checked)}
       />
       <span>
-        <span className="block font-mono text-[11px] font-bold text-gov-gray-800 dark:text-dark-text">
+        <span
+          className={`block font-mono text-[11px] font-bold ${
+            locked
+              ? 'text-gov-gray-600 dark:text-dark-muted'
+              : 'text-gov-gray-800 dark:text-dark-text'
+          }`}
+        >
           {entry.label}
         </span>
         {entry.hint ? (
           <span className="block text-[10px] text-gov-gray-500 dark:text-dark-muted">{entry.hint}</span>
         ) : null}
+        {locked ? (
+          <span className="block text-[10px] text-gov-gray-400 dark:text-dark-muted">
+            Incluida por el perfil de herramientas
+          </span>
+        ) : null}
       </span>
     </label>
   );
+}
+
+function isBaselineCategory(category: SkillCategory): boolean {
+  return category.id === 'baseline';
 }
 
 function filterCategory(
@@ -143,17 +150,16 @@ function filterCategory(
       (entry.hint ?? '').toLowerCase().includes(needle)
     );
   });
-  if (!needle && category.readOnly) return { ...category, skills };
   if (skills.length === 0) return null;
-  if (category.readOnly) {
-    return { ...category, skills: skills.length ? skills : category.skills };
-  }
-  const activeCount = skills.filter((entry) => selected.has(normalizeSkillId(entry.id))).length;
+  const baseline = isBaselineCategory(category);
+  const activeCount = baseline
+    ? skills.length
+    : skills.filter((entry) => selected.has(normalizeSkillId(entry.id))).length;
   return {
     ...category,
     skills,
     title:
-      activeCount > 0 && !category.readOnly
+      activeCount > 0 && !baseline
         ? `${category.title} (${activeCount}/${skills.length})`
         : category.title,
   };
@@ -279,32 +285,43 @@ export function WorkerToolsDropdown({
             </p>
           ) : (
             <div className="mt-2 max-h-[min(60vh,24rem)] space-y-2 overflow-y-auto">
-              {categories.map((category) => (
-                <CollapsibleCategory
-                  key={category.id}
-                  title={category.title}
-                  description={category.description}
-                  defaultOpen={category.id === 'web' || category.id === 'reports_html'}
-                  countLabel={
-                    category.readOnly
-                      ? `${category.skills.length} incluidas`
-                      : `${category.skills.filter((entry) => selected.has(normalizeSkillId(entry.id))).length}/${category.skills.length}`
-                  }
-                >
-                  {category.skills.map((entry) => (
-                    <SkillCheckboxRow
-                      key={entry.id}
-                      entry={entry}
-                      checked={
-                        category.readOnly ? true : selected.has(normalizeSkillId(entry.id))
-                      }
-                      disabled={disabled}
-                      readOnly={category.readOnly}
-                      onChange={(enabled) => patchSkill(entry.id, enabled)}
-                    />
-                  ))}
-                </CollapsibleCategory>
-              ))}
+              {categories.map((category) => {
+                const baseline = isBaselineCategory(category);
+                const activeCount = baseline
+                  ? category.skills.length
+                  : category.skills.filter((entry) =>
+                      selected.has(normalizeSkillId(entry.id))
+                    ).length;
+                const hasUnselected = category.skills.some(
+                  (entry) => !selected.has(normalizeSkillId(entry.id))
+                );
+                return (
+                  <CollapsibleCategory
+                    key={category.id}
+                    title={category.title}
+                    description={category.description}
+                    defaultOpen={baseline || hasUnselected || category.id === 'web'}
+                    countLabel={
+                      baseline
+                        ? `${category.skills.length} incluidas`
+                        : `${activeCount}/${category.skills.length}`
+                    }
+                  >
+                    {category.skills.map((entry) => (
+                      <SkillCheckboxRow
+                        key={entry.id}
+                        entry={entry}
+                        checked={
+                          baseline ? true : selected.has(normalizeSkillId(entry.id))
+                        }
+                        disabled={disabled}
+                        readOnly={baseline}
+                        onChange={(enabled) => patchSkill(entry.id, enabled)}
+                      />
+                    ))}
+                  </CollapsibleCategory>
+                );
+              })}
               {categories.length === 0 ? (
                 <p className="text-[11px] text-gov-gray-500 dark:text-dark-muted">Sin coincidencias.</p>
               ) : null}

@@ -10,7 +10,8 @@ function mapApiCategory(category: SkillCategoryPayload): SkillCategory {
     id: category.id,
     title: category.title,
     description: category.description ?? undefined,
-    readOnly: category.read_only,
+    // El picker siempre permite activar/desactivar skills de plataforma vía manifest.
+    readOnly: false,
     skills: (category.skills ?? []).map((skill) => ({
       id: skill.id,
       label: skill.label || skill.id,

@@ -59,12 +59,36 @@ Comandos fly: `/team`, `/workers`, `/vault`, `/heartbeat on|off`, `/context on|o
 
 ```bash
 pm2 restart DuckClaw-Gateway --update-env
-pnpm admin:dev    # o: cd apps/duckclaw-admin && pnpm dev
+pnpm admin:dev    # http://localhost:3001 — ver apps/duckclaw-admin/README.md
 ```
 
-Variables en `apps/duckclaw-admin/.env.local`: `DUCKCLAW_GATEWAY_URL`, `DUCKCLAW_ADMIN_API_KEY` (misma clave que gateway).
+Variables en `apps/duckclaw-admin/.env.local`: `DUCKCLAW_GATEWAY_URL`, `DUCKCLAW_ADMIN_API_KEY` (misma clave que gateway), `DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASSWORD` (seed login).
 
 Servicios: Redis + DuckClaw-DB-Writer + DuckClaw-Gateway.
+
+### Agentes y herramientas (manifest)
+
+- Pantalla **Estudio → Agentes** (`/templates/[id]`): dropdown **Herramientas** activa skills en `manifest.yaml` (catálogo desde `GET /api/v1/admin/catalog/skill-categories`).
+- Guardar manifest persiste en DuckDB (`admin_worker_versions`); el runtime no lee el estado React en memoria.
+- **Capabilities** del worker: comparar skills declaradas vs `tools_runtime` (útil para diagnosticar gaps).
+
+### GitHub MCP (skill `github`)
+
+Requisitos en el **host del gateway** (usuario PM2):
+
+```bash
+# .env raíz
+GITHUB_TOKEN=ghp_...
+
+# Docker accesible (mismo usuario que PM2)
+docker info
+docker pull ghcr.io/github/github-mcp-server
+sudo usermod -aG docker $USER   # si permission denied en docker.sock
+
+pm2 restart DuckClaw-Gateway --update-env
+```
+
+Log esperado al delegar a un worker con `github` en manifest: `GitHub MCP registered N tools`.
 
 ### Context monitor (compactación LLM del hilo)
 

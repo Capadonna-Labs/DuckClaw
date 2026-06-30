@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 
 
-# Lineas tipo "worker 2", "Job-Hunter 1" al inicio del cuerpo (eco de heartbeats / historial).
+# Lineas tipo "worker 2", "cicd-expert 1" al inicio del cuerpo (eco de heartbeats / historial).
 # El numero es subagent_slot_rank (Redis), no replica PM2; ver subagent_run_id.
 _SUBAGENT_INSTANCE_HEADER_LINE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*\s+\d+\s*$")
 

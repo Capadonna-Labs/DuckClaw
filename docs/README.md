@@ -8,7 +8,6 @@ Mapa canónico de `docs/`. Las **specs normativas** viven bajo **`docs/specs/`**
 
 1. **[`GETTING_STARTED.md`](GETTING_STARTED.md)** — **`uv run duckops up`** (plug-and-play) o paso a paso con `bootstrap` / `init`.
 2. **[`README.md`](../README.md)** — layout del monorepo, `duckops serve --gateway`.
-3. **Este archivo** — qué leer según tu tarea.
 3. **[`docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`](specs/features/platform/DB_FIRST_CORE_REFACTOR.md)** — **fuente de verdad de arquitectura** (DB-first, qué es core, qué está limpio, roadmap).
 4. **[`docs/architecture/system_overview.md`](architecture/system_overview.md)** — diagrama y componentes.
 5. **[`docs/COMANDOS.md`](COMANDOS.md)** — PM2, Redis, Telegram, variables, cheat sheet operativo.
@@ -26,7 +25,7 @@ Mapa canónico de `docs/`. Las **specs normativas** viven bajo **`docs/specs/`**
 | [`docs/architecture/`](architecture/) | Narrativa técnica estable | Singleton writer, memoria tri-cameral, Tailscale, infra-bootstrap |
 | [`docs/core/`](core/) | Capas del sistema (skills, memoria, agentes) | Profundizar en tooling y sandbox |
 | [`docs/api/`](api/) | Contratos HTTP gateway / db-writer | Integrar clientes o BFF |
-| [`apps/duckclaw-admin/docs/`](../../apps/duckclaw-admin/docs/) | Docs de la consola admin | Solo frontend admin |
+| [`apps/duckclaw-admin/docs/`](../../apps/duckclaw-admin/docs/) | Docs de la consola admin (BFF, manifest, MCP) | Frontend admin, picker herramientas, playground |
 
 ---
 
@@ -46,6 +45,7 @@ Las rutas **`/api/v1/admin/train/*`** y la pestaña **`/train`** del admin **fue
 
 - Índice plataforma: [`docs/specs/features/platform/README.md`](specs/features/platform/README.md)
 - Admin UI (spec): [`DUCKCLAW_ADMIN_UI.md`](specs/features/platform/DUCKCLAW_ADMIN_UI.md)
+- Admin UI (guía operativa): [`apps/duckclaw-admin/README.md`](../apps/duckclaw-admin/README.md)
 - Telegram: [`docs/specs/features/telegram-gateway/TELEGRAM.md`](specs/features/telegram-gateway/TELEGRAM.md)
 - MCP conectores remotos: [`docs/specs/features/integrations/REMOTE_MCP_CONNECTORS.md`](specs/features/integrations/REMOTE_MCP_CONNECTORS.md)
 - Tests de guardrail docs: `tests/test_db_first_guardrails_static.py`, `tests/test_forge_legacy_cleanup.py`

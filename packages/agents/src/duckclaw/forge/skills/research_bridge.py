@@ -150,7 +150,7 @@ def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
     except (TypeError, ValueError):
         max_results = 15
     topic = cfg.get("topic", "general")
-    # False = no hinchar contexto con HTML crudo de páginas (contrato skills Job-Hunter).
+    # False = no hinchar contexto con HTML crudo de páginas (contrato research skill).
     include_raw_content = bool(cfg.get("include_raw_content", False))
     include_domains = _normalize_include_domains(cfg.get("include_domains"))
 

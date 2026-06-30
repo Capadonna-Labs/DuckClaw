@@ -62,12 +62,12 @@ def test_tailscale_funnel_panel_mentions_port_and_docs() -> None:
 def test_telegram_webhook_post_deploy_message_uses_public_base() -> None:
     d = SovereignDraft(
         gateway_port=8000,
-        gateway_pm2_name="Finanz-Gateway",
+        gateway_pm2_name="DuckClaw-Gateway",
         telegram_webhook_public_base_url="https://platform-orchestrator.example.test",
     )
     msg = telegram_webhook_post_deploy_message(d)
     assert "https://platform-orchestrator.example.test/api/v1/telegram/webhook" in msg
-    assert "Finanz-Gateway" in msg
+    assert "DuckClaw-Gateway" in msg
     assert "8000" in msg
 
 

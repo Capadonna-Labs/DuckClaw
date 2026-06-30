@@ -10,7 +10,7 @@ import urllib.request
 BASE = (os.environ.get("SENSORY_URL") or "http://100.99.72.63:8001").rstrip("/")
 text = ("Frase larga de prueba post reinicio. " * 80)[:1400]
 payload = json.dumps(
-    {"text": text, "voice_id": "finanz_alert", "output_format": "wav"}
+    {"text": text, "voice_id": "default_assistant", "output_format": "wav"}
 ).encode()
 req = urllib.request.Request(
     f"{BASE}/api/v1/sensory/synthesize",

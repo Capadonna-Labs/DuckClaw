@@ -100,11 +100,12 @@ Contrato cola/ledger: [`docs/specs/features/platform/DB_WRITER_CONTRACT.md`](doc
 
 ### Control plane en el hub (`gateway.duckdb`)
 
-Migraciones versionadas en `packages/shared/src/duckclaw/schema_migrations.py` (actualmente **v27**). Piezas principales:
+Migraciones versionadas en `packages/shared/src/duckclaw/schema_migrations.py` (actualmente **v29**). Piezas principales:
 
 | Dominio | Tablas / owners |
 |---------|-----------------|
 | **Workers** | `admin_worker_catalog`, contexts, capabilities, skills, assignments |
+| **Catálogo skills UI** | `admin_skill_categories`, `admin_skill_catalog_items` — seed `framework_skill_categories_v1` |
 | **Políticas** | `prompt_policy_registry`, `worker_prompt_bindings`, `tool_policy_directives`, `worker_runtime_policies` |
 | **Proyectos** | `admin_projects`, `admin_project_agents`, members |
 | **Runtime** | `admin_runtime_settings` (tenant, chat, gateway, heartbeat, sandbox, LLM, secrets) |
@@ -137,14 +138,14 @@ Stack local:
 pnpm dev:local              # gateway + db-writer + admin
 ```
 
-**Producción** (PM2, admin `:3000`):
+**Producción** (PM2 spawn, admin `:3000`; dev local `:3001`):
 
 ```bash
 pm2 start config/ecosystem.spawn.config.cjs
 pm2 save
 ```
 
-`.env.local` en `apps/duckclaw-admin/`: `DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000` y `DUCKCLAW_ADMIN_API_KEY` (misma clave que el gateway).
+`.env.local` en `apps/duckclaw-admin/`: `DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000` y `DUCKCLAW_ADMIN_API_KEY` (misma clave que el gateway). Guía completa: [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md).
 
 Si la UI sale sin estilos o congelada en «Esperando Gateway…» tras un error de compilación:
 
@@ -152,7 +153,9 @@ Si la UI sale sin estilos o congelada en «Esperando Gateway…» tras un error 
 rm -rf apps/duckclaw-admin/.next && cd apps/duckclaw-admin && pnpm dev
 ```
 
-Consola: plantillas/workers, proyectos, **prompt policies**, playground, knowledge RAG, runtime settings, **conectores MCP** (`/mcp/connectors`), sandbox artifacts. Spec UI: [`docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md`](docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md)
+Consola: **agentes** (catálogo DB), picker de **herramientas/manifest**, proyectos, **prompt policies**, playground, knowledge RAG, runtime settings, **conectores MCP** (`/mcp`), sandbox artifacts. Spec UI: [`docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md`](docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md)
+
+**GitHub MCP** (skill `github` en manifest): `GITHUB_TOKEN` + Docker accesible por el usuario PM2 (`docker` en PATH y grupo `docker`). Ver [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md#github-mcp-desde-admin).
 
 **Retirado:** API `/api/v1/admin/train/*` y pestaña `/train` — usar `uv run duckops train` y [`packages/agents/train/`](packages/agents/train/).
 

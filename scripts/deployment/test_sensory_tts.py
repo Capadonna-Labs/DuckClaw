@@ -4,7 +4,7 @@ import sys
 import urllib.request
 
 url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8000/api/v1/sensory/synthesize"
-payload = json.dumps({"text": "Hola prueba", "voice_id": "leila_assistant"}).encode()
+payload = json.dumps({"text": "Hola prueba", "voice_id": "default_assistant"}).encode()
 req = urllib.request.Request(
     url,
     data=payload,

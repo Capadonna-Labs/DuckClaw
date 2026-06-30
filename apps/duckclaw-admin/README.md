@@ -9,7 +9,6 @@ Consola web de operación para DuckClaw: agentes (catálogo DB-first), playgroun
 | [docs/environment.md](docs/environment.md) | Variables de entorno |
 | [docs/development.md](docs/development.md) | Desarrollo, build, pruebas |
 | [docs/voice-realtime.md](docs/voice-realtime.md) | Voz en vivo (Pipecat / playground) |
-| [docs/legacy-crm-module.md](docs/legacy-crm-module.md) | Código CRM PQRSD heredado (sin rutas activas) |
 | [specs/features/platform/DUCKCLAW_ADMIN_UI.md](../../specs/features/platform/DUCKCLAW_ADMIN_UI.md) | Spec normativa (SDD) |
 
 ---

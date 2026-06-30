@@ -10,7 +10,7 @@ DuckClaw core ships built-in slash commands (`/help`, `/vault`, `/workers`, …)
 | `DUCKCLAW_EXTENSION_LIB_PATH` | `workers/duckclaw/lib` | Python plugin directory relative to each root (default: `lib`) |
 | `DUCKCLAW_FLY_DISPATCHERS` | `fly_commands:dispatch` | Comma/semicolon list of `module:callable` entrypoints |
 | `DUCKCLAW_FLY_MANIFEST` | `workers/duckclaw/fly_extension.yaml` | Optional YAML manifest (absolute or relative to extension root) |
-| `DUCKCLAW_FLY_READ_ONLY_EXTRA` | `ibkr,trading-session` | Extra commands safe for read-only vault opens |
+| `DUCKCLAW_FLY_READ_ONLY_EXTRA` | `export-report,summarize-thread` | Extra commands safe for read-only vault opens |
 
 ## Dispatcher contract
 

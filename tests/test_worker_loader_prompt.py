@@ -48,7 +48,7 @@ def test_load_system_prompt_default_when_empty(tmp_path: Path) -> None:
 
 
 def test_append_domain_closure_block_appends_when_present(tmp_path: Path) -> None:
-    d = tmp_path / "leila"
+    d = tmp_path / "worker-demo"
     d.mkdir()
     (d / "domain_closure.md").write_text("CLOSURE_FINAL", encoding="utf-8")
     out = append_domain_closure_block("BASE", _spec(d))

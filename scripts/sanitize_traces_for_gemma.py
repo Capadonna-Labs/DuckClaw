@@ -154,7 +154,7 @@ def tool_content_indicates_success(content: str) -> bool:
     try:
         data = json.loads(raw)
     except (json.JSONDecodeError, TypeError):
-        # Texto plano (p. ej. IBKR formateado): sin JSON de error estándar
+        # Texto plano (sin JSON de error estándar)
         low = raw.lower()
         if '"error"' in raw or "'error'" in raw:
             return False

@@ -14,6 +14,10 @@ El **API Gateway** y el **db-writer** leen este archivo.
 | `DUCKCLAW_REPO_ROOT` | No | Ruta absoluta al monorepo si el gateway no infiere la raíz |
 | `DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES` | Para pantalla Telegram | Formato multiplex documentado en specs |
 | `LANGCHAIN_API_KEY` | No | Traces LangSmith (admin API `/traces/langsmith`) |
+| `GITHUB_TOKEN` | Para skill `github` en manifest | PAT para GitHub MCP (`duckclaw.github.mcp_bridge`) |
+| `GITHUB_TOOLSETS` | No | Toolsets del servidor MCP (default en código) |
+
+**GitHub MCP:** además del token, el proceso **PM2 del gateway** necesita `docker` en PATH y permiso sobre `docker.sock` (usuario en grupo `docker`). Diagnóstico: `uv run python scripts/doctor.py` (check 9).
 
 Ejemplo mínimo para admin:
 
@@ -85,13 +89,6 @@ Login: credenciales en hub DuckDB (`DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASS
 Para apagar el proxy admin: `tailscale serve --https=8443 off`
 
 **No** commitear `.env.local`. Está en `.gitignore` de la app.
-
-## Variables legacy CRM (no usadas por rutas admin actuales)
-
-Si reactivas el módulo GovTech PQRSD, ver [legacy-crm-module.md](legacy-crm-module.md):
-
-- `CRM_DUCKDB_PATH`, `CRM_VAULT_USER_ID`, `DUCKCLAW_GATEWAY_USER_ID_OVERRIDE`
-- `NEXT_PUBLIC_IA_HABILITADA`, `OPENROUTER_API_KEY`
 
 ## Checklist de coherencia
 

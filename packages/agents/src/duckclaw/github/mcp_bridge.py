@@ -1,8 +1,7 @@
 """
 Generic GitHub MCP capability.
 
-This module is intentionally outside ``duckclaw.forge.skills`` and contains no
-Job Hunter or deterministic PR workflow. Workers must opt in via DB-first
+This module is intentionally outside ``duckclaw.forge.skills``. Workers must opt in via DB-first
 capability/config before these tools are registered.
 """
 

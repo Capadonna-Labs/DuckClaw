@@ -4,6 +4,9 @@ import { createContext, useContext, useEffect, useState } from 'react';
 
 type Theme = 'light' | 'dark';
 
+const THEME_STORAGE_KEY = 'duckclaw-admin-theme';
+const LEGACY_THEME_STORAGE_KEY = 'crm-theme';
+
 interface ThemeContextValue {
   theme: Theme;
   toggleTheme: () => void;
@@ -19,9 +22,10 @@ const ThemeContext = createContext<ThemeContextValue>({
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setThemeState] = useState<Theme>('light');
 
-  // Lee preferencia guardada en localStorage al montar
   useEffect(() => {
-    const saved = localStorage.getItem('crm-theme') as Theme | null;
+    const saved =
+      (localStorage.getItem(THEME_STORAGE_KEY) as Theme | null) ||
+      (localStorage.getItem(LEGACY_THEME_STORAGE_KEY) as Theme | null);
     const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
     const initialTheme = saved ?? (prefersDark ? 'dark' : 'light');
     setThemeState(initialTheme);
@@ -35,7 +39,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     } else {
       root.classList.remove('dark');
     }
-    localStorage.setItem('crm-theme', t);
+    localStorage.setItem(THEME_STORAGE_KEY, t);
+    localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
   }
 
   function setTheme(t: Theme) {

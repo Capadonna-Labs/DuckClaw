@@ -23,7 +23,7 @@ def main() -> int:
     key = _load_admin_key()
     body = json.dumps(
         {
-            "worker_id": "finanz",
+            "worker_id": "default",
             "message": "Di hola en una frase corta.",
             "chat_id": "tts-sse-smoke",
             "stream": True,

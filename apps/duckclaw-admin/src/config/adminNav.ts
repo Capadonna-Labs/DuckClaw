@@ -31,7 +31,7 @@ export const USER_WORKSPACE_NAV_GROUP: AdminNavGroup = {
   label: 'Tu espacio',
   hint: 'Crea, conversa y retoma trabajo',
   items: [
-    { href: '/overview', label: 'Inicio', section: 'core', audience: 'user' },
+    { href: '/overview', label: 'Resumen', section: 'core', audience: 'user' },
     { href: '/playground', label: 'Chat', section: 'core', audience: 'user' },
     { href: '/sandbox', label: 'Sandbox', section: 'core', audience: 'user' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
@@ -46,7 +46,7 @@ export const WORK_NAV_GROUP: AdminNavGroup = {
   label: 'Trabajo',
   hint: 'Operación diaria',
   items: [
-    { href: '/overview', label: 'Inicio', section: 'core', audience: 'admin' },
+    { href: '/overview', label: 'Resumen', section: 'core', audience: 'admin' },
     { href: '/playground', label: 'Chat', section: 'core', audience: 'admin' },
     { href: '/sandbox', label: 'Sandbox', section: 'core', audience: 'admin' },
     { href: '/kanban', label: 'Tablero', section: 'core', audience: 'admin' },
@@ -58,8 +58,8 @@ export const STUDIO_NAV_GROUP: AdminNavGroup = {
   label: 'Estudio',
   hint: 'Agentes, conocimiento e informes',
   items: [
-    { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/projects', label: 'Proyectos', section: 'core', audience: 'admin' },
+    { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/knowledge', label: 'Conocimiento', section: 'core', audience: 'admin' },
     { href: '/reports', label: 'Reportes', section: 'core', audience: 'admin' },
   ],
@@ -146,7 +146,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   ),
   '/ops': 'Overview',
   '/commands': 'Overview',
-  '/overview': 'Inicio',
+  '/overview': 'Resumen',
   '/playground': 'Playground',
   '/sandbox': 'Sandbox',
   '/projects': 'Proyectos',

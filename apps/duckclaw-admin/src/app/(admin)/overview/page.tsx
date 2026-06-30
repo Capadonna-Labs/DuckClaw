@@ -41,7 +41,7 @@ export default function OverviewPage() {
     <div className="space-y-8 animate-in fade-in duration-500">
       <header>
         <h1 className="text-3xl font-black text-gov-gray-900 dark:text-dark-text tracking-tight">
-          {isAdmin ? 'Overview' : 'Inicio'}
+          Resumen
         </h1>
       </header>
 

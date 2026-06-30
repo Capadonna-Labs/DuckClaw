@@ -14,7 +14,7 @@ function groupLabelsFor(role: 'admin' | 'user' | 'viewer'): string[] {
 }
 
 const userLabels = labelsFor('user');
-assert.deepEqual(userLabels, ['Inicio', 'Chat', 'Sandbox', 'Mis agentes', 'Proyectos', 'Ajustes']);
+assert.deepEqual(userLabels, ['Resumen', 'Chat', 'Sandbox', 'Mis agentes', 'Proyectos', 'Ajustes']);
 assert.equal(userLabels.includes('Runtime'), false);
 assert.equal(userLabels.includes('DuckDB'), false);
 
@@ -26,7 +26,7 @@ assert.equal(adminLabels.includes('Chat'), true);
 assert.equal(adminLabels.includes('Sandbox'), true);
 assert.equal(adminLabels.includes('Runtime'), true);
 assert.equal(adminLabels.includes('Acceso'), true);
-assert.equal(adminLabels.includes('Inicio'), true);
+assert.equal(adminLabels.includes('Resumen'), true);
 
 const adminGroups = groupLabelsFor('admin');
 assert.deepEqual(adminGroups, ['Trabajo', 'Estudio', 'Plataforma']);
@@ -38,6 +38,7 @@ const studioGroup = navEntriesForRole('admin').find(
 );
 assert.ok(studioGroup?.type === 'group');
 const studioLabels = studioGroup.group.items.map((i) => i.label);
+assert.deepEqual(studioLabels.slice(0, 2), ['Proyectos', 'Agentes']);
 assert.equal(studioLabels.includes('Conocimiento'), true);
 assert.equal(studioLabels.includes('VNC'), false);
 

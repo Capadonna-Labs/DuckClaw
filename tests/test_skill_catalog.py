@@ -37,12 +37,37 @@ def test_seed_framework_skill_catalog_is_idempotent(gateway_db) -> None:
     ids = {cat["id"] for cat in categories}
     assert "web" in ids
     assert "reports_html" in ids
+    assert "mcp" in ids
     assert "data_market" not in ids
     assert "ibkr" not in ids
     web = next(cat for cat in categories if cat["id"] == "web")
     skill_ids = {item["id"] for item in web["skills"]}
     assert "research" in skill_ids
     assert "google_trends" in skill_ids
+
+
+def test_sync_framework_skill_catalog_adds_missing_github_mcp(gateway_db) -> None:
+    from duckclaw.skill_catalog import list_skill_categories_from_db, sync_framework_skill_catalog_from_pack
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        adapter = _Adapter(con)
+        adapter.execute(
+            "DELETE FROM main.admin_skill_catalog_items "
+            "WHERE category_id IN ("
+            "SELECT category_id FROM main.admin_skill_categories WHERE category_key = 'mcp'"
+            ")"
+        )
+        adapter.execute("DELETE FROM main.admin_skill_categories WHERE category_key = 'mcp'")
+        added = sync_framework_skill_catalog_from_pack(adapter)
+        categories = list_skill_categories_from_db(adapter)
+    finally:
+        con.close()
+
+    assert added >= 1
+    mcp = next(cat for cat in categories if cat["id"] == "mcp")
+    skill_ids = {item["id"] for item in mcp["skills"]}
+    assert "github" in skill_ids
 
 
 def test_skill_categories_api_payload_includes_baseline_profiles(gateway_db) -> None:

@@ -240,6 +240,31 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     from duckclaw.forge.skills.custom_reports_bridge import register_custom_reports_skill
 
     register_custom_reports_skill(tools, db, spec)
+    skills_list = [
+        str(skill).strip().lower().replace("-", "_")
+        for skill in (getattr(spec, "skills_list", None) or [])
+    ]
+    skill_configs = getattr(spec, "skill_configs", None) or {}
+    if "github" in skills_list or "github" in skill_configs:
+        from duckclaw.github.mcp_bridge import register_github_skill
+
+        github_cfg = skill_configs.get("github")
+        if github_cfg is None:
+            github_cfg = {}
+        register_github_skill(
+            tools,
+            github_cfg,
+            logical_worker_id=str(
+                getattr(spec, "logical_worker_id", None)
+                or getattr(spec, "worker_id", None)
+                or ""
+            ),
+            manifest_worker_slug=str(
+                getattr(spec, "worker_slug", None)
+                or getattr(spec, "worker_id", None)
+                or ""
+            ),
+        )
     try:
         from duckclaw.forge.skills.mcp_connector_bridge import register_worker_mcp_connector_tools
 

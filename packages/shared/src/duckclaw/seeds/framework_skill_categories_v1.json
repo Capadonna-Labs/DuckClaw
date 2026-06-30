@@ -57,6 +57,25 @@
       "skills": [
         { "id": "tailscale", "hint": "Red Tailscale" }
       ]
+    },
+    {
+      "id": "mcp",
+      "title": "MCP",
+      "description": "Conectores Model Context Protocol empaquetados.",
+      "sort_order": 55,
+      "skills": [
+        {
+          "id": "github",
+          "label": "GitHub",
+          "hint": "GitHub MCP oficial (Docker + GITHUB_TOKEN)",
+          "default_config": {
+            "enabled": true,
+            "token_env": "GITHUB_TOKEN",
+            "mcp_read_only": true,
+            "hitl_destructive": true
+          }
+        }
+      ]
     }
   ]
 }

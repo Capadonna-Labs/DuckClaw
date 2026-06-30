@@ -24,6 +24,13 @@ const DEFAULT_COMFYUI_CONFIG: Record<string, unknown> = {
   enabled: true,
 };
 
+const DEFAULT_GITHUB_CONFIG: Record<string, unknown> = {
+  enabled: true,
+  token_env: 'GITHUB_TOKEN',
+  mcp_read_only: true,
+  hitl_destructive: true,
+};
+
 function addSkillBinding(
   bindings: ManifestSkillBindings,
   skillNames: string[],
@@ -117,6 +124,7 @@ function defaultConfigForSkill(skillId: string): Record<string, unknown> | null 
   const normalized = normalizeSkillId(skillId);
   if (normalized === 'research') return { ...DEFAULT_RESEARCH_CONFIG };
   if (normalized === 'comfyui') return { ...DEFAULT_COMFYUI_CONFIG };
+  if (normalized === 'github') return { ...DEFAULT_GITHUB_CONFIG };
   return null;
 }
 

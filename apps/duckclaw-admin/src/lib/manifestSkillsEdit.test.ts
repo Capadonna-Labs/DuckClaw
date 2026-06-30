@@ -50,4 +50,10 @@ assert.equal(reportsBundleFullySelected(bundleOn), true);
 const bundleOff = applyReportsBundle(bundleOn, false);
 assert.equal(reportsBundleFullySelected(bundleOff), false);
 
+const withGithub = toggleOptionalSkill(SIMPLE, 'github', true);
+const githubParsed = parseManifestSkills(withGithub);
+assert.ok(githubParsed.optionalSkillNames.includes('github'));
+assert.equal(githubParsed.bindings.github?.token_env, 'GITHUB_TOKEN');
+assert.equal(githubParsed.bindings.github?.mcp_read_only, true);
+
 console.log('manifestSkillsEdit.test.ts: ok');

@@ -41,6 +41,17 @@ export const FALLBACK_PLATFORM_CATEGORIES: SkillCategory[] = [
       { id: 'read_llm_usage_summary', label: 'read_llm_usage_summary' },
     ],
   },
+  {
+    id: 'mcp',
+    title: 'MCP',
+    skills: [
+      {
+        id: 'github',
+        label: 'GitHub',
+        hint: 'GitHub MCP oficial (Docker + GITHUB_TOKEN)',
+      },
+    ],
+  },
 ];
 
 export const FALLBACK_BASELINE_PROFILES: Record<ToolProfile, string[]> = {

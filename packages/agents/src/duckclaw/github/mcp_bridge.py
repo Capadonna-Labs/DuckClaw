@@ -335,7 +335,7 @@ def register_github_skill(
     logical_worker_id: str = "",
     manifest_worker_slug: Optional[str] = None,
 ) -> None:
-    if not manifest_github_config:
+    if manifest_github_config is None:
         return
     cfg = manifest_github_config if isinstance(manifest_github_config, dict) else {}
 

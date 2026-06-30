@@ -1299,6 +1299,12 @@ def _migration_028_seed_skill_catalog(db: Any) -> None:
     seed_framework_skill_catalog_if_empty(db)
 
 
+def _migration_029_sync_skill_catalog_github_mcp(db: Any) -> None:
+    from duckclaw.skill_catalog import sync_framework_skill_catalog_from_pack
+
+    sync_framework_skill_catalog_from_pack(db)
+
+
 _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     21: _migration_021_apply_framework_policy_pack,
     22: _migration_022_refresh_framework_packs,
@@ -1306,6 +1312,7 @@ _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     25: _migration_025_framework_report_engine_tool_routing,
     26: _migration_026_framework_document_lanes,
     28: _migration_028_seed_skill_catalog,
+    29: _migration_029_sync_skill_catalog_github_mcp,
 }
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
@@ -1337,4 +1344,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (26, "framework_document_lanes", _M026_FRAMEWORK_DOCUMENT_LANES),
     (27, "mcp_connectors_v1", _M027_MCP_CONNECTORS),
     (28, "skill_catalog_v1", _M028_SKILL_CATALOG),
+    (29, "skill_catalog_github_mcp", []),
 ]

@@ -1,15 +1,7 @@
 import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
 import { join, resolve } from 'path';
-import { repoRoot } from '@/lib/localOps';
-
-/** Misma prioridad que ``vaults.db_root()`` en el gateway (extensión externa antes que monorepo). */
-export function resolveProductDbRoot(): string {
-  const extensionRoot = process.env.DUCKCLAW_EXTENSION_ROOT?.trim();
-  if (extensionRoot) return extensionRoot;
-  return repoRoot();
-}
-
+import { resolveProductDbRoot } from '@/lib/extensionRoot';
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 

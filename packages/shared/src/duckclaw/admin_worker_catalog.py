@@ -11,8 +11,11 @@ import re
 import uuid
 from typing import Any
 
+import yaml
+
 from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
+from duckclaw.skill_catalog import ensure_skill_catalog_schema
 
 _WORKER_ID_RE = re.compile(r"[^a-zA-Z0-9_-]+")
 
@@ -179,6 +182,7 @@ def ensure_admin_worker_catalog_schema(db: Any) -> None:
             sql = stmt.strip()
             if sql:
                 db.execute(sql)
+    ensure_skill_catalog_schema(db)
 
 
 def sanitize_catalog_worker_id(worker_id: str) -> str:
@@ -614,6 +618,23 @@ def update_catalog_worker_file(
             add_worker_context(db, worker_uid=worker_uid, title=rel, content_md=content, sort_order=100)
             context_synced = True
 
+    if rel.lower() in ("manifest.yaml", "manifest.yml"):
+        try:
+            parsed = yaml.safe_load(content)
+        except yaml.YAMLError as exc:
+            raise ValueError(f"manifest.yaml inválido: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError("manifest.yaml debe ser un objeto YAML (mapping)")
+        manifest_snapshot = dict(parsed)
+
+    catalog_skills_synced = {"attached": 0, "updated": 0, "detached": 0}
+    if rel.lower() in ("manifest.yaml", "manifest.yml"):
+        catalog_skills_synced = sync_worker_catalog_skills_from_manifest(
+            db,
+            worker_uid=worker_uid,
+            manifest=manifest_snapshot,
+        )
+
     version = add_worker_version(
         db,
         worker_uid=worker_uid,
@@ -627,6 +648,7 @@ def update_catalog_worker_file(
         "path": rel,
         "version": version["version"],
         "context_synced": context_synced,
+        "catalog_skills_synced": catalog_skills_synced,
     }
 
 
@@ -796,6 +818,165 @@ def attach_skill_to_worker(
         )
         """
     )
+
+
+def _normalize_catalog_skill_name(name: str) -> str:
+    return str(name or "").strip().lower().replace("-", "_")
+
+
+def _declared_skills_from_manifest(manifest: dict[str, Any]) -> tuple[list[str], dict[str, dict[str, Any]]]:
+    from duckclaw.workers.manifest import _parse_skill_bindings
+
+    skills_list = manifest.get("skills") or []
+    if isinstance(skills_list, str):
+        skills_list = [part.strip() for part in skills_list.split(",") if part.strip()]
+    if not isinstance(skills_list, list):
+        skills_list = []
+    return _parse_skill_bindings(skills_list)
+
+
+def _visible_catalog_skills_for_worker(
+    db: Any,
+    *,
+    tenant_id: str,
+    owner_email: str,
+) -> dict[str, dict[str, str]]:
+    """Map normalized skill name -> {skill_id, name} for tenant-visible catalog skills."""
+    owner = (owner_email or "").strip().lower()
+    tenant = (tenant_id or "default").strip() or "default"
+    rows = _query_all_dicts(
+        db,
+        "SELECT skill_id, name, owner_email, visibility "
+        "FROM main.admin_skills "
+        f"WHERE active = true AND tenant_id = '{_sql_lit(tenant, 128)}' "
+        f"AND (owner_email = '{_sql_lit(owner, 256)}' OR visibility = 'public')",
+    )
+    out: dict[str, dict[str, str]] = {}
+    for row in rows:
+        raw_name = str(row.get("name") or "").strip()
+        skill_id = str(row.get("skill_id") or "").strip()
+        if not raw_name or not skill_id:
+            continue
+        out[_normalize_catalog_skill_name(raw_name)] = {
+            "skill_id": skill_id,
+            "name": raw_name,
+        }
+    return out
+
+
+def _upsert_worker_skill_binding(
+    db: Any,
+    *,
+    worker_uid: str,
+    skill_id: str,
+    config: dict[str, Any] | None,
+    sort_order: int,
+    enabled: bool = True,
+) -> None:
+    ensure_admin_worker_catalog_schema(db)
+    existing = _first_row(
+        db,
+        "SELECT skill_id, enabled FROM main.admin_worker_skills "
+        f"WHERE worker_uid = '{_sql_lit(worker_uid, 64)}' AND skill_id = '{_sql_lit(skill_id, 64)}'",
+    )
+    config_json = _json(config)
+    if existing:
+        db.execute(
+            f"""
+            UPDATE main.admin_worker_skills
+            SET enabled = {str(bool(enabled)).lower()},
+                config_json = '{_sql_lit(config_json, 8192)}',
+                sort_order = {int(sort_order)},
+                updated_at = CURRENT_TIMESTAMP
+            WHERE worker_uid = '{_sql_lit(worker_uid, 64)}'
+              AND skill_id = '{_sql_lit(skill_id, 64)}'
+            """
+        )
+        return
+    db.execute(
+        f"""
+        INSERT INTO main.admin_worker_skills
+          (worker_uid, skill_id, enabled, config_json, sort_order)
+        VALUES (
+          '{_sql_lit(worker_uid, 64)}',
+          '{_sql_lit(skill_id, 64)}',
+          {str(bool(enabled)).lower()},
+          '{_sql_lit(config_json, 8192)}',
+          {int(sort_order)}
+        )
+        """
+    )
+
+
+def sync_worker_catalog_skills_from_manifest(
+    db: Any,
+    *,
+    worker_uid: str,
+    manifest: dict[str, Any],
+) -> dict[str, int]:
+    """Sync admin_worker_skills for catalog skills declared in manifest (platform skills stay manifest-only)."""
+    ensure_admin_worker_catalog_schema(db)
+    worker = get_worker_by_uid(db, worker_uid)
+    if not worker:
+        return {"attached": 0, "updated": 0, "detached": 0}
+
+    skill_names, skill_configs = _declared_skills_from_manifest(manifest)
+    visible = _visible_catalog_skills_for_worker(
+        db,
+        tenant_id=str(worker.get("tenant_id") or "default"),
+        owner_email=str(worker.get("owner_email") or ""),
+    )
+
+    desired_ids: list[str] = []
+    attached = 0
+    updated = 0
+    for idx, skill_name in enumerate(skill_names):
+        catalog = visible.get(_normalize_catalog_skill_name(skill_name))
+        if not catalog:
+            continue
+        skill_id = catalog["skill_id"]
+        desired_ids.append(skill_id)
+        existing = _first_row(
+            db,
+            "SELECT skill_id, enabled FROM main.admin_worker_skills "
+            f"WHERE worker_uid = '{_sql_lit(worker_uid, 64)}' AND skill_id = '{_sql_lit(skill_id, 64)}'",
+        )
+        config = skill_configs.get(_normalize_catalog_skill_name(skill_name))
+        _upsert_worker_skill_binding(
+            db,
+            worker_uid=worker_uid,
+            skill_id=skill_id,
+            config=config,
+            sort_order=idx * 10,
+            enabled=True,
+        )
+        if existing:
+            updated += 1
+        else:
+            attached += 1
+
+    detached = 0
+    current_rows = _query_all_dicts(
+        db,
+        "SELECT skill_id FROM main.admin_worker_skills "
+        f"WHERE worker_uid = '{_sql_lit(worker_uid, 64)}' AND enabled = true",
+    )
+    desired_set = set(desired_ids)
+    for row in current_rows:
+        skill_id = str(row.get("skill_id") or "").strip()
+        if not skill_id or skill_id in desired_set:
+            continue
+        db.execute(
+            f"""
+            UPDATE main.admin_worker_skills
+            SET enabled = false, updated_at = CURRENT_TIMESTAMP
+            WHERE worker_uid = '{_sql_lit(worker_uid, 64)}'
+              AND skill_id = '{_sql_lit(skill_id, 64)}'
+            """
+        )
+        detached += 1
+
+    return {"attached": attached, "updated": updated, "detached": detached}
 
 
 def list_worker_skills(db: Any, *, worker_uid: str) -> list[dict[str, str]]:

@@ -1,0 +1,62 @@
+{
+  "pack_version": "framework_skill_categories_v1",
+  "metadata": {
+    "seed": "framework_skill_categories_v1",
+    "scope": "framework",
+    "locale": "es"
+  },
+  "categories": [
+    {
+      "id": "sandbox_code",
+      "title": "Sandbox y código",
+      "description": "Scripts aislados y cambios de código asistidos.",
+      "sort_order": 10,
+      "skills": [
+        { "id": "execute_sandbox_script", "hint": "Ejecutar script en sandbox Docker" },
+        { "id": "propose_code_change", "hint": "Proponer cambio de código revisable" },
+        { "id": "approve_code_change", "hint": "Aprobar cambio de código propuesto" }
+      ]
+    },
+    {
+      "id": "web",
+      "title": "Web e investigación",
+      "description": "Búsqueda web, tendencias y fuentes externas.",
+      "sort_order": 20,
+      "skills": [
+        { "id": "research", "hint": "Tavily / búsqueda web (requiere TAVILY_API_KEY)" },
+        { "id": "google_trends", "hint": "Google Trends" },
+        { "id": "reddit", "hint": "Posts y comentarios de Reddit" },
+        { "id": "openweather", "hint": "Clima vía OpenWeather" }
+      ]
+    },
+    {
+      "id": "visual",
+      "title": "Visual",
+      "description": "Generación de imágenes y artefactos visuales.",
+      "sort_order": 30,
+      "skills": [
+        { "id": "comfyui", "hint": "ComfyUI (config avanzada en YAML)" }
+      ]
+    },
+    {
+      "id": "reports_html",
+      "title": "Reportes HTML",
+      "description": "Dashboards publicados en la consola de Reportes.",
+      "sort_order": 40,
+      "skills": [
+        { "id": "publish_custom_report", "hint": "Publicar HTML en main.custom_reports" },
+        { "id": "update_custom_report_title", "hint": "Actualizar título sin reenviar HTML" },
+        { "id": "read_llm_usage_summary", "hint": "Métricas de uso LLM para dashboards" }
+      ]
+    },
+    {
+      "id": "infra",
+      "title": "Infra",
+      "description": "Integraciones de red e infraestructura.",
+      "sort_order": 50,
+      "skills": [
+        { "id": "tailscale", "hint": "Red Tailscale" }
+      ]
+    }
+  ]
+}

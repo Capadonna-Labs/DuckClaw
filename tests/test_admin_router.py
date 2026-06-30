@@ -225,6 +225,22 @@ def test_catalog_skills(admin_client: TestClient):
     assert "template_local" in data
 
 
+def test_catalog_skill_categories(admin_client: TestClient):
+    r = admin_client.get(
+        "/api/v1/admin/catalog/skill-categories",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert isinstance(data.get("categories"), list)
+    assert len(data["categories"]) >= 4
+    assert "general" in data.get("baseline_profiles", {})
+    category_ids = {item["id"] for item in data["categories"]}
+    assert "web" in category_ids
+    assert "reports_html" in category_ids
+    assert "data_market" not in category_ids
+
+
 def test_catalog_skills_does_not_expose_filesystem_skills_without_db_rows(
     gateway_admin_client: TestClient,
 ) -> None:

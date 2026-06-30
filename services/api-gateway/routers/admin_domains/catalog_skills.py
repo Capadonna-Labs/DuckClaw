@@ -14,6 +14,7 @@ from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.admin_worker_catalog import get_latest_worker_version, list_visible_workers_for_actor
 from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
 from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.skill_catalog import skill_categories_api_payload
 from duckclaw.write_commands import DeactivateCatalogSkillCommand, UpsertCatalogSkillCommand
 from routers.admin_domains.admin_common import actor_from_header, admin_audit, problem, require_admin_key
 
@@ -125,6 +126,13 @@ async def catalog_skills(actor: str = Depends(actor_from_header)) -> dict[str, A
                     }
                 )
     return {"global": global_skills, "template_local": template_skills}
+
+
+@router.get("/skill-categories", dependencies=[Depends(require_admin_key)])
+async def catalog_skill_categories() -> dict[str, Any]:
+    """Platform skill categories and baseline profiles (DB-first catalog)."""
+    with open_gateway_db(read_only=True) as db:
+        return skill_categories_api_payload(db)
 
 
 @router.post("/skills", dependencies=[Depends(require_admin_key)])

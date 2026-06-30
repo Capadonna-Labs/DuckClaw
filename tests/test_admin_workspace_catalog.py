@@ -68,6 +68,142 @@ def test_worker_catalog_keeps_identity_separate_from_import_snapshots(gateway_db
     assert {"manifest_snapshot_json", "files_snapshot_json"}.issubset(version_columns)
 
 
+def test_update_catalog_worker_file_syncs_manifest_snapshot_from_yaml(gateway_db: Path) -> None:
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import (
+        add_worker_version,
+        create_worker,
+        ensure_admin_worker_catalog_schema,
+        get_latest_worker_version,
+        update_catalog_worker_file,
+    )
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        adapter = _Adapter(con)
+        ensure_profile_for_user(adapter, email="alice@test.local")
+        ensure_admin_worker_catalog_schema(adapter)
+
+        worker = create_worker(
+            adapter,
+            owner_email="alice@test.local",
+            worker_id="skills-sync",
+            display_name="Skills Sync",
+        )
+        add_worker_version(
+            adapter,
+            worker_uid=worker["worker_uid"],
+            created_by="alice@test.local",
+            manifest_snapshot={"id": "skills-sync", "skills": []},
+            files_snapshot={"manifest.yaml": "id: skills-sync\nskills: []\n"},
+        )
+
+        manifest_yaml = (
+            "id: skills-sync\n"
+            "name: Skills Sync\n"
+            "tool_profile: general\n"
+            "skills:\n"
+            "  - publish_custom_report\n"
+            "  - google_trends\n"
+        )
+        update_catalog_worker_file(
+            adapter,
+            worker_uid=worker["worker_uid"],
+            file_path="manifest.yaml",
+            content=manifest_yaml,
+            actor_email="alice@test.local",
+        )
+        latest = get_latest_worker_version(adapter, worker_uid=worker["worker_uid"]) or {}
+        manifest = latest.get("manifest_snapshot") or {}
+        files = latest.get("files_snapshot") or {}
+    finally:
+        con.close()
+
+    assert manifest.get("id") == "skills-sync"
+    assert "publish_custom_report" in (manifest.get("skills") or [])
+    assert "google_trends" in (manifest.get("skills") or [])
+    assert files.get("manifest.yaml") == manifest_yaml
+
+
+def test_update_catalog_worker_file_syncs_admin_worker_skills_for_catalog_skills_only(
+    gateway_db: Path,
+) -> None:
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import (
+        add_worker_version,
+        create_worker,
+        ensure_admin_worker_catalog_schema,
+        list_worker_skills,
+        register_skill,
+        update_catalog_worker_file,
+    )
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        adapter = _Adapter(con)
+        ensure_profile_for_user(adapter, email="alice@test.local")
+        ensure_admin_worker_catalog_schema(adapter)
+
+        worker = create_worker(
+            adapter,
+            owner_email="alice@test.local",
+            worker_id="skills-junction",
+            display_name="Skills Junction",
+        )
+        add_worker_version(
+            adapter,
+            worker_uid=worker["worker_uid"],
+            created_by="alice@test.local",
+            manifest_snapshot={"id": "skills-junction", "skills": []},
+            files_snapshot={"manifest.yaml": "id: skills-junction\nskills: []\n"},
+        )
+        skill = register_skill(
+            adapter,
+            name="ticket_lookup",
+            skill_type="python",
+            implementation_ref="duckclaw.skills.ticket_lookup",
+            owner_email="alice@test.local",
+            tenant_id=worker["tenant_id"],
+        )
+
+        manifest_with_catalog_skill = (
+            "id: skills-junction\n"
+            "skills:\n"
+            "  - ticket_lookup\n"
+            "  - google_trends\n"
+        )
+        result = update_catalog_worker_file(
+            adapter,
+            worker_uid=worker["worker_uid"],
+            file_path="manifest.yaml",
+            content=manifest_with_catalog_skill,
+            actor_email="alice@test.local",
+        )
+        bound = list_worker_skills(adapter, worker_uid=worker["worker_uid"])
+
+        manifest_without_catalog_skill = (
+            "id: skills-junction\n"
+            "skills:\n"
+            "  - google_trends\n"
+        )
+        update_catalog_worker_file(
+            adapter,
+            worker_uid=worker["worker_uid"],
+            file_path="manifest.yaml",
+            content=manifest_without_catalog_skill,
+            actor_email="alice@test.local",
+        )
+        bound_after = list_worker_skills(adapter, worker_uid=worker["worker_uid"])
+    finally:
+        con.close()
+
+    assert result["catalog_skills_synced"]["attached"] == 1
+    assert len(bound) == 1
+    assert bound[0]["skill_id"] == skill["skill_id"]
+    assert bound[0]["name"] == "ticket_lookup"
+    assert len(bound_after) == 0
+
+
 def test_worker_catalog_enforces_tenant_scoped_unique_worker_ids(gateway_db: Path) -> None:
     from duckclaw.admin_worker_catalog import create_worker
 

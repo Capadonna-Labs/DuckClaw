@@ -237,6 +237,9 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     from duckclaw.forge.skills.report_engine_bridge import register_report_engine_tools
 
     register_report_engine_tools(tools)
+    from duckclaw.forge.skills.custom_reports_bridge import register_custom_reports_skill
+
+    register_custom_reports_skill(tools, db, spec)
     try:
         from duckclaw.forge.skills.mcp_connector_bridge import register_worker_mcp_connector_tools
 

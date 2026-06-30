@@ -49,6 +49,7 @@ export default function TemplateEditorPage() {
   const [error, setError] = useState<string | null>(null);
   const [newContextTitle, setNewContextTitle] = useState('');
   const [contextError, setContextError] = useState<string | null>(null);
+  const [manifestYaml, setManifestYaml] = useState('');
 
   const markdownFile = isMarkdownPath(tab);
   const isCatalogWorker = detail?.source === 'catalog' || detail?.read_only === true;
@@ -85,6 +86,7 @@ export default function TemplateEditorPage() {
           'manifest.yaml';
         setTab(preferred);
         setContent(d.contents[preferred] ?? '');
+        setManifestYaml(d.contents['manifest.yaml'] ?? '');
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
   }, [workerId, focusFile]);
@@ -95,15 +97,42 @@ export default function TemplateEditorPage() {
 
   useEffect(() => {
     if (!detail) return;
-    setContent(detail.contents[tab] ?? '');
+    if (tab === 'manifest.yaml') {
+      setContent(manifestYaml);
+    } else {
+      setContent(detail.contents[tab] ?? '');
+    }
     if (!isMarkdownPath(tab)) setMarkdownView('edit');
-  }, [tab, detail]);
+  }, [tab, detail, manifestYaml]);
+
+  useEffect(() => {
+    if (tab === 'manifest.yaml') {
+      setManifestYaml(content);
+    }
+  }, [tab, content]);
+
+  const savedManifestYaml = detail?.contents?.['manifest.yaml'] ?? '';
+  const manifestDirty = manifestYaml !== savedManifestYaml;
+
+  const onManifestChange = (nextYaml: string) => {
+    setManifestYaml(nextYaml);
+    if (tab === 'manifest.yaml') {
+      setContent(nextYaml);
+    }
+  };
 
   const save = async () => {
     if (!workerId || !canEditFiles) return;
     setMsg(null);
     try {
-      await adminService.saveTemplateFile(workerId, tab, content);
+      if (tab === 'manifest.yaml') {
+        await adminService.saveTemplateFile(workerId, tab, content);
+      } else {
+        await adminService.saveTemplateFile(workerId, tab, content);
+        if (manifestDirty) {
+          await adminService.saveTemplateFile(workerId, 'manifest.yaml', manifestYaml);
+        }
+      }
       setMsg(isCatalogWorker ? 'Guardado en DuckDB (catálogo)' : 'Guardado en disco (canónico)');
       load();
     } catch (e) {
@@ -251,7 +280,11 @@ export default function TemplateEditorPage() {
 
       <WorkerCapabilitiesCard
         workerId={workerId}
-        manifestYaml={detail?.contents?.['manifest.yaml']}
+        manifestYaml={manifestYaml}
+        onManifestChange={onManifestChange}
+        manifestDirty={manifestDirty}
+        canEdit={canEditFiles}
+        refreshKey={msg}
       />
 
       <div className="flex flex-col lg:flex-row gap-4">

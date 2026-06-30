@@ -80,6 +80,26 @@ export interface SkillCatalogItem {
   worker_id?: string;
 }
 
+export interface SkillCategorySkillItem {
+  id: string;
+  label: string;
+  hint?: string | null;
+}
+
+export interface SkillCategoryPayload {
+  id: string;
+  title: string;
+  description?: string | null;
+  read_only?: boolean;
+  skills: SkillCategorySkillItem[];
+}
+
+export interface SkillCategoriesCatalogResponse {
+  categories: SkillCategoryPayload[];
+  baseline_profiles: Record<string, string[]>;
+  pack_version?: string;
+}
+
 export interface CreateSkillInput {
   name: string;
   description?: string;
@@ -1213,6 +1233,9 @@ export const adminService = {
     adminFetch<{ global: SkillCatalogItem[]; template_local: SkillCatalogItem[] }>(
       '/catalog/skills'
     ),
+
+  getSkillCategories: () =>
+    adminFetch<SkillCategoriesCatalogResponse>('/catalog/skill-categories'),
 
   createSkill: (body: CreateSkillInput) =>
     adminFetch<{ ok: boolean; skill: SkillCatalogItem }>('/catalog/skills', {

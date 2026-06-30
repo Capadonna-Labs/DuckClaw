@@ -1226,6 +1226,43 @@ _M027_MCP_CONNECTORS = [
 ]
 
 
+_M028_SKILL_CATALOG = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_skill_categories (
+        category_id VARCHAR PRIMARY KEY,
+        category_key VARCHAR NOT NULL UNIQUE,
+        title VARCHAR NOT NULL,
+        description TEXT,
+        sort_order INTEGER DEFAULT 0,
+        read_only BOOLEAN DEFAULT false,
+        scope VARCHAR DEFAULT 'platform',
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_skill_catalog_items (
+        item_id VARCHAR PRIMARY KEY,
+        category_id VARCHAR NOT NULL,
+        skill_key VARCHAR NOT NULL,
+        label VARCHAR NOT NULL,
+        hint TEXT,
+        sort_order INTEGER DEFAULT 0,
+        default_config_json TEXT DEFAULT '{}',
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (category_id, skill_key)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_skill_catalog_items_category
+        ON main.admin_skill_catalog_items (category_id, active, sort_order)
+    """,
+]
+
+
 def _migration_024_framework_report_engine_policy(db: Any) -> None:
     from duckclaw.framework_policy_pack import apply_framework_policy_pack
 
@@ -1256,12 +1293,19 @@ def _migration_022_refresh_framework_packs(db: Any) -> None:
     apply_framework_policy_pack(db)
 
 
+def _migration_028_seed_skill_catalog(db: Any) -> None:
+    from duckclaw.skill_catalog import seed_framework_skill_catalog_if_empty
+
+    seed_framework_skill_catalog_if_empty(db)
+
+
 _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     21: _migration_021_apply_framework_policy_pack,
     22: _migration_022_refresh_framework_packs,
     24: _migration_024_framework_report_engine_policy,
     25: _migration_025_framework_report_engine_tool_routing,
     26: _migration_026_framework_document_lanes,
+    28: _migration_028_seed_skill_catalog,
 }
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
@@ -1292,4 +1336,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (25, "framework_report_engine_tool_routing", _M025_FRAMEWORK_REPORT_ENGINE_TOOL_ROUTING),
     (26, "framework_document_lanes", _M026_FRAMEWORK_DOCUMENT_LANES),
     (27, "mcp_connectors_v1", _M027_MCP_CONNECTORS),
+    (28, "skill_catalog_v1", _M028_SKILL_CATALOG),
 ]

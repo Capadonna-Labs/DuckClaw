@@ -558,6 +558,7 @@ def test_catalog_skill_routes_live_in_domain_module() -> None:
     assert '@router.post("/catalog/skills"' not in admin
     assert 'router = APIRouter(prefix="/catalog", tags=["admin-catalog-skills"])' in catalog_skills
     assert '@router.get("/skills", dependencies=[Depends(require_admin_key)])' in catalog_skills
+    assert '@router.get("/skill-categories", dependencies=[Depends(require_admin_key)])' in catalog_skills
     assert '@router.post("/skills", dependencies=[Depends(require_admin_key)])' in catalog_skills
     assert '@router.delete("/skills/{name}", dependencies=[Depends(require_admin_key)])' in catalog_skills
 

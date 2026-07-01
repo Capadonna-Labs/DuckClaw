@@ -131,11 +131,19 @@ export default function TemplatesPage() {
             <Plus size={16} />
             Nuevo agente
           </button>
+          {isAdmin && (
+            <Link
+              href="/policies"
+              className="px-4 py-2 border border-gov-blue-200 text-sm font-bold rounded-xl text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan"
+            >
+              Reglas base
+            </Link>
+          )}
           <Link
             href="/projects"
             className="px-4 py-2 border border-gov-gray-200 text-sm font-bold rounded-xl dark:border-dark-border"
           >
-            {isAdmin ? 'Proyecto administrado' : 'Crear proyecto'}
+            {isAdmin ? 'Proyectos' : 'Crear proyecto'}
           </Link>
         </div>
       </header>

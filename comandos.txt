@@ -5,6 +5,7 @@ install.cmd                                # Windows Explorador: doble clic
 cmd /c install.cmd                         # Windows PowerShell alternativa
 ./duckops-up.sh                            # macOS / Linux / WSL
 
+source .venv/bin/activate
 uv run duckops up                          # si ya tienes uv
 uv run duckops doctor --strict
 uv run duckops configure

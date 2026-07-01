@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ExternalLink } from 'lucide-react';
 import { PageShell } from '@/components/admin/PageShell';
+import type { EmbeddedViewProps } from '@/components/admin/embeddedView';
 import { McpCmdBlock } from '@/components/mcp/McpCmdBlock';
 import { McpConnectorsPanel } from '@/components/mcp/McpConnectorsPanel';
 import { McpLiveBanner } from '@/components/mcp/McpLiveBanner';
@@ -15,13 +16,14 @@ import { isAdminRole } from '@/lib/roles';
 import { adminService } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
 
-export function McpUnifiedView() {
+export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
   const { usuario } = useAuthStore();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const canWrite = isAdminRole(usuario?.rol);
-  const canRunOps = usuario?.rol === 'admin';
-  const [tab, setTab] = useState<McpTabId>(() => parseMcpTab(searchParams.get('tab')));
+  const tabParam = embedded ? 'mcpTab' : 'tab';
+  const [tab, setTab] = useState<McpTabId>(() =>
+    parseMcpTab(searchParams.get(tabParam))
+  );
   const { data, error, refreshCatalog } = useMcpCatalog();
   const { live, setLive, refreshLive } = useMcpLiveStatus();
   const [opsRunning, setOpsRunning] = useState<string | null>(null);
@@ -31,11 +33,13 @@ export function McpUnifiedView() {
   const [mcpSource, setMcpSource] = useState('default');
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const canWrite = isAdminRole(usuario?.rol);
+  const canRunOps = usuario?.rol === 'admin';
   const isUp = live?.reachable === true;
 
   useEffect(() => {
-    setTab(parseMcpTab(searchParams.get('tab')));
-  }, [searchParams]);
+    setTab(parseMcpTab(searchParams.get(tabParam)));
+  }, [searchParams, tabParam]);
 
   useEffect(() => {
     if (!data) return;
@@ -45,6 +49,10 @@ export function McpUnifiedView() {
 
   const selectTab = (next: McpTabId) => {
     setTab(next);
+    if (embedded) {
+      router.replace(`/plataforma?tab=mcp&mcpTab=${next}`, { scroll: false });
+      return;
+    }
     router.replace(`/mcp?tab=${next}`, { scroll: false });
   };
 
@@ -101,17 +109,20 @@ export function McpUnifiedView() {
   };
 
   const activeTab = MCP_TABS.find((t) => t.id === tab);
+  const shellClassName = embedded ? 'space-y-6' : undefined;
 
-  return (
-    <PageShell>
-      <header>
-        <h1 className="text-3xl font-black dark:text-dark-text">MCP</h1>
-        <p className="mt-1 max-w-3xl text-sm text-gov-gray-500 dark:text-dark-muted">
-          Conectores externos, servidor DuckClaw HTTP, runtime PM2 y catálogo en una sola vista.
-          Las tools de conectores aparecen como{' '}
-          <span className="font-mono">mcp__&#123;connector&#125;__&#123;tool&#125;</span>.
-        </p>
-      </header>
+  const body = (
+    <>
+      {!embedded && (
+        <header>
+          <h1 className="text-3xl font-black dark:text-dark-text">MCP</h1>
+          <p className="mt-1 max-w-3xl text-sm text-gov-gray-500 dark:text-dark-muted">
+            Conectores externos, servidor DuckClaw HTTP, runtime PM2 y catálogo en una sola vista.
+            Las tools de conectores aparecen como{' '}
+            <span className="font-mono">mcp__&#123;connector&#125;__&#123;tool&#125;</span>.
+          </p>
+        </header>
+      )}
 
       <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
         {MCP_TABS.map((item) => {
@@ -140,7 +151,7 @@ export function McpUnifiedView() {
         })}
       </div>
 
-      {activeTab && (
+      {!embedded && activeTab && (
         <p className="text-sm text-gov-gray-500 dark:text-dark-muted">{activeTab.hint}</p>
       )}
 
@@ -268,6 +279,12 @@ export function McpUnifiedView() {
           </section>
         </>
       )}
-    </PageShell>
+    </>
   );
+
+  if (embedded) {
+    return <div className={shellClassName}>{body}</div>;
+  }
+
+  return <PageShell className={shellClassName}>{body}</PageShell>;
 }

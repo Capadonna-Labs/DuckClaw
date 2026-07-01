@@ -169,7 +169,7 @@ function UserMenu({
           </div>
           {isAdmin && (
             <Link
-              href="/admin/access?tab=cuenta"
+              href="/administracion?tab=cuenta"
               onClick={() => setUserMenuOpen(false)}
               className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-gov-blue-800 hover:bg-gov-blue-50 dark:text-dark-cyan dark:hover:bg-dark-bg"
             >

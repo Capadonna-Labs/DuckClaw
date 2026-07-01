@@ -94,7 +94,7 @@ export default function KnowledgePage() {
   }, [loadSources]);
 
   const uploadFiles = useCallback(async () => {
-    if (!projectId || files.length === 0) return;
+    if (files.length === 0) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -136,7 +136,7 @@ export default function KnowledgePage() {
   }, [serverPath]);
 
   const importServerPath = useCallback(async () => {
-    if (!projectId || !serverPath.trim()) return;
+    if (!serverPath.trim()) return;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -222,7 +222,8 @@ export default function KnowledgePage() {
               Gestor RAG
             </h1>
             <p className="mt-2 max-w-3xl text-sm text-gov-gray-600 dark:text-dark-muted">
-              Sube documentos y asígnalos a un proyecto. El Playground los usa cuando eliges ese proyecto en el chat.
+              Sube documentos para todo el framework o para un proyecto concreto. El conocimiento del framework
+              está disponible en todos los chats; el de proyecto solo añade contexto local.
             </p>
           </div>
           {projectId && (
@@ -249,7 +250,7 @@ export default function KnowledgePage() {
           <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Scope</h2>
           <div className="mt-4 grid gap-3 md:grid-cols-2">
             <label className="block text-sm font-bold text-gov-gray-700 dark:text-dark-text">
-              Proyecto
+              Alcance
               <select
                 value={projectId}
                 onChange={(e) => {
@@ -258,10 +259,10 @@ export default function KnowledgePage() {
                 }}
                 className="mt-1 w-full rounded-xl border border-gov-blue-100 px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
               >
-                <option value="">Selecciona un proyecto</option>
+                <option value="">Framework (todos los agentes y proyectos)</option>
                 {projects.map((project) => (
                   <option key={project.project_id} value={project.project_id}>
-                    {project.name}
+                    Proyecto: {project.name}
                   </option>
                 ))}
               </select>
@@ -355,7 +356,7 @@ export default function KnowledgePage() {
           <button
             type="button"
             onClick={() => void uploadFiles()}
-            disabled={!projectId || files.length === 0 || busy}
+            disabled={files.length === 0 || busy}
             className="mt-4 w-full rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
           >
             Importar archivos
@@ -436,7 +437,7 @@ export default function KnowledgePage() {
             <button
               type="button"
               onClick={() => void importServerPath()}
-              disabled={!projectId || !serverPath.trim() || busy}
+              disabled={!serverPath.trim() || busy}
               className="flex-1 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
             >
               {busy ? 'Importando…' : 'Importar vault'}
@@ -476,7 +477,7 @@ export default function KnowledgePage() {
           <p className="mt-4 rounded-2xl border border-dashed border-gov-blue-100 p-4 text-sm text-gov-gray-500 dark:border-dark-border dark:text-dark-muted">
             {projectId
               ? 'Aún no hay documentos para este proyecto. Sube archivos arriba.'
-              : 'Elige un proyecto para ver o añadir conocimiento.'}
+              : 'Aún no hay conocimiento global del framework. Sube archivos con alcance Framework.'}
           </p>
         ) : (
           <div className="mt-4 grid gap-3">

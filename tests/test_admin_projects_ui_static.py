@@ -162,11 +162,11 @@ def test_rag_manager_upload_contract_and_navigation() -> None:
 
     assert rag_page.exists()
     rag_text = rag_page.read_text(encoding="utf-8")
-    assert "{ href: '/knowledge', label: 'RAG'" in nav
+    assert "{ href: '/knowledge', label: 'Conocimiento', section: 'core', audience: 'all' }" in nav
     assert "'/knowledge': Database" in Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(
         encoding="utf-8"
     )
-    assert "Gestor RAG" in rag_text
+    assert "Framework (todos los agentes y proyectos)" in rag_text
     assert 'type="file"' in rag_text
     assert "multiple" in rag_text
     assert "webkitdirectory" in rag_text
@@ -187,7 +187,7 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
     sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
-    page_path = Path("apps/duckclaw-admin/src/app/(admin)/policies/page.tsx")
+    page_path = Path("apps/duckclaw-admin/src/components/policies/PoliciesPageView.tsx")
     prompt_policy_router = Path(
         "services/api-gateway/routers/admin_domains/prompt_policies.py"
     ).read_text(encoding="utf-8")
@@ -195,8 +195,8 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
 
     assert page_path.exists()
     page = page_path.read_text(encoding="utf-8")
-    assert "{ href: '/policies', label: 'Instrucciones'" in nav
-    assert "'/policies': ClipboardList" in sidebar
+    assert "{ href: '/plataforma', label: 'Plataforma'" in nav
+    assert "pathnameMatchesHub" in sidebar
     assert "PromptPolicy" in service
     assert "PromptPolicyHealth" in service
     assert "listPromptPolicies:" in service
@@ -226,7 +226,7 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
     assert "missing_count" in page
     assert "adminService.upsertPromptPolicy" in page
     assert "adminService.deactivatePromptPolicy" in page
-    assert "Desactivar versión" in page
+    assert "Dejar de usar esta versión" in page
     assert "No se borrará físicamente" in page
     assert "Esta acción desactiva solo la versión" in page
     assert "disabled={!canWrite" in page

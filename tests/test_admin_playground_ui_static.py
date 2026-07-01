@@ -9,7 +9,7 @@ def test_playground_ui_can_scope_chat_to_db_first_project() -> None:
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
 
     assert "projectLabel={activeProject?.name || 'Todos los agentes'}" in page
-    assert 'title="Proyecto"' in page
+    assert 'title="Configurar proyecto y agente"' in page
     assert "projectId" in page
     assert "selectableWorkers" in page
     assert "return projectWorkerIds.includes(id);" in page
@@ -51,111 +51,77 @@ def test_sidebar_removes_inline_hide_menu_button_and_adds_playground_selector() 
     assert "consoleRoleLabel" not in sidebar
     assert "Rol activo:" not in sidebar
     assert "Historial" in sidebar
-    assert "Tablero" in sidebar
     assert "Nueva conversación" in sidebar
     assert '/playground?view=history' in sidebar
-    assert 'href="/kanban"' in sidebar
     assert "/playground?new=1" in sidebar
+    nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
+    assert "href: '/productividad'" in nav
     assert "adminService.listConversations" not in sidebar
 
 
 def test_playground_nav_groups_keep_kanban_nested_and_audit_in_security() -> None:
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
-    operation_body = nav.split("export const OPERATION_NAV_GROUP", 1)[1].split(
-        "export const BUILD_NAV_GROUP", 1
+    more_body = nav.split("export const MORE_NAV_GROUP", 1)[1].split("/** @deprecated", 1)[0]
+    primary_body = nav.split("export const PRIMARY_NAV_GROUP", 1)[1].split(
+        "export const MORE_NAV_GROUP", 1
     )[0]
-    build_body = nav.split("export const BUILD_NAV_GROUP", 1)[1].split(
-        "export const DATA_NAV_GROUP", 1
-    )[0]
-    security_body = nav.split("export const SECURITY_NAV_GROUP", 1)[1].split(
-        "export const SYSTEM_NAV_GROUP", 1
-    )[0]
-    system_body = nav.split("export const SYSTEM_NAV_GROUP", 1)[1].split(
-        "/** Orden del sidebar", 1
-    )[0]
+    hub_routes = Path("apps/duckclaw-admin/src/lib/adminHubRoutes.ts").read_text(encoding="utf-8")
 
-    assert "label: 'Tablero'" not in operation_body
-    assert "href: '/kanban'" not in operation_body
-    assert "label: 'Auditoría'" not in operation_body
-    assert "href: '/audit'" not in operation_body
-    assert "label: 'Train'" not in build_body
-    assert "href: '/train'" not in build_body
-    assert "label: 'VNC'" in build_body
-    assert "href: '/vnc'" in build_body
-    assert "label: 'Auditoría'" in security_body
-    assert "href: '/audit'" in security_body
-    assert "href: '/settings'" not in security_body
-    assert "href: '/settings'" not in system_body
-    assert "href: '/train'" not in system_body
-    assert "href: '/vnc'" not in system_body
-    assert "href: '/telegram'" in system_body
-    assert "href: '/telegram'" not in security_body
+    assert "label: 'Inicio'" in primary_body
+    assert "label: 'Chat'" in primary_body
+    assert "label: 'Conocimiento'" in primary_body
+    assert "href: '/productividad'" in more_body
+    assert "href: '/plataforma'" in more_body
+    assert "href: '/integraciones'" in more_body
+    assert "href: '/administracion'" in more_body
+    assert "href: '/kanban'" not in more_body
+    assert "href: '/kanban'" not in primary_body
+    assert "'/kanban'" in hub_routes
+    assert "'/audit'" in hub_routes
 
 
 def test_integrations_are_nested_inside_agents_selector() -> None:
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
-    sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
-    build_body = nav.split("export const BUILD_NAV_GROUP", 1)[1].split(
-        "export const DATA_NAV_GROUP", 1
-    )[0]
+    more_body = nav.split("export const MORE_NAV_GROUP", 1)[1].split("/** @deprecated", 1)[0]
     structure_body = nav.split("export const ADMIN_NAV_STRUCTURE", 1)[1].split(
-        "/** Lista plana", 1
+        "export const ADMIN_NAV", 1
     )[0]
+    integraciones_hub = Path(
+        "apps/duckclaw-admin/src/app/(admin)/integraciones/page.tsx"
+    ).read_text(encoding="utf-8")
 
-    assert "label: 'Integraciones'" not in build_body
-    assert "href: '/integrations'" not in build_body
-    assert "{ type: 'group', group: INTEGRATIONS_NAV_GROUP }" in structure_body
-    assert "IntegrationsNavSelector" in sidebar
-    assert "Telegram" in sidebar
-    assert 'href="/telegram"' in sidebar
-    assert "Edge devices" in sidebar
-    assert 'href="/integrations/edge-devices"' in sidebar
-    assert "Sensory node" in sidebar
-    assert 'href="/integrations/sensory-node"' in sidebar
+    assert "href: '/integraciones'" in more_body
+    assert "href: '/integrations/edge-devices'" not in more_body
+    assert "EdgeDevicesPageView" in integraciones_hub
+    assert "TelegramIntegrationPageView" in integraciones_hub
+    assert "{ type: 'group', group: PRIMARY_NAV_GROUP }" in structure_body
+    assert "{ type: 'group', group: MORE_NAV_GROUP }" in structure_body
 
 
 def test_admin_sidebar_keeps_core_groups_and_data_access() -> None:
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
     sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
     structure_body = nav.split("export const ADMIN_NAV_STRUCTURE", 1)[1].split(
-        "/** Lista plana", 1
+        "export const ADMIN_NAV", 1
     )[0]
-    operation_body = nav.split("export const OPERATION_NAV_GROUP", 1)[1].split(
-        "export const PLAYGROUND_NAV_GROUP", 1
+    primary_body = nav.split("export const PRIMARY_NAV_GROUP", 1)[1].split(
+        "export const MORE_NAV_GROUP", 1
     )[0]
-    playground_body = nav.split("export const PLAYGROUND_NAV_GROUP", 1)[1].split(
-        "export const BUILD_NAV_GROUP", 1
-    )[0]
-    build_body = nav.split("export const BUILD_NAV_GROUP", 1)[1].split(
-        "export const DATA_NAV_GROUP", 1
-    )[0]
-    data_body = nav.split("export const DATA_NAV_GROUP", 1)[1].split(
-        "export const INTEGRATIONS_NAV_GROUP", 1
-    )[0]
-    security_body = nav.split("export const SECURITY_NAV_GROUP", 1)[1].split(
-        "export const SYSTEM_NAV_GROUP", 1
-    )[0]
+    more_body = nav.split("export const MORE_NAV_GROUP", 1)[1].split("/** @deprecated", 1)[0]
 
-    assert "label: 'Inicio'" in operation_body or "label: 'Conversar'" in nav
-    assert "label: 'Chat'" in playground_body or "href: '/playground'" in nav
-    assert "label: 'Agentes'" in build_body
-    assert "label: 'Datos'" in data_body
-    assert "href: '/duckdb'" in data_body
-    assert "label: 'Seguridad'" in security_body
-    assert "{ type: 'group', group: CONVERSAR_NAV_GROUP }" in structure_body
-    assert "{ type: 'group', group: BUILD_NAV_GROUP }" in structure_body
-    assert "{ type: 'group', group: DATA_NAV_GROUP }" in structure_body
-    assert "{ type: 'group', group: INTEGRATIONS_NAV_GROUP }" in structure_body
-    assert "{ type: 'group', group: SECURITY_NAV_GROUP }" in structure_body
-    assert "{ type: 'group', group: SYSTEM_NAV_GROUP }" in structure_body
-    assert "hint:" not in operation_body
-    assert "hint:" not in playground_body
-    assert "hint:" not in build_body
-    assert "hint:" not in security_body
+    assert "label: 'Inicio'" in primary_body
+    assert "label: 'Chat'" in primary_body or "href: '/playground'" in primary_body
+    assert "label: 'Agentes'" in primary_body
+    assert "label: 'Conocimiento'" in primary_body
+    assert "href: '/plataforma'" in more_body
+    assert "AdminHubShell" in Path(
+        "apps/duckclaw-admin/src/app/(admin)/plataforma/page.tsx"
+    ).read_text(encoding="utf-8")
+    assert "label: 'Más'" in nav
+    assert "{ type: 'group', group: PRIMARY_NAV_GROUP }" in structure_body
+    assert "{ type: 'group', group: MORE_NAV_GROUP }" in structure_body
     assert "openGroupId" in sidebar
-    assert "openGroups" not in sidebar
-    assert "group.hint" not in sidebar
-    assert "rounded-2xl border border-white/10 bg-white/[0.03] p-2" not in sidebar
+    assert "group.collapsible" in sidebar
 
 
 def test_topbar_hamburger_toggles_desktop_sidebar() -> None:
@@ -202,7 +168,7 @@ def test_playground_selects_conversation_from_sidebar_history() -> None:
     assert "function uniqueConversationsBySession" in page
     assert "uniqueConversations.map((conversation)" in page
     assert "searchParams.get('view') === 'history'" in page
-    assert "adminService.listConversations({ tenant_id: tenantId, section: 'playground', limit: 80 })" in page
+    assert "adminService.listConversations({ tenant_id: tenantId, limit: 80 })" in page
     assert "href={`/playground?conversation=${encodeURIComponent(conversation.session_id)}`}" in page
     assert "const selectConversationById = useCallback" in hook
     assert "searchParams.get('conversation')" in page
@@ -284,9 +250,7 @@ def test_playground_config_panel_uses_compact_cards_and_modals() -> None:
 
 
 def test_fly_commands_live_in_playground_not_overview() -> None:
-    overview_ops = Path("apps/duckclaw-admin/src/components/admin/OverviewOpsPanel.tsx").read_text(
-        encoding="utf-8"
-    )
+    overview = Path("apps/duckclaw-admin/src/app/(admin)/overview/page.tsx").read_text(encoding="utf-8")
     playground = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(
         encoding="utf-8"
     )
@@ -294,8 +258,8 @@ def test_fly_commands_live_in_playground_not_overview() -> None:
         encoding="utf-8"
     )
 
-    assert "listFlyCommands" not in overview_ops
-    assert "Fly Commands" not in overview_ops
+    assert "listFlyCommands" not in overview
+    assert "Fly Commands" not in overview
     assert "ChatCommandsPanel" in playground
     assert "Comandos del chat" in playground
     assert "Comandos frecuentes" in playground
@@ -304,18 +268,16 @@ def test_fly_commands_live_in_playground_not_overview() -> None:
     assert "redirect('/playground')" in commands_page
 
 
-def test_overview_combines_operations_and_pm2_logs() -> None:
-    overview_ops = Path("apps/duckclaw-admin/src/components/admin/OverviewOpsPanel.tsx").read_text(
+def test_overview_uses_home_checklist_not_ops_panel() -> None:
+    overview = Path("apps/duckclaw-admin/src/app/(admin)/overview/page.tsx").read_text(encoding="utf-8")
+
+    assert "HomeChecklist" in overview
+    assert "Tu camino" in Path("apps/duckclaw-admin/src/components/admin/HomeChecklist.tsx").read_text(
         encoding="utf-8"
     )
-
-    assert "Logs en vivo" in overview_ops
-    assert "Pm2LiveLogsPanel embedded" in overview_ops
-    assert "StackBootstrapPanel" not in overview_ops
-    assert "showQuickActions" not in overview_ops
-    assert "Arranque y conexión" not in overview_ops
-    assert "Salida de la operación" not in overview_ops
-    assert "SettingsSection" not in overview_ops
+    assert "PlatformQuickStart" not in overview
+    assert "OverviewOpsPanel" not in overview
+    assert "Pm2LiveLogsPanel" not in overview
 
 
 def test_floating_chat_uses_fixed_large_panel_and_header_actions() -> None:
@@ -434,10 +396,10 @@ def test_admin_chat_voice_response_defaults_off_and_gates_tts_toggle() -> None:
 def test_admin_pages_avoid_internal_jargon_copy() -> None:
     targets = [
         "apps/duckclaw-admin/src/app/(admin)/projects/page.tsx",
-        "apps/duckclaw-admin/src/app/(admin)/skills/page.tsx",
+        "apps/duckclaw-admin/src/components/skills/SkillsHubView.tsx",
         "apps/duckclaw-admin/src/app/(admin)/mcp/page.tsx",
-        "apps/duckclaw-admin/src/app/(admin)/telegram/page.tsx",
-        "apps/duckclaw-admin/src/app/(admin)/admin/access/page.tsx",
+        "apps/duckclaw-admin/src/components/integrations/TelegramIntegrationPageView.tsx",
+        "apps/duckclaw-admin/src/components/admin/AccessPageView.tsx",
         "apps/duckclaw-admin/src/components/access/AccessPersistenceInfo.tsx",
         "apps/duckclaw-admin/src/app/(admin)/templates/page.tsx",
         "apps/duckclaw-admin/src/app/(admin)/playground/page.tsx",
@@ -535,14 +497,16 @@ def test_admin_service_does_not_expose_generic_env_editing() -> None:
 
 def test_mcp_page_does_not_render_official_reference_as_user_catalog() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/mcp/page.tsx").read_text(encoding="utf-8")
+    unified = Path("apps/duckclaw-admin/src/components/mcp/McpUnifiedView.tsx").read_text(encoding="utf-8")
     catalog = Path("apps/duckclaw-admin/src/app/(admin)/mcp/catalog/page.tsx").read_text(encoding="utf-8")
 
     assert "OfficialMcpReferenceTable" not in page
     assert "Catálogo oficial MCP" not in page
     assert "MCP Registry" not in page
-    assert "OfficialMcpReferenceTable" in catalog
-    assert "Catálogo oficial MCP" in catalog
-    assert "MCP Registry" in catalog
+    assert "OfficialMcpReferenceTable" in unified
+    assert "tab === 'catalog'" in unified
+    assert "MCP Registry" in unified
+    assert "redirect('/mcp?tab=catalog')" in catalog
 
 
 def test_overview_and_projects_headers_do_not_render_legacy_helper_copy() -> None:
@@ -568,7 +532,8 @@ def test_console_user_delete_uses_confirm_danger_modal() -> None:
 
 
 def test_skills_page_exposes_new_skill_db_first_form() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/skills/page.tsx").read_text(encoding="utf-8")
+    redirect_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/page.tsx").read_text(encoding="utf-8")
+    hub = Path("apps/duckclaw-admin/src/components/skills/SkillsHubView.tsx").read_text(encoding="utf-8")
     summary = Path("apps/duckclaw-admin/src/app/(admin)/skills/summary/page.tsx").read_text(encoding="utf-8")
     new_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/new/page.tsx").read_text(encoding="utf-8")
     create_form = Path("apps/duckclaw-admin/src/components/skills/SkillCreateForm.tsx").read_text(encoding="utf-8")
@@ -576,12 +541,13 @@ def test_skills_page_exposes_new_skill_db_first_form() -> None:
     local_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/local/page.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
 
-    assert 'href="/skills/summary"' in page
-    assert 'href="/skills/new"' in page
-    assert 'href="/skills/global"' in page
-    assert 'href="/skills/local"' in page
-    assert "createSkill" not in page
-    assert "filterScope" not in page
+    assert "redirect('/plataforma?tab=skills')" in redirect_page
+    assert 'href="/skills/summary"' in hub
+    assert 'href="/skills/new"' in hub
+    assert 'href="/skills/global"' in hub
+    assert 'href="/skills/local"' in hub
+    assert "createSkill" not in hub
+    assert "filterScope" not in hub
     assert "Resumen de skills" in summary
     assert "Nueva skill" in new_page
     assert "createSkill" in create_form
@@ -592,14 +558,18 @@ def test_skills_page_exposes_new_skill_db_first_form() -> None:
 
 
 def test_duckdb_page_exposes_confirmed_legacy_schema_cleanup() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/duckdb/page.tsx").read_text(encoding="utf-8")
+    redirect_page = Path("apps/duckclaw-admin/src/app/(admin)/duckdb/page.tsx").read_text(encoding="utf-8")
+    page = Path("apps/duckclaw-admin/src/components/duckdb/DuckDbPageView.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
 
+    assert "redirect('/plataforma?tab=duckdb')" in redirect_page
     assert "Schemas legacy detectados" in page
-    assert "Configuración DuckDB" in page
-    assert "Schemas legacy configurados" in page
-    assert "getRuntimeSettings" in page
-    assert "patchRuntimeSettings" in page
+    assert "Configuración DuckDB" not in page
+    assert "Schemas legacy configurados" not in page
+    assert "getRuntimeSettings" not in page
+    assert "patchRuntimeSettings" not in page
+    assert "Overview" not in page
+    assert "'overview'" not in page
     assert "Variables .env" not in page
     assert "getEnv()" not in page
     assert "ConfirmDangerModal" in page
@@ -609,5 +579,3 @@ def test_duckdb_page_exposes_confirmed_legacy_schema_cleanup() -> None:
     assert "main_tables" in service
     assert "listDuckdbLegacySchemas" in service
     assert "dropDuckdbLegacySchemas" in service
-    assert "getRuntimeSettings" in service
-    assert "patchRuntimeSettings" in service

@@ -13,13 +13,19 @@ def test_playground_shows_session_database_chip() -> None:
         encoding="utf-8"
     )
     assert "SessionDatabaseChip" in page
-    assert "Base de datos de esta sesión" in chip
+    assert 'title="Base de datos de esta sesión"' in page
+    assert "sessionDbScopeLabel" in chip
+    assert "BD sin resolver" in chip
 
 
 def test_knowledge_page_status_badges_and_playground_banner() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/knowledge/page.tsx").read_text(encoding="utf-8")
-    assert "KnowledgeStatusBadge" in page
+    assert "KnowledgeSourceCard" in page
     assert "KnowledgePlaygroundBanner" in page
+    card = Path("apps/duckclaw-admin/src/components/knowledge/KnowledgeSourceCard.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "KnowledgeStatusBadge" in card
     banner = Path(
         "apps/duckclaw-admin/src/components/knowledge/KnowledgePlaygroundBanner.tsx"
     ).read_text(encoding="utf-8")

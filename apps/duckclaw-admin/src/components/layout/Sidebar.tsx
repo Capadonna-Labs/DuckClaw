@@ -35,10 +35,16 @@ import {
   type AdminNavGroup,
   type AdminNavItem,
 } from '@/config/adminNav';
+import { pathnameMatchesHub } from '@/lib/adminHubRoutes';
 import { cn } from '@/lib/utils';
 import type { LucideIcon } from 'lucide-react';
 
 const NAV_ICONS: Record<string, LucideIcon> = {
+  '/productividad': ClipboardList,
+  '/plataforma': ServerCog,
+  '/integraciones': Cable,
+  '/administracion': ShieldCheck,
+  '/reports': ClipboardList,
   '/overview': LayoutDashboard,
   '/kanban': LayoutGrid,
   '/templates': Bot,
@@ -64,6 +70,8 @@ const NAV_ICONS: Record<string, LucideIcon> = {
 };
 
 const GROUP_ICONS: Record<string, LucideIcon> = {
+  primary: LayoutDashboard,
+  more: Sparkles,
   'user-workspace': UserCircle,
   work: MessageCircle,
   studio: Hammer,
@@ -83,20 +91,15 @@ function isNavActive(pathname: string, href: string): boolean {
 }
 
 function groupHasActive(pathname: string, group: AdminNavGroup): boolean {
-  if (group.id === 'work' || group.id === 'conversar' || group.id === 'playground' || group.id === 'user-workspace') {
+  if (group.id === 'primary') {
     return (
+      pathname === '/overview' ||
       pathname.startsWith('/playground') ||
-      pathname.startsWith('/sandbox') ||
-      pathname === '/kanban' ||
-      pathname === '/overview'
+      pathname.startsWith('/templates') ||
+      pathname.startsWith('/knowledge')
     );
   }
-  return group.items.some((item) => {
-    if (item.href === '/integrations') {
-      return pathname === '/telegram' || pathname.startsWith('/integrations');
-    }
-    return isNavActive(pathname, item.href);
-  });
+  return group.items.some((item) => pathnameMatchesHub(pathname, item.href));
 }
 
 type SidebarProps = {
@@ -111,14 +114,14 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
     () => navEntriesForRole(usuario?.rol),
     [usuario?.rol]
   );
-  const [openGroupId, setOpenGroupId] = useState<string | null>('work');
+  const [openGroupId, setOpenGroupId] = useState<string | null>(null);
 
   useEffect(() => {
-    const activeGroup = entries.find(
-      (entry) => entry.type === 'group' && groupHasActive(pathname, entry.group)
+    const activeMore = entries.find(
+      (entry) => entry.type === 'group' && entry.group.id === 'more' && groupHasActive(pathname, entry.group)
     );
-    if (activeGroup?.type === 'group') {
-      setOpenGroupId(activeGroup.group.id);
+    if (activeMore?.type === 'group') {
+      setOpenGroupId('more');
     }
   }, [entries, pathname]);
 
@@ -208,7 +211,50 @@ function NavGroup({
   groupIcon: LucideIcon;
   onNavigate?: () => void;
 }) {
+  const collapsible = group.collapsible !== false;
   const active = groupHasActive(pathname, group);
+
+  const renderItem = (item: AdminNavItem) => {
+    const Icon = NAV_ICONS[item.href] ?? LayoutDashboard;
+    const childActive = pathnameMatchesHub(pathname, item.href);
+    if (item.href === '/playground') {
+      return (
+        <PlaygroundNavSelector
+          key={item.href}
+          item={item}
+          icon={Icon}
+          active={childActive}
+          onNavigate={onNavigate}
+        />
+      );
+    }
+    return (
+      <Link
+        key={`${item.href}-${item.label}`}
+        href={item.href}
+        onClick={() => onNavigate?.()}
+        className={cn(
+          collapsible
+            ? 'flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-xl transition-colors'
+            : 'flex items-center gap-3 px-4 py-2.5 text-sm font-medium rounded-lg transition-colors',
+          childActive
+            ? collapsible
+              ? 'bg-white text-gov-blue-900 shadow-sm dark:bg-dark-surface dark:text-dark-text'
+              : 'bg-gov-blue-700 text-white'
+            : collapsible
+              ? 'text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white'
+              : 'text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white'
+        )}
+      >
+        <Icon size={collapsible ? 18 : 20} />
+        {item.label}
+      </Link>
+    );
+  };
+
+  if (!collapsible) {
+    return <div className="space-y-0.5">{group.items.map((item) => renderItem(item))}</div>;
+  }
 
   return (
     <section className="space-y-1">
@@ -230,116 +276,8 @@ function NavGroup({
           className={cn('shrink-0 transition-transform', open && 'rotate-180')}
         />
       </button>
-      {open && (
-        <div className="space-y-0.5">
-          {group.items.map((item) => {
-            const Icon = NAV_ICONS[item.href] ?? LayoutDashboard;
-            const childActive = isNavActive(pathname, item.href);
-            if (item.href === '/playground') {
-              return (
-                <PlaygroundNavSelector
-                  key={item.href}
-                  item={item}
-                  icon={Icon}
-                  active={childActive}
-                  onNavigate={onNavigate}
-                />
-              );
-            }
-            if (item.href === '/integrations') {
-              return (
-                <IntegrationsNavSelector
-                  key={item.href}
-                  item={item}
-                  icon={Icon}
-                  active={pathname === '/telegram' || pathname.startsWith('/integrations')}
-                  onNavigate={onNavigate}
-                />
-              );
-            }
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={() => onNavigate?.()}
-                className={cn(
-                  'flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-xl transition-colors',
-                  childActive
-                    ? 'bg-white text-gov-blue-900 shadow-sm dark:bg-dark-surface dark:text-dark-text'
-                    : 'text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white'
-                )}
-              >
-                <Icon size={18} />
-                {item.label}
-              </Link>
-            );
-          })}
-        </div>
-      )}
+      {open && <div className="space-y-0.5">{group.items.map((item) => renderItem(item))}</div>}
     </section>
-  );
-}
-
-function IntegrationsNavSelector({
-  item,
-  icon: Icon,
-  active,
-  onNavigate,
-}: {
-  item: AdminNavItem;
-  icon: LucideIcon;
-  active: boolean;
-  onNavigate?: () => void;
-}) {
-  const [open, setOpen] = useState(active);
-
-  useEffect(() => {
-    if (active) setOpen(true);
-  }, [active]);
-
-  return (
-    <div>
-      <button
-        type="button"
-        onClick={() => setOpen((value) => !value)}
-        aria-expanded={open}
-        className={cn(
-          'w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-xl transition-colors',
-          active
-            ? 'bg-white text-gov-blue-900 shadow-sm dark:bg-dark-surface dark:text-dark-text'
-            : 'text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white'
-        )}
-      >
-        <Icon size={18} />
-        <span className="flex-1 text-left">{item.label}</span>
-        <ChevronDown size={14} className={cn('shrink-0 transition-transform', open && 'rotate-180')} />
-      </button>
-      {open && (
-        <div className="ml-7 mt-1 space-y-0.5 border-l border-white/10 pl-3">
-          <Link
-            href="/telegram"
-            onClick={() => onNavigate?.()}
-            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
-          >
-            Telegram
-          </Link>
-          <Link
-            href="/integrations/edge-devices"
-            onClick={() => onNavigate?.()}
-            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
-          >
-            Edge devices
-          </Link>
-          <Link
-            href="/integrations/sensory-node"
-            onClick={() => onNavigate?.()}
-            className="block rounded-lg px-2 py-1.5 text-xs font-semibold text-gov-gray-300 hover:bg-gov-blue-700/40 hover:text-white"
-          >
-            Sensory node
-          </Link>
-        </div>
-      )}
-    </div>
   );
 }
 

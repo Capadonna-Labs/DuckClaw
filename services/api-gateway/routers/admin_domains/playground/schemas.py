@@ -40,8 +40,8 @@ LLM_PROVIDER_CATALOG: list[dict[str, Any]] = [
         "kind": "api",
         "env_keys": ["OPENROUTER_API_KEY"],
         "base_url_example": "https://openrouter.ai/api/v1",
-        "model_example": "deepseek/deepseek-v4-flash",
-        "hint": "Un endpoint para muchos modelos; app attribution en rankings",
+        "model_example": "z-ai/glm-5.2",
+        "hint": "Un endpoint para muchos modelos; default GLM 5.2 (z-ai/glm-5.2)",
     },
     {
         "id": "gemini",

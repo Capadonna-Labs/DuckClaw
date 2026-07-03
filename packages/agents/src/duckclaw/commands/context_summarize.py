@@ -22,8 +22,6 @@ from duckclaw.workers.provider_input_budget import (
 
 _log = logging.getLogger(__name__)
 
-_SUMMARY_PREVIEW_CHARS = 600
-
 
 def _catalog_db_for_manifest() -> Any | None:
     """Catálogo de workers vive en hub gateway, no en bóveda por conversación."""
@@ -124,15 +122,6 @@ def _history_to_langchain_messages(history: list[dict[str, str]], system_prompt:
         else:
             messages.append(AIMessage(content=item["content"]))
     return messages
-
-
-def _summary_preview(text: str) -> str:
-    body = (text or "").strip()
-    if not body:
-        return "(vacío)"
-    if len(body) <= _SUMMARY_PREVIEW_CHARS:
-        return body
-    return body[:_SUMMARY_PREVIEW_CHARS] + "…"
 
 
 def _messages_to_kept_history(messages: list[Any]) -> list[dict[str, str]]:
@@ -276,12 +265,12 @@ def execute_summarize_with_meta(
     )
     if err:
         return f"⚠️ {err}", {}
-    preview = _summary_preview(summary or "")
     kept = len(summary or "")
+    full_body = (summary or "").strip()
     reply = (
         "✅ Hilo compactado manualmente.\n"
         f"Resumen guardado ({kept} caracteres).\n\n"
-        f"Vista previa:\n{preview}"
+        f"{full_body}"
     )
     return reply, meta
 
@@ -316,12 +305,12 @@ def execute_summarize(
     )
     if err:
         return f"⚠️ {err}"
-    preview = _summary_preview(summary or "")
     kept = len(summary or "")
+    full_body = (summary or "").strip()
     return (
         "✅ Hilo compactado manualmente.\n"
         f"Resumen guardado ({kept} caracteres).\n\n"
-        f"Vista previa:\n{preview}"
+        f"{full_body}"
     )
 
 

@@ -39,13 +39,42 @@ OPENROUTER_ATTRIBUTION_HEADERS: dict[str, str] = {
 }
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_MODEL_MAP: dict[str, str | None] = {
-    "default": "anthropic/claude-sonnet-4-5",
+    "default": "z-ai/glm-5.2",
     "fast": "deepseek/deepseek-chat",
-    "reasoning": "anthropic/claude-opus-4-5",
+    "reasoning": "z-ai/glm-5.2",
     "cheap": "deepseek/deepseek-chat",
-    "coding": "anthropic/claude-sonnet-4-5",
+    "coding": "z-ai/glm-5.2",
     "local": None,
 }
+# Etiquetas UI / typos → slug OpenRouter (evita 400 «not a valid model ID»).
+OPENROUTER_MODEL_ALIASES: dict[str, str] = {
+    "glm 5.2": "z-ai/glm-5.2",
+    "glm-5.2": "z-ai/glm-5.2",
+    "glm5.2": "z-ai/glm-5.2",
+    "glm 5": "z-ai/glm-5.2",
+    "zhipu/glm-5.2": "z-ai/glm-5.2",
+}
+
+
+def normalize_openrouter_model_id(model: str) -> str:
+    """
+    Resuelve slug OpenRouter desde id canónico o etiqueta legible (p. ej. «GLM 5.2»).
+
+    Econofísica: OpenRouter rechaza labels sin ``provider/model``; normalizar antes del POST
+    evita fallos cuando la UI o runtime guardó el display name en vez del slug.
+    """
+    raw = (model or "").strip()
+    if not raw:
+        return str(OPENROUTER_MODEL_MAP["default"] or "")
+    if "/" in raw:
+        return raw
+    key = re.sub(r"\s+", " ", raw.lower().replace("_", "-"))
+    mapped = OPENROUTER_MODEL_ALIASES.get(key)
+    if mapped:
+        return mapped
+    if "glm" in key and ("5.2" in key or "5-2" in key):
+        return "z-ai/glm-5.2"
+    return raw
 _or_attribution_logged = False
 
 _log = logging.getLogger(__name__)
@@ -66,7 +95,7 @@ def build_openrouter_llm(model: str = "", base_url: str = "") -> Any:
     except Exception as exc:
         raise RuntimeError("OpenRouter requiere langchain-openai.") from exc
 
-    resolved_model = (model or "").strip() or str(OPENROUTER_MODEL_MAP["default"] or "")
+    resolved_model = normalize_openrouter_model_id(model)
     _or_default = OPENROUTER_BASE_URL.rstrip("/")
     u_low = (base_url or "").strip().lower()
     if (

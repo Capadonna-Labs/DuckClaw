@@ -48,22 +48,26 @@ def _format_excerpt(text: str) -> str:
 
 
 def search_project_knowledge(query: str, source_id: str = "") -> str:
-    """Busca fragmentos RAG del proyecto activo en admin_knowledge_* (solo lectura)."""
+    """Busca fragmentos RAG en admin_knowledge_* según el alcance activo."""
     from duckclaw.forge.rag.knowledge_core import search_knowledge
     from duckclaw.forge.skills.knowledge_tool_context import (
         get_knowledge_tool_project_id,
+        get_knowledge_tool_scope,
         get_knowledge_tool_tenant_id,
         get_knowledge_tool_worker_uid,
     )
+    from duckclaw.knowledge_scope import normalize_knowledge_scope, scope_allows_retrieval
 
     project_id = get_knowledge_tool_project_id()
-    if not project_id:
+    scope = normalize_knowledge_scope(get_knowledge_tool_scope(), project_id=project_id)
+    if not scope_allows_retrieval(scope, project_id=project_id):
         return json.dumps(
             {
                 "error": (
-                    "No hay project_id en el contexto del turno; "
-                    "no se puede buscar en la base de conocimiento del proyecto."
-                )
+                    "El alcance de conocimiento requiere proyecto. "
+                    "Elige uno en Run settings o cambia a Plataforma."
+                ),
+                "knowledge_scope": scope,
             },
             ensure_ascii=False,
         )
@@ -82,6 +86,7 @@ def search_project_knowledge(query: str, source_id: str = "") -> str:
             project_id=project_id,
             worker_uid=get_knowledge_tool_worker_uid(),
             source_id=(source_id or "").strip(),
+            knowledge_scope=scope,
         )
         if not rows:
             from duckclaw.forge.rag.knowledge_core import read_knowledge_document
@@ -92,6 +97,7 @@ def search_project_knowledge(query: str, source_id: str = "") -> str:
                 tenant_id=get_knowledge_tool_tenant_id(),
                 project_id=project_id,
                 worker_uid=get_knowledge_tool_worker_uid(),
+                knowledge_scope=scope,
                 limit=8,
             )
         chunks = [
@@ -120,8 +126,8 @@ def register_search_project_knowledge_tool(tools_list: list[Any]) -> None:
             search_project_knowledge,
             name="search_project_knowledge",
             description=(
-                "Busca fragmentos en la base de conocimiento RAG del proyecto activo "
-                "(tablas admin_knowledge_*). No uses read_sql para esas tablas."
+                "Busca fragmentos en la base de conocimiento RAG del alcance activo "
+                "(plataforma, proyecto o ambos). No uses read_sql para esas tablas."
             ),
         )
     )

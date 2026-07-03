@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
-import { proxyAuthToGateway } from '@/lib/authProxy';
+import { invalidateBffSessionCache, proxyAuthToGateway } from '@/lib/authProxy';
 
 export async function POST(req: NextRequest) {
+  invalidateBffSessionCache();
   const body = await req.text();
   return proxyAuthToGateway(req, 'login', {
     method: 'POST',

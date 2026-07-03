@@ -323,13 +323,14 @@ export default function TemplateEditorPage() {
           <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
           <section className="mt-2 rounded-xl border border-gov-blue-100 bg-white p-3 text-[11px] text-gov-gray-600 dark:border-dark-border dark:bg-dark-surface dark:text-dark-muted">
             <p className="font-black uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted">
-              Dónde se almacena
+              Cómo se usa en el chat
             </p>
             <p className="mt-2">
-              <strong>Comportamiento:</strong> `system_prompt.md` y `soul.md` vienen de las versiones del catálogo.
+              Lo que escribes en <strong>Instrucciones</strong> y <strong>Tono</strong> guía cómo responde el
+              agente cuando le hablas en Playground.
             </p>
             <p className="mt-1">
-              <strong>Contextos DB:</strong> los Markdown adicionales viven en `main.admin_worker_contexts`.
+              Pulsa <strong>Guardar</strong> para aplicar cambios. No hace falta tocar YAML ni tablas internas.
             </p>
           </section>
           <p className="text-[10px] text-gov-gray-500 px-2 py-2 border-t dark:border-dark-border mt-2">

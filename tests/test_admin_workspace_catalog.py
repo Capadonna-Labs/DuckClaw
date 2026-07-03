@@ -464,6 +464,78 @@ def test_orchestrator_draft_does_not_hardcode_fake_skill_suggestions(
     assert "project_planning" not in names
 
 
+def test_user_agent_draft_builds_structured_agent_without_persisting(
+    gateway_db: Path,
+    gateway_admin_client,
+) -> None:
+    con = duckdb.connect(str(gateway_db))
+    try:
+        before_agents = con.execute("SELECT COUNT(*) FROM main.admin_user_agents").fetchone()[0]
+    finally:
+        con.close()
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/user-agents/draft",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+        json={
+            "prompt": "Agente DevOps que revisa logs PM2, diagnostica el gateway y propone fixes en sandbox",
+            "display_name": "Marco DevOps",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["display_name"]
+    assert body["worker_id"]
+    assert body["system_prompt"]
+    assert "DevOps" in body["description"] or "devops" in body["description"].lower() or body["system_prompt"]
+    assert body["tool_profile"] in {"general", "minimal", "rag_only"}
+    assert isinstance(body["questions"], list)
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        after_agents = con.execute("SELECT COUNT(*) FROM main.admin_user_agents").fetchone()[0]
+    finally:
+        con.close()
+    assert after_agents == before_agents
+
+
+def test_user_agent_draft_confirm_creates_runtime_agent(
+    gateway_db: Path,
+    gateway_admin_client,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
+    draft_response = gateway_admin_client.post(
+        "/api/v1/admin/user-agents/draft",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+        json={"prompt": "Asistente que resume documentos técnicos y responde en español claro"},
+    )
+    assert draft_response.status_code == 200, draft_response.text
+    draft = draft_response.json()
+    draft["worker_id"] = "doc-summarizer-agent"
+
+    confirm = gateway_admin_client.post(
+        "/api/v1/admin/user-agents/draft/confirm",
+        headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "alice@test.local"},
+        json={"draft": draft},
+    )
+    assert confirm.status_code == 200, confirm.text
+    body = confirm.json()
+    assert body["ok"] is True
+    assert body["worker_id"] == "doc-summarizer-agent"
+
+    con = duckdb.connect(str(gateway_db))
+    try:
+        row = con.execute(
+            "SELECT worker_id, display_name FROM main.admin_user_agents WHERE worker_id = ?",
+            ["doc-summarizer-agent"],
+        ).fetchone()
+    finally:
+        con.close()
+    assert row is not None
+
+
 def test_orchestrator_confirm_creates_project_workers_context_and_assignments(
     gateway_db: Path,
     gateway_admin_client,

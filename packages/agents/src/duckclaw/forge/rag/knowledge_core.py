@@ -405,6 +405,7 @@ def search_knowledge(
     project_id: str = "",
     worker_uid: str = "",
     source_id: str = "",
+    knowledge_scope: str = "both",
     limit: int = 8,
     embedding_fn: Callable[[str], list[float] | None] | None = None,
 ) -> list[dict[str, Any]]:
@@ -428,6 +429,7 @@ def search_knowledge(
             project_id=project_id,
             worker_uid=worker_uid,
             source_id=source_id,
+            knowledge_scope=knowledge_scope,
             limit=lim,
         )
         if rows:
@@ -439,6 +441,7 @@ def search_knowledge(
         project_id=project_id,
         worker_uid=worker_uid,
         source_id=source_id,
+        knowledge_scope=knowledge_scope,
         limit=lim,
     )
 
@@ -449,12 +452,20 @@ def _scope_where(
     project_id: str,
     worker_uid: str,
     source_id: str,
+    knowledge_scope: str = "both",
 ) -> tuple[str, list[Any]]:
+    from duckclaw.knowledge_scope import build_knowledge_scope_clauses
+
     clauses = ["c.active = true", "d.active = true", "s.active = true", "c.tenant_id = ?"]
     params: list[Any] = [tenant_id]
-    if project_id:
-        clauses.append("(c.project_id = ? OR c.project_id = '')")
-        params.append(project_id)
+    scope_clauses, scope_params = build_knowledge_scope_clauses(
+        knowledge_scope=knowledge_scope,
+        project_id=project_id,
+        source_alias="s",
+        chunk_alias="c",
+    )
+    clauses.extend(scope_clauses)
+    params.extend(scope_params)
     if worker_uid:
         clauses.append("(c.worker_uid = ? OR c.worker_uid = '')")
         params.append(worker_uid)
@@ -482,6 +493,7 @@ def _search_knowledge_vector(
     project_id: str,
     worker_uid: str,
     source_id: str,
+    knowledge_scope: str = "both",
     limit: int,
 ) -> list[dict[str, Any]]:
     vec_str = "[" + ",".join(str(float(x)) for x in vector) + "]"
@@ -490,6 +502,7 @@ def _search_knowledge_vector(
         project_id=project_id,
         worker_uid=worker_uid,
         source_id=source_id,
+        knowledge_scope=knowledge_scope,
     )
     sql = f"""
         SELECT c.chunk_id, c.source_id, c.document_id, d.relative_path, c.chunk_index,
@@ -522,6 +535,7 @@ def _search_knowledge_lexical(
     project_id: str,
     worker_uid: str,
     source_id: str,
+    knowledge_scope: str = "both",
     limit: int,
 ) -> list[dict[str, Any]]:
     tokens = lexical_tokens(query)
@@ -532,6 +546,7 @@ def _search_knowledge_lexical(
         project_id=project_id,
         worker_uid=worker_uid,
         source_id=source_id,
+        knowledge_scope=knowledge_scope,
     )
     token_clauses = []
     for token in tokens:
@@ -566,6 +581,7 @@ def read_knowledge_document(
     tenant_id: str,
     project_id: str,
     worker_uid: str = "",
+    knowledge_scope: str = "both",
     limit: int = 40,
 ) -> list[dict[str, Any]]:
     """Return all active chunks for a document matched by relative_path substring."""
@@ -578,6 +594,7 @@ def read_knowledge_document(
         project_id=project_id,
         worker_uid=worker_uid,
         source_id="",
+        knowledge_scope=knowledge_scope,
     )
     folded = fold_search_text(needle)
     params.extend([f"%{needle.lower()}%", f"%{folded}%"])

@@ -6,11 +6,11 @@ import { useAuthStore } from '@/store/authStore';
 import { Sidebar, Topbar } from '@/components/layout';
 import { FloatingAdminChat } from '@/components/chat/FloatingAdminChat';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, hasHydrated, setReturnTo } = useAuthStore();
+  const { isAuthenticated, hasHydrated, authError, setReturnTo } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
@@ -31,8 +31,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setIsSidebarOpen(false);
   }, [hasHydrated, isAuthenticated, router, pathname, setReturnTo]);
 
-  if (!hasHydrated || !isAuthenticated) {
-    return <AdminLoading />;
+  if (!hasHydrated) {
+    return <AdminLoading message="Verificando sesión…" />;
+  }
+
+  if (!isAuthenticated) {
+    if (authError) {
+      return <AdminAuthError message={authError} />;
+    }
+    return <AdminLoading message="Redirigiendo al login…" />;
   }
 
   return (
@@ -64,6 +71,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           )}
         >
           <div className={isWorkspaceRoute ? 'h-full w-full min-h-0' : 'max-w-[1600px] mx-auto'}>
+            {authError ? (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100">
+                {authError} — usando sesión en caché; algunas acciones pueden fallar hasta que el gateway responda.
+              </div>
+            ) : null}
             {children}
           </div>
         </main>
@@ -73,13 +85,36 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   );
 }
 
-function AdminLoading() {
+function AdminLoading({ message }: { message: string }) {
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-4 dark:bg-dark-bg">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 dark:bg-dark-bg px-6 text-center">
       <Loader2 size={32} className="animate-spin text-gov-blue-700" />
-      <p className="text-xs font-bold text-gov-gray-400 uppercase tracking-widest">
-        Verificando sesión…
-      </p>
+      <p className="text-xs font-bold text-gov-gray-400 uppercase tracking-widest">{message}</p>
+    </div>
+  );
+}
+
+function AdminAuthError({ message }: { message: string }) {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center gap-4 dark:bg-dark-bg px-6 text-center max-w-lg mx-auto">
+      <p className="text-sm font-semibold text-gov-gray-800 dark:text-dark-text">No se pudo validar la sesión</p>
+      <p className="text-sm text-gov-gray-600 dark:text-dark-muted">{message}</p>
+      <div className="flex flex-wrap justify-center gap-3">
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white"
+        >
+          <RefreshCw size={16} />
+          Reintentar
+        </button>
+        <a
+          href="/login"
+          className="rounded-xl border border-gov-gray-200 px-4 py-2 text-sm font-bold text-gov-gray-800 dark:border-dark-border dark:text-dark-text"
+        >
+          Ir al login
+        </a>
+      </div>
     </div>
   );
 }

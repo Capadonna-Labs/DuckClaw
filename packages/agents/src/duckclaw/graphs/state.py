@@ -67,6 +67,7 @@ class ManagerAgentState(TypedDict, total=False):
 
     # Proyecto activo (admin playground / RAG); propagado al subgrafo worker.
     project_id: Optional[str]
+    knowledge_scope: Optional[str]
 
     coordinator_worker_id: Optional[str]
     delegation_pool: Optional[List[str]]

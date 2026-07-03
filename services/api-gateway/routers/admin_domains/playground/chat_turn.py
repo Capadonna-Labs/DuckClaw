@@ -29,6 +29,7 @@ from routers.admin_domains.playground.vault_access import resolved_vault_for_adm
 class PlaygroundActorTurn:
     wid: str
     project_id: str
+    knowledge_scope: str
     eff_tenant: str
     profile: dict[str, Any]
     catalog_allowed: bool
@@ -40,6 +41,8 @@ def resolve_playground_actor_turn(
     *,
     worker_id: str,
     project_id: str | None,
+    knowledge_scope: str | None = None,
+    chat_id: str = "",
 ) -> PlaygroundActorTurn:
     from core.admin_identity import (
         get_visible_worker_for_actor,
@@ -81,9 +84,31 @@ def resolve_playground_actor_turn(
     except FileNotFoundError:
         pass
     eff_tenant = str(profile.get("tenant_id") or "").strip() or gateway_effective_tenant_id("default")
+    scope = "platform"
+    try:
+        with open_gateway_db(read_only=True) as db:
+            from routers.admin_domains.playground.knowledge_scope_resolution import (
+                resolve_playground_knowledge_scope,
+            )
+
+            scope = resolve_playground_knowledge_scope(
+                db,
+                chat_id=chat_id,
+                tenant_id=eff_tenant,
+                project_id=project_id_clean,
+                body_scope=knowledge_scope,
+            )
+    except FileNotFoundError:
+        from duckclaw.knowledge_scope import default_knowledge_scope_for_project, normalize_knowledge_scope
+
+        scope = normalize_knowledge_scope(
+            knowledge_scope or default_knowledge_scope_for_project(project_id_clean),
+            project_id=project_id_clean,
+        )
     return PlaygroundActorTurn(
         wid=wid,
         project_id=project_id_clean,
+        knowledge_scope=scope,
         eff_tenant=eff_tenant,
         profile=profile,
         catalog_allowed=catalog_allowed,
@@ -155,6 +180,7 @@ async def ingest_playground_message_with_images(
 class PlaygroundPreparedChat:
     wid: str
     project_id: str
+    knowledge_scope: str
     eff_tenant: str
     msg: str
     original_user_message: str | None
@@ -176,6 +202,8 @@ async def prepare_playground_chat_turn(
         actor,
         worker_id=body.worker_id,
         project_id=body.project_id,
+        knowledge_scope=body.knowledge_scope,
+        chat_id=body.chat_id,
     )
     msg = (body.message or "").strip()
     original_user_message = ((body.user_incoming or "").strip() or msg)
@@ -219,14 +247,14 @@ async def prepare_playground_chat_turn(
     )
     vault_path = vault_info.get("effective_path") or ""
     rag_context_count = 0
-    if turn.project_context:
-        msg, rag_context_count = project_context_message(
-            msg=msg,
-            project_context=turn.project_context,
-            worker_id=turn.wid,
-            tenant_id=turn.eff_tenant,
-            project_id=turn.project_id,
-        )
+    msg, rag_context_count = project_context_message(
+        msg=msg,
+        project_context=turn.project_context,
+        worker_id=turn.wid,
+        tenant_id=turn.eff_tenant,
+        project_id=turn.project_id,
+        knowledge_scope=turn.knowledge_scope,
+    )
 
     chat = ChatRequest(
         message=msg,
@@ -237,12 +265,14 @@ async def prepare_playground_chat_turn(
         chat_type="private",
         tenant_id=turn.eff_tenant,
         project_id=turn.project_id,
+        knowledge_scope=turn.knowledge_scope,
         stream=body.stream,
         vault_db_path=vault_path or None,
     )
     return PlaygroundPreparedChat(
         wid=turn.wid,
         project_id=turn.project_id,
+        knowledge_scope=turn.knowledge_scope,
         eff_tenant=turn.eff_tenant,
         msg=msg,
         original_user_message=original_user_message,
@@ -260,10 +290,17 @@ async def prepare_playground_voice_turn(
     worker_id: str,
     chat_id: str,
     project_id: str | None,
+    knowledge_scope: str | None = None,
     msg: str,
     request: Request,
 ) -> PlaygroundPreparedChat:
-    turn = resolve_playground_actor_turn(actor, worker_id=worker_id, project_id=project_id)
+    turn = resolve_playground_actor_turn(
+        actor,
+        worker_id=worker_id,
+        project_id=project_id,
+        knowledge_scope=knowledge_scope,
+        chat_id=chat_id,
+    )
     team_ctx = playground_team_context(tenant_id=turn.eff_tenant, chat_id=chat_id)
     if turn.wid != "default" and not turn.catalog_allowed:
         raise problem(403, "Worker no asignado al catálogo del actor", turn.wid)
@@ -274,15 +311,14 @@ async def prepare_playground_voice_turn(
 
     vault_info = await resolved_vault_for_admin_chat(session_id, team_ctx, turn.wid, request=request)
     vault_path = vault_info.get("effective_path") or ""
-    rag_context_count = 0
-    if turn.project_context:
-        msg, rag_context_count = project_context_message(
-            msg=msg,
-            project_context=turn.project_context,
-            worker_id=turn.wid,
-            tenant_id=turn.eff_tenant,
-            project_id=turn.project_id,
-        )
+    msg, rag_context_count = project_context_message(
+        msg=msg,
+        project_context=turn.project_context,
+        worker_id=turn.wid,
+        tenant_id=turn.eff_tenant,
+        project_id=turn.project_id,
+        knowledge_scope=turn.knowledge_scope,
+    )
 
     chat = ChatRequest(
         message=msg,
@@ -292,12 +328,14 @@ async def prepare_playground_voice_turn(
         chat_type="private",
         tenant_id=turn.eff_tenant,
         project_id=turn.project_id,
+        knowledge_scope=turn.knowledge_scope,
         stream=False,
         vault_db_path=vault_path or None,
     )
     return PlaygroundPreparedChat(
         wid=turn.wid,
         project_id=turn.project_id,
+        knowledge_scope=turn.knowledge_scope,
         eff_tenant=turn.eff_tenant,
         msg=msg,
         original_user_message=None,

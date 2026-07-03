@@ -71,6 +71,7 @@ from routers.admin_domains.template_lifecycle import (
     validate_template_impl as _validate_template_impl,
 )
 from routers.admin_domains.user_agents import router as user_agents_router
+from routers.admin_domains.user_agent_draft import router as user_agent_draft_router
 from routers.admin_domains.visual_assets import router as visual_assets_router
 from routers.admin_domains.worker_capabilities import router as worker_capabilities_router
 from routers.admin_domains.workspace_managed_draft import router as workspace_managed_draft_router
@@ -104,6 +105,7 @@ router.include_router(telegram_routes_router)
 router.include_router(template_contexts_router)
 router.include_router(templates_catalog_router)
 router.include_router(user_agents_router)
+router.include_router(user_agent_draft_router)
 router.include_router(visual_assets_router)
 router.include_router(worker_capabilities_router)
 router.include_router(workspace_managed_draft_router)

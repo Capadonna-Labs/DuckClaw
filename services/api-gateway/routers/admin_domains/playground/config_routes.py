@@ -25,7 +25,12 @@ from routers.admin_domains.playground.llm_settings import (
     resolved_llm_for_playground,
 )
 from routers.admin_domains.playground.router import router
-from routers.admin_domains.playground.schemas import PlaygroundModelBody, PlaygroundVaultBody, PlaygroundWorkerBody
+from routers.admin_domains.playground.schemas import (
+    PlaygroundKnowledgeScopeBody,
+    PlaygroundModelBody,
+    PlaygroundVaultBody,
+    PlaygroundWorkerBody,
+)
 from routers.admin_domains.playground.team_context import merge_playground_catalog_and_team_workers, playground_team_context
 from routers.admin_domains.playground.tenant_resolution import gateway_effective_tenant_id
 from routers.admin_domains.playground.vault_access import resolved_vault_for_admin_chat
@@ -115,10 +120,26 @@ async def playground_config(
     vault_options = playground_vault_options_for_team(team_ctx)
     voice = await playground_voice_status()
     realtime_voice = await playground_realtime_voice_status()
+    knowledge_scope = "platform"
+    try:
+        with open_gateway_db(read_only=True) as db:
+            from routers.admin_domains.playground.knowledge_scope_resolution import (
+                resolve_playground_knowledge_scope,
+            )
+
+            knowledge_scope = resolve_playground_knowledge_scope(
+                db,
+                chat_id=eff_chat,
+                tenant_id=eff_tenant,
+                project_id="",
+            )
+    except FileNotFoundError:
+        pass
     return {
         "llm": llm,
         "catalog": catalog,
         "config_chat_id": eff_chat,
+        "knowledge_scope": knowledge_scope,
         "workers": workers_payload["workers"],
         "workers_invalid": workers_payload["workers_invalid"],
         "env_path": str(env_file()),
@@ -248,6 +269,60 @@ async def playground_set_worker(
         "worker_id": worker_id,
         "selected_worker_id": selected,
         "effective_worker_id": pick_playground_worker(team_ctx, selected),
+    }
+
+
+@router.put("/playground/knowledge-scope", dependencies=[Depends(require_admin_key)])
+async def playground_set_knowledge_scope(
+    body: PlaygroundKnowledgeScopeBody,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    """Persiste alcance RAG por conversación (platform | project | both)."""
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.knowledge_scope import VALID_KNOWLEDGE_SCOPES, normalize_knowledge_scope
+    from duckclaw.runtime_session_settings import upsert_session_runtime_setting
+    from routers.admin_domains.playground.knowledge_scope_resolution import (
+        resolve_playground_knowledge_scope,
+    )
+
+    raw_scope = (body.knowledge_scope or "").strip().lower()
+    if raw_scope not in VALID_KNOWLEDGE_SCOPES:
+        raise problem(400, "Alcance RAG inválido", "Válidos: platform, project, both")
+
+    chat_id = body.chat_id.strip()
+    project_id = (body.project_id or "").strip()
+    tenant_id = gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
+
+    with open_gateway_db(read_only=False) as db:
+        profile = ensure_profile_for_user(db, email=actor)
+        tenant_id = str(profile.get("tenant_id") or "").strip() or tenant_id
+        effective = normalize_knowledge_scope(raw_scope, project_id=project_id)
+        upsert_session_runtime_setting(
+            db,
+            chat_id,
+            "knowledge_scope",
+            effective,
+            tenant_id=tenant_id,
+            updated_by=actor,
+        )
+        resolved = resolve_playground_knowledge_scope(
+            db,
+            chat_id=chat_id,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            body_scope=effective,
+        )
+    return {
+        "ok": True,
+        "chat_id": chat_id,
+        "tenant_id": tenant_id,
+        "knowledge_scope": resolved,
+        "project_id": project_id or None,
+        "message": f"Alcance RAG: {resolved}",
     }
 
 

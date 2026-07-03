@@ -37,12 +37,24 @@ def knowledge_inventory_for_project(
     tenant_id: str,
     project_id: str,
     worker_uid: str = "",
+    knowledge_scope: str = "both",
     limit: int = 8,
 ) -> list[dict[str, Any]]:
-    if not project_id:
+    from duckclaw.knowledge_scope import normalize_knowledge_scope, scope_allows_retrieval
+
+    scope = normalize_knowledge_scope(knowledge_scope, project_id=project_id)
+    if not scope_allows_retrieval(scope, project_id=project_id):
         return []
-    clauses = ["s.tenant_id = ?", "s.active = true", "(s.project_id = ? OR s.project_id = '')"]
-    params: list[Any] = [tenant_id, project_id]
+    from duckclaw.knowledge_scope import build_knowledge_scope_clauses
+
+    scope_clauses, scope_params = build_knowledge_scope_clauses(
+        knowledge_scope=scope,
+        project_id=project_id,
+        source_alias="s",
+        chunk_alias="c",
+    )
+    clauses = ["s.tenant_id = ?", "s.active = true", *scope_clauses]
+    params: list[Any] = [tenant_id, *scope_params]
     if worker_uid:
         clauses.append("(s.worker_uid = ? OR s.worker_uid = '')")
         params.append(worker_uid)
@@ -90,6 +102,7 @@ def knowledge_documents_for_project(
     tenant_id: str,
     project_id: str,
     worker_uid: str = "",
+    knowledge_scope: str = "both",
     limit: int = 80,
 ) -> list[dict[str, Any]]:
     from duckclaw.admin_knowledge_read import list_project_knowledge_documents
@@ -99,6 +112,7 @@ def knowledge_documents_for_project(
         tenant_id=tenant_id,
         project_id=project_id,
         worker_uid=worker_uid,
+        knowledge_scope=knowledge_scope,
         limit=limit,
     )
 
@@ -110,15 +124,20 @@ def build_knowledge_context(
     tenant_id: str,
     project_id: str,
     worker_uid: str = "",
+    knowledge_scope: str = "both",
     inventory_limit: int = 8,
     retrieval_limit: int = 6,
     embedding_fn: Callable[[str], list[float] | None] | None = None,
 ) -> KnowledgeContext:
+    from duckclaw.knowledge_scope import normalize_knowledge_scope
+
+    scope = normalize_knowledge_scope(knowledge_scope, project_id=project_id)
     inventory = knowledge_inventory_for_project(
         db,
         tenant_id=tenant_id,
         project_id=project_id,
         worker_uid=worker_uid,
+        knowledge_scope=scope,
         limit=inventory_limit,
     )
     documents = knowledge_documents_for_project(
@@ -126,6 +145,7 @@ def build_knowledge_context(
         tenant_id=tenant_id,
         project_id=project_id,
         worker_uid=worker_uid,
+        knowledge_scope=scope,
         limit=80,
     )
     rows = search_knowledge(
@@ -134,6 +154,7 @@ def build_knowledge_context(
         tenant_id=tenant_id,
         project_id=project_id,
         worker_uid=worker_uid,
+        knowledge_scope=scope,
         limit=retrieval_limit,
         embedding_fn=embedding_fn,
     )

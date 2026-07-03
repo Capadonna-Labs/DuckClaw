@@ -273,6 +273,7 @@ def prepare_worker_invoke_state(
 
     out_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
     project_id = (state.get("project_id") or "").strip()
+    knowledge_scope = (state.get("knowledge_scope") or "").strip()
     worker_state: dict[str, Any] = {
         "input": planned_task_for_worker,
         "incoming": planned_task_for_worker,
@@ -292,6 +293,8 @@ def prepare_worker_invoke_state(
     }
     if project_id:
         worker_state["project_id"] = project_id
+    if knowledge_scope:
+        worker_state["knowledge_scope"] = knowledge_scope
     if out_tok:
         worker_state["outbound_telegram_bot_token"] = out_tok
     ich = (state.get("integration_channel") or "").strip()

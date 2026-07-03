@@ -62,6 +62,8 @@ async def _ainvoke(
     outbound_telegram_bot_token: str | None = None,
     entry_worker_id: str | None = None,
     integration_channel: str | None = None,
+    project_id: str | None = None,
+    knowledge_scope: str | None = None,
 ) -> dict:
     """
     Invoca el grafo y retorna {"reply": str, "messages": list | None}.
@@ -90,6 +92,12 @@ async def _ainvoke(
     _ew = (entry_worker_id or "").strip()
     if _ew:
         state["entry_worker_id"] = _ew
+    _pid = (project_id or "").strip()
+    if _pid:
+        state["project_id"] = _pid
+    _scope = (knowledge_scope or "").strip()
+    if _scope:
+        state["knowledge_scope"] = _scope
     _ich, _ilbl = resolve_integration_label(integration_channel, chat_id=chat_id)
     state["integration_channel"] = _ich
     state["integration_label"] = _ilbl
@@ -169,6 +177,8 @@ async def ainvoke_manager_ephemeral(
     outbound_telegram_bot_token: str | None = None,
     entry_worker_id: str | None = None,
     integration_channel: str | None = None,
+    project_id: str | None = None,
+    knowledge_scope: str | None = None,
 ) -> dict:
     """
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
@@ -194,6 +204,8 @@ async def ainvoke_manager_ephemeral(
             outbound_telegram_bot_token=outbound_telegram_bot_token,
             entry_worker_id=entry_worker_id,
             integration_channel=integration_channel,
+            project_id=project_id,
+            knowledge_scope=knowledge_scope,
         )
     finally:
         try:

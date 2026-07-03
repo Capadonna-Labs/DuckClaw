@@ -144,7 +144,19 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
     display_name = str(payload.get("display_name") or worker_id).strip()[:256] or worker_id
     source_template_id = str(payload.get("source_template_id") or "default").strip()[:64] or "default"
     system_prompt = str(payload.get("system_prompt") or "")
+    soul = str(payload.get("soul") or "").strip()
+    tool_profile = str(payload.get("tool_profile") or "general").strip().lower()
+    if tool_profile not in ("general", "minimal", "rag_only"):
+        tool_profile = "general"
     skills = [str(skill).strip()[:128] for skill in payload.get("skills") or [] if str(skill).strip()]
+    if payload.get("web_search") and "research" not in {s.lower() for s in skills}:
+        skills.append("research")
+    try:
+        from duckclaw.framework_tool_pack import ensure_baseline_skills
+
+        skills = ensure_baseline_skills(skills, manifest={"tool_profile": tool_profile})
+    except Exception:
+        pass
     manifest = {
         "id": worker_id,
         "display_name": display_name,
@@ -154,11 +166,16 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
         "description": str(payload.get("description") or "").strip(),
         "system_prompt": system_prompt.strip(),
         "skills": skills,
+        "tool_profile": tool_profile,
     }
+    if payload.get("browser_sandbox"):
+        manifest["browser_sandbox"] = True
     manifest_json = json.dumps(manifest, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
     files_snapshot = {"manifest.json": manifest_json}
     if system_prompt.strip():
         files_snapshot["system_prompt.md"] = system_prompt.strip()
+    if soul:
+        files_snapshot["soul.md"] = soul
 
     _apply_upsert_worker(
         conn,
@@ -180,6 +197,25 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
     worker_uid = _resolve_worker_uid(conn, worker_id, tenant_id)
     if not worker_uid:
         raise RuntimeError("user agent worker insert failed")
+    if soul:
+        existing_soul = conn.execute(
+            "SELECT context_id FROM main.admin_worker_contexts "
+            "WHERE worker_uid = ? AND title = 'soul.md' AND active = true LIMIT 1",
+            [worker_uid],
+        ).fetchone()
+        if existing_soul:
+            conn.execute(
+                "UPDATE main.admin_worker_contexts "
+                "SET content_md = ?, updated_at = CURRENT_TIMESTAMP WHERE context_id = ?",
+                [soul, existing_soul[0]],
+            )
+        else:
+            cid = f"ctx_{uuid.uuid4().hex[:16]}"
+            conn.execute(
+                "INSERT INTO main.admin_worker_contexts "
+                "(context_id, worker_uid, title, content_md, sort_order) VALUES (?, ?, 'soul.md', ?, 20)",
+                [cid, worker_uid, soul],
+            )
     manifest_path = f"db://admin_worker_catalog/{worker_uid}/manifest.json"
     existing_user_agent = conn.execute(
         "SELECT worker_id FROM main.admin_user_agents WHERE tenant_id = ? AND worker_id = ?",

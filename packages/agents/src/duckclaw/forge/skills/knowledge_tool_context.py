@@ -7,6 +7,7 @@ from contextvars import ContextVar
 _knowledge_tenant_id: ContextVar[str] = ContextVar("duckclaw_knowledge_tenant_id", default="")
 _knowledge_project_id: ContextVar[str] = ContextVar("duckclaw_knowledge_project_id", default="")
 _knowledge_worker_uid: ContextVar[str] = ContextVar("duckclaw_knowledge_worker_uid", default="")
+_knowledge_scope: ContextVar[str] = ContextVar("duckclaw_knowledge_scope", default="")
 _session_actor_email: ContextVar[str] = ContextVar("duckclaw_session_actor_email", default="")
 _session_chat_id: ContextVar[str] = ContextVar("duckclaw_session_chat_id", default="")
 
@@ -33,6 +34,14 @@ def set_knowledge_tool_worker_uid(worker_uid: str) -> None:
 
 def get_knowledge_tool_worker_uid() -> str:
     return (_knowledge_worker_uid.get() or "").strip()
+
+
+def set_knowledge_tool_scope(knowledge_scope: str) -> None:
+    _knowledge_scope.set((knowledge_scope or "").strip())
+
+
+def get_knowledge_tool_scope() -> str:
+    return (_knowledge_scope.get() or "").strip()
 
 
 def set_session_actor_email(actor_email: str) -> None:

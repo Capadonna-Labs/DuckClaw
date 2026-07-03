@@ -3,6 +3,14 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  BFF_SESSION_COOKIE,
+  bffSessionKeyFromCookie,
+  coalesceBffSessionLookup,
+  getCachedBffSession,
+  invalidateBffSessionCache,
+  setCachedBffSession,
+} from '@/lib/bffSessionCache';
 import { gatewayBase } from '@/lib/gatewayProxy';
 
 export function gatewayAuthBase(): string {
@@ -39,6 +47,8 @@ export function applyUpstreamSetCookies(
   }
 }
 
+const AUTH_PROXY_TIMEOUT_MS = 8_000;
+
 export async function proxyAuthToGateway(
   req: NextRequest,
   path: string,
@@ -61,12 +71,18 @@ export async function proxyAuthToGateway(
       ...init,
       headers,
       cache: 'no-store',
+      signal: AbortSignal.timeout(AUTH_PROXY_TIMEOUT_MS),
     });
   } catch (err) {
     const detail = err instanceof Error ? err.message : 'fetch failed';
+    const timedOut =
+      (err instanceof Error && err.name === 'TimeoutError') ||
+      detail.toLowerCase().includes('aborted');
     return NextResponse.json(
       {
-        detail: `No se pudo contactar el gateway: ${detail}`,
+        detail: timedOut
+          ? `Gateway no respondió en ${AUTH_PROXY_TIMEOUT_MS / 1000}s (${base})`
+          : `No se pudo contactar el gateway: ${detail}`,
         code: 'gateway_unreachable',
       },
       { status: 503 }
@@ -96,21 +112,43 @@ export type SessionUser = {
 export async function resolveSessionUser(req: NextRequest): Promise<SessionUser | null> {
   const base = gatewayAuthBase();
   if (!base) return null;
-  const cookie = forwardCookieHeader(req);
-  if (!cookie) return null;
+  const sessionKey = bffSessionKeyFromCookie(req.cookies.get(BFF_SESSION_COOKIE)?.value);
+  if (!sessionKey) return null;
 
-  try {
-    const upstream = await fetch(`${base}/api/v1/admin/auth/me`, {
-      headers: { cookie },
-      cache: 'no-store',
-    });
-    if (!upstream.ok) return null;
-    const data = (await upstream.json()) as { user?: SessionUser };
-    return data.user ?? null;
-  } catch {
-    return null;
+  const cached = getCachedBffSession(sessionKey);
+  if (cached !== undefined) {
+    return cached;
   }
+
+  return coalesceBffSessionLookup(sessionKey, async () => {
+    const cookie = forwardCookieHeader(req);
+    if (!cookie) return null;
+
+    try {
+      const upstream = await fetch(`${base}/api/v1/admin/auth/me`, {
+        headers: { cookie },
+        cache: 'no-store',
+        signal: AbortSignal.timeout(AUTH_PROXY_TIMEOUT_MS),
+      });
+      if (!upstream.ok) {
+        invalidateBffSessionCache(sessionKey);
+        return null;
+      }
+      const data = (await upstream.json()) as { user?: SessionUser };
+      const user = data.user ?? null;
+      if (user) {
+        setCachedBffSession(sessionKey, user);
+      } else {
+        invalidateBffSessionCache(sessionKey);
+      }
+      return user;
+    } catch {
+      return null;
+    }
+  });
 }
+
+export { invalidateBffSessionCache };
 
 export function validateCsrf(req: NextRequest): boolean {
   const header = (req.headers.get('x-csrf-token') || '').trim();

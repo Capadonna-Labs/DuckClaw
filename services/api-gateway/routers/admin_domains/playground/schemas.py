@@ -119,12 +119,24 @@ class PlaygroundWorkerBody(BaseModel):
     worker_id: str = Field(..., min_length=1, max_length=64)
 
 
+class PlaygroundKnowledgeScopeBody(BaseModel):
+    chat_id: str = Field(..., min_length=1, max_length=128)
+    tenant_id: str | None = Field(default=None, max_length=64)
+    knowledge_scope: str = Field(..., min_length=1, max_length=16)
+    project_id: str | None = Field(default=None, max_length=64)
+
+
 class PlaygroundChatBody(BaseModel):
     worker_id: str = Field(default="default", max_length=64)
     message: str = Field(default="", max_length=16000)
     chat_id: str = Field(default="admin-playground", max_length=128)
     tenant_id: str = Field(default="default", max_length=64)
     project_id: str | None = Field(default=None, max_length=64)
+    knowledge_scope: str | None = Field(
+        default=None,
+        max_length=16,
+        description="Alcance RAG: platform | project | both",
+    )
     telegram_user_id: str | None = Field(
         default=None,
         max_length=32,
@@ -164,6 +176,7 @@ class PlaygroundVoiceBody(BaseModel):
     chat_id: str = Field(default="admin-playground", max_length=128)
     tenant_id: str = Field(default="default", max_length=64)
     project_id: str | None = Field(default=None, max_length=64)
+    knowledge_scope: str | None = Field(default=None, max_length=16)
     audio_base64: str = Field(..., min_length=8, description="OGG/WAV/WebM base64 desde el navegador")
     language_hint: str | None = Field(default="es", max_length=16)
     voice_response: bool = Field(

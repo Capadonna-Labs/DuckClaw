@@ -95,6 +95,58 @@ def _normalize_local_artifacts_to_db() -> None:
         pass
 
 
+async def _run_deferred_gateway_startup() -> None:
+    """Warmups pesados fuera del camino crítico: uvicorn debe aceptar /health de inmediato."""
+    try:
+        from duckclaw.forge.skills.comfyui_bridge import (
+            clear_all_comfy_generations,
+            reset_comfyui_runtime,
+        )
+
+        stale = await asyncio.to_thread(clear_all_comfy_generations)
+        reset_result = await asyncio.to_thread(reset_comfyui_runtime)
+        if stale or reset_result.get("interrupt") or reset_result.get("deleted_pending"):
+            _log.info(
+                "ComfyUI startup hygiene: stale_jobs=%s reset=%s",
+                len(stale),
+                reset_result,
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("ComfyUI startup hygiene skipped: %s", exc)
+
+    try:
+        from duckclaw.graphs.graph_server import get_db
+        from duckclaw.llm_usage_log import ensure_llm_usage_log_table
+        from duckclaw.media_usage_log import ensure_media_usage_log_table
+
+        await asyncio.to_thread(ensure_llm_usage_log_table, get_db())
+        await asyncio.to_thread(ensure_media_usage_log_table, get_db())
+        _log.info("llm_usage_log: tabla asegurada en gateway DuckDB")
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("llm_usage_log: no se pudo asegurar tabla al arranque: %s", exc)
+
+    try:
+        from duckclaw.catalog_seed import seed_catalog_if_empty
+        from duckclaw.graphs.graph_server import get_db
+
+        await asyncio.to_thread(seed_catalog_if_empty, get_db())
+        _log.info("catalog: templates importados desde filesystem")
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("catalog seed skipped: %s", exc)
+
+    try:
+        from duckclaw.sandbox_artifacts import purge_expired_runs
+
+        purge_result = await asyncio.to_thread(purge_expired_runs)
+        if purge_result.get("purged"):
+            _log.info(
+                "sandbox artifacts: purged %s expired run(s)",
+                purge_result.get("purged"),
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("sandbox artifacts: purge at startup failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     from duckclaw.gateway.settings import get_gateway_settings
@@ -220,55 +272,21 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _log.warning("knowledge auto-sync no disponible: %s", exc)
 
-    try:
-        from duckclaw.forge.skills.comfyui_bridge import (
-            clear_all_comfy_generations,
-            reset_comfyui_runtime,
-        )
-
-        stale = clear_all_comfy_generations()
-        reset_result = await asyncio.to_thread(reset_comfyui_runtime)
-        if stale or reset_result.get("interrupt") or reset_result.get("deleted_pending"):
-            _log.info(
-                "ComfyUI startup hygiene: stale_jobs=%s reset=%s",
-                len(stale),
-                reset_result,
-            )
-    except Exception as exc:  # noqa: BLE001
-        _log.debug("ComfyUI startup hygiene skipped: %s", exc)
-
-    try:
-        from duckclaw.graphs.graph_server import get_db
-        from duckclaw.llm_usage_log import ensure_llm_usage_log_table
-        from duckclaw.media_usage_log import ensure_media_usage_log_table
-
-        ensure_llm_usage_log_table(get_db())
-        ensure_media_usage_log_table(get_db())
-        _log.info("llm_usage_log: tabla asegurada en gateway DuckDB")
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("llm_usage_log: no se pudo asegurar tabla al arranque: %s", exc)
-
-    try:
-        from duckclaw.catalog_seed import seed_catalog_if_empty
-
-        seed_catalog_if_empty(get_db())
-        _log.info("catalog: templates importados desde filesystem")
-    except Exception as exc:  # noqa: BLE001
-        _log.debug("catalog seed skipped: %s", exc)
-
-    try:
-        from duckclaw.sandbox_artifacts import purge_expired_runs
-
-        purge_result = purge_expired_runs()
-        if purge_result.get("purged"):
-            _log.info(
-                "sandbox artifacts: purged %s expired run(s)",
-                purge_result.get("purged"),
-            )
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("sandbox artifacts: purge at startup failed: %s", exc)
+    app.state.deferred_startup_task = asyncio.create_task(
+        _run_deferred_gateway_startup(),
+        name="gateway-deferred-startup",
+    )
 
     yield
+
+    _dst = getattr(app.state, "deferred_startup_task", None)
+    if _dst is not None:
+        _dst.cancel()
+        try:
+            await _dst
+        except BaseException:
+            pass
+        app.state.deferred_startup_task = None
 
     _gt = getattr(app.state, "goals_ticker_task", None)
     if _gt is not None:

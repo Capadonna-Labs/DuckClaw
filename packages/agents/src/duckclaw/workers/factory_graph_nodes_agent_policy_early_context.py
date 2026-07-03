@@ -33,6 +33,7 @@ def bind_agent_turn_tool_context(
         )
         from duckclaw.forge.skills.knowledge_tool_context import (
             set_knowledge_tool_project_id,
+            set_knowledge_tool_scope,
             set_knowledge_tool_tenant_id,
             set_knowledge_tool_worker_uid,
             set_session_actor_email,
@@ -43,7 +44,16 @@ def bind_agent_turn_tool_context(
         set_goals_tool_worker_id(worker_id)
         set_goals_tool_db_path(str(path))
         set_knowledge_tool_tenant_id(tenant_ctx)
-        set_knowledge_tool_project_id(str(state.get("project_id") or ""))
+        project_ctx = str(state.get("project_id") or "")
+        set_knowledge_tool_project_id(project_ctx)
+        from duckclaw.knowledge_scope import normalize_knowledge_scope
+
+        set_knowledge_tool_scope(
+            normalize_knowledge_scope(
+                str(state.get("knowledge_scope") or ""),
+                project_id=project_ctx,
+            )
+        )
         worker_uid = ""
         try:
             import duckdb

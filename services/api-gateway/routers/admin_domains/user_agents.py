@@ -25,6 +25,10 @@ class UserAgentCreateBody(BaseModel):
     system_prompt: str = ""
     description: str = ""
     skills: list[str] = Field(default_factory=list)
+    soul: str = ""
+    tool_profile: str = "general"
+    browser_sandbox: bool = False
+    web_search: bool = False
 
 
 def require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
@@ -120,6 +124,10 @@ async def create_user_agent(
         system_prompt=body.system_prompt,
         description=body.description,
         skills=body.skills,
+        soul=body.soul,
+        tool_profile=body.tool_profile,
+        browser_sandbox=body.browser_sandbox,
+        web_search=body.web_search,
     )
     try:
         task_id = _enqueue_user_agent_command(command)

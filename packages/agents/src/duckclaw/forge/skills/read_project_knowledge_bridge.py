@@ -17,13 +17,24 @@ def read_project_knowledge(relative_path: str) -> str:
     from duckclaw.forge.rag.knowledge_core import read_knowledge_document
     from duckclaw.forge.skills.knowledge_tool_context import (
         get_knowledge_tool_project_id,
+        get_knowledge_tool_scope,
         get_knowledge_tool_tenant_id,
         get_knowledge_tool_worker_uid,
     )
+    from duckclaw.knowledge_scope import normalize_knowledge_scope, scope_allows_retrieval
 
     project_id = get_knowledge_tool_project_id()
-    if not project_id:
-        return json.dumps({"error": "No hay project_id en el contexto del turno."}, ensure_ascii=False)
+    scope = normalize_knowledge_scope(get_knowledge_tool_scope(), project_id=project_id)
+    if not scope_allows_retrieval(scope, project_id=project_id):
+        return json.dumps(
+            {
+                "error": (
+                    "El alcance de conocimiento requiere proyecto. "
+                    "Elige uno en Run settings o cambia a Plataforma."
+                ),
+            },
+            ensure_ascii=False,
+        )
 
     path = (relative_path or "").strip()
     if not path:
@@ -38,6 +49,7 @@ def read_project_knowledge(relative_path: str) -> str:
             tenant_id=get_knowledge_tool_tenant_id(),
             project_id=project_id,
             worker_uid=get_knowledge_tool_worker_uid(),
+            knowledge_scope=scope,
         )
         if not rows:
             return json.dumps(

@@ -1263,6 +1263,34 @@ _M028_SKILL_CATALOG = [
 ]
 
 
+_M030_USER_AGENT_DRAFT_POLICY = [
+    """
+    INSERT INTO main.prompt_policy_registry
+      (policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active)
+    SELECT
+      'ppol_admin_user_agent_draft_v1',
+      'manager_task',
+      'admin_user_agent_draft',
+      1,
+      'active',
+      content,
+      sha256(content),
+      '{"seed":"schema_migration_030","scope":"admin_user_agent"}',
+      true
+    FROM (
+      SELECT '{"draft_prompt_template":"Responde SOLO JSON válido, sin markdown, sin texto extra.\\nNo inventes secretos. No escribas en DB. Solo prepara un borrador revisable de un agente runtime.\\nSchema exacto:\\n{{\\"display_name\\":\\"string\\",\\"worker_id\\":\\"string\\",\\"description\\":\\"string\\",\\"system_prompt\\":\\"string\\",\\"soul\\":\\"string\\",\\"tool_profile\\":\\"general|minimal|rag_only\\",\\"skills\\":[\\"string\\"],\\"browser_sandbox\\":false,\\"web_search\\":false,\\"suggested_skills\\":[{{\\"name\\":\\"string\\",\\"reason\\":\\"string\\",\\"available\\":true}}],\\"questions\\":[\\"string\\"]}}\\nHints opcionales: display_name={display_name_hint}, worker_id={worker_id_hint}\\nSkills detectadas o sugeridas: {suggested_skills_json}\\nComportamiento deseado del agente:\\n{prompt}","fallback":{"display_name_template":"Asistente {title}","worker_id_template":"{slug}-agent","description_template":"Agente orientado a: {goal}","system_prompt_template":"Eres un agente especializado. Tu misión es ayudar con: {goal}.\\n\\nReglas:\\n- Pide datos faltantes antes de asumir.\\n- Usa herramientas del manifest solo cuando aporten valor.\\n- Responde en español claro y accionable.","soul_template":"# Personalidad\\n- Profesional y directo\\n- Prioriza verificabilidad\\n\\n# Enfoque\\n{goal}","tool_profile":"general","skills":[],"browser_sandbox":false,"web_search":false,"model_error_note_template":"> Nota: no se pudo invocar el modelo configurado; se usó análisis local estructurado.","questions":["¿Qué resultado concreto debe entregar este agente?","¿Qué fuentes de datos o herramientas debe usar?","¿Hay restricciones de tono, seguridad o aprobación humana?"]}}' AS content
+    )
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM main.prompt_policy_registry
+      WHERE policy_type = 'manager_task'
+        AND policy_name = 'admin_user_agent_draft'
+        AND version = 1
+    )
+    """,
+]
+
+
 def _migration_024_framework_report_engine_policy(db: Any) -> None:
     from duckclaw.framework_policy_pack import apply_framework_policy_pack
 
@@ -1345,4 +1373,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (27, "mcp_connectors_v1", _M027_MCP_CONNECTORS),
     (28, "skill_catalog_v1", _M028_SKILL_CATALOG),
     (29, "skill_catalog_github_mcp", []),
+    (30, "user_agent_draft_policy", _M030_USER_AGENT_DRAFT_POLICY),
 ]

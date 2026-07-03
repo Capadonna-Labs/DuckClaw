@@ -1,74 +1,140 @@
-import Link from 'next/link';
-import { BarChart3, Blocks, Plus } from 'lucide-react';
+'use client';
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { RefreshCw } from 'lucide-react';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
+import { SkillCreateForm } from '@/components/skills/SkillCreateForm';
+import { SkillInventory } from '@/components/skills/SkillInventory';
+import { SkillSummary } from '@/components/skills/SkillSummary';
+import { SkillsConceptPanel } from '@/components/skills/SkillsConceptPanel';
+import { PlatformSkillsPanel } from '@/components/skills/PlatformSkillsPanel';
+import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
+
+const TABS = [
+  { id: 'catalog', label: 'Catálogo DB' },
+  { id: 'platform', label: 'Plataforma' },
+  { id: 'create', label: 'Crear' },
+] as const;
+
+type SkillsTab = (typeof TABS)[number]['id'];
+
+function parseSkillsTab(raw: string | null): SkillsTab {
+  if (raw === 'platform' || raw === 'create' || raw === 'catalog') return raw;
+  if (raw === 'global' || raw === 'local' || raw === 'summary') return 'catalog';
+  if (raw === 'new') return 'create';
+  return 'catalog';
+}
 
 export default function SkillsHubView({ embedded = false }: EmbeddedViewProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<SkillsTab>(() => parseSkillsTab(searchParams.get('skillsTab')));
+  const { globalSkills, localSkills, error, loadSkills } = useSkillsCatalog();
+
+  useEffect(() => {
+    setTab(parseSkillsTab(searchParams.get('skillsTab')));
+  }, [searchParams]);
+
+  const selectTab = useCallback(
+    (next: SkillsTab) => {
+      setTab(next);
+      if (embedded) {
+        const params = new URLSearchParams(searchParams.toString());
+        params.set('tab', 'skills');
+        params.set('skillsTab', next);
+        router.replace(`/plataforma?${params.toString()}`, { scroll: false });
+      }
+    },
+    [embedded, router, searchParams]
+  );
+
+  const refresh = useCallback(() => {
+    void loadSkills().catch(() => undefined);
+  }, [loadSkills]);
+
+  const showEmptyGlobalHint = useMemo(() => globalSkills.length === 0, [globalSkills.length]);
+
   return (
     <ViewChrome embedded={embedded}>
       {!embedded && (
         <header>
           <h1 className="text-3xl font-black dark:text-dark-text">Skills</h1>
           <p className="mt-1 max-w-2xl text-sm text-gov-gray-500 dark:text-dark-muted">
-            Administra cada responsabilidad en una vista separada.
+            Capacidades que el agente expone al LLM como herramientas. Inventario, creación y skills del
+            framework en un solo lugar.
           </p>
         </header>
       )}
 
-      <section className="grid gap-4 md:grid-cols-2">
-        <SkillRouteCard
-          href="/skills/summary"
-          title="Resumen"
-          description="Conteo global/local y estado del inventario."
-          icon={<BarChart3 size={22} />}
-        />
-        <SkillRouteCard
-          href="/skills/new"
-          title="Nueva skill"
-          description="Crear metadata DB-first privada."
-          icon={<Plus size={22} />}
-        />
-        <SkillRouteCard
-          href="/skills/global"
-          title="Skills globales"
-          description="Capacidades reutilizables entre agentes."
-          icon={<Blocks size={22} />}
-        />
-        <SkillRouteCard
-          href="/skills/local"
-          title="Skills locales"
-          description="Capacidades específicas de workers."
-          icon={<Blocks size={22} />}
-        />
-      </section>
-    </ViewChrome>
-  );
-}
+      <div className="space-y-6">
+        <SkillsConceptPanel defaultOpen={showEmptyGlobalHint} />
 
-function SkillRouteCard({
-  href,
-  title,
-  description,
-  icon,
-}: {
-  href: string;
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      className="group rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-gov-blue-300 hover:shadow-md dark:border-dark-border dark:bg-dark-surface"
-    >
-      <div className="flex items-start gap-3">
-        <span className="rounded-2xl bg-gov-blue-50 p-3 text-gov-blue-700 dark:bg-dark-bg dark:text-dark-cyan">
-          {icon}
-        </span>
-        <div>
-          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">{title}</h2>
-          <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">{description}</p>
+        <SkillSummary
+          globalCount={globalSkills.length}
+          localCount={localSkills.length}
+          onCreateClick={() => selectTab('create')}
+        />
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <nav className="flex flex-wrap gap-1 rounded-xl border border-gov-gray-200 bg-gov-gray-50 p-1 dark:border-dark-border dark:bg-dark-bg">
+            {TABS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => selectTab(item.id)}
+                className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
+                  tab === item.id
+                    ? 'bg-white text-gov-blue-800 shadow-sm dark:bg-dark-surface dark:text-dark-cyan'
+                    : 'text-gov-gray-600 hover:text-gov-gray-900 dark:text-dark-muted dark:hover:text-dark-text'
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+          <button
+            type="button"
+            onClick={refresh}
+            className="inline-flex items-center gap-2 rounded-xl border border-gov-gray-200 px-3 py-2 text-xs font-bold text-gov-gray-700 dark:border-dark-border dark:text-dark-muted"
+          >
+            <RefreshCw size={14} />
+            Refrescar
+          </button>
         </div>
+
+        {error && <p className="text-sm text-red-600">{error}</p>}
+
+        {tab === 'catalog' && (
+          <div className="space-y-6">
+            <SkillInventory
+              title="Catálogo global"
+              subtitle="Filas en main.admin_skills — reutilizables entre agentes."
+              items={globalSkills}
+              emptyHint="Crea una skill en la pestaña Crear, implementa el bridge Python y actívala en el manifest del agente."
+              onCreateClick={() => selectTab('create')}
+            />
+            <SkillInventory
+              title="Skills locales por agente"
+              subtitle="Archivos skills/*.py dentro del snapshot de cada worker."
+              items={localSkills}
+              showWorker
+              emptyHint="Sube o edita archivos .py en el bundle del agente (editor → archivos skills/)."
+            />
+          </div>
+        )}
+
+        {tab === 'platform' && <PlatformSkillsPanel />}
+
+        {tab === 'create' && (
+          <SkillCreateForm
+            onCreated={async () => {
+              await loadSkills();
+              selectTab('catalog');
+            }}
+          />
+        )}
       </div>
-    </Link>
+    </ViewChrome>
   );
 }

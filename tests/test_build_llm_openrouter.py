@@ -8,6 +8,7 @@ from duckclaw.integrations.llm_providers import (
     OPENROUTER_ATTRIBUTION_HEADERS,
     build_llm,
     build_openrouter_llm,
+    normalize_openrouter_model_id,
 )
 
 
@@ -19,7 +20,7 @@ def test_build_llm_openrouter_returns_chat_openai(monkeypatch: pytest.MonkeyPatc
     monkeypatch.delenv("LLM_MODEL", raising=False)
     llm = build_llm("openrouter", "", "", prefer_env_provider=False)
     assert llm is not None
-    assert getattr(llm, "model_name", None) == "anthropic/claude-sonnet-4-5"
+    assert getattr(llm, "model_name", None) == "z-ai/glm-5.2"
 
 
 def test_build_llm_openrouter_requires_api_key(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,7 +90,7 @@ def test_build_llm_openrouter_alias_router(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.delenv("LLM_MODEL", raising=False)
     llm = build_llm("router", "", "", prefer_env_provider=False)
     assert llm is not None
-    assert getattr(llm, "model_name", None) == "anthropic/claude-sonnet-4-5"
+    assert getattr(llm, "model_name", None) == "z-ai/glm-5.2"
 
 
 def test_build_llm_openrouter_explicit_model_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,3 +103,14 @@ def test_build_llm_openrouter_explicit_model_unchanged(monkeypatch: pytest.Monke
         prefer_env_provider=False,
     )
     assert getattr(llm, "model_name", None) == "google/gemini-2.5-pro"
+
+
+def test_normalize_openrouter_model_id_glm_label() -> None:
+    assert normalize_openrouter_model_id("GLM 5.2") == "z-ai/glm-5.2"
+    assert normalize_openrouter_model_id("z-ai/glm-5.2") == "z-ai/glm-5.2"
+
+
+def test_build_openrouter_llm_accepts_glm_display_label(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
+    llm = build_openrouter_llm("GLM 5.2")
+    assert getattr(llm, "model_name", None) == "z-ai/glm-5.2"

@@ -19,6 +19,7 @@ export const OPENROUTER_MODEL_PRESETS: { id: string; label: string }[] = [
   { id: 'google/gemma-2-9b-it:free', label: 'Gemma 2 9B (free)' },
   { id: 'meta-llama/llama-3.2-3b-instruct:free', label: 'Llama 3.2 3B Instruct (free)' },
   { id: 'arcee-ai/trinity-large-preview:free', label: 'Trinity Large Preview (free)' },
+  { id: 'z-ai/glm-5.2', label: 'GLM 5.2 (Z.ai)' },
   { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
   { id: 'deepseek/deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
   { id: 'deepseek/deepseek-chat', label: 'DeepSeek Chat (legacy)' },

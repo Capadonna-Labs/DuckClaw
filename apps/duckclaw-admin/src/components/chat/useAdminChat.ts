@@ -47,6 +47,7 @@ export type UseAdminChatOptions = {
   /** Si se define, no se restaura otro worker desde historial/storage. */
   lockWorker?: string;
   projectId?: string;
+  knowledgeScope?: string;
   enabled?: boolean;
   /** Tras cada turno completado (para refrescar inbox). */
   onConversationActivity?: () => void;
@@ -203,6 +204,7 @@ export function useAdminChat({
   initialWorker = '',
   lockWorker = '',
   projectId = '',
+  knowledgeScope = '',
   enabled = true,
   onConversationActivity,
   onSandboxArtifacts,
@@ -746,6 +748,7 @@ export function useAdminChat({
         {
           worker_id: workerId,
           project_id: projectId || undefined,
+          knowledge_scope: knowledgeScope || undefined,
           message: text,
           chat_id: chatId,
           tenant_id: config?.effective_tenant_id ?? 'default',
@@ -911,6 +914,7 @@ export function useAdminChat({
       onSandboxArtifacts,
       workerId,
       projectId,
+      knowledgeScope,
       vaultPath,
       imageAttachments,
       voiceResponseMode,
@@ -1005,6 +1009,7 @@ export function useAdminChat({
             worker_id: workerId,
             chat_id: chatId,
             project_id: projectId || undefined,
+            knowledge_scope: knowledgeScope || undefined,
             audio_base64: audioBase64,
             voice_response: voiceResponseMode,
             language_hint: 'es',
@@ -1060,7 +1065,7 @@ export function useAdminChat({
         setLoading(false);
       }
     },
-    [loading, workerId, chatId, projectId, onConversationActivity, voiceResponseMode]
+    [loading, workerId, chatId, projectId, knowledgeScope, onConversationActivity, voiceResponseMode]
   );
 
   return {

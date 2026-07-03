@@ -56,6 +56,10 @@ class UpsertUserAgentCommand(WriteCommand):
     system_prompt: str = ""
     description: str = ""
     skills: list[str] = Field(default_factory=list)
+    soul: str = ""
+    tool_profile: str = "general"
+    browser_sandbox: bool = False
+    web_search: bool = False
 
 
 class UpsertCatalogSkillCommand(WriteCommand):

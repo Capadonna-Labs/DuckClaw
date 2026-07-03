@@ -67,12 +67,24 @@ def list_knowledge_sources(
     tenant_id: str,
     project_id: str = "",
     worker_uid: str = "",
+    knowledge_scope: str = "",
 ) -> list[dict[str, Any]]:
     """List active knowledge sources for a tenant with document/chunk counts."""
+    from duckclaw.knowledge_scope import default_knowledge_scope_for_project, normalize_knowledge_scope
+
+    scope = normalize_knowledge_scope(
+        knowledge_scope or default_knowledge_scope_for_project(project_id),
+        project_id=project_id,
+    )
     clauses = ["s.tenant_id = ?", "s.active = true"]
     params: list[Any] = [tenant_id]
-    if project_id:
-        clauses.append("(s.project_id = ? OR s.project_id = '')")
+    if scope == "platform":
+        clauses.append("(s.project_id = '' OR s.project_id IS NULL)")
+    elif scope == "project":
+        clauses.append("s.project_id = ?")
+        params.append(project_id)
+    elif project_id:
+        clauses.append("(s.project_id = ? OR s.project_id = '' OR s.project_id IS NULL)")
         params.append(project_id)
     if worker_uid:
         clauses.append("(s.worker_uid = ? OR s.worker_uid = '')")
@@ -239,18 +251,28 @@ def list_project_knowledge_documents(
     tenant_id: str,
     project_id: str,
     worker_uid: str = "",
+    knowledge_scope: str = "both",
     limit: int = 100,
 ) -> list[dict[str, Any]]:
-    """List active RAG documents for a project (for agent inventory tool)."""
-    if not project_id:
+    """List active RAG documents for a scope (for agent inventory tool)."""
+    from duckclaw.knowledge_scope import build_knowledge_scope_clauses, normalize_knowledge_scope, scope_allows_retrieval
+
+    scope = normalize_knowledge_scope(knowledge_scope, project_id=project_id)
+    if not scope_allows_retrieval(scope, project_id=project_id):
         return []
+    scope_clauses, scope_params = build_knowledge_scope_clauses(
+        knowledge_scope=scope,
+        project_id=project_id,
+        source_alias="s",
+        chunk_alias="c",
+    )
     clauses = [
         "s.tenant_id = ?",
         "s.active = true",
         "d.active = true",
-        "(s.project_id = ? OR s.project_id = '')",
+        *scope_clauses,
     ]
-    params: list[Any] = [tenant_id, project_id]
+    params: list[Any] = [tenant_id, *scope_params]
     if worker_uid:
         clauses.append("(s.worker_uid = ? OR s.worker_uid = '')")
         params.append(worker_uid)

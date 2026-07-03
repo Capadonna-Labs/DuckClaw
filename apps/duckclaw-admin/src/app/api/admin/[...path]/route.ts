@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { catalogFallbackResponse } from '@/lib/adminCatalogFallback';
+import { bffGatewayTimeoutMs } from '@/lib/bffGatewayTimeouts';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
@@ -21,6 +22,11 @@ const OPS_COMMANDS_FALLBACK = {
       id: 'start_stack',
       label: 'Iniciar plataforma',
       argv: ['__start_stack__'],
+    },
+    {
+      id: 'restart_stack',
+      label: 'Reiniciar plataforma (migrate + PM2)',
+      argv: ['__restart_stack__'],
     },
     {
       id: 'start_telegram_ingress',
@@ -101,16 +107,30 @@ function isWorkspaceProjectDetailPath(segments: string[]): boolean {
   return segments.length === 3 && segments[0] === 'workspace' && segments[1] === 'projects' && Boolean(segments[2]);
 }
 
+async function fetchGateway(
+  target: string,
+  init: RequestInit,
+  sub: string,
+  method: string
+): Promise<Response> {
+  const timeoutMs = bffGatewayTimeoutMs(sub, method);
+  return fetch(target, {
+    ...init,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+}
+
 async function projectDetailFallbackFromList(
   base: string,
   headers: Record<string, string>,
   projectId: string
 ): Promise<Record<string, unknown> | null> {
-  const listRes = await fetch(`${base}/api/v1/admin/workspace/projects?status=all&limit=200`, {
-    method: 'GET',
-    headers,
-    cache: 'no-store',
-  });
+  const listRes = await fetchGateway(
+    `${base}/api/v1/admin/workspace/projects?status=all&limit=200`,
+    { method: 'GET', headers, cache: 'no-store' },
+    'workspace/projects',
+    'GET'
+  );
   if (!listRes.ok) return null;
 
   const listJson = await listRes.json();
@@ -118,11 +138,12 @@ async function projectDetailFallbackFromList(
   const project = projects.find((item: { project_id?: string }) => item.project_id === projectId);
   if (!project) return null;
 
-  const agentsRes = await fetch(`${base}/api/v1/admin/workspace/projects/${encodeURIComponent(projectId)}/agents`, {
-    method: 'GET',
-    headers,
-    cache: 'no-store',
-  });
+  const agentsRes = await fetchGateway(
+    `${base}/api/v1/admin/workspace/projects/${encodeURIComponent(projectId)}/agents`,
+    { method: 'GET', headers, cache: 'no-store' },
+    `workspace/projects/${projectId}/agents`,
+    'GET'
+  );
   const agentsJson = agentsRes.ok ? await agentsRes.json() : {};
   const agents = Array.isArray(agentsJson?.agents) ? agentsJson.agents : project.agents ?? [];
 
@@ -231,10 +252,13 @@ async function proxy(req: NextRequest, segments: string[]) {
   let res: Response;
   let text: string;
   try {
-    res = await fetch(target, init);
+    res = await fetchGateway(target, init, sub, req.method);
     text = await res.text();
   } catch (err) {
     const msg = err instanceof Error ? err.message : 'fetch failed';
+    const timedOut =
+      (err instanceof Error && err.name === 'TimeoutError') ||
+      msg.toLowerCase().includes('aborted');
     const localOps = await localOpsRunFallback(sub, req.method, bodyText);
     if (localOps) return localOps;
     if (sub === 'health') {
@@ -248,7 +272,12 @@ async function proxy(req: NextRequest, segments: string[]) {
       );
     }
     return NextResponse.json(
-      { detail: `No se pudo contactar el gateway: ${msg}`, code: 'gateway_unreachable' },
+      {
+        detail: timedOut
+          ? `Gateway no respondió en ${bffGatewayTimeoutMs(sub, req.method) / 1000}s`
+          : `No se pudo contactar el gateway: ${msg}`,
+        code: 'gateway_unreachable',
+      },
       { status: 503 }
     );
   }

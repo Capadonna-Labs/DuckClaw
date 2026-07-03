@@ -11,25 +11,33 @@ from duckclaw.forge.skills.search_project_knowledge_bridge import _open_hub_db
 
 
 def get_project_context() -> str:
-    """Devuelve project_id, nombre, fuentes RAG y totales del turno actual."""
+    """Devuelve alcance RAG, proyecto, fuentes y totales del turno actual."""
     from duckclaw.admin_knowledge_read import list_knowledge_sources
     from duckclaw.forge.skills.knowledge_tool_context import (
         get_knowledge_tool_project_id,
+        get_knowledge_tool_scope,
         get_knowledge_tool_tenant_id,
         get_knowledge_tool_worker_uid,
     )
+    from duckclaw.knowledge_scope import SCOPE_LABELS_ES, normalize_knowledge_scope, scope_allows_retrieval
 
     project_id = get_knowledge_tool_project_id()
     tenant_id = get_knowledge_tool_tenant_id()
     worker_uid = get_knowledge_tool_worker_uid()
+    scope = normalize_knowledge_scope(get_knowledge_tool_scope(), project_id=project_id)
 
-    if not project_id:
+    if not scope_allows_retrieval(scope, project_id=project_id):
         return json.dumps(
             {
-                "project_id": "",
+                "project_id": project_id or "",
+                "knowledge_scope": scope,
+                "knowledge_scope_label": SCOPE_LABELS_ES.get(scope, scope),
                 "tenant_id": tenant_id,
                 "worker_uid": worker_uid,
-                "warning": "No hay proyecto en esta conversación. Elige uno en Run settings → Proyecto.",
+                "warning": (
+                    "Alcance «Proyecto» requiere elegir un proyecto en Run settings, "
+                    "o cambia a Plataforma / Plataforma + proyecto."
+                ),
                 "source_count": 0,
                 "chunk_count": 0,
             },
@@ -39,22 +47,24 @@ def get_project_context() -> str:
     db = None
     try:
         db = _open_hub_db()
-        name = project_id
-        try:
-            row = db.execute(
-                "SELECT name, status FROM main.admin_projects WHERE project_id = ? AND tenant_id = ? LIMIT 1",
-                [project_id, tenant_id],
-            ).fetchone()
-            if row and row[0]:
-                name = str(row[0])
-        except Exception:
-            pass
+        name = project_id or SCOPE_LABELS_ES.get(scope, "Plataforma")
+        if project_id:
+            try:
+                row = db.execute(
+                    "SELECT name, status FROM main.admin_projects WHERE project_id = ? AND tenant_id = ? LIMIT 1",
+                    [project_id, tenant_id],
+                ).fetchone()
+                if row and row[0]:
+                    name = str(row[0])
+            except Exception:
+                pass
 
         sources = list_knowledge_sources(
             db,
             tenant_id=tenant_id,
             project_id=project_id,
             worker_uid=worker_uid,
+            knowledge_scope=scope,
         )
         chunk_total = sum(int(s.get("chunk_count") or 0) for s in sources)
         doc_total = sum(int(s.get("document_count") or 0) for s in sources)
@@ -70,6 +80,7 @@ def get_project_context() -> str:
                 "display_name": s.get("display_name") or s.get("source_id"),
                 "source_kind": s.get("source_kind"),
                 "status": s.get("status"),
+                "project_id": s.get("project_id") or "",
                 "document_count": int(s.get("document_count") or 0),
                 "chunk_count": int(s.get("chunk_count") or 0),
             }
@@ -77,8 +88,10 @@ def get_project_context() -> str:
         ]
 
         payload: dict[str, Any] = {
-            "project_id": project_id,
+            "project_id": project_id or "",
             "project_name": name,
+            "knowledge_scope": scope,
+            "knowledge_scope_label": SCOPE_LABELS_ES.get(scope, scope),
             "tenant_id": tenant_id,
             "worker_uid": worker_uid,
             "source_count": len(sources),
@@ -90,6 +103,10 @@ def get_project_context() -> str:
         if chunk_total == 0 and len(sources) > 0:
             payload["warning"] = (
                 "Hay fuentes registradas pero 0 fragmentos indexados; RAG no inyectará contenido hasta indexar."
+            )
+        elif chunk_total == 0:
+            payload["warning"] = (
+                "No hay conocimiento indexado para este alcance. Sube documentos en Conocimiento."
             )
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
@@ -108,8 +125,8 @@ def register_get_project_context_tool(tools_list: list[Any]) -> None:
             get_project_context,
             name="get_project_context",
             description=(
-                "Resumen del proyecto activo: nombre, fuentes RAG, fragmentos indexados y avisos. "
-                "Úsalo al inicio si necesitas saber si hay conocimiento disponible o falta elegir proyecto."
+                "Resumen del alcance RAG activo: plataforma/proyecto/ambos, fuentes, fragmentos y avisos. "
+                "Úsalo al inicio si necesitas saber qué conocimiento está disponible."
             ),
         )
     )

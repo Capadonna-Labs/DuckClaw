@@ -42,6 +42,21 @@ def _seed_knowledge_hub(con) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _reset_knowledge_tool_context() -> None:
+    from duckclaw.forge.skills.knowledge_tool_context import (
+        set_knowledge_tool_project_id,
+        set_knowledge_tool_scope,
+        set_knowledge_tool_tenant_id,
+        set_knowledge_tool_worker_uid,
+    )
+
+    set_knowledge_tool_tenant_id("default")
+    set_knowledge_tool_project_id("")
+    set_knowledge_tool_scope("")
+    set_knowledge_tool_worker_uid("")
+
+
 @pytest.fixture
 def hub_with_knowledge(tmp_path: Path):
     import duckdb
@@ -155,11 +170,24 @@ def test_read_project_knowledge_returns_content(
     assert "least privilege" in payload["content"].lower()
 
 
-def test_search_project_knowledge_requires_project_id() -> None:
-    from duckclaw.forge.skills.knowledge_tool_context import set_knowledge_tool_project_id
-    from duckclaw.forge.skills.search_project_knowledge_bridge import search_project_knowledge
+def test_get_project_context_includes_knowledge_scope(
+    hub_with_knowledge: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw.forge.skills.knowledge_tool_context import (
+        set_knowledge_tool_project_id,
+        set_knowledge_tool_scope,
+        set_knowledge_tool_tenant_id,
+    )
+    from duckclaw.forge.skills.get_project_context_bridge import get_project_context
 
-    set_knowledge_tool_project_id("")
-    payload = json.loads(search_project_knowledge("anything"))
-    assert "error" in payload
-    assert "project_id" in payload["error"].lower()
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.search_project_knowledge_bridge._resolve_hub_db_path",
+        lambda: str(hub_with_knowledge),
+    )
+    set_knowledge_tool_tenant_id("tenant_a")
+    set_knowledge_tool_project_id("proj_a")
+    set_knowledge_tool_scope("both")
+    payload = json.loads(get_project_context())
+    assert payload["knowledge_scope"] == "both"
+    assert payload["document_count"] == 1

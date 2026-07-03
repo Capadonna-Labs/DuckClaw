@@ -36,6 +36,13 @@ import {
   PM2_LOG_VIEWPORT_SHELL_CLASS,
 } from '@/components/admin/Pm2LiveLogsPanel';
 import { writeLastProjectId } from '@/lib/floatingChatProject';
+import { KnowledgeScopeControl } from '@/components/playground/KnowledgeScopeControl';
+import {
+  defaultKnowledgeScope,
+  knowledgeScopeLabel,
+  normalizeKnowledgeScope,
+  type KnowledgeScope,
+} from '@/lib/knowledgeScope';
 import type { FlyCommandEntry } from '@/types/admin';
 
 const FREQUENT_CHAT_COMMANDS = new Set(['/team', '/vault', '/model', '/workers']);
@@ -54,6 +61,9 @@ export default function PlaygroundPage() {
   const [config, setConfig] = useState<PlaygroundConfig | null>(null);
   const [workerId, setWorkerId] = useState(initialWorker);
   const [projectId, setProjectId] = useState(initialProject);
+  const [knowledgeScope, setKnowledgeScope] = useState<KnowledgeScope>(
+    defaultKnowledgeScope(initialProject)
+  );
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [sandboxToggling, setSandboxToggling] = useState(false);
@@ -96,6 +106,7 @@ export default function PlaygroundPage() {
     chatId: conv.sessionId ?? '',
     initialWorker: workerId,
     projectId,
+    knowledgeScope,
     enabled: Boolean(conv.sessionId),
     onConversationActivity: conv.bumpRefresh,
     onSandboxArtifacts: (payload) => {
@@ -110,6 +121,7 @@ export default function PlaygroundPage() {
 
   useEffect(() => {
     writeLastProjectId(projectId);
+    setKnowledgeScope((prev) => normalizeKnowledgeScope(prev, projectId));
   }, [projectId]);
 
   useEffect(() => {
@@ -169,6 +181,9 @@ export default function PlaygroundPage() {
       )
       .then((c) => {
         setConfig(c);
+        if (c.knowledge_scope) {
+          setKnowledgeScope(normalizeKnowledgeScope(c.knowledge_scope, projectId));
+        }
         const fromServer = (c.selected_worker_id || '').trim();
         const ids = workerOptionIds(c.workers);
         let nextWorker = ids[0] ?? '';
@@ -182,7 +197,28 @@ export default function PlaygroundPage() {
         setWorkerId(nextWorker);
       })
       .catch(() => undefined);
-  }, [initialWorker, conv.sessionId]);
+  }, [initialWorker, conv.sessionId, projectId]);
+
+  const persistKnowledgeScope = useCallback(
+    async (nextScope: KnowledgeScope) => {
+      const normalized = normalizeKnowledgeScope(nextScope, projectId);
+      setKnowledgeScope(normalized);
+      const chatId = conv.sessionId ?? '';
+      if (!chatId) return;
+      try {
+        await adminService.setPlaygroundKnowledgeScope({
+          chat_id: chatId,
+          tenant_id: config?.effective_tenant_id,
+          knowledge_scope: normalized,
+          project_id: projectId || undefined,
+        });
+        loadConfig();
+      } catch {
+        /* keep local selection */
+      }
+    },
+    [conv.sessionId, config?.effective_tenant_id, projectId, loadConfig]
+  );
 
   useEffect(() => {
     loadConfig();
@@ -336,6 +372,7 @@ export default function PlaygroundPage() {
           />
           <PlaygroundRagProjectWarning
             projectId={projectId}
+            knowledgeScope={knowledgeScope}
             indexedSourceCount={indexedKnowledgeSources}
             onOpenRouting={() => setSettingsModal('routing')}
           />
@@ -349,6 +386,7 @@ export default function PlaygroundPage() {
       conv.sessionId,
       handleSandboxToggle,
       indexedKnowledgeSources,
+      knowledgeScope,
       projectId,
       sandboxRefreshKey,
       sandboxToggling,
@@ -386,6 +424,7 @@ export default function PlaygroundPage() {
           ) || workerId || '—'
         }
         projectLabel={activeProject?.name || 'Todos los agentes'}
+        knowledgeScopeLabel={knowledgeScopeLabel(knowledgeScope)}
         systemPreview={systemPreview}
         systemReady={Boolean(systemPreview.trim())}
         invalidWorkers={config?.workers_invalid ?? []}
@@ -407,13 +446,14 @@ export default function PlaygroundPage() {
     <>
       {settingsModal === 'routing' && (
         <SettingsModal
-          title="Configurar proyecto y agente"
-          description="Selecciona contexto sin ensuciar la superficie del chat."
+          title="Contexto del chat"
+          description="Proyecto, agente y alcance de conocimiento RAG."
           onClose={() => setSettingsModal(null)}
         >
           <ProjectAgentControls
             config={config}
             projectId={projectId}
+            knowledgeScope={knowledgeScope}
             activeProject={activeProject}
             projectWorkerIds={projectWorkerIds}
             selectableWorkers={selectableWorkers}
@@ -423,6 +463,7 @@ export default function PlaygroundPage() {
               setWorkerId('');
             }}
             onWorkerChange={selectWorker}
+            onKnowledgeScopeChange={(scope) => void persistKnowledgeScope(scope)}
           />
         </SettingsModal>
       )}
@@ -879,24 +920,28 @@ function SettingValue({ label, value }: { label: string; value: string }) {
 function ProjectAgentControls({
   config,
   projectId,
+  knowledgeScope,
   activeProject,
   projectWorkerIds,
   selectableWorkers,
   workerId,
   onProjectChange,
   onWorkerChange,
+  onKnowledgeScopeChange,
 }: {
   config: PlaygroundConfig | null;
   projectId: string;
+  knowledgeScope: KnowledgeScope;
   activeProject?: NonNullable<PlaygroundConfig['projects']>[number];
   projectWorkerIds: string[];
   selectableWorkers: NonNullable<PlaygroundConfig['workers']>;
   workerId: string;
   onProjectChange: (projectId: string) => void;
   onWorkerChange: (workerId: string) => void;
+  onKnowledgeScopeChange: (scope: KnowledgeScope) => void;
 }) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {(config?.projects?.length ?? 0) > 0 && (
         <label className="block space-y-1.5">
           <span className="text-xs font-bold text-gov-gray-500">Proyecto</span>
@@ -935,6 +980,12 @@ function ProjectAgentControls({
           })}
         </select>
       </label>
+
+      <KnowledgeScopeControl
+        value={knowledgeScope}
+        projectId={projectId}
+        onChange={onKnowledgeScopeChange}
+      />
 
       <p className="rounded-2xl border border-gov-blue-100 bg-gov-blue-50/70 p-3 text-xs text-gov-blue-800 dark:border-dark-border dark:bg-dark-bg dark:text-dark-cyan">
         {activeProject

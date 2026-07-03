@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
@@ -179,24 +180,34 @@ async def admin_auth_me(request: Request) -> dict[str, Any]:
         await destroy_session(redis_client, session_id)
         raise HTTPException(status_code=401, detail="Session user missing")
 
-    with open_gateway_db(read_only=True) as db:
-        user = get_by_email(db, email)
-        if not user or not bool(user.get("active", True)):
-            await destroy_session(redis_client, session_id)
-            raise HTTPException(status_code=401, detail="Session user not active")
-        public_user = {
-            **session,
-            "email": user.get("email"),
-            "nombre": user.get("nombre"),
-            "rol": user.get("rol"),
-            "initials": user.get("initials") or "",
-        }
-        session = attach_profile_to_console_user(db, public_user)
+    def _resolve_session_from_db() -> dict[str, Any] | None:
+        with open_gateway_db(read_only=True) as db:
+            user = get_by_email(db, email)
+            if not user or not bool(user.get("active", True)):
+                return None
+            public_user = {
+                **session,
+                "email": user.get("email"),
+                "nombre": user.get("nombre"),
+                "rol": user.get("rol"),
+                "initials": user.get("initials") or "",
+            }
+            return attach_profile_to_console_user(db, public_user)
+
+    resolved = await asyncio.to_thread(_resolve_session_from_db)
+    if resolved is None:
+        await destroy_session(redis_client, session_id)
+        raise HTTPException(status_code=401, detail="Session user not active")
+    session = resolved
 
     session = await refresh_session(redis_client, session_id, session)
     if not (session.get("profile") or {}).get("tenant_id") and email:
-        with open_gateway_db(read_only=True) as db:
-            session = attach_profile_to_console_user(db, dict(session))
+
+        def _attach_profile() -> dict[str, Any]:
+            with open_gateway_db(read_only=True) as db:
+                return attach_profile_to_console_user(db, dict(session))
+
+        session = await asyncio.to_thread(_attach_profile)
     return {"user": session_user_public(session)}
 
 

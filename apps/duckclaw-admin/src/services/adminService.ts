@@ -225,6 +225,24 @@ export interface ManagedWorkspaceDraft {
   questions: string[];
 }
 
+export interface UserAgentDraft {
+  display_name: string;
+  worker_id: string;
+  description: string;
+  system_prompt: string;
+  soul: string;
+  tool_profile: 'general' | 'minimal' | 'rag_only';
+  skills: string[];
+  browser_sandbox: boolean;
+  web_search: boolean;
+  suggested_skills: {
+    name: string;
+    reason: string;
+    available: boolean;
+  }[];
+  questions: string[];
+}
+
 export interface PromptPolicy {
   policy_id: string;
   policy_type: string;
@@ -816,6 +834,10 @@ export const adminService = {
     system_prompt?: string;
     description?: string;
     skills?: string[];
+    soul?: string;
+    tool_profile?: string;
+    browser_sandbox?: boolean;
+    web_search?: boolean;
   }) =>
     adminFetch<{
       ok: boolean;
@@ -831,6 +853,31 @@ export const adminService = {
     }>('/user-agents', {
       method: 'POST',
       body: JSON.stringify(body),
+    }),
+
+  createUserAgentDraft: (body: { prompt: string; display_name?: string; worker_id?: string }) =>
+    adminFetch<UserAgentDraft>('/user-agents/draft', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  confirmUserAgentDraft: (draft: UserAgentDraft) =>
+    adminFetch<{
+      ok: boolean;
+      task_id: string;
+      worker_id: string;
+      agent: {
+        tenant_id: string;
+        owner_email: string;
+        worker_id: string;
+        display_name: string;
+        source_template_id: string;
+        manifest_path: string;
+        active: boolean;
+      };
+    }>('/user-agents/draft/confirm', {
+      method: 'POST',
+      body: JSON.stringify({ draft }),
     }),
 
   deactivateTemplate: (id: string) =>
@@ -1644,6 +1691,7 @@ export const adminService = {
     return adminFetch<{
       llm: { provider: string; model: string; base_url: string; scope?: string };
       config_chat_id?: string;
+      knowledge_scope?: string;
       catalog: {
         id: string;
         label: string;
@@ -1724,6 +1772,24 @@ export const adminService = {
       vault_db_path: string;
       vault: PlaygroundVaultInfo;
     }>('/playground/vault', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  setPlaygroundKnowledgeScope: (body: {
+    chat_id: string;
+    tenant_id?: string;
+    knowledge_scope: string;
+    project_id?: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      chat_id: string;
+      tenant_id: string;
+      knowledge_scope: string;
+      project_id?: string | null;
+      message: string;
+    }>('/playground/knowledge-scope', {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
@@ -1985,6 +2051,7 @@ export const adminService = {
   playgroundChat: (body: {
     worker_id: string;
     project_id?: string;
+    knowledge_scope?: string;
     message: string;
     chat_id?: string;
     tenant_id?: string;
@@ -2020,6 +2087,7 @@ export const adminService = {
     body: {
       worker_id: string;
       project_id?: string;
+      knowledge_scope?: string;
       message: string;
       chat_id?: string;
       tenant_id?: string;

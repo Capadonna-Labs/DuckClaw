@@ -45,6 +45,10 @@ class ChatRequest(BaseModel):
         None,
         description="ID del proyecto admin para contexto RAG y search_project_knowledge.",
     )
+    knowledge_scope: str | None = Field(
+        None,
+        description="Alcance RAG: platform | project | both",
+    )
     shared_db_path: str | None = Field(
         None,
         description="Ruta a .duckdb compartido; solo tiene efecto en workers con forge_context.shared_db_path_env.",

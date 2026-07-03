@@ -25,6 +25,7 @@ export type PlaygroundRunSettingsPanelProps = {
   activeVaultScope?: string;
   workerLabel: string;
   projectLabel: string;
+  knowledgeScopeLabel: string;
   systemPreview: string;
   systemReady: boolean;
   invalidWorkers: string[];
@@ -59,6 +60,7 @@ export function PlaygroundRunSettingsPanel({
   activeVaultScope,
   workerLabel,
   projectLabel,
+  knowledgeScopeLabel,
   systemPreview,
   systemReady,
   invalidWorkers,
@@ -148,7 +150,13 @@ export function PlaygroundRunSettingsPanel({
           <StudioFieldRow
             label="Proyecto"
             value={projectLabel}
-            hint="Filtro de agentes y RAG"
+            hint="Filtro de agentes"
+            onClick={() => onOpen('routing')}
+          />
+          <StudioFieldRow
+            label="RAG"
+            value={knowledgeScopeLabel}
+            hint="Alcance de conocimiento en chat"
             onClick={() => onOpen('routing')}
           />
           <StudioFieldRow

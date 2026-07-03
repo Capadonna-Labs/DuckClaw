@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { AdminRole, AdminUser } from '@/types/admin';
 import { normalizeAdminRole } from '@/lib/roles';
+import { writeAuthSnapshot } from '@/lib/authSessionCache';
 
 function parseLoginError(status: number, data: unknown): string {
   if (status === 429) return 'Demasiados intentos. Espera un momento.';
@@ -22,6 +23,7 @@ interface AuthState {
   isAuthenticated: boolean;
   isSubmitting: boolean;
   loginError: string | null;
+  authError: string | null;
   returnTo: string | null;
   hasHydrated: boolean;
 
@@ -30,6 +32,7 @@ interface AuthState {
   logout: () => Promise<void>;
   setReturnTo: (path: string | null) => void;
   setHasHydrated: (value: boolean) => void;
+  setAuthError: (message: string | null) => void;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -37,18 +40,23 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   isAuthenticated: false,
   isSubmitting: false,
   loginError: null,
+  authError: null,
   returnTo: null,
   hasHydrated: false,
 
-  setUser: (user) =>
+  setUser: (user) => {
+    writeAuthSnapshot(user);
     set({
       usuario: user,
       isAuthenticated: Boolean(user),
-    }),
+    });
+  },
 
   setReturnTo: (path) => set({ returnTo: path }),
 
   setHasHydrated: (value) => set({ hasHydrated: value }),
+
+  setAuthError: (message) => set({ authError: message }),
 
   loginWithCredentials: async (email, password) => {
     set({ isSubmitting: true, loginError: null });
@@ -78,6 +86,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         isAuthenticated: true,
         isSubmitting: false,
         loginError: null,
+        authError: null,
       });
     } catch {
       set({ isSubmitting: false, loginError: 'No se pudo conectar con el servidor' });
@@ -99,6 +108,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       isAuthenticated: false,
       isSubmitting: false,
       loginError: null,
+      authError: null,
       returnTo: get().returnTo,
     });
   },

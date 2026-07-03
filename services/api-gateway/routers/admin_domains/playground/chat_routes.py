@@ -94,6 +94,7 @@ async def playground_voice(
         worker_id=body.worker_id,
         chat_id=body.chat_id,
         project_id=body.project_id,
+        knowledge_scope=body.knowledge_scope,
         msg=msg,
         request=request,
     )

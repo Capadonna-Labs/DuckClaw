@@ -15,6 +15,9 @@ interface TopbarProps {
   onMenuClick?: () => void;
 }
 
+const STACK_RESTART_SUCCESS_MSG =
+  'DB-Writer y Gateway reiniciados. Reintenta la carga RAG en unos segundos.';
+
 export default function Topbar({ onMenuClick }: TopbarProps) {
   const { usuario, logout } = useAuthStore();
   const { theme, toggleTheme } = useTheme();
@@ -23,6 +26,14 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
   const canRunOps = usuario?.rol === 'admin';
   const [stackRestarting, setStackRestarting] = useState(false);
   const [stackRestartMessage, setStackRestartMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (stackRestartMessage !== STACK_RESTART_SUCCESS_MSG) return;
+    const timer = window.setTimeout(() => {
+      window.location.reload();
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [stackRestartMessage]);
 
   const handleLogout = () => {
     logout();
@@ -46,7 +57,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       const gateway = await adminService.runOps('pm2_restart_gateway');
       setStackRestartMessage(
         writer.ok && gateway.ok
-          ? 'DB-Writer y Gateway reiniciados. Reintenta la carga RAG en unos segundos.'
+          ? STACK_RESTART_SUCCESS_MSG
           : 'PM2 no confirmó el reinicio completo de DB-Writer/Gateway.'
       );
     } catch (e) {

@@ -21,8 +21,10 @@ export type NormalizedOpsRunResult = OpsRunResult & {
 /** Ops que no deben ejecutarse vía gateway (reinician el propio gateway). */
 export const HOST_ONLY_OPS = new Set([
   'pm2_restart_gateway',
+  'pm2_restart_db_writer',
   'pm2_start_gateway',
   'start_stack',
+  'restart_stack',
   'start_telegram_ingress',
 ]);
 
@@ -75,6 +77,9 @@ export function formatOpsOutput(r: OpsRunResult): string {
     lines.push(
       'Admin móvil (:8443): si la página se cortó unos segundos, recarga; el proxy Serve se re-aplicó al final.'
     );
+  }
+  if (r.op_id === 'restart_stack' && ok) {
+    lines.push('Stack recuperado: migraciones aplicadas y PM2 relanzado. Espera unos segundos y recarga.');
   }
   if (r.op_id === 'start_telegram_ingress' && ok) {
     lines.push('Tailscale Funnel activo. Prueba un mensaje al bot en Telegram.');

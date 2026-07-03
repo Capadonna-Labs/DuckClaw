@@ -9,14 +9,54 @@ import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { useEffect, useRef, useState } from 'react';
 import { adminService } from '@/services/adminService';
+import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { PlatformStatusStrip } from '@/components/admin/GatewayStatusBadge';
+
+const DEBUG_LOG_ENDPOINT = 'http://127.0.0.1:7477/ingest/4cb00f05-d949-473c-91c2-92e570fd43ec';
+const DEBUG_SESSION_ID = 'ab0734';
+
+// #region agent log
+function agentLog(
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown>
+) {
+  fetch(DEBUG_LOG_ENDPOINT, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': DEBUG_SESSION_ID,
+    },
+    body: JSON.stringify({
+      sessionId: DEBUG_SESSION_ID,
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+      runId: 'topbar-restart',
+    }),
+  }).catch(() => {});
+}
+// #endregion
 
 interface TopbarProps {
   onMenuClick?: () => void;
 }
 
-const STACK_RESTART_SUCCESS_MSG =
-  'DB-Writer y Gateway reiniciados. Reintenta la carga RAG en unos segundos.';
+async function waitForGatewayHealth(attempts = 20, delayMs = 2000): Promise<boolean> {
+  for (let i = 0; i < attempts; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+    try {
+      await adminService.health();
+      return true;
+    } catch {
+      /* retry */
+    }
+  }
+  return false;
+}
 
 export default function Topbar({ onMenuClick }: TopbarProps) {
   const { usuario, logout } = useAuthStore();
@@ -28,10 +68,10 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
   const [stackRestartMessage, setStackRestartMessage] = useState<string | null>(null);
 
   useEffect(() => {
-    if (stackRestartMessage !== STACK_RESTART_SUCCESS_MSG) return;
+    if (!stackRestartMessage?.startsWith('Stack recuperado')) return;
     const timer = window.setTimeout(() => {
       window.location.reload();
-    }, 3000);
+    }, 4000);
     return () => window.clearTimeout(timer);
   }, [stackRestartMessage]);
 
@@ -52,16 +92,39 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
     if (!canRunOps) return;
     setStackRestarting(true);
     setStackRestartMessage(null);
+    agentLog('H1', 'Topbar.tsx:restartStack', 'restart_stack invoked', {});
     try {
-      const writer = await adminService.runOps('pm2_restart_db_writer');
-      const gateway = await adminService.runOps('pm2_restart_gateway');
+      const result = await adminService.runOps('restart_stack');
+      agentLog('H1', 'Topbar.tsx:restartStack', 'restart_stack ops result', {
+        ok: result.ok,
+        exit_code: result.exit_code,
+        executed_via: result.executed_via,
+      });
+      if (!result.ok) {
+        setStackRestartMessage(
+          formatOpsOutput({
+            ok: false,
+            exit_code: result.exit_code,
+            stdout: result.stdout,
+            stderr: result.stderr,
+            executed_via: result.executed_via,
+            op_id: 'restart_stack',
+          })
+        );
+        return;
+      }
+      setStackRestartMessage('Recuperando gateway (health check)…');
+      const healthy = await waitForGatewayHealth();
+      agentLog('H3', 'Topbar.tsx:restartStack', 'health wait finished', { healthy });
       setStackRestartMessage(
-        writer.ok && gateway.ok
-          ? STACK_RESTART_SUCCESS_MSG
-          : 'PM2 no confirmó el reinicio completo de DB-Writer/Gateway.'
+        healthy
+          ? 'Stack recuperado: migraciones + PM2. Recargando consola…'
+          : 'Migraciones y PM2 OK, pero /health no respondió aún. Espera 30s y recarga manualmente.'
       );
     } catch (e) {
-      setStackRestartMessage(e instanceof Error ? e.message : 'No se pudo reiniciar DB-Writer/Gateway');
+      const msg = e instanceof Error ? e.message : 'No se pudo reiniciar el stack';
+      agentLog('H5', 'Topbar.tsx:restartStack', 'restart_stack failed', { message: msg });
+      setStackRestartMessage(msg);
     } finally {
       setStackRestarting(false);
     }
@@ -86,7 +149,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
                 onClick={() => void restartStack()}
                 disabled={stackRestarting}
                 className="inline-flex items-center gap-2 rounded-xl border border-gov-blue-100 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
-                title="Reiniciar DuckClaw-DB-Writer y DuckClaw-Gateway con PM2"
+                title="Migraciones DuckDB + reinicio DuckClaw-DB-Writer y DuckClaw-Gateway (PM2)"
               >
                 <RefreshCw size={14} className={stackRestarting ? 'animate-spin' : ''} />
                 <span className="hidden sm:inline">
@@ -94,7 +157,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
                 </span>
               </button>
               {stackRestartMessage && (
-                <div className="absolute right-0 top-full z-50 mt-2 w-72 max-w-[calc(100vw-2rem)] rounded-2xl border bg-white p-3 text-xs font-semibold text-gov-gray-700 shadow-lg dark:border-dark-border dark:bg-dark-surface dark:text-dark-text">
+                <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border bg-white p-3 text-xs font-semibold text-gov-gray-700 shadow-lg dark:border-dark-border dark:bg-dark-surface dark:text-dark-text whitespace-pre-wrap">
                   {stackRestartMessage}
                 </div>
               )}

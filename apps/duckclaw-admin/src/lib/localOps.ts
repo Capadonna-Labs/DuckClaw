@@ -1,6 +1,7 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { HOST_ONLY_OPS, type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { runStackRecoverLocal } from '@/lib/stackRecover';
 import { runStackStartLocal } from '@/lib/stackStart';
 import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
 
@@ -28,6 +29,10 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
   start_stack: {
     label: 'Iniciar plataforma',
     argv: ['__start_stack__'],
+  },
+  restart_stack: {
+    label: 'Reiniciar plataforma (migrate + PM2)',
+    argv: ['__restart_stack__'],
   },
   start_telegram_ingress: {
     label: 'Activar Tailscale (Telegram webhook)',
@@ -91,6 +96,9 @@ export function listOpsCommands() {
 export function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult> {
   if (opId === 'start_stack') {
     return runStackStartLocal();
+  }
+  if (opId === 'restart_stack') {
+    return runStackRecoverLocal();
   }
   if (opId === 'start_telegram_ingress') {
     return runTelegramIngressStartLocal();

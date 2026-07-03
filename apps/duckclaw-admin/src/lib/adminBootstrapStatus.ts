@@ -29,38 +29,77 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
   });
 }
 
-async function resolvePm2GatewayStatus(): Promise<AdminBootstrapStatus['pm2Status']> {
+async function resolvePm2GatewayStatus(): Promise<{
+  status: AdminBootstrapStatus['pm2Status'];
+  restartCount: number | null;
+}> {
   try {
     const [bin, arg] = PM2_JLIST_COMMAND.split(' ');
     const { stdout } = await execFileAsync(bin, [arg], { timeout: 2_000 });
     const rows = JSON.parse(stdout || '[]') as unknown;
-    if (!Array.isArray(rows)) return 'unknown';
+    if (!Array.isArray(rows)) return { status: 'unknown', restartCount: null };
     const gateway = rows.find((row) => {
       if (!row || typeof row !== 'object') return false;
       return (row as { name?: string }).name === 'DuckClaw-Gateway';
-    }) as { pm2_env?: { status?: string } } | undefined;
-    if (!gateway) return 'missing';
+    }) as { pm2_env?: { status?: string; restart_time?: number } } | undefined;
+    if (!gateway) return { status: 'missing', restartCount: null };
     const status = gateway.pm2_env?.status;
-    if (status === 'online' || status === 'stopped' || status === 'errored') return status;
-    return 'unknown';
+    const restartCount =
+      typeof gateway.pm2_env?.restart_time === 'number' ? gateway.pm2_env.restart_time : null;
+    if (status === 'online' || status === 'stopped' || status === 'errored') {
+      return { status, restartCount };
+    }
+    return { status: 'unknown', restartCount };
   } catch {
-    return 'unknown';
+    return { status: 'unknown', restartCount: null };
   }
 }
 
 function baseStatusFields(pm2Status: AdminBootstrapStatus['pm2Status']) {
   return {
     pm2Status,
-    recoveryCommand: 'pnpm stack:up',
+    recoveryCommand: 'Reiniciar stack (barra superior: migrate + PM2)',
   };
 }
+
+// #region agent log
+function agentLog(
+  hypothesisId: string,
+  location: string,
+  message: string,
+  data: Record<string, unknown>
+) {
+  fetch('http://127.0.0.1:7477/ingest/4cb00f05-d949-473c-91c2-92e570fd43ec', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Debug-Session-Id': 'ab0734',
+    },
+    body: JSON.stringify({
+      sessionId: 'ab0734',
+      hypothesisId,
+      location,
+      message,
+      data,
+      timestamp: Date.now(),
+      runId: 'bootstrap-status',
+    }),
+  }).catch(() => {});
+}
+// #endregion
 
 export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatus> {
   const base = gatewayBase();
   const key = adminApiKey();
   const checkedAt = new Date().toISOString();
   const gatewayHint = gatewayConnectHint();
-  const pm2Status = await resolvePm2GatewayStatus();
+  const pm2 = await resolvePm2GatewayStatus();
+  const pm2Status = pm2.status;
+  agentLog('H1', 'adminBootstrapStatus.ts:resolve', 'bootstrap status probe', {
+    pm2Status,
+    restartCount: pm2.restartCount,
+    gatewayConfigured: Boolean(base),
+  });
 
   if (!base) {
     return {
@@ -95,6 +134,17 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
       };
     }
   } catch (err) {
+    const detail =
+      pm2.restartCount != null && pm2.restartCount >= 20
+        ? `${err instanceof Error ? err.message : 'fetch failed'} (PM2 reinicios: ${pm2.restartCount}; probable crash loop — usa Reiniciar stack)`
+        : err instanceof Error
+          ? err.message
+          : 'fetch failed';
+    agentLog('H1', 'adminBootstrapStatus.ts:health-fail', 'gateway health unreachable', {
+      detail,
+      pm2Status,
+      restartCount: pm2.restartCount,
+    });
     return {
       gatewayConfigured: true,
       gatewayReachable: false,
@@ -103,7 +153,7 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
       canAttemptLogin: false,
       code: 'gateway_unreachable',
       message: 'Gateway iniciando o sin responder.',
-      detail: err instanceof Error ? err.message : 'fetch failed',
+      detail,
       gatewayHint,
       ...baseStatusFields(pm2Status),
       checkedAt,

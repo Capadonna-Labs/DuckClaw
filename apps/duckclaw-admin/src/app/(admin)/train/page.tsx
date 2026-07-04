@@ -1,48 +1,84 @@
-import SettingsSection from '@/components/settings/SettingsSection';
-import { GraduationCap, Terminal } from 'lucide-react';
+'use client';
+
+import { useState } from 'react';
+import { Database, Settings2, Play } from 'lucide-react';
+import TrainDataStep, { type DataSource } from '@/components/train/TrainDataStep';
+import TrainConfigStep, { type LoraConfig, type TrainBackend } from '@/components/train/TrainConfigStep';
+import TrainRunStep from '@/components/train/TrainRunStep';
+
+type StepId = 'data' | 'config' | 'run';
+
+const STEPS: { id: StepId; label: string; icon: typeof Database }[] = [
+  { id: 'data', label: '1. Datos', icon: Database },
+  { id: 'config', label: '2. Configuracion', icon: Settings2 },
+  { id: 'run', label: '3. Entrenar', icon: Play },
+];
+
+const DEFAULT_CONFIG: LoraConfig = {
+  model: 'Qwen/Qwen3-0.6B',
+  rank: 8,
+  alpha: 16,
+  lr: '1e-4',
+  epochs: 2,
+  batchSize: 4,
+  maxSeqLen: 1024,
+};
 
 export default function TrainPage() {
+  const [step, setStep] = useState<StepId>('data');
+  const [source, setSource] = useState<DataSource>('traces');
+  const [hfDataset, setHfDataset] = useState('');
+  const [config, setConfig] = useState<LoraConfig>(DEFAULT_CONFIG);
+  const [backend, setBackend] = useState<TrainBackend>('mlx');
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-6 max-w-4xl mx-auto">
       <header>
         <h1 className="text-3xl font-black dark:text-dark-text">Train</h1>
         <p className="text-sm text-gov-gray-500 mt-1">
-          SFT / GRPO pipeline — CLI only (admin API removed)
+          Fine-tuning con LoRA — conecta tu dataset, configura hiperparametros y entrena.
         </p>
       </header>
 
-      <SettingsSection
-        titulo="Usar CLI"
-        descripcion="El panel admin ya no ejecuta el pipeline de entrenamiento."
-        icono={<GraduationCap size={22} />}
-      >
-        <p className="text-sm text-gov-gray-600 dark:text-gov-gray-400 mb-4">
-          Ejecuta el pipeline desde el monorepo con DuckOps o los scripts bajo{' '}
-          <code className="font-mono text-xs">packages/agents/train/</code>.
-        </p>
-        <pre className="p-4 rounded-xl bg-gov-gray-50 dark:bg-dark-bg text-xs font-mono whitespace-pre-wrap">
-          {`# Desde la raíz del repo
-uv run duckops train -c packages/agents/train/config/lora_config.yaml
+      <nav className="flex gap-1 rounded-2xl border dark:border-dark-border bg-gov-gray-50 dark:bg-dark-bg p-1">
+        {STEPS.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setStep(id)}
+            className={`flex-1 flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-colors ${
+              step === id
+                ? 'bg-white text-gov-blue-800 shadow-sm dark:bg-dark-surface dark:text-dark-text'
+                : 'text-gov-gray-400 hover:text-gov-gray-600 dark:hover:text-gov-gray-300'
+            }`}
+          >
+            <Icon size={16} />
+            {label}
+          </button>
+        ))}
+      </nav>
 
-# Trazas y datasets
-packages/agents/train/conversation_traces/
-packages/agents/train/gemma4/`}
-        </pre>
-      </SettingsSection>
-
-      <SettingsSection
-        titulo="GRPO (alternativa)"
-        descripcion="Captura con reward_metadata vía variable de entorno del gateway"
-        icono={<Terminal size={22} />}
-        defaultOpen={false}
-      >
-        <pre className="p-3 rounded-xl bg-gov-gray-50 dark:bg-dark-bg text-xs font-mono">
-          DUCKCLAW_CONVERSATION_TRACES_FORMAT=grpo
-        </pre>
-        <p className="mt-3 text-xs text-gov-gray-500">
-          Spec: specs/features/platform/SFT_DATASET_FORMAT.md
-        </p>
-      </SettingsSection>
+      <div className="rounded-3xl border dark:border-dark-border bg-white dark:bg-dark-surface p-6 shadow-sm">
+        {step === 'data' && (
+          <TrainDataStep
+            source={source}
+            onSourceChange={setSource}
+            hfDataset={hfDataset}
+            onHfDatasetChange={setHfDataset}
+          />
+        )}
+        {step === 'config' && (
+          <TrainConfigStep
+            config={config}
+            onConfigChange={setConfig}
+            backend={backend}
+            onBackendChange={setBackend}
+          />
+        )}
+        {step === 'run' && (
+          <TrainRunStep config={config} backend={backend} />
+        )}
+      </div>
     </div>
   );
 }

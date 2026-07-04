@@ -1,10 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Bot, X, Maximize2 } from 'lucide-react';
-import { ThinkingDots } from '@/components/chat/ChatBubble';
+import { Maximize2, X } from 'lucide-react';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
@@ -15,30 +14,9 @@ import { sectionFromPath } from '@/lib/conversationStorage';
 import {
   projectIdFromPathname,
   readLastProjectId,
-  writeLastProjectId,
 } from '@/lib/floatingChatProject';
+import { useLayoutUiStore } from '@/store/layoutUiStore';
 
-const BUBBLE_OFFSET_STORAGE_KEY = 'duckclaw-floating-chat-offset-x';
-const BUBBLE_SIZE_PX = 48;
-const EDGE_INSET_PX = 16;
-const PANEL_WIDTH_PX = 560;
-const PANEL_HEIGHT_PX = 720;
-const NARROW_BREAKPOINT_PX = 640;
-
-function useNarrowViewport(): boolean {
-  const [narrow, setNarrow] = useState(false);
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const mq = window.matchMedia(`(max-width: ${NARROW_BREAKPOINT_PX}px)`);
-    const apply = () => setNarrow(mq.matches);
-    apply();
-    mq.addEventListener('change', apply);
-    return () => mq.removeEventListener('change', apply);
-  }, []);
-  return narrow;
-}
-
-/** Si la ruta es /templates/[workerId], usar ese agente por defecto. */
 function workerFromPath(pathname: string): string {
   const match = pathname.match(/^\/templates\/([^/]+)/);
   if (!match?.[1]) return '';
@@ -49,29 +27,11 @@ function workerFromPath(pathname: string): string {
   }
 }
 
-function readStoredOffset(): number {
-  if (typeof window === 'undefined') return 0;
-  try {
-    const raw = localStorage.getItem(BUBBLE_OFFSET_STORAGE_KEY);
-    const n = raw ? Number(raw) : 0;
-    return Number.isFinite(n) && n >= 0 ? n : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function maxDragOffset(): number {
-  if (typeof window === 'undefined') return 0;
-  return Math.max(0, window.innerWidth - BUBBLE_SIZE_PX - EDGE_INSET_PX * 2);
-}
-
 export function FloatingAdminChat() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const isNarrow = useNarrowViewport();
-  const [open, setOpen] = useState(false);
+  const { chatDrawerOpen: open, setChatDrawerOpen: setOpen } = useLayoutUiStore();
   const [tenantId, setTenantId] = useState<string | undefined>();
-  const [offsetX, setOffsetX] = useState(0);
   const projectId = useMemo(() => {
     const fromUrl = (searchParams.get('project') || '').trim();
     if (fromUrl) return fromUrl;
@@ -79,12 +39,6 @@ export function FloatingAdminChat() {
     if (fromPath) return fromPath;
     return readLastProjectId();
   }, [pathname, searchParams]);
-  const dragRef = useRef({
-    active: false,
-    startX: 0,
-    startOffset: 0,
-    moved: false,
-  });
 
   const section = useMemo(() => sectionFromPath(pathname), [pathname]);
   const sectionTitle = titleForAdminPath(pathname);
@@ -101,14 +55,11 @@ export function FloatingAdminChat() {
   const { workerId, loading, messages, historyLoading, scrollToBottom } = chat;
   const activeWorkerLabel = workerId || '…';
 
-  const openPanel = useCallback(() => setOpen(true), []);
+  const openPanel = useCallback(() => setOpen(true), [setOpen]);
 
   const {
     unreadCount,
-    badgeText,
-    badgeLabel,
     ensureNotificationPermission,
-    notificationPermission: notifyPerm,
   } = useFloatingChatUnread({
     sessionId: conv.sessionId,
     messages,
@@ -135,83 +86,9 @@ export function FloatingAdminChat() {
       .catch(() => undefined);
   }, []);
 
-  useEffect(() => {
-    setOffsetX(readStoredOffset());
-  }, []);
-
-  useEffect(() => {
-    const onResize = () => {
-      setOffsetX((prev) => Math.min(prev, maxDragOffset()));
-    };
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-
-  const persistOffset = useCallback((value: number) => {
-    const clamped = Math.min(Math.max(0, value), maxDragOffset());
-    setOffsetX(clamped);
-    try {
-      localStorage.setItem(BUBBLE_OFFSET_STORAGE_KEY, String(clamped));
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const onBubblePointerDown = useCallback(
-    (e: React.PointerEvent<HTMLButtonElement>) => {
-      if (e.button !== 0) return;
-      dragRef.current = {
-        active: true,
-        startX: e.clientX,
-        startOffset: offsetX,
-        moved: false,
-      };
-      e.currentTarget.setPointerCapture(e.pointerId);
-    },
-    [offsetX]
-  );
-
-  const onBubblePointerMove = useCallback(
-    (e: React.PointerEvent<HTMLButtonElement>) => {
-      if (!dragRef.current.active) return;
-      const delta = dragRef.current.startX - e.clientX;
-      if (Math.abs(delta) > 4) dragRef.current.moved = true;
-      persistOffset(dragRef.current.startOffset + delta);
-    },
-    [persistOffset]
-  );
-
-  const endBubbleDrag = useCallback((e: React.PointerEvent<HTMLButtonElement>) => {
-    if (!dragRef.current.active) return;
-    dragRef.current.active = false;
-    try {
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const onBubbleClick = useCallback(() => {
-    if (dragRef.current.moved) {
-      dragRef.current.moved = false;
-      return;
-    }
-    setOpen((wasOpen) => {
-      if (!wasOpen) void ensureNotificationPermission();
-      return !wasOpen;
-    });
-  }, [ensureNotificationPermission]);
-
-  const maxOffset = maxDragOffset();
-  const panelOpensRight = maxOffset > 0 && offsetX > maxOffset * 0.35;
-
   if (pathname === '/playground' || pathname.startsWith('/playground/')) {
     return null;
   }
-
-  const bubbleBottomClass = isNarrow
-    ? 'bottom-[max(1rem,env(safe-area-inset-bottom))]'
-    : 'bottom-4';
 
   const headerActions = (
     <div className="flex items-center justify-end gap-1 shrink-0">
@@ -263,111 +140,17 @@ export function FloatingAdminChat() {
       />
     );
 
-  const panelBody = (
-    <div className="relative flex flex-1 min-h-0 w-full pointer-events-auto overflow-hidden rounded-2xl max-sm:rounded-none">
-      {chatPanel}
+  return (
+    <div
+      className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-out border-l dark:border-dark-border bg-white dark:bg-dark-surface ${
+        open ? 'w-[420px]' : 'w-0 border-l-0'
+      }`}
+    >
+      <div className="flex flex-col h-full w-[420px] min-w-[420px]">
+        {chatPanel}
+      </div>
     </div>
   );
-
-  return (
-    <>
-      {open && isNarrow && (
-        <div
-          className="fixed inset-0 z-50 flex flex-col pointer-events-auto bg-gov-blue-900/40 backdrop-blur-[1px] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]"
-          role="presentation"
-          onClick={() => setOpen(false)}
-        >
-          <div
-            className="flex flex-1 flex-col min-h-0 w-full max-w-full bg-white dark:bg-dark-surface shadow-2xl animate-in slide-in-from-bottom-4 fade-in duration-200"
-            role="dialog"
-            aria-label={`Chat en ${sectionTitle}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {panelBody}
-          </div>
-        </div>
-      )}
-
-      <div
-        className={`fixed ${bubbleBottomClass} z-40 flex flex-col gap-2 pointer-events-none ${
-          isNarrow ? 'left-4 items-start' : panelOpensRight ? 'items-start' : 'items-end'
-        }`}
-        style={
-          isNarrow
-            ? undefined
-            : { right: `calc(${EDGE_INSET_PX}px + ${offsetX}px)` }
-        }
-      >
-        {notifyPerm === 'denied' && !open && (
-          <p
-            className="pointer-events-none max-w-[220px] rounded-lg bg-amber-50 px-2 py-1 text-[10px] text-amber-900 shadow dark:bg-amber-950/90 dark:text-amber-100"
-            role="status"
-          >
-            Notificaciones bloqueadas en el navegador. Actívalas en Ajustes del sitio.
-          </p>
-        )}
-        {open && !isNarrow && (
-          <div
-            className={`pointer-events-auto relative flex flex-col animate-in slide-in-from-bottom-4 fade-in duration-200 ${
-              panelOpensRight ? 'self-start' : 'self-end'
-            }`}
-            style={{
-              width: PANEL_WIDTH_PX,
-              height: `min(${PANEL_HEIGHT_PX}px, calc(100dvh - 2rem))`,
-              maxWidth: 'calc(100vw - 2rem)',
-            }}
-            role="dialog"
-            aria-label={`Chat en ${sectionTitle}`}
-          >
-            {panelBody}
-          </div>
-        )}
-
-        {(!open || !isNarrow) && (
-      <button
-        type="button"
-        onClick={onBubbleClick}
-        onPointerDown={onBubblePointerDown}
-        onPointerMove={onBubblePointerMove}
-        onPointerUp={endBubbleDrag}
-        onPointerCancel={endBubbleDrag}
-        className={`pointer-events-auto relative flex items-center justify-center size-12 rounded-full bg-gov-blue-700 text-white shadow-lg hover:bg-gov-blue-800 transition-colors touch-none cursor-grab active:cursor-grabbing ${
-          !open && loading ? 'ring-2 ring-gov-blue-400/80 ring-offset-2 ring-offset-transparent' : ''
-        }`}
-        aria-expanded={open}
-        aria-busy={loading}
-        aria-label={
-          open
-            ? loading
-              ? 'Minimizar asistente; el agente sigue pensando'
-              : badgeLabel
-                ? `Cerrar asistente, ${badgeLabel}`
-                : 'Cerrar asistente'
-            : loading
-              ? `Agente pensando (${activeWorkerLabel}). Abrir chat. Arrastra para mover.`
-              : badgeLabel
-                ? `Abrir asistente, ${badgeLabel}, agente activo ${activeWorkerLabel}. Arrastra para mover.`
-                : `Abrir asistente, agente activo ${activeWorkerLabel}. Arrastra para mover.`
-        }
-      >
-        {open ? (
-          <X size={22} aria-hidden />
-        ) : loading ? (
-          <ThinkingDots size="sm" className="text-white" />
-        ) : (
-          <Bot size={22} aria-hidden />
-        )}
-        {!open && unreadCount > 0 && (
-          <span
-            className="absolute -top-0.5 -right-0.5 z-10 flex min-w-[1.125rem] h-[1.125rem] items-center justify-center rounded-full bg-red-600 px-1 text-[10px] font-semibold leading-none text-white shadow ring-2 ring-white dark:ring-dark-bg"
-            aria-label={badgeLabel}
-          >
-            {badgeText}
-          </span>
-        )}
-      </button>
-        )}
-      </div>
-    </>
-  );
 }
+
+export { useFloatingChatUnread };

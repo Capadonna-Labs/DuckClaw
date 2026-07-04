@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, Layers, Loader2, Search } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronsDownUp, ChevronsUpDown, Layers, Loader2, Search } from 'lucide-react';
 import type { SkillCatalogItem } from '@/services/adminService';
 import {
   applyReportsBundle,
@@ -32,21 +32,22 @@ function CollapsibleCategory({
   title,
   description,
   countLabel,
-  defaultOpen,
+  open,
+  onToggle,
   children,
 }: {
   title: string;
   description?: string;
   countLabel?: string;
-  defaultOpen?: boolean;
+  open: boolean;
+  onToggle: () => void;
   children: React.ReactNode;
 }) {
-  const [open, setOpen] = useState(defaultOpen ?? false);
   return (
     <section className="rounded-xl border border-gov-gray-200/90 bg-white dark:border-dark-border dark:bg-[#1e1f20]">
       <button
         type="button"
-        onClick={() => setOpen((value) => !value)}
+        onClick={onToggle}
         className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
         aria-expanded={open}
       >
@@ -202,6 +203,24 @@ export function WorkerToolsDropdown({
   const activeOptionalCount = parsed.optionalSkillNames.length;
   const reportsSelected = reportsBundleFullySelected(manifestYaml);
 
+  const [openCategories, setOpenCategories] = useState<Record<string, boolean>>({});
+
+  const toggleCategory = useCallback((id: string) => {
+    setOpenCategories((prev) => ({ ...prev, [id]: !prev[id] }));
+  }, []);
+
+  const allExpanded = categories.length > 0 && categories.every((c) => openCategories[c.id]);
+
+  const toggleAll = useCallback(() => {
+    if (allExpanded) {
+      setOpenCategories({});
+    } else {
+      const next: Record<string, boolean> = {};
+      for (const c of categories) next[c.id] = true;
+      setOpenCategories(next);
+    }
+  }, [allExpanded, categories]);
+
   const patchSkill = (skillId: string, enabled: boolean) => {
     onManifestChange(toggleOptionalSkill(manifestYaml, skillId, enabled));
   };
@@ -284,48 +303,58 @@ export function WorkerToolsDropdown({
               Cargando categorías…
             </p>
           ) : (
-            <div className="mt-2 max-h-[min(60vh,24rem)] space-y-2 overflow-y-auto">
-              {categories.map((category) => {
-                const baseline = isBaselineCategory(category);
-                const activeCount = baseline
-                  ? category.skills.length
-                  : category.skills.filter((entry) =>
-                      selected.has(normalizeSkillId(entry.id))
-                    ).length;
-                const hasUnselected = category.skills.some(
-                  (entry) => !selected.has(normalizeSkillId(entry.id))
-                );
-                return (
-                  <CollapsibleCategory
-                    key={category.id}
-                    title={category.title}
-                    description={category.description}
-                    defaultOpen={baseline || hasUnselected || category.id === 'web'}
-                    countLabel={
-                      baseline
-                        ? `${category.skills.length} incluidas`
-                        : `${activeCount}/${category.skills.length}`
-                    }
-                  >
-                    {category.skills.map((entry) => (
-                      <SkillCheckboxRow
-                        key={entry.id}
-                        entry={entry}
-                        checked={
-                          baseline ? true : selected.has(normalizeSkillId(entry.id))
-                        }
-                        disabled={disabled}
-                        readOnly={baseline}
-                        onChange={(enabled) => patchSkill(entry.id, enabled)}
-                      />
-                    ))}
-                  </CollapsibleCategory>
-                );
-              })}
-              {categories.length === 0 ? (
-                <p className="text-[11px] text-gov-gray-500 dark:text-dark-muted">Sin coincidencias.</p>
+            <>
+              {categories.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={toggleAll}
+                  className="mt-2 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[10px] font-bold text-gov-gray-500 hover:text-gov-gray-700 hover:bg-gov-gray-50 dark:text-dark-muted dark:hover:text-dark-text dark:hover:bg-dark-bg"
+                >
+                  {allExpanded ? <ChevronsDownUp size={12} /> : <ChevronsUpDown size={12} />}
+                  {allExpanded ? 'Colapsar todo' : 'Expandir todo'}
+                </button>
               ) : null}
-            </div>
+              <div className="mt-1 max-h-[min(60vh,24rem)] space-y-2 overflow-y-auto">
+                {categories.map((category) => {
+                  const baseline = isBaselineCategory(category);
+                  const activeCount = baseline
+                    ? category.skills.length
+                    : category.skills.filter((entry) =>
+                        selected.has(normalizeSkillId(entry.id))
+                      ).length;
+                  return (
+                    <CollapsibleCategory
+                      key={category.id}
+                      title={category.title}
+                      description={category.description}
+                      open={!!openCategories[category.id]}
+                      onToggle={() => toggleCategory(category.id)}
+                      countLabel={
+                        baseline
+                          ? `${category.skills.length} incluidas`
+                          : `${activeCount}/${category.skills.length}`
+                      }
+                    >
+                      {category.skills.map((entry) => (
+                        <SkillCheckboxRow
+                          key={entry.id}
+                          entry={entry}
+                          checked={
+                            baseline ? true : selected.has(normalizeSkillId(entry.id))
+                          }
+                          disabled={disabled}
+                          readOnly={baseline}
+                          onChange={(enabled) => patchSkill(entry.id, enabled)}
+                        />
+                      ))}
+                    </CollapsibleCategory>
+                  );
+                })}
+                {categories.length === 0 ? (
+                  <p className="text-[11px] text-gov-gray-500 dark:text-dark-muted">Sin coincidencias.</p>
+                ) : null}
+              </div>
+            </>
           )}
         </div>
       ) : null}

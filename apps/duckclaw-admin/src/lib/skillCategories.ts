@@ -42,6 +42,16 @@ export const FALLBACK_PLATFORM_CATEGORIES: SkillCategory[] = [
     ],
   },
   {
+    id: 'visual',
+    title: 'Visual y media',
+    description: 'Generación de imágenes, video y artefactos visuales.',
+    skills: [
+      { id: 'comfyui', label: 'comfyui', hint: 'ComfyUI (config avanzada en YAML)' },
+      { id: 'fal', label: 'fal.ai', hint: 'Generación de imágenes con fal.ai (Flux, etc.)' },
+      { id: 'higgsfield', label: 'Higgsfield', hint: 'Video e imágenes con Higgsfield API' },
+    ],
+  },
+  {
     id: 'mcp',
     title: 'MCP',
     skills: [

@@ -27,7 +27,7 @@ export type AdminNavEntry =
   | { type: 'item'; item: AdminNavItem }
   | { type: 'group'; group: AdminNavGroup };
 
-/** 4 destinos visibles: Inicio, Chat, Agentes, Conocimiento. */
+/** Destinos principales: Inicio, Chat, Proyectos, Agentes, Base de Conocimiento, Train. */
 export const PRIMARY_NAV_GROUP: AdminNavGroup = {
   id: 'primary',
   label: 'Principal',
@@ -35,20 +35,21 @@ export const PRIMARY_NAV_GROUP: AdminNavGroup = {
   items: [
     { href: '/overview', label: 'Inicio', section: 'core', audience: 'all' },
     { href: '/playground', label: 'Chat', section: 'core', audience: 'all' },
+    { href: '/projects', label: 'Proyectos', section: 'core', audience: 'all' },
     { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
-    { href: '/knowledge', label: 'Conocimiento', section: 'core', audience: 'all' },
+    { href: '/knowledge', label: 'Base de Conocimiento', section: 'core', audience: 'all' },
   ],
 };
 
-/** Proyectos, plataforma y operación avanzada (colapsado por defecto). */
+/** Sandbox, plataforma y operación avanzada (colapsado por defecto). */
 export const MORE_NAV_GROUP: AdminNavGroup = {
   id: 'more',
-  label: 'Más',
-  hint: 'Proyectos, hubs y avanzado',
+  label: 'Avanzado',
+  hint: 'Sandbox, plataforma y operación avanzada',
   collapsible: true,
   items: [
-    { href: '/projects', label: 'Proyectos', section: 'core', audience: 'all' },
+    { href: '/train', label: 'Train', section: 'core', audience: 'admin' },
     { href: '/sandbox', label: 'Sandbox', section: 'core', audience: 'all' },
     { href: '/productividad', label: 'Productividad', section: 'core', audience: 'admin' },
     { href: '/plataforma', label: 'Plataforma', section: 'core', audience: 'admin' },
@@ -134,7 +135,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/playground': 'Chat',
   '/sandbox': 'Sandbox',
   '/projects': 'Proyectos',
-  '/knowledge': 'Conocimiento',
+  '/knowledge': 'Base de Conocimiento',
   '/productividad': 'Productividad',
   '/plataforma': 'Plataforma',
   '/integraciones': 'Integraciones',
@@ -152,6 +153,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/kanban': 'Tablero',
   '/settings': 'Ajustes',
   '/templates': 'Agentes',
+  '/train': 'Train',
   '/reports': 'Reportes',
 };
 

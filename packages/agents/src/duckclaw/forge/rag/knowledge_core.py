@@ -360,10 +360,18 @@ def embed_chunk_payloads(
     chunks: list[dict[str, Any]],
     embedding_fn: Callable[[str], list[float] | None],
 ) -> list[dict[str, Any]]:
+    if not chunks:
+        return []
+    from duckclaw.forge.rag.embeddings import embed_text, embed_texts
+
+    if embedding_fn is embed_text:
+        texts = [str(chunk.get("content") or "") for chunk in chunks]
+        vectors = embed_texts(texts)
+    else:
+        vectors = [embedding_fn(str(chunk.get("content") or "")) for chunk in chunks]
     out: list[dict[str, Any]] = []
-    for chunk in chunks:
+    for chunk, vec in zip(chunks, vectors):
         item = dict(chunk)
-        vec = embedding_fn(str(item.get("content") or ""))
         if isinstance(vec, list) and len(vec) == 384:
             item["embedding"] = [float(x) for x in vec]
             item["embedding_status"] = "READY"

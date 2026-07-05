@@ -74,11 +74,12 @@ def test_context_toggle_with_read_only_handle_uses_typed_agent_config_command(
         captured["user_id"] = user_id
         return command.task_id
 
-    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue)
+    monkeypatch.setattr("duckclaw.db_write_fire_and_forget.enqueue_write_command", fake_enqueue)
     monkeypatch.setattr(
-        "duckclaw.db_write_queue.poll_task_status_sync",
+        "duckclaw.db_write_fire_and_forget.wait_write_task",
         lambda *_args, **_kwargs: DbWriteTaskStatus(status="success"),
     )
+    monkeypatch.setenv("DUCKCLAW_WRITE_POLL_SEC", "30")
 
     db = ReadOnlyDb(tmp_path / "vault.duckdb")
     out = chat_state.execute_context_toggle(
@@ -98,3 +99,40 @@ def test_context_toggle_with_read_only_handle_uses_typed_agent_config_command(
     assert captured["user_id"] == "chat1"
     assert db.released is True
     assert db.resumed is True
+
+
+def test_context_toggle_fire_and_forget_returns_queued_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ReadOnlyDb:
+        _read_only = True
+
+        def __init__(self, db_path: Path) -> None:
+            self._path = str(db_path)
+
+        def execute(self, sql: str) -> None:
+            raise AssertionError(sql)
+
+        def query(self, _sql: str) -> list[dict[str, str]]:
+            return []
+
+        def release_file_handle_for_external_writer(self) -> None:
+            return None
+
+        def resume_readonly_file_handle(self) -> None:
+            return None
+
+    monkeypatch.delenv("DUCKCLAW_WRITE_POLL_SEC", raising=False)
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.enqueue_write_command",
+        lambda *_args, **_kwargs: "task-ctx-1",
+    )
+
+    out = chat_state.execute_context_toggle(
+        ReadOnlyDb(tmp_path / "vault.duckdb"),
+        "chat1",
+        "on",
+        tenant_id="tenant-a",
+    )
+    assert out == "Write encolado (task_id=task-ctx-1)"

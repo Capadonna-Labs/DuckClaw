@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from duckclaw import db_write_queue
+from duckclaw.db_write_fire_and_forget import enqueue_write_and_resolve
 from duckclaw.write_commands import ForgetChatStateCommand, UpsertAgentConfigEntriesCommand
 
 _PREFIX = "chat_"
@@ -135,17 +135,11 @@ def set_chat_state_via_typed_command(
 
     released_ro, resume = _release_ro_handle_for_writer(db)
     try:
-        task_id = db_write_queue.enqueue_typed_command(
+        return enqueue_write_and_resolve(
             command,
             db_path=target_db_path,
             user_id=str(chat_id or "default").strip() or "default",
         )
-        status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=30.0)
-        if status is None:
-            return False, "timeout esperando db-writer"
-        if status.status != "success":
-            return False, (status.detail or "db-writer failed")[:500]
-        return True, ""
     finally:
         if released_ro and callable(resume):
             try:
@@ -183,17 +177,11 @@ def forget_chat_state_via_typed_command(
 
     released_ro, resume = _release_ro_handle_for_writer(db)
     try:
-        task_id = db_write_queue.enqueue_typed_command(
+        return enqueue_write_and_resolve(
             command,
             db_path=target_db_path,
             user_id=str(chat_id or "default").strip() or "default",
         )
-        status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=30.0)
-        if status is None:
-            return False, "timeout esperando db-writer"
-        if status.status != "success":
-            return False, (status.detail or "db-writer failed")[:500]
-        return True, ""
     finally:
         if released_ro and callable(resume):
             try:
@@ -239,6 +227,8 @@ def execute_forget(db: Any, chat_id: Any, *, tenant_id: Any = None) -> str:
     ok, err = forget_chat_state_via_typed_command(db, chat_id, tenant_id=tid)
     if not ok:
         return f"No se pudo borrar historial: {err}"
+    if err:
+        return err
     if os.environ.get("LANGCHAIN_TRACING_V2", "").lower() == "true":
         try:
             import langsmith
@@ -270,6 +260,8 @@ def execute_context_toggle(
         )
         if not ok:
             return f"No se pudo actualizar contexto largo: {err}"
+        if err:
+            return err
         return "✅ Contexto largo activado (más mensajes en historial)."
     if v in ("off", "0", "false"):
         ok, err = set_chat_state_via_typed_command(
@@ -281,6 +273,8 @@ def execute_context_toggle(
         )
         if not ok:
             return f"No se pudo actualizar contexto largo: {err}"
+        if err:
+            return err
         return "✅ Contexto largo desactivado (solo historial reciente)."
     current = get_chat_state(db, chat_id, "use_rag")
     return (

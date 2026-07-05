@@ -9,10 +9,16 @@ import { isAdminRole } from '@/lib/roles';
 import { adminService } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
 import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
-import type { AdminHealth, GatewayHealthMetrics } from '@/types/admin';
+import type { AdminHealth, GatewayHealthMetrics, Pm2ProcessHealth } from '@/types/admin';
 
 const RAM_WARN_MB = 800;
 const WRITE_QUEUE_WARN_DEPTH = 5;
+
+const PM2_SUBROW_NAMES = new Set([
+  'DuckClaw-DB-Writer',
+  'DuckClaw-Knowledge-Indexer',
+  'DuckClaw-Heartbeat',
+]);
 
 type CardTone = 'ok' | 'warn' | 'bad' | 'neutral';
 
@@ -123,6 +129,55 @@ function buildStackCards(health: AdminHealth | null): StackCard[] {
   ];
 }
 
+function pm2StatusTone(status: string | undefined): CardTone {
+  switch ((status || '').toLowerCase()) {
+    case 'online':
+      return 'ok';
+    case 'stopped':
+    case 'stopping':
+      return 'neutral';
+    case 'errored':
+    case 'error':
+      return 'bad';
+    default:
+      return 'neutral';
+  }
+}
+
+function formatPm2Status(status: string | undefined): string {
+  switch ((status || '').toLowerCase()) {
+    case 'online':
+      return 'Online';
+    case 'stopped':
+      return 'Detenido';
+    case 'stopping':
+      return 'Parando';
+    case 'errored':
+    case 'error':
+      return 'Error';
+    case 'missing':
+      return 'No registrado';
+    default:
+      return status || '—';
+  }
+}
+
+function formatPm2Memory(proc: Pm2ProcessHealth): string {
+  const parts: string[] = [];
+  if (typeof proc.rss_mb === 'number') {
+    parts.push(`${proc.rss_mb} MB RSS`);
+  }
+  if (typeof proc.heap_mb === 'number') {
+    parts.push(`${proc.heap_mb} MB heap`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : '—';
+}
+
+function buildPm2SubrowProcesses(metrics: GatewayHealthMetrics | undefined): Pm2ProcessHealth[] {
+  const rows = metrics?.pm2_processes ?? [];
+  return rows.filter((row) => PM2_SUBROW_NAMES.has(row.name));
+}
+
 export function StackHealthCards() {
   const { usuario } = useAuthStore();
   const isAdmin = isAdminRole(usuario?.rol);
@@ -138,6 +193,8 @@ export function StackHealthCards() {
 
   const updatedLabel = useRelativeTimeLabel(fetchedAt);
   const cards = buildStackCards(health);
+  const pm2Subrow = buildPm2SubrowProcesses(health?.gateway_metrics);
+  const showPm2Subrow = pm2Subrow.length > 0;
   const workerCacheCard = cards.find((c) => c.id === 'worker-cache');
   const initialLoad = !gatewayError && health == null && fetchedAt === 0;
   const loading = initialLoad || refreshing;
@@ -193,6 +250,7 @@ export function StackHealthCards() {
             <h2 className="text-sm font-black text-gov-gray-800 dark:text-dark-text">Estado del stack</h2>
             <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">
               Gateway, colas Redis y caché LangGraph.
+              {showPm2Subrow ? ' Procesos PM2 del stack debajo.' : null}
               {fetchedAt > 0 ? (
                 <>
                   {' '}
@@ -228,6 +286,29 @@ export function StackHealthCards() {
             </span>
           </div>
         </div>
+        {showPm2Subrow ? (
+          <div className="flex flex-wrap gap-2 border-b border-gov-gray-100 px-5 py-3 dark:border-dark-border">
+            {pm2Subrow.map((proc) => {
+              const tone = pm2StatusTone(proc.status);
+              return (
+                <div
+                  key={proc.name}
+                  className={`inline-flex min-w-[9.5rem] flex-col rounded-lg border px-3 py-2 ${toneClasses(tone)}`}
+                >
+                  <p className="text-[10px] font-black uppercase tracking-wider opacity-80">
+                    {proc.label ?? proc.name}
+                  </p>
+                  <p className="mt-1 text-sm font-black tabular-nums">
+                    {initialLoad ? '…' : formatPm2Status(proc.status)}
+                  </p>
+                  <p className="mt-0.5 text-[11px] opacity-80">
+                    {initialLoad ? '…' : formatPm2Memory(proc)}
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
         <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           {cards.map((card) => {
             const Icon = card.icon;

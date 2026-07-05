@@ -41,6 +41,17 @@ Patrón idéntico a jobs RAG (`GET /admin/knowledge/jobs/{job_id}`).
 
 Con `DUCKCLAW_SPAWN_PROFILE=1`, el Gateway puede aplicar writes inline — excepción documentada, no stack PM2 producción.
 
+## Agents (fly commands + knowledge indexer)
+
+| Ruta | Patrón |
+|------|--------|
+| `duckclaw.db_write_fire_and_forget.enqueue_write_command` | Encola typed command; **no** bloquea |
+| `wait_write_task` / `DUCKCLAW_WRITE_POLL_SEC` | Poll opcional (default **0** en gateway) |
+| `knowledge_auto_sync._enqueue_knowledge_command` | Fire-and-forget; falla solo si Redis/enqueue lanza |
+| `commands/chat_state`, `crons`, `team_access` | Encolan vía helper; mensaje `Write encolado (task_id=…)` sin poll |
+
+**Prohibido en hot paths gateway/indexer:** `poll_task_status_sync` con timeout > 0 salvo `DUCKCLAW_WRITE_POLL_SEC` explícito (spawn/dev).
+
 ## Pendiente
 
 - Telegram inbound → cola Redis (fase 2)
@@ -49,6 +60,8 @@ Con `DUCKCLAW_SPAWN_PROFILE=1`, el Gateway puede aplicar writes inline — excep
 ## Métricas Overview
 
 `GET /admin/health` expone `gateway_metrics.db_write_queue_depth` (LLEN `duckdb_write_queue`) junto a RAG y RAM. La consola Overview permite refresh manual con bypass de caché (45s TTL en store).
+
+`gateway_metrics.pm2_processes` lista estado PM2 (`online` / `stopped` / `missing`) y RAM (`monit.memory` → `rss_mb`, heap Node vía `axm_monitor` si existe) para `DuckClaw-Gateway`, `DuckClaw-DB-Writer`, `DuckClaw-Knowledge-Indexer` y `DuckClaw-Heartbeat`. La recolección usa `pm2 jlist` con timeout **2s**; si PM2 no está en PATH, la clave es `[]` y el endpoint no bloquea. Overview muestra DB-Writer, Indexer y Heartbeat en una fila compacta bajo el encabezado del stack.
 
 ## Liberación de recursos (Gateway in-process)
 

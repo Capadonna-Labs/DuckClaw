@@ -12,9 +12,12 @@ import type {
   ConsoleUser,
   OverviewMetrics,
   OverviewMetricsParams,
+  RestoreFrameworkPoliciesResponse,
   SharedDbGrant,
+  SyncCatalogPromptsResponse,
   WhitelistUser,
   WorkerCapabilitiesPayload,
+  WriteTaskStatusResponse,
 } from '@/types/admin';
 
 export type { TemplateSummary, TemplateDetail } from '@/types/admin';
@@ -677,19 +680,18 @@ export const adminService = {
   getPromptPolicyHealth: () => adminFetch<PromptPolicyHealth>('/prompt-policies/health'),
 
   restoreFrameworkPolicies: () =>
-    adminFetch<{ ok: boolean; applied: string[]; pack: string }>(
-      '/prompt-policies/restore-framework',
+    adminFetch<RestoreFrameworkPoliciesResponse>('/prompt-policies/restore-framework', {
+      method: 'POST',
+    }),
+
+  syncCatalogPrompts: (force = false) =>
+    adminFetch<SyncCatalogPromptsResponse>(
+      `/prompt-policies/sync-catalog?force=${force ? 'true' : 'false'}`,
       { method: 'POST' }
     ),
 
-  syncCatalogPrompts: (force = false) =>
-    adminFetch<{
-      ok: boolean;
-      task_id: string;
-      synced: string[];
-      skipped: string[];
-      failed: string[];
-    }>(`/prompt-policies/sync-catalog?force=${force ? 'true' : 'false'}`, { method: 'POST' }),
+  getWriteTaskStatus: (taskId: string) =>
+    adminFetch<WriteTaskStatusResponse>(`/write-tasks/${encodeURIComponent(taskId)}`),
 
   getOverviewMetrics: (params?: OverviewMetricsParams) => {
     const qs = new URLSearchParams();

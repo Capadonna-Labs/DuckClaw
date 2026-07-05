@@ -10,6 +10,7 @@ import time
 from typing import Any, Optional
 
 from duckclaw import db_write_queue
+from duckclaw.db_write_fire_and_forget import enqueue_write_and_resolve
 from duckclaw.commands.chat_state import (
     _PREFIX,
     _chat_key,
@@ -37,6 +38,12 @@ GOALS_DELTA_MAX_SECONDS = 7 * 24 * 3600
 # IDs mostrados en /crons para quitar un schedule con /crons --rm <cron-id>
 CRON_SCHEDULE_ID_DELTA = "delta"
 CRON_SCHEDULE_ID_WALL = "wall"
+
+
+def _queued_write_suffix(note: str) -> str:
+    if note.startswith("Write encolado"):
+        return f" {note}"
+    return ""
 
 
 def _normalize_cron_rm_id(token: str) -> Optional[str]:
@@ -332,17 +339,11 @@ def _set_chat_state_entries(
     )
     released_ro, resume = _release_ro_handle_for_writer(db)
     try:
-        task_id = db_write_queue.enqueue_typed_command(
+        return enqueue_write_and_resolve(
             command,
             db_path=target_db_path,
             user_id=str(chat_id or "default").strip() or "default",
         )
-        status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=30.0)
-        if status is None:
-            return False, "timeout esperando db-writer"
-        if status.status != "success":
-            return False, (status.detail or "db-writer failed")[:500]
-        return True, ""
     finally:
         if released_ro and callable(resume):
             try:
@@ -678,6 +679,7 @@ def execute_crons_schedule(
             f"Revisión proactiva cada ~{human} (modo {mode}, canal {notify_ch}, jitter ~{int(jitter_ratio * 100)}%). "
             "El programador disparará SYSTEM_EVENT ante desalineación con el manifiesto /goals, "
             f"o en cada intervalo si modo=always. {goals_note} /crons --delta off para cancelar."
+            f"{_queued_write_suffix(persist_err)}"
         )
 
     if toks and toks[0] == "--timestamp":
@@ -723,6 +725,7 @@ def execute_crons_schedule(
         return (
             f"Programación por reloj guardada. {format_cron_wall_human(spec)} "
             "Usa /crons para listar. /crons --timestamp off para cancelar."
+            f"{_queued_write_suffix(persist_err)}"
         )
 
     if toks and toks[0] == "--rm":

@@ -37,6 +37,8 @@ La consola Admin soporta dos flujos:
 
 **Indexación fuera del Gateway:** ingest/sync de carpetas se encola en Redis (`duckclaw:knowledge_sync_jobs`) y la consume el proceso PM2 `DuckClaw-Knowledge-Indexer`. Ver `GATEWAY_PROCESS_BOUNDARIES.md`.
 
+**Tuning indexer (latencia/RAM):** `DUCKCLAW_KNOWLEDGE_EMBED_BATCH_SIZE` (default 32) agrupa chunks por llamada al modelo; `DUCKCLAW_KNOWLEDGE_INDEXER_MAX_INFLIGHT` (default 1) limita jobs concurrentes; `DUCKCLAW_KNOWLEDGE_QUEUE_DEPTH_WARN` (default 10) dispara log de backpressure cuando la cola Redis crece. `GET /admin/health` expone `knowledge_embed_batch_size` y `knowledge_sync_queue_depth`.
+
 Ambos flujos deben pedir scope explícito: proyecto obligatorio cuando se gestione desde `/knowledge`, y agente opcional para limitar retrieval a un worker.
 
 Evolución planificada:

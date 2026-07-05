@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { adminService, type PromptPolicy, type PromptPolicyHealth } from '@/services/adminService';
 import type { TemplateSummary } from '@/types/admin';
+import { formatWriteTaskPollNotice, pollWriteTask } from '@/lib/pollWriteTask';
 import { useAuthStore } from '@/store/authStore';
 import type { EmbeddedViewProps } from '@/components/admin/embeddedView';
 
@@ -189,10 +190,29 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
     setRestoringFramework(true);
     setError(null);
     setMessage(null);
+    const busyLabel = 'Restauración de reglas base';
     try {
       const result = await adminService.restoreFrameworkPolicies();
-      setMessage(`Reglas base restauradas: ${result.applied.join(', ') || 'sin cambios'}`);
-      reloadAll();
+      if (result.accepted && result.task_id) {
+        setMessage(`${busyLabel}…`);
+        const pollResult = await pollWriteTask(result.task_id, {
+          onTick: (status) => {
+            if (status === 'pending') {
+              setMessage(`${busyLabel} (pendiente)…`);
+            }
+          },
+        });
+        reloadAll();
+        const notice = formatWriteTaskPollNotice(pollResult, busyLabel);
+        if (pollResult.state === 'success') {
+          setMessage(notice);
+        } else {
+          setError(notice);
+        }
+      } else {
+        setMessage(result.message || `${busyLabel} encolada.`);
+        reloadAll();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo restaurar framework');
     } finally {
@@ -209,15 +229,29 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
     setSyncingCatalog(true);
     setError(null);
     setMessage(null);
+    const busyLabel = 'Copia de instrucciones a agentes';
     try {
       const result = await adminService.syncCatalogPrompts(false);
-      const parts = [
-        result.synced.length ? `synced: ${result.synced.join(', ')}` : null,
-        result.skipped.length ? `skipped: ${result.skipped.join(', ')}` : null,
-        result.failed.length ? `failed: ${result.failed.join(', ')}` : null,
-      ].filter(Boolean);
-      setMessage(parts.length ? `Agentes actualizados — ${parts.join(' · ')}` : 'Ningún agente necesitaba actualización');
-      reloadAll();
+      if (result.accepted && result.task_id) {
+        setMessage(`${busyLabel}…`);
+        const pollResult = await pollWriteTask(result.task_id, {
+          onTick: (status) => {
+            if (status === 'pending') {
+              setMessage(`${busyLabel} (pendiente)…`);
+            }
+          },
+        });
+        reloadAll();
+        const notice = formatWriteTaskPollNotice(pollResult, busyLabel);
+        if (pollResult.state === 'success') {
+          setMessage(notice);
+        } else {
+          setError(notice);
+        }
+      } else {
+        setMessage(result.message || `${busyLabel} encolada.`);
+        reloadAll();
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo sincronizar catálogo');
     } finally {

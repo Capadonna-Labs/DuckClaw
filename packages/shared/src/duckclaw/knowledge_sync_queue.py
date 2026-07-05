@@ -199,6 +199,14 @@ def enqueue_single_file_sync_job(
     )
 
 
+def knowledge_sync_queue_depth() -> int | None:
+    try:
+        client = _redis_client()
+        return int(client.llen(KNOWLEDGE_SYNC_QUEUE_KEY))
+    except Exception:
+        return None
+
+
 def dequeue_knowledge_sync_job(*, block_timeout_sec: float = 2.0) -> KnowledgeSyncJob | None:
     client = _redis_client()
     if block_timeout_sec > 0:

@@ -526,6 +526,132 @@ def _telegram_webhook_parallel_processing_enabled() -> bool:
     return False
 
 
+def _telegram_inbound_queue_enabled() -> bool:
+    from duckclaw.telegram_inbound_queue import telegram_inbound_queue_enabled
+
+    return telegram_inbound_queue_enabled()
+
+
+async def telegram_invoke_agent_chat_and_reply(
+    *,
+    message: str,
+    chat_id: int | str,
+    user_id: str,
+    username: str,
+    chat_type: str,
+    tenant_id: str,
+    worker_id: str,
+    session_id: str,
+    reply_token: str | None,
+    telegram_forced_vault_db_path: str | None,
+    invoke_agent_chat: Callable[..., Awaitable[Any]],
+    resolve_effective_telegram_bot_token: Callable[[], str],
+    redis_client: Any,
+    telegram_mcp: Any,
+) -> None:
+    """Invoke agent chat y envía respuesta por Bot API (webhook sync/parallel o consumer Redis)."""
+    payload = ChatRequest(
+        message=message,
+        chat_id=str(chat_id),
+        user_id=user_id,
+        username=username,
+        chat_type=chat_type,
+        tenant_id=tenant_id,
+    )
+
+    async def _invoke_and_reply() -> None:
+        try:
+            res = await invoke_agent_chat(
+                payload,
+                worker_id,
+                session_id,
+                tenant_id,
+                redis_client=redis_client,
+                telegram_multipart_tail_delivery="native",
+                telegram_mcp=telegram_mcp,
+                telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                outbound_telegram_bot_token=(reply_token or "").strip() or None,
+                delivery_context=build_telegram_webhook_delivery_context(
+                    telegram_multipart_tail_delivery="native",
+                    telegram_mcp=telegram_mcp,
+                    telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                    outbound_telegram_bot_token=(reply_token or "").strip() or None,
+                ),
+            )
+        except HTTPException as exc:
+            detail = exc.detail
+            if isinstance(detail, dict):
+                msg_err = str(detail.get("detail") or detail)
+            else:
+                msg_err = str(detail)
+            _log.warning("telegram webhook invoke falló: %s", msg_err)
+            token_e = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
+            if token_e and msg_err:
+                try:
+                    client_e = TelegramBotApiAsyncClient(token_e)
+                    await client_e.send_message(
+                        chat_id=chat_id,
+                        text=msg_err[:3900],
+                        parse_mode=None,
+                    )
+                except Exception as send_exc:  # noqa: BLE001
+                    _log.warning("telegram webhook no pudo enviar error al usuario: %s", send_exc)
+            return
+
+        reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
+        if not reply_local:
+            _log.warning(
+                "telegram webhook: invoke_agent_chat devolvió respuesta vacía tenant_id=%s "
+                "chat_id=%s msg_len=%s worker_id=%s",
+                tenant_id,
+                chat_id,
+                len(payload.message or ""),
+                worker_id,
+            )
+            return
+
+        token_r = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
+        if not token_r:
+            _log.warning("telegram webhook: hay respuesta pero falta TELEGRAM_BOT_TOKEN")
+            return
+        client_r = TelegramBotApiAsyncClient(token_r)
+        tail_plain = (res.get("telegram_multipart_tail_plain") or "").strip() if isinstance(res, dict) else ""
+        head_plain = (res.get("telegram_reply_head_plain") or "").strip() if isinstance(res, dict) else ""
+        reply_plain = head_plain if (tail_plain and head_plain) else reply_local[:3500]
+        reply_html = llm_markdown_to_telegram_html(reply_plain)
+        cap_msg = 4096 - 16
+        if len(reply_html) > cap_msg:
+            reply_html = reply_html[: max(0, cap_msg - 1)] + "…"
+        sent = await client_r.send_message(
+            chat_id=chat_id, text=reply_html, parse_mode="HTML"
+        )
+        if not sent.get("ok"):
+            await client_r.send_message(
+                chat_id=chat_id,
+                text=reply_plain[:3900],
+                parse_mode=None,
+            )
+        if tail_plain:
+            from core.telegram_multipart_tail_dispatch_async import dispatch_telegram_multipart_tail_async
+
+            await dispatch_telegram_multipart_tail_async(
+                tail_plain=tail_plain,
+                session_id=str(chat_id),
+                user_id=(str(user_id or "").strip() or str(chat_id)),
+                telegram_multipart_tail_delivery="native",
+                effective_telegram_bot_token=(lambda _tok=token_r: _tok),
+                telegram_mcp=telegram_mcp,
+                redis_client=redis_client,
+                tenant_id=tenant_id,
+            )
+
+    try:
+        with telegram_bot_token_override(reply_token):
+            await _invoke_and_reply()
+    except Exception as exc:  # noqa: BLE001
+        _log.exception("telegram webhook: fallo en invocación en segundo plano: %s", exc)
+
+
 def _normalize_alias(value: str) -> str:
     return re.sub(r"[^a-z0-9_]", "", str(value or "").strip().lower())
 
@@ -1301,117 +1427,56 @@ def build_telegram_inbound_webhook_router(
             )
             return {"ok": "true"}
 
-        payload = ChatRequest(
-            message=text,
-            chat_id=str(chat_id),
-            user_id=user_id,
-            username=username,
-            chat_type=chat_type,
-            tenant_id=tenant_id,
-        )
-
         session_id = str(chat_id)
         telegram_mcp = getattr(request.app.state, "telegram_mcp", None)
 
-        async def _invoke_and_reply() -> None:
+        if _telegram_inbound_queue_enabled():
+            from duckclaw.telegram_inbound_queue import enqueue_telegram_update
+
             try:
-                res = await invoke_agent_chat(
-                    payload,
-                    worker_id,
-                    session_id,
-                    tenant_id,
-                    redis_client=redis_client,
-                    telegram_multipart_tail_delivery="native",
-                    telegram_mcp=telegram_mcp,
-                    telegram_forced_vault_db_path=telegram_forced_vault_db_path,
-                    outbound_telegram_bot_token=(reply_token or "").strip() or None,
-                    delivery_context=build_telegram_webhook_delivery_context(
-                        telegram_multipart_tail_delivery="native",
-                        telegram_mcp=telegram_mcp,
-                        telegram_forced_vault_db_path=telegram_forced_vault_db_path,
-                        outbound_telegram_bot_token=(reply_token or "").strip() or None,
-                    ),
+                await asyncio.to_thread(
+                    enqueue_telegram_update,
+                    {
+                        "worker_id": worker_id,
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                        "reply_token": (reply_token or "").strip(),
+                        "telegram_forced_vault_db_path": telegram_forced_vault_db_path,
+                        "chat_id": chat_id,
+                        "user_id": user_id,
+                        "username": username,
+                        "chat_type": chat_type,
+                        "message": text,
+                        "update_id": update_id,
+                    },
                 )
-            except HTTPException as exc:
-                detail = exc.detail
-                if isinstance(detail, dict):
-                    msg_err = str(detail.get("detail") or detail)
-                else:
-                    msg_err = str(detail)
-                _log.warning("telegram webhook invoke falló: %s", msg_err)
-                token_e = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
-                if token_e and msg_err:
-                    try:
-                        client_e = TelegramBotApiAsyncClient(token_e)
-                        await client_e.send_message(
-                            chat_id=chat_id,
-                            text=msg_err[:3900],
-                            parse_mode=None,
-                        )
-                    except Exception as send_exc:  # noqa: BLE001
-                        _log.warning("telegram webhook no pudo enviar error al usuario: %s", send_exc)
-                return
-
-            reply_local = (res.get("response") or "").strip() if isinstance(res, dict) else ""
-            if not reply_local:
-                _log.warning(
-                    "telegram webhook: invoke_agent_chat devolvió respuesta vacía tenant_id=%s "
-                    "chat_id=%s msg_len=%s worker_id=%s",
-                    tenant_id,
-                    chat_id,
-                    len(payload.message or ""),
-                    worker_id,
-                )
-                return
-
-            token_r = (reply_token or "").strip() or (resolve_effective_telegram_bot_token() or "").strip()
-            if not token_r:
-                _log.warning("telegram webhook: hay respuesta pero falta TELEGRAM_BOT_TOKEN")
-                return
-            client_r = TelegramBotApiAsyncClient(token_r)
-            tail_plain = (res.get("telegram_multipart_tail_plain") or "").strip() if isinstance(res, dict) else ""
-            head_plain = (res.get("telegram_reply_head_plain") or "").strip() if isinstance(res, dict) else ""
-            reply_plain = head_plain if (tail_plain and head_plain) else reply_local[:3500]
-            reply_html = llm_markdown_to_telegram_html(reply_plain)
-            cap_msg = 4096 - 16
-            if len(reply_html) > cap_msg:
-                reply_html = reply_html[: max(0, cap_msg - 1)] + "…"
-            sent = await client_r.send_message(
-                chat_id=chat_id, text=reply_html, parse_mode="HTML"
-            )
-            if not sent.get("ok"):
-                await client_r.send_message(
-                    chat_id=chat_id,
-                    text=reply_plain[:3900],
-                    parse_mode=None,
-                )
-            if tail_plain:
-                from core.telegram_multipart_tail_dispatch_async import dispatch_telegram_multipart_tail_async
-
-                await dispatch_telegram_multipart_tail_async(
-                    tail_plain=tail_plain,
-                    session_id=str(chat_id),
-                    user_id=(str(user_id or "").strip() or str(chat_id)),
-                    telegram_multipart_tail_delivery="native",
-                    effective_telegram_bot_token=(lambda _tok=token_r: _tok),
-                    telegram_mcp=telegram_mcp,
-                    redis_client=redis_client,
-                    tenant_id=tenant_id,
-                )
+            except Exception as exc:  # noqa: BLE001
+                _log.exception("telegram inbound enqueue failed update_id=%s: %s", update_id, exc)
+            return {"ok": "true"}
 
         async def _invoke_and_reply_safe() -> None:
-            try:
-                with telegram_bot_token_override(reply_token):
-                    await _invoke_and_reply()
-            except Exception as exc:  # noqa: BLE001
-                _log.exception("telegram webhook: fallo en invocación en segundo plano: %s", exc)
+            await telegram_invoke_agent_chat_and_reply(
+                message=text,
+                chat_id=chat_id,
+                user_id=user_id,
+                username=username,
+                chat_type=chat_type,
+                tenant_id=tenant_id,
+                worker_id=worker_id,
+                session_id=session_id,
+                reply_token=(reply_token or "").strip() or None,
+                telegram_forced_vault_db_path=telegram_forced_vault_db_path,
+                invoke_agent_chat=invoke_agent_chat,
+                resolve_effective_telegram_bot_token=resolve_effective_telegram_bot_token,
+                redis_client=redis_client,
+                telegram_mcp=telegram_mcp,
+            )
 
         if _telegram_webhook_parallel_processing_enabled():
             asyncio.create_task(_invoke_and_reply_safe())
             return {"ok": "true"}
 
-        with telegram_bot_token_override(reply_token):
-            await _invoke_and_reply()
+        await _invoke_and_reply_safe()
         return {"ok": "true"}
 
     if _compact_path_bindings:

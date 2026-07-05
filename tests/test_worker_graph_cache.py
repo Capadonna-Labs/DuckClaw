@@ -55,5 +55,6 @@ def test_gateway_health_metrics_shape() -> None:
     assert "process_role" in metrics
     assert "worker_graph_cache" in metrics
     assert "knowledge_sync_queue_depth" in metrics
+    assert "knowledge_embed_batch_size" in metrics
     assert "db_write_queue_depth" in metrics
     assert "rss_mb" in metrics

@@ -231,6 +231,33 @@ async def lifespan(app: FastAPI):
 
     _log.info("knowledge indexing: gateway enqueue-only (DuckClaw-Knowledge-Indexer consumes Redis queue)")
 
+    app.state.telegram_inbound_consumer_task = None
+    try:
+        from duckclaw.telegram_inbound_queue import telegram_inbound_queue_enabled
+
+        if telegram_inbound_queue_enabled():
+            from core.agent_chat import invoke_chat
+            from core.telegram_delivery import effective_telegram_bot_token
+            from core.telegram_inbound_consumer import telegram_inbound_consumer_loop
+
+            app.state.telegram_inbound_consumer_task = asyncio.create_task(
+                telegram_inbound_consumer_loop(
+                    app=app,
+                    invoke_agent_chat=invoke_chat,
+                    resolve_effective_telegram_bot_token=effective_telegram_bot_token,
+                ),
+                name="telegram-inbound-consumer",
+            )
+            _log.info(
+                "telegram inbound Redis consumer enabled (DUCKCLAW_TELEGRAM_INBOUND_QUEUE=1)"
+            )
+        else:
+            _log.info(
+                "telegram inbound Redis queue disabled (set DUCKCLAW_TELEGRAM_INBOUND_QUEUE=1 to enable)"
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("telegram inbound consumer no disponible: %s", exc)
+
     app.state.deferred_startup_task = asyncio.create_task(
         _run_deferred_gateway_startup(),
         name="gateway-deferred-startup",
@@ -264,6 +291,15 @@ async def lifespan(app: FastAPI):
         except BaseException:
             pass
         app.state.knowledge_auto_sync_task = None
+
+    _tic = getattr(app.state, "telegram_inbound_consumer_task", None)
+    if _tic is not None:
+        _tic.cancel()
+        try:
+            await _tic
+        except BaseException:
+            pass
+        app.state.telegram_inbound_consumer_task = None
 
     _tg_mcp = getattr(app.state, "telegram_mcp", None)
     if _tg_mcp is not None:

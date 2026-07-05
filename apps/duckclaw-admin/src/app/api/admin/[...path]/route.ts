@@ -29,11 +29,6 @@ const OPS_COMMANDS_FALLBACK = {
       argv: ['__restart_stack__'],
     },
     {
-      id: 'start_telegram_ingress',
-      label: 'Solo Tailscale + webhooks Telegram',
-      argv: ['__start_telegram_ingress__'],
-    },
-    {
       id: 'pm2_start_db_writer',
       label: 'Iniciar DuckClaw-DB-Writer',
       argv: ['__pm2_recycle_db_writer__'],

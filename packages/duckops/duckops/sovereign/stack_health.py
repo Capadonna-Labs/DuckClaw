@@ -267,7 +267,7 @@ def format_stack_health_rich(
         lines.append(f"  {mark} [bold]{c.label}[/] — {c.detail}")
     lines.append("")
     lines.append(
-        "[dim]Telegram (user id, token), Tailscale e integraciones: "
-        "apps/duckclaw-admin tras aplicar.[/]"
+        "[dim]Integraciones opcionales (Telegram, Tailscale, etc.): "
+        "apps/duckclaw-admin → Integraciones.[/]"
     )
     return "\n".join(lines)

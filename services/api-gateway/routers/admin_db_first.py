@@ -71,8 +71,7 @@ async def patch_runtime_settings(
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
     from duckclaw.admin_user_profiles import ensure_profile_for_user
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.gateway_enqueue import enqueue_admin_command
     from duckclaw.write_commands import UpsertRuntimeSettingCommand
 
     updated: list[str] = []
@@ -99,10 +98,7 @@ async def patch_runtime_settings(
             secret=item.secret,
             updated_by=profile["email"],
         )
-        task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-        command_status = poll_task_status_sync(task_id, timeout_sec=0.5)
-        if command_status and command_status.status == "failed":
-            raise ValueError(command_status.detail or "runtime setting write failed")
+        task_id = enqueue_admin_command(command)
         task_ids.append(task_id)
         domain_key = f"{item.domain.strip().lower()}.{item.key.strip().lower()}"
         updated.append(domain_key)
@@ -113,4 +109,4 @@ async def patch_runtime_settings(
             actor=profile["email"],
             meta={"domain": item.domain, "setting": item.key, "scope": item.scope},
         )
-    return {"ok": True, "updated": updated, "task_id": task_ids[-1] if task_ids else "", "task_ids": task_ids}
+    return {"ok": True, "updated": updated, "accepted": True, "task_id": task_ids[-1] if task_ids else "", "task_ids": task_ids}

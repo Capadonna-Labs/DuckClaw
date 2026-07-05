@@ -139,19 +139,9 @@ def _prompt_policy_requirement_row(requirement: Any) -> dict[str, str]:
 
 
 def _enqueue_prompt_policy_command(command: Any) -> str:
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.gateway_enqueue import enqueue_admin_command
 
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    command_status = poll_task_status_sync(task_id, timeout_sec=0.5)
-    if command_status and command_status.status == "failed":
-        detail = command_status.detail or "prompt policy write failed"
-        if "No hay query SQL" in detail:
-            raise ValueError(
-                "DB-Writer desactualizado: reinicia DuckClaw-DB-Writer y DuckClaw-Gateway para aplicar comandos de prompt policies."
-            )
-        raise ValueError(detail)
-    return task_id
+    return enqueue_admin_command(command)
 
 
 @router.get("", dependencies=[Depends(require_admin_key)])
@@ -340,45 +330,21 @@ async def restore_framework_policies(
 ) -> dict[str, Any]:
     """Re-aplica ``framework_policy_pack_v1`` sin tocar ``system_prompt/<worker>``."""
 
-    import json as _json
-
-    from core.admin_identity import open_gateway_db
-    from duckclaw.db_write_queue import poll_task_status_sync
     from duckclaw.write_commands import RestoreFrameworkPolicyPackCommand
 
     try:
         command = RestoreFrameworkPolicyPackCommand(force=True, actor_email=actor)
         task_id = _enqueue_prompt_policy_command(command)
-        command_status = poll_task_status_sync(task_id, timeout_sec=8.0)
-        if command_status and command_status.status == "failed":
-            raise ValueError(command_status.detail or "restore framework failed")
-        applied: list[str] = []
-        with open_gateway_db(read_only=True) as db:
-            row = _fetchone(
-                db.execute(
-                    "SELECT command_json FROM main.admin_write_ledger WHERE task_id = ?",
-                    [task_id],
-                )
-            )
-            if row and row[0]:
-                payload = _json.loads(str(row[0]))
-                raw_applied = payload.get("_applied")
-                if isinstance(raw_applied, list):
-                    applied = [str(item) for item in raw_applied]
     except ValueError as exc:
         raise _problem(400, str(exc), "restore_framework") from exc
-    except Exception as exc:
-        raise _problem(
-            500,
-            "No se pudo restaurar framework pack",
-            str(exc)[:240],
-        ) from exc
     return {
         "ok": True,
+        "accepted": True,
         "task_id": task_id,
-        "applied": applied,
+        "applied": [],
         "actor": actor,
         "pack": "framework_policy_pack_v1",
+        "message": "Restore encolado; consulta GET /admin/write-tasks/{task_id} para el estado.",
     }
 
 
@@ -389,45 +355,20 @@ async def sync_catalog_prompt_policies(
 ) -> dict[str, Any]:
     """Backfill ``system_prompt/<worker>`` desde snapshots del catálogo DB."""
 
-    import json as _json
-
-    from core.admin_identity import open_gateway_db
-    from duckclaw.db_write_queue import poll_task_status_sync
     from duckclaw.write_commands import SyncCatalogPromptsCommand
 
-    sync_result: dict[str, list[str]] = {"synced": [], "skipped": [], "failed": []}
     try:
         command = SyncCatalogPromptsCommand(force=force, actor_email=actor)
         task_id = _enqueue_prompt_policy_command(command)
-        command_status = poll_task_status_sync(task_id, timeout_sec=15.0)
-        if command_status and command_status.status == "failed":
-            raise ValueError(command_status.detail or "sync catalog prompts failed")
-        with open_gateway_db(read_only=True) as db:
-            row = _fetchone(
-                db.execute(
-                    "SELECT command_json FROM main.admin_write_ledger WHERE task_id = ?",
-                    [task_id],
-                )
-            )
-            if row and row[0]:
-                payload = _json.loads(str(row[0]))
-                raw_result = payload.get("_sync_result")
-                if isinstance(raw_result, dict):
-                    for key in ("synced", "skipped", "failed"):
-                        items = raw_result.get(key)
-                        if isinstance(items, list):
-                            sync_result[key] = [str(item) for item in items]
     except ValueError as exc:
         raise _problem(400, str(exc), "sync_catalog") from exc
-    except Exception as exc:
-        raise _problem(
-            500,
-            "No se pudo sincronizar prompts del catálogo",
-            str(exc)[:240],
-        ) from exc
     return {
         "ok": True,
+        "accepted": True,
         "task_id": task_id,
         "actor": actor,
-        **sync_result,
+        "synced": [],
+        "skipped": [],
+        "failed": [],
+        "message": "Sync encolado; consulta GET /admin/write-tasks/{task_id} para el estado.",
     }

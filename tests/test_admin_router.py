@@ -45,6 +45,20 @@ def test_admin_health_ok(admin_client: TestClient):
     assert isinstance(data["gateway_metrics"], dict)
 
 
+def test_admin_write_task_pending(admin_client) -> None:
+    from fastapi.testclient import TestClient
+
+    client: TestClient = admin_client
+    r = client.get(
+        "/api/v1/admin/write-tasks/task_unknown",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["task_id"] == "task_unknown"
+    assert data["status"] == "pending"
+
+
 def test_admin_prompt_policy_health_reports_missing_db_first_requirements(
     gateway_admin_client: TestClient,
     gateway_db: Path,

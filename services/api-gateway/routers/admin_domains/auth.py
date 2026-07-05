@@ -69,11 +69,9 @@ async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response
     from core.admin_identity import attach_profile_to_console_user, console_user_public
 
     def _enqueue_auth_command(command: Any) -> str:
-        task_id = db_write_queue.enqueue_typed_command(command, db_path=gw, user_id="default")
-        command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
-        if command_status and command_status.status == "failed":
-            raise RuntimeError(command_status.detail or "admin auth write failed")
-        return task_id
+        from duckclaw.gateway_enqueue import enqueue_admin_command
+
+        return enqueue_admin_command(command)
 
     db = DuckClaw(gw, read_only=True, engine="python")
     should_seed = False

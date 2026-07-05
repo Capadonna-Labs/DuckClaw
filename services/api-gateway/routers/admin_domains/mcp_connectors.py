@@ -14,8 +14,7 @@ from duckclaw.admin_mcp_connectors import (
     resolve_worker_uid,
 )
 from duckclaw.admin_user_profiles import ensure_profile_for_user
-from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.gateway_enqueue import enqueue_admin_command
 from duckclaw.mcp_connector_presets import list_mcp_connector_presets
 from duckclaw.write_commands import (
     DeactivateMcpConnectorCommand,
@@ -95,11 +94,7 @@ def _actor_profile(actor: str) -> dict[str, Any]:
 
 
 def _enqueue(command: Any) -> str:
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    status_row = poll_task_status_sync(task_id, timeout_sec=1.0)
-    if status_row and status_row.status == "failed":
-        raise ValueError(status_row.detail or "mcp connector write failed")
-    return task_id
+    return enqueue_admin_command(command)
 
 
 @router.get("", dependencies=[Depends(require_admin_key)])

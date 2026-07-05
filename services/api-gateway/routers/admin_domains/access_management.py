@@ -87,17 +87,9 @@ def _admin_audit(
 
 
 def _enqueue_access_command(command: Any) -> str:
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.gateway_enqueue import enqueue_admin_command
 
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    try:
-        result = poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
-    except Exception:
-        result = None
-    if result and result.status == "failed":
-        raise RuntimeError(result.detail or "db-writer rejected access command")
-    return task_id
+    return enqueue_admin_command(command)
 
 
 def _gateway_db_path_or_404() -> str:

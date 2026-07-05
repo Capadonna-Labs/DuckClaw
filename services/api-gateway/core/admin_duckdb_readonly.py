@@ -211,15 +211,24 @@ def execute_admin_dml(
         user_id=vault_user_id,
     )
     if not db_write_queue.spawn_inline_writes_enabled():
-        command_status = db_write_queue.poll_task_status_sync(
-            task_id,
-            timeout_sec=30.0,
-            interval_sec=0.05,
-        )
-        if command_status is None:
-            raise ValueError("timeout esperando db-writer")
-        if command_status.status != "success":
-            raise ValueError(command_status.detail or "db-writer rechazó la escritura")
+        return {
+            "mode": "write",
+            "status": "enqueued",
+            "accepted": True,
+            "task_id": task_id,
+            "columns": [],
+            "rows": [],
+            "row_count": 0,
+        }
+    command_status = db_write_queue.poll_task_status_sync(
+        task_id,
+        timeout_sec=30.0,
+        interval_sec=0.05,
+    )
+    if command_status is None:
+        raise ValueError("timeout esperando db-writer")
+    if command_status.status != "success":
+        raise ValueError(command_status.detail or "db-writer rechazó la escritura")
     return {
         "mode": "write",
         "status": "success",

@@ -54,12 +54,9 @@ def _template_worker_id(worker_id: str) -> str:
 
 
 def _enqueue_template_catalog_command(command: Any) -> str:
-    task_id = db_write_queue.enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
-    if command_status and command_status.status == "failed":
-        detail = command_status.detail or "template catalog write failed"
-        raise _problem(400, "Mutación de template rechazada por DB-writer", detail)
-    return task_id
+    from duckclaw.gateway_enqueue import enqueue_admin_command
+
+    return enqueue_admin_command(command)
 
 
 def _admin_audit(action: str, resource: str, detail: str, *, actor: str, task_id: str) -> None:

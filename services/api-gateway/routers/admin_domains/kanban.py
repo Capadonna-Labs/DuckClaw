@@ -150,14 +150,9 @@ def _kanban_existing_card(db: Any, *, card_id: str, tenant_id: str, actor_email:
 
 
 def _enqueue_kanban_command(command: Any) -> str:
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.gateway_enqueue import enqueue_admin_command
 
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    command_status = poll_task_status_sync(task_id, timeout_sec=0.5)
-    if command_status and command_status.status == "failed":
-        raise ValueError(command_status.detail or "kanban write failed")
-    return task_id
+    return enqueue_admin_command(command)
 
 
 @router.get("", dependencies=[Depends(require_admin_key)])

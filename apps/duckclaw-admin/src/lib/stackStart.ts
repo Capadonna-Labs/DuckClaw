@@ -4,8 +4,6 @@ import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOps
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
 import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell, pm2RecycleHeartbeatShell, pm2RecycleKnowledgeIndexerShell } from '@/lib/pm2Recycle';
 import { pm2WaitShellPreamble } from '@/lib/pm2WaitShell';
-import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
-
 const SYNC_PM2 = [
   'uv',
   'run',
@@ -153,14 +151,6 @@ pm2 list
     });
   }
 
-  const telegram = await runTelegramIngressStartLocal();
-  chunks.push('\n── Tailscale + Telegram (webhook) ──\n', telegram.stdout, telegram.stderr);
-  if (telegram.exit_code !== 0) {
-    chunks.push(
-      '\nwarn: ingress Telegram/Tailscale omitido o falló (no bloquea Gateway ni consola en localhost).\n'
-    );
-  }
-
   const serve = await runArgv(
     cwd,
     ['uv', 'run', 'python', 'scripts/restore_tailscale_admin_serve.py'],
@@ -182,7 +172,7 @@ pm2 list
     op_id: 'start_stack',
     exit_code: 0,
     stdout: chunks.join('\n'),
-    stderr: telegram.exit_code !== 0 ? telegram.stderr : '',
+    stderr: '',
     executed_via: 'local',
   });
 }

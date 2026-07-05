@@ -9,6 +9,9 @@ import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
 
 export { HOST_ONLY_OPS };
 
+/** Ops de integración: ejecutables pero no listados en comandos generales de plataforma. */
+export const INTEGRATION_ONLY_OPS = new Set(['start_telegram_ingress']);
+
 export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = {
   pm2_list: { label: 'PM2 — listar procesos', argv: ['pm2', 'list'] },
   pm2_status: { label: 'PM2 — estado', argv: ['pm2', 'status'] },
@@ -144,7 +147,9 @@ export function isLocalOpId(opId: string): boolean {
 
 export function listOpsCommands() {
   return {
-    commands: Object.entries(OPS_ALLOWLIST).map(([id, v]) => ({
+    commands: Object.entries(OPS_ALLOWLIST)
+      .filter(([id]) => !INTEGRATION_ONLY_OPS.has(id))
+      .map(([id, v]) => ({
       id,
       label: v.label,
       argv: v.argv,

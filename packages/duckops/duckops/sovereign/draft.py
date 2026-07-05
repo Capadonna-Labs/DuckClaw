@@ -72,7 +72,7 @@ class SovereignDraft(BaseModel):
     tailscale_funnel_bg_via_wizard: bool = False
     duckclaw_tailscale_auth_key: str = ""
     tailscale_key_masked: bool = False
-    enable_telegram_mcp: bool = True
+    enable_telegram_mcp: bool = False
 
     #: Telegram Guard: tu user_id numérico (quien ejecuta el wizard) → role admin al materializar.
     wizard_creator_telegram_user_id: str = ""

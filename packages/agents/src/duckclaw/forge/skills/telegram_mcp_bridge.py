@@ -226,6 +226,15 @@ async def _telegram_mcp_owner_loop(state: _McpOwnerState, params: Any) -> None:
             _log.warning("telegram MCP: error en tarea dueña tras arranque: %s", exc, exc_info=True)
 
 
+def telegram_mcp_gateway_warmup_enabled(repo: Path | None = None) -> bool:
+    """Integración opt-in: solo calentar MCP Telegram si está explícitamente habilitada."""
+    root = repo or infer_repo_root()
+    cfg = load_mcp_servers_yaml(root)
+    if not telegram_mcp_feature_enabled(cfg):
+        return False
+    return bool((os.environ.get("TELEGRAM_BOT_TOKEN") or "").strip())
+
+
 async def start_telegram_mcp_gateway_session(
     repo: Path | None = None,
 ) -> TelegramMcpGatewayHolder | None:

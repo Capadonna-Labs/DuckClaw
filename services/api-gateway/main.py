@@ -55,26 +55,26 @@ _gateway_log = logging.getLogger("duckclaw.gateway")
 _obs_log = get_obs_logger()
 
 _gateway_log.info(
-    "Gateway startup: gateway_db_path=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s "
-    "| diagnóstico Telegram: pm2 logs ... --lines 300 "
-    "y grep telegram_inbound_early rate_limited",
+    "Gateway startup: gateway_db_path=%s DUCKCLAW_PM2_MATCHED_APP_NAME=%s",
     get_gateway_db_path() or "(unset)",
     (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip() or "(unset)",
 )
 try:
-    from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env
+    from duckclaw.integrations.telegram.integration_gate import telegram_integration_env_configured
 
-    _compact = load_path_webhook_bindings_from_env()
-    if _compact:
-        _gateway_log.info(
-            "telegram path multiplex: %s ruta(s) cargadas al arranque: %s",
-            len(_compact),
-            ", ".join(b.webhook_path for b in _compact),
-        )
+    if telegram_integration_env_configured():
+        from duckclaw.integrations.telegram.compact_webhook_routes import load_path_webhook_bindings_from_env
+
+        _compact = load_path_webhook_bindings_from_env()
+        if _compact:
+            _gateway_log.info(
+                "telegram path multiplex (integración): %s ruta(s): %s",
+                len(_compact),
+                ", ".join(b.webhook_path for b in _compact),
+            )
 except ValueError as _compact_exc:
     _gateway_log.error(
-        "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES (compacto) inválido al arranque; "
-        "rutas por path no montadas hasta corregir .env: %s",
+        "DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES inválido; rutas por path no montadas: %s",
         _compact_exc,
     )
 except Exception:
@@ -92,7 +92,7 @@ _authorize_or_reject = authorize_or_reject
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="API unificada para Telegram, agentes y escrituras DuckDB.",
+    description="API unificada para agentes, consola admin y escrituras DuckDB.",
     docs_url="/docs",
     redoc_url="/redoc",
     lifespan=lifespan,

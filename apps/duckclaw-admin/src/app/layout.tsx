@@ -9,7 +9,7 @@ const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "DuckClaw Admin",
-  description: "Consola de configuración DuckClaw — plantillas, Telegram, DuckDB y runtime",
+  description: "Consola de configuración DuckClaw — agentes, skills, DuckDB y runtime",
 };
 
 export default function RootLayout({

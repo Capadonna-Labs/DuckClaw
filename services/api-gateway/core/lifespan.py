@@ -162,11 +162,19 @@ async def lifespan(app: FastAPI):
             _mcp_sess = await start_telegram_mcp_gateway_session(_mcp_repo)
             if _mcp_sess is not None:
                 app.state.telegram_mcp = _mcp_sess
-                _log.info("Telegram MCP: sesión stdio activa para egress")
+                _log.info("Telegram MCP: sesión stdio activa (integración)")
         except Exception as exc:  # noqa: BLE001
-            _log.warning("Telegram MCP: no se pudo iniciar (se usa Bot API directa): %s", exc)
+            _log.warning("Telegram MCP: no se pudo iniciar: %s", exc)
 
-    asyncio.create_task(_start_telegram_mcp(), name="telegram-mcp-warm")
+    try:
+        from duckclaw.forge.skills.telegram_mcp_bridge import telegram_mcp_gateway_warmup_enabled
+
+        if telegram_mcp_gateway_warmup_enabled():
+            asyncio.create_task(_start_telegram_mcp(), name="telegram-mcp-warm")
+        else:
+            _log.debug("Telegram MCP: integración no configurada; omitido en arranque core")
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("Telegram MCP: gate omitido: %s", exc)
 
     try:
         from duckclaw.forge.skills.reddit_bridge import (
@@ -249,12 +257,10 @@ async def lifespan(app: FastAPI):
                 name="telegram-inbound-consumer",
             )
             _log.info(
-                "telegram inbound Redis consumer enabled (DUCKCLAW_TELEGRAM_INBOUND_QUEUE=1)"
+                "telegram inbound Redis consumer enabled (integración DUCKCLAW_TELEGRAM_INBOUND_QUEUE=1)"
             )
         else:
-            _log.info(
-                "telegram inbound Redis queue disabled (set DUCKCLAW_TELEGRAM_INBOUND_QUEUE=1 to enable)"
-            )
+            _log.debug("telegram inbound Redis queue disabled (integración opt-in)")
     except Exception as exc:  # noqa: BLE001
         _log.warning("telegram inbound consumer no disponible: %s", exc)
 

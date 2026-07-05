@@ -7,12 +7,44 @@ import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedV
 import { TelegramUsersPanel } from '@/components/access/TelegramUsersPanel';
 import { TelegramWebhookRoutesEditor } from '@/components/telegram/TelegramWebhookRoutesEditor';
 import { useAuthStore } from '@/store/authStore';
-import { Database, Users } from 'lucide-react';
+import { adminService } from '@/services/adminService';
+import { formatOpsOutput } from '@/lib/formatOpsOutput';
+import { Database, Globe, Users } from 'lucide-react';
 
 export default function TelegramIntegrationPageView({ embedded = false }: EmbeddedViewProps) {
   const { usuario } = useAuthStore();
   const canWrite = usuario?.rol === 'admin';
   const [tenantId, setTenantId] = useState('default');
+  const [ingressRunning, setIngressRunning] = useState(false);
+  const [ingressOutput, setIngressOutput] = useState<string | null>(null);
+  const [ingressError, setIngressError] = useState<string | null>(null);
+
+  const activateIngress = async () => {
+    if (!canWrite) return;
+    setIngressRunning(true);
+    setIngressError(null);
+    setIngressOutput(null);
+    try {
+      const r = await adminService.runOps('start_telegram_ingress');
+      setIngressOutput(
+        formatOpsOutput({
+          ok: r.ok,
+          exit_code: r.exit_code,
+          stdout: r.stdout,
+          stderr: r.stderr,
+          executed_via: r.executed_via,
+          op_id: 'start_telegram_ingress',
+        })
+      );
+      if (!r.ok) {
+        setIngressError('No se pudo activar el ingress Telegram. Revisa tokens y rutas webhook.');
+      }
+    } catch (e) {
+      setIngressError(e instanceof Error ? e.message : 'Error activando ingress');
+    } finally {
+      setIngressRunning(false);
+    }
+  };
 
   return (
     <ViewChrome embedded={embedded}>
@@ -35,7 +67,7 @@ export default function TelegramIntegrationPageView({ embedded = false }: Embedd
 
       <SettingsSection
         titulo="Configuración Telegram"
-        descripcion="DB-first para rutas webhook; .env queda como fallback de arranque."
+        descripcion="DB-first para rutas webhook; .env solo como fallback bootstrap si DuckDB aún no tiene rutas."
         icono={<Database size={22} />}
       >
         <div className="space-y-2 text-sm text-gov-gray-600 dark:text-dark-muted">
@@ -65,6 +97,36 @@ export default function TelegramIntegrationPageView({ embedded = false }: Embedd
       </SettingsSection>
 
       <TelegramWebhookRoutesEditor canWrite={canWrite} />
+
+      <SettingsSection
+        titulo="Ingress webhook (Tailscale + setWebhook)"
+        descripcion="Paso final de la integración. No forma parte del arranque core de la plataforma."
+        icono={<Globe size={22} />}
+      >
+        <p className="text-sm text-gov-gray-600 dark:text-dark-muted mb-4">
+          Activa Funnel/Tailscale y registra webhooks en Bot API. Ejecuta esto después de guardar rutas arriba.
+        </p>
+        {canWrite ? (
+          <button
+            type="button"
+            onClick={() => void activateIngress()}
+            disabled={ingressRunning}
+            className="rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60 dark:bg-dark-cyan dark:text-dark-bg"
+          >
+            {ingressRunning ? 'Activando…' : 'Activar ingress Telegram'}
+          </button>
+        ) : (
+          <p className="text-xs text-gov-gray-500">Solo administradores pueden activar ingress.</p>
+        )}
+        {ingressError && (
+          <p className="mt-3 text-sm text-red-600 dark:text-red-400">{ingressError}</p>
+        )}
+        {ingressOutput && (
+          <pre className="mt-3 max-h-48 overflow-auto rounded-xl bg-gov-gray-900 p-3 text-xs text-gov-gray-100 whitespace-pre-wrap">
+            {ingressOutput}
+          </pre>
+        )}
+      </SettingsSection>
     </ViewChrome>
   );
 }

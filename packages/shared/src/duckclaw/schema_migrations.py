@@ -237,7 +237,7 @@ def migrate_gateway_database(db_path: str, *, seed_admin: bool = True) -> list[i
 # ---------------------------------------------------------------------------
 
 _M001_INITIAL_CORE = [
-    # admin_console_users (from admin_console_users.py:_ADMIN_CONSOLE_USERS_DDL)
+    # admin_console_users — schema completo (sin ALTER; fresh install = un solo CREATE)
     """
     CREATE TABLE IF NOT EXISTS main.admin_console_users (
         email VARCHAR PRIMARY KEY,
@@ -247,14 +247,13 @@ _M001_INITIAL_CORE = [
         initials VARCHAR,
         active BOOLEAN DEFAULT true,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        hash_algo TEXT DEFAULT 'pbkdf2_sha256',
+        hash_params JSON,
+        failed_login_count INTEGER DEFAULT 0,
+        last_failed_at TIMESTAMP
     )
     """,
-    # auth columns (from admin_console_users.py:_AUTH_COLUMN_MIGRATIONS)
-    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS hash_algo TEXT DEFAULT 'pbkdf2_sha256'",
-    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS hash_params JSON",
-    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER DEFAULT 0",
-    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS last_failed_at TIMESTAMP",
     # admin_user_profiles (from admin_user_profiles.py)
     """
     CREATE TABLE IF NOT EXISTS main.admin_user_profiles (
@@ -1345,6 +1344,86 @@ def _migration_032_user_agent_draft_policy_v2_refresh(db: Any) -> None:
     apply_user_agent_draft_policy(db, force=True)
 
 
+def _migration_033_harness_core_to_main(db: Any) -> None:
+    """Copia datos legacy harness_core.* → main.* y elimina el schema obsoleto."""
+    try:
+        has_legacy = db.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'harness_core' AND table_name = 'homeostasis_targets'"
+        ).fetchone()
+        if has_legacy and int(has_legacy[0]) > 0:
+            db.execute(
+                """
+                INSERT INTO main.homeostasis_targets (tenant_id, targets_json, updated_at)
+                SELECT tenant_id, targets_json, updated_at
+                FROM harness_core.homeostasis_targets
+                ON CONFLICT (tenant_id) DO NOTHING
+                """
+            )
+        has_runs = db.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'harness_core' AND table_name = 'meditate_runs'"
+        ).fetchone()
+        if has_runs and int(has_runs[0]) > 0:
+            db.execute(
+                """
+                INSERT INTO main.meditate_runs (
+                    run_id, tenant_id, distance_vector, actions_json, status, created_at
+                )
+                SELECT run_id, tenant_id, distance_vector, actions_json, status, created_at
+                FROM harness_core.meditate_runs
+                ON CONFLICT (run_id) DO NOTHING
+                """
+            )
+    except Exception as exc:
+        _log.warning("migration 033 harness_core copy skipped: %s", exc)
+    for stmt in (
+        "DROP TABLE IF EXISTS harness_core.meditate_runs",
+        "DROP TABLE IF EXISTS harness_core.homeostasis_targets",
+        "DROP SCHEMA IF EXISTS harness_core",
+    ):
+        try:
+            db.execute(stmt)
+        except Exception:
+            pass
+
+
+_M033_HOMEOSTASIS_MAIN = [
+    """
+    CREATE TABLE IF NOT EXISTS main.semantic_memory (
+        id VARCHAR PRIMARY KEY,
+        content TEXT NOT NULL,
+        source VARCHAR DEFAULT 'manual_injection',
+        embedding FLOAT[384],
+        embedding_status VARCHAR DEFAULT 'PENDING',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        topic VARCHAR,
+        insight TEXT,
+        confidence_score DOUBLE,
+        updated_at TIMESTAMP,
+        tenant_id VARCHAR
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.homeostasis_targets (
+        tenant_id VARCHAR PRIMARY KEY,
+        targets_json JSON,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.meditate_runs (
+        run_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL,
+        distance_vector JSON,
+        actions_json JSON,
+        status VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+]
+
+
 _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     21: _migration_021_apply_framework_policy_pack,
     22: _migration_022_refresh_framework_packs,
@@ -1355,6 +1434,7 @@ _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     29: _migration_029_sync_skill_catalog_github_mcp,
     31: _migration_031_user_agent_draft_policy_v2,
     32: _migration_032_user_agent_draft_policy_v2_refresh,
+    33: _migration_033_harness_core_to_main,
 }
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
@@ -1390,4 +1470,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (30, "user_agent_draft_policy", _M030_USER_AGENT_DRAFT_POLICY),
     (31, "user_agent_draft_policy_v2", []),
     (32, "user_agent_draft_policy_v2_refresh", []),
+    (33, "homeostasis_main_schema", _M033_HOMEOSTASIS_MAIN),
 ]

@@ -133,12 +133,25 @@ def ingest_folder_paths(
     worker_uid: str,
     compute_embeddings: bool,
     paths: list[Path],
+    job_id: str = "",
 ) -> tuple[list[str], int]:
     """Ingest one file at a time to limit peak RAM (PDF/markitdown + embeddings)."""
+    from duckclaw.knowledge_sync_queue import update_job_progress
+
     task_ids: list[str] = []
     chunks_total = 0
     base = root if root.is_dir() else root.parent
-    for file_path in paths:
+    total = len(paths)
+    for index, file_path in enumerate(paths):
+        if job_id:
+            update_job_progress(
+                job_id,
+                files_total=total,
+                files_done=index,
+                chunks_done=chunks_total,
+                phase="indexing",
+                current_file=file_path.name,
+            )
         payload = build_document_payload(root=base, path=file_path, source_id=source_id)
         file_task_ids, file_chunks = ingest_folder_payloads(
             source_id=source_id,
@@ -151,6 +164,15 @@ def ingest_folder_paths(
         )
         task_ids.extend(file_task_ids)
         chunks_total += file_chunks
+        if job_id:
+            update_job_progress(
+                job_id,
+                files_total=total,
+                files_done=index + 1,
+                chunks_done=chunks_total,
+                phase="indexing",
+                current_file=file_path.name,
+            )
         del payload
         gc.collect()
     return task_ids, chunks_total
@@ -163,6 +185,7 @@ def execute_folder_sync(
     actor_email: str,
     compute_embeddings: bool = True,
     force: bool = False,
+    job_id: str = "",
 ) -> SyncResult:
     source_id = str(source["source_id"])
     source_uri = str(source.get("source_uri") or "").strip()
@@ -186,6 +209,7 @@ def execute_folder_sync(
             actor_email=actor_email,
             compute_embeddings=compute_embeddings,
             force=force,
+            job_id=job_id,
         )
     finally:
         _sync_lock.release()
@@ -198,6 +222,7 @@ def _execute_folder_sync_locked(
     actor_email: str,
     compute_embeddings: bool,
     force: bool,
+    job_id: str = "",
 ) -> SyncResult:
     from duckclaw.knowledge_indexer_guard import assert_indexer_process_for_mutation
 
@@ -274,6 +299,7 @@ def _execute_folder_sync_locked(
         worker_uid=worker_uid,
         compute_embeddings=compute_embeddings,
         paths=upsert_paths,
+        job_id=job_id,
     )
     result.task_ids.extend(ingest_task_ids)
     result.scanned = plan.scanned
@@ -317,6 +343,7 @@ def execute_folder_ingest_for_source(
     source: dict[str, Any],
     actor_email: str,
     compute_embeddings: bool = True,
+    job_id: str = "",
 ) -> SyncResult:
     """Full folder ingest for a registered source (create/import flow)."""
     from duckclaw.knowledge_indexer_guard import assert_indexer_process_for_mutation
@@ -375,6 +402,7 @@ def execute_folder_ingest_for_source(
             worker_uid=worker_uid,
             compute_embeddings=compute_embeddings,
             paths=paths,
+            job_id=job_id,
         )
         result.task_ids.extend(ingest_task_ids)
         result.scanned = len(paths)

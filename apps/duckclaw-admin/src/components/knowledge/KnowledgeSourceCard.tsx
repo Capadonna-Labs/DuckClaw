@@ -6,16 +6,23 @@ import { ChevronDown, ChevronUp, FolderSync, Trash2 } from 'lucide-react';
 import type { KnowledgeSource } from '@/services/adminService';
 import { KnowledgeStatusBadge } from '@/components/knowledge/KnowledgeStatusBadge';
 import {
+  KnowledgeIndexingProgress,
+  type KnowledgeJobProgress,
+} from '@/components/knowledge/KnowledgeIndexingProgress';
+import {
   isFolderKnowledgeSource,
   knowledgeSourceLastSyncLabel,
   knowledgeSourcePrimaryLabel,
   knowledgeSourceSecondaryLine,
 } from '@/components/knowledge/knowledgeSourceLabel';
+import { knowledgeStatusTone } from '@/components/knowledge/knowledgeStatusUi';
 
 type KnowledgeSourceCardProps = {
   source: KnowledgeSource;
   projectId: string;
   busy: boolean;
+  jobProgress?: KnowledgeJobProgress | null;
+  expectedFileTotal?: number;
   onSync: (source: KnowledgeSource) => void;
   onDelete: (source: KnowledgeSource) => void;
 };
@@ -24,12 +31,17 @@ export function KnowledgeSourceCard({
   source,
   projectId,
   busy,
+  jobProgress,
+  expectedFileTotal,
   onSync,
   onDelete,
 }: KnowledgeSourceCardProps) {
   const [expanded, setExpanded] = useState(false);
   const secondary = knowledgeSourceSecondaryLine(source);
   const hasLongDetail = Boolean(secondary && secondary.length > 72);
+  const tone = knowledgeStatusTone(source);
+  const metadataFileCount =
+    typeof source.metadata?.file_count === 'number' ? source.metadata.file_count : undefined;
 
   return (
     <div className="rounded-2xl border border-gov-blue-50 dark:border-dark-border overflow-hidden">
@@ -48,6 +60,14 @@ export function KnowledgeSourceCard({
               <> · última sync {knowledgeSourceLastSyncLabel(source)}</>
             )}
           </p>
+          {tone === 'indexing' && (
+            <KnowledgeIndexingProgress
+              progress={jobProgress}
+              documentCount={source.document_count}
+              chunkCount={source.chunk_count}
+              expectedTotal={expectedFileTotal ?? metadataFileCount}
+            />
+          )}
           {hasLongDetail && (
             <button
               type="button"

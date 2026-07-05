@@ -21,10 +21,9 @@ def _make_db_with_manifest(path: Path, targets_json: Any, tenant_id: str = "defa
     from duckclaw import DuckClaw
 
     con = duckdb.connect(str(path))
-    con.execute("CREATE SCHEMA IF NOT EXISTS harness_core")
     con.execute(
         """
-        CREATE TABLE IF NOT EXISTS harness_core.homeostasis_targets (
+        CREATE TABLE IF NOT EXISTS main.homeostasis_targets (
             tenant_id VARCHAR PRIMARY KEY,
             targets_json JSON,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -33,7 +32,7 @@ def _make_db_with_manifest(path: Path, targets_json: Any, tenant_id: str = "defa
     )
     payload = json.dumps(targets_json) if not isinstance(targets_json, str) else targets_json
     con.execute(
-        "INSERT INTO harness_core.homeostasis_targets (tenant_id, targets_json) VALUES (?, ?)",
+        "INSERT INTO main.homeostasis_targets (tenant_id, targets_json) VALUES (?, ?)",
         [tenant_id, payload],
     )
     con.close()
@@ -93,10 +92,9 @@ def test_load_manifest_migrate_legacy_goals_from_agent_config(tmp_path: Path) ->
 
     path = tmp_path / "vault.duckdb"
     con = duckdb.connect(str(path))
-    con.execute("CREATE SCHEMA IF NOT EXISTS harness_core")
     con.execute(
         """
-        CREATE TABLE harness_core.homeostasis_targets (
+        CREATE TABLE main.homeostasis_targets (
             tenant_id VARCHAR PRIMARY KEY,
             targets_json JSON,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -104,7 +102,7 @@ def test_load_manifest_migrate_legacy_goals_from_agent_config(tmp_path: Path) ->
         """
     )
     con.execute(
-        "INSERT INTO harness_core.homeostasis_targets (tenant_id, targets_json) VALUES ('t1', '{}')"
+        "INSERT INTO main.homeostasis_targets (tenant_id, targets_json) VALUES ('t1', '{}')"
     )
     con.execute(
         """

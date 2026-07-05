@@ -151,10 +151,6 @@ CREATE TABLE IF NOT EXISTS main.task_audit_log (
 
 def _ensure_task_audit_log_table(conn: Any) -> None:
     conn.execute(_TASK_AUDIT_TABLE_DDL)
-    try:
-        conn.execute("ALTER TABLE main.task_audit_log ADD COLUMN plan_title VARCHAR")
-    except Exception:
-        pass
 
 
 def _normalize_task_audit_status(raw: Any) -> str:

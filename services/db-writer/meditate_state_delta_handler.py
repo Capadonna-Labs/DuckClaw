@@ -18,10 +18,8 @@ from models.meditate_state_delta import MeditateStateDelta
 
 logger = logging.getLogger("db-writer.meditate_state_delta")
 
-_HARNESS_DDL = """
-CREATE SCHEMA IF NOT EXISTS harness_core;
-
-CREATE TABLE IF NOT EXISTS harness_core.meditate_runs (
+_HOMESTASIS_DDL = """
+CREATE TABLE IF NOT EXISTS main.meditate_runs (
   run_id VARCHAR PRIMARY KEY,
   tenant_id VARCHAR NOT NULL,
   distance_vector JSON,
@@ -30,7 +28,7 @@ CREATE TABLE IF NOT EXISTS harness_core.meditate_runs (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE TABLE IF NOT EXISTS harness_core.homeostasis_targets (
+CREATE TABLE IF NOT EXISTS main.homeostasis_targets (
   tenant_id VARCHAR PRIMARY KEY,
   targets_json JSON,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -64,8 +62,8 @@ def _connect_duckdb_writable(
     raise RuntimeError("connect duckdb failed")
 
 
-def _ensure_harness_schema(con: duckdb.DuckDBPyConnection) -> None:
-    for stmt in _HARNESS_DDL.strip().split(";"):
+def _ensure_homeostasis_schema(con: duckdb.DuckDBPyConnection) -> None:
+    for stmt in _HOMESTASIS_DDL.strip().split(";"):
         s = stmt.strip()
         if s:
             con.execute(s)
@@ -109,7 +107,7 @@ def _apply_manifest(con: duckdb.DuckDBPyConnection, delta: MeditateStateDelta) -
     tid = str(delta.tenant_id or "default")
     con.execute(
         """
-        INSERT INTO harness_core.homeostasis_targets (tenant_id, targets_json)
+        INSERT INTO main.homeostasis_targets (tenant_id, targets_json)
         VALUES (?, ?)
         ON CONFLICT (tenant_id) DO UPDATE SET
           targets_json = excluded.targets_json,
@@ -123,7 +121,7 @@ def _apply_audit(con: duckdb.DuckDBPyConnection, delta: MeditateStateDelta) -> N
     m = delta.audit_mutation()
     con.execute(
         """
-        INSERT INTO harness_core.meditate_runs (run_id, tenant_id, distance_vector, actions_json, status)
+        INSERT INTO main.meditate_runs (run_id, tenant_id, distance_vector, actions_json, status)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT (run_id) DO UPDATE SET
           distance_vector = excluded.distance_vector,
@@ -187,7 +185,7 @@ def _sync_handle_meditate_state_delta(message: str) -> None:
 
     con = _connect_duckdb_writable(target_db_path)
     try:
-        _ensure_harness_schema(con)
+        _ensure_homeostasis_schema(con)
         if delta.delta_type == "PURGE_STALE_TASKS":
             _apply_purge_stale(con, delta)
         elif delta.delta_type == "QUARANTINE_MEMORY":

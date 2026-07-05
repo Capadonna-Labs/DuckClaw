@@ -1906,6 +1906,13 @@ export const adminService = {
       status: string;
       detail?: string;
       updated_at?: number;
+      progress?: {
+        files_total?: number;
+        files_done?: number;
+        chunks_done?: number;
+        phase?: string;
+        current_file?: string;
+      };
     }>(`/knowledge/jobs/${encodeURIComponent(jobId)}`),
 
   createKnowledgeSource: (body: {

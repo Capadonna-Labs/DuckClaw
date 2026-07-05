@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Idempotent harness_core DDL on hub DuckDB (VPS one-shot)."""
+"""Idempotent homeostasis/meditate DDL on hub DuckDB (VPS one-shot)."""
 from __future__ import annotations
 
 import os
@@ -8,13 +8,12 @@ import sys
 import duckdb
 
 DDL = """
-CREATE SCHEMA IF NOT EXISTS harness_core;
-CREATE TABLE IF NOT EXISTS harness_core.homeostasis_targets (
+CREATE TABLE IF NOT EXISTS main.homeostasis_targets (
     tenant_id VARCHAR PRIMARY KEY,
     targets_json JSON,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-CREATE TABLE IF NOT EXISTS harness_core.meditate_runs (
+CREATE TABLE IF NOT EXISTS main.meditate_runs (
     run_id VARCHAR PRIMARY KEY,
     tenant_id VARCHAR NOT NULL,
     distance_vector JSON,
@@ -42,7 +41,8 @@ def main() -> int:
                 con.execute(s)
         rows = con.execute(
             "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'harness_core' ORDER BY 1"
+            "WHERE table_schema = 'main' AND table_name IN ('homeostasis_targets', 'meditate_runs') "
+            "ORDER BY 1"
         ).fetchall()
         print("ok", path)
         print("tables:", [r[0] for r in rows])

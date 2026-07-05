@@ -1,10 +1,18 @@
 import { adminService } from '@/services/adminService';
 
 export type KnowledgeSyncJobPollResult =
-  | { state: 'completed'; detail?: string }
-  | { state: 'failed'; detail?: string }
-  | { state: 'timeout' }
+  | { state: 'completed'; detail?: string; progress?: KnowledgeJobProgress }
+  | { state: 'failed'; detail?: string; progress?: KnowledgeJobProgress }
+  | { state: 'timeout'; progress?: KnowledgeJobProgress }
   | { state: 'not_found' };
+
+export type KnowledgeJobProgress = {
+  files_total?: number;
+  files_done?: number;
+  chunks_done?: number;
+  phase?: string;
+  current_file?: string;
+};
 
 const TERMINAL = new Set(['completed', 'failed']);
 
@@ -13,11 +21,12 @@ export async function pollKnowledgeSyncJob(
   options?: {
     intervalMs?: number;
     maxAttempts?: number;
-    onTick?: (status: string) => void;
+    onTick?: (status: string, progress?: KnowledgeJobProgress) => void;
   }
 ): Promise<KnowledgeSyncJobPollResult> {
   const intervalMs = options?.intervalMs ?? 2500;
   const maxAttempts = options?.maxAttempts ?? 120;
+  let lastProgress: KnowledgeJobProgress | undefined;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
@@ -29,18 +38,22 @@ export async function pollKnowledgeSyncJob(
       continue;
     }
     const status = row.status;
-    options?.onTick?.(status);
+    const progress = row.progress;
+    if (progress) {
+      lastProgress = progress;
+    }
+    options?.onTick?.(status, progress);
     if (status === 'completed') {
-      return { state: 'completed', detail: row.detail };
+      return { state: 'completed', detail: row.detail, progress: lastProgress };
     }
     if (status === 'failed') {
-      return { state: 'failed', detail: row.detail };
+      return { state: 'failed', detail: row.detail, progress: lastProgress };
     }
     if (TERMINAL.has(status)) {
-      return { state: 'failed', detail: row.detail };
+      return { state: 'failed', detail: row.detail, progress: lastProgress };
     }
   }
-  return { state: 'timeout' };
+  return { state: 'timeout', progress: lastProgress };
 }
 
 export function formatKnowledgeJobPollNotice(

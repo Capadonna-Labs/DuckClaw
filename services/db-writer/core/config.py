@@ -1,15 +1,23 @@
 # services/db-writer/core/config.py
-from pathlib import Path
+from __future__ import annotations
 
-from pydantic import AliasChoices, Field, RedisDsn
+import os
+from pathlib import Path
+from typing import Self
+
+from pydantic import AliasChoices, Field, RedisDsn, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-# Calcula la raíz del monorepo (sube 3 niveles: core -> db-writer -> services -> duckclaw)
+# Raíz del monorepo (core -> db-writer -> services -> duckclaw)
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent.parent
+
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "DuckClaw DB Writer"
-    REDIS_URL: RedisDsn = "redis://localhost:6379/0"
+    REDIS_URL: RedisDsn = Field(
+        default="redis://localhost:6379/0",
+        validation_alias=AliasChoices("REDIS_URL", "DUCKCLAW_REDIS_URL"),
+    )
     QUEUE_NAME: str = "duckdb_write_queue"
     CONTEXT_INJECTION_QUEUE_NAME: str = Field(
         default="duckclaw:state_delta:context",
@@ -55,9 +63,18 @@ class Settings(BaseSettings):
     PROCESSING_LEASE_SEC: int = 120
     PROCESSING_RECLAIM_INTERVAL_SEC: int = 30
 
-    # Ruta absoluta calculada dinámicamente
-    DUCKDB_PATH: str = str(ROOT_DIR / "db" / "duckclaw.duckdb") 
+    # Resuelto en validator vía duckclaw.gateway_db (misma bóveda que el Gateway).
+    DUCKDB_PATH: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    @model_validator(mode="after")
+    def _resolve_duckdb_path(self) -> Self:
+        os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(ROOT_DIR))
+        from duckclaw.gateway_db import get_gateway_db_path
+
+        object.__setattr__(self, "DUCKDB_PATH", get_gateway_db_path())
+        return self
+
 
 settings = Settings()

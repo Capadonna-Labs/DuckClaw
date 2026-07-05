@@ -32,11 +32,6 @@ CREATE TABLE IF NOT EXISTS main.visual_assets (
 );
 """
 
-_VISUAL_ASSETS_ALTER = [
-    "ALTER TABLE main.visual_assets ADD COLUMN IF NOT EXISTS operation VARCHAR DEFAULT ''",
-    "ALTER TABLE main.visual_assets ADD COLUMN IF NOT EXISTS source_image_path VARCHAR DEFAULT ''",
-]
-
 
 def _is_duckdb_lock_error(exc: BaseException) -> bool:
     msg = str(exc).lower()
@@ -66,11 +61,6 @@ def _connect_duckdb_writable(
 
 def _ensure_visual_assets_schema(con: duckdb.DuckDBPyConnection) -> None:
     con.execute(_VISUAL_ASSETS_DDL)
-    for stmt in _VISUAL_ASSETS_ALTER:
-        try:
-            con.execute(stmt)
-        except Exception:
-            pass
 
 
 def _apply_visual_asset_upsert(con: duckdb.DuckDBPyConnection, delta: VisualStateDelta) -> None:

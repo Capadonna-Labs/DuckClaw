@@ -151,8 +151,10 @@ def _run_typed_command_sync(
     command_type: str,
     payload: dict,
     target_db_path: str,
-) -> str:
-    """Ejecuta comando tipado en DuckDB. Retorna 'completed' o 'already_completed'."""
+) -> tuple[str, str | None]:
+    """Ejecuta comando tipado en DuckDB. Retorna (outcome, success_detail)."""
+    from duckclaw.write_task_detail import format_write_task_success_detail
+
     conn = _connect_duckdb_writable(target_db_path)
     try:
         from duckclaw.schema_migrations import run_pending_migrations
@@ -162,7 +164,7 @@ def _run_typed_command_sync(
 
         if _ledger_is_completed(conn, task_id):
             conn.execute("ROLLBACK")
-            return "already_completed"
+            return "already_completed", None
 
         if command_type == "raw_sql":
             query = str(payload.get("query") or "")
@@ -182,7 +184,7 @@ def _run_typed_command_sync(
             json.dumps(payload, default=str),
         )
         conn.execute("COMMIT")
-        return "completed"
+        return "completed", format_write_task_success_detail(command_type, payload)
     except Exception:
         try:
             conn.execute("ROLLBACK")
@@ -315,7 +317,7 @@ async def _handle_typed_command(
 
     try:
         async with _db_path_locks.acquire(target_db_path):
-            outcome = await asyncio.to_thread(
+            outcome, success_detail = await asyncio.to_thread(
                 _run_typed_command_sync,
                 task_id,
                 command_type,
@@ -343,7 +345,11 @@ async def _handle_typed_command(
 
     await redis_client.set(dedup_key, "1", ex=TASK_STATUS_TTL_SEC * 2)
     logger.info("[%s] Command %s completed", task_id, command_type)
-    await _publish_task_status(redis_client, task_id, DbWriteTaskStatus(status="success"))
+    await _publish_task_status(
+        redis_client,
+        task_id,
+        DbWriteTaskStatus(status="success", detail=success_detail),
+    )
     await record_metric(redis_client, "processed")
     return True
 

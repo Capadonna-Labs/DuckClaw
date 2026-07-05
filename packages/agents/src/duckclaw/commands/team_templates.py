@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 from typing import Any, Optional, Protocol
 
-from duckclaw import db_write_queue
 from duckclaw.commands.chat_state import (
     _skip_runtime_ddl,
     get_chat_state,
@@ -138,17 +137,14 @@ def _enqueue_tenant_team_templates_command(
     )
     released_ro, resume = _release_ro_handle_for_writer(db)
     try:
-        task_id = db_write_queue.enqueue_typed_command(
+        from duckclaw.db_write_fire_and_forget import enqueue_write_and_resolve
+
+        ok, err = enqueue_write_and_resolve(
             command,
             db_path=target_db_path,
             user_id=tenant_id or "default",
         )
-        status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=30.0)
-        if status is None:
-            return False, "timeout esperando db-writer"
-        if status.status != "success":
-            return False, (status.detail or "db-writer failed")[:500]
-        return True, ""
+        return ok, err
     finally:
         if released_ro and callable(resume):
             try:

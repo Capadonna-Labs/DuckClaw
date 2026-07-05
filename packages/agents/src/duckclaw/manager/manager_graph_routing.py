@@ -6,11 +6,23 @@ from duckclaw.graphs.state import ManagerAgentState
 from duckclaw.manager.fast_replies import (
     _manager_capabilities_fast_path_ok,
     _manager_greeting_fast_path_ok,
+    _manager_knowledge_inventory_fast_path_ok,
 )
 from duckclaw.manager.routing import _worker_matches_id
 from duckclaw.utils.logger import get_obs_logger, log_sys
 
 _obs = get_obs_logger()
+
+
+def _fast_path_user_text(state: ManagerAgentState) -> str:
+    return (
+        state.get("user_incoming")
+        or state.get("incoming")
+        or state.get("input")
+        or state.get("message")
+        or ""
+    ).strip()
+
 
 def route_after_plan(state: ManagerAgentState) -> str:
     mspec = state.get("mercenary_spec")
@@ -40,10 +52,11 @@ def route_after_invoke_worker(state: ManagerAgentState) -> str:
 
 
 def route_after_router(state: ManagerAgentState) -> str:
-    incoming = (state.get("incoming") or state.get("input") or state.get("message") or "").strip()
-    if _manager_greeting_fast_path_ok(incoming):
-        return "greeting_shortcut"
-    if _manager_capabilities_fast_path_ok(incoming):
+    user_text = _fast_path_user_text(state)
+    greeting_ok = _manager_greeting_fast_path_ok(user_text)
+    capabilities_ok = _manager_capabilities_fast_path_ok(user_text)
+    knowledge_ok = _manager_knowledge_inventory_fast_path_ok(user_text)
+    if greeting_ok or capabilities_ok or knowledge_ok:
         return "greeting_shortcut"
     return "plan"
 

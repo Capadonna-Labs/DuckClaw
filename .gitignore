@@ -77,6 +77,9 @@ logs/
 .cursor/
 debug_sft.log
 
+# DuckOps migrate backups (local pre-migrate snapshots)
+.duckops/migrate-backups/
+
 # Tests deprecados (quant-trader, CFD, MOC, IBKR): locales; requieren .env/broker
 tests/deprecated/
 
@@ -98,4 +101,3 @@ _auto_publish_fix/
 _reports_fix_staging/
 _reports_staging/
 debug-*.log
-/Users/workstation/Developer/duckclaw/.duckops/migrate-backups

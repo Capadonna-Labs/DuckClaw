@@ -9,6 +9,7 @@ import { SandboxBrowserPanel } from '@/components/sandbox/SandboxBrowserPanel';
 import { SandboxConfigPanel } from '@/components/sandbox/SandboxConfigPanel';
 import { adminService } from '@/services/adminService';
 import { cn } from '@/lib/utils';
+import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 
 type SandboxTab = 'files' | 'config' | 'browser';
 
@@ -57,9 +58,9 @@ export default function SandboxPage() {
 
   useEffect(() => {
     void loadStatus();
-    const t = setInterval(() => void loadStatus(), 12000);
-    return () => clearInterval(t);
   }, [loadStatus]);
+
+  useVisibilityAwareInterval(() => void loadStatus(), 30_000);
 
   const dockerOk = status?.docker_available === true;
 
@@ -89,8 +90,8 @@ export default function SandboxPage() {
             {headerBadge}
           </h1>
           <p className="text-sm text-gov-gray-500 mt-1 max-w-2xl">
-            Entorno aislado Strix: configuración, archivos efímeros y navegador en vivo. Los
-            artefactos no van al RAG hasta que los guardes en Drive.
+            Código y archivos que el agente crea al ejecutar tareas. Actívalo en Chat con{' '}
+            <code className="font-mono text-xs">/sandbox on</code>. Los resultados aparecen aquí en vivo.
           </p>
         </div>
         <button

@@ -11,12 +11,12 @@ const OPS_COMMANDS_FALLBACK = {
     {
       id: 'pm2_restart_gateway',
       label: 'Reiniciar DuckClaw-Gateway',
-      argv: ['pm2', 'restart', 'DuckClaw-Gateway', '--update-env'],
+      argv: ['__pm2_recycle_gateway__'],
     },
     {
       id: 'pm2_restart_db_writer',
       label: 'Reiniciar DuckClaw-DB-Writer',
-      argv: ['pm2', 'restart', 'DuckClaw-DB-Writer', '--update-env'],
+      argv: ['__pm2_recycle_db_writer__'],
     },
     {
       id: 'start_stack',
@@ -36,12 +36,12 @@ const OPS_COMMANDS_FALLBACK = {
     {
       id: 'pm2_start_db_writer',
       label: 'Iniciar DuckClaw-DB-Writer',
-      argv: ['pm2', 'start', 'config/ecosystem.db-writer.config.cjs', '--update-env'],
+      argv: ['__pm2_recycle_db_writer__'],
     },
     {
       id: 'pm2_start_gateway',
       label: 'Iniciar DuckClaw-Gateway',
-      argv: ['pm2', 'start', 'config/ecosystem.api.config.cjs', '--only', 'DuckClaw-Gateway', '--update-env'],
+      argv: ['__pm2_recycle_gateway__'],
     },
     {
       id: 'pm2_logs_gateway',
@@ -90,11 +90,6 @@ const OPS_COMMANDS_FALLBACK = {
 };
 
 const WRITE_METHODS = new Set(['PUT', 'PATCH', 'POST', 'DELETE']);
-const LOCAL_OPS_ALLOWLIST: Record<string, string[]> = {
-  pm2_restart_db_writer: ['pm2', 'restart', 'DuckClaw-DB-Writer', '--update-env'],
-  pm2_restart_gateway: ['pm2', 'restart', 'DuckClaw-Gateway', '--update-env'],
-  pm2_start_gateway: ['pm2', 'start', 'config/ecosystem.api.config.cjs', '--only', 'DuckClaw-Gateway', '--update-env'],
-};
 
 function userWriteAllowed(sub: string, method: string): boolean {
   if (method === 'POST' && sub === 'projects') return true;
@@ -164,39 +159,21 @@ async function localOpsRunFallback(sub: string, method: string, bodyText: string
   } catch {
     return NextResponse.json({ detail: 'Payload ops/run inválido' }, { status: 400 });
   }
-  const argv = LOCAL_OPS_ALLOWLIST[opId];
-  if (!argv) {
+  const { isLocalOpId, runOpsLocal } = await import('@/lib/localOps');
+  if (!isLocalOpId(opId)) {
     return NextResponse.json({ detail: 'Comando local no permitido', op_id: opId }, { status: 403 });
   }
 
-  const { execFile } = await import('node:child_process');
-  const cwd = process.env.DUCKCLAW_REPO_ROOT?.trim() || process.cwd();
-  return new Promise((resolve) => {
-    execFile(
-      argv[0],
-      argv.slice(1),
-      { cwd, timeout: 30_000, maxBuffer: 1024 * 1024 },
-      (error, stdout, stderr) => {
-        const exitCode =
-          typeof (error as NodeJS.ErrnoException | null)?.code === 'number'
-            ? Number((error as NodeJS.ErrnoException).code)
-            : error
-              ? 1
-              : 0;
-        resolve(
-          NextResponse.json({
-            ok: exitCode === 0,
-            op_id: opId,
-            exit_code: exitCode,
-            stdout: String(stdout || ''),
-            stderr: String(stderr || ''),
-            executed_via: 'bff-local',
-            _gateway_stale: true,
-          })
-        );
-      }
+  try {
+    const result = await runOpsLocal(opId);
+    return NextResponse.json(
+      { ...result, _gateway_stale: true },
+      { headers: { 'X-Duckclaw-Ops-Via': 'bff-fallback' } }
     );
-  });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Error ejecutando comando';
+    return NextResponse.json({ detail: msg, op_id: opId }, { status: 500 });
+  }
 }
 
 async function proxy(req: NextRequest, segments: string[]) {

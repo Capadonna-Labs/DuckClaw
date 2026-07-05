@@ -15,20 +15,18 @@ router = APIRouter(prefix="/ops", tags=["admin-ops"])
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
 
+from duckclaw.ops.pm2_recycle import pm2_recycle_db_writer_bash_lc, pm2_recycle_gateway_bash_lc
+
+_PM2_RECYCLE_GATEWAY = pm2_recycle_gateway_bash_lc()
+_PM2_RECYCLE_DB_WRITER = pm2_recycle_db_writer_bash_lc()
+
 _OPS_ALLOWLIST: dict[str, list[str]] = {
     "pm2_list": ["pm2", "list"],
     "pm2_status": ["pm2", "status"],
-    "pm2_restart_gateway": ["pm2", "restart", "DuckClaw-Gateway", "--update-env"],
-    "pm2_restart_db_writer": ["pm2", "restart", "DuckClaw-DB-Writer", "--update-env"],
-    "pm2_start_db_writer": ["pm2", "start", "config/ecosystem.db-writer.config.cjs", "--update-env"],
-    "pm2_start_gateway": [
-        "pm2",
-        "start",
-        "config/ecosystem.api.config.cjs",
-        "--only",
-        "DuckClaw-Gateway",
-        "--update-env",
-    ],
+    "pm2_restart_gateway": ["bash", "-lc", _PM2_RECYCLE_GATEWAY],
+    "pm2_restart_db_writer": ["bash", "-lc", _PM2_RECYCLE_DB_WRITER],
+    "pm2_start_db_writer": ["bash", "-lc", _PM2_RECYCLE_DB_WRITER],
+    "pm2_start_gateway": ["bash", "-lc", _PM2_RECYCLE_GATEWAY],
     "pm2_logs_gateway": ["pm2", "logs", "DuckClaw-Gateway", "--lines", "40", "--nostream"],
     "pm2_start_mcp": ["pm2", "start", "config/ecosystem.mcp.config.cjs"],
     "pm2_restart_mcp": ["pm2", "restart", "DuckClaw-MCP", "--update-env"],

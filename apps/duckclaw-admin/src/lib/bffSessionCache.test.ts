@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  BFF_SESSION_STALE_GRACE_MS,
   BFF_SESSION_TTL_MS,
   coalesceBffSessionLookup,
   getCachedBffSession,
@@ -24,6 +25,11 @@ invalidateBffSessionCache('sess-1');
 assert.equal(getCachedBffSession('sess-1'), undefined);
 
 assert.ok(BFF_SESSION_TTL_MS >= 30_000);
+assert.ok(BFF_SESSION_STALE_GRACE_MS >= 60_000);
+
+setCachedBffSession('sess-stale', user);
+const staleOnly = getCachedBffSession('sess-stale', { allowStale: true });
+assert.equal(staleOnly?.email, 'a@b.com');
 
 let calls = 0;
 const gate = Promise.resolve();

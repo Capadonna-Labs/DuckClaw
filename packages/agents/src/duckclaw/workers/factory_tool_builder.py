@@ -234,6 +234,9 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
     register_convert_document_tool(tools)
     register_export_output_document_tool(tools)
     register_get_project_context_tool(tools)
+    from duckclaw.forge.skills.update_worker_system_prompt_bridge import register_update_my_system_prompt_tool
+
+    register_update_my_system_prompt_tool(tools)
     from duckclaw.forge.skills.report_engine_bridge import register_report_engine_tools
 
     register_report_engine_tools(tools)

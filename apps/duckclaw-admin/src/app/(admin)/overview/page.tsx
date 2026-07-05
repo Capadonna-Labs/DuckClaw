@@ -8,6 +8,7 @@ import { adminService } from '@/services/adminService';
 import type { OverviewMetrics } from '@/types/admin';
 import { HomeChecklist } from '@/components/admin/HomeChecklist';
 import { friendlyGatewayError } from '@/lib/adminErrors';
+import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 import { useAuthStore } from '@/store/authStore';
 import { isAdminRole } from '@/lib/roles';
 
@@ -23,8 +24,14 @@ export default function OverviewPage() {
   const [metricsOpen, setMetricsOpen] = useState(false);
 
   useEffect(() => {
-    adminService
-      .health()
+    useGatewayHealthStore
+      .getState()
+      .refresh()
+      .then((health) => {
+        if (!health) {
+          setError(friendlyGatewayError('Sin conexión'));
+        }
+      })
       .catch((e) =>
         setError(friendlyGatewayError(e instanceof Error ? e.message : 'Sin conexión'))
       );

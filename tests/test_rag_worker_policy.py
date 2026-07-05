@@ -240,8 +240,12 @@ def test_rag_debug_instrumentation_is_not_left_in_runtime_modules() -> None:
         Path("packages/agents/src/duckclaw/forge/rag/context_provider.py"),
         Path("packages/agents/src/duckclaw/graphs/manager_graph.py"),
         Path("packages/agents/src/duckclaw/graphs/graph_server.py"),
+        Path("packages/agents/src/duckclaw/manager/manager_graph_routing.py"),
+        Path("packages/agents/src/duckclaw/forge/skills/update_worker_system_prompt_bridge.py"),
         Path("services/api-gateway/routers/admin.py"),
         Path("services/api-gateway/main.py"),
+        Path("services/api-gateway/routers/admin_domains/playground/config_routes.py"),
+        Path("apps/duckclaw-admin/src/lib/localOps.ts"),
     ]
     forbidden = (
         "debug-ab0734",

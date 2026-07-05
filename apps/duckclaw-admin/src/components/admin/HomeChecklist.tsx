@@ -6,6 +6,7 @@ import { Bot, CheckCircle2, Circle, Database, MessageCircle, Server } from 'luci
 import { adminService } from '@/services/adminService';
 import { playgroundHref, readLastCreatedWorker, readLastProjectId } from '@/lib/onboardingFlow';
 import { friendlyGatewayError } from '@/lib/adminErrors';
+import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 
 type StepState = 'pending' | 'ok' | 'warn';
 
@@ -34,11 +35,14 @@ export function HomeChecklist() {
       let stackOk = false;
       let stackDetail = 'Comprobando gateway y Redis…';
       try {
-        const health = await adminService.health();
-        stackOk = health.status === 'ok' && health.redis;
-        stackDetail = stackOk
-          ? `Gateway OK · Redis ${health.redis ? 'conectado' : 'pendiente'}`
-          : `Gateway: ${health.status} · Redis: ${health.redis ? 'sí' : 'no'}`;
+        const health = await useGatewayHealthStore.getState().refresh();
+        stackOk = health?.status === 'ok' && Boolean(health?.redis);
+        stackDetail = health
+          ? stackOk
+            ? `Gateway OK · Redis ${health.redis ? 'conectado' : 'pendiente'}`
+            : `Gateway: ${health.status} · Redis: ${health.redis ? 'sí' : 'no'}`
+          : 'Sin conexión';
+        if (!health) setStackError(friendlyGatewayError('Sin conexión'));
       } catch (e) {
         stackDetail = friendlyGatewayError(e instanceof Error ? e.message : 'Sin conexión');
         setStackError(stackDetail);

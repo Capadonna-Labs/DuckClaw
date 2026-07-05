@@ -263,6 +263,15 @@ async def admin_health(request: Request) -> dict[str, Any]:
             redis_ok = True
     except Exception:
         redis_ok = False
+
+    gateway_metrics: dict[str, Any] = {}
+    try:
+        from duckclaw.ops.gateway_health_metrics import collect_gateway_health_metrics
+
+        gateway_metrics = collect_gateway_health_metrics()
+    except Exception:
+        gateway_metrics = {}
+
     return {
         "status": "ok",
         "workers_count": len(workers),
@@ -275,6 +284,7 @@ async def admin_health(request: Request) -> dict[str, Any]:
             "ops": True,
             "projects": True,
         },
+        "gateway_metrics": gateway_metrics,
     }
 
 

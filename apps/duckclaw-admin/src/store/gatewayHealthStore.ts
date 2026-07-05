@@ -13,6 +13,7 @@ type GatewayHealthState = {
   data: AdminHealth | null;
   error: boolean;
   recovering: boolean;
+  refreshing: boolean;
   fetchedAt: number;
   refresh: (force?: boolean) => Promise<AdminHealth | null>;
   beginRecovery: () => void;
@@ -27,6 +28,7 @@ export const useGatewayHealthStore = create<GatewayHealthState>((set, get) => ({
   data: null,
   error: false,
   recovering: false,
+  refreshing: false,
   fetchedAt: 0,
   beginRecovery: () => {
     consecutiveFailures = 0;
@@ -40,13 +42,22 @@ export const useGatewayHealthStore = create<GatewayHealthState>((set, get) => ({
     if (!force && !recovering && data && Date.now() - fetchedAt < TTL_MS) {
       return data;
     }
-    if (inflight) return inflight;
+    if (inflight) {
+      set({ refreshing: true });
+      return inflight;
+    }
 
+    set({ refreshing: true });
     inflight = adminService
       .health()
       .then((health) => {
         consecutiveFailures = 0;
-        set({ data: health, error: false, recovering: false, fetchedAt: Date.now() });
+        set({
+          data: health,
+          error: false,
+          recovering: false,
+          fetchedAt: Date.now(),
+        });
         return health;
       })
       .catch(() => {
@@ -67,6 +78,7 @@ export const useGatewayHealthStore = create<GatewayHealthState>((set, get) => ({
       })
       .finally(() => {
         inflight = null;
+        set({ refreshing: false });
       });
 
     return inflight;

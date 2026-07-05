@@ -44,4 +44,20 @@ Con `DUCKCLAW_SPAWN_PROFILE=1`, el Gateway puede aplicar writes inline — excep
 ## Pendiente
 
 - Telegram inbound → cola Redis (fase 2)
-- UI Admin: poll genérico `write-tasks` tras mutaciones CRUD
+- UI Admin: poll genérico `write-tasks` tras mutaciones CRUD largas
+
+## Métricas Overview
+
+`GET /admin/health` expone `gateway_metrics.db_write_queue_depth` (LLEN `duckdb_write_queue`) junto a RAG y RAM. La consola Overview permite refresh manual con bypass de caché (45s TTL en store).
+
+## Liberación de recursos (Gateway in-process)
+
+```http
+POST /api/v1/admin/gateway/release-worker-cache
+→ { entries_before, entries_after, rss_mb_before, rss_mb_after, worker_graph_cache }
+```
+
+- Solo vacía caché LangGraph + `gc.collect()` en el proceso HTTP actual.
+- **No** reinicia PM2 ni DB-Writer.
+- UI: botón en tarjeta «Caché workers» con modal de confirmación (coste: cold start en próximo chat).
+- Misma rutina que fly commands (`duckclaw.ops.gateway_resource_release`).

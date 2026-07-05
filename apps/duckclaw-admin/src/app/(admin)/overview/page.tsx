@@ -20,17 +20,10 @@ export default function OverviewPage() {
   const isAdmin = isAdminRole(usuario?.rol);
   const gatewayFailed = useGatewayHealthStore((s) => s.error);
   const gatewayHealth = useGatewayHealthStore((s) => s.data);
-  const gatewayFetchedAt = useGatewayHealthStore((s) => s.fetchedAt);
-  const refreshGatewayHealth = useGatewayHealthStore((s) => s.refresh);
-  const gatewayChecking = !gatewayFailed && gatewayHealth == null && gatewayFetchedAt === 0;
   const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
 
   const error = gatewayFailed ? friendlyGatewayError('Sin conexión') : null;
-
-  useEffect(() => {
-    void refreshGatewayHealth();
-  }, [refreshGatewayHealth]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -65,11 +58,7 @@ export default function OverviewPage() {
 
       {error && <GatewayErrorBanner message={error} />}
 
-      <StackHealthCards
-        health={gatewayHealth}
-        loading={gatewayChecking}
-        gatewayError={gatewayFailed}
-      />
+      <StackHealthCards />
 
       <HomeChecklist />
 

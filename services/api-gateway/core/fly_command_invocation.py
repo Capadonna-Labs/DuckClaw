@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import gc
 import logging
 import os
 import time
@@ -18,7 +17,8 @@ from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.extensions.fly import extension_fly_read_only_command_names
 from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
 from duckclaw.graphs.on_the_fly_commands import handle_command, parse_command, pop_all_fly_outbound_charts
-from duckclaw.manager.graph import trim_worker_graph_cache, worker_graph_cache_entry_count
+from duckclaw.manager.graph import worker_graph_cache_entry_count
+from duckclaw.ops.gateway_resource_release import release_worker_graph_cache
 from duckclaw.utils.logger import format_chat_id_for_terminal
 
 ResolveTelegramBotToken = Callable[[], str]
@@ -111,8 +111,7 @@ def _audit_fly_vault_resolution(vault_db_path: str, fly_engine: str) -> None:
 def _clear_cached_worker_handles_for_fly() -> None:
     try:
         cache_entries = worker_graph_cache_entry_count()
-        trim_worker_graph_cache(force_clear=True)
-        gc.collect()
+        release_worker_graph_cache(force=True)
         if _log.isEnabledFor(logging.DEBUG):
             _log.debug("fly cleared worker graph cache entries=%s", cache_entries)
     except Exception:

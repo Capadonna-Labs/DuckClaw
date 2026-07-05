@@ -59,6 +59,31 @@ def test_admin_write_task_pending(admin_client) -> None:
     assert data["status"] == "pending"
 
 
+def test_admin_release_worker_cache(admin_client, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setattr(
+        "duckclaw.ops.gateway_resource_release.release_worker_graph_cache",
+        lambda **_: {
+            "ok": True,
+            "entries_before": 2,
+            "entries_after": 0,
+            "rss_mb_before": 500.0,
+            "rss_mb_after": 480.0,
+            "worker_graph_cache": {"enabled": True, "entries": 0, "max_entries": 8},
+        },
+    )
+    client: TestClient = admin_client
+    r = client.post(
+        "/api/v1/admin/gateway/release-worker-cache",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["entries_after"] == 0
+
+
 def test_admin_prompt_policy_health_reports_missing_db_first_requirements(
     gateway_admin_client: TestClient,
     gateway_db: Path,

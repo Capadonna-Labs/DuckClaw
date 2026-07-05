@@ -72,11 +72,12 @@ def test_forget_with_read_only_handle_uses_typed_command_and_preserves_response(
         captured["user_id"] = user_id
         return command.task_id
 
-    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue)
+    monkeypatch.setattr("duckclaw.db_write_fire_and_forget.enqueue_write_command", fake_enqueue)
     monkeypatch.setattr(
-        "duckclaw.db_write_queue.poll_task_status_sync",
+        "duckclaw.db_write_fire_and_forget.wait_write_task",
         lambda *_args, **_kwargs: DbWriteTaskStatus(status="success"),
     )
+    monkeypatch.setenv("DUCKCLAW_WRITE_POLL_SEC", "30")
 
     db = ReadOnlyDb(tmp_path / "vault.duckdb")
     result = execute_forget(db, "default", tenant_id="tenant-a")
@@ -91,3 +92,35 @@ def test_forget_with_read_only_handle_uses_typed_command_and_preserves_response(
     assert captured["user_id"] == "default"
     assert db.released is True
     assert db.resumed is True
+
+
+def test_forget_fire_and_forget_returns_queued_message(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class ReadOnlyDb:
+        _read_only = True
+
+        def __init__(self, db_path: Path) -> None:
+            self._path = str(db_path)
+
+        def execute(self, sql: str) -> None:
+            raise AssertionError(sql)
+
+        def query(self, _sql: str) -> list[dict[str, str]]:
+            return []
+
+        def release_file_handle_for_external_writer(self) -> None:
+            return None
+
+        def resume_readonly_file_handle(self) -> None:
+            return None
+
+    monkeypatch.delenv("DUCKCLAW_WRITE_POLL_SEC", raising=False)
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.enqueue_write_command",
+        lambda *_args, **_kwargs: "forget-task-1",
+    )
+
+    result = execute_forget(ReadOnlyDb(tmp_path / "vault.duckdb"), "default", tenant_id="tenant-a")
+    assert result == "Write encolado (task_id=forget-task-1)"

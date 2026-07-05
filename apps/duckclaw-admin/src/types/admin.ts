@@ -91,6 +91,15 @@ export interface RuntimeConfigRow {
   value: string;
 }
 
+export interface Pm2ProcessHealth {
+  name: string;
+  label?: string;
+  status: string;
+  pid?: number | null;
+  rss_mb?: number | null;
+  heap_mb?: number | null;
+}
+
 export interface GatewayHealthMetrics {
   process_role?: string;
   rss_mb?: number | null;
@@ -102,6 +111,7 @@ export interface GatewayHealthMetrics {
   };
   knowledge_sync_queue_depth?: number | null;
   db_write_queue_depth?: number | null;
+  pm2_processes?: Pm2ProcessHealth[];
   collected_at?: number;
 }
 
@@ -214,4 +224,32 @@ export interface OverviewMetrics {
   activity: OverviewActivityRow[];
   latency: OverviewLatencyRow[];
   db_path?: string;
+}
+
+export type WriteTaskStatus = 'pending' | 'success' | 'failed';
+
+export interface WriteTaskStatusResponse {
+  task_id: string;
+  status: WriteTaskStatus;
+  detail?: string | null;
+}
+
+export interface AsyncWriteTaskAccepted {
+  ok: boolean;
+  accepted: boolean;
+  task_id: string;
+  message: string;
+}
+
+export interface RestoreFrameworkPoliciesResponse extends AsyncWriteTaskAccepted {
+  applied: string[];
+  pack: string;
+  actor?: string;
+}
+
+export interface SyncCatalogPromptsResponse extends AsyncWriteTaskAccepted {
+  synced: string[];
+  skipped: string[];
+  failed: string[];
+  actor?: string;
 }

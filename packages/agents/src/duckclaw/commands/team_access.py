@@ -397,9 +397,13 @@ def _enqueue_team_access_command(db: Any, acl_db: Any, command: Any, *, requeste
     resumes = _release_ro_handles_for_external_writer(db, acl_db)
     try:
         try:
-            from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync  # noqa: PLC0415
+            from duckclaw.db_write_fire_and_forget import (  # noqa: PLC0415
+                enqueue_write_command,
+                wait_write_task,
+                write_poll_timeout_sec,
+            )
 
-            task_id = enqueue_typed_command(
+            task_id = enqueue_write_command(
                 command,
                 db_path=target_db_path,
                 user_id=str(requester_id or "default").strip() or "default",
@@ -415,9 +419,10 @@ def _enqueue_team_access_command(db: Any, acl_db: Any, command: Any, *, requeste
             _dispatch_authorized_user_command_inline(db, command)
             return str(getattr(command, "task_id", "") or "")
 
-        status = poll_task_status_sync(task_id, timeout_sec=0.25, interval_sec=0.05)
+        poll_sec = write_poll_timeout_sec()
+        status = wait_write_task(task_id, timeout_sec=poll_sec)
         if status is None:
-            if _can_apply_team_command_on_existing_rw(db, target_db_path):
+            if poll_sec > 0 and _can_apply_team_command_on_existing_rw(db, target_db_path):
                 _audit_team_whitelist_rw(
                     "typed_command_inline_existing_rw",
                     command_type=getattr(command, "command_type", ""),
@@ -434,6 +439,15 @@ def _enqueue_team_access_command(db: Any, acl_db: Any, command: Any, *, requeste
                 resume()
             except Exception:
                 pass
+
+
+def _team_queued_write_suffix(task_id: str) -> str:
+    from duckclaw.db_write_fire_and_forget import write_poll_timeout_sec  # noqa: PLC0415
+
+    tid = str(task_id or "").strip()
+    if write_poll_timeout_sec() <= 0 and tid:
+        return f" Write encolado (task_id={tid})"
+    return ""
 
 
 def _enqueue_authorized_user_command(db: Any, acl_db: Any, command: Any, *, requester_id: str) -> str:
@@ -525,7 +539,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             return "Uso: /team --rm <user_id>"
         from duckclaw.write_commands import DeleteAuthorizedUserCommand  # noqa: PLC0415
 
-        _enqueue_authorized_user_command(
+        task_id = _enqueue_authorized_user_command(
             db,
             acl,
             DeleteAuthorizedUserCommand(
@@ -537,7 +551,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         )
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         target_label = _player_label("", target_uid, db=acl, tenant_id=tid)
-        return f"✅ Eliminado {target_label} del tenant '{tid}'."
+        return f"✅ Eliminado {target_label} del tenant '{tid}'.{_team_queued_write_suffix(task_id)}"
 
     if raw.startswith("--add ") or raw.strip() == "--add":
         if not rid:
@@ -561,7 +575,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
             return "Uso: /team --add <user_id> [nombre] [admin|user]"
         from duckclaw.write_commands import UpsertAuthorizedUserCommand  # noqa: PLC0415
 
-        _enqueue_authorized_user_command(
+        task_id = _enqueue_authorized_user_command(
             db,
             acl,
             UpsertAuthorizedUserCommand(
@@ -575,7 +589,7 @@ def execute_team_whitelist(db: Any, tenant_id: Any, requester_id: Any, args: str
         )
         _invalidate_whitelist_redis_cache(tenant_id=tid, user_id=target_uid)
         target_label = _player_label(uname, target_uid, db=acl, tenant_id=tid)
-        return f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'."
+        return f"✅ Añadido {target_label} (role={role_out}) al tenant '{tid}'.{_team_queued_write_suffix(task_id)}"
 
     if raw == "--shared-list" or raw.startswith("--shared-list"):
         if not rid:

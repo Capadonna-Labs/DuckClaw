@@ -68,15 +68,14 @@ def knowledge_sync_in_progress() -> bool:
 
 
 def _enqueue_knowledge_command(command: Any) -> str:
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    from duckclaw.db_write_fire_and_forget import enqueue_write_command
     from duckclaw.gateway_db import get_gateway_db_path
 
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    status = poll_task_status_sync(task_id, timeout_sec=0.5)
-    if status and status.status == "failed":
-        detail = status.detail or "knowledge write failed"
-        raise ValueError(detail)
-    return task_id
+    return enqueue_write_command(
+        command,
+        db_path=get_gateway_db_path(),
+        user_id="default",
+    )
 
 
 def ingest_folder_payloads(

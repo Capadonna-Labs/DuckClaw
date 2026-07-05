@@ -113,11 +113,12 @@ def test_crons_delta_with_read_only_handle_queues_typed_agent_config_command(
         "harness_core.targets.load_homeostasis_manifest",
         lambda *_args, **_kwargs: SimpleNamespace(goals=[]),
     )
-    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue)
+    monkeypatch.setattr("duckclaw.db_write_fire_and_forget.enqueue_write_command", fake_enqueue)
     monkeypatch.setattr(
-        "duckclaw.db_write_queue.poll_task_status_sync",
+        "duckclaw.db_write_fire_and_forget.wait_write_task",
         lambda *_args, **_kwargs: DbWriteTaskStatus(status="success"),
     )
+    monkeypatch.setenv("DUCKCLAW_WRITE_POLL_SEC", "30")
 
     db_path = tmp_path / "vault.duckdb"
     db = ReadOnlyDb(db_path)

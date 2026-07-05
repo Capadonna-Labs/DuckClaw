@@ -147,6 +147,36 @@ def test_folder_mtime_fingerprint_changes_on_edit(tmp_path) -> None:
     assert second >= first
 
 
+def test_enqueue_knowledge_command_is_fire_and_forget(monkeypatch) -> None:
+    from duckclaw.forge.rag import knowledge_auto_sync
+
+    polled = {"called": False}
+
+    def fake_enqueue(command, *, db_path, user_id):
+        return "k-task-1"
+
+    def fake_poll(*_args, **_kwargs):
+        polled["called"] = True
+        return None
+
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.enqueue_write_command",
+        fake_enqueue,
+    )
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.wait_write_task",
+        fake_poll,
+    )
+    monkeypatch.setattr(
+        "duckclaw.gateway_db.get_gateway_db_path",
+        lambda: "/tmp/hub.duckdb",
+    )
+
+    task_id = knowledge_auto_sync._enqueue_knowledge_command(object())
+    assert task_id == "k-task-1"
+    assert polled["called"] is False
+
+
 def test_auto_sync_enabled_defaults_true(monkeypatch) -> None:
     from duckclaw.forge.rag.knowledge_auto_sync import auto_sync_enabled, auto_sync_poll_seconds
 

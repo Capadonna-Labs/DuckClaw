@@ -11,6 +11,19 @@
 | `DuckClaw-Knowledge-Indexer` | `knowledge-indexer` | Cola Redis + ingest/sync/auto-sync |
 | `DuckClaw-Heartbeat` | `heartbeat` | Crons, méditate, homeostasis |
 
+## Cola Telegram inbound (`duckclaw:telegram_inbound_updates`)
+
+| Etapa | Gateway |
+|-------|---------|
+| Webhook POST | Dedupe, VLM/context inline; encola invoke si `DUCKCLAW_TELEGRAM_INBOUND_QUEUE=1` |
+| Consumer (lifespan) | `BRPOP` → `invoke_agent_chat` + reply Bot API |
+
+Default: cola **desactivada** (webhook usa `CHAT_PARALLEL_INVOCATIONS` o invoke sync).
+
+```bash
+DUCKCLAW_TELEGRAM_INBOUND_QUEUE=1   # fase 2 — latencia HTTP mínima vía Redis
+```
+
 ## Cola unificada (`duckclaw:knowledge_sync_jobs`)
 
 | Job kind | Gateway | Indexer |
@@ -49,7 +62,6 @@ Admin **Reiniciar stack** incluye Knowledge-Indexer y Heartbeat.
 
 ## Pendiente (otros subsistemas)
 
-- Telegram inbound → cola Redis (fase 2 — fuera de scope)
 - UI Admin: poll genérico write-tasks tras CRUD
 
 Ver también: `GATEWAY_DB_WRITER_BOUNDARIES.md`

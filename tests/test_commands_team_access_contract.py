@@ -151,11 +151,12 @@ def test_team_add_with_read_only_handle_queues_typed_command_and_releases_handle
         queued.append((command, db_path, user_id))
         return command.task_id
 
-    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", fake_enqueue_typed_command)
+    monkeypatch.setattr("duckclaw.db_write_fire_and_forget.enqueue_write_command", fake_enqueue_typed_command)
     monkeypatch.setattr(
-        "duckclaw.db_write_queue.poll_task_status_sync",
+        "duckclaw.db_write_fire_and_forget.wait_write_task",
         lambda _task_id, **_kwargs: SimpleNamespace(status="success", detail=""),
     )
+    monkeypatch.setenv("DUCKCLAW_WRITE_POLL_SEC", "30")
 
     original_provider = getattr(team_access, "_team_access_acl_db_provider")
     team_access.configure_team_access_acl_db_provider(None)
@@ -181,3 +182,32 @@ def test_team_add_with_read_only_handle_queues_typed_command_and_releases_handle
     assert command.role == "admin"
     assert db.released == 1
     assert db.resumed == 1
+
+
+def test_team_add_fire_and_forget_appends_queued_suffix(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    team_access = importlib.import_module(CANONICAL_MODULE)
+    db = _ReadOnlyTeamAccessDb(tmp_path / "gateway.duckdb")
+
+    monkeypatch.delenv("DUCKCLAW_WRITE_POLL_SEC", raising=False)
+    monkeypatch.setattr(
+        team_access,
+        "_enqueue_authorized_user_command",
+        lambda *_args, **_kwargs: "team-task-9",
+    )
+
+    original_provider = getattr(team_access, "_team_access_acl_db_provider")
+    team_access.configure_team_access_acl_db_provider(None)
+    try:
+        out = team_access.execute_team_whitelist(
+            db,
+            "tenant-ro",
+            "1",
+            "--add 2 beta admin",
+        )
+    finally:
+        team_access.configure_team_access_acl_db_provider(original_provider)
+
+    assert "Write encolado (task_id=team-task-9)" in out

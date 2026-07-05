@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { adminService, type AdminConversation } from '@/services/adminService';
 import {
+  ArrowLeft,
   FolderOpen,
   Settings2,
   Bot,
@@ -33,7 +34,6 @@ import {
   Pm2LiveLogsControls,
   Pm2LiveLogsProvider,
   Pm2LiveLogsViewport,
-  PM2_LOG_VIEWPORT_SHELL_CLASS,
 } from '@/components/admin/Pm2LiveLogsPanel';
 import { writeLastProjectId } from '@/lib/floatingChatProject';
 import { KnowledgeScopeControl } from '@/components/playground/KnowledgeScopeControl';
@@ -132,6 +132,7 @@ export default function PlaygroundPage() {
       try {
         await createConversation();
         if (!cancelled) {
+          setShowHistory(false);
           router.replace('/playground', { scroll: false });
         }
       } catch {
@@ -155,6 +156,7 @@ export default function PlaygroundPage() {
     async function selectRequestedConversation() {
       try {
         await selectConversationById(requestedConversation);
+        if (!cancelled) setShowHistory(false);
       } finally {
         if (!cancelled) {
           router.replace('/playground', { scroll: false });
@@ -284,7 +286,10 @@ export default function PlaygroundPage() {
       .catch(() => setSystemPreview(''));
   }, [workerId]);
 
-  const isHistoryView = searchParams.get('view') === 'history';
+  const [showHistory, setShowHistory] = useState(
+    searchParams.get('new') !== '1' && !searchParams.get('conversation')
+  );
+  const isHistoryView = showHistory;
 
   useEffect(() => {
     setMainScrollEl(document.getElementById('admin-main-scroll'));
@@ -560,10 +565,19 @@ export default function PlaygroundPage() {
       />
 
       {isHistoryView ? (
-        <PlaygroundHistoryView tenantId={config?.effective_tenant_id} />
+        <PlaygroundHistoryView tenantId={config?.effective_tenant_id} onSelectConversation={(id) => { void conv.selectConversationById(id).then(() => setShowHistory(false)); }} />
       ) : (
         <>
       <div className="relative flex flex-1 flex-col min-w-0 min-h-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setShowHistory(true)}
+          className="absolute left-3 top-3 z-20 flex items-center gap-1.5 rounded-full border border-gov-blue-100 bg-white/90 px-2.5 py-2 text-[11px] font-black text-gov-blue-800 shadow-sm backdrop-blur hover:bg-gov-blue-50 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan dark:hover:bg-dark-bg"
+          aria-label="Volver al historial"
+        >
+          <ArrowLeft size={14} />
+          <span className="hidden sm:inline">Historial</span>
+        </button>
         <div className="lg:hidden absolute right-3 top-3 z-20 flex items-center gap-2">
           <Link
             href={
@@ -726,7 +740,7 @@ function uniqueConversationsBySession(conversations: AdminConversation[]): Admin
   });
 }
 
-function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
+function PlaygroundHistoryView({ tenantId, onSelectConversation }: { tenantId?: string; onSelectConversation?: (id: string) => void }) {
   const [conversations, setConversations] = useState<AdminConversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -816,9 +830,10 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
             {uniqueConversations.map((conversation) => (
               <li key={conversation.session_id}>
                 <div className="flex items-stretch gap-2 rounded-2xl border dark:border-dark-border p-3 hover:border-gov-blue-300 hover:bg-gov-blue-50/50 dark:hover:bg-dark-bg transition-colors">
-                  <Link
-                    href={`/playground?conversation=${encodeURIComponent(conversation.session_id)}`}
-                    className="min-w-0 flex-1"
+                  <button
+                    type="button"
+                    onClick={() => onSelectConversation?.(conversation.session_id)}
+                    className="min-w-0 flex-1 text-left"
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -836,7 +851,7 @@ function PlaygroundHistoryView({ tenantId }: { tenantId?: string }) {
                     <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-400 mt-2">
                       {conversation.last_worker_id || 'sin worker'} · {conversation.message_count} mensajes
                     </p>
-                  </Link>
+                  </button>
                   <button
                     type="button"
                     onClick={() => void deleteHistoryConversation(conversation)}

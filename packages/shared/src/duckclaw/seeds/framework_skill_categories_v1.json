@@ -31,11 +31,13 @@
     },
     {
       "id": "visual",
-      "title": "Visual",
-      "description": "Generación de imágenes y artefactos visuales.",
+      "title": "Visual y media",
+      "description": "Generación de imágenes, video y artefactos visuales.",
       "sort_order": 30,
       "skills": [
-        { "id": "comfyui", "hint": "ComfyUI (config avanzada en YAML)" }
+        { "id": "comfyui", "hint": "ComfyUI (config avanzada en YAML)" },
+        { "id": "fal", "label": "fal.ai", "hint": "Generación de imágenes con fal.ai (Flux, etc.)" },
+        { "id": "higgsfield", "label": "Higgsfield", "hint": "Video e imágenes con Higgsfield API" }
       ]
     },
     {

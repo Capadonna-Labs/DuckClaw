@@ -79,8 +79,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             {children}
           </div>
         </main>
-        {!isWorkspaceRoute ? <FloatingAdminChat /> : null}
       </div>
+      <FloatingAdminChat />
     </div>
   );
 }

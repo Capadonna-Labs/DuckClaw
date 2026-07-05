@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import gc
 import logging
 import os
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from duckclaw.forge.rag.knowledge_core import build_document_payload, embed_chunk_payloads
+from duckclaw.forge.rag.knowledge_core import build_document_payload
 from duckclaw.forge.rag.knowledge_paths import path_under_any_root, validate_knowledge_ingest_root
 from duckclaw.forge.rag.knowledge_sync import folder_mtime_fingerprint, plan_folder_sync
 from duckclaw.write_commands import (
@@ -23,6 +25,7 @@ _log = logging.getLogger(__name__)
 
 _AUTO_SYNC_ACTOR = "system@knowledge-auto-sync"
 _last_fingerprint: dict[str, float] = {}
+_sync_lock = threading.Lock()
 
 
 @dataclass
@@ -43,11 +46,25 @@ def auto_sync_enabled() -> bool:
 
 
 def auto_sync_poll_seconds() -> int:
-    raw = (os.environ.get("DUCKCLAW_KNOWLEDGE_AUTO_SYNC_POLL_SEC") or "15").strip()
+    raw = (os.environ.get("DUCKCLAW_KNOWLEDGE_AUTO_SYNC_POLL_SEC") or "60").strip()
     try:
-        return max(5, int(raw))
+        return max(15, int(raw))
     except ValueError:
-        return 15
+        return 60
+
+
+def sync_max_files_per_run() -> int | None:
+    raw = (os.environ.get("DUCKCLAW_KNOWLEDGE_SYNC_MAX_FILES") or "").strip()
+    if not raw:
+        return None
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return None
+
+
+def knowledge_sync_in_progress() -> bool:
+    return _sync_lock.locked()
 
 
 def _enqueue_knowledge_command(command: Any) -> str:
@@ -72,6 +89,8 @@ def ingest_folder_payloads(
     compute_embeddings: bool,
     payloads: list[Any],
 ) -> tuple[list[str], int]:
+    from duckclaw.forge.rag.knowledge_core import embed_chunk_payloads
+
     task_ids: list[str] = []
     chunks_total = 0
     embedding_fn = None
@@ -105,10 +124,43 @@ def ingest_folder_payloads(
     return task_ids, chunks_total
 
 
+def ingest_folder_paths(
+    *,
+    root: Path,
+    source_id: str,
+    tenant_id: str,
+    actor_email: str,
+    project_id: str,
+    worker_uid: str,
+    compute_embeddings: bool,
+    paths: list[Path],
+) -> tuple[list[str], int]:
+    """Ingest one file at a time to limit peak RAM (PDF/markitdown + embeddings)."""
+    task_ids: list[str] = []
+    chunks_total = 0
+    base = root if root.is_dir() else root.parent
+    for file_path in paths:
+        payload = build_document_payload(root=base, path=file_path, source_id=source_id)
+        file_task_ids, file_chunks = ingest_folder_payloads(
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            compute_embeddings=compute_embeddings,
+            payloads=[payload],
+        )
+        task_ids.extend(file_task_ids)
+        chunks_total += file_chunks
+        del payload
+        gc.collect()
+    return task_ids, chunks_total
+
+
 def execute_folder_sync(
     *,
     source: dict[str, Any],
-    existing: dict[str, tuple[str, str]],
+    existing: dict[str, tuple[str, str, int]],
     actor_email: str,
     compute_embeddings: bool = True,
     force: bool = False,
@@ -124,6 +176,37 @@ def execute_folder_sync(
         result.skipped_reason = "not_folder_kind"
         return result
 
+    if not _sync_lock.acquire(blocking=False):
+        result.skipped_reason = "sync_in_progress"
+        return result
+
+    try:
+        return _execute_folder_sync_locked(
+            source=source,
+            existing=existing,
+            actor_email=actor_email,
+            compute_embeddings=compute_embeddings,
+            force=force,
+        )
+    finally:
+        _sync_lock.release()
+
+
+def _execute_folder_sync_locked(
+    *,
+    source: dict[str, Any],
+    existing: dict[str, tuple[str, str, int]],
+    actor_email: str,
+    compute_embeddings: bool,
+    force: bool,
+) -> SyncResult:
+    from duckclaw.knowledge_indexer_guard import assert_indexer_process_for_mutation
+
+    assert_indexer_process_for_mutation(operation="folder_sync")
+    source_id = str(source["source_id"])
+    source_uri = str(source.get("source_uri") or "").strip()
+    result = SyncResult(source_id=source_id)
+
     try:
         root = validate_knowledge_ingest_root(source_uri)
     except (ValueError, FileNotFoundError) as exc:
@@ -137,13 +220,24 @@ def execute_folder_sync(
         result.skipped = len(existing)
         return result
 
-    plan = plan_folder_sync(root=root, source_id=source_id, existing=existing)
-    if not force and not plan.to_upsert and not plan.to_deactivate:
+    plan = plan_folder_sync(root=root, source_id=source_id, existing=existing, force=force)
+    if not force and not plan.to_upsert_paths and not plan.to_deactivate:
         _last_fingerprint[source_id] = fingerprint
         result.scanned = plan.scanned
         result.skipped = plan.skipped
         result.skipped_reason = "no_changes"
         return result
+
+    upsert_paths = list(plan.to_upsert_paths)
+    max_files = sync_max_files_per_run()
+    if max_files is not None and len(upsert_paths) > max_files:
+        upsert_paths = upsert_paths[:max_files]
+        _log.info(
+            "knowledge sync source=%s capped upsert batch to %s files (max=%s)",
+            source_id,
+            len(upsert_paths),
+            max_files,
+        )
 
     tenant_id = str(source.get("tenant_id") or "default")
     project_id = str(source.get("project_id") or "")
@@ -172,18 +266,19 @@ def execute_folder_sync(
         )
         result.task_ids.append(_enqueue_knowledge_command(deactivate_cmd))
 
-    ingest_task_ids, chunks = ingest_folder_payloads(
+    ingest_task_ids, chunks = ingest_folder_paths(
+        root=root,
         source_id=source_id,
         tenant_id=tenant_id,
         actor_email=actor_email,
         project_id=project_id,
         worker_uid=worker_uid,
         compute_embeddings=compute_embeddings,
-        payloads=plan.to_upsert,
+        paths=upsert_paths,
     )
     result.task_ids.extend(ingest_task_ids)
     result.scanned = plan.scanned
-    result.upserted = len(plan.to_upsert)
+    result.upserted = len(upsert_paths)
     result.skipped = plan.skipped
     result.removed = len(plan.to_deactivate)
     result.chunks = chunks
@@ -213,8 +308,234 @@ def execute_folder_sync(
         },
     )
     result.task_ids.append(_enqueue_knowledge_command(ready_cmd))
-    _last_fingerprint[source_id] = fingerprint
+    if max_files is None or len(plan.to_upsert_paths) <= max_files:
+        _last_fingerprint[source_id] = fingerprint
     return result
+
+
+def execute_folder_ingest_for_source(
+    *,
+    source: dict[str, Any],
+    actor_email: str,
+    compute_embeddings: bool = True,
+) -> SyncResult:
+    """Full folder ingest for a registered source (create/import flow)."""
+    from duckclaw.knowledge_indexer_guard import assert_indexer_process_for_mutation
+
+    assert_indexer_process_for_mutation(operation="folder_ingest")
+    source_id = str(source["source_id"])
+    source_uri = str(source.get("source_uri") or "").strip()
+    result = SyncResult(source_id=source_id)
+
+    if not source_uri or source_uri.startswith("upload://"):
+        result.skipped_reason = "not_a_folder_uri"
+        return result
+
+    if not _sync_lock.acquire(blocking=False):
+        result.skipped_reason = "sync_in_progress"
+        return result
+
+    try:
+        root = validate_knowledge_ingest_root(source_uri)
+    except (ValueError, FileNotFoundError) as exc:
+        _sync_lock.release()
+        result.skipped_reason = str(exc)
+        return result
+
+    try:
+        from duckclaw.forge.rag.knowledge_core import iter_allowed_files
+
+        tenant_id = str(source.get("tenant_id") or "default")
+        project_id = str(source.get("project_id") or "")
+        worker_uid = str(source.get("worker_uid") or "")
+        paths = iter_allowed_files(root)
+        if not paths:
+            result.skipped_reason = "no_indexable_files"
+            return result
+
+        indexing_cmd = CreateKnowledgeSourceCommand(
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            source_kind="folder",
+            source_uri=source_uri,
+            display_name=str(source.get("display_name") or ""),
+            status="indexing",
+            metadata=dict(source.get("metadata") or {}),
+        )
+        result.task_ids.append(_enqueue_knowledge_command(indexing_cmd))
+
+        ingest_task_ids, chunks = ingest_folder_paths(
+            root=root,
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            compute_embeddings=compute_embeddings,
+            paths=paths,
+        )
+        result.task_ids.extend(ingest_task_ids)
+        result.scanned = len(paths)
+        result.upserted = len(paths)
+        result.chunks = chunks
+
+        ready_cmd = CreateKnowledgeSourceCommand(
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            source_kind="folder",
+            source_uri=source_uri,
+            display_name=str(source.get("display_name") or ""),
+            status="ready",
+            metadata={
+                **dict(source.get("metadata") or {}),
+                "last_sync_at": datetime.now(timezone.utc).isoformat(),
+                "sync_stats": {
+                    "scanned": result.scanned,
+                    "upserted": result.upserted,
+                    "skipped": 0,
+                    "removed": 0,
+                    "chunks": chunks,
+                    "trigger": "folder_ingest",
+                },
+            },
+        )
+        result.task_ids.append(_enqueue_knowledge_command(ready_cmd))
+        _last_fingerprint[source_id] = folder_mtime_fingerprint(root)
+        return result
+    finally:
+        _sync_lock.release()
+
+
+def execute_browser_upload_for_source(
+    *,
+    source: dict[str, Any],
+    actor_email: str,
+    staging_dir: str,
+    compute_embeddings: bool = True,
+) -> SyncResult:
+    from duckclaw.forge.rag.knowledge_core import build_uploaded_document_payload
+    from duckclaw.knowledge_indexer_guard import assert_indexer_process_for_mutation
+    from duckclaw.knowledge_upload_staging import read_staged_upload_manifest
+
+    assert_indexer_process_for_mutation(operation="browser_upload")
+    source_id = str(source["source_id"])
+    result = SyncResult(source_id=source_id)
+    tenant_id = str(source.get("tenant_id") or "default")
+    project_id = str(source.get("project_id") or "")
+    worker_uid = str(source.get("worker_uid") or "")
+
+    staged_paths = read_staged_upload_manifest(staging_dir)
+    if not staged_paths:
+        result.skipped_reason = "empty_staging"
+        return result
+
+    if not _sync_lock.acquire(blocking=False):
+        result.skipped_reason = "sync_in_progress"
+        return result
+
+    try:
+        indexing_cmd = CreateKnowledgeSourceCommand(
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            source_kind="file",
+            source_uri=f"upload://{source_id}",
+            display_name=str(source.get("display_name") or ""),
+            status="indexing",
+            metadata=dict(source.get("metadata") or {}),
+        )
+        result.task_ids.append(_enqueue_knowledge_command(indexing_cmd))
+
+        chunks_total = 0
+        for staged_path in staged_paths:
+            payload = build_uploaded_document_payload(
+                filename=staged_path.name,
+                data=staged_path.read_bytes(),
+                source_id=source_id,
+            )
+            ingest_task_ids, chunks = ingest_folder_payloads(
+                source_id=source_id,
+                tenant_id=tenant_id,
+                actor_email=actor_email,
+                project_id=project_id,
+                worker_uid=worker_uid,
+                compute_embeddings=compute_embeddings,
+                payloads=[payload],
+            )
+            result.task_ids.extend(ingest_task_ids)
+            chunks_total += chunks
+            del payload
+            gc.collect()
+
+        result.scanned = len(staged_paths)
+        result.upserted = len(staged_paths)
+        result.chunks = chunks_total
+
+        ready_cmd = CreateKnowledgeSourceCommand(
+            source_id=source_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            source_kind="file",
+            source_uri=f"upload://{source_id}",
+            display_name=str(source.get("display_name") or ""),
+            status="ready",
+            metadata={
+                **dict(source.get("metadata") or {}),
+                "upload": True,
+                "documents": len(staged_paths),
+                "chunks": chunks_total,
+                "last_sync_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        result.task_ids.append(_enqueue_knowledge_command(ready_cmd))
+        return result
+    finally:
+        _sync_lock.release()
+
+
+def execute_single_file_sync_for_source(
+    *,
+    source: dict[str, Any],
+    actor_email: str,
+    file_path: Path,
+    compute_embeddings: bool = True,
+) -> SyncResult:
+    from duckclaw.knowledge_indexer_guard import assert_indexer_process_for_mutation
+
+    assert_indexer_process_for_mutation(operation="single_file_sync")
+    source_id = str(source["source_id"])
+    source_uri = str(source.get("source_uri") or "").strip()
+    result = SyncResult(source_id=source_id)
+
+    try:
+        root = validate_knowledge_ingest_root(source_uri)
+    except (ValueError, FileNotFoundError) as exc:
+        result.skipped_reason = str(exc)
+        return result
+
+    base = root if root.is_dir() else root.parent
+    resolved = file_path.expanduser().resolve()
+    if not path_under_any_root(resolved, [base]):
+        result.skipped_reason = "file_outside_source_root"
+        return result
+
+    payload = build_document_payload(root=base, path=resolved, source_id=source_id)
+    return _sync_single_file_source(
+        source=source,
+        payload=payload,
+        actor_email=actor_email,
+        compute_embeddings=compute_embeddings,
+    )
 
 
 def _is_duckdb_lock_error(exc: BaseException) -> bool:
@@ -287,7 +608,7 @@ def sync_file_after_write(
     project_id: str = "",
     compute_embeddings: bool = True,
 ) -> dict[str, Any]:
-    """Re-index a single written file into matching folder sources."""
+    """Queue re-index of one written file — Gateway must not index inline."""
     if not auto_sync_enabled():
         return {"synced": False, "reason": "auto_sync_disabled"}
 
@@ -298,10 +619,9 @@ def sync_file_after_write(
     if db is None:
         return {"synced": False, "reason": "no_hub_db"}
 
+    job_ids: list[str] = []
     results: list[dict[str, Any]] = []
     try:
-        from duckclaw.admin_knowledge_read import list_source_document_checksums
-
         sources = _folder_sources_containing_file(
             db,
             file_path=file_path,
@@ -312,40 +632,20 @@ def sync_file_after_write(
             return {"synced": False, "reason": "no_matching_source", "sources": []}
 
         resolved = file_path.expanduser().resolve()
+        from duckclaw.knowledge_sync_queue import enqueue_single_file_sync_job
+
         for source in sources:
             source_id = str(source["source_id"])
-            source_uri = str(source.get("source_uri") or "").strip()
-            try:
-                root = validate_knowledge_ingest_root(source_uri)
-            except (ValueError, FileNotFoundError):
-                continue
-            base = root if root.is_dir() else root.parent
-            if not path_under_any_root(resolved, [base]):
-                continue
-
-            existing = list_source_document_checksums(db, source_id=source_id)
-            payload = build_document_payload(root=base, path=resolved, source_id=source_id)
-            rel = str(payload.document["relative_path"])
-            prior = existing.get(rel)
-            if prior and prior[1] == payload.document["checksum"]:
-                results.append({"source_id": source_id, "skipped": True, "relative_path": rel})
-                continue
-
-            sync_result = _sync_single_file_source(
-                source=source,
-                payload=payload,
+            job_id = enqueue_single_file_sync_job(
+                source_id=source_id,
+                tenant_id=tenant_id,
                 actor_email=_AUTO_SYNC_ACTOR,
+                file_path=str(resolved),
                 compute_embeddings=compute_embeddings,
             )
-            results.append(
-                {
-                    "source_id": source_id,
-                    "relative_path": rel,
-                    "upserted": True,
-                    "chunks": sync_result.chunks,
-                }
-            )
-        return {"synced": bool(results), "sources": results}
+            job_ids.append(job_id)
+            results.append({"source_id": source_id, "queued": True, "job_id": job_id})
+        return {"synced": True, "queued": True, "job_ids": job_ids, "sources": results}
     finally:
         if close_db:
             try:
@@ -411,7 +711,14 @@ def _sync_single_file_source(
 
 def run_auto_sync_poll(*, compute_embeddings: bool = True) -> list[SyncResult]:
     """Poll all folder sources; sync when vault mtime fingerprint changes."""
+    from duckclaw.knowledge_indexer_guard import assert_indexer_process_for_mutation
+
+    assert_indexer_process_for_mutation(operation="auto_sync_poll")
     if not auto_sync_enabled():
+        return []
+
+    if knowledge_sync_in_progress():
+        _log.debug("knowledge auto-sync: sync manual/otro ciclo en curso, omitiendo")
         return []
 
     if _vault_write_session_active():

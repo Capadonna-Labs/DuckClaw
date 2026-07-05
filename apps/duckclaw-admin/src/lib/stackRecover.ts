@@ -57,8 +57,12 @@ export async function runStackRecoverLocal(): Promise<NormalizedOpsRunResult> {
 cd "${cwd}"
 pm2 stop DuckClaw-Gateway 2>/dev/null || true
 pm2 stop DuckClaw-DB-Writer 2>/dev/null || true
+pm2 stop DuckClaw-Knowledge-Indexer 2>/dev/null || true
+pm2 stop DuckClaw-Heartbeat 2>/dev/null || true
 wait_pm2_stopped DuckClaw-Gateway 15 || true
 wait_pm2_stopped DuckClaw-DB-Writer 15 || true
+wait_pm2_stopped DuckClaw-Knowledge-Indexer 15 || true
+wait_pm2_stopped DuckClaw-Heartbeat 15 || true
 echo "PM2_STOP_OK"
 `;
   const stop = await runArgv(cwd, ['bash', '-lc', stopShell], 60_000);

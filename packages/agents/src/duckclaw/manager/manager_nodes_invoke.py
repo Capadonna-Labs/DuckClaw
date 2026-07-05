@@ -269,8 +269,9 @@ def build_invoke_worker_node(
             except Exception:
                 _vis_prov = "local"
             worker_cache_key = f"{worker_cache_key}::visprov_{_vis_prov}"
-            if worker_cache_key not in _worker_cache_mod._worker_graph_cache:
-                _worker_cache_mod._worker_graph_cache[worker_cache_key] = _build_worker_graph(
+            worker_graph = _worker_cache_mod.worker_graph_cache_get(worker_cache_key)
+            if worker_graph is None:
+                worker_graph = _build_worker_graph(
                     assigned,
                     vault_db_path or db_path,
                     llm,
@@ -295,7 +296,7 @@ def build_invoke_worker_node(
                     incoming_hint=_combined,
                     open_vault_read_only=_summarize_vault_ro,
                 )
-            worker_graph = _worker_cache_mod._worker_graph_cache[worker_cache_key]
+                _worker_cache_mod.remember_worker_graph_cache(worker_cache_key, worker_graph)
             set_log_context(
                 tenant_id=tenant_id,
                 worker_id=assigned,

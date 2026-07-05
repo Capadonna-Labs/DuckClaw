@@ -50,6 +50,18 @@ def pm2_recycle_db_writer_shell(*, repo_root: str | Path = ".") -> str:
     return pm2_recycle_shell("db_writer", repo_root=repo_root, success_token="PM2_RECYCLE_DB_WRITER_OK")
 
 
+def pm2_recycle_knowledge_indexer_shell(*, repo_root: str | Path = ".") -> str:
+    return pm2_recycle_shell(
+        "knowledge_indexer",
+        repo_root=repo_root,
+        success_token="PM2_RECYCLE_KNOWLEDGE_INDEXER_OK",
+    )
+
+
+def pm2_recycle_heartbeat_shell(*, repo_root: str | Path = ".") -> str:
+    return pm2_recycle_shell("heartbeat", repo_root=repo_root, success_token="PM2_RECYCLE_HEARTBEAT_OK")
+
+
 def pm2_recycle_gateway_bash_lc(*, repo_root: str | Path = ".") -> str:
     entry = _process_spec("gateway")
     name = entry["name"]

@@ -215,12 +215,10 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _log.warning("Reddit MCP: warm no iniciado: %s", exc)
 
-    _embed_goals_ticker = (
-        os.environ.get("DUCKCLAW_EMBED_GOALS_TICKER", "true").strip().lower()
-        in ("1", "true", "yes", "on")
-    )
-    if _embed_goals_ticker:
-        try:
+    try:
+        from duckclaw.process_role import embed_goals_ticker_in_gateway, embed_knowledge_sync_in_gateway
+
+        if embed_goals_ticker_in_gateway():
             from services.heartbeat.main import GOALS_TICKER_POLL_SECONDS, _run_goals_proactive_tick
 
             _poll_s = max(5, int(GOALS_TICKER_POLL_SECONDS))
@@ -241,36 +239,15 @@ async def lifespan(app: FastAPI):
 
             app.state.goals_ticker_task = asyncio.create_task(_goals_ticker_loop())
             _log.info(
-                "embedded crons+méditate ticker enabled (poll=%ss, source=services.heartbeat)",
+                "embedded crons+méditate ticker enabled (poll=%ss) — prefer DuckClaw-Heartbeat in production",
                 _poll_s,
             )
-        except Exception as exc:  # noqa: BLE001
-            _log.warning("embedded crons ticker no disponible: %s", exc)
-
-    try:
-        from duckclaw.forge.rag.knowledge_auto_sync import auto_sync_enabled, auto_sync_poll_seconds, run_auto_sync_poll
-
-        if auto_sync_enabled():
-            _knowledge_poll_s = auto_sync_poll_seconds()
-
-            async def _knowledge_auto_sync_loop() -> None:
-                while True:
-                    try:
-                        await asyncio.to_thread(run_auto_sync_poll)
-                    except Exception as _ks_exc:  # noqa: BLE001
-                        _log.warning("knowledge auto-sync loop error: %s", _ks_exc)
-                    await asyncio.sleep(_knowledge_poll_s)
-
-            app.state.knowledge_auto_sync_task = asyncio.create_task(
-                _knowledge_auto_sync_loop(),
-                name="knowledge-auto-sync",
-            )
-            _log.info(
-                "knowledge auto-sync enabled (poll=%ss, vault/Obsidian folder sources)",
-                _knowledge_poll_s,
-            )
+        else:
+            _log.info("embedded crons ticker disabled (use DuckClaw-Heartbeat / DUCKCLAW_EMBED_GOALS_TICKER=true for dev)")
     except Exception as exc:  # noqa: BLE001
-        _log.warning("knowledge auto-sync no disponible: %s", exc)
+        _log.warning("embedded crons ticker no disponible: %s", exc)
+
+    _log.info("knowledge indexing: gateway enqueue-only (DuckClaw-Knowledge-Indexer consumes Redis queue)")
 
     app.state.deferred_startup_task = asyncio.create_task(
         _run_deferred_gateway_startup(),

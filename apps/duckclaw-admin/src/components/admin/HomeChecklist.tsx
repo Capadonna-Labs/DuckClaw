@@ -2,11 +2,9 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, Circle, Database, MessageCircle, Server } from 'lucide-react';
+import { Bot, CheckCircle2, Circle, Database, MessageCircle } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import { playgroundHref, readLastCreatedWorker, readLastProjectId } from '@/lib/onboardingFlow';
-import { friendlyGatewayError } from '@/lib/adminErrors';
-import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 
 type StepState = 'pending' | 'ok' | 'warn';
 
@@ -23,30 +21,12 @@ type ChecklistStep = {
 export function HomeChecklist() {
   const [steps, setSteps] = useState<ChecklistStep[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stackError, setStackError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       setLoading(true);
-      setStackError(null);
-
-      let stackOk = false;
-      let stackDetail = 'Comprobando gateway y Redis…';
-      try {
-        const health = await useGatewayHealthStore.getState().refresh();
-        stackOk = health?.status === 'ok' && Boolean(health?.redis);
-        stackDetail = health
-          ? stackOk
-            ? `Gateway OK · Redis ${health.redis ? 'conectado' : 'pendiente'}`
-            : `Gateway: ${health.status} · Redis: ${health.redis ? 'sí' : 'no'}`
-          : 'Sin conexión';
-        if (!health) setStackError(friendlyGatewayError('Sin conexión'));
-      } catch (e) {
-        stackDetail = friendlyGatewayError(e instanceof Error ? e.message : 'Sin conexión');
-        setStackError(stackDetail);
-      }
 
       let agentOk = false;
       let agentDetail = 'Crea al menos un agente con instrucciones.';
@@ -81,14 +61,6 @@ export function HomeChecklist() {
 
       setSteps([
         {
-          id: 'stack',
-          title: 'Stack local',
-          detail: stackDetail,
-          state: stackOk ? 'ok' : 'warn',
-          href: '/overview',
-          cta: 'Ver estado',
-        },
-        {
           id: 'agent',
           title: 'Agente listo',
           detail: agentDetail,
@@ -120,6 +92,7 @@ export function HomeChecklist() {
     }
 
     void load();
+
     return () => {
       cancelled = true;
     };
@@ -131,15 +104,8 @@ export function HomeChecklist() {
     <section className="rounded-3xl border border-gov-blue-100 bg-gradient-to-br from-gov-blue-50 to-white p-5 dark:border-dark-border dark:from-dark-bg dark:to-dark-surface">
       <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Tu camino</h2>
       <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-        Un solo hilo: stack → agente → (opcional) conocimiento → chat. Lo demás está en{' '}
-        <strong className="font-bold">Más</strong> del menú lateral.
+        Agente → (opcional) conocimiento → chat. El estado del sistema está en la barra superior.
       </p>
-
-      {stackError && (
-        <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-          {stackError}
-        </p>
-      )}
 
       <ol className="mt-4 space-y-3">
         {loading ? (
@@ -184,13 +150,7 @@ export function HomeChecklist() {
 
 function StepIcon({ step, index }: { step: ChecklistStep; index: number }) {
   const Icon =
-    step.id === 'stack'
-      ? Server
-      : step.id === 'agent'
-        ? Bot
-        : step.id === 'knowledge'
-          ? Database
-          : MessageCircle;
+    step.id === 'agent' ? Bot : step.id === 'knowledge' ? Database : MessageCircle;
   const StatusIcon = step.state === 'ok' ? CheckCircle2 : Circle;
   return (
     <div className="relative shrink-0">

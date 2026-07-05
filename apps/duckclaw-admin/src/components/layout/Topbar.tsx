@@ -17,9 +17,9 @@ interface TopbarProps {
   onMenuClick?: () => void;
 }
 
-async function waitForGatewayHealth(maxAttempts = 8): Promise<boolean> {
+async function waitForGatewayHealth(maxAttempts = 20): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i += 1) {
-    const delayMs = Math.min(2000 * (i + 1), 8000);
+    const delayMs = Math.min(1500 * (i + 1), 6000);
     await new Promise((resolve) => window.setTimeout(resolve, delayMs));
     const health = await useGatewayHealthStore.getState().refresh(true);
     if (health?.status === 'ok') return true;
@@ -61,6 +61,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
     if (!canRunOps) return;
     setStackRestarting(true);
     setStackRestartMessage(null);
+    useGatewayHealthStore.getState().beginRecovery();
     try {
       const result = await adminService.runOps('restart_stack');
       if (!result.ok) {
@@ -87,6 +88,8 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       const msg = e instanceof Error ? e.message : 'No se pudo reiniciar el stack';
       setStackRestartMessage(msg);
     } finally {
+      useGatewayHealthStore.getState().endRecovery();
+      await useGatewayHealthStore.getState().refresh(true);
       setStackRestarting(false);
     }
   };

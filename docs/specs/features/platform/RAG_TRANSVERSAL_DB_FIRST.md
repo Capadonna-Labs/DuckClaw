@@ -35,6 +35,8 @@ La consola Admin soporta dos flujos:
 - **Subir archivos desde el navegador:** flujo principal para el usuario. Usa selector de archivos o drag/drop, envía `multipart/form-data` al BFF y el Gateway normaliza documentos/chunks sin depender de rutas locales del browser.
 - **Importar ruta del servidor:** flujo avanzado para carpetas grandes ya disponibles en el Mac mini/VPS. La ruta debe estar bajo `DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS`.
 
+**Indexación fuera del Gateway:** ingest/sync de carpetas se encola en Redis (`duckclaw:knowledge_sync_jobs`) y la consume el proceso PM2 `DuckClaw-Knowledge-Indexer`. Ver `GATEWAY_PROCESS_BOUNDARIES.md`.
+
 Ambos flujos deben pedir scope explícito: proyecto obligatorio cuando se gestione desde `/knowledge`, y agente opcional para limitar retrieval a un worker.
 
 Evolución planificada:

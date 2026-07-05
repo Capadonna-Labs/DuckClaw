@@ -1,18 +1,22 @@
 -------- PARA LEVANTAR EL SISTEMA --------
 
-install.cmd                                # Windows Explorador: doble clic
+# Día cero (primera vez en esta máquina):
+install.cmd                                # Windows — doble clic
 .\install.cmd                              # Windows PowerShell (obligatorio el .\)
 cmd /c install.cmd                         # Windows PowerShell alternativa
 ./duckops-up.sh                            # macOS / Linux / WSL
 
-source .venv/bin/activate
-uv run duckops up                          # si ya tienes uv
+# Stack backend (cualquier host — uv sync + migrate + PM2 recycle + /health):
+cd <raíz-del-repo>
+uv run duckops stack deploy
+uv run duckops stack deploy --no-migrate   # solo reinicio PM2, sin migrar
+uv run duckops stack deploy --no-sync      # omitir uv sync (deploy rápido)
+
+# Utilidades:
+uv run duckops up                          # wizard / arranque interactivo
 uv run duckops doctor --strict
 uv run duckops configure
-
 uv run duckops down --all
-uv run duckclaw-migrate
-uv run duckops up
 
 --------- INTERFAZ GRAFICA ----------
 cd apps/duckclaw-admin

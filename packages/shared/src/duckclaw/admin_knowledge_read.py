@@ -20,6 +20,13 @@ def _fetchall(result: Any) -> list[Any]:
     return []
 
 
+def _fetchone(result: Any) -> Any | None:
+    if hasattr(result, "fetchone"):
+        return result.fetchone()
+    rows = _fetchall(result)
+    return rows[0] if rows else None
+
+
 def _knowledge_source_row(row: tuple[Any, ...]) -> dict[str, Any]:
     (
         source_id,
@@ -128,7 +135,8 @@ def get_knowledge_source(
     source_id: str,
 ) -> dict[str, Any] | None:
     """Return one active knowledge source for a tenant, or None."""
-    row = db.execute(
+    row = _fetchone(
+        db.execute(
         """
         SELECT s.source_id, s.tenant_id, s.project_id, s.worker_uid, s.source_kind,
                s.source_uri, s.display_name, s.status, s.metadata_json, s.active,
@@ -150,7 +158,8 @@ def get_knowledge_source(
                  s.created_at, s.updated_at
         """,
         [source_id, tenant_id],
-    ).fetchone()
+        )
+    )
     if not row:
         return None
     return _knowledge_source_row(tuple(row))
@@ -160,24 +169,24 @@ def list_source_document_checksums(
     db: Any,
     *,
     source_id: str,
-) -> dict[str, tuple[str, str]]:
-    """Map relative_path -> (document_id, checksum) for active documents."""
+) -> dict[str, tuple[str, str, int]]:
+    """Map relative_path -> (document_id, checksum, byte_size) for active documents."""
     rows = _fetchall(
         db.execute(
             """
-            SELECT relative_path, document_id, checksum
+            SELECT relative_path, document_id, checksum, byte_size
             FROM main.admin_knowledge_documents
             WHERE source_id = ? AND active = true
             """,
             [source_id],
         )
     )
-    out: dict[str, tuple[str, str]] = {}
-    for relative_path, document_id, checksum in rows:
+    out: dict[str, tuple[str, str, int]] = {}
+    for relative_path, document_id, checksum, byte_size in rows:
         rel = str(relative_path or "").strip()
         if not rel:
             continue
-        out[rel] = (str(document_id), str(checksum or ""))
+        out[rel] = (str(document_id), str(checksum or ""), int(byte_size or 0))
     return out
 
 

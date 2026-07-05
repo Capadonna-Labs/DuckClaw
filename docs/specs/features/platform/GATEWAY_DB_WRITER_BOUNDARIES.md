@@ -60,7 +60,7 @@ Con `DUCKCLAW_SPAWN_PROFILE=1`, el Gateway puede aplicar writes inline — excep
 ## Agents (fly / indexer)
 
 `duckclaw.db_write_fire_and_forget` — sin poll por defecto (`DUCKCLAW_WRITE_POLL_SEC=0`):
-`chat_state`, `crons`, `team_access`, `knowledge_auto_sync`, `history`, `runtime_toggles`, `team_templates`, `llm_usage_log`, `media_usage_log`.
+`chat_state`, `crons`, `team_access`, `knowledge_auto_sync`, `history`, `runtime_toggles`, `team_templates`, `llm_usage_log`, `media_usage_log`, `model_setup`, HITL services, report/update prompt bridges.
 
 ## Write-task detail
 

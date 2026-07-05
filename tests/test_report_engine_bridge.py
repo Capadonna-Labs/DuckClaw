@@ -51,13 +51,17 @@ def test_register_report_template_surfaces_db_writer_failure(monkeypatch: pytest
     ):
         with patch("duckclaw.spawn_profile.spawn_inline_writes_enabled", return_value=False):
             with patch(
-                "duckclaw.db_write_queue.poll_task_status_sync",
-                return_value=MagicMock(status="failed", detail="ACL denegado"),
+                "duckclaw.db_write_fire_and_forget.write_poll_timeout_sec",
+                return_value=10.0,
             ):
-                raw = register_report_template(
-                    "INFORME MENSUAL.docx",
-                    "Informe mensual",
-                )
+                with patch(
+                    "duckclaw.db_write_fire_and_forget.wait_write_task",
+                    return_value=MagicMock(status="failed", detail="ACL denegado"),
+                ):
+                    raw = register_report_template(
+                        "INFORME MENSUAL.docx",
+                        "Informe mensual",
+                    )
     payload = json.loads(raw)
     assert "error" in payload
     assert "ACL denegado" in payload["error"]

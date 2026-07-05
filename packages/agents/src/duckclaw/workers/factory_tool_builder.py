@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from typing import Any, Optional
 
-from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+from duckclaw.db_write_queue import enqueue_typed_command
 from duckclaw.write_commands import RawSqlCommand
 from duckclaw.utils.logger import log_tool_execution_sync
 from duckclaw.workers import read_pool
@@ -154,13 +154,16 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
                     params=[],
                     tenant_id="default",
                 )
+                from duckclaw.db_write_fire_and_forget import wait_write_task, write_poll_timeout_sec
+                from duckclaw.db_write_queue import enqueue_typed_command
+
                 task_id = enqueue_typed_command(
                     cmd,
                     db_path=resolved,
                     user_id=uid,
                 )
-                _poll = 15.0 if released_ro else 3.0
-                st = poll_task_status_sync(task_id, timeout_sec=_poll)
+                poll_sec = write_poll_timeout_sec()
+                st = wait_write_task(task_id, timeout_sec=poll_sec) if poll_sec > 0 else None
             except Exception as e:
                 return json.dumps({"error": str(e)})
             finally:

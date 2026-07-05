@@ -54,19 +54,9 @@ def _problem(status_code: int, title: str, detail: str) -> HTTPException:
 
 
 def _enqueue_template_context_command(command: Any) -> str:
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.gateway_enqueue import enqueue_admin_command
 
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    command_status = poll_task_status_sync(task_id, timeout_sec=0.5)
-    if command_status and command_status.status == "failed":
-        detail = command_status.detail or "template context write failed"
-        if "No hay query SQL" in detail:
-            raise ValueError(
-                "DB-Writer desactualizado: reinicia DuckClaw-DB-Writer y DuckClaw-Gateway para aplicar comandos de templates."
-            )
-        raise ValueError(detail)
-    return task_id
+    return enqueue_admin_command(command)
 
 
 def _visible_worker(worker_id: str, actor: str) -> dict[str, str]:

@@ -39,6 +39,13 @@ class Settings(BaseSettings):
             "DUCKCLAW_REPORTS_STATE_DELTA_QUEUE",
         ),
     )
+    VLM_STATE_DELTA_QUEUE_NAME: str = Field(
+        default="duckclaw:state_delta:vlm",
+        validation_alias=AliasChoices(
+            "VLM_STATE_DELTA_QUEUE_NAME",
+            "DUCKCLAW_VLM_STATE_DELTA_QUEUE",
+        ),
+    )
     NEEDS_EMBEDDING_QUEUE_NAME: str = "duckclaw:needs_embedding"
     # DLQ: cada cola de state-delta usa ``{QUEUE_NAME}{DLQ_KEY_SUFFIX}`` (default ``:dlq``).
     # Ej.: duckclaw:state_delta:context → duckclaw:state_delta:context:dlq

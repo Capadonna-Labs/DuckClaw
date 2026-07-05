@@ -15,8 +15,7 @@ from core.admin_identity import (
 )
 from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.admin_worker_catalog import get_visible_worker_for_actor
-from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.gateway_enqueue import enqueue_admin_command
 from duckclaw.write_commands import (
     AssignAgentToProjectCommand,
     CreateProjectCommand,
@@ -69,11 +68,7 @@ def _problem(status_code: int, title: str, detail: str) -> HTTPException:
 
 
 def _enqueue_workspace_project_command(command: Any) -> str:
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    command_status = poll_task_status_sync(task_id, timeout_sec=0.5)
-    if command_status and command_status.status == "failed":
-        raise ValueError(command_status.detail or "workspace project write failed")
-    return task_id
+    return enqueue_admin_command(command)
 
 
 def _actor_profile(actor: str) -> dict[str, Any]:

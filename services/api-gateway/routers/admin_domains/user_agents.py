@@ -97,11 +97,9 @@ def _fallback_agent(
 
 
 def _enqueue_user_agent_command(command: UpsertUserAgentCommand) -> str:
-    task_id = db_write_queue.enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5)
-    if command_status and command_status.status == "failed":
-        raise ValueError(command_status.detail or "user agent write failed")
-    return task_id
+    from duckclaw.gateway_enqueue import enqueue_admin_command
+
+    return enqueue_admin_command(command)
 
 
 @router.post("/user-agents", dependencies=[Depends(require_admin_key)])

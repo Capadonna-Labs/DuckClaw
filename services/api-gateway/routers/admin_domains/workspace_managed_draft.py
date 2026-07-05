@@ -14,8 +14,7 @@ from core.models import ChatRequest
 from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.admin_worker_catalog import ensure_admin_worker_catalog_schema, sanitize_catalog_worker_id
 from duckclaw.channels import GatewayDeliveryContext
-from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-from duckclaw.gateway_db import get_gateway_db_path
+from duckclaw.gateway_enqueue import enqueue_admin_command
 from duckclaw.prompt_policies import PromptPolicyResolver
 from duckclaw.write_commands import ConfirmWorkspaceManagedDraftCommand
 from routers.admin_domains.playground.llm_settings import resolved_llm_for_playground
@@ -375,11 +374,7 @@ def _actor_profile(actor: str) -> dict[str, Any]:
 
 
 def _enqueue_workspace_managed_draft_command(command: ConfirmWorkspaceManagedDraftCommand) -> str:
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    command_status = poll_task_status_sync(task_id, timeout_sec=0.5)
-    if command_status and command_status.status == "failed":
-        raise ValueError(command_status.detail or "managed workspace draft write failed")
-    return task_id
+    return enqueue_admin_command(command)
 
 
 def _admin_audit(action: str, resource: str, detail: str, *, actor: str, meta: dict[str, Any] | None = None) -> None:

@@ -76,6 +76,7 @@ from routers.admin_domains.visual_assets import router as visual_assets_router
 from routers.admin_domains.worker_capabilities import router as worker_capabilities_router
 from routers.admin_domains.workspace_managed_draft import router as workspace_managed_draft_router
 from routers.admin_domains.workspace_projects import router as workspace_projects_router
+from routers.admin_domains.write_tasks import router as write_tasks_router
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 router.include_router(access_management_router)
@@ -110,6 +111,7 @@ router.include_router(visual_assets_router)
 router.include_router(worker_capabilities_router)
 router.include_router(workspace_managed_draft_router)
 router.include_router(workspace_projects_router)
+router.include_router(write_tasks_router)
 
 
 def _gateway_effective_tenant_id(request_tenant: str | None) -> str:

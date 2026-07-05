@@ -49,8 +49,7 @@ Admin **Reiniciar stack** incluye Knowledge-Indexer y Heartbeat.
 
 ## Pendiente (otros subsistemas)
 
-- ~~LangGraph cache por worker (LRU en Gateway)~~ ✓ `DUCKCLAW_WORKER_GRAPH_CACHE_*`
 - Telegram inbound → cola Redis (fase 2 — fuera de scope)
-- ~~Admin poll async de jobs RAG~~ ✓
-- ~~Crons ticker solo en Heartbeat PM2~~ ✓
-- ~~Métricas `/health`~~ ✓ `metrics.rss_mb`, cola RAG, worker cache
+- UI Admin: poll genérico write-tasks tras CRUD
+
+Ver también: `GATEWAY_DB_WRITER_BOUNDARIES.md`

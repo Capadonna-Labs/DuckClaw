@@ -49,6 +49,11 @@ try:
 except ImportError:
     handle_visual_state_delta_message = None
 
+try:
+    from vlm_state_delta_handler import handle_vlm_state_delta_message
+except ImportError:
+    handle_vlm_state_delta_message = None
+
 from duckclaw.db_write_queue import (
     TASK_STATUS_TTL_SEC,
     DbWriteTaskStatus,
@@ -598,6 +603,28 @@ async def _reports_state_delta_loop(redis_client: redis.Redis) -> None:
     )
 
 
+async def _vlm_state_delta_loop(redis_client: redis.Redis) -> None:
+    if handle_vlm_state_delta_message is None:
+        logger.warning("VLM_STATE_DELTA handler no disponible; omitiendo loop")
+        return
+    q = str(settings.VLM_STATE_DELTA_QUEUE_NAME).strip()
+    logger.info("Escuchando cola VLM_STATE_DELTA (VLM_CONTEXT_EXTRACTED): %s", q)
+
+    async def _handler(redis_client: redis.Redis, message: str) -> None:
+        try:
+            await handle_vlm_state_delta_message(redis_client, message)
+        except Exception as exc:  # noqa: BLE001
+            await push_dlq(redis_client, q, message, str(exc))
+            logger.exception("VLM_STATE_DELTA handler no capturó excepción: %s", exc)
+
+    await run_reliable_queue_loop(
+        redis_client,
+        q,
+        _handler,
+        lease_sec=settings.PROCESSING_LEASE_SEC,
+    )
+
+
 async def _extension_state_delta_loop(redis_client: redis.Redis, binding: Any) -> None:
     q = str(binding.queue_name).strip()
     label = str(binding.label or q).strip()
@@ -630,6 +657,8 @@ def _all_reliable_queues(extra_bindings: list[Any] | None = None) -> list[str]:
         queues.append(str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip())
     if handle_reports_state_delta_message is not None:
         queues.append(str(settings.REPORTS_STATE_DELTA_QUEUE_NAME).strip())
+    if handle_vlm_state_delta_message is not None:
+        queues.append(str(settings.VLM_STATE_DELTA_QUEUE_NAME).strip())
     for binding in extra_bindings or ():
         queues.append(str(binding.queue_name).strip())
     return queues
@@ -655,6 +684,7 @@ async def process_queue():
             _visual_state_delta_loop(redis_client),
             _meditate_state_delta_loop(redis_client),
             _reports_state_delta_loop(redis_client),
+            _vlm_state_delta_loop(redis_client),
             *extension_tasks,
         )
     except asyncio.CancelledError:
@@ -667,6 +697,9 @@ async def process_queue():
 if __name__ == "__main__":
     logger.info("Iniciando DuckClaw DB Writer...")
     try:
+        from startup_bootstrap import run_startup_bootstrap
+
+        run_startup_bootstrap()
         asyncio.run(process_queue())
     except KeyboardInterrupt:
         logger.info("Proceso detenido por el usuario (KeyboardInterrupt).")

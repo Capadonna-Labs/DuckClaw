@@ -414,10 +414,9 @@ async def duckdb_drop_legacy_schemas(
         schemas=dropped,
         main_tables=dropped_main_tables,
     )
-    task_id = db_write_queue.enqueue_typed_command(command, db_path=resolved, user_id=scope["vault_user_id"])
-    command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5, interval_sec=0.05)
-    if command_status and command_status.status == "failed":
-        raise _problem(400, "Cleanup legacy rechazado por DB-writer", command_status.detail or task_id)
+    from duckclaw.db_write_queue import enqueue_typed_command
+
+    task_id = enqueue_typed_command(command, db_path=resolved, user_id=scope["vault_user_id"])
     _admin_audit(
         "duckdb.legacy_schema.drop",
         resolved,

@@ -114,25 +114,7 @@ async def _run_deferred_gateway_startup() -> None:
     except Exception as exc:  # noqa: BLE001
         _log.debug("ComfyUI startup hygiene skipped: %s", exc)
 
-    try:
-        from duckclaw.graphs.graph_server import get_db
-        from duckclaw.llm_usage_log import ensure_llm_usage_log_table
-        from duckclaw.media_usage_log import ensure_media_usage_log_table
-
-        await asyncio.to_thread(ensure_llm_usage_log_table, get_db())
-        await asyncio.to_thread(ensure_media_usage_log_table, get_db())
-        _log.info("llm_usage_log: tabla asegurada en gateway DuckDB")
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("llm_usage_log: no se pudo asegurar tabla al arranque: %s", exc)
-
-    try:
-        from duckclaw.catalog_seed import seed_catalog_if_empty
-        from duckclaw.graphs.graph_server import get_db
-
-        await asyncio.to_thread(seed_catalog_if_empty, get_db())
-        _log.info("catalog: templates importados desde filesystem")
-    except Exception as exc:  # noqa: BLE001
-        _log.debug("catalog seed skipped: %s", exc)
+    _log.info("hub bootstrap (catalog, usage tables): DuckClaw-DB-Writer startup_bootstrap")
 
     try:
         from duckclaw.sandbox_artifacts import purge_expired_runs

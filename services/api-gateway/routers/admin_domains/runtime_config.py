@@ -110,14 +110,10 @@ def _absolute_vault_path(vault_path: str) -> str:
 
 def _enqueue_runtime_config_command(command: Any, *, db_path: str, actor: str) -> str:
     from core.admin_identity import vault_user_id_for_actor
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    from duckclaw.db_write_queue import enqueue_typed_command
 
     user_id = vault_user_id_for_actor(actor)
-    task_id = enqueue_typed_command(command, db_path=db_path, user_id=user_id)
-    command_status = poll_task_status_sync(task_id, timeout_sec=0.5)
-    if command_status and command_status.status == "failed":
-        raise ValueError(command_status.detail or "runtime config write failed")
-    return task_id
+    return enqueue_typed_command(command, db_path=db_path, user_id=user_id)
 
 
 @router.get("/vaults", dependencies=[Depends(require_admin_key)])

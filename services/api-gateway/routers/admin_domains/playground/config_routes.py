@@ -311,16 +311,11 @@ async def playground_set_knowledge_scope(
         updated_by=actor,
     )
     try:
-        task_id = db_write_queue.enqueue_typed_command(command, db_path=gw, user_id="default")
-        command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=3.0)
+        from duckclaw.gateway_enqueue import enqueue_admin_command
+
+        task_id = enqueue_admin_command(command)
     except Exception as exc:
         raise problem(400, "No se pudo actualizar el alcance RAG", str(exc)) from exc
-    if command_status and command_status.status == "failed":
-        raise problem(
-            400,
-            "No se pudo actualizar el alcance RAG",
-            command_status.detail or "runtime setting write failed",
-        )
 
     with open_gateway_db(read_only=True) as db:
         resolved = resolve_playground_knowledge_scope(
@@ -387,16 +382,11 @@ async def playground_set_model(
             updated_by=actor,
         )
         try:
-            task_id = db_write_queue.enqueue_typed_command(command, db_path=gw, user_id="default")
-            command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=0.5)
+            from duckclaw.gateway_enqueue import enqueue_admin_command
+
+            task_id = enqueue_admin_command(command)
         except Exception as exc:
             raise problem(400, "No se pudo actualizar el modelo", str(exc)) from exc
-        if command_status and command_status.status == "failed":
-            raise problem(
-                400,
-                "No se pudo actualizar el modelo",
-                command_status.detail or "runtime setting write failed",
-            )
         task_ids.append(task_id)
 
     llm = resolved_llm_for_chat(chat_id)

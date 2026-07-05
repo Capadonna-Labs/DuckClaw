@@ -1888,6 +1888,14 @@ export const adminService = {
       auto_sync_poll_sec: number;
     }>('/knowledge/config'),
 
+  getKnowledgeSyncJobStatus: (jobId: string) =>
+    adminFetch<{
+      job_id: string;
+      status: string;
+      detail?: string;
+      updated_at?: number;
+    }>(`/knowledge/jobs/${encodeURIComponent(jobId)}`),
+
   createKnowledgeSource: (body: {
     source_uri: string;
     display_name?: string;
@@ -1903,6 +1911,8 @@ export const adminService = {
       source_id: string;
       status?: string;
       task_ids: string[];
+      sync_job_id?: string;
+      message?: string;
       documents: number;
       chunks: number;
       skipped_hidden?: number;
@@ -1932,13 +1942,17 @@ export const adminService = {
   ) =>
     adminFetch<{
       ok: boolean;
+      accepted?: boolean;
       source_id: string;
+      status?: string;
       task_ids: string[];
-      scanned: number;
-      upserted: number;
-      skipped: number;
-      removed: number;
-      chunks: number;
+      sync_job_id?: string;
+      message?: string;
+      scanned?: number;
+      upserted?: number;
+      skipped?: number;
+      removed?: number;
+      chunks?: number;
     }>(`/knowledge/sources/${encodeURIComponent(sourceId)}/sync`, {
       method: 'POST',
       body: JSON.stringify(body),
@@ -1962,8 +1976,12 @@ export const adminService = {
     }
     return adminFormFetch<{
       ok: boolean;
+      accepted?: boolean;
       source_id: string;
+      status?: string;
       task_ids: string[];
+      sync_job_id?: string;
+      message?: string;
       documents: number;
       chunks: number;
     }>('/knowledge/uploads', form);

@@ -1,4 +1,8 @@
-"""RAG / knowledge admin routes (sources, uploads, search)."""
+"""RAG / knowledge admin routes (sources, uploads, search).
+
+Gateway is enqueue-only for indexing mutations. DuckClaw-Knowledge-Indexer consumes Redis jobs.
+Spec: docs/specs/features/platform/GATEWAY_PROCESS_BOUNDARIES.md
+"""
 
 from __future__ import annotations
 
@@ -7,7 +11,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, UploadFile
 from pydantic import BaseModel, Field
 
 _log = logging.getLogger(__name__)
@@ -78,19 +82,9 @@ class KnowledgeFolderPreviewBody(BaseModel):
 
 
 def _enqueue_knowledge_command(command: Any) -> str:
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
-    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.gateway_enqueue import enqueue_admin_command
 
-    task_id = enqueue_typed_command(command, db_path=get_gateway_db_path(), user_id="default")
-    status = poll_task_status_sync(task_id, timeout_sec=0.5)
-    if status and status.status == "failed":
-        detail = status.detail or "knowledge write failed"
-        if "No hay query SQL" in detail:
-            raise ValueError(
-                "DB-Writer desactualizado: reinicia DuckClaw-DB-Writer y DuckClaw-Gateway para aplicar comandos RAG tipados."
-            )
-        raise ValueError(detail)
-    return task_id
+    return enqueue_admin_command(command)
 
 
 def _validate_knowledge_ingest_root(source_uri: str) -> Path:
@@ -99,101 +93,22 @@ def _validate_knowledge_ingest_root(source_uri: str) -> Path:
     return validate_knowledge_ingest_root(source_uri)
 
 
-def _ingest_folder_payloads(
-    *,
-    source_id: str,
-    tenant_id: str,
-    actor_email: str,
-    project_id: str,
-    worker_uid: str,
-    compute_embeddings: bool,
-    payloads: list[Any],
-) -> tuple[list[str], int]:
-    from duckclaw.forge.rag.knowledge_auto_sync import ingest_folder_payloads
+@router.get("/knowledge/jobs/{job_id}", dependencies=[Depends(require_admin_key)])
+async def get_knowledge_sync_job(job_id: str) -> dict[str, Any]:
+    from duckclaw.knowledge_sync_queue import get_job_status
 
-    return ingest_folder_payloads(
-        source_id=source_id,
-        tenant_id=tenant_id,
-        actor_email=actor_email,
-        project_id=project_id,
-        worker_uid=worker_uid,
-        compute_embeddings=compute_embeddings,
-        payloads=payloads,
-    )
-
-
-def _complete_folder_ingest(
-    *,
-    source_id: str,
-    tenant_id: str,
-    actor_email: str,
-    project_id: str,
-    worker_uid: str,
-    source_kind: str,
-    source_uri: str,
-    display_name: str,
-    metadata: dict[str, Any],
-    compute_embeddings: bool,
-    payloads: list[Any],
-    skipped_hidden: int,
-    skipped_unsupported: int,
-) -> None:
-    """Background ingest: evita HTTP 500 por timeout en vaults grandes."""
-    from duckclaw.write_commands import CreateKnowledgeSourceCommand
-
-    documents = len(payloads)
-    try:
-        _ingest_folder_payloads(
-            source_id=source_id,
-            tenant_id=tenant_id,
-            actor_email=actor_email,
-            project_id=project_id,
-            worker_uid=worker_uid,
-            compute_embeddings=compute_embeddings,
-            payloads=payloads,
-        )
-        ingest_meta = {
-            "documents": documents,
-            "skipped_hidden": skipped_hidden,
-            "skipped_unsupported": skipped_unsupported,
-        }
-        ready_cmd = CreateKnowledgeSourceCommand(
-            source_id=source_id,
-            tenant_id=tenant_id,
-            actor_email=actor_email,
-            project_id=project_id,
-            worker_uid=worker_uid,
-            source_kind=source_kind,  # type: ignore[arg-type]
-            source_uri=source_uri,
-            display_name=display_name,
-            status="ready",
-            metadata={**metadata, **ingest_meta},
-        )
-        _enqueue_knowledge_command(ready_cmd)
-    except Exception as exc:
-        _log.exception("folder ingest failed source_id=%s", source_id)
-        fail_cmd = CreateKnowledgeSourceCommand(
-            source_id=source_id,
-            tenant_id=tenant_id,
-            actor_email=actor_email,
-            project_id=project_id,
-            worker_uid=worker_uid,
-            source_kind=source_kind,  # type: ignore[arg-type]
-            source_uri=source_uri,
-            display_name=display_name,
-            status="failed",
-            metadata={**metadata, "error": str(exc)[:500], "documents": documents},
-        )
-        try:
-            _enqueue_knowledge_command(fail_cmd)
-        except Exception:
-            _log.exception("could not mark knowledge source failed source_id=%s", source_id)
+    row = get_job_status(job_id.strip())
+    if not row:
+        raise problem(404, f"Job de indexación no encontrado: {job_id}", job_id)
+    return {"job_id": job_id.strip(), **row}
 
 
 @router.get("/knowledge/config", dependencies=[Depends(require_admin_key)])
 async def knowledge_config() -> dict[str, Any]:
     from duckclaw.forge.rag.knowledge_auto_sync import auto_sync_enabled, auto_sync_poll_seconds
     from duckclaw.forge.rag.knowledge_paths import knowledge_allowed_roots, knowledge_output_roots
+    from duckclaw.knowledge_sync_queue import KNOWLEDGE_SYNC_QUEUE_KEY
+    from duckclaw.process_role import embed_knowledge_sync_in_gateway, is_knowledge_indexer_process
 
     def _root_row(path: Path) -> dict[str, Any]:
         return {
@@ -207,6 +122,10 @@ async def knowledge_config() -> dict[str, Any]:
         "output_roots": [_root_row(p) for p in knowledge_output_roots()],
         "auto_sync": auto_sync_enabled(),
         "auto_sync_poll_sec": auto_sync_poll_seconds(),
+        "indexer_queue": KNOWLEDGE_SYNC_QUEUE_KEY,
+        "indexer_embedded_in_gateway": embed_knowledge_sync_in_gateway(),
+        "gateway_enqueue_only": True,
+        "process_role": "knowledge-indexer" if is_knowledge_indexer_process() else "gateway",
     }
 
 
@@ -217,41 +136,50 @@ async def list_knowledge_sources(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
+    from core.heavy_work import run_heavy_work
     from duckclaw.admin_knowledge_read import list_knowledge_sources as _list_sources
     from duckclaw.admin_user_profiles import ensure_profile_for_user
 
     with open_gateway_db(read_only=True) as db:
         profile = ensure_profile_for_user(db, email=actor)
-        sources = _list_sources(
-            db,
-            tenant_id=profile["tenant_id"],
-            project_id=project_id,
-            worker_uid=worker_uid,
-        )
+
+        def _list() -> list[dict[str, Any]]:
+            return _list_sources(
+                db,
+                tenant_id=profile["tenant_id"],
+                project_id=project_id,
+                worker_uid=worker_uid,
+            )
+
+        sources = await run_heavy_work(_list)
     return {"sources": sources}
 
 
 @router.post("/knowledge/sources/preview", dependencies=[Depends(require_admin_key)])
 async def preview_knowledge_folder(body: KnowledgeFolderPreviewBody) -> dict[str, Any]:
+    from core.heavy_work import run_heavy_work
     from duckclaw.forge.rag.knowledge_core import scan_knowledge_folder
 
     try:
         root = _validate_knowledge_ingest_root(body.source_uri)
-        scan = scan_knowledge_folder(root)
-        base = root if root.is_dir() else root.parent
-        sample_paths = [
-            str(p.resolve().relative_to(base.resolve())).replace("\\", "/")
-            for p in scan.files[:8]
-        ]
-        return {
-            "ok": True,
-            "source_uri": str(root),
-            "file_count": scan.file_count,
-            "skipped_hidden": scan.skipped_hidden,
-            "skipped_secret": scan.skipped_secret,
-            "skipped_unsupported": scan.skipped_unsupported,
-            "sample_paths": sample_paths,
-        }
+
+        def _scan() -> dict[str, Any]:
+            scan = scan_knowledge_folder(root)
+            base = root if root.is_dir() else root.parent
+            sample_paths = [
+                str(p.resolve().relative_to(base.resolve())).replace("\\", "/")
+                for p in scan.files[:8]
+            ]
+            return {
+                "file_count": scan.file_count,
+                "skipped_hidden": scan.skipped_hidden,
+                "skipped_secret": scan.skipped_secret,
+                "skipped_unsupported": scan.skipped_unsupported,
+                "sample_paths": sample_paths,
+            }
+
+        stats = await run_heavy_work(_scan)
+        return {"ok": True, "source_uri": str(root), **stats}
     except Exception as exc:
         raise problem(400, str(exc), "knowledge_preview") from exc
 
@@ -259,11 +187,11 @@ async def preview_knowledge_folder(body: KnowledgeFolderPreviewBody) -> dict[str
 @router.post("/knowledge/sources", dependencies=[Depends(require_admin_key)])
 async def create_knowledge_source(
     body: KnowledgeSourceCreateBody,
-    background_tasks: BackgroundTasks,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
     from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.knowledge_sync_queue import enqueue_knowledge_sync_job
     from duckclaw.write_commands import CreateKnowledgeSourceCommand
 
     with open_gateway_db(read_only=True) as db:
@@ -285,12 +213,12 @@ async def create_knowledge_source(
         )
         task_ids = [_enqueue_knowledge_command(command)]
         documents = 0
-        chunks = 0
         skipped_hidden = 0
         skipped_unsupported = 0
+        sync_job_id = ""
         if body.ingest:
             root = _validate_knowledge_ingest_root(body.source_uri)
-            from duckclaw.forge.rag.knowledge_core import build_document_payload, scan_knowledge_folder
+            from duckclaw.forge.rag.knowledge_core import scan_knowledge_folder
 
             scan = scan_knowledge_folder(root)
             if scan.file_count == 0:
@@ -298,32 +226,15 @@ async def create_knowledge_source(
                     "No hay archivos indexables (.md, .txt, .pdf…) en esa carpeta. "
                     "Revisa la ruta o sube archivos manualmente."
                 )
-            payloads = [
-                build_document_payload(
-                    root=root if root.is_dir() else root.parent,
-                    path=file_path,
-                    source_id=source_id,
-                )
-                for file_path in scan.files
-            ]
-            documents = len(payloads)
+            documents = scan.file_count
             skipped_hidden = scan.skipped_hidden
             skipped_unsupported = scan.skipped_unsupported
-            background_tasks.add_task(
-                _complete_folder_ingest,
+            sync_job_id = enqueue_knowledge_sync_job(
+                kind="folder_ingest",
                 source_id=source_id,
                 tenant_id=profile["tenant_id"],
                 actor_email=profile["email"],
-                project_id=body.project_id.strip(),
-                worker_uid=body.worker_uid.strip(),
-                source_kind=body.source_kind.strip() or "folder",
-                source_uri=body.source_uri.strip(),
-                display_name=body.display_name.strip(),
-                metadata=body.metadata,
                 compute_embeddings=body.compute_embeddings,
-                payloads=payloads,
-                skipped_hidden=skipped_hidden,
-                skipped_unsupported=skipped_unsupported,
             )
     except Exception as exc:
         raise problem(400, str(exc), "knowledge_source") from exc
@@ -333,10 +244,16 @@ async def create_knowledge_source(
         "source_id": source_id,
         "status": "indexing" if body.ingest and documents > 0 else "pending",
         "task_ids": task_ids,
+        "sync_job_id": sync_job_id,
         "documents": documents,
-        "chunks": chunks,
+        "chunks": 0,
         "skipped_hidden": skipped_hidden,
         "skipped_unsupported": skipped_unsupported,
+        "message": (
+            "Indexación encolada en DuckClaw-Knowledge-Indexer."
+            if sync_job_id
+            else None
+        ),
     }
 
 
@@ -351,12 +268,9 @@ async def upload_knowledge_files(
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
     from duckclaw.admin_user_profiles import ensure_profile_for_user
-    from duckclaw.forge.rag.knowledge_core import build_uploaded_document_payload, embed_chunk_payloads
-    from duckclaw.write_commands import (
-        CreateKnowledgeSourceCommand,
-        UpsertKnowledgeChunksCommand,
-        UpsertKnowledgeDocumentCommand,
-    )
+    from duckclaw.knowledge_sync_queue import enqueue_browser_upload_job
+    from duckclaw.knowledge_upload_staging import stage_browser_upload
+    from duckclaw.write_commands import CreateKnowledgeSourceCommand
 
     if not files:
         raise problem(400, "Debes subir al menos un archivo", "knowledge_upload")
@@ -366,10 +280,21 @@ async def upload_knowledge_files(
     with open_gateway_db(read_only=True) as db:
         profile = ensure_profile_for_user(db, email=actor)
 
+    file_payloads: list[tuple[str, bytes]] = []
+    for upload in files:
+        data = await upload.read()
+        if not data:
+            continue
+        if len(data) > _KNOWLEDGE_UPLOAD_MAX_BYTES:
+            raise problem(400, f"{upload.filename or 'archivo'} supera 5MB", "knowledge_upload")
+        file_payloads.append((upload.filename or f"upload-{len(file_payloads)}.txt", data))
+
+    if not file_payloads:
+        raise problem(400, "Debes subir al menos un archivo con contenido", "knowledge_upload")
+
     try:
         source_id = f"ksrc_{uuid.uuid4().hex[:16]}"
-        task_ids: list[str] = []
-        upload_labels = _upload_filename_labels(files)
+        upload_labels = [name for name, _data in file_payloads]
         resolved_display = _upload_display_name(display_name, upload_labels)
         source_cmd = CreateKnowledgeSourceCommand(
             source_id=source_id,
@@ -381,79 +306,33 @@ async def upload_knowledge_files(
             source_uri=f"upload://{source_id}",
             display_name=resolved_display,
             status="indexing",
-            metadata={"upload": True, "file_count": len(files), "file_names": upload_labels},
+            metadata={"upload": True, "file_count": len(file_payloads), "file_names": upload_labels},
         )
-        task_ids.append(_enqueue_knowledge_command(source_cmd))
-
-        embedding_fn = None
-        if compute_embeddings:
-            from duckclaw.forge.rag.embeddings import embed_text
-
-            embedding_fn = embed_text
-        documents = 0
-        chunks = 0
-        for upload in files:
-            data = await upload.read()
-            if not data:
-                continue
-            if len(data) > _KNOWLEDGE_UPLOAD_MAX_BYTES:
-                raise ValueError(f"{upload.filename or 'archivo'} supera 5MB")
-            payload = build_uploaded_document_payload(
-                filename=upload.filename or f"upload-{documents}.txt",
-                data=data,
-                source_id=source_id,
-            )
-            doc_cmd = UpsertKnowledgeDocumentCommand(
-                tenant_id=profile["tenant_id"],
-                actor_email=profile["email"],
-                **payload.document,
-            )
-            task_ids.append(_enqueue_knowledge_command(doc_cmd))
-            chunk_payloads = (
-                embed_chunk_payloads(payload.chunks, embedding_fn)
-                if embedding_fn is not None
-                else payload.chunks
-            )
-            chunk_cmd = UpsertKnowledgeChunksCommand(
-                tenant_id=profile["tenant_id"],
-                actor_email=profile["email"],
-                document_id=payload.document["document_id"],
-                source_id=source_id,
-                project_id=project_id.strip(),
-                worker_uid=worker_uid.strip(),
-                chunks=chunk_payloads,
-            )
-            task_ids.append(_enqueue_knowledge_command(chunk_cmd))
-            documents += 1
-            chunks += len(chunk_payloads)
-
-        ready_cmd = CreateKnowledgeSourceCommand(
+        task_id = _enqueue_knowledge_command(source_cmd)
+        job_id = enqueue_browser_upload_job(
             source_id=source_id,
             tenant_id=profile["tenant_id"],
             actor_email=profile["email"],
+            staging_dir=str(stage_browser_upload(job_id=f"kupload_{source_id}", files=file_payloads)),
             project_id=project_id.strip(),
             worker_uid=worker_uid.strip(),
-            source_kind="file",
-            source_uri=f"upload://{source_id}",
             display_name=resolved_display,
-            status="ready",
-            metadata={
-                "upload": True,
-                "documents": documents,
-                "chunks": chunks,
-                "file_names": upload_labels,
-            },
+            file_names=upload_labels,
+            compute_embeddings=compute_embeddings,
         )
-        task_ids.append(_enqueue_knowledge_command(ready_cmd))
     except Exception as exc:
-        raise problem(400, "No se pudo procesar la carga RAG", str(exc)) from exc
+        raise problem(400, "No se pudo encolar la carga RAG", str(exc)) from exc
 
     return {
         "ok": True,
+        "accepted": True,
         "source_id": source_id,
-        "task_ids": task_ids,
-        "documents": documents,
-        "chunks": chunks,
+        "status": "indexing",
+        "task_ids": [task_id],
+        "sync_job_id": job_id,
+        "documents": len(file_payloads),
+        "chunks": 0,
+        "message": "Carga encolada en DuckClaw-Knowledge-Indexer.",
     }
 
 
@@ -464,9 +343,10 @@ async def sync_knowledge_source(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
-    from duckclaw.admin_knowledge_read import get_knowledge_source, list_source_document_checksums
+    from duckclaw.admin_knowledge_read import get_knowledge_source
     from duckclaw.admin_user_profiles import ensure_profile_for_user
-    from duckclaw.forge.rag.knowledge_auto_sync import execute_folder_sync
+    from duckclaw.knowledge_sync_queue import enqueue_knowledge_sync_job
+    from duckclaw.write_commands import CreateKnowledgeSourceCommand
 
     with open_gateway_db(read_only=True) as db:
         profile = ensure_profile_for_user(db, email=actor)
@@ -478,28 +358,40 @@ async def sync_knowledge_source(
         source_uri = str(source.get("source_uri") or "").strip()
         if not source_uri or source_uri.startswith("upload://"):
             raise problem(400, "Esta fuente no tiene ruta de servidor para sincronizar", source_id)
-        existing = list_source_document_checksums(db, source_id=source_id)
 
     try:
-        outcome = execute_folder_sync(
-            source=source,
-            existing=existing,
+        indexing_cmd = CreateKnowledgeSourceCommand(
+            source_id=source_id,
+            tenant_id=profile["tenant_id"],
             actor_email=profile["email"],
-            compute_embeddings=body.compute_embeddings,
+            project_id=str(source.get("project_id") or ""),
+            worker_uid=str(source.get("worker_uid") or ""),
+            source_kind="folder",
+            source_uri=source_uri,
+            display_name=str(source.get("display_name") or ""),
+            status="indexing",
+            metadata=dict(source.get("metadata") or {}),
+        )
+        task_id = _enqueue_knowledge_command(indexing_cmd)
+        sync_job_id = enqueue_knowledge_sync_job(
+            kind="folder_sync",
+            source_id=source_id,
+            tenant_id=profile["tenant_id"],
+            actor_email=profile["email"],
             force=True,
+            compute_embeddings=body.compute_embeddings,
         )
     except Exception as exc:
         raise problem(400, str(exc), "knowledge_sync") from exc
 
     return {
         "ok": True,
+        "accepted": True,
         "source_id": source_id,
-        "task_ids": outcome.task_ids,
-        "scanned": outcome.scanned,
-        "upserted": outcome.upserted,
-        "skipped": outcome.skipped,
-        "removed": outcome.removed,
-        "chunks": outcome.chunks,
+        "status": "indexing",
+        "task_ids": [task_id],
+        "sync_job_id": sync_job_id,
+        "message": "Sincronización encolada en DuckClaw-Knowledge-Indexer.",
     }
 
 
@@ -532,18 +424,23 @@ async def search_knowledge(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
+    from core.heavy_work import run_heavy_work
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.forge.rag.knowledge_core import search_knowledge as _search
 
     with open_gateway_db(read_only=True) as db:
         profile = ensure_profile_for_user(db, email=actor)
-        rows = _search(
-            db,
-            query=body.query,
-            tenant_id=profile["tenant_id"],
-            project_id=body.project_id.strip(),
-            worker_uid=body.worker_uid.strip(),
-            source_id=body.source_id.strip(),
-            limit=body.limit,
-        )
+
+        def _search_rows() -> list[dict[str, Any]]:
+            return _search(
+                db,
+                query=body.query,
+                tenant_id=profile["tenant_id"],
+                project_id=body.project_id.strip(),
+                worker_uid=body.worker_uid.strip(),
+                source_id=body.source_id.strip(),
+                limit=body.limit,
+            )
+
+        rows = await run_heavy_work(_search_rows)
     return {"results": rows, "count": len(rows)}

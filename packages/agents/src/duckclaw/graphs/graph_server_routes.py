@@ -75,7 +75,7 @@ def register_graph_server_routes(app: FastAPI) -> None:
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
-        from duckclaw.manager.graph import clear_worker_graph_cache
+        from duckclaw.manager.graph import trim_worker_graph_cache
 
         graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
         history = req.history or []
@@ -101,7 +101,7 @@ def register_graph_server_routes(app: FastAPI) -> None:
                 db.close()
             except Exception:
                 pass
-            clear_worker_graph_cache()
+            trim_worker_graph_cache()
 
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         return InvokeResponse(
@@ -124,7 +124,7 @@ def register_graph_server_routes(app: FastAPI) -> None:
         except Exception as exc:
             raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
-        from duckclaw.manager.graph import clear_worker_graph_cache
+        from duckclaw.manager.graph import trim_worker_graph_cache
 
         graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
 
@@ -154,7 +154,7 @@ def register_graph_server_routes(app: FastAPI) -> None:
                     db.close()
                 except Exception:
                     pass
-                clear_worker_graph_cache()
+                trim_worker_graph_cache()
 
         return StreamingResponse(
             event_generator(),

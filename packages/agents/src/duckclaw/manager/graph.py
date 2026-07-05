@@ -57,7 +57,10 @@ from duckclaw.manager.manager_worker_cache import (
     _vault_lock_key,
     _worker_graph_cache,
     clear_worker_graph_cache,
+    trim_worker_graph_cache,
     worker_graph_cache_entry_count,
+    worker_graph_cache_get,
+    worker_graph_cache_stats,
 )
 from duckclaw.manager.routing import (
     _LONE_HTTP_URL_ONLY_LINE,
@@ -70,5 +73,8 @@ __all__ = [
     "build_manager_graph",
     "clear_worker_graph_cache",
     "release_subagent_slot",
+    "trim_worker_graph_cache",
     "worker_graph_cache_entry_count",
+    "worker_graph_cache_get",
+    "worker_graph_cache_stats",
 ]

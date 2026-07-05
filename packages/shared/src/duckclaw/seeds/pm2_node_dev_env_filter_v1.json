@@ -41,6 +41,16 @@
       "name": "DuckClaw-DB-Writer",
       "ecosystem": "config/ecosystem.db-writer.config.cjs",
       "only_flag": null
+    },
+    "knowledge_indexer": {
+      "name": "DuckClaw-Knowledge-Indexer",
+      "ecosystem": "config/ecosystem.knowledge-indexer.config.cjs",
+      "only_flag": "--only DuckClaw-Knowledge-Indexer"
+    },
+    "heartbeat": {
+      "name": "DuckClaw-Heartbeat",
+      "ecosystem": "config/ecosystem.heartbeat.config.cjs",
+      "only_flag": "--only DuckClaw-Heartbeat"
     }
   }
 }

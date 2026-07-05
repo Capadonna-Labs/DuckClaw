@@ -13,6 +13,10 @@ import {
   formatKnowledgeError,
   type KnowledgeFolderPreview,
 } from '@/components/knowledge/knowledgeErrorMessage';
+import {
+  formatKnowledgeJobPollNotice,
+  pollKnowledgeSyncJob,
+} from '@/lib/pollKnowledgeSyncJob';
 
 const ACCEPTED_EXTENSIONS = '.md,.markdown,.txt,.json,.csv,.pdf,.docx,.doc,.pptx,.html,.htm';
 const DIRECTORY_INPUT_PROPS = { webkitdirectory: '', directory: '' };
@@ -94,16 +98,22 @@ export default function KnowledgePage() {
     }
   }, [projectId, workerUid]);
 
-  const pollSourcesAfterImport = useCallback(
-    async (previousCount: number) => {
-      for (let attempt = 0; attempt < 6; attempt += 1) {
-        await new Promise((resolve) => window.setTimeout(resolve, 3000));
-        const rows = await loadSources();
-        const indexing = rows.some((row) => row.status === 'indexing' || row.status === 'pending');
-        if (rows.length > previousCount || (!indexing && rows.length > 0) || attempt >= 11) {
-          break;
-        }
+  const waitForKnowledgeJob = useCallback(
+    async (jobId: string | undefined, busyLabel: string) => {
+      if (!jobId) {
+        await loadSources();
+        return;
       }
+      setNotice(`${busyLabel}…`);
+      const pollResult = await pollKnowledgeSyncJob(jobId, {
+        onTick: (status) => {
+          if (status === 'running' || status === 'queued') {
+            setNotice(`${busyLabel} (${status})…`);
+          }
+        },
+      });
+      await loadSources();
+      setNotice(formatKnowledgeJobPollNotice(pollResult, busyLabel));
     },
     [loadSources]
   );
@@ -127,18 +137,15 @@ export default function KnowledgePage() {
       });
       setFiles([]);
       setDisplayName('');
-      setNotice(`Carga lista: ${result.documents} docs, ${result.chunks} chunks.`);
-      const prevCount = sources.length;
+      setNotice(`Carga encolada: ${result.documents} documento(s).`);
       await loadSources();
-      if (result.documents > 0) {
-        void pollSourcesAfterImport(prevCount);
-      }
+      void waitForKnowledgeJob(result.sync_job_id, 'Indexando carga');
     } catch (e) {
       setError(formatKnowledgeError(e instanceof Error ? e.message : 'No se pudieron subir archivos'));
     } finally {
       setBusy(false);
     }
-  }, [computeEmbeddings, displayName, files, loadSources, pollSourcesAfterImport, projectId, selectedProject?.name, sources.length, workerUid]);
+  }, [computeEmbeddings, displayName, files, loadSources, projectId, waitForKnowledgeJob, workerUid]);
 
   const previewServerPath = useCallback(async () => {
     if (!serverPath.trim()) return;
@@ -176,24 +183,19 @@ export default function KnowledgePage() {
       setServerPath('');
       setDisplayName('');
       setFolderPreview(null);
-      const skipNote =
-        (result.skipped_hidden ?? 0) > 0
-          ? ` (${result.skipped_hidden} ocultos omitidos, ej. .obsidian)`
-          : '';
       setNotice(
         result.status === 'indexing'
-          ? `Indexando ${result.documents} documentos… La lista se actualizará sola.`
-          : `Importación lista: ${result.documents} documento(s)${skipNote}. Sincronización automática activa.`
+          ? `Indexando ${result.documents} documento(s)…`
+          : `Importación encolada: ${result.documents} documento(s).`
       );
-      const prevCount = sources.length;
       await loadSources();
-      void pollSourcesAfterImport(prevCount);
+      void waitForKnowledgeJob(result.sync_job_id, 'Indexando carpeta');
     } catch (e) {
       setError(formatKnowledgeError(e instanceof Error ? e.message : 'No se pudo importar la ruta servidor'));
     } finally {
       setBusy(false);
     }
-  }, [computeEmbeddings, displayName, loadSources, pollSourcesAfterImport, projectId, serverPath, sources.length, workerUid]);
+  }, [computeEmbeddings, displayName, loadSources, projectId, serverPath, waitForKnowledgeJob, workerUid]);
 
   const syncSource = useCallback(
     async (source: KnowledgeSource) => {
@@ -204,29 +206,34 @@ export default function KnowledgePage() {
         const result = await adminService.syncKnowledgeSource(source.source_id, {
           compute_embeddings: computeEmbeddings,
         });
-        setNotice(
-          `Sync: ${result.scanned} escaneados, ${result.upserted} actualizados, ${result.skipped} sin cambios, ${result.removed} eliminados.`
-        );
-        loadSources();
+        setNotice(result.message ?? 'Sincronización encolada…');
+        void waitForKnowledgeJob(result.sync_job_id, 'Sincronizando carpeta');
       } catch (e) {
         setError(e instanceof Error ? e.message : 'No se pudo sincronizar la fuente');
       } finally {
         setBusy(false);
       }
     },
-    [computeEmbeddings, loadSources]
+    [computeEmbeddings, waitForKnowledgeJob]
   );
 
-  const deactivateSource = useCallback(
+  const deleteSource = useCallback(
     async (source: KnowledgeSource) => {
-      if (!window.confirm(`Desactivar fuente RAG "${source.display_name || source.source_uri}"?`)) return;
+      if (
+        !window.confirm(
+          `Eliminar "${source.display_name || source.source_uri}" del RAG?\n\nSe borrarán del contexto del chat los ${source.document_count} documento(s) y ${source.chunk_count} fragmento(s) indexados. La carpeta original en disco no se toca.`
+        )
+      ) {
+        return;
+      }
       setBusy(true);
       setError(null);
       try {
         await adminService.deleteKnowledgeSource(source.source_id);
+        setNotice('Fuente eliminada del RAG. El agente ya no verá esos documentos en el chat.');
         loadSources();
       } catch (e) {
-        setError(e instanceof Error ? e.message : 'No se pudo desactivar la fuente');
+        setError(e instanceof Error ? e.message : 'No se pudo eliminar la fuente del RAG');
       } finally {
         setBusy(false);
       }
@@ -514,7 +521,7 @@ export default function KnowledgePage() {
                 projectId={projectId}
                 busy={busy}
                 onSync={(item) => void syncSource(item)}
-                onDeactivate={(item) => void deactivateSource(item)}
+                onDelete={(item) => void deleteSource(item)}
               />
             ))}
           </div>

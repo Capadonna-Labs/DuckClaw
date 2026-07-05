@@ -9,6 +9,7 @@ import subprocess
 from fastapi import APIRouter, FastAPI, Request
 
 from core.config import settings
+from duckclaw.ops.gateway_health_metrics import collect_gateway_health_metrics
 
 router = APIRouter(tags=["health"])
 
@@ -47,6 +48,7 @@ async def health(request: Request):
         "status": "ok",
         "service": "api-gateway",
         "telegram_path_routes_registered": telegram_path_route_count(request.app),
+        "metrics": collect_gateway_health_metrics(),
     }
 
 

@@ -17,7 +17,7 @@ type KnowledgeSourceCardProps = {
   projectId: string;
   busy: boolean;
   onSync: (source: KnowledgeSource) => void;
-  onDeactivate: (source: KnowledgeSource) => void;
+  onDelete: (source: KnowledgeSource) => void;
 };
 
 export function KnowledgeSourceCard({
@@ -25,7 +25,7 @@ export function KnowledgeSourceCard({
   projectId,
   busy,
   onSync,
-  onDeactivate,
+  onDelete,
 }: KnowledgeSourceCardProps) {
   const [expanded, setExpanded] = useState(false);
   const secondary = knowledgeSourceSecondaryLine(source);
@@ -98,12 +98,13 @@ export function KnowledgeSourceCard({
           )}
           <button
             type="button"
-            onClick={() => onDeactivate(source)}
+            onClick={() => onDelete(source)}
             disabled={busy}
             className="inline-flex items-center justify-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900/60 dark:text-red-300"
+            title="Elimina documentos y fragmentos indexados del chat"
           >
             <Trash2 size={14} />
-            Desactivar
+            Eliminar del RAG
           </button>
         </div>
       </div>

@@ -155,7 +155,7 @@ def invoke_ephemeral_gateway_graph(
     del hub, gana el override del hub (consola admin); el vault solo si el hub no tiene llm_*.
     """
     from duckclaw.integrations.llm_providers import build_llm
-    from duckclaw.manager.graph import clear_worker_graph_cache
+    from duckclaw.manager.graph import trim_worker_graph_cache
 
     from duckclaw.graphs.graph_server_llm_config import _ensure_llm_config, get_graph_state
     from duckclaw.graphs.graph_server_studio import _build_manager_graph_for_db
@@ -164,7 +164,7 @@ def invoke_ephemeral_gateway_graph(
     graph_state = get_graph_state()
     db_path = str(graph_state["db_path"])
     os.makedirs(str(Path(db_path).parent), exist_ok=True)
-    clear_worker_graph_cache()
+    trim_worker_graph_cache()
     v_p = (vault_db_path or "").strip()
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
 

@@ -3,7 +3,7 @@
 export const BFF_TIMEOUT_FAST_MS = 8_000;
 export const BFF_TIMEOUT_DEFAULT_GET_MS = 30_000;
 export const BFF_TIMEOUT_DEFAULT_WRITE_MS = 45_000;
-export const BFF_TIMEOUT_HEALTH_MS = 3_000;
+export const BFF_TIMEOUT_HEALTH_MS = 10_000;
 export const BFF_TIMEOUT_KNOWLEDGE_MUTATION_MS = 120_000;
 export const BFF_TIMEOUT_OPS_MS = 60_000;
 
@@ -21,7 +21,7 @@ export function bffGatewayTimeoutMs(sub: string, method: string): number {
     return BFF_TIMEOUT_KNOWLEDGE_MUTATION_MS;
   }
   if (path === 'ops/run') {
-    return BFF_TIMEOUT_OPS_MS;
+    return 240_000;
   }
   if (path === 'user-agents/draft') {
     return 120_000;

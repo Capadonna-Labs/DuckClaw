@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
-import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell } from '@/lib/pm2Recycle';
+import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell, pm2RecycleHeartbeatShell, pm2RecycleKnowledgeIndexerShell } from '@/lib/pm2Recycle';
 import { pm2WaitShellPreamble } from '@/lib/pm2WaitShell';
 import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
 
@@ -120,10 +120,18 @@ cd "${cwd}"
 GATEWAY_MODE="start"
 pm2 stop DuckClaw-Gateway 2>/dev/null || true
 pm2 stop DuckClaw-DB-Writer 2>/dev/null || true
+pm2 stop DuckClaw-Knowledge-Indexer 2>/dev/null || true
+pm2 stop DuckClaw-Heartbeat 2>/dev/null || true
 wait_pm2_stopped DuckClaw-Gateway 15 || true
 wait_pm2_stopped DuckClaw-DB-Writer 15 || true
+wait_pm2_stopped DuckClaw-Knowledge-Indexer 15 || true
+wait_pm2_stopped DuckClaw-Heartbeat 15 || true
 ${pm2RecycleDbWriterShell(cwd).trim()}
 wait_pm2_online DuckClaw-DB-Writer 30 || exit 1
+${pm2RecycleKnowledgeIndexerShell(cwd).trim()}
+wait_pm2_online DuckClaw-Knowledge-Indexer 30 || exit 1
+${pm2RecycleHeartbeatShell(cwd).trim()}
+wait_pm2_online DuckClaw-Heartbeat 30 || exit 1
 ${pm2RecycleGatewayShell(cwd).trim()}
 wait_pm2_online DuckClaw-Gateway 30 || exit 1
 wait_gateway_health 45 || true
@@ -133,7 +141,7 @@ pm2 save 2>/dev/null || true
 pm2 list
 `;
   const proc = await runArgv(cwd, ['bash', '-lc', shell], 180_000);
-  chunks.push('\n── DuckClaw-DB-Writer + DuckClaw-Gateway ──\n', proc.stdout, proc.stderr);
+  chunks.push('\n── DuckClaw-DB-Writer + Knowledge-Indexer + Heartbeat + Gateway ──\n', proc.stdout, proc.stderr);
 
   if (proc.exit_code !== 0) {
     return normalizeOpsResult({

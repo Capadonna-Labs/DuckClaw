@@ -12,11 +12,13 @@ function workersTooltipLabel(workers: string[]): string {
 }
 
 const POLL_OK_MS = 60_000;
-const POLL_ERROR_MS = 20_000;
+const POLL_ERROR_MS = 30_000;
 
 export function PlatformStatusStrip() {
+  const recovering = useGatewayHealthStore((s) => s.recovering);
   const data = useGatewayHealthStore((s) => s.data);
   const error = useGatewayHealthStore((s) => s.error);
+  const fetchedAt = useGatewayHealthStore((s) => s.fetchedAt);
   const refresh = useGatewayHealthStore((s) => s.refresh);
 
   const poll = useCallback(() => {
@@ -40,8 +42,15 @@ export function PlatformStatusStrip() {
   const workersCount =
     typeof data?.workers_count === 'number' ? data.workers_count : workers.length || null;
 
-  const online = !error && data != null && isGatewayHealthy(data.status);
-  const gatewayLabel = error ? 'Off-line' : formatGatewayStatus(data?.status);
+  const checking = !recovering && !error && data == null && fetchedAt === 0;
+  const online = !recovering && !error && data != null && isGatewayHealthy(data.status);
+  const gatewayLabel = recovering
+    ? 'Reiniciando…'
+    : checking
+      ? 'Comprobando…'
+      : error
+        ? 'Off-line'
+        : formatGatewayStatus(data?.status);
   const workersTitle = useMemo(() => workersTooltipLabel(workers), [workers]);
 
   return (
@@ -51,13 +60,25 @@ export function PlatformStatusStrip() {
     >
       <span
         className={`inline-flex items-center gap-1.5 px-2.5 py-2 text-xs font-black ${
-          online
-            ? 'text-emerald-800 dark:text-emerald-300'
-            : 'text-red-800 dark:text-red-300'
+          recovering
+            ? 'text-amber-800 dark:text-amber-300'
+            : checking
+              ? 'text-gov-gray-600 dark:text-dark-muted'
+              : online
+                ? 'text-emerald-800 dark:text-emerald-300'
+                : 'text-red-800 dark:text-red-300'
         }`}
       >
         <span
-          className={`inline-block w-2 h-2 rounded-full shrink-0 ${online ? 'bg-emerald-500' : 'bg-red-500'}`}
+          className={`inline-block w-2 h-2 rounded-full shrink-0 ${
+            recovering
+              ? 'bg-amber-500 animate-pulse'
+              : checking
+                ? 'bg-gov-gray-400 animate-pulse'
+                : online
+                  ? 'bg-emerald-500'
+                  : 'bg-red-500'
+          }`}
           aria-hidden
         />
         <span className="hidden sm:inline text-[10px] uppercase tracking-wide opacity-70">Sistema</span>

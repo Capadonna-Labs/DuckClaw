@@ -184,7 +184,7 @@ async def ainvoke_manager_ephemeral(
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
     Uso recomendado desde services/api-gateway en lugar de retener un grafo global.
     """
-    from duckclaw.manager.graph import clear_worker_graph_cache
+    from duckclaw.manager.graph import trim_worker_graph_cache
 
     _ensure_llm_config()
     graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, chat_id, vault_db_path)
@@ -212,4 +212,4 @@ async def ainvoke_manager_ephemeral(
             db.close()
         except Exception:
             pass
-        clear_worker_graph_cache()
+        trim_worker_graph_cache()

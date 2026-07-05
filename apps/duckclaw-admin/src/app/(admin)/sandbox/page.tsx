@@ -19,6 +19,8 @@ const TABS: { id: SandboxTab; label: string; icon: typeof Box }[] = [
   { id: 'browser', label: 'Navegador', icon: Monitor },
 ];
 
+const STATUS_POLL_MS = 60_000;
+
 export default function SandboxPage() {
   const searchParams = useSearchParams();
   const tabParam = (searchParams.get('tab') || 'files') as SandboxTab;
@@ -39,28 +41,37 @@ export default function SandboxPage() {
   }, [tabParam]);
 
   useEffect(() => {
+    if (tab !== 'config' && tab !== 'browser') return;
     adminService
       .getPlaygroundConfig()
       .then((cfg) => {
         setPolicyChatId((prev) => prev || cfg.team_chat_id || 'admin-sandbox-workspace');
       })
       .catch(() => undefined);
-  }, []);
+  }, [tab]);
 
   const loadStatus = useCallback(async () => {
     try {
       const st = await adminService.getSandboxStatus();
       setStatus(st);
     } catch {
-      setStatus(null);
+      setStatus((prev) => prev);
     }
   }, []);
 
-  useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+  const statusPollingEnabled = tab === 'files' || tab === 'config';
 
-  useVisibilityAwareInterval(() => void loadStatus(), 30_000);
+  useEffect(() => {
+    if (!statusPollingEnabled) return;
+    void loadStatus();
+  }, [loadStatus, statusPollingEnabled, refreshKey]);
+
+  useVisibilityAwareInterval(
+    () => {
+      if (statusPollingEnabled) void loadStatus();
+    },
+    statusPollingEnabled ? STATUS_POLL_MS : null
+  );
 
   const dockerOk = status?.docker_available === true;
 

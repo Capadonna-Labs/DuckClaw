@@ -25,3 +25,11 @@ export function pm2RecycleGatewayShell(repoRoot: string): string {
 export function pm2RecycleDbWriterShell(repoRoot: string): string {
   return pm2RecycleShell('db_writer', repoRoot, 'PM2_RECYCLE_DB_WRITER_OK');
 }
+
+export function pm2RecycleKnowledgeIndexerShell(repoRoot: string): string {
+  return pm2RecycleShell('knowledge_indexer', repoRoot, 'PM2_RECYCLE_KNOWLEDGE_INDEXER_OK');
+}
+
+export function pm2RecycleHeartbeatShell(repoRoot: string): string {
+  return pm2RecycleShell('heartbeat', repoRoot, 'PM2_RECYCLE_HEARTBEAT_OK');
+}

@@ -29,26 +29,26 @@ def test_plan_folder_sync_skips_unchanged_and_detects_changes(tmp_path) -> None:
     doc.write_text("# Note\nv1", encoding="utf-8")
 
     payload = build_document_payload(root=root, path=doc, source_id="ksrc_obs")
+    byte_size = int(payload.document["byte_size"])
     existing = {
-        "note.md": (str(payload.document["document_id"]), str(payload.document["checksum"])),
+        "note.md": (str(payload.document["document_id"]), str(payload.document["checksum"]), byte_size),
     }
 
     unchanged = plan_folder_sync(root=root, source_id="ksrc_obs", existing=existing)
     assert unchanged.scanned == 1
     assert unchanged.skipped == 1
-    assert unchanged.to_upsert == []
+    assert unchanged.to_upsert_paths == []
     assert unchanged.to_deactivate == []
 
     doc.write_text("# Note\nv2", encoding="utf-8")
     changed = plan_folder_sync(root=root, source_id="ksrc_obs", existing=existing)
     assert changed.skipped == 0
-    assert len(changed.to_upsert) == 1
-    assert changed.to_upsert[0].document["checksum"] != existing["note.md"][1]
+    assert len(changed.to_upsert_paths) == 1
 
     doc.unlink()
     removed = plan_folder_sync(root=root, source_id="ksrc_obs", existing=existing)
     assert removed.to_deactivate == [payload.document["document_id"]]
-    assert removed.to_upsert == []
+    assert removed.to_upsert_paths == []
 
 
 def test_resolve_truncated_gmail_path_uses_allowed_root(tmp_path, monkeypatch) -> None:
@@ -155,13 +155,14 @@ def test_auto_sync_enabled_defaults_true(monkeypatch) -> None:
     monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_AUTO_SYNC", "false")
     assert auto_sync_enabled() is False
     monkeypatch.delenv("DUCKCLAW_KNOWLEDGE_AUTO_SYNC_POLL_SEC", raising=False)
-    assert auto_sync_poll_seconds() == 15
+    assert auto_sync_poll_seconds() == 60
 
 
 def test_execute_folder_sync_skips_unchanged_fingerprint(tmp_path, monkeypatch) -> None:
     from duckclaw.forge.rag.knowledge_auto_sync import execute_folder_sync
     from duckclaw.forge.rag.knowledge_core import build_document_payload
 
+    monkeypatch.setenv("DUCKCLAW_PROCESS_ROLE", "knowledge-indexer")
     vault = tmp_path / "vault"
     vault.mkdir()
     doc = vault / "note.md"
@@ -169,7 +170,13 @@ def test_execute_folder_sync_skips_unchanged_fingerprint(tmp_path, monkeypatch) 
     monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS", str(vault))
 
     payload = build_document_payload(root=vault, path=doc, source_id="ksrc_x")
-    existing = {"note.md": (payload.document["document_id"], payload.document["checksum"])}
+    existing = {
+        "note.md": (
+            payload.document["document_id"],
+            payload.document["checksum"],
+            int(payload.document["byte_size"]),
+        )
+    }
     source = {
         "source_id": "ksrc_x",
         "tenant_id": "tenant_a",

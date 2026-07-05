@@ -54,6 +54,13 @@ def get_embedding_model():
     if _EMBEDDING_MODEL is not None:
         return _EMBEDDING_MODEL
     try:
+        from duckclaw.process_role import gateway_embedding_policy, is_gateway_process
+
+        if is_gateway_process() and gateway_embedding_policy() == "remote_only":
+            return None
+    except ImportError:
+        pass
+    try:
         from sentence_transformers import SentenceTransformer
 
         _EMBEDDING_MODEL = SentenceTransformer("sentence-transformers/all-MiniLM-L6-v2")

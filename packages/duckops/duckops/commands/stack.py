@@ -17,6 +17,7 @@ app = typer.Typer()
 
 GATEWAY_NAME = "DuckClaw-Gateway"
 DB_WRITER_NAME = "DuckClaw-DB-Writer"
+KNOWLEDGE_INDEXER_NAME = "DuckClaw-Knowledge-Indexer"
 
 
 def _repo_root() -> Path:
@@ -102,8 +103,17 @@ def _service_report(*, provider: str, host: str, port: int) -> dict[str, Any]:
     services = {
         GATEWAY_NAME: {"status": gateway_status, "health_ok": gateway_health},
         DB_WRITER_NAME: {"status": db_writer_status},
+        KNOWLEDGE_INDEXER_NAME: {
+            "status": _pm2_status_by_name(KNOWLEDGE_INDEXER_NAME) if provider == "pm2" else "unknown"
+        },
     }
-    all_ok = gateway_status == "online" and gateway_health and db_writer_status == "online"
+    indexer_status = services[KNOWLEDGE_INDEXER_NAME]["status"]
+    all_ok = (
+        gateway_status == "online"
+        and gateway_health
+        and db_writer_status == "online"
+        and indexer_status == "online"
+    )
     return {"provider": provider, "host": host, "port": port, "services": services, "all_ok": all_ok}
 
 
@@ -163,6 +173,7 @@ def up(
     root = _repo_root()
     api_ecosystem = root / "config" / "ecosystem.api.config.cjs"
     db_writer_ecosystem = root / "config" / "ecosystem.db-writer.config.cjs"
+    indexer_ecosystem = root / "config" / "ecosystem.knowledge-indexer.config.cjs"
     if not api_ecosystem.is_file():
         typer.echo(f"No existe {api_ecosystem}", err=True)
         raise typer.Exit(1)
@@ -170,6 +181,8 @@ def up(
     changed = _pm2_start(api_ecosystem, GATEWAY_NAME)
     if db_writer_ecosystem.is_file():
         changed = _pm2_start(db_writer_ecosystem, DB_WRITER_NAME) or changed
+    if indexer_ecosystem.is_file():
+        changed = _pm2_start(indexer_ecosystem, KNOWLEDGE_INDEXER_NAME) or changed
 
     if changed:
         proc = _run(["pm2", "save"])
@@ -182,6 +195,31 @@ def up(
         raise typer.Exit(1)
 
     _print_status(_service_report(provider=selected, host=host, port=port))
+
+
+@app.command("deploy")
+def stack_deploy(
+    sync_deps: bool = typer.Option(True, "--sync/--no-sync", help="Ejecuta uv sync antes del deploy."),
+    migrate: bool = typer.Option(True, "--migrate/--no-migrate", help="Ejecuta duckclaw-migrate antes del PM2 recycle."),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host local del Gateway."),
+    port: int = typer.Option(8000, "--port", help="Puerto local del Gateway."),
+    wait: bool = typer.Option(True, "--wait/--no-wait", help="Espera /health OK tras el deploy."),
+    timeout_seconds: float = typer.Option(45.0, "--timeout", help="Timeout de /health."),
+) -> None:
+    """uv sync + migrate + recicla PM2 (env limpio) + DB-Writer, Knowledge-Indexer y Gateway."""
+    from duckclaw.ops.stack_deploy import run_stack_deploy
+
+    code = run_stack_deploy(
+        repo_root=_repo_root(),
+        print_fn=typer.echo,
+        sync_deps=sync_deps,
+        migrate=migrate,
+        host=host,
+        port=port,
+        wait_health=wait,
+        health_timeout=timeout_seconds,
+    )
+    raise typer.Exit(code)
 
 
 @app.command("codegen")

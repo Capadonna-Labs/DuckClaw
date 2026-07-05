@@ -3,7 +3,6 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { OverviewMetrics } from '@/types/admin';
 import { HomeChecklist } from '@/components/admin/HomeChecklist';
@@ -18,23 +17,14 @@ const TokenUsageChart = dynamic(() => import('@/components/dashboard/TokenUsageC
 export default function OverviewPage() {
   const { usuario } = useAuthStore();
   const isAdmin = isAdminRole(usuario?.rol);
+  const gatewayFailed = useGatewayHealthStore((s) => s.error);
+  const gatewayHealth = useGatewayHealthStore((s) => s.data);
   const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
-  const [metricsOpen, setMetricsOpen] = useState(false);
+
+  const error = gatewayFailed ? friendlyGatewayError('Sin conexión') : null;
 
   useEffect(() => {
-    useGatewayHealthStore
-      .getState()
-      .refresh()
-      .then((health) => {
-        if (!health) {
-          setError(friendlyGatewayError('Sin conexión'));
-        }
-      })
-      .catch((e) =>
-        setError(friendlyGatewayError(e instanceof Error ? e.message : 'Sin conexión'))
-      );
     if (!isAdmin) return;
     adminService
       .getOverviewMetrics()
@@ -69,35 +59,24 @@ export default function OverviewPage() {
 
       <HomeChecklist />
 
-      {isAdmin && !error && (
+      {isAdmin && !error && gatewayHealth && (
         <section className="rounded-2xl border border-gov-gray-100 bg-white dark:border-dark-border dark:bg-dark-surface">
-          <button
-            type="button"
-            onClick={() => setMetricsOpen((v) => !v)}
-            className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left"
-            aria-expanded={metricsOpen}
-          >
-            <span className="text-sm font-black text-gov-gray-800 dark:text-dark-text">
-              Métricas de uso (opcional)
-            </span>
-            <ChevronDown
-              size={18}
-              className={`shrink-0 transition-transform ${metricsOpen ? 'rotate-180' : ''}`}
-            />
-          </button>
-          {metricsOpen && (
-            <div className="space-y-6 border-t border-gov-gray-100 px-5 py-5 dark:border-dark-border">
-              {metricsError && (
-                <p className="text-sm text-amber-800 dark:text-amber-300">{metricsError}</p>
-              )}
-              <ChartCard title="Uso LLM — tokens y costo (USD)">
-                <TokenUsageChart initial={metrics?.usage} />
-              </ChartCard>
-              <ChartCard title="Rendimiento">
-                <ActivityChart data={metrics?.activity ?? []} />
-              </ChartCard>
-            </div>
-          )}
+          <div className="border-b border-gov-gray-100 px-5 py-4 dark:border-dark-border">
+            <h2 className="text-sm font-black text-gov-gray-800 dark:text-dark-text">
+              Métricas de uso
+            </h2>
+          </div>
+          <div className="space-y-6 px-5 py-5">
+            {metricsError && (
+              <p className="text-sm text-amber-800 dark:text-amber-300">{metricsError}</p>
+            )}
+            <ChartCard title="Uso LLM — tokens y costo (USD)">
+              <TokenUsageChart initial={metrics?.usage} />
+            </ChartCard>
+            <ChartCard title="Rendimiento">
+              <ActivityChart data={metrics?.activity ?? []} />
+            </ChartCard>
+          </div>
         </section>
       )}
     </div>

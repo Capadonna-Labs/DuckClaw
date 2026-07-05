@@ -101,7 +101,17 @@ export interface GatewayHealthMetrics {
     ttl_sec?: number;
   };
   knowledge_sync_queue_depth?: number | null;
+  db_write_queue_depth?: number | null;
   collected_at?: number;
+}
+
+export interface ReleaseWorkerCacheResult {
+  ok: boolean;
+  entries_before: number;
+  entries_after: number;
+  rss_mb_before: number | null;
+  rss_mb_after: number | null;
+  worker_graph_cache?: GatewayHealthMetrics['worker_graph_cache'];
 }
 
 export interface AdminHealth {

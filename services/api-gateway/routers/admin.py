@@ -22,6 +22,7 @@ from routers.admin_domains.duckdb_explorer import router as duckdb_explorer_rout
 from routers.admin_domains.env_config import env_file as _env_file
 from routers.admin_domains.env_config import router as env_config_router
 from routers.admin_domains.fly_commands_catalog import router as fly_commands_catalog_router
+from routers.admin_domains.gateway_resources import router as gateway_resources_router
 from routers.admin_domains.forge_projects import router as forge_projects_router
 from routers.admin_domains.hitl_admin import router as hitl_admin_router
 from routers.admin_domains.kanban import router as kanban_router
@@ -88,6 +89,7 @@ router.include_router(duckdb_explorer_router)
 router.include_router(env_config_router)
 router.include_router(fly_commands_catalog_router)
 router.include_router(forge_projects_router)
+router.include_router(gateway_resources_router)
 router.include_router(hitl_admin_router)
 router.include_router(kanban_router)
 router.include_router(kanban_runtime_router)

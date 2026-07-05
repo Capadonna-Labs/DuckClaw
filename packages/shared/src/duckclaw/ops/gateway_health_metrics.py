@@ -19,6 +19,11 @@ def _process_rss_mb() -> float | None:
         return None
 
 
+def process_rss_mb() -> float | None:
+    """RSS del proceso Gateway (pico vía ``getrusage``)."""
+    return _process_rss_mb()
+
+
 def _worker_graph_cache_stats() -> dict[str, Any]:
     try:
         from duckclaw.manager.manager_worker_cache import worker_graph_cache_stats
@@ -41,6 +46,19 @@ def _knowledge_queue_depth() -> int | None:
         return None
 
 
+def _db_write_queue_depth() -> int | None:
+    try:
+        import redis
+
+        from duckclaw.db_write_queue import DEFAULT_WRITE_QUEUE_NAME
+        from duckclaw.runtime_env import resolve_redis_url
+
+        client = redis.from_url(resolve_redis_url(), decode_responses=True)
+        return int(client.llen(DEFAULT_WRITE_QUEUE_NAME))
+    except Exception:
+        return None
+
+
 def collect_gateway_health_metrics() -> dict[str, Any]:
     role = "unknown"
     try:
@@ -56,5 +74,6 @@ def collect_gateway_health_metrics() -> dict[str, Any]:
         "rss_mb": _process_rss_mb(),
         "worker_graph_cache": cache,
         "knowledge_sync_queue_depth": _knowledge_queue_depth(),
+        "db_write_queue_depth": _db_write_queue_depth(),
         "collected_at": round(time.time(), 3),
     }

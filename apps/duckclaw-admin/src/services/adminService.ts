@@ -3,6 +3,7 @@ import { mutationHeaders } from '@/lib/csrfClient';
 import { readSseChatStream } from '@/lib/sseChat';
 import type {
   AdminHealth,
+  ReleaseWorkerCacheResult,
   FlyCommandEntry,
   TemplateDetail,
   TemplateSummary,
@@ -631,6 +632,9 @@ function listWorkspaceProjectsPage(params?: WorkspaceProjectsQuery) {
 
 export const adminService = {
   health: () => adminFetch<AdminHealth>('/health'),
+
+  releaseWorkerGraphCache: () =>
+    adminFetch<ReleaseWorkerCacheResult>('/gateway/release-worker-cache', { method: 'POST' }),
 
   listPromptPolicies: (params?: {
     policy_type?: string;

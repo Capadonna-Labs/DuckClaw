@@ -1333,6 +1333,18 @@ def _migration_029_sync_skill_catalog_github_mcp(db: Any) -> None:
     sync_framework_skill_catalog_from_pack(db)
 
 
+def _migration_031_user_agent_draft_policy_v2(db: Any) -> None:
+    from duckclaw.user_agent_draft_policy import apply_user_agent_draft_policy
+
+    apply_user_agent_draft_policy(db, force=True)
+
+
+def _migration_032_user_agent_draft_policy_v2_refresh(db: Any) -> None:
+    from duckclaw.user_agent_draft_policy import apply_user_agent_draft_policy
+
+    apply_user_agent_draft_policy(db, force=True)
+
+
 _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     21: _migration_021_apply_framework_policy_pack,
     22: _migration_022_refresh_framework_packs,
@@ -1341,6 +1353,8 @@ _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     26: _migration_026_framework_document_lanes,
     28: _migration_028_seed_skill_catalog,
     29: _migration_029_sync_skill_catalog_github_mcp,
+    31: _migration_031_user_agent_draft_policy_v2,
+    32: _migration_032_user_agent_draft_policy_v2_refresh,
 }
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
@@ -1374,4 +1388,6 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (28, "skill_catalog_v1", _M028_SKILL_CATALOG),
     (29, "skill_catalog_github_mcp", []),
     (30, "user_agent_draft_policy", _M030_USER_AGENT_DRAFT_POLICY),
+    (31, "user_agent_draft_policy_v2", []),
+    (32, "user_agent_draft_policy_v2_refresh", []),
 ]

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Bot, CheckCircle2, Database, Loader2, MessageCircle, Sparkles, X } from 'lucide-react';
@@ -18,13 +18,26 @@ function slugifyId(raw: string): string {
     .slice(0, 64);
 }
 
-type WizardStep = 1 | 2 | 3;
+type WizardStep = 1 | 2;
+type InstructionTab = 'system_prompt' | 'soul';
+
+const MIN_SYSTEM_PROMPT_LEN = 80;
+const MIN_SOUL_LEN = 20;
 
 const steps: { id: WizardStep; label: string }[] = [
   { id: 1, label: 'Comportamiento' },
-  { id: 2, label: 'Preguntas' },
-  { id: 3, label: 'Borrador' },
+  { id: 2, label: 'Revisar y crear' },
 ];
+
+function normalizeAgentDraft(raw: UserAgentDraft): UserAgentDraft {
+  return {
+    ...raw,
+    tool_profile: raw.tool_profile || 'general',
+    browser_sandbox: raw.browser_sandbox ?? false,
+    web_search: raw.web_search ?? false,
+    questions: raw.questions ?? [],
+  };
+}
 
 type CreateAgentDialogProps = {
   open: boolean;
@@ -46,11 +59,22 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
+  const [instructionTab, setInstructionTab] = useState<InstructionTab>('system_prompt');
+  const [showAdvancedCapabilities, setShowAdvancedCapabilities] = useState(false);
+  const dialogScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    dialogScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [step]);
 
   if (!open) return null;
 
   const effectiveId = workerId.trim() || slugifyId(displayName);
   const promptReady = behaviorPrompt.trim().length >= 10;
+  const systemPromptLen = draft?.system_prompt.trim().length ?? 0;
+  const soulLen = draft?.soul.trim().length ?? 0;
+  const instructionsReady =
+    systemPromptLen >= MIN_SYSTEM_PROMPT_LEN && soulLen >= MIN_SOUL_LEN;
 
   const resetState = () => {
     setStep(1);
@@ -60,6 +84,8 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
     setDraft(null);
     setError(null);
     setCreatedId(null);
+    setInstructionTab('system_prompt');
+    setShowAdvancedCapabilities(false);
   };
 
   const resetAndClose = () => {
@@ -80,8 +106,9 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
         display_name: displayName.trim(),
         worker_id: effectiveId,
       });
-      setDraft(nextDraft);
+      setDraft(normalizeAgentDraft(nextDraft));
       setStep(2);
+      setInstructionTab('system_prompt');
     } catch (e) {
       setError(errorMessage(e, 'No se pudo analizar el comportamiento'));
     } finally {
@@ -90,7 +117,12 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
   };
 
   const confirmDraft = async () => {
-    if (!draft) return;
+    if (!draft || !instructionsReady) {
+      setError(
+        `Completa instrucciones (mín. ${MIN_SYSTEM_PROMPT_LEN} caracteres) y personalidad (mín. ${MIN_SOUL_LEN}).`
+      );
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -125,7 +157,8 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                 Agente listo
               </p>
               <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
-                <strong className="font-mono">{createdId}</strong> incluye prompt, manifest y skills sugeridas.
+                <strong className="font-mono">{createdId}</strong> incluye system prompt, soul, manifest y reglas
+                en DuckDB listas para chatear.
               </p>
             </div>
             <button type="button" onClick={resetAndClose} className="rounded-lg p-1 hover:bg-gov-gray-100 dark:hover:bg-dark-bg">
@@ -176,6 +209,7 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
       <div
+        ref={dialogScrollRef}
         role="dialog"
         aria-modal
         aria-labelledby="create-agent-title"
@@ -188,7 +222,7 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
               Nuevo agente
             </p>
             <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-              Describe el comportamiento; el LLM genera prompt, manifest y skills antes de guardar.
+              Describe el comportamiento; la IA genera system prompt y soul editables antes de guardar.
             </p>
           </div>
           <button type="button" onClick={resetAndClose} className="rounded-lg p-1 hover:bg-gov-gray-100 dark:hover:bg-dark-bg">
@@ -267,27 +301,12 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
 
           {step === 2 && draft && (
             <>
-              <p className="text-sm text-gov-gray-600 dark:text-dark-muted">
-                Revisa lo que el análisis detectó como información faltante. Puedes ajustar el objetivo en el paso 1 y regenerar.
-              </p>
-              <div className="grid gap-2">
-                {draft.questions.length > 0 ? (
-                  draft.questions.map((question, index) => (
-                    <div key={`${index}:${question}`} className="rounded-xl bg-gov-gray-50 p-3 text-sm dark:bg-dark-bg">
-                      {question}
-                    </div>
-                  ))
-                ) : (
-                  <p className="rounded-xl bg-gov-gray-50 p-3 text-sm text-gov-gray-600 dark:bg-dark-bg dark:text-dark-muted">
-                    No hay preguntas pendientes para este borrador.
-                  </p>
-                )}
-              </div>
-            </>
-          )}
-
-          {step === 3 && draft && (
-            <>
+              {draft.questions.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                  <p className="text-xs font-bold">Opcional — la IA sugiere aclarar:</p>
+                  <p className="mt-1">{draft.questions[0]}</p>
+                </div>
+              )}
               <div className="grid gap-3 sm:grid-cols-2">
                 <label className="block space-y-1">
                   <span className="text-xs font-bold">Nombre visible</span>
@@ -315,58 +334,130 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                   className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
                 />
               </label>
-              <label className="block space-y-1">
-                <span className="text-xs font-bold">System prompt</span>
-                <textarea
-                  value={draft.system_prompt}
-                  onChange={(e) => updateDraft({ system_prompt: clampInput(e.target.value, 12000) })}
-                  rows={6}
-                  className="w-full rounded-xl border px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
-                />
-              </label>
-              <label className="block space-y-1">
-                <span className="text-xs font-bold">Soul (personalidad)</span>
-                <textarea
-                  value={draft.soul}
-                  onChange={(e) => updateDraft({ soul: clampInput(e.target.value, 4000) })}
-                  rows={4}
-                  className="w-full rounded-xl border px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
-                />
-              </label>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <label className="block space-y-1">
-                  <span className="text-xs font-bold">Nivel de capacidades</span>
-                  <select
-                    value={draft.tool_profile}
-                    onChange={(e) =>
-                      updateDraft({ tool_profile: e.target.value as UserAgentDraft['tool_profile'] })
-                    }
-                    className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+              <div className="rounded-xl border p-3 dark:border-dark-border">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setInstructionTab('system_prompt')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
+                      instructionTab === 'system_prompt'
+                        ? 'bg-gov-blue-700 text-white'
+                        : 'bg-gov-gray-100 text-gov-gray-700 dark:bg-dark-bg dark:text-dark-muted'
+                    }`}
                   >
-                    <option value="general">General (SQL, RAG, sandbox)</option>
-                    <option value="rag_only">Solo RAG</option>
-                    <option value="minimal">Mínimo (conversación)</option>
-                  </select>
-                </label>
-                <div className="flex flex-col justify-end gap-2 text-sm">
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={draft.browser_sandbox}
-                      onChange={(e) => updateDraft({ browser_sandbox: e.target.checked })}
-                    />
-                    Sandbox de archivos/navegador
-                  </label>
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={draft.web_search}
-                      onChange={(e) => updateDraft({ web_search: e.target.checked })}
-                    />
-                    Búsqueda web (research)
-                  </label>
+                    System prompt ({systemPromptLen})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInstructionTab('soul')}
+                    className={`rounded-lg px-3 py-1.5 text-xs font-bold ${
+                      instructionTab === 'soul'
+                        ? 'bg-gov-blue-700 text-white'
+                        : 'bg-gov-gray-100 text-gov-gray-700 dark:bg-dark-bg dark:text-dark-muted'
+                    }`}
+                  >
+                    Soul ({soulLen})
+                  </button>
                 </div>
+                {instructionTab === 'system_prompt' ? (
+                  <label className="mt-3 block space-y-1">
+                    <span className="text-xs font-bold text-gov-gray-700 dark:text-dark-text">
+                      Qué hace el agente (rol, herramientas, reglas)
+                    </span>
+                    <textarea
+                      value={draft.system_prompt}
+                      onChange={(e) => updateDraft({ system_prompt: clampInput(e.target.value, 12000) })}
+                      rows={10}
+                      className="w-full rounded-xl border px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
+                    />
+                    <p
+                      className={`text-xs ${
+                        systemPromptLen >= MIN_SYSTEM_PROMPT_LEN
+                          ? 'text-green-700 dark:text-green-300'
+                          : 'text-amber-700 dark:text-amber-300'
+                      }`}
+                    >
+                      Mínimo {MIN_SYSTEM_PROMPT_LEN} caracteres ({systemPromptLen}/{MIN_SYSTEM_PROMPT_LEN}).
+                    </p>
+                  </label>
+                ) : (
+                  <label className="mt-3 block space-y-1">
+                    <span className="text-xs font-bold text-gov-gray-700 dark:text-dark-text">
+                      Cómo habla y se comporta (tono, estilo, valores)
+                    </span>
+                    <textarea
+                      value={draft.soul}
+                      onChange={(e) => updateDraft({ soul: clampInput(e.target.value, 4000) })}
+                      rows={8}
+                      className="w-full rounded-xl border px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
+                    />
+                    <p
+                      className={`text-xs ${
+                        soulLen >= MIN_SOUL_LEN
+                          ? 'text-green-700 dark:text-green-300'
+                          : 'text-amber-700 dark:text-amber-300'
+                      }`}
+                    >
+                      Mínimo {MIN_SOUL_LEN} caracteres ({soulLen}/{MIN_SOUL_LEN}).
+                    </p>
+                  </label>
+                )}
               </div>
+              <section className="rounded-xl border border-gov-blue-100 bg-gov-blue-50/50 p-4 dark:border-dark-border dark:bg-dark-bg/60">
+                <p className="text-xs font-black uppercase tracking-wide text-gov-blue-800 dark:text-dark-cyan">
+                  Capacidades incluidas
+                </p>
+                <p className="mt-1 text-sm text-gov-gray-700 dark:text-dark-muted">
+                  Por defecto tu agente puede consultar datos, leer documentos, generar informes y ejecutar
+                  scripts en un entorno aislado. No tienes que configurar nada más.
+                </p>
+                <p className="mt-2 text-xs font-semibold text-gov-gray-600 dark:text-dark-muted">
+                  Perfil activo: Asistente completo
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedCapabilities((v) => !v)}
+                  className="mt-2 text-xs font-bold text-gov-blue-800 underline dark:text-dark-cyan"
+                >
+                  {showAdvancedCapabilities ? 'Ocultar opciones avanzadas' : 'Cambiar nivel (opcional)'}
+                </button>
+                {showAdvancedCapabilities && (
+                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                    <label className="block space-y-1">
+                      <span className="text-xs font-bold">Nivel de capacidades</span>
+                      <select
+                        value={draft.tool_profile}
+                        onChange={(e) =>
+                          updateDraft({ tool_profile: e.target.value as UserAgentDraft['tool_profile'] })
+                        }
+                        className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+                      >
+                        <option value="general">Asistente completo (recomendado)</option>
+                        <option value="rag_only">Solo documentación</option>
+                        <option value="minimal">Conversación ligera</option>
+                      </select>
+                    </label>
+                    <div className="flex flex-col justify-end gap-2 text-sm">
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={draft.browser_sandbox}
+                          onChange={(e) => updateDraft({ browser_sandbox: e.target.checked })}
+                        />
+                        Abrir sitios web
+                      </label>
+                      <label className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={draft.web_search}
+                          onChange={(e) => updateDraft({ web_search: e.target.checked })}
+                        />
+                        Buscar en internet
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </section>
               {draft.suggested_skills.length > 0 && (
                 <div className="rounded-xl border p-3 dark:border-dark-border">
                   <p className="text-xs font-black uppercase tracking-wide text-gov-gray-500">Skills sugeridas</p>
@@ -413,29 +504,19 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                 onClick={() => setStep(1)}
                 className="rounded-xl border px-4 py-2 text-sm font-semibold dark:border-dark-border"
               >
-                Ajustar comportamiento
-              </button>
-              <button
-                type="button"
-                onClick={() => setStep(3)}
-                className="rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white"
-              >
-                Ver borrador
-              </button>
-            </>
-          )}
-          {step === 3 && (
-            <>
-              <button
-                type="button"
-                onClick={() => setStep(2)}
-                className="rounded-xl border px-4 py-2 text-sm font-semibold dark:border-dark-border"
-              >
-                Preguntas
+                Cambiar descripción
               </button>
               <button
                 type="button"
                 disabled={busy}
+                onClick={() => void generateDraft()}
+                className="rounded-xl border px-4 py-2 text-sm font-semibold dark:border-dark-border"
+              >
+                Regenerar con IA
+              </button>
+              <button
+                type="button"
+                disabled={busy || !instructionsReady}
                 onClick={() => void confirmDraft()}
                 className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
               >

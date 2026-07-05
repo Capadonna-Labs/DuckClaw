@@ -27,6 +27,12 @@ from routers.admin_domains.workspace_managed_draft import (
     _workspace_managed_worker_id,
 )
 
+from duckclaw.user_agent_draft_policy import (
+    _MIN_SOUL_LEN,
+    _MIN_SYSTEM_PROMPT_LEN,
+    coalesce_user_agent_draft,
+    sanitize_wizard_questions,
+)
 from duckclaw.write_commands import UpsertUserAgentCommand
 
 router = APIRouter(tags=["admin-user-agent-draft"])
@@ -164,9 +170,10 @@ def _user_agent_fallback_draft(
         "browser_sandbox": bool(fallback.browser_sandbox),
         "web_search": bool(fallback.web_search),
         "suggested_skills": suggested_skills,
-        "questions": [
-            _workspace_managed_format(question, values)[:512] for question in fallback.questions
-        ],
+        "questions": sanitize_wizard_questions(
+            prompt,
+            [_workspace_managed_format(question, values)[:512] for question in fallback.questions],
+        ),
     }
 
 
@@ -174,6 +181,7 @@ def _validated_user_agent_draft_or_fallback(
     *,
     raw_response: str,
     fallback: dict[str, Any],
+    behavior_prompt: str = "",
 ) -> dict[str, Any]:
     parsed = _extract_json_object(raw_response)
     if not parsed:
@@ -182,12 +190,14 @@ def _validated_user_agent_draft_or_fallback(
         draft = UserAgentDraftPayloadBody.model_validate(parsed).model_dump()
     except Exception:
         return fallback
-    draft["tool_profile"] = _normalize_tool_profile(str(draft.get("tool_profile") or "general"))
-    if not str(draft.get("display_name") or "").strip():
-        draft["display_name"] = fallback["display_name"]
-    if not str(draft.get("worker_id") or "").strip():
-        draft["worker_id"] = fallback["worker_id"]
-    return draft
+    merged = coalesce_user_agent_draft(
+        draft,
+        fallback,
+        normalize_tool_profile=_normalize_tool_profile,
+        behavior_prompt=behavior_prompt,
+    )
+    merged["questions"] = sanitize_wizard_questions(behavior_prompt, merged.get("questions") or [])
+    return merged
 
 
 async def _user_agent_model_draft_or_fallback(
@@ -249,7 +259,11 @@ async def _user_agent_model_draft_or_fallback(
         return next_fallback
 
     raw = str(result.get("response") or result.get("reply") or "") if isinstance(result, dict) else str(result or "")
-    return _validated_user_agent_draft_or_fallback(raw_response=raw, fallback=fallback)
+    return _validated_user_agent_draft_or_fallback(
+        raw_response=raw,
+        fallback=fallback,
+        behavior_prompt=prompt,
+    )
 
 
 def _merge_declared_skills(draft: UserAgentDraftPayloadBody) -> list[str]:
@@ -317,6 +331,22 @@ async def confirm_user_agent_draft(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     draft = body.draft
+    system_prompt = (draft.system_prompt or "").strip()
+    soul = (draft.soul or "").strip()
+    if len(system_prompt) < _MIN_SYSTEM_PROMPT_LEN:
+        raise _problem(
+            400,
+            "Instrucciones incompletas",
+            f"system_prompt debe tener al menos {_MIN_SYSTEM_PROMPT_LEN} caracteres. "
+            "Regenera el borrador o edítalo en el paso de instrucciones.",
+        )
+    if len(soul) < _MIN_SOUL_LEN:
+        raise _problem(
+            400,
+            "Personalidad incompleta",
+            f"soul debe tener al menos {_MIN_SOUL_LEN} caracteres. "
+            "Regenera el borrador o edita la personalidad antes de crear el agente.",
+        )
     profile = _actor_profile(actor)
     worker_uid = f"wrk_{uuid.uuid4().hex}"
     worker_id = _workspace_managed_worker_id(draft.worker_id)
@@ -329,10 +359,10 @@ async def confirm_user_agent_draft(
         worker_id=worker_id,
         display_name=display_name,
         source_template_id="default",
-        system_prompt=draft.system_prompt,
+        system_prompt=draft.system_prompt.strip(),
         description=draft.description,
         skills=skills,
-        soul=draft.soul,
+        soul=soul,
         tool_profile=_normalize_tool_profile(draft.tool_profile),
         browser_sandbox=bool(draft.browser_sandbox),
         web_search=bool(draft.web_search),

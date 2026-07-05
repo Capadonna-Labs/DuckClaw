@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useState } from 'react';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Trash2 } from 'lucide-react';
 import type { SkillCatalogItem } from '@/services/adminService';
 import { filterSkills } from '@/components/skills/useSkillsCatalog';
 
@@ -13,6 +13,8 @@ export function SkillInventory({
   showWorker = false,
   emptyHint,
   onCreateClick,
+  onHardDelete,
+  canDelete = false,
 }: {
   title: string;
   subtitle?: string;
@@ -20,6 +22,8 @@ export function SkillInventory({
   showWorker?: boolean;
   emptyHint?: string;
   onCreateClick?: () => void;
+  onHardDelete?: (skill: SkillCatalogItem) => void;
+  canDelete?: boolean;
 }) {
   const [q, setQ] = useState('');
   const filtered = filterSkills(items, q);
@@ -52,6 +56,8 @@ export function SkillInventory({
         showWorker={showWorker}
         emptyHint={emptyHint}
         onCreateClick={onCreateClick}
+        onHardDelete={onHardDelete}
+        canDelete={canDelete}
       />
     </section>
   );
@@ -62,11 +68,15 @@ function SkillTable({
   showWorker,
   emptyHint,
   onCreateClick,
+  onHardDelete,
+  canDelete,
 }: {
   items: SkillCatalogItem[];
   showWorker?: boolean;
   emptyHint?: string;
   onCreateClick?: () => void;
+  onHardDelete?: (skill: SkillCatalogItem) => void;
+  canDelete?: boolean;
 }) {
   if (items.length === 0) {
     return (
@@ -122,18 +132,31 @@ function SkillTable({
               )}
               <td className="max-w-md px-3 py-2 font-mono text-[10px] text-gov-gray-500">{skill.path}</td>
               <td className="px-3 py-2 text-xs">
-                {skill.worker_id ? (
-                  <Link
-                    href={`/templates/${encodeURIComponent(skill.worker_id)}`}
-                    className="font-bold text-gov-blue-700 dark:text-dark-cyan"
-                  >
-                    Editor
-                  </Link>
-                ) : (
-                  <Link href="/templates" className="font-bold text-gov-blue-700 dark:text-dark-cyan">
-                    Activar en agente
-                  </Link>
-                )}
+                <div className="flex flex-wrap items-center gap-2">
+                  {skill.worker_id ? (
+                    <Link
+                      href={`/templates/${encodeURIComponent(skill.worker_id)}`}
+                      className="font-bold text-gov-blue-700 dark:text-dark-cyan"
+                    >
+                      Editor
+                    </Link>
+                  ) : (
+                    <Link href="/templates" className="font-bold text-gov-blue-700 dark:text-dark-cyan">
+                      Activar en agente
+                    </Link>
+                  )}
+                  {canDelete && onHardDelete && !skill.worker_id ? (
+                    <button
+                      type="button"
+                      onClick={() => onHardDelete(skill)}
+                      className="inline-flex items-center gap-1 font-bold text-red-700 hover:underline dark:text-red-300"
+                      title="Eliminar definitivamente de DuckDB"
+                    >
+                      <Trash2 size={12} />
+                      Borrar
+                    </button>
+                  ) : null}
+                </div>
               </td>
             </tr>
           ))}

@@ -107,6 +107,7 @@ from duckclaw.write_handlers.workers import (
     _apply_deactivate_catalog_worker,
     _apply_deactivate_worker,
     _apply_deactivate_worker_context,
+    _apply_hard_delete_catalog_skill,
     _apply_hard_delete_catalog_worker,
     _apply_import_templates_to_catalog,
     _apply_reactivate_catalog_worker,

@@ -488,7 +488,9 @@ def test_user_agent_draft_builds_structured_agent_without_persisting(
     assert body["display_name"]
     assert body["worker_id"]
     assert body["system_prompt"]
-    assert "DevOps" in body["description"] or "devops" in body["description"].lower() or body["system_prompt"]
+    assert body["soul"]
+    assert len(body["system_prompt"]) >= 80
+    assert len(body["soul"]) >= 20
     assert body["tool_profile"] in {"general", "minimal", "rag_only"}
     assert isinstance(body["questions"], list)
 

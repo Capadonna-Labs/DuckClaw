@@ -28,6 +28,32 @@ def _resolve_worker_uid(conn: Any, worker_id: str, tenant_id: str) -> str | None
     return str(row[0]) if row else None
 
 
+def _sync_user_agent_prompt_policy(
+    conn: Any,
+    *,
+    worker_id: str,
+    files_snapshot: dict[str, str],
+    actor_email: str,
+    worker_uid: str,
+) -> None:
+    from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
+
+    if not sync_worker_system_prompt_policy(
+        conn,
+        worker_id=worker_id,
+        files=files_snapshot,
+        actor_email=actor_email,
+        worker_uid=worker_uid,
+        force=True,
+    ):
+        content = str(files_snapshot.get("system_prompt.md") or "").strip()
+        if not content:
+            raise RuntimeError(
+                f"system_prompt vacío para {worker_id}; no se pudo materializar en prompt_policy_registry"
+            )
+        raise RuntimeError(f"No se pudo sincronizar system_prompt/{worker_id} en prompt_policy_registry")
+
+
 def _stable_json(value: Any) -> str:
     return json.dumps(value or {}, default=str, ensure_ascii=False, sort_keys=True)
 
@@ -115,7 +141,7 @@ def _apply_upsert_worker(conn: Any, payload: dict) -> None:
     if system_prompt:
         existing_context = conn.execute(
             "SELECT context_id FROM main.admin_worker_contexts "
-            "WHERE worker_uid = ? AND title = 'system_prompt' AND active = true LIMIT 1",
+            "WHERE worker_uid = ? AND title = 'system_prompt.md' AND active = true LIMIT 1",
             [existing_uid],
         ).fetchone()
         if existing_context:
@@ -128,7 +154,8 @@ def _apply_upsert_worker(conn: Any, payload: dict) -> None:
             cid = f"ctx_{uuid.uuid4().hex[:16]}"
             conn.execute(
                 "INSERT INTO main.admin_worker_contexts "
-                "(context_id, worker_uid, title, content_md) VALUES (?, ?, 'system_prompt', ?)",
+                "(context_id, worker_uid, title, content_md, sort_order) "
+                "VALUES (?, ?, 'system_prompt.md', ?, 10)",
                 [cid, existing_uid, system_prompt],
             )
 
@@ -143,8 +170,12 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
     worker_id = sanitize_catalog_worker_id(sanitize_user_agent_worker_id(str(payload.get("worker_id") or "")))
     display_name = str(payload.get("display_name") or worker_id).strip()[:256] or worker_id
     source_template_id = str(payload.get("source_template_id") or "default").strip()[:64] or "default"
-    system_prompt = str(payload.get("system_prompt") or "")
+    system_prompt = str(payload.get("system_prompt") or "").strip()
     soul = str(payload.get("soul") or "").strip()
+    if len(system_prompt) < 80:
+        raise ValueError("system_prompt debe tener al menos 80 caracteres")
+    if len(soul) < 20:
+        raise ValueError("soul debe tener al menos 20 caracteres")
     tool_profile = str(payload.get("tool_profile") or "general").strip().lower()
     if tool_profile not in ("general", "minimal", "rag_only"):
         tool_profile = "general"
@@ -236,19 +267,13 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
                 worker_id,
             ],
         )
-        try:
-            from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
-
-            sync_worker_system_prompt_policy(
-                conn,
-                worker_id=worker_id,
-                files=files_snapshot,
-                actor_email=str(profile.get("email") or actor),
-                worker_uid=worker_uid,
-                force=True,
-            )
-        except Exception:
-            pass
+        _sync_user_agent_prompt_policy(
+            conn,
+            worker_id=worker_id,
+            files_snapshot=files_snapshot,
+            actor_email=str(profile.get("email") or actor),
+            worker_uid=worker_uid,
+        )
         return
     conn.execute(
         "INSERT INTO main.admin_user_agents "
@@ -263,19 +288,13 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
             manifest_path,
         ],
     )
-    try:
-        from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
-
-        sync_worker_system_prompt_policy(
-            conn,
-            worker_id=worker_id,
-            files=files_snapshot,
-            actor_email=str(profile.get("email") or actor),
-            worker_uid=worker_uid,
-            force=True,
-        )
-    except Exception:
-        pass
+    _sync_user_agent_prompt_policy(
+        conn,
+        worker_id=worker_id,
+        files_snapshot=files_snapshot,
+        actor_email=str(profile.get("email") or actor),
+        worker_uid=worker_uid,
+    )
 
 
 def _catalog_skill_name(raw: Any) -> str:
@@ -349,6 +368,29 @@ def _apply_deactivate_catalog_skill(conn: Any, payload: dict) -> None:
         "WHERE name = ? AND owner_email = ? AND tenant_id = ?",
         [name, str(profile.get("email") or actor), tenant_id],
     )
+
+
+def _apply_hard_delete_catalog_skill(conn: Any, payload: dict) -> None:
+    ensure_admin_worker_catalog_schema(conn)
+    actor = str(payload.get("actor_email") or "system").strip().lower() or "system"
+    profile = ensure_profile_for_user(conn, email=actor)
+    tenant_id = str(payload.get("tenant_id") or profile.get("tenant_id") or "default").strip() or "default"
+    if str(profile.get("tenant_id") or tenant_id) != tenant_id:
+        raise ValueError(f"Tenant mismatch for actor: {actor}")
+
+    name = _catalog_skill_name(payload.get("name"))
+    owner = str(profile.get("email") or actor)
+    row = conn.execute(
+        "SELECT skill_id, owner_email, tenant_id FROM main.admin_skills WHERE name = ? LIMIT 1",
+        [name],
+    ).fetchone()
+    if not row:
+        return
+    skill_id = str(row[0])
+    if str(row[1] or "").strip().lower() != owner.strip().lower() or str(row[2] or "") != tenant_id:
+        raise ValueError(f"Catalog skill not owned by actor: {name}")
+    conn.execute("DELETE FROM main.admin_worker_skills WHERE skill_id = ?", [skill_id])
+    conn.execute("DELETE FROM main.admin_skills WHERE skill_id = ?", [skill_id])
 
 
 def _apply_deactivate_worker(conn: Any, payload: dict) -> None:
@@ -592,6 +634,7 @@ register_handler("upsert_worker", _apply_upsert_worker)
 register_handler("upsert_user_agent", _apply_upsert_user_agent)
 register_handler("upsert_catalog_skill", _apply_upsert_catalog_skill)
 register_handler("deactivate_catalog_skill", _apply_deactivate_catalog_skill)
+register_handler("hard_delete_catalog_skill", _apply_hard_delete_catalog_skill)
 register_handler("deactivate_worker", _apply_deactivate_worker)
 register_handler("update_catalog_worker_file", _apply_update_catalog_worker_file)
 register_handler("deactivate_catalog_worker", _apply_deactivate_catalog_worker)

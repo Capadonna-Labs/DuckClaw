@@ -1296,6 +1296,12 @@ export const adminService = {
       body: JSON.stringify(body),
     }),
 
+  hardDeleteSkill: (name: string) =>
+    adminFetch<{ ok: boolean; hard_deleted: boolean; id: string }>(
+      `/catalog/skills/${encodeURIComponent(name)}/hard-delete`,
+      { method: 'DELETE' }
+    ),
+
   getIndustriesCatalog: () =>
     adminFetch<{ industries: IndustryOption[]; starters: IndustryOption[] }>(
       '/catalog/industries'

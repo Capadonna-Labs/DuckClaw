@@ -47,7 +47,9 @@ export function SkillCreateForm({ onCreated }: { onCreated?: () => Promise<void>
       <div className="lg:col-span-2">
         <h2 className="text-lg font-black dark:text-dark-text">Nueva skill</h2>
         <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
-          Crea metadata DB-first reutilizable por tus agentes.
+          Registro avanzado en DuckDB. Esto <strong className="font-bold">no</strong> crea el código Python:
+          solo metadata reutilizable. Después debes implementar el bridge y activarla en el manifest del
+          agente.
         </p>
       </div>
       {error && <p className="text-sm text-red-600 lg:col-span-2">{error}</p>}

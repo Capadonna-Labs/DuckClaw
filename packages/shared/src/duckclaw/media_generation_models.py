@@ -12,6 +12,8 @@ DEFAULT_FLUX_IMG2IMG_ENDPOINT = "fal-ai/flux/dev/image-to-image"
 DEFAULT_FLUX_KONTEXT_PRO_ENDPOINT = "fal-ai/flux-pro/kontext"
 DEFAULT_KLING_VIDEO_ENDPOINT = "fal-ai/kling-video/v1.6/standard/text-to-video"
 DEFAULT_WAN_ENDPOINT = "fal-ai/wan/v2.2-a14b/text-to-video"
+DEFAULT_HIGGSFIELD_I2V_ENDPOINT = "higgsfield/dop-turbo"
+DEFAULT_HIGGSFIELD_T2I_ENDPOINT = "higgsfield/text-to-image"
 
 ImageModelEndpoint = Literal[
     "fal-ai/flux/dev",

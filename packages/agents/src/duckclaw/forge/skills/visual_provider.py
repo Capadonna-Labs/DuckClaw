@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import Any, Literal
 
-VisualProvider = Literal["local", "fal"]
+VisualProvider = Literal["local", "fal", "higgsfield"]
 
 _CHAT_STATE_KEY = "comfyui_provider"
 
@@ -24,9 +24,17 @@ def _fal_available() -> bool:
     return fal_api_key_configured()
 
 
+def _higgsfield_available() -> bool:
+    from duckclaw.higgsfield_env import higgsfield_api_key_configured
+
+    return higgsfield_api_key_configured()
+
+
 def default_visual_provider() -> VisualProvider:
     if _fal_available():
         return "fal"
+    if _higgsfield_available():
+        return "higgsfield"
     if _comfy_available():
         return "local"
     return "local"
@@ -42,7 +50,7 @@ def resolve_visual_provider(db: Any, chat_id: Any) -> VisualProvider:
             raw = (get_chat_state(db, chat_id, _CHAT_STATE_KEY) or "").strip().lower()
         except Exception:
             raw = ""
-    if raw in ("local", "fal"):
+    if raw in ("local", "fal", "higgsfield"):
         if raw == "fal" and not _fal_available():
             return default_visual_provider()
         if raw == "local" and not _comfy_available():
@@ -56,9 +64,11 @@ def resolve_visual_provider(db: Any, chat_id: Any) -> VisualProvider:
 def provider_status_message(provider: VisualProvider) -> str:
     local_ok = _comfy_available()
     fal_ok = _fal_available()
+    hf_ok = _higgsfield_available()
     lines = [
         f"Proveedor activo: {provider}",
         f"  local (ComfyUI): {'disponible' if local_ok else 'no configurado (COMFYUI_API_URL)'}",
         f"  fal (Fal.ai): {'disponible' if fal_ok else 'no configurado (FAL_KEY)'}",
+        f"  higgsfield: {'disponible' if hf_ok else 'no configurado (HIGGSFIELD_API_KEY)'}",
     ]
     return "\n".join(lines)

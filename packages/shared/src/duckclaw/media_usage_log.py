@@ -20,6 +20,8 @@ _DEFAULT_RATES: dict[str, float] = {
     "fal-ai/kling/v2.5/video-to-video": 0.35,
     "fal-ai/wan/v2.2-a14b/text-to-video": 0.30,
     "fal-ai/comfy": 0.05,
+    "higgsfield/dop-turbo": 0.40,
+    "higgsfield/text-to-image": 0.03,
 }
 
 

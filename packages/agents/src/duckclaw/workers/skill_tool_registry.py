@@ -74,6 +74,12 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         registrar_path="duckclaw.forge.skills.comfyui_bridge:register_comfyui_skill",
         keyword_context={"duckclaw_db": "db"},
     ),
+    SkillToolRegistrar(
+        skill_name="higgsfield",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.higgsfield_bridge:register_higgsfield_skill",
+        keyword_context={"duckclaw_db": "db"},
+    ),
 )
 
 VISUAL_ARTIFACT_READER_PATH = "duckclaw.forge.skills.comfyui_bridge:read_artifact_image_as_b64"

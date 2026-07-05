@@ -21,6 +21,8 @@ SECRET_ENV_KEYS: frozenset[str] = frozenset(
         "GITHUB_TOKEN",
         "FAL_KEY",
         "FAL_API_KEY",
+        "HIGGSFIELD_API_KEY",
+        "HIGGSFIELD_KEY",
         "DUCKCLAW_OUTBOUND_WEBHOOK_SECRET",
         "DUCKCLAW_TAILSCALE_AUTH_KEY",
         "TELEGRAM_WEBHOOK_SECRET",

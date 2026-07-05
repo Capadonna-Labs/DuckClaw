@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChevronDown, LogOut, Sun, Moon, Menu, RefreshCw, User } from 'lucide-react';
+import { ChevronDown, LogOut, Sun, Moon, Menu, MessageSquare, RefreshCw, User } from 'lucide-react';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
@@ -30,7 +30,7 @@ async function waitForGatewayHealth(maxAttempts = 8): Promise<boolean> {
 export default function Topbar({ onMenuClick }: TopbarProps) {
   const { usuario, logout } = useAuthStore();
   const { theme, toggleTheme } = useTheme();
-  const { sidebarOpen, toggleSidebar } = useLayoutUiStore();
+  const { sidebarOpen, toggleSidebar, chatDrawerOpen, toggleChatDrawer } = useLayoutUiStore();
   const router = useRouter();
   const canRunOps = usuario?.rol === 'admin';
   const [stackRestarting, setStackRestarting] = useState(false);
@@ -125,6 +125,20 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
             </div>
           )}
         </div>
+        <button
+          type="button"
+          onClick={toggleChatDrawer}
+          className={`p-2 rounded-lg transition-colors ${
+            chatDrawerOpen
+              ? 'bg-gov-blue-700 text-white hover:bg-gov-blue-800'
+              : 'text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg'
+          }`}
+          aria-label={chatDrawerOpen ? 'Cerrar asistente' : 'Abrir asistente'}
+          aria-expanded={chatDrawerOpen}
+          title="Asistente"
+        >
+          <MessageSquare size={20} />
+        </button>
         <button
           type="button"
           onClick={toggleTheme}

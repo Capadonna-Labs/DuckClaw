@@ -37,7 +37,10 @@ def _release_ro_handle_for_writer(db: Any) -> tuple[bool, Any]:
 
 
 def _enqueue_resolve(db: Any, command: ResolveUncertaintyEventCommand) -> None:
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    from duckclaw.db_write_fire_and_forget import (
+        enqueue_write_and_resolve,
+        write_poll_timeout_sec,
+    )
 
     raw_path = str(getattr(db, "_path", "") or "").strip()
     if not raw_path or raw_path == ":memory:":
@@ -46,10 +49,9 @@ def _enqueue_resolve(db: Any, command: ResolveUncertaintyEventCommand) -> None:
     user_id = _infer_user_id_for_queue(resolved)
     released_ro, resume = _release_ro_handle_for_writer(db)
     try:
-        task_id = enqueue_typed_command(command, db_path=resolved, user_id=user_id)
-        status = poll_task_status_sync(task_id, timeout_sec=20.0)
-        if status is not None and status.status == "failed":
-            raise RuntimeError(status.detail or "uncertainty resolve failed")
+        ok, err = enqueue_write_and_resolve(command, db_path=resolved, user_id=user_id)
+        if not ok and write_poll_timeout_sec() > 0:
+            raise RuntimeError(err or "uncertainty resolve failed")
     finally:
         if released_ro and callable(resume):
             try:

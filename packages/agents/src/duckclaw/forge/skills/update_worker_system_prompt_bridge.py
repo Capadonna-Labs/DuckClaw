@@ -74,7 +74,7 @@ def _maybe_sync_catalog_file(*, db_path: str, worker_id: str, actor: str, conten
     if not db_path or not worker_id or not content.strip():
         return
     try:
-        from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+        from duckclaw.db_write_fire_and_forget import enqueue_write_command, wait_write_task, write_poll_timeout_sec
         from duckclaw.write_commands import UpdateCatalogWorkerFileCommand
 
         command = UpdateCatalogWorkerFileCommand(
@@ -84,8 +84,8 @@ def _maybe_sync_catalog_file(*, db_path: str, worker_id: str, actor: str, conten
             file_path="system_prompt.md",
             content=content,
         )
-        task_id = enqueue_typed_command(command, db_path=db_path, user_id=actor)
-        poll_task_status_sync(task_id, timeout_sec=5.0)
+        task_id = enqueue_write_command(command, db_path=db_path, user_id=actor)
+        wait_write_task(task_id, timeout_sec=write_poll_timeout_sec())
     except Exception:
         return
 

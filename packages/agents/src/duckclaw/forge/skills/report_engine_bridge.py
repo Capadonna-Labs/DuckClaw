@@ -73,7 +73,8 @@ def _apply_report_command_inline(db: Any, body: dict[str, Any]) -> None:
 
 def _dispatch_write(payload: dict[str, Any]) -> None:
     """Encola comando tipado y espera confirmación del db-writer antes de continuar."""
-    from duckclaw.db_write_queue import enqueue_or_apply_duckdb_write_sync, poll_task_status_sync
+    from duckclaw.db_write_fire_and_forget import wait_write_task, write_poll_timeout_sec
+    from duckclaw.db_write_queue import enqueue_or_apply_duckdb_write_sync
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
     from duckclaw.state_delta_vault import _same_vault_db_path
 
@@ -122,7 +123,10 @@ def _dispatch_write(payload: dict[str, Any]) -> None:
         )
         if spawn_inline_writes_enabled():
             return
-        status = poll_task_status_sync(task_id, timeout_sec=10.0, interval_sec=0.08)
+        poll_sec = write_poll_timeout_sec()
+        if poll_sec <= 0:
+            return
+        status = wait_write_task(task_id, timeout_sec=poll_sec)
         if status is None:
             raise RuntimeError(
                 "Timeout esperando confirmación del db-writer. "

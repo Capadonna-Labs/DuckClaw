@@ -16,7 +16,6 @@ from fastapi.testclient import TestClient
 from duckclaw.admin_auth_crypto import calculate_login_delay, hash_password_argon2, verify_and_migrate
 from duckclaw.admin_console_users import (
     authenticate_console_user,
-    ensure_admin_auth_columns,
     ensure_admin_console_users_table,
     get_by_email,
     seed_admin_console_users_if_empty,
@@ -133,12 +132,18 @@ def test_calculate_login_delay_edges() -> None:
     assert calculate_login_delay(20) == 3600
 
 
-def test_admin_auth_columns_idempotent(gateway_db: Path) -> None:
+def test_admin_console_users_table_idempotent(gateway_db: Path) -> None:
     con = duckdb.connect(str(gateway_db))
     try:
         adapter = _Adapter(con)
-        ensure_admin_auth_columns(adapter)
-        ensure_admin_auth_columns(adapter)
+        ensure_admin_console_users_table(adapter)
+        ensure_admin_console_users_table(adapter)
+        cols = {
+            str(row[1])
+            for row in con.execute("PRAGMA table_info('main.admin_console_users')").fetchall()
+        }
+        for col in ("hash_algo", "hash_params", "failed_login_count", "last_failed_at"):
+            assert col in cols
     finally:
         con.close()
 

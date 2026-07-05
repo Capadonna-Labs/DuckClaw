@@ -91,10 +91,54 @@ def _status_key(job_id: str) -> str:
     return f"{KNOWLEDGE_SYNC_STATUS_PREFIX}{job_id}"
 
 
-def set_job_status(job_id: str, *, status: str, detail: str = "") -> None:
+def set_job_status(
+    job_id: str,
+    *,
+    status: str,
+    detail: str = "",
+    progress: dict[str, Any] | None = None,
+) -> None:
     client = _redis_client()
-    payload = json.dumps({"status": status, "detail": detail, "updated_at": time.time()})
-    client.set(_status_key(job_id), payload, ex=KNOWLEDGE_SYNC_STATUS_TTL_SEC)
+    existing = get_job_status(job_id) or {}
+    payload: dict[str, Any] = {
+        "status": status,
+        "detail": detail,
+        "updated_at": time.time(),
+    }
+    if progress is not None:
+        payload["progress"] = progress
+    elif isinstance(existing.get("progress"), dict) and status in {"queued", "running"}:
+        payload["progress"] = existing["progress"]
+    client.set(
+        _status_key(job_id),
+        json.dumps(payload, ensure_ascii=False),
+        ex=KNOWLEDGE_SYNC_STATUS_TTL_SEC,
+    )
+
+
+def update_job_progress(job_id: str, **fields: Any) -> None:
+    """Merge progress fields into the Redis job payload (indexer heartbeat)."""
+    if not job_id or not fields:
+        return
+    client = _redis_client()
+    key = _status_key(job_id)
+    raw = client.get(key)
+    if raw:
+        try:
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                payload = {"status": "running"}
+        except json.JSONDecodeError:
+            payload = {"status": "running"}
+    else:
+        payload = {"status": "running"}
+    progress = dict(payload.get("progress") or {})
+    progress.update({key: value for key, value in fields.items() if value is not None})
+    payload["progress"] = progress
+    payload["updated_at"] = time.time()
+    if payload.get("status") == "queued":
+        payload["status"] = "running"
+    client.set(key, json.dumps(payload, ensure_ascii=False), ex=KNOWLEDGE_SYNC_STATUS_TTL_SEC)
 
 
 def get_job_status(job_id: str) -> dict[str, Any] | None:
@@ -283,6 +327,7 @@ def process_knowledge_sync_job(job: KnowledgeSyncJob) -> dict[str, Any]:
                 source=source,
                 actor_email=job.actor_email,
                 compute_embeddings=job.compute_embeddings,
+                job_id=job.job_id,
             )
         else:
             source = get_knowledge_source(db, tenant_id=job.tenant_id, source_id=job.source_id)
@@ -296,6 +341,7 @@ def process_knowledge_sync_job(job: KnowledgeSyncJob) -> dict[str, Any]:
                 actor_email=job.actor_email,
                 compute_embeddings=job.compute_embeddings,
                 force=job.force,
+                job_id=job.job_id,
             )
     finally:
         db.close()

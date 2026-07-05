@@ -23,6 +23,36 @@ def test_knowledge_sync_job_roundtrip() -> None:
     assert restored.compute_embeddings is False
 
 
+def test_update_job_progress_merges_fields(monkeypatch) -> None:
+    from duckclaw.knowledge_sync_queue import get_job_status, set_job_status, update_job_progress
+
+    store: dict[str, str] = {}
+
+    class FakeRedis:
+        def set(self, key: str, value: str, ex: int | None = None) -> bool:
+            store[key] = value
+            return True
+
+        def get(self, key: str):
+            return store.get(key)
+
+    monkeypatch.setattr("duckclaw.knowledge_sync_queue._redis_client", lambda: FakeRedis())
+
+    job_id = "ksync_prog1"
+    set_job_status(job_id, status="queued")
+    update_job_progress(job_id, files_total=10, files_done=0, phase="indexing")
+    update_job_progress(job_id, files_done=3, chunks_done=12, current_file="notes.md")
+
+    status = get_job_status(job_id)
+    assert status is not None
+    assert status["status"] == "running"
+    progress = status["progress"]
+    assert progress["files_total"] == 10
+    assert progress["files_done"] == 3
+    assert progress["chunks_done"] == 12
+    assert progress["current_file"] == "notes.md"
+
+
 def test_enqueue_and_dequeue_job(monkeypatch) -> None:
     from duckclaw.knowledge_sync_queue import (
         KNOWLEDGE_SYNC_QUEUE_KEY,

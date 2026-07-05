@@ -1,4 +1,4 @@
-"""Load/save per-tenant homeostasis manifest from harness_core.homeostasis_targets."""
+"""Load/save per-tenant homeostasis manifest from main.homeostasis_targets."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def _query_manifest_row(db: Any, tenant_id: str) -> HomeostasisManifest:
     try:
         esc = tid.replace("'", "''")
         raw = db.query(
-            f"SELECT targets_json FROM harness_core.homeostasis_targets "
+            f"SELECT targets_json FROM main.homeostasis_targets "
             f"WHERE tenant_id = '{esc}' LIMIT 1"
         )
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])

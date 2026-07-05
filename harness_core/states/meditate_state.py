@@ -32,7 +32,7 @@ DEFAULT_STALE_TASK_SOURCES: tuple[str, ...] = (
 
 
 class HomeostasisTarget(BaseModel):
-    """Per-tenant infrastructure homeostasis targets (persisted in harness_core.homeostasis_targets)."""
+    """Per-tenant infrastructure homeostasis targets (persisted in main.homeostasis_targets)."""
 
     error_rate_pct: float = Field(default=2.0, ge=0)
     stale_tasks_count: int = Field(default=0, ge=0)

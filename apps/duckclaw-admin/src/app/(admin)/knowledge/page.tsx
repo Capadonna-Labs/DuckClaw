@@ -16,7 +16,14 @@ import {
 import {
   formatKnowledgeJobPollNotice,
   pollKnowledgeSyncJob,
+  type KnowledgeJobProgress,
 } from '@/lib/pollKnowledgeSyncJob';
+
+type IndexingJobState = {
+  jobId: string;
+  expectedFiles?: number;
+  progress?: KnowledgeJobProgress;
+};
 
 const ACCEPTED_EXTENSIONS = '.md,.markdown,.txt,.json,.csv,.pdf,.docx,.doc,.pptx,.html,.htm';
 const DIRECTORY_INPUT_PROPS = { webkitdirectory: '', directory: '' };
@@ -41,6 +48,7 @@ export default function KnowledgePage() {
   const [folderPreview, setFolderPreview] = useState<KnowledgeFolderPreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const [vaultRoots, setVaultRoots] = useState<{ path: string; label: string; exists: boolean }[]>([]);
+  const [indexingJobs, setIndexingJobs] = useState<Record<string, IndexingJobState>>({});
 
   useEffect(() => {
     if (initialWorker) setWorkerUid(initialWorker);
@@ -98,25 +106,75 @@ export default function KnowledgePage() {
     }
   }, [projectId, workerUid]);
 
+  const loadSourcesSilent = useCallback(async () => {
+    try {
+      const rows = await adminService.listKnowledgeSources({ project_id: projectId, worker_uid: workerUid });
+      setSources(rows);
+    } catch {
+      /* polling silencioso */
+    }
+  }, [projectId, workerUid]);
+
   const waitForKnowledgeJob = useCallback(
-    async (jobId: string | undefined, busyLabel: string) => {
+    async (
+      jobId: string | undefined,
+      busyLabel: string,
+      options?: { sourceId?: string; expectedFiles?: number }
+    ) => {
+      const sourceId = options?.sourceId;
       if (!jobId) {
         await loadSources();
         return;
       }
+      if (sourceId) {
+        setIndexingJobs((prev) => ({
+          ...prev,
+          [sourceId]: { jobId, expectedFiles: options?.expectedFiles, progress: prev[sourceId]?.progress },
+        }));
+      }
       setNotice(`${busyLabel}…`);
       const pollResult = await pollKnowledgeSyncJob(jobId, {
-        onTick: (status) => {
+        onTick: (status, progress) => {
           if (status === 'running' || status === 'queued') {
-            setNotice(`${busyLabel} (${status})…`);
+            const pct =
+              progress?.files_total && progress.files_done !== undefined
+                ? ` · ${progress.files_done}/${progress.files_total}`
+                : '';
+            setNotice(`${busyLabel} (${status})${pct}…`);
+          }
+          if (sourceId && progress) {
+            setIndexingJobs((prev) => ({
+              ...prev,
+              [sourceId]: {
+                jobId,
+                expectedFiles: options?.expectedFiles,
+                progress,
+              },
+            }));
           }
         },
       });
+      if (sourceId) {
+        setIndexingJobs((prev) => {
+          const next = { ...prev };
+          delete next[sourceId];
+          return next;
+        });
+      }
       await loadSources();
       setNotice(formatKnowledgeJobPollNotice(pollResult, busyLabel));
     },
     [loadSources]
   );
+
+  useEffect(() => {
+    const hasIndexing = sources.some((source) => source.status === 'indexing');
+    if (!hasIndexing) return;
+    const timer = window.setInterval(() => {
+      void loadSourcesSilent();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [sources, loadSourcesSilent]);
 
   useEffect(() => {
     loadSources();
@@ -139,7 +197,10 @@ export default function KnowledgePage() {
       setDisplayName('');
       setNotice(`Carga encolada: ${result.documents} documento(s).`);
       await loadSources();
-      void waitForKnowledgeJob(result.sync_job_id, 'Indexando carga');
+      void waitForKnowledgeJob(result.sync_job_id, 'Indexando carga', {
+        sourceId: result.source_id,
+        expectedFiles: result.documents,
+      });
     } catch (e) {
       setError(formatKnowledgeError(e instanceof Error ? e.message : 'No se pudieron subir archivos'));
     } finally {
@@ -189,7 +250,10 @@ export default function KnowledgePage() {
           : `Importación encolada: ${result.documents} documento(s).`
       );
       await loadSources();
-      void waitForKnowledgeJob(result.sync_job_id, 'Indexando carpeta');
+      void waitForKnowledgeJob(result.sync_job_id, 'Indexando carpeta', {
+        sourceId: result.source_id,
+        expectedFiles: result.documents,
+      });
     } catch (e) {
       setError(formatKnowledgeError(e instanceof Error ? e.message : 'No se pudo importar la ruta servidor'));
     } finally {
@@ -207,7 +271,9 @@ export default function KnowledgePage() {
           compute_embeddings: computeEmbeddings,
         });
         setNotice(result.message ?? 'Sincronización encolada…');
-        void waitForKnowledgeJob(result.sync_job_id, 'Sincronizando carpeta');
+        void waitForKnowledgeJob(result.sync_job_id, 'Sincronizando carpeta', {
+          sourceId: source.source_id,
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : 'No se pudo sincronizar la fuente');
       } finally {
@@ -520,6 +586,8 @@ export default function KnowledgePage() {
                 source={source}
                 projectId={projectId}
                 busy={busy}
+                jobProgress={indexingJobs[source.source_id]?.progress}
+                expectedFileTotal={indexingJobs[source.source_id]?.expectedFiles}
                 onSync={(item) => void syncSource(item)}
                 onDelete={(item) => void deleteSource(item)}
               />

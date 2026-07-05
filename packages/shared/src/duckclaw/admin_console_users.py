@@ -26,33 +26,22 @@ CREATE TABLE IF NOT EXISTS main.admin_console_users (
     initials VARCHAR,
     active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    hash_algo TEXT DEFAULT 'pbkdf2_sha256',
+    hash_params JSON,
+    failed_login_count INTEGER DEFAULT 0,
+    last_failed_at TIMESTAMP
 );
 """
 
 _PBKDF2_ITERATIONS = max(200_000, int(os.environ.get("PBKDF2_ITERATIONS", "260000")))
 _HASH_PREFIX = "pbkdf2_sha256"
 
-_AUTH_COLUMN_MIGRATIONS = [
-    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS hash_algo TEXT DEFAULT 'pbkdf2_sha256'",
-    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS hash_params JSON",
-    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS failed_login_count INTEGER DEFAULT 0",
-    "ALTER TABLE main.admin_console_users ADD COLUMN IF NOT EXISTS last_failed_at TIMESTAMP",
-]
-
-
-def ensure_admin_auth_columns(db: Any) -> None:
-    if getattr(db, "_read_only", False):
-        return
-    for stmt in _AUTH_COLUMN_MIGRATIONS:
-        db.execute(stmt)
-
 
 def ensure_admin_console_users_table(db: Any) -> None:
     if getattr(db, "_read_only", False):
         return
     db.execute(_ADMIN_CONSOLE_USERS_DDL)
-    ensure_admin_auth_columns(db)
 
 
 def hash_password(plain: str) -> str:

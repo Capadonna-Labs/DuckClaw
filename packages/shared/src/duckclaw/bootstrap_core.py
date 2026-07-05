@@ -17,30 +17,13 @@ from duckclaw.shared_db_grants import ensure_user_shared_db_access_table
 
 _log = logging.getLogger(__name__)
 
-_CORE_SEMANTIC_MEMORY_DDL = """
-CREATE SCHEMA IF NOT EXISTS main;
-CREATE TABLE IF NOT EXISTS main.semantic_memory (
-  id VARCHAR PRIMARY KEY,
-  content TEXT NOT NULL,
-  source VARCHAR DEFAULT 'manual_injection',
-  embedding FLOAT[384],
-  embedding_status VARCHAR DEFAULT 'PENDING',
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-ALTER TABLE main.semantic_memory ADD COLUMN IF NOT EXISTS topic VARCHAR;
-ALTER TABLE main.semantic_memory ADD COLUMN IF NOT EXISTS insight TEXT;
-ALTER TABLE main.semantic_memory ADD COLUMN IF NOT EXISTS confidence_score DOUBLE;
-ALTER TABLE main.semantic_memory ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP;
-ALTER TABLE main.semantic_memory ADD COLUMN IF NOT EXISTS tenant_id VARCHAR;
-"""
-
 
 def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
     """
     Aplica tablas indispensables del hub en una conexión DuckDB RW.
 
     Ejecuta migraciones versionadas primero, luego tablas legacy
-    (semantic_memory, api_conversation, agent_config, etc.).
+    (api_conversation, agent_config, etc.) no cubiertas por migraciones.
 
     ``con`` puede ser ``duckdb.DuckDBPyConnection`` o adaptador con ``.execute()``.
     """
@@ -111,32 +94,6 @@ def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
             role TEXT,
             content TEXT,
             received_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-    )
-    for stmt in _CORE_SEMANTIC_MEMORY_DDL.strip().split(";"):
-        s = stmt.strip()
-        if s:
-            con.execute(s)
-    con.execute("CREATE SCHEMA IF NOT EXISTS harness_core")
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS harness_core.homeostasis_targets (
-            tenant_id VARCHAR PRIMARY KEY,
-            targets_json JSON,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-    )
-    con.execute(
-        """
-        CREATE TABLE IF NOT EXISTS harness_core.meditate_runs (
-            run_id VARCHAR PRIMARY KEY,
-            tenant_id VARCHAR NOT NULL,
-            distance_vector JSON,
-            actions_json JSON,
-            status VARCHAR NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """
     )

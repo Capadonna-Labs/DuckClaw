@@ -20,7 +20,7 @@ def test_migrations_create_expected_tables() -> None:
     con = duckdb.connect(str(tmp / "test.duckdb"))
 
     applied = run_pending_migrations(con)
-    assert len(applied) == 27, f"Expected 27 migrations, got {len(applied)}: {applied}"
+    assert len(applied) == 33, f"Expected 33 migrations, got {len(applied)}: {applied}"
 
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
@@ -406,6 +406,19 @@ def test_phase4_tables_have_key_columns() -> None:
     con.close()
 
 
+def test_versioned_migrations_use_create_not_alter() -> None:
+    """Fresh installs must not rely on ALTER TABLE in numbered migrations."""
+    from duckclaw.schema_migrations import _ALL_MIGRATIONS
+
+    alters: list[str] = []
+    for version, name, ddl in _ALL_MIGRATIONS:
+        for stmt in ddl:
+            normalized = stmt.strip().upper()
+            if normalized.startswith("ALTER TABLE"):
+                alters.append(f"v{version:03d}_{name}: {stmt.strip()[:80]}")
+    assert alters == [], f"ALTER in versioned migrations: {alters}"
+
+
 def test_phase4_check_constraints_reject_invalid() -> None:
     """Verify CHECK constraints on Phase 4 tables reject bad values."""
     import duckdb
@@ -467,6 +480,65 @@ def test_phase4_check_constraints_reject_invalid() -> None:
             "WHERE server_id = 's1'"
         )
 
+    con.close()
+
+
+def test_migration_033_moves_harness_core_to_main() -> None:
+    """Legacy harness_core rows migrate to main.* and schema is dropped."""
+    import duckdb
+    import tempfile
+    from pathlib import Path
+
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    tmp = Path(tempfile.mkdtemp())
+    con = duckdb.connect(str(tmp / "legacy.duckdb"))
+    con.execute("CREATE SCHEMA harness_core")
+    con.execute(
+        """
+        CREATE TABLE harness_core.homeostasis_targets (
+            tenant_id VARCHAR PRIMARY KEY,
+            targets_json JSON,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO harness_core.homeostasis_targets (tenant_id, targets_json) "
+        "VALUES ('t1', '{\"infra\": {\"error_rate_pct\": 1.0}, \"goals\": []}')"
+    )
+    con.execute(
+        """
+        CREATE TABLE harness_core.meditate_runs (
+            run_id VARCHAR PRIMARY KEY,
+            tenant_id VARCHAR NOT NULL,
+            distance_vector JSON,
+            actions_json JSON,
+            status VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO harness_core.meditate_runs (run_id, tenant_id, status) "
+        "VALUES ('run-legacy', 't1', 'completed')"
+    )
+    con.close()
+
+    con = duckdb.connect(str(tmp / "legacy.duckdb"))
+    run_pending_migrations(con)
+    row = con.execute(
+        "SELECT targets_json FROM main.homeostasis_targets WHERE tenant_id = 't1'"
+    ).fetchone()
+    assert row is not None
+    run_row = con.execute(
+        "SELECT run_id FROM main.meditate_runs WHERE run_id = 'run-legacy'"
+    ).fetchone()
+    assert run_row is not None
+    harness = con.execute(
+        "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'harness_core'"
+    ).fetchone()
+    assert harness is not None and int(harness[0]) == 0
     con.close()
 
 

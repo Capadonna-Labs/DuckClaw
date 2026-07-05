@@ -33,10 +33,18 @@ def test_bootstrap_core_schema_creates_tables_no_domain_schemas(tmp_path: Path, 
             "SELECT count(*) FROM information_schema.tables "
             "WHERE table_schema = 'main' AND table_name = 'semantic_memory'"
         ).fetchone()[0] == 1
+        assert con.execute(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_schema = 'main' AND table_name = 'homeostasis_targets'"
+        ).fetchone()[0] == 1
+        assert con.execute(
+            "SELECT count(*) FROM information_schema.tables "
+            "WHERE table_schema = 'harness_core'"
+        ).fetchone()[0] == 0
 
         from duckclaw.bootstrap_core import core_unexpected_schemas_present
 
-        assert core_unexpected_schemas_present(con, ("quant_core", "finance_worker")) == []
+        assert core_unexpected_schemas_present(con, ("quant_core", "finance_worker", "harness_core")) == []
     finally:
         con.close()
 

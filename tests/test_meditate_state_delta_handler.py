@@ -76,10 +76,9 @@ def test_apply_quarantine_memory(tmp_path: Path, monkeypatch) -> None:
 def test_upsert_homeostasis_manifest(tmp_path: Path, monkeypatch) -> None:
     db_path = tmp_path / "manifest.duckdb"
     con = duckdb.connect(str(db_path))
-    con.execute("CREATE SCHEMA IF NOT EXISTS harness_core")
     con.execute(
         """
-        CREATE TABLE harness_core.homeostasis_targets (
+        CREATE TABLE main.homeostasis_targets (
             tenant_id VARCHAR PRIMARY KEY,
             targets_json JSON,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -113,7 +112,7 @@ def test_upsert_homeostasis_manifest(tmp_path: Path, monkeypatch) -> None:
     _sync_handle_meditate_state_delta(json.dumps(payload))
     con2 = duckdb.connect(str(db_path))
     row = con2.execute(
-        "SELECT targets_json FROM harness_core.homeostasis_targets WHERE tenant_id = 'analytics'"
+        "SELECT targets_json FROM main.homeostasis_targets WHERE tenant_id = 'analytics'"
     ).fetchone()
     con2.close()
     assert row is not None

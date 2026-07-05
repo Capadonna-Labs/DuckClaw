@@ -18,10 +18,9 @@ def _make_db(path: Path) -> Any:
     from duckclaw import DuckClaw
 
     con = duckdb.connect(str(path))
-    con.execute("CREATE SCHEMA IF NOT EXISTS harness_core")
     con.execute(
         """
-        CREATE TABLE harness_core.homeostasis_targets (
+        CREATE TABLE main.homeostasis_targets (
             tenant_id VARCHAR PRIMARY KEY,
             targets_json JSON,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

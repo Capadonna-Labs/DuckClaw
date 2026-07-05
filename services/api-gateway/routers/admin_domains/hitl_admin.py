@@ -60,7 +60,7 @@ def admin_meditate_status(
             esc = tid.replace("'", "''")
             raw = db.query(
                 "SELECT run_id, distance_vector, actions_json, status, created_at "
-                "FROM harness_core.meditate_runs "
+                "FROM main.meditate_runs "
                 f"WHERE tenant_id = '{esc}' "
                 "ORDER BY created_at DESC LIMIT 1"
             )

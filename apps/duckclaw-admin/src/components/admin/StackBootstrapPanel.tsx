@@ -41,7 +41,7 @@ export function StackBootstrapPanel({ onConnected, compact }: Props) {
         await waitForHealth(15, 2000, onConnected);
       } else {
         setError(
-          'Arranque incompleto. Revisa PM2, Tailscale Funnel y setWebhook en la salida.'
+          'Arranque incompleto. Revisa PM2 y Tailscale Funnel en la salida.'
         );
       }
     } catch (e) {
@@ -78,8 +78,8 @@ export function StackBootstrapPanel({ onConnected, compact }: Props) {
     <div className={compact ? 'space-y-3' : 'space-y-4'}>
       {!compact && (
         <p className="text-sm text-gov-gray-700 dark:text-dark-muted">
-          Un solo paso: <strong>PM2</strong> (DB-Writer + Gateway), <strong>Tailscale Funnel</strong> y{' '}
-          <strong>webhooks Telegram</strong> según <code className="text-xs">.env</code>.
+          Un solo paso: <strong>PM2</strong> (DB-Writer, Indexer, Heartbeat, Gateway) y{' '}
+          <strong>Tailscale Funnel</strong> si está en <code className="text-xs">.env</code>.
         </p>
       )}
       <div className="flex flex-wrap gap-2">

@@ -69,15 +69,7 @@ wait_gateway_health() {
 }
 """.strip()
 
-
-def stack_deploy_shell(*, repo_root: str | Path) -> str:
-    """Bash script: stop → recycle (delete+start) → wait online → health."""
-    root = Path(repo_root).resolve()
-    return f"""set -euo pipefail
-export PATH="/opt/homebrew/bin:/usr/local/bin:${{PATH:-/usr/bin:/bin}}"
-cd "{root}"
-{_PM2_WAIT_PREAMBLE}
-
+_PM2_STOP_BLOCK = f"""
 echo "==> Deteniendo stack PM2…"
 pm2 stop {GATEWAY_NAME} 2>/dev/null || true
 pm2 stop {DB_WRITER_NAME} 2>/dev/null || true
@@ -87,6 +79,28 @@ wait_pm2_stopped {GATEWAY_NAME} 15 || true
 wait_pm2_stopped {DB_WRITER_NAME} 15 || true
 wait_pm2_stopped {INDEXER_NAME} 15 || true
 wait_pm2_stopped {HEARTBEAT_NAME} 15 || true
+""".strip()
+
+
+def pm2_stop_stack_shell() -> str:
+    """Stop PM2 stack so duckclaw-migrate can open DuckDB RW."""
+    return f"""set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:${{PATH:-/usr/bin:/bin}}"
+{_PM2_WAIT_PREAMBLE}
+{_PM2_STOP_BLOCK}
+echo "PM2_STOP_OK"
+"""
+
+
+def stack_deploy_shell(*, repo_root: str | Path) -> str:
+    """Bash script: stop → recycle (delete+start) → wait online → health."""
+    root = Path(repo_root).resolve()
+    return f"""set -euo pipefail
+export PATH="/opt/homebrew/bin:/usr/local/bin:${{PATH:-/usr/bin:/bin}}"
+cd "{root}"
+{_PM2_WAIT_PREAMBLE}
+
+{_PM2_STOP_BLOCK}
 
 echo "==> Reciclando DuckClaw-DB-Writer…"
 {pm2_recycle_db_writer_shell(repo_root=root).strip()}
@@ -160,6 +174,14 @@ def run_uv_sync(*, repo_root: Path, print_fn: PrintFn) -> bool:
     return True
 
 
+def run_pm2_stop_stack(*, print_fn: PrintFn) -> bool:
+    print_fn("==> Deteniendo stack PM2 (liberar DuckDB antes de migrate)…")
+    proc = subprocess.run(["bash", "-lc", pm2_stop_stack_shell()], check=False)
+    if proc.returncode != 0:
+        print_fn("WARN: pm2 stop incompleto; migrate puede fallar si hay lock en vault")
+    return True
+
+
 def run_migrate(*, repo_root: Path, print_fn: PrintFn) -> bool:
     print_fn("==> duckclaw-migrate …")
     proc = subprocess.run(
@@ -193,8 +215,10 @@ def run_stack_deploy(
     if sync_deps and not run_uv_sync(repo_root=root, print_fn=print_fn):
         return 1
 
-    if migrate and not run_migrate(repo_root=root, print_fn=print_fn):
-        return 1
+    if migrate:
+        run_pm2_stop_stack(print_fn=print_fn)
+        if not run_migrate(repo_root=root, print_fn=print_fn):
+            return 1
 
     print_fn("==> Reciclando stack PM2 (DB-Writer → Knowledge-Indexer → Heartbeat → Gateway)…")
     shell = stack_deploy_shell(repo_root=root)

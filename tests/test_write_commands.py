@@ -168,7 +168,11 @@ class TestWriteCommands:
         assert raw["skills"] == ["read_knowledge"]
 
     def test_catalog_skill_commands_roundtrip(self) -> None:
-        from duckclaw.write_commands import DeactivateCatalogSkillCommand, UpsertCatalogSkillCommand
+        from duckclaw.write_commands import (
+            DeactivateCatalogSkillCommand,
+            HardDeleteCatalogSkillCommand,
+            UpsertCatalogSkillCommand,
+        )
 
         upsert = UpsertCatalogSkillCommand(
             task_id="task-skill-1",
@@ -186,9 +190,16 @@ class TestWriteCommands:
             actor_email="test@d.local",
             name="customer_lookup",
         )
+        hard_delete = HardDeleteCatalogSkillCommand(
+            task_id="task-skill-hard-delete-1",
+            tenant_id="default",
+            actor_email="test@d.local",
+            name="customer_lookup",
+        )
 
         raw_upsert = json.loads(upsert.to_redis_payload())
         raw_deactivate = json.loads(deactivate.to_redis_payload())
+        raw_hard_delete = json.loads(hard_delete.to_redis_payload())
 
         assert raw_upsert["command_type"] == "upsert_catalog_skill"
         assert raw_upsert["name"] == "customer_lookup"
@@ -196,6 +207,8 @@ class TestWriteCommands:
         assert raw_upsert["visibility"] == "private"
         assert raw_deactivate["command_type"] == "deactivate_catalog_skill"
         assert raw_deactivate["name"] == "customer_lookup"
+        assert raw_hard_delete["command_type"] == "hard_delete_catalog_skill"
+        assert raw_hard_delete["name"] == "customer_lookup"
 
     def test_template_catalog_mutation_commands_roundtrip(self) -> None:
         from duckclaw.write_commands import (
@@ -2088,9 +2101,14 @@ class TestCommandHandlers:
             "worker_id": "sales_bot",
             "display_name": "Sales Bot",
             "source_template_id": "default",
-            "system_prompt": "Ayuda con ventas consultivas.",
+            "system_prompt": (
+                "Ayuda con ventas consultivas usando datos del CRM. "
+                "Pide contexto del cliente antes de recomendar. "
+                "Resume hallazgos en español claro y accionable."
+            ),
             "description": "Agente creado desde consola admin.",
             "skills": ["read_knowledge"],
+            "soul": "## Tono\nConsultivo y claro.\n\n## Estilo\nPrioriza beneficios verificables.",
         }
 
         dispatch_command(con, payload)
@@ -2118,7 +2136,7 @@ class TestCommandHandlers:
             ).fetchone()[0],
             "contexts": con.execute(
                 "SELECT COUNT(*) FROM main.admin_worker_contexts "
-                "WHERE worker_uid = 'wrk_user_agent_1' AND title = 'system_prompt'"
+                "WHERE worker_uid = 'wrk_user_agent_1' AND title = 'system_prompt.md'"
             ).fetchone()[0],
         }
         files_snapshot = con.execute(
@@ -2134,6 +2152,14 @@ class TestCommandHandlers:
         )
         assert counts == {"workers": 1, "user_agents": 1, "versions": 1, "contexts": 1}
         assert json.loads(files_snapshot)["manifest.json"].startswith("{")
+        policy_row = con.execute(
+            """
+            SELECT active FROM main.prompt_policy_registry
+            WHERE policy_type = 'system_prompt' AND policy_name = 'sales_bot'
+            ORDER BY version DESC LIMIT 1
+            """
+        ).fetchone()
+        assert policy_row is not None and policy_row[0] is True
 
     def test_catalog_skill_handler_upserts_and_deactivates_idempotently(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import dispatch_command
@@ -2189,6 +2215,21 @@ class TestCommandHandlers:
         assert con.execute(
             "SELECT active FROM main.admin_skills WHERE name = 'customer_lookup'"
         ).fetchone()[0] is False
+
+        hard_delete_payload = {
+            "command_type": "hard_delete_catalog_skill",
+            "command_version": 1,
+            "task_id": "task-skill-hard-delete-1",
+            "tenant_id": "default",
+            "actor_email": "test@d.local",
+            "name": "customer_lookup",
+        }
+        dispatch_command(con, hard_delete_payload)
+        dispatch_command(con, hard_delete_payload)
+
+        assert con.execute(
+            "SELECT COUNT(*) FROM main.admin_skills WHERE name = 'customer_lookup'"
+        ).fetchone()[0] == 0
 
     def test_template_catalog_handlers_mutate_actor_owned_worker(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import dispatch_command

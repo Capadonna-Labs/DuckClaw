@@ -14,7 +14,11 @@ from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.admin_worker_catalog import get_latest_worker_version, list_visible_workers_for_actor
 from duckclaw.gateway_enqueue import enqueue_admin_command
 from duckclaw.skill_catalog import skill_categories_api_payload
-from duckclaw.write_commands import DeactivateCatalogSkillCommand, UpsertCatalogSkillCommand
+from duckclaw.write_commands import (
+    DeactivateCatalogSkillCommand,
+    HardDeleteCatalogSkillCommand,
+    UpsertCatalogSkillCommand,
+)
 from routers.admin_domains.admin_common import actor_from_header, admin_audit, problem, require_admin_key
 
 router = APIRouter(prefix="/catalog", tags=["admin-catalog-skills"])
@@ -170,4 +174,23 @@ async def deactivate_catalog_skill(
     except ValueError as exc:
         raise problem(400, str(exc), name) from exc
     admin_audit("catalog.skill.deactivate", name, "", actor=actor)
-    return {"ok": True, "task_id": task_id, "id": name}
+    return {"ok": True, "task_id": task_id, "id": name, "deactivated": True}
+
+
+@router.delete("/skills/{name}/hard-delete", dependencies=[Depends(require_admin_key)])
+async def hard_delete_catalog_skill(
+    name: str,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    profile = _actor_profile(actor)
+    command = HardDeleteCatalogSkillCommand(
+        tenant_id=str(profile.get("tenant_id") or "default"),
+        actor_email=str(profile.get("email") or effective_actor_email(actor)),
+        name=name,
+    )
+    try:
+        task_id = _enqueue_catalog_skill_command(command)
+    except ValueError as exc:
+        raise problem(400, str(exc), name) from exc
+    admin_audit("catalog.skill.hard_delete", name, "", actor=actor)
+    return {"ok": True, "task_id": task_id, "id": name, "hard_deleted": True}

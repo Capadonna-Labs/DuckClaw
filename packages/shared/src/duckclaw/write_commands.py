@@ -80,6 +80,13 @@ class DeactivateCatalogSkillCommand(WriteCommand):
     name: str = Field(..., min_length=2, max_length=128)
 
 
+class HardDeleteCatalogSkillCommand(WriteCommand):
+    """Physically remove one admin catalog skill and worker attachments."""
+
+    command_type: Literal["hard_delete_catalog_skill"] = "hard_delete_catalog_skill"
+    name: str = Field(..., min_length=2, max_length=128)
+
+
 class DeactivateWorkerCommand(WriteCommand):
     """Soft-delete a worker from the catalog."""
 

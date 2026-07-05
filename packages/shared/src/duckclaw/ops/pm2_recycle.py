@@ -34,9 +34,15 @@ def pm2_recycle_shell(
         start_cmd = f"{start_cmd} {only_flag}"
     lines = [
         f'cd "{root}"',
-        f"pm2 delete {name} 2>/dev/null || true",
-        start_cmd,
     ]
+    if kind == "gateway":
+        lines.append(
+            'for n in DuckClaw-Gateway duckclaw-gateway DuckClaw-API; do '
+            'pm2 delete "$n" 2>/dev/null || true; done'
+        )
+    else:
+        lines.append(f"pm2 delete {name} 2>/dev/null || true")
+    lines.append(start_cmd)
     if success_token:
         lines.append(f'echo "{success_token}"')
     return "\n".join(lines) + "\n"

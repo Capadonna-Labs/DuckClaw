@@ -2,6 +2,11 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { HOST_ONLY_OPS, type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
+import {
+  GATEWAY_PM2_CANDIDATES,
+  resolveGatewayPm2Name,
+  substitutePm2NamesInArgv,
+} from '@/lib/pm2AppResolve';
 import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell } from '@/lib/pm2Recycle';
 import { runStackRecoverLocal } from '@/lib/stackRecover';
 import { runStackStartLocal } from '@/lib/stackStart';
@@ -91,13 +96,57 @@ const PM2_SHELL_OPS: Record<string, (root: string) => string> = {
   pm2_start_db_writer: pm2RecycleDbWriterShell,
 };
 
-function runShellOp(
-  opId: string,
-  shell: string
-): Promise<NormalizedOpsRunResult> {
+function runShellOp(opId: string, shell: string): Promise<NormalizedOpsRunResult> {
   const cwd = repoRoot();
   return new Promise((resolve, reject) => {
     const proc = spawn('bash', ['-lc', shell], {
+      cwd,
+      env: opsSubprocessEnv(),
+    });
+    let stdout = '';
+    let stderr = '';
+    proc.stdout?.on('data', (d) => {
+      stdout += String(d);
+    });
+    proc.stderr?.on('data', (d) => {
+      stderr += String(d);
+    });
+    const timer = setTimeout(() => {
+      proc.kill('SIGTERM');
+      reject(new Error('Timeout ejecutando comando (90s)'));
+    }, 90_000);
+    proc.on('close', (code, signal) => {
+      clearTimeout(timer);
+      let exit_code = code ?? 1;
+      if (code === null && signal) {
+        const sigNum: Record<string, number> = {
+          SIGINT: 2,
+          SIGTERM: 15,
+          SIGHUP: 1,
+        };
+        exit_code = sigNum[signal] ? -sigNum[signal]! : -1;
+      }
+      resolve(
+        normalizeOpsResult({
+          op_id: opId,
+          exit_code,
+          stdout: stdout.slice(-12_000),
+          stderr: stderr.slice(-8_000),
+          executed_via: 'local',
+        })
+      );
+    });
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
+}
+
+function runArgvOp(opId: string, argv: string[]): Promise<NormalizedOpsRunResult> {
+  const cwd = repoRoot();
+  return new Promise((resolve, reject) => {
+    const proc = spawn(argv[0], argv.slice(1), {
       cwd,
       env: opsSubprocessEnv(),
     });
@@ -157,7 +206,7 @@ export function listOpsCommands() {
   };
 }
 
-export function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult> {
+export async function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult> {
   if (opId === 'start_stack') {
     return runStackStartLocal();
   }
@@ -169,54 +218,17 @@ export function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult> {
   }
   const entry = OPS_ALLOWLIST[opId];
   if (!entry) {
-    return Promise.reject(new Error(`Comando no permitido: ${opId}`));
+    throw new Error(`Comando no permitido: ${opId}`);
   }
   const shellBuilder = PM2_SHELL_OPS[opId];
   if (shellBuilder) {
     return runShellOp(opId, shellBuilder(repoRoot()));
   }
-  const cwd = repoRoot();
-  return new Promise((resolve, reject) => {
-    const proc = spawn(entry.argv[0], entry.argv.slice(1), {
-      cwd,
-      env: opsSubprocessEnv(),
-    });
-    let stdout = '';
-    let stderr = '';
-    proc.stdout?.on('data', (d) => {
-      stdout += String(d);
-    });
-    proc.stderr?.on('data', (d) => {
-      stderr += String(d);
-    });
-    const timer = setTimeout(() => {
-      proc.kill('SIGTERM');
-      reject(new Error('Timeout ejecutando comando (90s)'));
-    }, 90_000);
-    proc.on('close', (code, signal) => {
-      clearTimeout(timer);
-      let exit_code = code ?? 1;
-      if (code === null && signal) {
-        const sigNum: Record<string, number> = {
-          SIGINT: 2,
-          SIGTERM: 15,
-          SIGHUP: 1,
-        };
-        exit_code = sigNum[signal] ? -sigNum[signal]! : -1;
-      }
-      resolve(
-        normalizeOpsResult({
-          op_id: opId,
-          exit_code,
-          stdout: stdout.slice(-12_000),
-          stderr: stderr.slice(-8_000),
-          executed_via: 'local',
-        })
-      );
-    });
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-  });
+  if (opId === 'pm2_logs_gateway') {
+    const cwd = repoRoot();
+    const name = await resolveGatewayPm2Name(cwd);
+    const argv = substitutePm2NamesInArgv(entry.argv, name, GATEWAY_PM2_CANDIDATES);
+    return runArgvOp(opId, argv);
+  }
+  return runArgvOp(opId, entry.argv);
 }

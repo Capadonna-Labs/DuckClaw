@@ -90,23 +90,18 @@ def _set_runtime_toggle_state(
     )
 
     try:
-        from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+        from duckclaw.db_write_fire_and_forget import enqueue_write_and_resolve
     except Exception as exc:
         return False, f"cola DuckDB no disponible: {exc}"
 
     released_ro, resume = _release_ro_handle_for_writer(db)
     try:
-        task_id = enqueue_typed_command(
+        ok, err = enqueue_write_and_resolve(
             command,
             db_path=target_db_path,
             user_id=str(chat_id or "default").strip() or "default",
         )
-        status = poll_task_status_sync(task_id, timeout_sec=30.0)
-        if status is None:
-            return False, "timeout esperando db-writer"
-        if status.status != "success":
-            return False, (status.detail or "db-writer failed")[:500]
-        return True, ""
+        return ok, err
     finally:
         if released_ro and callable(resume):
             try:

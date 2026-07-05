@@ -104,7 +104,8 @@ def _infer_user_id_for_queue(db_path: str) -> str:
 def _enqueue_write(db: Any, sql: str, tenant_id: str) -> None:
     from pathlib import Path
 
-    from duckclaw.db_write_queue import enqueue_duckdb_write_sync, poll_task_status_sync
+    from duckclaw.db_write_fire_and_forget import wait_write_task, write_poll_timeout_sec
+    from duckclaw.db_write_queue import enqueue_duckdb_write_sync
 
     raw_path = str(getattr(db, "_path", "") or "").strip()
     if not raw_path or raw_path == ":memory:":
@@ -128,7 +129,7 @@ def _enqueue_write(db: Any, sql: str, tenant_id: str) -> None:
             user_id=uid,
             tenant_id=str(tenant_id or "default").strip() or "default",
         )
-        poll_task_status_sync(write_tid, timeout_sec=15.0)
+        wait_write_task(write_tid, timeout_sec=write_poll_timeout_sec())
     finally:
         if released_ro:
             try:
@@ -142,7 +143,11 @@ def _enqueue_write(db: Any, sql: str, tenant_id: str) -> None:
 def _enqueue_typed_write(db: Any, command: Any, tenant_id: str) -> None:
     from pathlib import Path
 
-    from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
+    from duckclaw.db_write_fire_and_forget import (
+        enqueue_write_command,
+        wait_write_task,
+        write_poll_timeout_sec,
+    )
 
     raw_path = str(getattr(db, "_path", "") or "").strip()
     if not raw_path or raw_path == ":memory:":
@@ -160,12 +165,8 @@ def _enqueue_typed_write(db: Any, command: Any, tenant_id: str) -> None:
         elif callable(susp) and callable(resu):
             susp()
             released_ro = True
-        write_tid = enqueue_typed_command(
-            command,
-            db_path=resolved,
-            user_id=uid,
-        )
-        poll_task_status_sync(write_tid, timeout_sec=15.0)
+        write_tid = enqueue_write_command(command, db_path=resolved, user_id=uid)
+        wait_write_task(write_tid, timeout_sec=write_poll_timeout_sec())
     finally:
         if released_ro:
             try:

@@ -57,6 +57,15 @@ Con `DUCKCLAW_SPAWN_PROFILE=1`, el Gateway puede aplicar writes inline — excep
 - Telegram inbound → cola Redis (fase 2)
 - UI Admin: poll genérico `write-tasks` tras mutaciones CRUD largas
 
+## Agents (fly / indexer)
+
+`duckclaw.db_write_fire_and_forget` — sin poll por defecto (`DUCKCLAW_WRITE_POLL_SEC=0`):
+`chat_state`, `crons`, `team_access`, `knowledge_auto_sync`, `history`, `runtime_toggles`, `team_templates`, `llm_usage_log`, `media_usage_log`.
+
+## Write-task detail
+
+db-writer publica `detail` en Redis para `sync_catalog_prompts` y `restore_framework_policy_pack` (vía `write_task_detail.py`).
+
 ## Métricas Overview
 
 `GET /admin/health` expone `gateway_metrics.db_write_queue_depth` (LLEN `duckdb_write_queue`) junto a RAG y RAM. La consola Overview permite refresh manual con bypass de caché (45s TTL en store).

@@ -1,14 +1,21 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { AdminBootstrapStatus } from '@/lib/adminBootstrapStatus';
+import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 
 type BootstrapState = {
   status: AdminBootstrapStatus | null;
   loading: boolean;
 };
 
-const BOOTSTRAP_POLL_MS = 3_000;
+const POLL_UNHEALTHY_MS = 15_000;
+const POLL_HEALTHY_MS = 60_000;
+
+function pollIntervalMs(status: AdminBootstrapStatus | null): number {
+  if (!status) return POLL_UNHEALTHY_MS;
+  return status.canAttemptLogin && status.code === 'ready' ? POLL_HEALTHY_MS : POLL_UNHEALTHY_MS;
+}
 
 export function useAdminBootstrapStatus(): BootstrapState {
   const [state, setState] = useState<BootstrapState>({ status: null, loading: true });
@@ -46,11 +53,10 @@ export function useAdminBootstrapStatus(): BootstrapState {
 
   useEffect(() => {
     void refresh();
-    const timer = setInterval(() => {
-      void refresh();
-    }, BOOTSTRAP_POLL_MS);
-    return () => clearInterval(timer);
   }, [refresh]);
+
+  const intervalMs = useMemo(() => pollIntervalMs(state.status), [state.status]);
+  useVisibilityAwareInterval(() => void refresh(), intervalMs);
 
   return state;
 }

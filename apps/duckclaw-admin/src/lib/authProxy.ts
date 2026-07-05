@@ -131,8 +131,12 @@ export async function resolveSessionUser(req: NextRequest): Promise<SessionUser 
         signal: AbortSignal.timeout(AUTH_PROXY_TIMEOUT_MS),
       });
       if (!upstream.ok) {
-        invalidateBffSessionCache(sessionKey);
-        return null;
+        if (upstream.status === 401 || upstream.status === 403) {
+          invalidateBffSessionCache(sessionKey);
+          return null;
+        }
+        const stale = getCachedBffSession(sessionKey, { allowStale: true });
+        return stale ?? null;
       }
       const data = (await upstream.json()) as { user?: SessionUser };
       const user = data.user ?? null;
@@ -143,7 +147,8 @@ export async function resolveSessionUser(req: NextRequest): Promise<SessionUser 
       }
       return user;
     } catch {
-      return null;
+      const stale = getCachedBffSession(sessionKey, { allowStale: true });
+      return stale ?? null;
     }
   });
 }

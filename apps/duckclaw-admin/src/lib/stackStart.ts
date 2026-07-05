@@ -1,6 +1,9 @@
 import { spawn } from 'child_process';
 import { join } from 'path';
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
+import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell } from '@/lib/pm2Recycle';
+import { pm2WaitShellPreamble } from '@/lib/pm2WaitShell';
 import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
 
 const SYNC_PM2 = [
@@ -31,7 +34,7 @@ function runArgv(
   return new Promise((resolve, reject) => {
     const proc = spawn(argv[0], argv.slice(1), {
       cwd,
-      env: { ...process.env, ...extraEnv },
+      env: opsSubprocessEnv(extraEnv),
     });
     let stdout = '';
     let stderr = '';
@@ -112,26 +115,21 @@ export async function runStackStartLocal(): Promise<NormalizedOpsRunResult> {
     });
   }
 
-  const shell = `cd "${cwd}"
+  const shell = `${pm2WaitShellPreamble()}
+cd "${cwd}"
 GATEWAY_MODE="start"
 pm2 stop DuckClaw-Gateway 2>/dev/null || true
 pm2 stop DuckClaw-DB-Writer 2>/dev/null || true
-sleep 2
-if pm2 describe DuckClaw-DB-Writer >/dev/null 2>&1; then
-  pm2 start DuckClaw-DB-Writer --update-env || pm2 restart DuckClaw-DB-Writer --update-env
-else
-  pm2 start config/ecosystem.db-writer.config.cjs --update-env
-fi
-sleep 2
-if pm2 describe DuckClaw-Gateway >/dev/null 2>&1; then
-  GATEWAY_MODE="restart"
-  pm2 start DuckClaw-Gateway --update-env || pm2 restart DuckClaw-Gateway --update-env
-else
-  pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway --update-env
-fi
+wait_pm2_stopped DuckClaw-Gateway 15 || true
+wait_pm2_stopped DuckClaw-DB-Writer 15 || true
+${pm2RecycleDbWriterShell(cwd).trim()}
+wait_pm2_online DuckClaw-DB-Writer 30 || exit 1
+${pm2RecycleGatewayShell(cwd).trim()}
+wait_pm2_online DuckClaw-Gateway 30 || exit 1
+wait_gateway_health 45 || true
+GATEWAY_MODE="recreate"
 echo "GATEWAY_PM2_MODE=$GATEWAY_MODE"
 pm2 save 2>/dev/null || true
-sleep 3
 pm2 list
 `;
   const proc = await runArgv(cwd, ['bash', '-lc', shell], 180_000);
@@ -149,6 +147,11 @@ pm2 list
 
   const telegram = await runTelegramIngressStartLocal();
   chunks.push('\n── Tailscale + Telegram (webhook) ──\n', telegram.stdout, telegram.stderr);
+  if (telegram.exit_code !== 0) {
+    chunks.push(
+      '\nwarn: ingress Telegram/Tailscale omitido o falló (no bloquea Gateway ni consola en localhost).\n'
+    );
+  }
 
   const serve = await runArgv(
     cwd,
@@ -169,9 +172,9 @@ pm2 list
 
   return normalizeOpsResult({
     op_id: 'start_stack',
-    exit_code: telegram.exit_code,
+    exit_code: 0,
     stdout: chunks.join('\n'),
-    stderr: telegram.stderr,
+    stderr: telegram.exit_code !== 0 ? telegram.stderr : '',
     executed_via: 'local',
   });
 }

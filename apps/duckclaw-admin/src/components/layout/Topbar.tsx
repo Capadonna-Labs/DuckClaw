@@ -11,49 +11,18 @@ import { useEffect, useRef, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { PlatformStatusStrip } from '@/components/admin/GatewayStatusBadge';
-
-const DEBUG_LOG_ENDPOINT = 'http://127.0.0.1:7477/ingest/4cb00f05-d949-473c-91c2-92e570fd43ec';
-const DEBUG_SESSION_ID = 'ab0734';
-
-// #region agent log
-function agentLog(
-  hypothesisId: string,
-  location: string,
-  message: string,
-  data: Record<string, unknown>
-) {
-  fetch(DEBUG_LOG_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': DEBUG_SESSION_ID,
-    },
-    body: JSON.stringify({
-      sessionId: DEBUG_SESSION_ID,
-      hypothesisId,
-      location,
-      message,
-      data,
-      timestamp: Date.now(),
-      runId: 'topbar-restart',
-    }),
-  }).catch(() => {});
-}
-// #endregion
+import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 
 interface TopbarProps {
   onMenuClick?: () => void;
 }
 
-async function waitForGatewayHealth(attempts = 20, delayMs = 2000): Promise<boolean> {
-  for (let i = 0; i < attempts; i += 1) {
+async function waitForGatewayHealth(maxAttempts = 8): Promise<boolean> {
+  for (let i = 0; i < maxAttempts; i += 1) {
+    const delayMs = Math.min(2000 * (i + 1), 8000);
     await new Promise((resolve) => window.setTimeout(resolve, delayMs));
-    try {
-      await adminService.health();
-      return true;
-    } catch {
-      /* retry */
-    }
+    const health = await useGatewayHealthStore.getState().refresh(true);
+    if (health?.status === 'ok') return true;
   }
   return false;
 }
@@ -92,14 +61,8 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
     if (!canRunOps) return;
     setStackRestarting(true);
     setStackRestartMessage(null);
-    agentLog('H1', 'Topbar.tsx:restartStack', 'restart_stack invoked', {});
     try {
       const result = await adminService.runOps('restart_stack');
-      agentLog('H1', 'Topbar.tsx:restartStack', 'restart_stack ops result', {
-        ok: result.ok,
-        exit_code: result.exit_code,
-        executed_via: result.executed_via,
-      });
       if (!result.ok) {
         setStackRestartMessage(
           formatOpsOutput({
@@ -115,7 +78,6 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       }
       setStackRestartMessage('Recuperando gateway (health check)…');
       const healthy = await waitForGatewayHealth();
-      agentLog('H3', 'Topbar.tsx:restartStack', 'health wait finished', { healthy });
       setStackRestartMessage(
         healthy
           ? 'Stack recuperado: migraciones + PM2. Recargando consola…'
@@ -123,7 +85,6 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo reiniciar el stack';
-      agentLog('H5', 'Topbar.tsx:restartStack', 'restart_stack failed', { message: msg });
       setStackRestartMessage(msg);
     } finally {
       setStackRestarting(false);

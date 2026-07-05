@@ -80,6 +80,12 @@ def build_router_node(
             out["shared_db_path"] = state["shared_db_path"]
         if "username" in state:
             out["username"] = state["username"]
+        if state.get("knowledge_scope"):
+            out["knowledge_scope"] = state.get("knowledge_scope")
+        if state.get("project_id"):
+            out["project_id"] = state.get("project_id")
+        if state.get("user_incoming"):
+            out["user_incoming"] = state.get("user_incoming")
         _ot = (state.get("outbound_telegram_bot_token") or "").strip()
         if _ot:
             out["outbound_telegram_bot_token"] = _ot

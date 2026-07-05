@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from '@/store/authStore';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
 import { Plus, RefreshCw, GripVertical } from 'lucide-react';
+import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 
 function readWorkerFilter(): string {
   if (typeof window === 'undefined') return '';
@@ -101,9 +102,9 @@ export default function KanbanBoardView({ embedded = false }: EmbeddedViewProps)
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 8000);
-    return () => clearInterval(t);
   }, [load]);
+
+  useVisibilityAwareInterval(load, 20_000);
 
   const filteredCards = useMemo(() => {
     const list = cards

@@ -236,6 +236,19 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
                 worker_id,
             ],
         )
+        try:
+            from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
+
+            sync_worker_system_prompt_policy(
+                conn,
+                worker_id=worker_id,
+                files=files_snapshot,
+                actor_email=str(profile.get("email") or actor),
+                worker_uid=worker_uid,
+                force=True,
+            )
+        except Exception:
+            pass
         return
     conn.execute(
         "INSERT INTO main.admin_user_agents "
@@ -250,6 +263,19 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
             manifest_path,
         ],
     )
+    try:
+        from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
+
+        sync_worker_system_prompt_policy(
+            conn,
+            worker_id=worker_id,
+            files=files_snapshot,
+            actor_email=str(profile.get("email") or actor),
+            worker_uid=worker_uid,
+            force=True,
+        )
+    except Exception:
+        pass
 
 
 def _catalog_skill_name(raw: Any) -> str:

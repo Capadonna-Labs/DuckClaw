@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "description": "Variables de Node/Next que no deben heredarse a procesos Python bajo PM2.",
+  "blocked_prefixes": ["npm_", "NEXT_", "PNPM_", "__NEXT_"],
+  "blocked_extra_prefixes": ["npm_package_"],
+  "blocked_keys": [
+    "NODE_OPTIONS",
+    "NODE_ENV",
+    "PORT",
+    "INIT_CWD",
+    "npm_config_user_agent",
+    "npm_lifecycle_event",
+    "npm_lifecycle_script",
+    "npm_command",
+    "npm_execpath",
+    "npm_node_execpath"
+  ],
+  "allowed_keys": [
+    "HOME",
+    "PATH",
+    "USER",
+    "LOGNAME",
+    "SHELL",
+    "LANG",
+    "TMPDIR",
+    "TERM",
+    "SSH_AUTH_SOCK",
+    "VIRTUAL_ENV",
+    "UV",
+    "PYTHONPATH",
+    "PYTHONUNBUFFERED"
+  ],
+  "allowed_prefixes": ["DUCKCLAW_", "TELEGRAM_", "REDIS_"],
+  "pm2_processes": {
+    "gateway": {
+      "name": "DuckClaw-Gateway",
+      "ecosystem": "config/ecosystem.api.config.cjs",
+      "only_flag": "--only DuckClaw-Gateway"
+    },
+    "db_writer": {
+      "name": "DuckClaw-DB-Writer",
+      "ecosystem": "config/ecosystem.db-writer.config.cjs",
+      "only_flag": null
+    }
+  }
+}

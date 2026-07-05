@@ -19,7 +19,14 @@ export type AdminBootstrapStatus = {
 
 const GATEWAY_STATUS_TIMEOUT_MS = 2_500;
 const PM2_JLIST_COMMAND = 'pm2 jlist';
+const PM2_CACHE_MS = 30_000;
 const execFileAsync = promisify(execFile);
+
+let pm2Cache: {
+  status: AdminBootstrapStatus['pm2Status'];
+  restartCount: number | null;
+  expiresAt: number;
+} | null = null;
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, {
@@ -33,6 +40,10 @@ async function resolvePm2GatewayStatus(): Promise<{
   status: AdminBootstrapStatus['pm2Status'];
   restartCount: number | null;
 }> {
+  const now = Date.now();
+  if (pm2Cache && now < pm2Cache.expiresAt) {
+    return { status: pm2Cache.status, restartCount: pm2Cache.restartCount };
+  }
   try {
     const [bin, arg] = PM2_JLIST_COMMAND.split(' ');
     const { stdout } = await execFileAsync(bin, [arg], { timeout: 2_000 });
@@ -47,7 +58,9 @@ async function resolvePm2GatewayStatus(): Promise<{
     const restartCount =
       typeof gateway.pm2_env?.restart_time === 'number' ? gateway.pm2_env.restart_time : null;
     if (status === 'online' || status === 'stopped' || status === 'errored') {
-      return { status, restartCount };
+      const resolved = { status, restartCount };
+      pm2Cache = { ...resolved, expiresAt: Date.now() + PM2_CACHE_MS };
+      return resolved;
     }
     return { status: 'unknown', restartCount };
   } catch {
@@ -62,32 +75,6 @@ function baseStatusFields(pm2Status: AdminBootstrapStatus['pm2Status']) {
   };
 }
 
-// #region agent log
-function agentLog(
-  hypothesisId: string,
-  location: string,
-  message: string,
-  data: Record<string, unknown>
-) {
-  fetch('http://127.0.0.1:7477/ingest/4cb00f05-d949-473c-91c2-92e570fd43ec', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'X-Debug-Session-Id': 'ab0734',
-    },
-    body: JSON.stringify({
-      sessionId: 'ab0734',
-      hypothesisId,
-      location,
-      message,
-      data,
-      timestamp: Date.now(),
-      runId: 'bootstrap-status',
-    }),
-  }).catch(() => {});
-}
-// #endregion
-
 export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatus> {
   const base = gatewayBase();
   const key = adminApiKey();
@@ -95,11 +82,6 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
   const gatewayHint = gatewayConnectHint();
   const pm2 = await resolvePm2GatewayStatus();
   const pm2Status = pm2.status;
-  agentLog('H1', 'adminBootstrapStatus.ts:resolve', 'bootstrap status probe', {
-    pm2Status,
-    restartCount: pm2.restartCount,
-    gatewayConfigured: Boolean(base),
-  });
 
   if (!base) {
     return {
@@ -140,11 +122,6 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
         : err instanceof Error
           ? err.message
           : 'fetch failed';
-    agentLog('H1', 'adminBootstrapStatus.ts:health-fail', 'gateway health unreachable', {
-      detail,
-      pm2Status,
-      restartCount: pm2.restartCount,
-    });
     return {
       gatewayConfigured: true,
       gatewayReachable: false,

@@ -81,6 +81,31 @@ function exitCodeBadge(exitCode?: number): string {
   return 'bg-red-900/50 text-red-200';
 }
 
+function formatSandboxLoadError(message: string): string {
+  const m = message.toLowerCase();
+  if (m === 'no autenticado' || m.includes('401')) {
+    return 'No se pudo validar la sesión con el gateway (puede estar lento). Pulsa Actualizar o reinicia el stack.';
+  }
+  if (m.includes('gateway') || m.includes('503') || m.includes('no respondió')) {
+    return 'El gateway no responde. Usa «Reiniciar stack» en la barra superior y vuelve aquí.';
+  }
+  return message;
+}
+
+function pickDefaultArtifactId(list: SandboxArtifactMeta[]): string {
+  if (!list.length) return '';
+  const codeLike = list.find((item) =>
+    /\.(py|sh|js|ts|tsx|jsx|md|sql|json)$/i.test(item.filename || item.relative_path || '')
+  );
+  return codeLike?.artifact_id ?? list[0]?.artifact_id ?? '';
+}
+
+function artifactTreeKey(item: SandboxArtifactMeta): string {
+  const rel = (item.relative_path || item.filename || '').trim();
+  const slash = rel.lastIndexOf('/');
+  return slash > 0 ? rel.slice(0, slash) : '';
+}
+
 function TabularPreview({ payload }: { payload: SandboxArtifactPreviewPayload }) {
   const columns = payload.columns ?? [];
   const rows = (payload.rows ?? []) as unknown[][];
@@ -287,7 +312,7 @@ export function SandboxArtifactsExplorer({
         return '';
       });
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudieron cargar las ejecuciones');
+      setError(formatSandboxLoadError(e instanceof Error ? e.message : 'No se pudieron cargar las ejecuciones'));
       setRuns([]);
       setSelectedRunId('');
     } finally {
@@ -315,7 +340,7 @@ export function SandboxArtifactsExplorer({
         setArtifacts(list);
         setSelectedArtifactId((prev) => {
           if (prev && list.some((a) => a.artifact_id === prev)) return prev;
-          return list[0]?.artifact_id ?? '';
+          return pickDefaultArtifactId(list);
         });
       })
       .catch(() => {
@@ -439,11 +464,22 @@ export function SandboxArtifactsExplorer({
     }
   };
 
+  const artifactGroups = useMemo(() => {
+    const groups = new Map<string, SandboxArtifactMeta[]>();
+    for (const item of artifacts) {
+      const key = artifactTreeKey(item);
+      const bucket = groups.get(key) ?? [];
+      bucket.push(item);
+      groups.set(key, bucket);
+    }
+    return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [artifacts]);
+
   return (
     <div className="flex h-full min-h-0 flex-col rounded-2xl border border-slate-800 bg-slate-950 text-slate-100">
       <div className="shrink-0 border-b border-amber-900/50 bg-amber-950/40 px-4 py-2">
         <p className="text-[11px] text-amber-100">
-          Scratch efímero del sandbox — no indexado en RAG hasta que uses{' '}
+          Archivos que el agente genera al ejecutar código. No entran al conocimiento hasta{' '}
           <strong>Guardar en Drive</strong>.
         </p>
       </div>
@@ -547,26 +583,32 @@ export function SandboxArtifactsExplorer({
                 <p className="px-3 pb-2 text-xs text-slate-500">Cargando…</p>
               ) : (
                 <ul className="max-h-40 overflow-y-auto pb-2">
-                  {artifacts.map((artifact) => {
-                    const active = artifact.artifact_id === selectedArtifactId;
-                    return (
-                      <li key={artifact.artifact_id}>
-                        <button
-                          type="button"
-                          onClick={() => setSelectedArtifactId(artifact.artifact_id)}
-                          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${
-                            active ? 'bg-slate-800' : 'hover:bg-slate-900'
-                          }`}
-                        >
-                          {artifactIcon(artifact.mime, artifact.filename)}
-                          <span className="min-w-0 flex-1 truncate">{artifact.filename}</span>
-                          <span className="text-[10px] text-slate-500">
-                            {formatBytes(artifact.byte_size)}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
+                  {artifactGroups.map(([folder, items]) => (
+                    <li key={folder || '__root__'}>
+                      {folder ? (
+                        <p className="px-3 py-1 font-mono text-[10px] text-slate-500">{folder}/</p>
+                      ) : null}
+                      {items.map((artifact) => {
+                        const active = artifact.artifact_id === selectedArtifactId;
+                        return (
+                          <button
+                            key={artifact.artifact_id}
+                            type="button"
+                            onClick={() => setSelectedArtifactId(artifact.artifact_id)}
+                            className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs ${
+                              active ? 'bg-slate-800' : 'hover:bg-slate-900'
+                            }`}
+                          >
+                            {artifactIcon(artifact.mime, artifact.filename)}
+                            <span className="min-w-0 flex-1 truncate">{artifact.filename}</span>
+                            <span className="text-[10px] text-slate-500">
+                              {formatBytes(artifact.byte_size)}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </li>
+                  ))}
                 </ul>
               )}
             </div>

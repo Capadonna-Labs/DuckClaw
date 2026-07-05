@@ -1,50 +1,47 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Bot } from 'lucide-react';
-import { adminService } from '@/services/adminService';
 import { formatGatewayStatus, isGatewayHealthy } from '@/lib/healthLabels';
+import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
+import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 
 function workersTooltipLabel(workers: string[]): string {
   if (workers.length === 0) return 'Sin workers activos visibles';
   return workers.join(', ');
 }
 
+const POLL_OK_MS = 60_000;
+const POLL_ERROR_MS = 20_000;
+
 export function PlatformStatusStrip() {
-  const [workersCount, setWorkersCount] = useState<number | null>(null);
-  const [workers, setWorkers] = useState<string[]>([]);
-  const [status, setStatus] = useState<string | null>(null);
-  const [error, setError] = useState(false);
+  const data = useGatewayHealthStore((s) => s.data);
+  const error = useGatewayHealthStore((s) => s.error);
+  const refresh = useGatewayHealthStore((s) => s.refresh);
+
+  const poll = useCallback(() => {
+    void refresh();
+  }, [refresh]);
 
   useEffect(() => {
-    const poll = () => {
-      adminService
-        .health()
-        .then((h) => {
-          setStatus(h.status);
-          const list = Array.isArray(h.workers)
-            ? h.workers.map((id) => String(id).trim()).filter(Boolean)
-            : [];
-          setWorkers(list);
-          setWorkersCount(
-            typeof h.workers_count === 'number' ? h.workers_count : list.length || null
-          );
-          setError(false);
-        })
-        .catch(() => {
-          setError(true);
-          setStatus(null);
-          setWorkersCount(null);
-          setWorkers([]);
-        });
-    };
-    poll();
-    const timer = window.setInterval(poll, 30_000);
-    return () => window.clearInterval(timer);
-  }, []);
+    void refresh();
+  }, [refresh]);
 
-  const online = !error && status != null && isGatewayHealthy(status);
-  const gatewayLabel = error ? 'Off-line' : formatGatewayStatus(status);
+  const intervalMs = useMemo(() => (error ? POLL_ERROR_MS : POLL_OK_MS), [error]);
+  useVisibilityAwareInterval(poll, intervalMs);
+
+  const workers = useMemo(
+    () =>
+      Array.isArray(data?.workers)
+        ? data.workers.map((id) => String(id).trim()).filter(Boolean)
+        : [],
+    [data?.workers]
+  );
+  const workersCount =
+    typeof data?.workers_count === 'number' ? data.workers_count : workers.length || null;
+
+  const online = !error && data != null && isGatewayHealthy(data.status);
+  const gatewayLabel = error ? 'Off-line' : formatGatewayStatus(data?.status);
   const workersTitle = useMemo(() => workersTooltipLabel(workers), [workers]);
 
   return (

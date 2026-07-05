@@ -281,7 +281,6 @@ async def playground_set_knowledge_scope(
     from core.admin_identity import open_gateway_db
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.knowledge_scope import VALID_KNOWLEDGE_SCOPES, normalize_knowledge_scope
-    from duckclaw.runtime_session_settings import upsert_session_runtime_setting
     from routers.admin_domains.playground.knowledge_scope_resolution import (
         resolve_playground_knowledge_scope,
     )
@@ -297,18 +296,33 @@ async def playground_set_knowledge_scope(
     if not gw or not os.path.isfile(gw):
         raise problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
 
-    with open_gateway_db(read_only=False) as db:
+    effective = normalize_knowledge_scope(raw_scope, project_id=project_id)
+    with open_gateway_db(read_only=True) as db:
         profile = ensure_profile_for_user(db, email=actor)
         tenant_id = str(profile.get("tenant_id") or "").strip() or tenant_id
-        effective = normalize_knowledge_scope(raw_scope, project_id=project_id)
-        upsert_session_runtime_setting(
-            db,
-            chat_id,
-            "knowledge_scope",
-            effective,
-            tenant_id=tenant_id,
-            updated_by=actor,
+
+    command = UpsertRuntimeSettingCommand(
+        tenant_id=tenant_id,
+        actor_email=runtime_session_actor(chat_id),
+        domain=RUNTIME_SESSION_DOMAIN,
+        key="knowledge_scope",
+        value=effective,
+        value_kind="string",
+        updated_by=actor,
+    )
+    try:
+        task_id = db_write_queue.enqueue_typed_command(command, db_path=gw, user_id="default")
+        command_status = db_write_queue.poll_task_status_sync(task_id, timeout_sec=3.0)
+    except Exception as exc:
+        raise problem(400, "No se pudo actualizar el alcance RAG", str(exc)) from exc
+    if command_status and command_status.status == "failed":
+        raise problem(
+            400,
+            "No se pudo actualizar el alcance RAG",
+            command_status.detail or "runtime setting write failed",
         )
+
+    with open_gateway_db(read_only=True) as db:
         resolved = resolve_playground_knowledge_scope(
             db,
             chat_id=chat_id,
@@ -318,6 +332,8 @@ async def playground_set_knowledge_scope(
         )
     return {
         "ok": True,
+        "queued": True,
+        "task_id": task_id,
         "chat_id": chat_id,
         "tenant_id": tenant_id,
         "knowledge_scope": resolved,

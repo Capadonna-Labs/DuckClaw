@@ -19,6 +19,16 @@ module.exports = {
       autorestart: true,
       watch: false,
       windowsHide: true,
+      filter_env: [
+        /^npm_/,
+        /^NEXT_/,
+        /^PNPM_/,
+        /^__NEXT_/,
+        "NODE_OPTIONS",
+        "NODE_ENV",
+        "PORT",
+        "INIT_CWD",
+      ],
       env: {
         PYTHONPATH: root,
         PYTHONUNBUFFERED: "1",

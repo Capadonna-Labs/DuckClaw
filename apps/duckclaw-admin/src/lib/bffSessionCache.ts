@@ -6,11 +6,14 @@
 import type { SessionUser } from '@/lib/authProxy';
 
 export const BFF_SESSION_COOKIE = 'session';
-export const BFF_SESSION_TTL_MS = 45_000;
+export const BFF_SESSION_TTL_MS = 120_000;
+/** Tras timeout del gateway, aceptar sesión ya validada durante este margen. */
+export const BFF_SESSION_STALE_GRACE_MS = 10 * 60_000;
 
 type CacheEntry = {
   user: SessionUser;
   expiresAt: number;
+  lastGoodAt: number;
 };
 
 const cache = new Map<string, CacheEntry>();
@@ -21,18 +24,28 @@ export function bffSessionKeyFromCookie(sessionCookie: string | null | undefined
   return key || null;
 }
 
-export function getCachedBffSession(key: string): SessionUser | null | undefined {
+export function getCachedBffSession(
+  key: string,
+  opts?: { allowStale?: boolean }
+): SessionUser | null | undefined {
   const entry = cache.get(key);
   if (!entry) return undefined;
-  if (Date.now() > entry.expiresAt) {
-    cache.delete(key);
-    return undefined;
+  const now = Date.now();
+  if (now <= entry.expiresAt) return entry.user;
+  if (opts?.allowStale && now <= entry.lastGoodAt + BFF_SESSION_STALE_GRACE_MS) {
+    return entry.user;
   }
-  return entry.user;
+  cache.delete(key);
+  return undefined;
 }
 
 export function setCachedBffSession(key: string, user: SessionUser): void {
-  cache.set(key, { user, expiresAt: Date.now() + BFF_SESSION_TTL_MS });
+  const now = Date.now();
+  cache.set(key, {
+    user,
+    expiresAt: now + BFF_SESSION_TTL_MS,
+    lastGoodAt: now,
+  });
 }
 
 export function invalidateBffSessionCache(key?: string | null): void {

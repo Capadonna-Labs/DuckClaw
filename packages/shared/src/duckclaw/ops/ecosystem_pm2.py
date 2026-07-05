@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from duckclaw.ops.pm2_env_filter import ecosystem_pm2_node_dev_filter_env_js_lines
 from duckclaw.ops.toolchain import resolve_repo_python
 
 # Compat: imports históricos desde manager / tests.
@@ -74,4 +75,5 @@ def ecosystem_pm2_fork_app_options_js_lines(*, max_restarts: int | None = 10) ->
     ]
     if max_restarts is not None:
         lines.append(f"      max_restarts: {max_restarts},")
+    lines.extend(ecosystem_pm2_node_dev_filter_env_js_lines())
     return lines

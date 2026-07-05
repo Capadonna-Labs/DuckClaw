@@ -91,6 +91,19 @@ export interface RuntimeConfigRow {
   value: string;
 }
 
+export interface GatewayHealthMetrics {
+  process_role?: string;
+  rss_mb?: number | null;
+  worker_graph_cache?: {
+    enabled?: boolean;
+    entries?: number;
+    max_entries?: number;
+    ttl_sec?: number;
+  };
+  knowledge_sync_queue_depth?: number | null;
+  collected_at?: number;
+}
+
 export interface AdminHealth {
   status: string;
   workers_count: number;
@@ -99,6 +112,7 @@ export interface AdminHealth {
   templates_dir: string;
   api_revision?: number;
   features?: { catalog?: boolean; ops?: boolean; projects?: boolean };
+  gateway_metrics?: GatewayHealthMetrics;
 }
 
 export interface ConsoleUser {

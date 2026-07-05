@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { OverviewMetrics } from '@/types/admin';
 import { HomeChecklist } from '@/components/admin/HomeChecklist';
+import { StackHealthCards } from '@/components/admin/StackHealthCards';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 import { useAuthStore } from '@/store/authStore';
@@ -19,10 +20,17 @@ export default function OverviewPage() {
   const isAdmin = isAdminRole(usuario?.rol);
   const gatewayFailed = useGatewayHealthStore((s) => s.error);
   const gatewayHealth = useGatewayHealthStore((s) => s.data);
+  const gatewayFetchedAt = useGatewayHealthStore((s) => s.fetchedAt);
+  const refreshGatewayHealth = useGatewayHealthStore((s) => s.refresh);
+  const gatewayChecking = !gatewayFailed && gatewayHealth == null && gatewayFetchedAt === 0;
   const [metrics, setMetrics] = useState<OverviewMetrics | null>(null);
   const [metricsError, setMetricsError] = useState<string | null>(null);
 
   const error = gatewayFailed ? friendlyGatewayError('Sin conexión') : null;
+
+  useEffect(() => {
+    void refreshGatewayHealth();
+  }, [refreshGatewayHealth]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -56,6 +64,12 @@ export default function OverviewPage() {
       </header>
 
       {error && <GatewayErrorBanner message={error} />}
+
+      <StackHealthCards
+        health={gatewayHealth}
+        loading={gatewayChecking}
+        gatewayError={gatewayFailed}
+      />
 
       <HomeChecklist />
 

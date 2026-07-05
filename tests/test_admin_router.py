@@ -41,6 +41,8 @@ def test_admin_health_ok(admin_client: TestClient):
     data = r.json()
     assert data.get("status") == "ok"
     assert "workers_count" in data
+    assert "gateway_metrics" in data
+    assert isinstance(data["gateway_metrics"], dict)
 
 
 def test_admin_prompt_policy_health_reports_missing_db_first_requirements(

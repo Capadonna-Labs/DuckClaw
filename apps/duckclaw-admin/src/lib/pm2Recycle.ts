@@ -11,8 +11,12 @@ function pm2RecycleShell(
   const startCmd = entry.only_flag
     ? `pm2 start ${entry.ecosystem} ${entry.only_flag}`
     : `pm2 start ${entry.ecosystem}`;
+  const legacyDeletes =
+    kind === 'gateway'
+      ? 'for n in DuckClaw-Gateway duckclaw-gateway DuckClaw-API; do pm2 delete "$n" 2>/dev/null || true; done'
+      : `pm2 delete ${entry.name} 2>/dev/null || true`;
   return `cd "${repoRoot}"
-pm2 delete ${entry.name} 2>/dev/null || true
+${legacyDeletes}
 ${startCmd}
 echo "${successToken}"
 `;

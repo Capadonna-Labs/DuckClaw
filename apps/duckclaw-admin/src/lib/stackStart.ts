@@ -116,11 +116,11 @@ export async function runStackStartLocal(): Promise<NormalizedOpsRunResult> {
   const shell = `${pm2WaitShellPreamble()}
 cd "${cwd}"
 GATEWAY_MODE="start"
-pm2 stop DuckClaw-Gateway 2>/dev/null || true
+pm2 stop DuckClaw-Gateway 2>/dev/null || pm2 stop duckclaw-gateway 2>/dev/null || true
 pm2 stop DuckClaw-DB-Writer 2>/dev/null || true
 pm2 stop DuckClaw-Knowledge-Indexer 2>/dev/null || true
 pm2 stop DuckClaw-Heartbeat 2>/dev/null || true
-wait_pm2_stopped DuckClaw-Gateway 15 || true
+wait_pm2_stopped DuckClaw-Gateway 15 || wait_pm2_stopped duckclaw-gateway 15 || true
 wait_pm2_stopped DuckClaw-DB-Writer 15 || true
 wait_pm2_stopped DuckClaw-Knowledge-Indexer 15 || true
 wait_pm2_stopped DuckClaw-Heartbeat 15 || true
@@ -131,7 +131,7 @@ wait_pm2_online DuckClaw-Knowledge-Indexer 30 || exit 1
 ${pm2RecycleHeartbeatShell(cwd).trim()}
 wait_pm2_online DuckClaw-Heartbeat 30 || exit 1
 ${pm2RecycleGatewayShell(cwd).trim()}
-wait_pm2_online DuckClaw-Gateway 30 || exit 1
+wait_pm2_online DuckClaw-Gateway 30 || wait_pm2_online duckclaw-gateway 30 || exit 1
 wait_gateway_health 45 || true
 GATEWAY_MODE="recreate"
 echo "GATEWAY_PM2_MODE=$GATEWAY_MODE"

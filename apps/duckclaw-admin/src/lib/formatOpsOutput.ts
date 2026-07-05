@@ -35,7 +35,7 @@ export function isPm2RestartInterrupted(r: Pick<OpsRunResult, 'exit_code' | 'std
   if (r.exit_code !== -2) return false;
   const stdout = r.stdout ?? '';
   if (!/Applying action restartProcessId/i.test(stdout)) return false;
-  if (r.op_id === 'pm2_restart_gateway') return /DuckClaw-Gateway/i.test(stdout);
+  if (r.op_id === 'pm2_restart_gateway') return /DuckClaw-Gateway|duckclaw-gateway/i.test(stdout);
   return false;
 }
 

@@ -20,6 +20,6 @@
 
 - Telegram: [`../telegram-gateway/TELEGRAM.md`](../telegram-gateway/TELEGRAM.md)
 - Patrones UI admin: [`docs/architecture/UIUX-PATTERNS.md`](../../../architecture/UIUX-PATTERNS.md)
-- Operaciones (heartbeat, meditate, multi-vault): [`docs/operations/`](../../../operations/)
+- Operaciones (heartbeat, loop, multi-vault): [`docs/operations/`](../../../operations/)
 
 **Train:** sin API admin `/train` — usar `uv run duckops train` y [`packages/agents/train/`](../../../../packages/agents/train/).

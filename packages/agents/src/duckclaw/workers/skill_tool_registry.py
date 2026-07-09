@@ -78,7 +78,18 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         skill_name="higgsfield",
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.higgsfield_bridge:register_higgsfield_skill",
-        keyword_context={"duckclaw_db": "db"},
+        keyword_context={
+            "duckclaw_db": "db",
+            "worker_id": "worker_id",
+            "tenant_id": "tenant_id",
+        },
+    ),
+    SkillToolRegistrar(
+        skill_name="slm_eval",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.slm_eval_bridge:register_slm_eval_skill",
+        empty_config_registers=True,
+        keyword_context={"db": "db"},
     ),
 )
 
@@ -118,6 +129,7 @@ def register_post_llm_skill_tools(
     *,
     db: Any,
     llm: Any,
+    tenant_id: str = "default",
 ) -> None:
     """Register configured skill tools that may depend on db or llm handles."""
     _register_configured_skill_tools(
@@ -130,6 +142,8 @@ def register_post_llm_skill_tools(
             "db": db,
             "llm": llm,
             "research_config": worker_skill_config(spec, "research"),
+            "worker_id": str(getattr(spec, "worker_id", None) or ""),
+            "tenant_id": str(tenant_id or "default"),
         },
     )
 

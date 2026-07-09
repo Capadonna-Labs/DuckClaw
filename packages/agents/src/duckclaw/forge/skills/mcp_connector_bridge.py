@@ -42,6 +42,8 @@ def _mcp_available() -> bool:
 
 def _public_tool_name(connector_id: str, tool_name: str) -> str:
     safe_connector = connector_id.replace("-", "_").replace(".", "_")
+    if safe_connector.startswith("mcp_"):
+        safe_connector = safe_connector[4:]
     safe_tool = tool_name.replace("-", "_").replace(".", "_")
     return f"mcp__{safe_connector}__{safe_tool}"
 
@@ -169,6 +171,47 @@ async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: 
     return tools
 
 
+def _open_catalog_db() -> Any:
+    """Open gateway DuckDB read-only for MCP connector registry lookups."""
+    from duckclaw import DuckClaw
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    path = (get_gateway_db_path() or "").strip()
+    if not path:
+        raise FileNotFoundError("Gateway DuckDB path not configured")
+    return DuckClaw(path, read_only=True, engine="python")
+
+
+def worker_has_mcp_connector(
+    *,
+    worker_id: str,
+    tenant_id: str = "default",
+    connector_id: str = "mcp_higgsfield",
+) -> bool:
+    """True when worker has an active MCP grant with bearer auth configured."""
+    if not worker_id:
+        return False
+    catalog_db = _open_catalog_db()
+    try:
+        worker_uid = resolve_worker_uid(catalog_db, worker_id=worker_id, tenant_id=tenant_id)
+        if not worker_uid:
+            return False
+        for connector in list_worker_mcp_connectors(
+            catalog_db, worker_uid=worker_uid, tenant_id=tenant_id
+        ):
+            if str(connector.get("connector_id") or "") != connector_id:
+                continue
+            kind = str(connector.get("auth_kind") or "none").strip().lower()
+            if kind == "bearer":
+                return bool(resolve_connector_bearer_token(catalog_db, connector))
+            return True
+    except Exception:
+        _log.debug("worker_has_mcp_connector check failed worker=%s", worker_id, exc_info=True)
+        return False
+    finally:
+        catalog_db.close()
+
+
 def register_worker_mcp_connector_tools(
     tools_list: list[Any],
     *,
@@ -176,14 +219,17 @@ def register_worker_mcp_connector_tools(
     worker_id: str,
     tenant_id: str = "default",
 ) -> None:
-    if db is None or not worker_id:
+    del db
+    if not worker_id:
         return
-    worker_uid = resolve_worker_uid(db, worker_id=worker_id, tenant_id=tenant_id)
-    if not worker_uid:
-        return
+    catalog_db = _open_catalog_db()
     try:
+        worker_uid = resolve_worker_uid(catalog_db, worker_id=worker_id, tenant_id=tenant_id)
+        if not worker_uid:
+            _log.debug("MCP connectors: worker_uid not found worker=%s tenant=%s", worker_id, tenant_id)
+            return
         connector_tools = _run_async_from_sync(
-            connect_worker_mcp_connectors(db, worker_uid=worker_uid, tenant_id=tenant_id)
+            connect_worker_mcp_connectors(catalog_db, worker_uid=worker_uid, tenant_id=tenant_id)
         )
         if connector_tools:
             tools_list.extend(connector_tools)
@@ -194,6 +240,8 @@ def register_worker_mcp_connector_tools(
             )
     except Exception:
         _log.warning("register_worker_mcp_connector_tools failed worker=%s", worker_id, exc_info=True)
+    finally:
+        catalog_db.close()
 
 
 async def test_mcp_connector(db: Any, connector: dict[str, Any]) -> dict[str, Any]:

@@ -1,6 +1,9 @@
+'use client';
+
 /** Convierte secuencias ANSI (estilo terminal macOS/PM2) a spans coloreados. */
 
 import type { ReactNode } from 'react';
+import { useTheme } from '@/components/shared/ThemeProvider';
 import { colorizePlainLogLine, hasAnsiCodes } from '@/lib/ansiLogParse';
 
 const ANSI_RE =
@@ -8,7 +11,7 @@ const ANSI_RE =
 
 export { colorizePlainLogLine, hasAnsiCodes, stripAnsi } from '@/lib/ansiLogParse';
 
-const FG: Record<number, string> = {
+const FG_DARK: Record<number, string> = {
   30: '#94a3b8',
   31: '#f87171',
   32: '#4ade80',
@@ -27,13 +30,75 @@ const FG: Record<number, string> = {
   97: '#ffffff',
 };
 
+const FG_LIGHT: Record<number, string> = {
+  30: '#475569',
+  31: '#b91c1c',
+  32: '#15803d',
+  33: '#a16207',
+  34: '#1d4ed8',
+  35: '#7e22ce',
+  36: '#0e7490',
+  37: '#1e293b',
+  90: '#64748b',
+  91: '#dc2626',
+  92: '#16a34a',
+  93: '#ca8a04',
+  94: '#2563eb',
+  95: '#9333ea',
+  96: '#0891b2',
+  97: '#0f172a',
+};
+
+const PALETTE_DARK = [
+  '#000000',
+  '#cd3131',
+  '#0dbc79',
+  '#e5e510',
+  '#2472c8',
+  '#bc3fbc',
+  '#11a8cd',
+  '#e5e5e5',
+  '#666666',
+  '#f14c4c',
+  '#23d18b',
+  '#f5f543',
+  '#3b8eea',
+  '#d670d6',
+  '#29b8db',
+  '#ffffff',
+];
+
+const PALETTE_LIGHT = [
+  '#1e293b',
+  '#b91c1c',
+  '#15803d',
+  '#a16207',
+  '#1d4ed8',
+  '#7e22ce',
+  '#0e7490',
+  '#334155',
+  '#64748b',
+  '#dc2626',
+  '#16a34a',
+  '#ca8a04',
+  '#2563eb',
+  '#9333ea',
+  '#0891b2',
+  '#0f172a',
+];
+
 type StyleState = {
   color?: string;
   bold?: boolean;
   dim?: boolean;
 };
 
-function applyCodes(state: StyleState, codes: number[]): StyleState {
+function applyCodes(
+  state: StyleState,
+  codes: number[],
+  fg: Record<number, string>,
+  palette: string[],
+): StyleState {
   const next = { ...state };
   for (let i = 0; i < codes.length; i += 1) {
     const c = codes[i];
@@ -44,29 +109,11 @@ function applyCodes(state: StyleState, codes: number[]): StyleState {
     if (c === 2) next.dim = true;
     if (c === 22) next.bold = false;
     if (c === 39) delete next.color;
-    if (FG[c]) next.color = FG[c];
+    if (fg[c]) next.color = fg[c];
     if (c === 38 && codes[i + 1] === 5 && codes[i + 2] != null) {
-      const palette = codes[i + 2];
-      if (palette >= 0 && palette <= 15) {
-        const base = [
-          '#000000',
-          '#cd3131',
-          '#0dbc79',
-          '#e5e510',
-          '#2472c8',
-          '#bc3fbc',
-          '#11a8cd',
-          '#e5e5e5',
-          '#666666',
-          '#f14c4c',
-          '#23d18b',
-          '#f5f543',
-          '#3b8eea',
-          '#d670d6',
-          '#29b8db',
-          '#ffffff',
-        ];
-        next.color = base[palette] ?? next.color;
+      const idx = codes[i + 2];
+      if (idx >= 0 && idx <= 15) {
+        next.color = palette[idx] ?? next.color;
       }
       i += 2;
     }
@@ -81,7 +128,10 @@ function styleToClass(state: StyleState): string {
   return parts.join(' ');
 }
 
-export function ansiTextToSpans(text: string): ReactNode[] {
+function ansiTextToSpans(text: string, theme: 'light' | 'dark'): ReactNode[] {
+  const fg = theme === 'dark' ? FG_DARK : FG_LIGHT;
+  const palette = theme === 'dark' ? PALETTE_DARK : PALETTE_LIGHT;
+
   if (!text) return [];
   if (!hasAnsiCodes(text)) {
     const lines = text.split('\n');
@@ -115,7 +165,7 @@ export function ansiTextToSpans(text: string): ReactNode[] {
         style={state.color ? { color: state.color } : undefined}
       >
         {chunk}
-      </span>
+      </span>,
     );
     last = end;
   };
@@ -130,7 +180,7 @@ export function ansiTextToSpans(text: string): ReactNode[] {
       .map((x) => Number.parseInt(x, 10))
       .filter((n) => !Number.isNaN(n));
     if (codes.length === 0) codes.push(0);
-    state = applyCodes(state, codes);
+    state = applyCodes(state, codes, fg, palette);
     last = m.index + m[0].length;
   }
   flush(src.length);
@@ -138,9 +188,12 @@ export function ansiTextToSpans(text: string): ReactNode[] {
 }
 
 export function AnsiLogText({ text, className = '' }: { text: string; className?: string }) {
+  const { theme } = useTheme();
   return (
-    <code className={`font-mono text-xs whitespace-pre-wrap break-words ${className}`}>
-      {ansiTextToSpans(text)}
+    <code
+      className={`font-mono text-xs whitespace-pre-wrap break-words text-gov-gray-800 dark:text-slate-200 ${className}`}
+    >
+      {ansiTextToSpans(text, theme)}
     </code>
   );
 }

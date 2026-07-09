@@ -1,4 +1,4 @@
-"""Enqueue meditate corrective mutations via db-writer state delta queue."""
+"""Enqueue loop corrective mutations via db-writer state delta queue."""
 
 from __future__ import annotations
 
@@ -8,39 +8,41 @@ import os
 import uuid
 from typing import Any
 
-from harness_core.states.meditate_state import DEFAULT_STALE_TASK_SOURCE_TABLE
+from harness_core.states.loop_state import DEFAULT_STALE_TASK_SOURCE_TABLE
 
 _log = logging.getLogger(__name__)
 
-DEFAULT_MEDITATE_STATE_DELTA_QUEUE = "duckclaw:state_delta:meditate"
+DEFAULT_LOOP_STATE_DELTA_QUEUE = "duckclaw:state_delta:loop"
 CIRCUIT_BREAKER_TTL_SECONDS = 3600
 
 
-def meditate_state_delta_queue_key() -> str:
+def loop_state_delta_queue_key() -> str:
     return (
-        os.environ.get("DUCKCLAW_MEDITATE_STATE_DELTA_QUEUE") or DEFAULT_MEDITATE_STATE_DELTA_QUEUE
+        os.environ.get("DUCKCLAW_LOOP_STATE_DELTA_QUEUE")
+        or os.environ.get("DUCKCLAW_MEDITATE_STATE_DELTA_QUEUE")
+        or DEFAULT_LOOP_STATE_DELTA_QUEUE
     ).strip()
 
 
 def circuit_breaker_redis_key(tenant_id: str, worker_id: str) -> str:
     t = (tenant_id or "default").strip() or "default"
     w = (worker_id or "unknown").strip() or "unknown"
-    return f"duckclaw:meditate:circuit_breaker:{t}:{w}"
+    return f"duckclaw:loop:circuit_breaker:{t}:{w}"
 
 
-def push_meditate_state_delta_sync(payload: dict[str, Any]) -> bool:
+def push_loop_state_delta_sync(payload: dict[str, Any]) -> bool:
     url = (os.environ.get("REDIS_URL") or os.environ.get("DUCKCLAW_REDIS_URL") or "").strip()
     if not url:
-        _log.warning("[meditate_state_delta] REDIS_URL ausente; omitiendo enqueue")
+        _log.warning("[loop_state_delta] REDIS_URL ausente; omitiendo enqueue")
         return False
     try:
         import redis
 
         r = redis.from_url(url, decode_responses=True)
-        r.lpush(meditate_state_delta_queue_key(), json.dumps(payload, ensure_ascii=False))
+        r.lpush(loop_state_delta_queue_key(), json.dumps(payload, ensure_ascii=False))
         return True
     except Exception as exc:
-        _log.warning("[meditate_state_delta] LPUSH falló: %s", exc)
+        _log.warning("[loop_state_delta] LPUSH falló: %s", exc)
         return False
 
 
@@ -104,7 +106,7 @@ def emit_purge_stale_tasks(
 ) -> bool:
     if not task_ids:
         return True
-    return push_meditate_state_delta_sync(
+    return push_loop_state_delta_sync(
         {
             "delta_type": "PURGE_STALE_TASKS",
             "tenant_id": tenant_id,
@@ -127,7 +129,7 @@ def emit_quarantine_memory(
 ) -> bool:
     if not memory_ids:
         return True
-    return push_meditate_state_delta_sync(
+    return push_loop_state_delta_sync(
         {
             "delta_type": "QUARANTINE_MEMORY",
             "tenant_id": tenant_id,
@@ -138,7 +140,7 @@ def emit_quarantine_memory(
     )
 
 
-def emit_meditate_audit(
+def emit_loop_audit(
     *,
     tenant_id: str,
     user_id: str,
@@ -148,9 +150,9 @@ def emit_meditate_audit(
     actions_json: list[dict[str, Any]],
     status: str,
 ) -> bool:
-    return push_meditate_state_delta_sync(
+    return push_loop_state_delta_sync(
         {
-            "delta_type": "UPSERT_MEDITATE_AUDIT",
+            "delta_type": "UPSERT_LOOP_AUDIT",
             "tenant_id": tenant_id,
             "user_id": user_id,
             "target_db_path": target_db_path,
@@ -162,3 +164,8 @@ def emit_meditate_audit(
             },
         }
     )
+
+
+meditate_state_delta_queue_key = loop_state_delta_queue_key
+push_meditate_state_delta_sync = push_loop_state_delta_sync
+emit_meditate_audit = emit_loop_audit

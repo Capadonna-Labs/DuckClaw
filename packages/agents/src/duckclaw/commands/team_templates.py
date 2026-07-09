@@ -179,11 +179,15 @@ def set_tenant_team_templates(
     )
 
 
-def _canonicalize_team_template_ids(ids: list, templates_root: Any = None) -> list:
+def _canonicalize_team_template_ids(
+    ids: list, templates_root: Any = None, *, tenant_id: str = "default"
+) -> list:
     """Resuelve alias de manifest y descarta ids sin template local."""
-    from duckclaw.workers.template_registry import list_template_ids, resolve_template_id
+    from duckclaw.workers.discovery import list_workers_for_fly
+    from duckclaw.workers.template_registry import resolve_template_id
 
-    all_t = list_template_ids(templates_root)
+    tid = (tenant_id or "default").strip() or "default"
+    all_t = list_workers_for_fly(tenant_id=tid, templates_root=templates_root)
     out: list[str] = []
     seen: set[str] = set()
     for raw in ids or []:
@@ -208,18 +212,18 @@ def get_effective_team_templates(
     3) DUCKCLAW_TEAM_MEMBERS
     4) todos los templates
     """
-    from duckclaw.workers.factory import list_workers
+    from duckclaw.workers.discovery import list_workers_for_fly
 
+    tid = str(tenant_id or "default").strip() or "default"
     chat_team = get_team_templates(db, chat_id)
     if chat_team:
-        return _canonicalize_team_template_ids(chat_team, templates_root)
-    tid = str(tenant_id or "default").strip() or "default"
+        return _canonicalize_team_template_ids(chat_team, templates_root, tenant_id=tid)
     tenant_team = get_tenant_team_templates(db, tid)
     if tenant_team:
-        return _canonicalize_team_template_ids(tenant_team, templates_root)
+        return _canonicalize_team_template_ids(tenant_team, templates_root, tenant_id=tid)
     env_raw = (os.environ.get("DUCKCLAW_TEAM_MEMBERS") or "").strip()
     if env_raw:
-        all_t = list_workers(templates_root)
+        all_t = list_workers_for_fly(tenant_id=tid, templates_root=templates_root)
         out: list[str] = []
         for part in env_raw.split(","):
             p = part.strip()
@@ -230,7 +234,7 @@ def get_effective_team_templates(
                 out.append(c)
         if out:
             return out
-    return list_workers(templates_root)
+    return list_workers_for_fly(tenant_id=tid, templates_root=templates_root)
 
 
 def _sync_tenant_team_if_admin(
@@ -271,10 +275,10 @@ def execute_team(
     requester_id: Any = None,
 ) -> str:
     """/workers [id1 id2 ...] [--add id...] [--rm worker_id]: equipo del chat."""
-    from duckclaw.workers.factory import list_workers
+    from duckclaw.workers.discovery import list_workers_for_fly
 
-    all_templates = list_workers()
     tid = str(tenant_id or "default").strip() or "default"
+    all_templates = list_workers_for_fly(tenant_id=tid)
     team = get_team_templates(db, chat_id)
     if not args or not args.strip():
         effective = get_effective_team_templates(db, chat_id, tid, None)

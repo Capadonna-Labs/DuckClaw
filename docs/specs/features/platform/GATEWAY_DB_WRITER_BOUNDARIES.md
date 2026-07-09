@@ -23,7 +23,8 @@ Complementa `GATEWAY_PROCESS_BOUNDARIES.md` (RAG/Indexer) y `DB_WRITER_CONTRACT.
 | `duckclaw:state_delta:context` | context_injection_handler |
 | `duckclaw:state_delta:visual` | visual_state_delta_handler |
 | `duckclaw:state_delta:vlm` | vlm_state_delta_handler |
-| `duckclaw:state_delta:meditate` | meditate_state_delta_handler |
+| `duckclaw:state_delta:loop` | loop_state_delta_handler |
+| `duckclaw:state_delta:meditate` | loop_state_delta_handler (legacy queue) |
 | `duckclaw:state_delta:reports` | reports_state_delta_handler |
 
 **Startup:** `startup_bootstrap.py` — DDL usage tables + `seed_catalog_if_empty` (cold start hub).

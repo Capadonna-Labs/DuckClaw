@@ -2,11 +2,10 @@ import { spawn } from 'child_process';
 import { join } from 'path';
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
+import { buildUvRunArgv } from '@/lib/resolveRepoRuntime';
 import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell, pm2RecycleHeartbeatShell, pm2RecycleKnowledgeIndexerShell } from '@/lib/pm2Recycle';
 import { pm2WaitShellPreamble } from '@/lib/pm2WaitShell';
-const SYNC_PM2 = [
-  'uv',
-  'run',
+const SYNC_PM2 = buildUvRunArgv([
   'python',
   '-c',
   [
@@ -15,7 +14,7 @@ const SYNC_PM2 = [
     'rerender_gateway_pm2_ecosystem(Path(".").resolve())',
     'print("PM2 config sincronizado")',
   ].join('; '),
-];
+]);
 
 function repoRoot(): string {
   const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
@@ -69,18 +68,12 @@ export async function runStackStartLocal(): Promise<NormalizedOpsRunResult> {
   const sync = await runArgv(cwd, SYNC_PM2);
   chunks.push('── Sincronizar PM2 desde .env ──\n', sync.stdout, sync.stderr);
   if (sync.exit_code !== 0) {
-    return normalizeOpsResult({
-      op_id: 'start_stack',
-      exit_code: sync.exit_code,
-      stdout: chunks.join('\n'),
-      stderr: '',
-      executed_via: 'local',
-    });
+    chunks.push('\n⚠ PM2 sync omitido (continuando arranque)\n');
   }
 
   const lockCheck = await runArgv(
     cwd,
-    ['uv', 'run', 'python', 'scripts/check_duckdb_lock_holders.py'],
+    buildUvRunArgv(['python', 'scripts/check_duckdb_lock_holders.py']),
     30_000
   );
   let blocking: Array<{ pid: number; db: string; kind: string; command: string }> = [];
@@ -124,12 +117,13 @@ wait_pm2_stopped DuckClaw-Gateway 15 || wait_pm2_stopped duckclaw-gateway 15 || 
 wait_pm2_stopped DuckClaw-DB-Writer 15 || true
 wait_pm2_stopped DuckClaw-Knowledge-Indexer 15 || true
 wait_pm2_stopped DuckClaw-Heartbeat 15 || true
+heal_pm2_corrupt_db_writer
 ${pm2RecycleDbWriterShell(cwd).trim()}
-wait_pm2_online DuckClaw-DB-Writer 30 || exit 1
+wait_pm2_online DuckClaw-DB-Writer 30 || echo "PM2_WARN: DuckClaw-DB-Writer not online yet"
 ${pm2RecycleKnowledgeIndexerShell(cwd).trim()}
-wait_pm2_online DuckClaw-Knowledge-Indexer 30 || exit 1
+wait_pm2_online DuckClaw-Knowledge-Indexer 30 || echo "PM2_OPTIONAL_SKIP: DuckClaw-Knowledge-Indexer"
 ${pm2RecycleHeartbeatShell(cwd).trim()}
-wait_pm2_online DuckClaw-Heartbeat 30 || exit 1
+wait_pm2_online DuckClaw-Heartbeat 30 || echo "PM2_OPTIONAL_SKIP: DuckClaw-Heartbeat"
 ${pm2RecycleGatewayShell(cwd).trim()}
 wait_pm2_online DuckClaw-Gateway 30 || wait_pm2_online duckclaw-gateway 30 || exit 1
 wait_gateway_health 45 || true
@@ -153,7 +147,7 @@ pm2 list
 
   const serve = await runArgv(
     cwd,
-    ['uv', 'run', 'python', 'scripts/restore_tailscale_admin_serve.py'],
+    buildUvRunArgv(['python', 'scripts/restore_tailscale_admin_serve.py']),
     60_000
   );
   chunks.push(

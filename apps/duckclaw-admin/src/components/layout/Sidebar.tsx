@@ -130,7 +130,7 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
       className="flex flex-col h-full min-h-0 w-64 bg-gov-blue-900 border-r border-gov-blue-700 shrink-0 dark:bg-dark-sidebar dark:border-dark-border"
       aria-label="Navegación principal"
     >
-      <div className="p-4 md:p-5 border-b border-gov-blue-700 dark:border-dark-border space-y-3 shrink-0">
+      <div className="h-16 px-4 md:px-5 border-b border-gov-blue-700 dark:border-dark-border flex items-center shrink-0">
         <div className="flex items-center gap-3">
           <BrandIcon />
           <BrandTitles />

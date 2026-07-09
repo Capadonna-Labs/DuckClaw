@@ -136,8 +136,8 @@ def list_mcp_connectors(db: Any, *, tenant_id: str = "default", include_inactive
     out: list[dict[str, Any]] = []
     for row in rows:
         connector = _row_to_connector(row)
-        connector.pop("auth_secret_key", None)
         connector["has_auth"] = _connector_has_auth(db, connector)
+        connector.pop("auth_secret_key", None)
         out.append(connector)
     return out
 
@@ -157,8 +157,8 @@ def get_mcp_connector(db: Any, *, connector_id: str, tenant_id: str = "default")
     if not row:
         return None
     connector = _row_to_connector(row)
-    connector.pop("auth_secret_key", None)
     connector["has_auth"] = _connector_has_auth(db, connector)
+    connector.pop("auth_secret_key", None)
     return connector
 
 
@@ -182,6 +182,9 @@ def get_mcp_connector_runtime(db: Any, *, connector_id: str, tenant_id: str = "d
 
 def _connector_has_auth(db: Any, connector: dict[str, Any]) -> bool:
     kind = str(connector.get("auth_kind") or "none").strip().lower()
+    preset = str(connector.get("preset_id") or "").strip().lower()
+    if preset == "higgsfield" and kind in ("", "none"):
+        kind = "bearer"
     if kind in ("", "none"):
         return True
     if kind == "bearer":
@@ -275,8 +278,8 @@ def tool_allowed_by_policy(connector: dict[str, Any], tool_name: str) -> bool:
         return False
     allowlist = [str(x).strip() for x in connector.get("tool_allowlist") or [] if str(x).strip()]
     if not allowlist:
-        return False
-    if "*" in allowlist:
+        allowed = True
+    elif "*" in allowlist:
         allowed = True
     else:
         allowed = name in allowlist

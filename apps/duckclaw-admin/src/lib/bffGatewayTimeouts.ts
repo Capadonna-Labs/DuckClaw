@@ -20,6 +20,12 @@ export function bffGatewayTimeoutMs(sub: string, method: string): number {
   if (path.startsWith('knowledge/') && verb !== 'GET' && verb !== 'HEAD') {
     return BFF_TIMEOUT_KNOWLEDGE_MUTATION_MS;
   }
+  if (path.startsWith('mcp/connectors/') && path.endsWith('/test')) {
+    return 90_000;
+  }
+  if (path.startsWith('mcp/connectors/') && verb !== 'GET' && verb !== 'HEAD') {
+    return 90_000;
+  }
   if (path === 'ops/run') {
     return 240_000;
   }

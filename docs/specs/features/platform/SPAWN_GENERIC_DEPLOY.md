@@ -11,7 +11,7 @@ Proveer un harness de agentes **local-first**, **agnóstico de dominio** y desat
 spawn duckclaw <cloud>
 ```
 
-La VM ejecuta [`scripts/deploy/spawn-install.sh`](../../../scripts/deploy/spawn-install.sh) tras clonar el repo. No se inyectan esquemas `quant_core`, `finance_worker`, `pqrsd_crm` ni `run_schema` de templates industriales en el día cero.
+La VM ejecuta [`scripts/deploy/spawn-install.sh`](../../../scripts/deploy/spawn-install.sh) tras clonar el repo. No se inyectan esquemas verticales de templates forge industriales en el día cero.
 
 ## Contrato `.env` (VM)
 
@@ -38,7 +38,7 @@ Plantilla: [`config/.env.spawn.example`](../../../config/.env.spawn.example).
 3. **Python:** `uv sync` en la raíz del monorepo.
 4. **Bootstrap:** `uv run duckops db bootstrap --core-only --only <DUCKDB_PATH>` (síncrono, antes de PM2; wrapper compatible: `scripts/bootstrap_dbs.py`).
 5. **Admin UI:** `pnpm install` + `pnpm build` en `apps/duckclaw-admin`; `.env.local` con gateway URL y admin key.
-6. **PM2:** `config/ecosystem.spawn.config.cjs` → Gateway `:8000`, Admin `:3000`.
+6. **PM2:** `config/ecosystem.spawn.config.cjs` → Gateway `:8000`, Admin `:3000`, Heartbeat (ticker `/loop --delta` y `/crons --delta` cuando `DUCKCLAW_EMBED_GOALS_TICKER=false`).
 
 ## Tablas core-only (`--core-only`)
 
@@ -54,7 +54,7 @@ Plantilla: [`config/.env.spawn.example`](../../../config/.env.spawn.example).
 | `main.semantic_memory` | RAG / admin memory |
 | `system.duckdb` registry | vía `ensure_registry()` |
 
-**Excluido:** `quant_core`, `pqrsd_crm`, `finance_worker`, `war_room_core`, `run_schema` de templates forge.
+**Excluido:** esquemas verticales legacy de templates forge (`run_schema` y dominios de extensión externa).
 
 ## Stack PM2 (perfil mínimo)
 
@@ -62,6 +62,7 @@ Plantilla: [`config/.env.spawn.example`](../../../config/.env.spawn.example).
 |---------|--------|--------|
 | `DuckClaw-Gateway` | 8000 | FastAPI |
 | `duckclaw-admin-ui` | 3000 | Next.js producción |
+| `DuckClaw-Heartbeat` | — | Ticker proactive `/loop --delta`, `/crons --delta`, homeostasis (requerido si `DUCKCLAW_EMBED_GOALS_TICKER=false`) |
 
 **Fuera de PM2 (perfil mínimo):** `DuckClaw-DB-Writer` — ver [Cola huérfana](#cola-huérfana-redis-sin-db-writer).
 
@@ -99,8 +100,8 @@ Código: [`spawn_profile.py`](../../../packages/shared/src/duckclaw/spawn_profil
 
 ```bash
 duckdb db/private/default/duckclaw.duckdb -c \
-  "SELECT schema_name FROM information_schema.schemata WHERE schema_name IN ('quant_core','pqrsd_crm','finance_worker');"
-# 0 filas
+  "SELECT schema_name FROM information_schema.schemata WHERE schema_name NOT IN ('main','information_schema','pg_catalog','system');"
+# 0 filas (solo core transversal)
 
 curl -s http://127.0.0.1:8000/health
 curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/

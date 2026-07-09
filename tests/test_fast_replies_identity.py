@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from duckclaw.commands.fast_replies import _is_capabilities_smalltalk, _is_knowledge_inventory_smalltalk
+from duckclaw.commands.fast_replies import (
+    _is_capabilities_smalltalk,
+    _is_knowledge_inventory_smalltalk,
+    resolve_fly_command_text,
+)
 
 
 def test_identity_multi_question_triggers_fast_path() -> None:
@@ -26,6 +30,14 @@ def test_concrete_sql_question_not_fast_path() -> None:
 def test_knowledge_inventory_question_triggers_fast_path() -> None:
     msg = "¿Qué base de conocimiento tienes?"
     assert _is_knowledge_inventory_smalltalk(msg) is True
+
+
+def test_resolve_fly_command_text_with_knowledge_scope() -> None:
+    wrapped = (
+        "[KNOWLEDGE_SCOPE]\nAlcance RAG: Plataforma\n[/KNOWLEDGE_SCOPE]\n/goals"
+    )
+    assert resolve_fly_command_text(user_incoming="/goals", message=wrapped) == "/goals"
+    assert resolve_fly_command_text(user_incoming="", message=wrapped) == "/goals"
 
 
 def test_knowledge_inventory_with_empty_rag_scope() -> None:

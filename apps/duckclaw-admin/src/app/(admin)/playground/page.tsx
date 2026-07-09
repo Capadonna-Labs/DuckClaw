@@ -15,13 +15,16 @@ import {
   PanelRightOpen,
   Terminal,
   Trash2,
+  Pencil,
   X,
 } from 'lucide-react';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
+import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
 import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
+import { ChatSlmSelector } from '@/components/chat/ChatSlmSelector';
 import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
 import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
@@ -476,22 +479,48 @@ export default function PlaygroundPage() {
       {settingsModal === 'model' && (
         <SettingsModal
           title="Model selection"
-          description="Proveedor y modelo LLM de esta conversación."
+          description="LLM remoto (profesor) y SLM local opcional (MLX-Inference PM2)."
           size="wide"
           onClose={() => setSettingsModal(null)}
         >
           {conv.sessionId ? (
-            <div className="space-y-4">
-              <SettingValue label="Actual" value={`${config?.llm?.provider || '—'} · ${config?.llm?.model || '—'}`} />
-              <ChatLlmSelectors
-                chatId={conv.sessionId}
-                provider={config?.llm?.provider ?? ''}
-                model={config?.llm?.model ?? ''}
-                catalog={config?.catalog ?? []}
-                onUpdated={loadConfig}
-                disabled={config?.authorized === false || chat.loading}
-                size="modal"
-              />
+            <div className="space-y-6">
+              <div className="space-y-3">
+                <SettingValue
+                  label="LLM actual"
+                  value={`${config?.llm?.provider || '—'} · ${config?.llm?.model || '—'}`}
+                />
+                <p className="text-xs font-black uppercase tracking-wider text-gov-gray-500">LLM</p>
+                <ChatLlmSelectors
+                  chatId={conv.sessionId}
+                  provider={config?.llm?.provider ?? ''}
+                  model={config?.llm?.model ?? ''}
+                  catalog={config?.catalog ?? []}
+                  onUpdated={loadConfig}
+                  disabled={config?.authorized === false || chat.loading}
+                  size="modal"
+                />
+              </div>
+              <div className="space-y-3 border-t dark:border-dark-border pt-4">
+                <SettingValue
+                  label="SLM actual"
+                  value={
+                    config?.slm?.enabled
+                      ? `${config.slm.model_short || config.slm.model} (${config.slm.mlx_status})`
+                      : 'Ninguno'
+                  }
+                />
+                <p className="text-xs font-black uppercase tracking-wider text-gov-gray-500">
+                  SLM (opcional)
+                </p>
+                <ChatSlmSelector
+                  chatId={conv.sessionId}
+                  slm={config?.slm}
+                  onUpdated={loadConfig}
+                  disabled={config?.authorized === false || chat.loading}
+                  size="modal"
+                />
+              </div>
             </div>
           ) : (
             <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
@@ -745,6 +774,7 @@ function PlaygroundHistoryView({ tenantId, onSelectConversation }: { tenantId?: 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
   const uniqueConversations = useMemo(
     () => uniqueConversationsBySession(conversations),
     [conversations]
@@ -774,6 +804,16 @@ function PlaygroundHistoryView({ tenantId, onSelectConversation }: { tenantId?: 
       cancelled = true;
     };
   }, [tenantId]);
+
+  const renameHistoryConversation = async (sessionId: string, title: string) => {
+    setError(null);
+    const meta = await adminService.patchConversation(sessionId, title, tenantId);
+    setConversations((prev) =>
+      prev.map((item) =>
+        item.session_id === sessionId ? { ...item, title: meta.title || title } : item
+      )
+    );
+  };
 
   const deleteHistoryConversation = async (conversation: AdminConversation) => {
     const title = conversation.title || conversation.session_id;
@@ -827,44 +867,69 @@ function PlaygroundHistoryView({ tenantId, onSelectConversation }: { tenantId?: 
         )}
         {tenantId?.trim() && !loading && !error && uniqueConversations.length > 0 && (
           <ul className="grid gap-2">
-            {uniqueConversations.map((conversation) => (
+            {uniqueConversations.map((conversation) => {
+              const isRenaming = renamingSessionId === conversation.session_id;
+              return (
               <li key={conversation.session_id}>
                 <div className="flex items-stretch gap-2 rounded-2xl border dark:border-dark-border p-3 hover:border-gov-blue-300 hover:bg-gov-blue-50/50 dark:hover:bg-dark-bg transition-colors">
                   <button
                     type="button"
-                    onClick={() => onSelectConversation?.(conversation.session_id)}
+                    onClick={() => {
+                      if (!isRenaming) onSelectConversation?.(conversation.session_id);
+                    }}
                     className="min-w-0 flex-1 text-left"
                   >
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="font-bold truncate dark:text-dark-text">
-                          {conversation.title || conversation.session_id}
-                        </p>
-                        <p className="text-xs text-gov-gray-500 mt-1 line-clamp-2">
-                          {conversation.last_message_preview || 'Sin mensajes todavía'}
-                        </p>
-                      </div>
-                      <span className="text-[10px] font-black uppercase tracking-wide text-gov-gray-400 shrink-0">
-                        {formatConversationTime(conversation.updated_at)}
-                      </span>
+                    <div className="min-w-0">
+                      <EditableConversationTitle
+                        value={conversation.title || conversation.session_id}
+                        onSave={async (title) => {
+                          await renameHistoryConversation(conversation.session_id, title);
+                          setRenamingSessionId(null);
+                        }}
+                        variant="history"
+                        hideEditIcon
+                        editing={isRenaming}
+                        onEditingChange={(next) =>
+                          setRenamingSessionId(next ? conversation.session_id : null)
+                        }
+                      />
+                      <p className="text-xs text-gov-gray-500 mt-1 line-clamp-2">
+                        {conversation.last_message_preview || 'Sin mensajes todavía'}
+                      </p>
                     </div>
                     <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-400 mt-2">
                       {conversation.last_worker_id || 'sin worker'} · {conversation.message_count} mensajes
                     </p>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => void deleteHistoryConversation(conversation)}
-                    disabled={deletingSessionId === conversation.session_id}
-                    className="shrink-0 self-center rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
-                    aria-label={`Eliminar conversación ${conversation.title || conversation.session_id}`}
-                  >
-                    <Trash2 size={15} aria-hidden />
-                    <span className="sr-only">Eliminar</span>
-                  </button>
+                  <div className="flex shrink-0 flex-col items-center justify-between gap-1.5 py-0.5">
+                    <span className="text-[10px] font-black uppercase tracking-wide text-gov-gray-400 whitespace-nowrap">
+                      {formatConversationTime(conversation.updated_at)}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setRenamingSessionId(conversation.session_id)}
+                      className="rounded-xl border border-gov-gray-200 bg-white px-3 py-2 text-xs font-bold text-gov-gray-600 hover:border-gov-blue-300 hover:text-gov-blue-700 dark:border-dark-border dark:bg-dark-surface dark:text-dark-muted dark:hover:text-dark-cyan"
+                      aria-label={`Renombrar conversación ${conversation.title || conversation.session_id}`}
+                      title="Renombrar conversación"
+                    >
+                      <Pencil size={15} aria-hidden />
+                      <span className="sr-only">Renombrar</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void deleteHistoryConversation(conversation)}
+                      disabled={deletingSessionId === conversation.session_id}
+                      className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+                      aria-label={`Eliminar conversación ${conversation.title || conversation.session_id}`}
+                    >
+                      <Trash2 size={15} aria-hidden />
+                      <span className="sr-only">Eliminar</span>
+                    </button>
+                  </div>
                 </div>
               </li>
-            ))}
+            );
+            })}
           </ul>
         )}
       </div>

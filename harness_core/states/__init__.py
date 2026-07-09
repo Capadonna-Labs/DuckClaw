@@ -1,4 +1,4 @@
-from harness_core.states.meditate_state import (
+from harness_core.states.loop_state import (
     CorrectiveAction,
     CurrentMetrics,
     HomeostasisTarget,

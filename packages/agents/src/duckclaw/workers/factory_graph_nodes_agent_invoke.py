@@ -23,6 +23,7 @@ from duckclaw.forge.rag.tool_policy import (
     should_prioritize_rag_over_storage_tools,
     without_storage_tools,
 )
+from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
 from duckclaw.workers.db_intent_policy import explicit_duckdb_schema_request
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.factory_graph_nodes_agent_policy_early import make_agent_policy_early

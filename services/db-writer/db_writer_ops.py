@@ -33,6 +33,8 @@ async def push_dlq(
     source_queue: str,
     message: str,
     error: str,
+    *,
+    handler: str = "",
 ) -> None:
     """Encola mensaje fallido en la DLQ derivada de la cola origen."""
     dlq_key = f"{source_queue.rstrip()}{DLQ_SUFFIX}"
@@ -42,6 +44,8 @@ async def push_dlq(
         "error": (error or "")[:2000],
         "ts": int(time.time()),
     }
+    if handler:
+        payload["handler"] = handler
     try:
         await redis_client.lpush(dlq_key, json.dumps(payload, ensure_ascii=False))
         logger.warning("DLQ: encolado en %s", dlq_key)

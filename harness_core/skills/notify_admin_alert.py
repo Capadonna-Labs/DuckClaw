@@ -1,4 +1,4 @@
-"""Admin SSE alert for meditate critical events."""
+"""Admin SSE alert for loop critical events."""
 
 from __future__ import annotations
 
@@ -18,12 +18,12 @@ def notify_admin_alert(
     distance_vector: dict[str, float] | None = None,
     actions: list[dict[str, Any]] | None = None,
 ) -> None:
-    """Publish meditate_critical alert via admin chat heartbeat SSE."""
+    """Publish loop_critical alert via admin chat heartbeat SSE."""
     cid = (admin_chat_id or "").strip()
     if not cid:
         _log.debug("notify_admin_alert: no admin_chat_id; skip")
         return
-    extra: dict[str, Any] = {"alert_type": "meditate_critical"}
+    extra: dict[str, Any] = {"alert_type": "loop_critical"}
     if tenant_id:
         extra["tenant_id"] = tenant_id
     if distance_vector:
@@ -39,7 +39,7 @@ def notify_admin_alert(
         publish_admin_chat_heartbeat(
             cid,
             text,
-            kind="meditate_critical",
+            kind="loop_critical",
             worker_id=worker_id,
             artifact_tenant_id=tenant_id,
         )

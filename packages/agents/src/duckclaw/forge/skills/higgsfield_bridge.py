@@ -360,10 +360,23 @@ def register_higgsfield_skill(
     higgsfield_config: Optional[dict] = None,
     *,
     duckclaw_db: Any = None,
+    worker_id: str = "",
+    tenant_id: str = "default",
 ) -> None:
     cfg = higgsfield_config if isinstance(higgsfield_config, dict) else {}
     if cfg.get("enabled") is False:
         return
+    try:
+        from duckclaw.forge.skills.mcp_connector_bridge import worker_has_mcp_connector
+
+        if worker_has_mcp_connector(worker_id=worker_id, tenant_id=tenant_id):
+            _log.info(
+                "Higgsfield: skipping REST tools for worker=%s (MCP connector active)",
+                worker_id or "?",
+            )
+            return
+    except Exception:
+        _log.debug("Higgsfield MCP preference check skipped", exc_info=True)
     token_env = str(cfg.get("token_env") or "HIGGSFIELD_API_KEY")
     if not _hf_key(token_env):
         _log.warning("Higgsfield disabled: missing %s", token_env)

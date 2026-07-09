@@ -149,6 +149,8 @@ def run_manual_context_fold(
     worker_id: str | None = None,
     history: list[dict[str, Any]] | None = None,
     vault_db_path: str | None = None,
+    fold_focus: str = "default",
+    alignment_preface: str = "",
 ) -> tuple[str | None, str | None, dict[str, Any]]:
     """
     Ejecuta fold LLM del hilo.
@@ -218,6 +220,8 @@ def run_manual_context_fold(
         prompt_base=prompt_base,
         llm_summary=summary_llm,
         force_prune=True,
+        fold_focus=fold_focus,
+        alignment_preface=alignment_preface,
     )
     new_summary = (out.get("analytical_summary") or "").strip()
     if not new_summary:

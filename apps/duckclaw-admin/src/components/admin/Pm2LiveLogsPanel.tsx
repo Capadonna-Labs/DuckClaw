@@ -22,7 +22,7 @@ const LOG_VIEWPORT_SHELL_CLASS =
   'flex min-h-[180px] max-h-[min(50vh,420px)] min-w-0 flex-col overflow-hidden';
 
 const LOG_VIEWPORT_SCROLL_CLASS =
-  'h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-2 font-mono text-[10px] leading-relaxed sm:p-3 sm:text-[11px]';
+  'h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-2 font-mono text-[10px] leading-relaxed text-gov-gray-800 sm:p-3 sm:text-[11px] dark:text-slate-200';
 
 /** Clases compartidas para viewport PM2 con scroll interno acotado. */
 export const PM2_LOG_VIEWPORT_SHELL_CLASS = LOG_VIEWPORT_SHELL_CLASS;
@@ -339,7 +339,7 @@ export function Pm2LiveLogsViewport({ className = '' }: { className?: string }) 
       {logText ? (
         <AnsiLogText text={logText} />
       ) : (
-        <span className="text-slate-500">
+        <span className="text-gov-gray-500 dark:text-slate-500">
           {streaming ? 'Esperando líneas…' : 'Activa Stream en Herramientas.'}
         </span>
       )}
@@ -374,7 +374,7 @@ export function Pm2LiveLogsPanel({ embedded = false, autoStart = false }: Props)
               </p>
             </div>
           </div>
-          <div className="space-y-0 overflow-hidden rounded-xl border dark:border-dark-border bg-slate-950/95">
+          <div className="space-y-0 overflow-hidden rounded-xl border border-gov-gray-200 bg-white text-gov-gray-800 dark:border-dark-border dark:bg-slate-950/95 dark:text-slate-200">
             <Pm2LiveLogsControls />
             <div className={LOG_VIEWPORT_SHELL_CLASS}>
               <Pm2LiveLogsViewport />

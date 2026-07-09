@@ -6,8 +6,8 @@ import json
 import logging
 from typing import Any
 
-from harness_core.skills.emit_correction_delta import push_meditate_state_delta_sync
-from harness_core.states.meditate_state import DomainGoal, HomeostasisManifest, HomeostasisTarget
+from harness_core.skills.emit_correction_delta import push_loop_state_delta_sync
+from harness_core.states.loop_state import DomainGoal, HomeostasisManifest, HomeostasisTarget
 
 _log = logging.getLogger(__name__)
 
@@ -55,34 +55,41 @@ def _query_manifest_row(db: Any, tenant_id: str) -> HomeostasisManifest:
 
 
 def _legacy_goals_from_chat(db: Any, chat_id: Any) -> list[DomainGoal]:
+    from harness_core.goal_priority import assign_sequential_priorities, parse_goal_priority
+
     try:
         from duckclaw.commands.goals import get_manager_goals
 
         raw_goals = get_manager_goals(db, chat_id)
         out: list[DomainGoal] = []
-        for g in raw_goals or []:
+        for idx, g in enumerate(raw_goals or [], start=1):
             if not isinstance(g, dict):
                 continue
             key = (g.get("belief_key") or "").strip()
             if not key:
                 continue
             try:
+                gk_raw = str(g.get("goal_kind") or "task").strip().lower()
+                goal_kind = "monitor" if gk_raw == "monitor" else "task"
+                prio = parse_goal_priority(g.get("priority"), default=idx)
                 out.append(
                     DomainGoal(
                         belief_key=key,
                         target_value=float(g.get("target_value") or 0),
                         threshold=float(g.get("threshold") or 0),
                         title=str(g.get("title") or key).strip(),
+                        goal_kind=goal_kind,
                         observed_value=(
                             float(g["observed_value"])
                             if g.get("observed_value") is not None
                             else None
                         ),
+                        priority=prio,
                     )
                 )
             except (TypeError, ValueError):
                 continue
-        return out
+        return assign_sequential_priorities(out)  # type: ignore[arg-type]
     except Exception:
         return []
 
@@ -114,7 +121,9 @@ def load_homeostasis_targets(db: Any, tenant_id: str) -> HomeostasisTarget:
 
 
 def manifest_goals_as_dicts(manifest: HomeostasisManifest) -> list[dict[str, Any]]:
-    return [g.model_dump() for g in manifest.goals]
+    from harness_core.goal_priority import sort_goals_by_priority
+
+    return [g.model_dump() for g in sort_goals_by_priority(manifest.goals)]
 
 
 def get_manifest_goals_for_chat(
@@ -123,7 +132,7 @@ def get_manifest_goals_for_chat(
     *,
     tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Goals from homeostasis manifest (single source for /crons scheduler and /meditate)."""
+    """Goals from homeostasis manifest (single source for /crons scheduler and /loop)."""
     tid = (tenant_id or "").strip()
     if not tid:
         try:
@@ -142,8 +151,8 @@ def save_homeostasis_manifest(
     target_db_path: str,
     manifest: HomeostasisManifest,
 ) -> bool:
-    """Enqueue UPSERT_HOMEOSTASIS_MANIFEST via meditate state delta queue."""
-    return push_meditate_state_delta_sync(
+    """Enqueue UPSERT_HOMEOSTASIS_MANIFEST via loop state delta queue."""
+    return push_loop_state_delta_sync(
         {
             "delta_type": "UPSERT_HOMEOSTASIS_MANIFEST",
             "tenant_id": tenant_id,

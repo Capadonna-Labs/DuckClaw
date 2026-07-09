@@ -33,7 +33,7 @@ Mapa canónico de `docs/`. Las **specs normativas** viven bajo **`docs/specs/`**
 
 ### `harness_core/` es core activo
 
-El directorio [`harness_core/`](../harness_core/) en la raíz **no es legacy**. Es el runtime de **Meditate** (homeostasis de infraestructura): grafos, políticas y skills del termostato. Comando fly `/meditate`, runbook [`docs/operations/Meditate-Homeostasis.md`](operations/Meditate-Homeostasis.md).
+El directorio [`harness_core/`](../harness_core/) en la raíz **no es legacy**. Es el runtime de **Loop** (homeostasis de infraestructura): grafos, políticas y skills del termostato. Comando fly `/loop`, runbook [`docs/operations/Loop-Homeostasis.md`](operations/Loop-Homeostasis.md).
 
 ### Train: sin API admin `/train`
 

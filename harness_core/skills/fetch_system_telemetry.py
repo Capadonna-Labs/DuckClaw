@@ -1,4 +1,4 @@
-"""Read-only DuckDB telemetry sweep for meditate homeostasis."""
+"""Read-only DuckDB telemetry sweep for loop homeostasis."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 
 from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
 
-from harness_core.states.meditate_state import CurrentMetrics, HomeostasisTarget
+from harness_core.states.loop_state import CurrentMetrics, HomeostasisTarget
 
 _log = logging.getLogger(__name__)
 

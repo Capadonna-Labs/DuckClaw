@@ -15,8 +15,11 @@ from duckclaw.write_handlers.mcp_connectors import _apply_upsert_mcp_connector
 
 
 def test_presets_include_higgsfield_and_stdio_profiles() -> None:
+    from duckclaw.mcp_connector_presets import default_mcp_connector_preset_ids
+
     presets = {p["preset_id"]: p for p in list_mcp_connector_presets()}
     assert "higgsfield" in presets
+    assert "higgsfield" in default_mcp_connector_preset_ids()
     assert presets["higgsfield"]["transport"] == "streamable_http"
     assert presets["higgsfield"]["endpoint_url"] == "https://mcp.higgsfield.ai/mcp"
     assert "mcp_fetch" in presets
@@ -40,7 +43,8 @@ def test_upsert_mcp_connector_from_preset_uses_stable_id() -> None:
         },
     )
     row = con.execute(
-        "SELECT connector_id, transport, preset_id, auth_kind FROM main.admin_mcp_connectors"
+        "SELECT connector_id, transport, preset_id, auth_kind FROM main.admin_mcp_connectors "
+        "WHERE connector_id = 'mcp_mcp_time'"
     ).fetchone()
     assert row is not None
     assert row[0] == "mcp_mcp_time"

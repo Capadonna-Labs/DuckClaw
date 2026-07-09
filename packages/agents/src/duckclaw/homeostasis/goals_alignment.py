@@ -39,6 +39,8 @@ class AlignmentItem:
     is_anomaly: bool
     has_data: bool
     comparison: str = "symmetric"
+    goal_kind: str = "task"
+    priority: int = 100
 
 
 @dataclass
@@ -109,6 +111,38 @@ def _parse_float(raw: Any) -> float | None:
         return None
 
 
+def manifest_monitor_goal_keys(goals: list[dict[str, Any]] | list[Any]) -> list[str]:
+    """belief_keys de metas monitor (nunca declarables como cumplidas vía HITL)."""
+    out: list[str] = []
+    for g in goals or []:
+        if isinstance(g, dict):
+            kind = str(g.get("goal_kind") or "task").strip() or "task"
+            key = (g.get("belief_key") or "").strip()
+        else:
+            kind = str(getattr(g, "goal_kind", None) or "task").strip() or "task"
+            key = (getattr(g, "belief_key", None) or "").strip()
+        if kind == "monitor" and key:
+            out.append(key)
+    return out
+
+
+def hitl_declarable_for_goals(goals: list[dict[str, Any]]) -> tuple[bool, str]:
+    """
+    False si el manifiesto incluye metas monitor: no se declaran «cumplidas» con /loop-approve.
+    """
+    keys = manifest_monitor_goal_keys(goals)
+    if not keys:
+        return True, ""
+    preview = ", ".join(keys[:4])
+    if len(keys) > 4:
+        preview += f" (+{len(keys) - 4})"
+    return (
+        False,
+        f"Metas monitor ({preview}) son revisión continua; no declares cumplimiento ni "
+        "uses request_homeostasis_validation para cerrarlas.",
+    )
+
+
 def refresh_goal_observations(db: Any, chat_id: Any, worker_id: str) -> list[dict]:
     """
     Normaliza observed_value ya persistido en goals sin LLM.
@@ -172,8 +206,11 @@ def assess_goals_list_alignment(
     worker_id: str = "",
 ) -> AlignmentReport:
     from duckclaw.commands.goals import _get_goals_registry_for_chat
+    from harness_core.goal_priority import parse_goal_priority, sort_goals_by_priority
 
-    goals = refresh_goals_list_observations(db, chat_id, worker_id, goals)
+    goals = sort_goals_by_priority(
+        refresh_goals_list_observations(db, chat_id, worker_id, goals)
+    )
     registry = _get_goals_registry_for_chat(db, chat_id)
     key_to_belief = {b.key.strip(): b for b in (registry.beliefs if registry else [])}
 
@@ -196,6 +233,8 @@ def assess_goals_list_alignment(
             comp = getattr(b, "comparison", "symmetric") or "symmetric"
 
         title = _goal_title(g, key)
+        goal_kind = str(g.get("goal_kind") or "task").strip() or "task"
+        priority = parse_goal_priority(g.get("priority"))
         has_data = observed is not None and target is not None and thresh is not None
         if not has_data or (target == 0 and thresh == 0):
             items.append(
@@ -209,6 +248,8 @@ def assess_goals_list_alignment(
                     is_anomaly=False,
                     has_data=False,
                     comparison=comp,
+                    goal_kind=goal_kind,
+                    priority=priority,
                 )
             )
             continue
@@ -227,6 +268,8 @@ def assess_goals_list_alignment(
                 is_anomaly=res.is_anomaly,
                 has_data=True,
                 comparison=comp,
+                goal_kind=goal_kind,
+                priority=priority,
             )
         )
 
@@ -235,7 +278,10 @@ def assess_goals_list_alignment(
     if not aligned:
         first = next((i for i in items if i.is_anomaly), None)
         if first:
-            opener = f"Detecté desalineación en «{first.title}» (obs={first.observed}, meta={first.target})."
+            opener = (
+                f"Detecté desalineación en P{first.priority} «{first.title}» "
+                f"(obs={first.observed}, meta={first.target})."
+            )
         else:
             opener = pick_nudge_opener(str(chat_id), 0.0)
 
@@ -269,6 +315,44 @@ def assess_goals_alignment(
         pass
     goals = refresh_goal_observations(db, chat_id, worker_id)
     return assess_goals_list_alignment(db, chat_id, goals, worker_id=worker_id)
+
+
+def format_alignment_report_markdown(report: AlignmentReport) -> str:
+    """Bloque legible para /loop --status y reportes fly."""
+    lines = ["## Alineación con /goals", ""]
+    if report.goals_count <= 0:
+        lines.append("Sin metas en manifiesto — define objetivos con `/goals`.")
+        return "\n".join(lines)
+    if report.aligned:
+        lines.append(f"**Estado:** alineado ({report.goals_count} meta(s)).")
+    else:
+        lines.append(
+            f"**Estado:** {report.misaligned_count} desvío(s) "
+            f"de {report.goals_count} meta(s)."
+        )
+    if report.opener_hint:
+        lines.append(report.opener_hint)
+    if report.goals_count > 1:
+        lines.append(
+            "Orden de atención: menor P primero (P1 antes que P2)."
+        )
+    lines.append("")
+    for item in report.items:
+        kind = (item.goal_kind or "task").strip() or "task"
+        title = (item.title or item.belief_key or "?").strip()
+        pl = f"P{item.priority} · " if item.priority >= 1 else ""
+        if not item.has_data:
+            lines.append(f"- {pl}**{title}** (`{kind}`): sin datos observables aún")
+            continue
+        flag = "⚠️" if item.is_anomaly else "✓"
+        obs = item.observed if item.observed is not None else "?"
+        target = item.target if item.target is not None else "?"
+        thresh = item.threshold if item.threshold is not None else "?"
+        lines.append(
+            f"- {flag} {pl}**{title}** (`{kind}`): obs={obs}, meta={target}, "
+            f"umbral={thresh}, delta={item.delta:.4g}"
+        )
+    return "\n".join(lines)
 
 
 def build_alignment_nudge_system_event(

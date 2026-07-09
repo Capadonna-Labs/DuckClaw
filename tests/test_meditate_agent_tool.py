@@ -31,6 +31,7 @@ def test_register_meditate_skill_configure_off(monkeypatch: pytest.MonkeyPatch) 
     names = {t.name for t in tools}
     assert "configure_meditate_homeostasis" in names
     assert "get_meditate_homeostasis_status" in names
+    assert "request_homeostasis_validation" in names
 
     set_goals_tool_chat_id("chat-1")
     set_goals_tool_tenant_id("tenant-a")
@@ -61,4 +62,4 @@ def test_register_meditate_skill_enable(monkeypatch: pytest.MonkeyPatch) -> None
     raw = cfg.invoke({"interval": "10min"})
     data = json.loads(raw)
     assert data["status"] == "ok"
-    assert data.get("first_cycle_executed") is True
+    assert data.get("enabled") is True

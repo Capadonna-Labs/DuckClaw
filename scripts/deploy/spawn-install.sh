@@ -132,7 +132,7 @@ if command -v pm2 &>/dev/null; then
   pm2 delete duckclaw-gateway duckclaw-admin-ui DuckClaw-Gateway 2>/dev/null || true
   pm2 start config/ecosystem.spawn.config.cjs
   pm2 save 2>/dev/null || true
-  log "PM2: gateway :8000, admin :3000"
+  log "PM2: gateway :8000, admin :3000, heartbeat (loop/crons ticker)"
 else
   log "WARN: pm2 no encontrado; omitiendo arranque automático."
 fi

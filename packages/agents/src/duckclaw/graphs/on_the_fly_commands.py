@@ -11,7 +11,7 @@ adaptadores que **no** pueden moverse a ``commands`` sin ciclos
 
 - ``_team_access_acl_db_provider`` → ``graph_server.get_db`` para ACL whitelist.
 - ``_GraphHeartbeatAdapter`` → ``chat_heartbeat`` (Redis/SSE + persistencia DB).
-- ``_GraphMeditateTickHeartbeatPublisher`` → heartbeat admin UI en ticks /meditate.
+- ``_GraphLoopTickHeartbeatPublisher`` → heartbeat admin UI en ticks /loop.
 - ``configure_heartbeat_runtime_db_provider`` / ``configure_provider_budget_runtime_db_provider``
   → wiring de ``get_db`` hacia runtime settings (best-effort al importar).
 - ``_sandbox_session_cleanup`` → ``graphs.sandbox.cleanup_sandbox_session_for_chat``.
@@ -83,7 +83,7 @@ from duckclaw.commands.comfyui import (
     _COMFYUI_PROVIDER_KEY as _COMFYUI_PROVIDER_KEY,
     execute_comfyui_provider as execute_comfyui_provider,
 )
-from duckclaw.commands.meditate import (
+from duckclaw.commands.loop import (
     MEDITATE_DELTA_MAX_SECONDS as MEDITATE_DELTA_MAX_SECONDS,
     MEDITATE_DELTA_MIN_SECONDS as MEDITATE_DELTA_MIN_SECONDS,
     _MEDITATE_DELTA_SECONDS_KEY as _MEDITATE_DELTA_SECONDS_KEY,
@@ -91,16 +91,19 @@ from duckclaw.commands.meditate import (
     _MEDITATE_TENANT_KEY as _MEDITATE_TENANT_KEY,
     _MEDITATE_WORKER_KEY as _MEDITATE_WORKER_KEY,
     _format_meditate_cycle_summary as _format_meditate_cycle_summary,
-    _publish_meditate_tick_heartbeat as _publish_meditate_tick_heartbeat,
+    _publish_loop_tick_heartbeat as _publish_loop_tick_heartbeat,
+    _resolve_loop_vault_user_id as _resolve_loop_vault_user_id,
     _resolve_meditate_vault_user_id as _resolve_meditate_vault_user_id,
-    apply_meditate_schedule as apply_meditate_schedule,
-    chat_id_from_meditate_delta_config_key as chat_id_from_meditate_delta_config_key,
-    clear_meditate_schedule as clear_meditate_schedule,
-    configure_meditate_tick_heartbeat_publisher as _configure_meditate_tick_heartbeat_publisher,
+    apply_loop_idle_schedule as apply_loop_idle_schedule,
+    apply_loop_schedule as apply_loop_schedule,
+    chat_id_from_loop_delta_config_key as chat_id_from_loop_delta_config_key,
+    clear_loop_schedule as clear_loop_schedule,
+    configure_loop_tick_heartbeat_publisher as _configure_loop_tick_heartbeat_publisher,
     execute_meditate as execute_meditate,
-    get_meditate_schedule_status as get_meditate_schedule_status,
-    invoke_meditate_cycle_for_chat as invoke_meditate_cycle_for_chat,
-    parse_meditate_delta_arg as parse_meditate_delta_arg,
+    execute_loop_immediate as execute_loop_immediate,
+    get_loop_schedule_status as get_loop_schedule_status,
+    invoke_loop_cycle_for_chat as invoke_loop_cycle_for_chat,
+    parse_loop_delta_arg as parse_loop_delta_arg,
 )
 from duckclaw.commands.goals import (
     _format_homeostasis_manifest_listing as _format_homeostasis_manifest_listing,
@@ -291,8 +294,8 @@ class _GraphHeartbeatAdapter:
 _configure_heartbeat_adapter(_GraphHeartbeatAdapter())
 
 
-class _GraphMeditateTickHeartbeatPublisher:
-    def publish_meditate_tick(
+class _GraphLoopTickHeartbeatPublisher:
+    def publish_loop_tick(
         self,
         chat_id: Any,
         *,
@@ -307,14 +310,14 @@ class _GraphMeditateTickHeartbeatPublisher:
             return
         publish_admin_chat_heartbeat(
             cid,
-            f"[meditate] {summary}",
-            kind="meditate_tick",
+            f"[loop] {summary}",
+            kind="loop_tick",
             worker_id=worker_id,
             artifact_tenant_id=tenant_id,
         )
 
 
-_configure_meditate_tick_heartbeat_publisher(_GraphMeditateTickHeartbeatPublisher())
+_configure_loop_tick_heartbeat_publisher(_GraphLoopTickHeartbeatPublisher())
 try:
     from duckclaw.graphs.chat_heartbeat import configure_heartbeat_runtime_db_provider
     from duckclaw.graphs.graph_server import get_db
@@ -405,4 +408,4 @@ def _browser_sandbox_sensor_lines_provider() -> list[str]:
 
 _configure_browser_sandbox_sensor_lines_provider(_browser_sandbox_sensor_lines_provider)
 
-_configure_goals_vault_user_id_resolver(_resolve_meditate_vault_user_id)
+_configure_goals_vault_user_id_resolver(_resolve_loop_vault_user_id)

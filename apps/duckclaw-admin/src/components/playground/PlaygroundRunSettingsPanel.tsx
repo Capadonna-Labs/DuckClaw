@@ -6,6 +6,7 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  Cpu,
   FileText,
   FolderOpen,
   MessageSquareText,
@@ -14,6 +15,12 @@ import {
 
 type PlaygroundConfig = {
   llm?: { provider?: string; model?: string };
+  slm?: {
+    enabled?: boolean;
+    model_short?: string;
+    mlx_status?: string;
+    pm2_name?: string;
+  };
   workers_invalid?: string[];
 } | null;
 
@@ -76,6 +83,10 @@ export function PlaygroundRunSettingsPanel({
 
   const model = config?.llm?.model || '—';
   const provider = config?.llm?.provider || 'Proveedor LLM';
+  const slmEnabled = Boolean(config?.slm?.enabled);
+  const slmLabel = slmEnabled
+    ? `${config?.slm?.model_short || 'MLX'} · ${config?.slm?.mlx_status || '—'}`
+    : 'Ninguno';
   const vaultLabel = basenamePath(activeVaultPath);
   const vaultScope =
     activeVaultScope === 'chat' ? 'Por conversación' : 'Vault compartido (RAG + SQL)';
@@ -96,15 +107,25 @@ export function PlaygroundRunSettingsPanel({
         >
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-black uppercase tracking-wider text-gov-gray-400 dark:text-dark-muted">
+                LLM
+              </p>
               <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">{model}</p>
               <p className="mt-0.5 font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
                 {provider}
               </p>
+              <p className="mt-2 text-[10px] font-black uppercase tracking-wider text-gov-gray-400 dark:text-dark-muted">
+                SLM (opcional)
+              </p>
+              <p className="text-xs font-semibold text-gov-gray-800 dark:text-dark-text">{slmLabel}</p>
               <p className="mt-2 text-[11px] leading-relaxed text-gov-gray-500 dark:text-dark-muted">
-                Modelo LLM activo en esta conversación. Clic para cambiar proveedor o modelo.
+                LLM remoto + SLM local MLX-Inference. Clic para cambiar.
               </p>
             </div>
-            <Brain size={16} className="shrink-0 text-gov-gray-400 dark:text-dark-muted" aria-hidden />
+            <div className="flex flex-col gap-1 shrink-0">
+              <Brain size={16} className="text-gov-gray-400 dark:text-dark-muted" aria-hidden />
+              <Cpu size={16} className="text-gov-gray-400 dark:text-dark-muted" aria-hidden />
+            </div>
           </div>
         </button>
 
@@ -202,7 +223,7 @@ export function PlaygroundRunSettingsPanel({
       </div>
 
       {logsPanelOpen && logsViewport ? (
-        <div className="flex min-h-[140px] max-h-[min(42vh,380px)] min-w-0 shrink-0 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-slate-950 dark:border-dark-border">
+        <div className="flex min-h-[140px] max-h-[min(42vh,380px)] min-w-0 shrink-0 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-white text-gov-gray-800 dark:border-dark-border dark:bg-slate-950 dark:text-slate-200">
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{logsViewport}</div>
         </div>
       ) : null}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { catalogFallbackResponse } from '@/lib/adminCatalogFallback';
 import { bffGatewayTimeoutMs } from '@/lib/bffGatewayTimeouts';
+import { HOST_ONLY_OPS } from '@/lib/formatOpsOutput';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
@@ -200,6 +201,27 @@ async function proxy(req: NextRequest, segments: string[]) {
     return NextResponse.json({ detail: 'Operación reservada para admin' }, { status: 403 });
   }
 
+  let bodyText = '';
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    const ct = req.headers.get('content-type');
+    const isMultipart = ct?.toLowerCase().includes('multipart/form-data') ?? false;
+    if (!isMultipart) {
+      bodyText = await req.text();
+    }
+  }
+  if (sub === 'ops/run' && req.method === 'POST') {
+    try {
+      const parsed = JSON.parse(bodyText || '{}') as { op_id?: string };
+      const opId = String(parsed.op_id || '').trim();
+      if (HOST_ONLY_OPS.has(opId)) {
+        const localOps = await localOpsRunFallback(sub, req.method, bodyText);
+        if (localOps) return localOps;
+      }
+    } catch {
+      /* proxy below */
+    }
+  }
+
   const url = new URL(req.url);
   const target = `${base}/api/v1/admin/${sub}${url.search}`;
 
@@ -210,13 +232,14 @@ async function proxy(req: NextRequest, segments: string[]) {
   if (ct) headers['Content-Type'] = ct;
   const isMultipart = ct?.toLowerCase().includes('multipart/form-data') ?? false;
 
-  let bodyText = '';
   const init: RequestInit = { method: req.method, headers, cache: 'no-store' };
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     if (isMultipart) {
       init.body = await req.arrayBuffer();
-    } else {
+    } else if (!bodyText) {
       bodyText = await req.text();
+      init.body = bodyText;
+    } else {
       init.body = bodyText;
     }
   }

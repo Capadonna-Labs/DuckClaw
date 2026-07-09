@@ -143,7 +143,7 @@ def initialize_worker_graph_context(
         _configure_provider_budget_runtime_db_provider(lambda: db)
     except Exception:
         pass
-    tools = _build_worker_tools(db, spec)
+    tools = _build_worker_tools(db, spec, tenant_id=tenant_id)
     _register_pre_llm_skill_tools(
         tools,
         spec,
@@ -202,7 +202,7 @@ def initialize_worker_graph_context(
     if llm is not None and _cp_early.get("enabled"):
         llm_summary = _build_summary_llm(llm, provider=provider, model=model, base_url=base_url)
 
-    _register_post_llm_skill_tools(tools, spec, db=db, llm=llm)
+    _register_post_llm_skill_tools(tools, spec, db=db, llm=llm, tenant_id=tenant_id)
     tools_by_name = {t.name: t for t in tools}
 
     try:
@@ -228,13 +228,20 @@ def initialize_worker_graph_context(
             tools_by_name = {t.name: t for t in tools}
         except Exception:
             pass
-    else:
-        try:
-            from duckclaw.forge.skills.homeostasis_bridge import register_goals_alignment_skill
+    try:
+        from duckclaw.forge.skills.homeostasis_bridge import register_goals_alignment_skill
+
+        if "assess_crons_alignment" not in tools_by_name:
             register_goals_alignment_skill(tools, db)
             tools_by_name = {t.name: t for t in tools}
-        except Exception:
-            pass
+    except Exception:
+        pass
+    try:
+        from duckclaw.forge.skills.loop_bridge import register_loop_skill
+
+        register_loop_skill(tools, db)
+    except Exception:
+        pass
 
     # Strix Sandbox: `run_sandbox` con LLM (política zero-trust si falta YAML); browser opt-in en manifest.
     try:

@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Optional
+
+try:
+    from langchain_core.runnables import RunnableConfig
+except ImportError:
+    RunnableConfig = Any  # type: ignore[misc, assignment]
 
 from duckclaw.workers.provider_input_budget import estimate_tokens_from_messages, split_for_pruning
 from duckclaw.workers.tool_output_truncation import truncate_tool_messages_for_llm
@@ -40,18 +45,38 @@ def serialize_messages_for_summary(messages: list[Any]) -> str:
     return "\n".join(lines)
 
 
-def llm_fold_conversation_summary(llm: Any, head_msgs: list[Any], prior: str) -> str:
+def llm_fold_conversation_summary(
+    llm: Any,
+    head_msgs: list[Any],
+    prior: str,
+    *,
+    fold_focus: str = "default",
+    alignment_preface: str = "",
+) -> str:
     from langchain_core.messages import HumanMessage, SystemMessage
 
     blob = serialize_messages_for_summary(head_msgs)
-    system_prompt = (
-        "Eres un asistente de compresión de contexto para un worker DuckClaw. "
-        "Produce un resumen operativo breve en español: intención del usuario, decisiones, "
-        "hallazgos, errores, datos pendientes y herramientas relevantes. "
-        "Sin saludos. Máximo ~800 palabras."
-    )
+    if fold_focus == "goals_alignment":
+        system_prompt = (
+            "Eres un asistente de compresión de contexto para un worker DuckClaw. "
+            "Produce un resumen operativo breve en español centrado en alineación con "
+            "las metas /goals: progreso, desvíos, decisiones del agente, evidencia "
+            "pendiente, herramientas usadas y próximos pasos para cumplir objetivos. "
+            "Sin saludos. Máximo ~800 palabras."
+        )
+    else:
+        system_prompt = (
+            "Eres un asistente de compresión de contexto para un worker DuckClaw. "
+            "Produce un resumen operativo breve en español: intención del usuario, decisiones, "
+            "hallazgos, errores, datos pendientes y herramientas relevantes. "
+            "Sin saludos. Máximo ~800 palabras."
+        )
+    preface_block = ""
+    if (alignment_preface or "").strip():
+        preface_block = "Informe de alineación /goals:\n" + alignment_preface.strip() + "\n\n---\n"
     human_prompt = (
-        "Resumen previo del hilo (puede estar vacío):\n"
+        preface_block
+        + "Resumen previo del hilo (puede estar vacío):\n"
         + (prior or "")
         + "\n\n---\nTranscript a compactar:\n"
         + blob
@@ -120,6 +145,8 @@ def apply_context_monitor_state(
     identity_fields: Callable[[dict], dict] | None = None,
     summary_state_key: str = "analytical_summary",
     force_prune: bool = False,
+    fold_focus: str = "default",
+    alignment_preface: str = "",
 ) -> dict:
     if not pruning_config.get("enabled"):
         return state
@@ -167,7 +194,13 @@ def apply_context_monitor_state(
 
     new_summary = prior
     if llm_summary is not None:
-        new_summary = llm_fold_conversation_summary(llm_summary, head, prior)
+        new_summary = llm_fold_conversation_summary(
+            llm_summary,
+            head,
+            prior,
+            fold_focus=fold_focus,
+            alignment_preface=alignment_preface,
+        )
     else:
         new_summary = ((prior + "\n") if prior else "") + "[Contexto anterior truncado.]"
 
@@ -187,8 +220,8 @@ def build_context_monitor_node(
     llm_summary: Any = None,
     identity_fields: Callable[[dict], dict] | None = None,
     summary_state_key: str = "analytical_summary",
-) -> Callable[[dict, Any], dict]:
-    def context_monitor_node(state: dict, config: Any = None) -> dict:
+) -> Callable[[dict, Optional[RunnableConfig]], dict]:
+    def context_monitor_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         return apply_context_monitor_state(
             state,
             pruning_config=pruning_config,

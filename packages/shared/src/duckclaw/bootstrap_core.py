@@ -130,6 +130,18 @@ def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
     )
     con.execute(
         """
+        CREATE TABLE IF NOT EXISTS harness_core.loop_runs (
+            run_id VARCHAR PRIMARY KEY,
+            tenant_id VARCHAR NOT NULL,
+            distance_vector JSON,
+            actions_json JSON,
+            status VARCHAR NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+    )
+    con.execute(
+        """
         CREATE TABLE IF NOT EXISTS harness_core.meditate_runs (
             run_id VARCHAR PRIMARY KEY,
             tenant_id VARCHAR NOT NULL,
@@ -140,6 +152,19 @@ def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
         );
         """
     )
+    try:
+        con.execute(
+            """
+            INSERT INTO harness_core.loop_runs (run_id, tenant_id, distance_vector, actions_json, status, created_at)
+            SELECT run_id, tenant_id, distance_vector, actions_json, status, created_at
+            FROM harness_core.meditate_runs m
+            WHERE NOT EXISTS (
+                SELECT 1 FROM harness_core.loop_runs l WHERE l.run_id = m.run_id
+            )
+            """
+        )
+    except Exception:
+        pass
 
 
 def core_unexpected_schemas_present(con: Any, schema_names: tuple[str, ...]) -> list[str]:

@@ -8,7 +8,7 @@ Registry DB-first de conectores MCP (stdio + Streamable HTTP) con grants por wor
 
 ## Fuera de alcance v1
 
-- OAuth redirect completo en UI (v1: pegar Bearer manual post-login Higgsfield/Claude)
+- OAuth redirect completo en UI Admin (v1: conectar OAuth en Claude Desktop/Code; sesión opcional en Admin para workers servidor)
 - Catálogo npm auto-install desde admin (presets documentados; stdio manual)
 - Sampling / roots MCP client features
 
@@ -25,7 +25,7 @@ Definición en [`packages/shared/src/duckclaw/seeds/mcp_connector_presets.yaml`]
 
 | Prioridad | Origen |
 |-----------|--------|
-| 1 | `DUCKCLAW_MCP_PRESETS_PATH` — override explícito (forks, Capadonna-Driller) |
+| 1 | `DUCKCLAW_MCP_PRESETS_PATH` — override explícito (forks, repos de extensión) |
 | 2 | `{DUCKCLAW_REPO_ROOT}/config/mcp_connector_presets.yaml` — edición en monorepo |
 | 3 | `duckclaw/seeds/mcp_connector_presets.yaml` — bundled en `duckclaw-shared` |
 
@@ -95,26 +95,19 @@ Prefix: `/api/v1/admin/mcp/connectors`
 5. **Playground** → selecciona ese worker → pregunta: *«¿Qué hora es en UTC?»*.
 6. Verifica en logs que aparece una tool `mcp__mcp_mcp_time__…`.
 
-### 2. Higgsfield (imagen/video, requiere Bearer v1)
+### 2. Higgsfield (imagen/video, OAuth en Admin)
 
-Higgsfield no expone API key estática: usa OAuth en clientes nativos. DuckClaw v1 pide pegar el Bearer manualmente.
+1. Admin → **MCP** → pestaña **Conectores** → `mcp_higgsfield` (preset Higgsfield).
+2. Clic **Conectar Higgsfield** → login OAuth en Higgsfield → vuelves a DuckClaw con sesión guardada.
+3. **Probar list_tools** → tools de generación.
+4. **Grant worker** (p. ej. un agente con skill `higgsfield`).
+5. Playground: *«Genera una imagen…»*.
 
-1. Crea cuenta en [higgsfield.ai](https://higgsfield.ai) (plan con créditos).
-2. En **Claude Desktop** o **Cursor**: Settings → Connectors → Add custom connector.
-   - Nombre: `Higgsfield`
-   - URL: `https://mcp.higgsfield.ai/mcp`
-3. Completa el login OAuth en el navegador.
-4. Captura el Bearer (workaround v1):
-   - Abre DevTools → pestaña **Network**.
-   - Dispara una acción MCP en el cliente (p. ej. listar modelos).
-   - Busca una petición a `mcp.higgsfield.ai` y copia el valor del header `Authorization: Bearer …` (sin la palabra Bearer).
-5. Admin → **Conectores MCP** → preset **Higgsfield** → **Crear conector** (`mcp_higgsfield`).
-6. Pega el token en **Token Bearer** → **Guardar token**.
-7. **Probar list_tools** → debe devolver tools de generación.
-8. **Grant worker** al agente que usarás en Playground/Telegram.
-9. Playground: *«Genera una imagen de un pato en estilo minimalista»*.
+Variables opcionales en `.env`:
+- `DUCKCLAW_ADMIN_URL` — URL pública del Admin (redirect post-OAuth).
+- `DUCKCLAW_MCP_OAUTH_REDIRECT_URI` — callback exacto si difiere del default Admin BFF.
 
-**Nota:** el Bearer de OAuth caduca; si el test falla con 401, repite pasos 3–6.
+**Nota:** sesión OAuth caduca; usa **Reconectar Higgsfield** si test devuelve 401.
 
 ### 3. MCP Fetch (stdio, red externa)
 
@@ -125,7 +118,7 @@ Igual que Time, preset **MCP Fetch**. Grant + Playground con una URL pública. R
 | Síntoma | Causa probable | Acción |
 |---------|----------------|--------|
 | Test 502 / timeout stdio | `npx` no disponible en host gateway | Instala Node 20+ en la máquina del gateway |
-| Test 401 Higgsfield | Bearer expirado o mal pegado | Renueva OAuth y vuelve a guardar token |
+| Test 401 Higgsfield | Sesión OAuth expirada o no guardada en Admin | Repite OAuth; guarda sesión en Admin |
 | Playground sin tools MCP | Falta grant o conector deshabilitado | Grant worker + verifica `enabled` |
 | Tool bloqueada | `read_only` + nombre mutante | Desactiva read_only o ajusta allowlist |
 

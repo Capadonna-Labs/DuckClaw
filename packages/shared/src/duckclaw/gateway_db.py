@@ -154,8 +154,16 @@ def iter_goals_ticker_duckdb_paths() -> list[str]:
 
     try:
         gw = Path(get_gateway_db_path()).expanduser().resolve()
-        priv_root = gw.parent.parent
-        if priv_root.is_dir() and priv_root.name == "private":
+        priv_roots: list[Path] = []
+        # Hub clásico: db/private/default/duckclaw.duckdb → db/private
+        classic = gw.parent.parent
+        if classic.is_dir() and classic.name == "private":
+            priv_roots.append(classic)
+        # Hub en db/duckclaw.duckdb con vaults en db/private (layout alternativo).
+        sibling = gw.parent / "private"
+        if sibling.is_dir() and sibling not in priv_roots:
+            priv_roots.append(sibling)
+        for priv_root in priv_roots:
             for user_dir in sorted(priv_root.iterdir()):
                 if not user_dir.is_dir():
                     continue

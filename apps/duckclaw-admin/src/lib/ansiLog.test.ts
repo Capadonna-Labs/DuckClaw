@@ -1,9 +1,16 @@
-import assert from 'node:assert/strict';
+import { describe, expect, it } from 'vitest';
 import { colorizePlainLogLine, stripAnsi } from './ansiLogParse';
 
-assert.equal(stripAnsi('\x1b[31merror\x1b[0m'), 'error');
-assert.equal(colorizePlainLogLine('ERROR: boom').className, 'text-red-400');
-assert.equal(colorizePlainLogLine('WARN: slow').className, 'text-amber-300');
-assert.equal(colorizePlainLogLine('0|Gateway | info').className, 'text-emerald-300');
+describe('ansiLogParse', () => {
+  it('strips ANSI escape codes', () => {
+    expect(stripAnsi('\x1b[31merror\x1b[0m')).toBe('error');
+  });
 
-console.log('ansiLog.test.ts: ok');
+  it('colorizes plain log lines for light and dark themes', () => {
+    expect(colorizePlainLogLine('ERROR: boom').className).toBe('text-red-700 dark:text-red-400');
+    expect(colorizePlainLogLine('WARN: slow').className).toBe('text-amber-700 dark:text-amber-300');
+    expect(colorizePlainLogLine('0|Gateway | info').className).toBe(
+      'text-emerald-700 dark:text-emerald-300',
+    );
+  });
+});

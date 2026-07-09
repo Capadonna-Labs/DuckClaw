@@ -1,6 +1,5 @@
 /** Proveedores seleccionables desde la UI admin (alineado con gateway /model). */
 export const SELECTABLE_LLM_PROVIDERS = new Set([
-  'mlx',
   'ollama',
   'openai',
   'anthropic',
@@ -9,6 +8,9 @@ export const SELECTABLE_LLM_PROVIDERS = new Set([
   'gemini',
   'openrouter',
 ]);
+
+/** MLX va en el selector SLM, no en LLM remoto. */
+export const LLM_ONLY_PROVIDERS = SELECTABLE_LLM_PROVIDERS;
 
 /** Slugs OpenRouter con etiqueta legible (id = valor enviado al gateway). */
 export const OPENROUTER_MODEL_PRESETS: { id: string; label: string }[] = [

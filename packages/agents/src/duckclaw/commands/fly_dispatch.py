@@ -24,12 +24,17 @@ from duckclaw.commands.goals import execute_homeostasis_goals
 from duckclaw.commands.health import execute_health, execute_heartbeat
 from duckclaw.commands.history import execute_history
 from duckclaw.commands.hitl import (
+    execute_approve_model,
     execute_code_approve,
     execute_code_reject,
+    execute_loop_approve,
+    execute_loop_reject,
+    execute_meditate_approve,
+    execute_meditate_reject,
     execute_resolve_uncertainty,
     execute_uncertainty_status,
 )
-from duckclaw.commands.meditate import execute_meditate
+from duckclaw.commands.loop import execute_loop, execute_loop_immediate, execute_loop_status
 from duckclaw.commands.model_setup import _execute_setup, execute_model, execute_models, execute_prompt
 from duckclaw.commands.runtime_toggles import execute_internet_toggle, execute_sandbox_toggle
 from duckclaw.commands.sensors import execute_sensors
@@ -111,6 +116,16 @@ def _dispatch_fly_command(
         return execute_code_approve(db, chat_id, args)
     if name in ("reject_code", "reject-code"):
         return execute_code_reject(db, chat_id, args)
+    if name in ("loop_approve", "loop-approve"):
+        return execute_loop_approve(db, chat_id, args, tenant_id=tenant_id)
+    if name in ("loop_reject", "loop-reject"):
+        return execute_loop_reject(db, chat_id, args, tenant_id=tenant_id)
+    if name in ("meditate_approve", "meditate-approve"):
+        return execute_loop_approve(db, chat_id, args, tenant_id=tenant_id)
+    if name in ("meditate_reject", "meditate-reject"):
+        return execute_loop_reject(db, chat_id, args, tenant_id=tenant_id)
+    if name in ("approve_model", "approve-model"):
+        return execute_approve_model(db, chat_id, args)
     if name == "help":
         return execute_help(db, chat_id)
     if name == "role":
@@ -118,7 +133,7 @@ def _dispatch_fly_command(
             "El comando /role ya no existe. Usa /workers para ver o definir el equipo, /help para ver todos los comandos."
         )
     if name == "roles":
-        return execute_roles(db, chat_id)
+        return execute_roles(db, chat_id, tenant_id=tenant_id)
     if name == "team":
         return execute_team_whitelist(db, tenant_id, requester_id, args)
     if name == "vault":
@@ -136,7 +151,7 @@ def _dispatch_fly_command(
             db, chat_id, args, tenant_id=tenant_id, requester_id=requester_id
         )
     if name == "skills":
-        return execute_skills_list(db, chat_id, args)
+        return execute_skills_list(db, chat_id, args, tenant_id=tenant_id)
     if name == "forget":
         return execute_forget(db, chat_id, tenant_id=tenant_id)
     if name == "context":
@@ -197,12 +212,33 @@ def _dispatch_fly_command(
             tenant_id=tenant_id,
             vault_user_id=vault_user_id,
         )
-    if name == "meditate":
+    if name == "loop":
         args_norm = (args or "").strip().lower()
-        if args_norm in ("--self", "--now"):
-            return None
-        return execute_meditate(
-            db, chat_id, args, tenant_id=tenant_id, vault_user_id=vault_user_id
+        first = args_norm.split()[0] if args_norm else ""
+        loop_kwargs = dict(
+            tenant_id=tenant_id,
+            vault_user_id=vault_user_id,
+            entry_worker_id=entry_worker_id,
+        )
+        if first == "--status":
+            return execute_loop_status(
+                db,
+                chat_id,
+                args,
+                tenant_id=tenant_id,
+                entry_worker_id=entry_worker_id,
+            )
+        if first in ("--self", "--now") or not args_norm:
+            return execute_loop_immediate(db, chat_id, **loop_kwargs)
+        if first in ("on", "off") or first == "--delta":
+            return execute_loop(db, chat_id, args, **loop_kwargs)
+        return execute_loop_immediate(db, chat_id, **loop_kwargs)
+    if name == "meditate":
+        return _dispatch_fly_command(
+            db, chat_id, "loop", args,
+            requester_id=requester_id, tenant_id=tenant_id,
+            vault_user_id=vault_user_id, username=username,
+            entry_worker_id=entry_worker_id,
         )
     if name == "tasks":
         return execute_tasks(db, chat_id)
@@ -265,9 +301,9 @@ def handle_command(
         ew = (entry_worker_id or "").strip()
         if ew and ew.lower() != "manager" and db is not None:
             try:
-                from duckclaw.workers.factory import list_workers
+                from duckclaw.workers.discovery import list_workers_for_fly
 
-                canonical = _resolve_template_id(list_workers(), ew)
+                canonical = _resolve_template_id(list_workers_for_fly(tenant_id=tid), ew)
                 if canonical:
                     set_chat_state(db, chat_id, "worker_id", canonical)
             except Exception:

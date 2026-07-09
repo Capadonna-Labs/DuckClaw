@@ -213,7 +213,7 @@ async def lifespan(app: FastAPI):
 
             _poll_s = max(5, int(GOALS_TICKER_POLL_SECONDS))
 
-            from services.heartbeat.main import _run_meditate_proactive_tick
+            from services.heartbeat.main import _run_loop_proactive_tick
 
             async def _goals_ticker_loop() -> None:
                 while True:
@@ -222,7 +222,7 @@ async def lifespan(app: FastAPI):
                     except Exception as _loop_exc:  # noqa: BLE001
                         _log.warning("embedded crons ticker loop error: %s", _loop_exc)
                     try:
-                        await _run_meditate_proactive_tick()
+                        await _run_loop_proactive_tick()
                     except Exception as _med_exc:  # noqa: BLE001
                         _log.warning("embedded meditate ticker loop error: %s", _med_exc)
                     await asyncio.sleep(_poll_s)

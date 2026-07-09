@@ -13,7 +13,7 @@ export type ChatMsg = {
   text: string;
   streaming?: boolean;
   interrupted?: boolean;
-  heartbeatKind?: 'plan' | 'tool' | 'status' | 'visual';
+  heartbeatKind?: 'plan' | 'tool' | 'status' | 'visual' | 'loop_tick';
   /** Worker activo en heartbeat (SSE). */
   workerId?: string;
   /** Instancia swarm 1..n. */

@@ -1345,6 +1345,12 @@ def _migration_032_user_agent_draft_policy_v2_refresh(db: Any) -> None:
     apply_user_agent_draft_policy(db, force=True)
 
 
+def _migration_033_default_mcp_higgsfield(db: Any) -> None:
+    from duckclaw.mcp_connector_defaults import backfill_default_mcp_connectors_and_grants
+
+    backfill_default_mcp_connectors_and_grants(db)
+
+
 _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     21: _migration_021_apply_framework_policy_pack,
     22: _migration_022_refresh_framework_packs,
@@ -1355,6 +1361,7 @@ _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     29: _migration_029_sync_skill_catalog_github_mcp,
     31: _migration_031_user_agent_draft_policy_v2,
     32: _migration_032_user_agent_draft_policy_v2_refresh,
+    33: _migration_033_default_mcp_higgsfield,
 }
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
@@ -1390,4 +1397,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (30, "user_agent_draft_policy", _M030_USER_AGENT_DRAFT_POLICY),
     (31, "user_agent_draft_policy_v2", []),
     (32, "user_agent_draft_policy_v2_refresh", []),
+    (33, "default_mcp_higgsfield", []),
 ]

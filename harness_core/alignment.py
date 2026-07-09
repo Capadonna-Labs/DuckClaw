@@ -1,4 +1,4 @@
-"""Assess homeostasis manifest alignment (infra + domain goals) for meditate messaging."""
+"""Assess homeostasis manifest alignment (infra + domain goals) for loop messaging."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from harness_core.skills.strix_compute_delta import compute_distance_vector
-from harness_core.states.meditate_state import CurrentMetrics, HomeostasisManifest
+from harness_core.states.loop_state import CurrentMetrics, HomeostasisManifest
 
 
 @dataclass

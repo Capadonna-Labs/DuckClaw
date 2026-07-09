@@ -12,6 +12,19 @@ import {
 
 const ALLOWED_KEYS = new Set(PM2_NODE_DEV_ENV_FILTER.allowed_keys);
 
+function augmentPathForOps(pathValue: string | undefined): string {
+  const home = process.env.HOME?.trim() || '/root';
+  const prefixes = [
+    `${home}/.local/bin`,
+    '/root/.local/bin',
+    '/usr/local/bin',
+  ].filter((p, i, arr) => arr.indexOf(p) === i);
+  const base = (pathValue || '').trim();
+  if (!base) return prefixes.join(':');
+  const missing = prefixes.filter((p) => !base.split(':').includes(p));
+  return missing.length ? [...missing, base].join(':') : base;
+}
+
 export function opsSubprocessEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -30,5 +43,6 @@ export function opsSubprocessEnv(extra?: Record<string, string>): NodeJS.Process
       out[key] = value;
     }
   }
+  out.PATH = augmentPathForOps(out.PATH);
   return out as NodeJS.ProcessEnv;
 }

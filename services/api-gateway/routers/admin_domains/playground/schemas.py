@@ -103,6 +103,16 @@ class PlaygroundModelBody(BaseModel):
     base_url: str | None = Field(default=None, max_length=512)
 
 
+class PlaygroundSlmBody(BaseModel):
+    chat_id: str = Field(..., min_length=1, max_length=128)
+    enabled: bool = Field(default=False)
+    adapter_path: str | None = Field(
+        default=None,
+        max_length=512,
+        description="Ruta adapter LoRA; vacío usa MLX_ADAPTER_PATH del PM2.",
+    )
+
+
 class PlaygroundVaultBody(BaseModel):
     chat_id: str = Field(..., min_length=1, max_length=128)
     tenant_id: str | None = Field(default=None, max_length=64)

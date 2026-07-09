@@ -50,5 +50,15 @@ wait_gateway_health() {
   echo "GATEWAY_HEALTH_TIMEOUT $url"
   return 1
 }
+
+heal_pm2_corrupt_db_writer() {
+  if ! pm2 describe DuckClaw-DB-Writer >/dev/null 2>&1; then
+    return 0
+  fi
+  if pm2 describe DuckClaw-DB-Writer 2>/dev/null | grep -qE 'script path.*services/db-writer/main\\.py'; then
+    echo "PM2_HEAL: DuckClaw-DB-Writer corrupt entry (main.py as script); deleting"
+    pm2 delete DuckClaw-DB-Writer 2>/dev/null || true
+  fi
+}
 `.trim();
 }

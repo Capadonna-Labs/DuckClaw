@@ -56,11 +56,36 @@ export async function pollKnowledgeSyncJob(
   return { state: 'timeout', progress: lastProgress };
 }
 
+export function parseKnowledgeJobDetail(detail?: string): {
+  scanned?: number;
+  upserted?: number;
+  chunks?: number;
+} | null {
+  if (!detail) return null;
+  try {
+    const parsed = JSON.parse(detail) as Record<string, unknown>;
+    return {
+      scanned: typeof parsed.scanned === 'number' ? parsed.scanned : undefined,
+      upserted: typeof parsed.upserted === 'number' ? parsed.upserted : undefined,
+      chunks: typeof parsed.chunks === 'number' ? parsed.chunks : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function formatKnowledgeJobPollNotice(
   result: KnowledgeSyncJobPollResult,
   fallbackBusy: string
 ): string {
   if (result.state === 'completed') {
+    const stats = parseKnowledgeJobDetail(result.detail);
+    if (stats && (stats.upserted ?? 0) === 0 && (stats.scanned ?? 0) === 0) {
+      return 'Indexación terminó sin procesar archivos — pulsa Sincronizar de nuevo o revisa pm2 logs DuckClaw-Knowledge-Indexer.';
+    }
+    if (stats?.upserted != null && stats.chunks != null) {
+      return `Indexación completada: ${stats.upserted} archivo(s), ${stats.chunks} fragmento(s).`;
+    }
     return 'Indexación completada.';
   }
   if (result.state === 'failed') {

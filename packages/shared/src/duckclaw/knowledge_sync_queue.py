@@ -179,6 +179,7 @@ def enqueue_knowledge_sync_job(
     staging_dir: str = "",
     file_path: str = "",
     metadata: dict[str, Any] | None = None,
+    files_total: int = 0,
 ) -> str:
     job = KnowledgeSyncJob(
         job_id=_new_job_id(),
@@ -196,7 +197,16 @@ def enqueue_knowledge_sync_job(
         file_path=file_path,
         metadata=dict(metadata or {}),
     )
-    return _push_job(job)
+    job_id = _push_job(job)
+    if files_total > 0:
+        update_job_progress(
+            job_id,
+            files_total=files_total,
+            files_done=0,
+            chunks_done=0,
+            phase="queued",
+        )
+    return job_id
 
 
 def enqueue_browser_upload_job(
@@ -210,7 +220,9 @@ def enqueue_browser_upload_job(
     display_name: str,
     file_names: list[str],
     compute_embeddings: bool = True,
+    files_total: int = 0,
 ) -> str:
+    total = files_total if files_total > 0 else len(file_names)
     return enqueue_knowledge_sync_job(
         kind="browser_upload",
         source_id=source_id,
@@ -222,6 +234,7 @@ def enqueue_browser_upload_job(
         display_name=display_name,
         staging_dir=staging_dir,
         metadata={"file_names": file_names, "upload": True},
+        files_total=total,
     )
 
 
@@ -295,6 +308,7 @@ def process_knowledge_sync_job(job: KnowledgeSyncJob) -> dict[str, Any]:
         set_job_status(job.job_id, status="failed", detail="no_hub_db")
         return {"ok": False, "reason": "no_hub_db"}
 
+    source: dict[str, Any] | None = None
     try:
         if job.kind == "browser_upload":
             source = get_knowledge_source(db, tenant_id=job.tenant_id, source_id=job.source_id)
@@ -349,6 +363,30 @@ def process_knowledge_sync_job(job: KnowledgeSyncJob) -> dict[str, Any]:
     if outcome.skipped_reason == "sync_in_progress":
         set_job_status(job.job_id, status="deferred", detail=outcome.skipped_reason)
         return {"ok": False, "deferred": True, "reason": outcome.skipped_reason}
+
+    if outcome.skipped_reason:
+        reason = str(outcome.skipped_reason)
+        try:
+            from duckclaw.forge.rag.knowledge_auto_sync import _enqueue_source_error_status
+
+            if source:
+                _enqueue_source_error_status(source=source, actor_email=job.actor_email, reason=reason)
+        except Exception as exc:
+            _log.warning("failed to mark source error job=%s: %s", job.job_id, exc)
+        set_job_status(job.job_id, status="failed", detail=reason)
+        return {"ok": False, "reason": reason}
+
+    if job.kind == "folder_ingest" and outcome.scanned == 0 and outcome.upserted == 0:
+        reason = "no_files_indexed"
+        try:
+            from duckclaw.forge.rag.knowledge_auto_sync import _enqueue_source_error_status
+
+            if source:
+                _enqueue_source_error_status(source=source, actor_email=job.actor_email, reason=reason)
+        except Exception as exc:
+            _log.warning("failed to mark source error job=%s: %s", job.job_id, exc)
+        set_job_status(job.job_id, status="failed", detail=reason)
+        return {"ok": False, "reason": reason}
 
     if job.kind == "browser_upload" and job.staging_dir:
         from duckclaw.knowledge_upload_staging import cleanup_staging_dir

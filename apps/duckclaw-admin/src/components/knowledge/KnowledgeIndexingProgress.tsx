@@ -13,6 +13,8 @@ type KnowledgeIndexingProgressProps = {
   documentCount?: number;
   chunkCount?: number;
   expectedTotal?: number;
+  jobStatus?: string | null;
+  errorMessage?: string | null;
 };
 
 export function KnowledgeIndexingProgress({
@@ -20,31 +22,41 @@ export function KnowledgeIndexingProgress({
   documentCount = 0,
   chunkCount = 0,
   expectedTotal,
+  jobStatus,
+  errorMessage,
 }: KnowledgeIndexingProgressProps) {
   const total = progress?.files_total ?? expectedTotal ?? 0;
   const done = Math.max(progress?.files_done ?? 0, documentCount);
   const chunks = Math.max(progress?.chunks_done ?? 0, chunkCount);
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
-  const indeterminate = total <= 0;
+  const indeterminate = total <= 0 && !errorMessage;
+  const queued = (jobStatus || progress?.phase) === 'queued';
+  const failed = Boolean(errorMessage) || jobStatus === 'failed';
 
   return (
     <div className="mt-3" role="status" aria-live="polite">
       <div className="h-2 overflow-hidden rounded-full bg-gov-gray-100 dark:bg-dark-bg">
-        {indeterminate ? (
+        {failed ? (
+          <div className="h-full w-full rounded-full bg-red-400/80" />
+        ) : indeterminate ? (
           <div className="relative h-full w-full overflow-hidden">
             <div className="absolute inset-y-0 w-1/3 animate-pulse rounded-full bg-sky-500" />
           </div>
         ) : (
           <div
             className="h-full rounded-full bg-sky-500 transition-all duration-300"
-            style={{ width: `${pct}%` }}
+            style={{ width: `${Math.max(pct, done > 0 ? 2 : 0)}%` }}
           />
         )}
       </div>
-      <p className="mt-1.5 text-[11px] text-gov-gray-600 dark:text-dark-muted">
-        {indeterminate
-          ? 'Indexando… esperando conteo de archivos'
-          : `${done} / ${total} archivos (${pct}%) · ${chunks} fragmento${chunks === 1 ? '' : 's'}`}
+      <p
+        className={`mt-1.5 text-[11px] ${failed ? 'text-red-600 dark:text-red-300' : 'text-gov-gray-600 dark:text-dark-muted'}`}
+      >
+        {failed
+          ? errorMessage
+          : indeterminate
+            ? 'Indexando… contando archivos en la bóveda'
+            : `${done} / ${total} archivos (${pct}%) · ${chunks} fragmento${chunks === 1 ? '' : 's'}${queued ? ' · en cola' : ''}`}
       </p>
       {progress?.current_file && (
         <p className="mt-0.5 truncate font-mono text-[10px] text-gov-gray-400 dark:text-dark-muted/80">

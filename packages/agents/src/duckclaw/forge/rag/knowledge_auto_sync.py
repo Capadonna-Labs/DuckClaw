@@ -78,6 +78,33 @@ def _enqueue_knowledge_command(command: Any) -> str:
     )
 
 
+def _enqueue_source_error_status(
+    *,
+    source: dict[str, Any],
+    actor_email: str,
+    reason: str,
+) -> str:
+    """Marca fuente en error para no dejar INDEXANDO colgado."""
+    source_id = str(source["source_id"])
+    cmd = CreateKnowledgeSourceCommand(
+        source_id=source_id,
+        tenant_id=str(source.get("tenant_id") or "default"),
+        actor_email=actor_email,
+        project_id=str(source.get("project_id") or ""),
+        worker_uid=str(source.get("worker_uid") or ""),
+        source_kind=str(source.get("source_kind") or "folder"),  # type: ignore[arg-type]
+        source_uri=str(source.get("source_uri") or ""),
+        display_name=str(source.get("display_name") or ""),
+        status="error",
+        metadata={
+            **dict(source.get("metadata") or {}),
+            "last_error": reason[:500],
+            "last_error_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    return _enqueue_knowledge_command(cmd)
+
+
 def ingest_folder_payloads(
     *,
     source_id: str,
@@ -290,6 +317,17 @@ def _execute_folder_sync_locked(
         )
         result.task_ids.append(_enqueue_knowledge_command(deactivate_cmd))
 
+    if job_id and upsert_paths:
+        from duckclaw.knowledge_sync_queue import update_job_progress
+
+        update_job_progress(
+            job_id,
+            files_total=len(upsert_paths),
+            files_done=0,
+            chunks_done=0,
+            phase="indexing",
+        )
+
     ingest_task_ids, chunks = ingest_folder_paths(
         root=root,
         source_id=source_id,
@@ -378,6 +416,17 @@ def execute_folder_ingest_for_source(
         if not paths:
             result.skipped_reason = "no_indexable_files"
             return result
+
+        if job_id:
+            from duckclaw.knowledge_sync_queue import update_job_progress
+
+            update_job_progress(
+                job_id,
+                files_total=len(paths),
+                files_done=0,
+                chunks_done=0,
+                phase="indexing",
+            )
 
         indexing_cmd = CreateKnowledgeSourceCommand(
             source_id=source_id,

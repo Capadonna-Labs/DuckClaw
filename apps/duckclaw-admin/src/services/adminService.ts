@@ -1915,6 +1915,25 @@ export const adminService = {
       };
     }>(`/knowledge/jobs/${encodeURIComponent(jobId)}`),
 
+  getKnowledgeSourceIndexingProgress: (sourceId: string) =>
+    adminFetch<{
+      active: boolean;
+      source_id: string;
+      job_id?: string | null;
+      job_status?: string | null;
+      progress?: {
+        files_total?: number;
+        files_done?: number;
+        chunks_done?: number;
+        phase?: string;
+        current_file?: string;
+      };
+      file_count?: number;
+      document_count?: number;
+      chunk_count?: number;
+      error_message?: string | null;
+    }>(`/knowledge/sources/${encodeURIComponent(sourceId)}/indexing-progress`),
+
   createKnowledgeSource: (body: {
     source_uri: string;
     display_name?: string;

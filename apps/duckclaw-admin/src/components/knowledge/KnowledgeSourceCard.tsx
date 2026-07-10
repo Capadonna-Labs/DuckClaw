@@ -23,6 +23,8 @@ type KnowledgeSourceCardProps = {
   busy: boolean;
   jobProgress?: KnowledgeJobProgress | null;
   expectedFileTotal?: number;
+  jobStatus?: string | null;
+  errorMessage?: string | null;
   onSync: (source: KnowledgeSource) => void;
   onDelete: (source: KnowledgeSource) => void;
 };
@@ -33,6 +35,8 @@ export function KnowledgeSourceCard({
   busy,
   jobProgress,
   expectedFileTotal,
+  jobStatus,
+  errorMessage,
   onSync,
   onDelete,
 }: KnowledgeSourceCardProps) {
@@ -66,6 +70,8 @@ export function KnowledgeSourceCard({
               documentCount={source.document_count}
               chunkCount={source.chunk_count}
               expectedTotal={expectedFileTotal ?? metadataFileCount}
+              jobStatus={jobStatus}
+              errorMessage={errorMessage}
             />
           )}
           {hasLongDetail && (

@@ -53,6 +53,39 @@ def test_update_job_progress_merges_fields(monkeypatch) -> None:
     assert progress["current_file"] == "notes.md"
 
 
+def test_enqueue_sets_initial_progress(monkeypatch) -> None:
+    from duckclaw.knowledge_sync_queue import enqueue_knowledge_sync_job, get_job_status
+
+    store: dict[str, str] = {}
+    queue: list[str] = []
+
+    class FakeRedis:
+        def lpush(self, key: str, value: str) -> int:
+            queue.insert(0, value)
+            return len(queue)
+
+        def set(self, key: str, value: str, ex: int | None = None) -> bool:
+            store[key] = value
+            return True
+
+        def get(self, key: str):
+            return store.get(key)
+
+    monkeypatch.setattr("duckclaw.knowledge_sync_queue._redis_client", lambda: FakeRedis())
+
+    job_id = enqueue_knowledge_sync_job(
+        kind="folder_ingest",
+        source_id="ksrc_y",
+        tenant_id="tenant_a",
+        actor_email="admin@test.com",
+        files_total=42,
+    )
+    status = get_job_status(job_id)
+    assert status is not None
+    assert status["progress"]["files_total"] == 42
+    assert status["progress"]["files_done"] == 0
+
+
 def test_enqueue_and_dequeue_job(monkeypatch) -> None:
     from duckclaw.knowledge_sync_queue import (
         KNOWLEDGE_SYNC_QUEUE_KEY,

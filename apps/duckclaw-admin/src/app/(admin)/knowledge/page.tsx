@@ -20,9 +20,11 @@ import {
 } from '@/lib/pollKnowledgeSyncJob';
 
 type IndexingJobState = {
-  jobId: string;
+  jobId?: string;
   expectedFiles?: number;
   progress?: KnowledgeJobProgress;
+  jobStatus?: string | null;
+  errorMessage?: string | null;
 };
 
 const ACCEPTED_EXTENSIONS = '.md,.markdown,.txt,.json,.csv,.pdf,.docx,.doc,.pptx,.html,.htm';
@@ -168,12 +170,39 @@ export default function KnowledgePage() {
   );
 
   useEffect(() => {
-    const hasIndexing = sources.some((source) => source.status === 'indexing');
-    if (!hasIndexing) return;
-    const timer = window.setInterval(() => {
+    const indexing = sources.filter((source) => source.status === 'indexing');
+    if (indexing.length === 0) return;
+
+    const poll = async () => {
+      await Promise.all(
+        indexing.map(async (source) => {
+          const row = await adminService.getKnowledgeSourceIndexingProgress(source.source_id).catch(() => null);
+          if (!row?.active) return;
+          setIndexingJobs((prev) => ({
+            ...prev,
+            [source.source_id]: {
+              jobId: row.job_id ?? undefined,
+              expectedFiles: row.file_count ?? prev[source.source_id]?.expectedFiles,
+              progress: row.progress ?? prev[source.source_id]?.progress,
+              jobStatus: row.job_status ?? prev[source.source_id]?.jobStatus,
+              errorMessage: row.error_message ?? prev[source.source_id]?.errorMessage,
+            },
+          }));
+        })
+      );
+    };
+
+    void poll();
+    const progressTimer = window.setInterval(() => {
+      void poll();
+    }, 2000);
+    const sourcesTimer = window.setInterval(() => {
       void loadSourcesSilent();
-    }, 3000);
-    return () => window.clearInterval(timer);
+    }, 5000);
+    return () => {
+      window.clearInterval(progressTimer);
+      window.clearInterval(sourcesTimer);
+    };
   }, [sources, loadSourcesSilent]);
 
   useEffect(() => {
@@ -587,7 +616,12 @@ export default function KnowledgePage() {
                 projectId={projectId}
                 busy={busy}
                 jobProgress={indexingJobs[source.source_id]?.progress}
-                expectedFileTotal={indexingJobs[source.source_id]?.expectedFiles}
+                expectedFileTotal={
+                  indexingJobs[source.source_id]?.expectedFiles ??
+                  (typeof source.metadata?.file_count === 'number' ? source.metadata.file_count : undefined)
+                }
+                jobStatus={indexingJobs[source.source_id]?.jobStatus}
+                errorMessage={indexingJobs[source.source_id]?.errorMessage}
                 onSync={(item) => void syncSource(item)}
                 onDelete={(item) => void deleteSource(item)}
               />

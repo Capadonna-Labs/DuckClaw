@@ -14,10 +14,18 @@ from duckclaw.graphs.on_the_fly_commands import execute_homeostasis_goals, set_m
 from harness_core.states.meditate_state import DomainGoal, HomeostasisManifest
 
 
+def _disable_sync_manifest_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "duckclaw.commands.goals._try_sync_write_homeostasis_manifest",
+        lambda *_a, **_k: False,
+    )
+
+
 def _make_db(path: Path) -> Any:
     from duckclaw import DuckClaw
 
     con = duckdb.connect(str(path))
+    con.execute("CREATE SCHEMA IF NOT EXISTS main")
     con.execute(
         """
         CREATE TABLE main.homeostasis_targets (
@@ -58,6 +66,7 @@ def test_execute_homeostasis_goals_set_infra(
         return True
 
     monkeypatch.setattr("harness_core.targets.save_homeostasis_manifest", _fake_save)
+    _disable_sync_manifest_write(monkeypatch)
     out = execute_homeostasis_goals(db, "5", "--set error_rate_pct 2", tenant_id="t1")
     assert "error_rate_pct" in out
     assert saved and saved[-1].infra.error_rate_pct == 2.0
@@ -88,6 +97,7 @@ def test_execute_homeostasis_goals_add_and_rm(
         "harness_core.targets.load_homeostasis_manifest",
         lambda *_a, **_k: store,
     )
+    _disable_sync_manifest_write(monkeypatch)
     out_rm = execute_homeostasis_goals(db, "9", "--rm completion_rate_pct", tenant_id="t1")
     assert "eliminada" in out_rm.lower()
     assert store.goals == []
@@ -116,6 +126,7 @@ def test_execute_homeostasis_goals_migrate(
         return True
 
     monkeypatch.setattr("harness_core.targets.save_homeostasis_manifest", _fake_save)
+    _disable_sync_manifest_write(monkeypatch)
     out = execute_homeostasis_goals(db, "7", "--migrate", tenant_id="t1")
     assert "Migradas" in out
     assert captured["manifest"].goals[0].belief_key == "latency_ms"
@@ -157,6 +168,7 @@ def _patch_manifest_store(
         "harness_core.targets.load_homeostasis_manifest",
         lambda *_a, **_k: store,
     )
+    _disable_sync_manifest_write(monkeypatch)
     return saved
 
 
@@ -323,6 +335,33 @@ def test_execute_homeostasis_goals_add_assigns_next_priority(
     assert "prioridad P2" in out.lower() or "P2" in out
     added = next(g for g in saved[-1].goals if g.belief_key != "solo")
     assert added.priority == 2
+
+
+def test_execute_homeostasis_goals_uses_chat_tenant_over_gateway_default(
+    tmp_path: Path,
+) -> None:
+    from duckclaw.commands.chat_state import set_chat_state
+
+    db = _make_db(tmp_path / "tenant_resolve.duckdb")
+    set_chat_state(db, "30", "goals_proactive_tenant_id", "tenant-chat")
+    payload = {
+        "goals": [
+            {
+                "belief_key": "completion_rate_pct",
+                "target_value": 95.0,
+                "threshold": 2.0,
+                "title": "Completion rate",
+                "priority": 1,
+            }
+        ]
+    }
+    db.execute(
+        "INSERT INTO main.homeostasis_targets (tenant_id, targets_json) VALUES (?, ?)",
+        ["tenant-chat", json.dumps(payload)],
+    )
+    out = execute_homeostasis_goals(db, "30", "", tenant_id="default")
+    assert "**completion_rate_pct**" in out
+    assert "(ninguna)" not in out.lower()
 
 
 def test_assess_goals_list_alignment_sorted_by_priority() -> None:

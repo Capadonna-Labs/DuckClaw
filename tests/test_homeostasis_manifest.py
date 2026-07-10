@@ -21,6 +21,7 @@ def _make_db_with_manifest(path: Path, targets_json: Any, tenant_id: str = "defa
     from duckclaw import DuckClaw
 
     con = duckdb.connect(str(path))
+    con.execute("CREATE SCHEMA IF NOT EXISTS main")
     con.execute(
         """
         CREATE TABLE IF NOT EXISTS main.homeostasis_targets (
@@ -92,6 +93,7 @@ def test_load_manifest_migrate_legacy_goals_from_agent_config(tmp_path: Path) ->
 
     path = tmp_path / "vault.duckdb"
     con = duckdb.connect(str(path))
+    con.execute("CREATE SCHEMA IF NOT EXISTS main")
     con.execute(
         """
         CREATE TABLE main.homeostasis_targets (
@@ -130,3 +132,66 @@ def test_load_manifest_migrate_legacy_goals_from_agent_config(tmp_path: Path) ->
     manifest = load_homeostasis_manifest(db, "t1", chat_id="42", migrate_legacy=True)
     assert len(manifest.goals) == 1
     assert manifest.goals[0].belief_key == "completion_rate_pct"
+
+
+def test_resolve_homeostasis_tenant_id_prefers_chat_state(tmp_path: Path) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.commands.chat_state import set_chat_state
+    from harness_core.targets import resolve_homeostasis_tenant_id
+
+    path = tmp_path / "tenant.duckdb"
+    con = duckdb.connect(str(path))
+    con.execute(
+        """
+        CREATE TABLE agent_config (
+          key VARCHAR PRIMARY KEY,
+          value TEXT,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.close()
+    db = DuckClaw(str(path))
+    set_chat_state(db, "chat-1", "goals_proactive_tenant_id", "tenant-from-chat")
+    assert resolve_homeostasis_tenant_id(db, "chat-1", "default") == "tenant-from-chat"
+    assert resolve_homeostasis_tenant_id(db, "chat-1", None) == "tenant-from-chat"
+
+
+def test_load_manifest_falls_back_to_harness_core_schema(tmp_path: Path) -> None:
+    from duckclaw import DuckClaw
+
+    path = tmp_path / "legacy.duckdb"
+    con = duckdb.connect(str(path))
+    con.execute("CREATE SCHEMA IF NOT EXISTS harness_core")
+    con.execute(
+        """
+        CREATE TABLE harness_core.homeostasis_targets (
+            tenant_id VARCHAR PRIMARY KEY,
+            targets_json JSON,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    con.execute(
+        "INSERT INTO harness_core.homeostasis_targets (tenant_id, targets_json) VALUES (?, ?)",
+        [
+            "legacy-tenant",
+            json.dumps(
+                {
+                    "goals": [
+                        {
+                            "belief_key": "latency_ms",
+                            "target_value": 250.0,
+                            "threshold": 25.0,
+                            "title": "Latency budget",
+                        }
+                    ]
+                }
+            ),
+        ],
+    )
+    con.close()
+    db = DuckClaw(str(path))
+    manifest = load_homeostasis_manifest(db, "legacy-tenant", migrate_legacy=False)
+    assert len(manifest.goals) == 1
+    assert manifest.goals[0].belief_key == "latency_ms"

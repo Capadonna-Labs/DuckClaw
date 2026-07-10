@@ -774,8 +774,8 @@ def test_admin_hitl_routes_live_in_domain_module() -> None:
     assert '@router.get("/code/decisions"' not in admin
     assert '@router.get("/uncertainty/events"' not in admin
     assert '@router.post("/uncertainty/resolve"' not in admin
-    assert '@router.get("/meditate/status"' not in admin
-    assert '@router.post("/meditate/tick"' not in admin
+    assert '@router.get("/loop/status"' in hitl
+    assert '@router.post("/loop/tick"' in hitl
     assert 'router = APIRouter(tags=["admin-hitl"])' in hitl
     assert "duckclaw.hitl.code_decision_service" in hitl
     assert "duckclaw.hitl.uncertainty_service" in hitl

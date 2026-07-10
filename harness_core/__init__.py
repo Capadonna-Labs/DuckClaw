@@ -1,6 +1,6 @@
-"""Harness Core: proactive infrastructure graphs (meditate homeostasis)."""
+"""Harness Core: proactive infrastructure graphs (loop homeostasis)."""
 
-from harness_core.states.meditate_state import (
+from harness_core.states.loop_state import (
     CorrectiveAction,
     CurrentMetrics,
     HomeostasisTarget,
@@ -16,12 +16,17 @@ __all__ = [
 
 
 def build_meditate_graph(*args, **kwargs):
-    from harness_core.graphs.meditate_graph import build_meditate_graph as _build
+    from harness_core.graphs.loop_graph import build_meditate_graph as _build
 
     return _build(*args, **kwargs)
 
 
-def invoke_meditate_run(*args, **kwargs):
-    from harness_core.graphs.meditate_graph import invoke_meditate_run as _invoke
+def invoke_loop_run(*args, **kwargs):
+    from harness_core.graphs.loop_graph import invoke_loop_run as _invoke
 
     return _invoke(*args, **kwargs)
+
+
+def build_loop_graph(*args, **kwargs):
+    from harness_core.graphs.loop_graph import build_loop_graph as _build
+    return _build(*args, **kwargs)

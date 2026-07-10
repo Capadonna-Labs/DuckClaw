@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel
 
 from routers.admin_domains.admin_common import admin_audit, problem, require_admin_key as _require_admin_key_impl
+from duckclaw.ops.pm2_names import apply_pm2_name_to_argv
 
 router = APIRouter(prefix="/ops", tags=["admin-ops"])
 
@@ -84,7 +85,7 @@ def _pm2_restart_interrupted(op_id: str, exit_code: int, stdout: str) -> bool:
     if "Applying action restartProcessId" not in stdout:
         return False
     if op_id == "pm2_restart_gateway":
-        return "DuckClaw-Gateway" in stdout
+        return "DuckClaw-Gateway" in stdout or "duckclaw-gateway" in stdout
     return False
 
 
@@ -150,6 +151,7 @@ async def run_ops_command(
         raise _problem(400, "Comando no permitido", op_id)
 
     resolved = _resolve_ops_argv(argv)
+    resolved = apply_pm2_name_to_argv(op_id, resolved, cwd=_repo_root())
 
     def _run() -> dict[str, Any]:
         proc = subprocess.run(

@@ -85,7 +85,10 @@ async def prepare_chat_invoke(
     is_system_prompt = bool(payload.is_system_prompt or False)
     skip_session_lock = bool(getattr(payload, "skip_session_lock", False) or False)
     msg_for_cb = message.strip()
-    is_fly_command = msg_for_cb.startswith("/")
+    from duckclaw.commands.fast_replies import resolve_fly_command_text
+
+    fly_msg = resolve_fly_command_text(user_incoming=user_incoming, message=msg_for_cb)
+    is_fly_command = fly_msg.startswith("/")
     if not is_system_prompt and not skip_session_lock and not is_fly_command:
         try:
             from harness_core.skills.emit_correction_delta import is_circuit_breaker_active
@@ -99,7 +102,7 @@ async def prepare_chat_invoke(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                     detail=(
                         "Meditate circuit breaker activo para este worker. "
-                        "Revisa alertas admin (meditate_critical) antes de reanudar chats."
+                        "Revisa alertas admin (loop_critical) antes de reanudar chats."
                     ),
                 )
         except HTTPException:

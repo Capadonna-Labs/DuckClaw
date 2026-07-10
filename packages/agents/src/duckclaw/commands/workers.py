@@ -10,24 +10,26 @@ from duckclaw.guardrails.loader import format_guardrail
 _DEFAULT_WORKER = "manager"
 
 
-def execute_roles(db: Any, chat_id: Any) -> str:
+def execute_roles(db: Any, chat_id: Any, *, tenant_id: Any = None) -> str:
     """/roles: lista todos los trabajadores virtuales (templates) disponibles."""
     _ = db, chat_id
-    from duckclaw.workers.factory import list_workers
+    from duckclaw.workers.discovery import list_workers_for_fly
 
-    all_templates = list_workers()
+    tid = str(tenant_id or "default").strip() or "default"
+    all_templates = list_workers_for_fly(tenant_id=tid)
     if not all_templates:
         return "No hay agentes en el catálogo. Añade al menos uno (forge/seed o consola admin)."
     lines = "\n".join(f"- {w}" for w in all_templates)
     return format_guardrail("fly_commands", "roles_list_intro", lines=lines)
 
 
-def execute_skills_list(db: Any, chat_id: Any, args: str) -> str:
+def execute_skills_list(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
     """/skills <worker_id>: lista herramientas del template. worker_id debe ser uno de /roles."""
     _ = db, chat_id
-    from duckclaw.workers.factory import list_workers
+    from duckclaw.workers.discovery import list_workers_for_fly
 
-    available = list_workers()
+    tid = str(tenant_id or "default").strip() or "default"
+    available = list_workers_for_fly(tenant_id=tid)
     wid_raw = (args or "").strip()
     if not wid_raw:
         return "Uso: /skills <worker_id>. Ver templates: /roles"

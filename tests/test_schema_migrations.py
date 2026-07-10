@@ -20,7 +20,7 @@ def test_migrations_create_expected_tables() -> None:
     con = duckdb.connect(str(tmp / "test.duckdb"))
 
     applied = run_pending_migrations(con)
-    assert len(applied) == 33, f"Expected 33 migrations, got {len(applied)}: {applied}"
+    assert len(applied) == 34, f"Expected 34 migrations, got {len(applied)}: {applied}"
 
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
@@ -535,6 +535,10 @@ def test_migration_033_moves_harness_core_to_main() -> None:
         "SELECT run_id FROM main.meditate_runs WHERE run_id = 'run-legacy'"
     ).fetchone()
     assert run_row is not None
+    loop_row = con.execute(
+        "SELECT run_id FROM main.loop_runs WHERE run_id = 'run-legacy'"
+    ).fetchone()
+    assert loop_row is not None
     harness = con.execute(
         "SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'harness_core'"
     ).fetchone()

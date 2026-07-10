@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { ChevronDown, LogOut, Sun, Moon, Menu, MessageSquare, RefreshCw, User } from 'lucide-react';
+import { ChevronDown, LogOut, Sun, Moon, Menu, Sparkles, RefreshCw, User } from 'lucide-react';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
@@ -32,6 +32,8 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
   const { theme, toggleTheme } = useTheme();
   const { sidebarOpen, toggleSidebar, chatDrawerOpen, toggleChatDrawer } = useLayoutUiStore();
   const router = useRouter();
+  const pathname = usePathname();
+  const isChatTab = pathname === '/playground' || pathname.startsWith('/playground/');
   const canRunOps = usuario?.rol === 'admin';
   const [stackRestarting, setStackRestarting] = useState(false);
   const [stackRestartMessage, setStackRestartMessage] = useState<string | null>(null);
@@ -40,7 +42,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
     if (!stackRestartMessage?.startsWith('Stack recuperado')) return;
     const timer = window.setTimeout(() => {
       window.location.reload();
-    }, 4000);
+    }, 3000);
     return () => window.clearTimeout(timer);
   }, [stackRestartMessage]);
 
@@ -113,11 +115,11 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
                 onClick={() => void restartStack()}
                 disabled={stackRestarting}
                 className="inline-flex items-center gap-2 rounded-xl border border-gov-blue-100 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
-                title="Migraciones DuckDB + reinicio DuckClaw-DB-Writer y DuckClaw-Gateway (PM2)"
+                title="Migraciones DuckDB + reinicio DuckClaw-DB-Writer, DuckClaw-Heartbeat y DuckClaw-Gateway (PM2)"
               >
                 <RefreshCw size={14} className={stackRestarting ? 'animate-spin' : ''} />
                 <span className="hidden sm:inline">
-                  {stackRestarting ? 'Reiniciando...' : 'Reiniciar stack'}
+                  {stackRestarting ? '—' : 'Reiniciar stack'}
                 </span>
               </button>
               {stackRestartMessage && (
@@ -128,20 +130,6 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
             </div>
           )}
         </div>
-        <button
-          type="button"
-          onClick={toggleChatDrawer}
-          className={`p-2 rounded-lg transition-colors ${
-            chatDrawerOpen
-              ? 'bg-gov-blue-700 text-white hover:bg-gov-blue-800'
-              : 'text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg'
-          }`}
-          aria-label={chatDrawerOpen ? 'Cerrar asistente' : 'Abrir asistente'}
-          aria-expanded={chatDrawerOpen}
-          title="Asistente"
-        >
-          <MessageSquare size={20} />
-        </button>
         <button
           type="button"
           onClick={toggleTheme}
@@ -157,6 +145,22 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
           onLogout={handleLogout}
           isAdmin={canRunOps}
         />
+        {!isChatTab && (
+          <button
+            type="button"
+            onClick={toggleChatDrawer}
+            className={`p-2 rounded-lg transition-colors ${
+              chatDrawerOpen
+                ? 'bg-gov-blue-700 text-white hover:bg-gov-blue-800'
+                : 'text-gov-blue-700 hover:bg-gov-blue-50 dark:text-dark-cyan dark:hover:bg-dark-bg'
+            }`}
+            aria-label={chatDrawerOpen ? 'Cerrar asistente IA' : 'Abrir asistente IA'}
+            aria-expanded={chatDrawerOpen}
+            title="Asistente IA"
+          >
+            <Sparkles size={20} />
+          </button>
+        )}
       </div>
     </header>
   );

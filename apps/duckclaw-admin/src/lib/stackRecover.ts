@@ -1,9 +1,9 @@
-import { spawn } from 'child_process';
 import { join } from 'path';
-import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { spawn } from 'child_process';import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
+import { buildUvRunArgv } from '@/lib/resolveRepoRuntime';
 import { pm2WaitShellPreamble } from '@/lib/pm2WaitShell';
-import { runStackStartLocal } from '@/lib/stackStart';
+import { runStackRestartCoreLocal } from '@/lib/stackRestartCore';
 
 function repoRoot(): string {
   const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
@@ -68,31 +68,33 @@ echo "PM2_STOP_OK"
   const stop = await runArgv(cwd, ['bash', '-lc', stopShell], 60_000);
   chunks.push('── Detener Gateway + DB-Writer (liberar DuckDB) ──\n', stop.stdout, stop.stderr);
 
-  const migrate = await runArgv(cwd, ['uv', 'run', 'duckclaw-migrate'], 180_000);
+  const migrateArgv = buildUvRunArgv(['duckclaw-migrate']);
+  const migrate = await runArgv(cwd, migrateArgv, 180_000);
   chunks.push('\n── Migraciones DuckDB (incl. seeders de policy pack) ──\n', migrate.stdout, migrate.stderr);
-  if (migrate.exit_code !== 0) {
-    return normalizeOpsResult({
-      op_id: 'restart_stack',
-      exit_code: migrate.exit_code,
-      stdout: chunks.join('\n'),
-      stderr: 'duckclaw-migrate falló; revisa locks DuckDB o ejecuta: uv run duckclaw-migrate',
-      executed_via: 'local',
-    });
-  }
-  if (migrate.stderr.trim()) {
+  const migrateFailed = migrate.exit_code !== 0;
+  if (migrateFailed) {
+    chunks.push(
+      '\n⚠ duckclaw-migrate falló; se intentará levantar Gateway/DB-Writer igualmente.\n',
+      migrate.stderr.trim() ? `Detalle: ${migrate.stderr.trim()}\n` : ''
+    );
+  } else if (migrate.stderr.trim()) {
     chunks.push(
       '\n(nota: avisos de drift en migraciones son informativos si aparece «Migrated OK»)\n'
     );
   }
 
-  const start = await runStackStartLocal();
-  chunks.push('\n── Arranque PM2 + ingress ──\n', start.stdout, start.stderr);
+  const start = await runStackRestartCoreLocal();
+  chunks.push('\n── Arranque PM2 (Gateway + DB-Writer + Heartbeat) ──\n', start.stdout, start.stderr);
 
+  const startOk = start.exit_code === 0;
   return normalizeOpsResult({
     op_id: 'restart_stack',
-    exit_code: start.exit_code,
+    exit_code: startOk ? (migrateFailed ? migrate.exit_code : 0) : start.exit_code,
     stdout: chunks.join('\n'),
-    stderr: start.stderr,
+    stderr: startOk && migrateFailed
+      ? 'Migraciones con error, pero PM2 relanzado. Revisa logs de duckclaw-migrate.'
+      : start.stderr,
     executed_via: 'local',
+    ok: startOk,
   });
 }

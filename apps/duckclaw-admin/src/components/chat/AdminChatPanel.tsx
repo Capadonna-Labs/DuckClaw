@@ -7,6 +7,7 @@ import {
   Brain,
   ChevronDown,
   ChevronRight,
+  Cpu,
   MessageSquarePlus,
   Send,
   Settings2,
@@ -28,6 +29,7 @@ import {
   type AdminChatController,
 } from '@/components/chat/useAdminChat';
 import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
+import { ChatSlmSelector } from '@/components/chat/ChatSlmSelector';
 import { ConversationQuickPicker } from '@/components/chat/ConversationQuickPicker';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
 import { workerOptionId, workerOptionLabel } from '@/lib/workerOptions';
@@ -66,11 +68,8 @@ export type AdminChatPanelProps = {
   className?: string;
 };
 
-function chatPanelTitle(sectionTitle?: string): string {
-  const base = 'Asistente';
-  const section = (sectionTitle || '').trim();
-  if (!section || section === 'DuckClaw Admin') return base;
-  return `${section}/${base}`;
+function chatPanelTitle(_sectionTitle?: string): string {
+  return 'Asistente';
 }
 
 export function AdminChatPanel({
@@ -297,13 +296,28 @@ export function AdminChatPanel({
                     <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
                       <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
                         <Brain size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
-                        Modelo
+                        LLM
                       </span>
                       <ChatLlmSelectors
                         chatId={chatId}
                         provider={config?.llm?.provider ?? ''}
                         model={config?.llm?.model ?? ''}
                         catalog={config?.catalog ?? []}
+                        onUpdated={() => reloadConfig()}
+                        disabled={config?.authorized === false || loading}
+                        compact
+                      />
+                    </label>
+                  ) : null}
+                  {chatId ? (
+                    <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
+                      <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
+                        <Cpu size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
+                        SLM (opcional)
+                      </span>
+                      <ChatSlmSelector
+                        chatId={chatId}
+                        slm={config?.slm}
                         onUpdated={() => reloadConfig()}
                         disabled={config?.authorized === false || loading}
                         compact
@@ -378,15 +392,34 @@ export function AdminChatPanel({
                   />
                 )}
                 {chatId && (config?.catalog?.length ?? 0) > 0 && (
-                  <ChatLlmSelectors
-                    chatId={chatId}
-                    provider={config?.llm?.provider ?? ''}
-                    model={config?.llm?.model ?? ''}
-                    catalog={config?.catalog ?? []}
-                    onUpdated={() => reloadConfig()}
-                    disabled={config?.authorized === false || loading}
-                    compact={false}
-                  />
+                  <div className="flex flex-col gap-2 min-w-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted">
+                      LLM
+                    </span>
+                    <ChatLlmSelectors
+                      chatId={chatId}
+                      provider={config?.llm?.provider ?? ''}
+                      model={config?.llm?.model ?? ''}
+                      catalog={config?.catalog ?? []}
+                      onUpdated={() => reloadConfig()}
+                      disabled={config?.authorized === false || loading}
+                      compact={false}
+                    />
+                  </div>
+                )}
+                {chatId && (
+                  <div className="flex flex-col gap-2 min-w-0">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted">
+                      SLM (opcional)
+                    </span>
+                    <ChatSlmSelector
+                      chatId={chatId}
+                      slm={config?.slm}
+                      onUpdated={() => reloadConfig()}
+                      disabled={config?.authorized === false || loading}
+                      compact={false}
+                    />
+                  </div>
                 )}
                 <select
                   value={workerId}

@@ -44,12 +44,19 @@ export function formatToolDurationMs(ms: number | null | undefined): string {
   return `${m}m ${s}s`;
 }
 
+export function formatToolDisplayName(toolName: string): string {
+  const name = (toolName || '').trim();
+  if (!name) return 'tool';
+  // mcp__mcp_higgsfield__foo → mcp__higgsfield__foo (connector id ya lleva prefijo mcp_)
+  return name.replace(/^mcp__mcp_/, 'mcp__');
+}
+
 export function toolHeartbeatDisplayText(
   toolName: string,
   phase: ToolHeartbeatPhase | 'running' | undefined,
   elapsedMs: number | null | undefined
 ): string {
-  const name = (toolName || 'tool').trim();
+  const name = formatToolDisplayName(toolName || 'tool');
   const base = `Usando: ${name}`;
   if (phase === 'error') {
     const dur = formatToolDurationMs(elapsedMs);

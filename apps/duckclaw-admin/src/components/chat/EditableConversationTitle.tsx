@@ -8,10 +8,15 @@ export type EditableConversationTitleProps = {
   onSave: (title: string) => Promise<void>;
   active?: boolean;
   compact?: boolean;
-  /** Cabecera Playground — texto más grande estilo AI Studio. */
-  variant?: 'default' | 'studio';
+  /** Cabecera Playground — texto más grande estilo AI Studio; history — listado con lápiz siempre visible. */
+  variant?: 'default' | 'studio' | 'history';
   /** Solo botón lápiz (junto al desplegable de conversación). */
   trigger?: 'default' | 'iconButton';
+  /** Oculta lápiz junto al título (p. ej. historial con lápiz en columna de acciones). */
+  hideEditIcon?: boolean;
+  /** Modo controlado del editor inline. */
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
   className?: string;
 };
 
@@ -22,12 +27,25 @@ export function EditableConversationTitle({
   compact = false,
   variant = 'default',
   trigger = 'default',
+  hideEditIcon = false,
+  editing: controlledEditing,
+  onEditingChange,
   className = '',
 }: EditableConversationTitleProps) {
   const isStudio = variant === 'studio';
-  const textSize = isStudio ? 'text-base' : compact ? 'text-xs' : 'text-sm';
-  const iconSize = isStudio ? 15 : compact ? 12 : 14;
-  const [editing, setEditing] = useState(false);
+  const isHistory = variant === 'history';
+  const textSize = isStudio ? 'text-base' : isHistory ? 'text-sm font-bold' : compact ? 'text-xs' : 'text-sm';
+  const iconSize = isStudio ? 15 : isHistory || compact ? 12 : 14;
+  const editIconAlwaysVisible = !hideEditIcon && (isStudio || isHistory);
+  const [internalEditing, setInternalEditing] = useState(false);
+  const editing = controlledEditing ?? internalEditing;
+  const setEditing = useCallback(
+    (next: boolean) => {
+      onEditingChange?.(next);
+      if (controlledEditing === undefined) setInternalEditing(next);
+    },
+    [controlledEditing, onEditingChange]
+  );
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -48,7 +66,7 @@ export function EditableConversationTitle({
     setEditing(false);
     setDraft(value);
     setErr(null);
-  }, [value]);
+  }, [setEditing, value]);
 
   const commit = useCallback(async () => {
     const next = draft.trim();
@@ -70,7 +88,7 @@ export function EditableConversationTitle({
     } finally {
       setSaving(false);
     }
-  }, [cancel, draft, onSave, value]);
+  }, [cancel, draft, onSave, setEditing, value]);
 
   if (editing) {
     const editWrap =
@@ -143,16 +161,23 @@ export function EditableConversationTitle({
       >
         {value}
       </span>
-      <button
-        type="button"
-        onClick={() => setEditing(true)}
-        className={`shrink-0 p-0.5 rounded opacity-0 group-hover/title:opacity-100 group-hover:opacity-100 focus:opacity-100 ${
-          active ? 'text-white/80 hover:text-white' : 'text-gov-gray-400 hover:text-gov-blue-700'
-        }`}
-        aria-label="Renombrar conversación"
-      >
-        <Pencil size={iconSize} />
-      </button>
+      {!hideEditIcon ? (
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className={`shrink-0 rounded p-1 transition-opacity ${
+            editIconAlwaysVisible
+              ? 'text-gov-gray-400 hover:text-gov-blue-700 dark:text-dark-muted dark:hover:text-dark-cyan opacity-80 hover:opacity-100'
+              : `opacity-0 group-hover/title:opacity-100 group-hover:opacity-100 focus:opacity-100 ${
+                  active ? 'text-white/80 hover:text-white' : 'text-gov-gray-400 hover:text-gov-blue-700'
+                }`
+          }`}
+          aria-label="Renombrar conversación"
+          title="Renombrar conversación"
+        >
+          <Pencil size={iconSize} />
+        </button>
+      ) : null}
     </div>
   );
 }

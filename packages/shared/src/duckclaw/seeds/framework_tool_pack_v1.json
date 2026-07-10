@@ -26,6 +26,26 @@
         "max_results": 5,
         "include_answer": true
       }
+    },
+    "higgsfield": {
+      "env_any": ["HIGGSFIELD_API_KEY"],
+      "default_config": {
+        "enabled": true,
+        "token_env": "HIGGSFIELD_API_KEY"
+      }
+    },
+    "fal": {
+      "env_any": ["FAL_KEY", "FAL_API_KEY"],
+      "default_config": {
+        "enabled": true,
+        "token_env": "FAL_KEY"
+      }
+    },
+    "comfyui": {
+      "env_any": [],
+      "default_config": {
+        "enabled": true
+      }
     }
   },
   "framework_tools": {

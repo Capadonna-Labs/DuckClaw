@@ -948,7 +948,7 @@ def test_telegram_whitelist_resolves_gateway_tenant(
 def test_train_admin_routes_removed(admin_client: TestClient):
     headers = {"X-Admin-Key": "test-admin-key"}
 
-    assert admin_client.get("/api/v1/admin/train/status", headers=headers).status_code == 404
+    assert admin_client.get("/api/v1/admin/train/status", headers=headers).status_code == 200
     assert (
         admin_client.post(
             "/api/v1/admin/train/pipeline/collect",

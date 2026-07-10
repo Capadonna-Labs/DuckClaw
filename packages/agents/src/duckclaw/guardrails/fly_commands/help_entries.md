@@ -5,9 +5,14 @@
 /roles|Ver todos los trabajadores virtuales (templates)
 /tasks|Estado actual: BUSY/IDLE, subagente, tarea
 /history|Historial de tareas (quién hizo qué)
-/goals|Manifiesto homeostasis: metas de dominio + umbrales infra (--set, --rm, --migrate, --reset)
+/goals|Manifiesto homeostasis: metas de dominio + umbrales infra (--set, --rm, --priority, --monitor, --task, --migrate, --reset)
 /crons|Solo programación proactiva: --delta / --timestamp; --rm delta|wall (metas en /goals)
-/meditate|Infra: --delta 4h|10m|off (contrasta /goals)
+/loop|Auto-mejora: bare, on, on --delta, --delta (silencio), --status, on 4h (reloj), off
+/loop-approve [uuid]|HITL: confirma homeostasis tras validación de /goals; alias /loop_approve
+/loop-reject [uuid] [razón]|HITL: rechaza homeostasis pendiente; alias /loop_reject
+/meditate|(Deprecated) alias de /loop
+/meditate-approve [uuid]|(Deprecated) alias de /loop-approve
+/meditate-reject [uuid] [razón]|(Deprecated) alias de /loop-reject
 /prompt <worker_id>|Ver prompt; --change <texto> para cambiar
 /model|Ver o cambiar LLM (provider/model; openrouter, or, deepseek, mlx, …)
 /models|Listar modelos disponibles de un provider (ej. gemini)

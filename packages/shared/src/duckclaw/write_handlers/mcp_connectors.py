@@ -43,9 +43,15 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
     if launch_env is None and preset:
         launch_env = preset.get("launch_env") or {}
 
-    auth_kind = str(payload.get("auth_kind") or (preset or {}).get("auth_kind") or "none").strip().lower()
+    auth_kind = str(payload.get("auth_kind") or "").strip().lower()
+    if auth_kind in ("", "none") and preset:
+        auth_kind = str(preset.get("auth_kind") or "none").strip().lower()
+    elif not auth_kind:
+        auth_kind = str((preset or {}).get("auth_kind") or "none").strip().lower()
     tool_allowlist = payload.get("tool_allowlist")
     if tool_allowlist is None and preset:
+        tool_allowlist = preset.get("tool_allowlist") or []
+    elif isinstance(tool_allowlist, list) and not tool_allowlist and preset:
         tool_allowlist = preset.get("tool_allowlist") or []
     tool_denylist = payload.get("tool_denylist")
     if tool_denylist is None and preset:
@@ -57,6 +63,8 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
         read_only = True
     egress_hosts = payload.get("egress_hosts")
     if egress_hosts is None and preset:
+        egress_hosts = preset.get("egress_hosts") or []
+    elif isinstance(egress_hosts, list) and not egress_hosts and preset:
         egress_hosts = preset.get("egress_hosts") or []
     metadata = payload.get("metadata")
     if metadata is None and preset:
@@ -203,6 +211,7 @@ def _apply_grant_worker_mcp_connector(conn: Any, payload: dict) -> None:
     connector_id = str(payload.get("connector_id") or "").strip()
     worker_uid = str(payload.get("worker_uid") or "").strip()
     permission = str(payload.get("permission") or "use").strip() or "use"
+    actor = str(payload.get("actor_email") or "system").strip().lower() or "system"
     if not connector_id or not worker_uid:
         raise ValueError("connector_id and worker_uid required")
 
@@ -219,14 +228,34 @@ def _apply_grant_worker_mcp_connector(conn: Any, payload: dict) -> None:
             """,
             [permission, worker_uid, connector_id],
         )
-        return
-    conn.execute(
-        """
-        INSERT INTO main.admin_worker_mcp_grants (worker_uid, connector_id, permission, active)
-        VALUES (?, ?, ?, true)
-        """,
-        [worker_uid, connector_id, permission],
-    )
+    else:
+        conn.execute(
+            """
+            INSERT INTO main.admin_worker_mcp_grants (worker_uid, connector_id, permission, active)
+            VALUES (?, ?, ?, true)
+            """,
+            [worker_uid, connector_id, permission],
+        )
+
+    preset_row = conn.execute(
+        "SELECT preset_id FROM main.admin_mcp_connectors "
+        "WHERE connector_id = ? AND active = true LIMIT 1",
+        [connector_id],
+    ).fetchone()
+    preset_id = str(
+        preset_row[0]
+        if preset_row and not isinstance(preset_row, dict)
+        else (preset_row or {}).get("preset_id") or ""
+    ).strip()
+    if preset_id:
+        from duckclaw.mcp_connector_defaults import enable_worker_manifest_skill_for_mcp_preset
+
+        enable_worker_manifest_skill_for_mcp_preset(
+            conn,
+            worker_uid=worker_uid,
+            preset_id=preset_id,
+            actor_email=actor,
+        )
 
 
 def _apply_revoke_worker_mcp_connector(conn: Any, payload: dict) -> None:

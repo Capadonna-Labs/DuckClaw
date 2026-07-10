@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from harness_core.states.meditate_state import CurrentMetrics, HomeostasisTarget
+from harness_core.states.loop_state import CurrentMetrics, HomeostasisTarget
 
 
 def _as_metrics(metrics: CurrentMetrics | dict[str, Any]) -> CurrentMetrics:

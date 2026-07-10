@@ -143,6 +143,14 @@ def enforce_playground_worker_access(
             raise problem(403, "Worker no asignado al catálogo del actor", wid)
 
 
+def _playground_message_is_fly_command(*, user_incoming: str, message: str) -> bool:
+    """Slash/fly commands no deben pasar por VLM (evita 502 MLX colgado en paralelo)."""
+    from duckclaw.commands.fast_replies import resolve_fly_command_text
+
+    fly_cmd = resolve_fly_command_text(user_incoming=user_incoming, message=message)
+    return fly_cmd.startswith("/")
+
+
 async def ingest_playground_message_with_images(
     msg: str,
     images: list[PlaygroundImageIn],
@@ -173,6 +181,14 @@ async def ingest_playground_message_with_images(
     except ValueError as exc:
         raise problem(400, str(exc), "images") from exc
     except Exception as exc:
+        from core.vlm_ingest import VlmIngestAllFailed
+
+        if isinstance(exc, VlmIngestAllFailed):
+            base = (msg or "").strip() or "Analiza esta imagen."
+            return (
+                f"{base}\n\n"
+                "[Nota: visión (VLM) no disponible; el agente continúa sin contexto visual adjunto.]"
+            ).strip()
         raise problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
 
 
@@ -209,7 +225,11 @@ async def prepare_playground_chat_turn(
     original_user_message = ((body.user_incoming or "").strip() or msg)
     if not msg and not body.images:
         raise problem(400, "message o images requeridos", "")
-    if body.images:
+    is_fly = _playground_message_is_fly_command(
+        user_incoming=original_user_message,
+        message=msg,
+    )
+    if body.images and not is_fly:
         msg = await ingest_playground_message_with_images(msg, body.images, eff_tenant=turn.eff_tenant)
     if not msg:
         raise problem(400, "message vacío tras VLM", body.message)

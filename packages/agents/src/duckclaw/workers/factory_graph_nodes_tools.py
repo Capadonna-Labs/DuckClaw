@@ -77,6 +77,21 @@ def make_tools_node(ctx: WorkerGraphContext):
             )
         except Exception:
             _log.debug("worker tool context hooks skipped", exc_info=True)
+        try:
+            from duckclaw.workers.factory_graph_nodes_agent_policy_early_context import (
+                bind_agent_turn_tool_context,
+            )
+
+            bind_agent_turn_tool_context(
+                state=state,
+                worker_id=worker_id,
+                path=str(path),
+                db=db,
+                chat_ctx=str(state.get("chat_id") or state.get("session_id") or "default"),
+                tenant_ctx=_tenant_ctx,
+            )
+        except Exception:
+            _log.debug("bind_agent_turn_tool_context in tools_node skipped", exc_info=True)
         messages = state["messages"]
         last = messages[-1]
         tool_calls = getattr(last, "tool_calls", None) or []

@@ -11,7 +11,7 @@ from routers.admin_domains.duckdb_explorer import _duckdb_readonly_session
 router = APIRouter(tags=["admin-hitl"])
 
 
-class AdminMeditateTickBody(BaseModel):
+class AdminLoopTickBody(BaseModel):
     tenant_id: str = "default"
     worker_id: str
     vault_db_path: str = ""
@@ -40,12 +40,12 @@ class UncertaintyResolveBody(BaseModel):
     vault_path: str = Field(..., min_length=4)
 
 
-@router.get("/meditate/status", dependencies=[Depends(require_admin_key)])
-def admin_meditate_status(
+@router.get("/loop/status", dependencies=[Depends(require_admin_key)])
+def admin_loop_status(
     tenant_id: str = Query("default"),
     worker_id: str = Query(""),
 ) -> dict[str, Any]:
-    """Último run meditate, distance_vector y estado del circuit breaker."""
+    """Último run loop, distance_vector y estado del circuit breaker."""
     import json
 
     from harness_core.skills.emit_correction_delta import circuit_breaker_redis_key, is_circuit_breaker_active
@@ -58,15 +58,22 @@ def admin_meditate_status(
 
         with open_gateway_db(read_only=True) as db:
             esc = tid.replace("'", "''")
-            raw = db.query(
-                "SELECT run_id, distance_vector, actions_json, status, created_at "
-                "FROM main.meditate_runs "
-                f"WHERE tenant_id = '{esc}' "
-                "ORDER BY created_at DESC LIMIT 1"
-            )
-            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-            if rows and isinstance(rows[0], dict):
-                last_run = rows[0]
+            for table in (
+                "main.loop_runs",
+                "main.meditate_runs",
+                "harness_core.loop_runs",
+                "harness_core.meditate_runs",
+            ):
+                raw = db.query(
+                    "SELECT run_id, distance_vector, actions_json, status, created_at "
+                    f"FROM {table} "
+                    f"WHERE tenant_id = '{esc}' "
+                    "ORDER BY created_at DESC LIMIT 1"
+                )
+                rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+                if rows and isinstance(rows[0], dict):
+                    last_run = rows[0]
+                    break
     except Exception as exc:
         last_run = {"error": str(exc)}
 
@@ -80,11 +87,11 @@ def admin_meditate_status(
     }
 
 
-@router.post("/meditate/tick", dependencies=[Depends(require_admin_key)])
-def admin_meditate_tick(body: AdminMeditateTickBody) -> dict[str, Any]:
-    """Disparo manual del grafo meditate (admin)."""
-    from harness_core.graphs.meditate_graph import invoke_meditate_run
-    from harness_core.states.meditate_state import HomeostasisTarget
+@router.post("/loop/tick", dependencies=[Depends(require_admin_key)])
+def admin_loop_tick(body: AdminLoopTickBody) -> dict[str, Any]:
+    """Disparo manual del grafo loop (admin)."""
+    from harness_core.graphs.loop_graph import invoke_loop_run
+    from harness_core.states.loop_state import HomeostasisTarget
     from harness_core.targets import load_homeostasis_targets
 
     tid = (body.tenant_id or "default").strip() or "default"
@@ -110,27 +117,40 @@ def admin_meditate_tick(body: AdminMeditateTickBody) -> dict[str, Any]:
     except Exception:
         pass
 
-    from duckclaw.graphs.on_the_fly_commands import _resolve_meditate_vault_user_id
+    from duckclaw.commands.loop import _resolve_loop_vault_user_id
 
-    meditate_user_id = _resolve_meditate_vault_user_id(
+    loop_user_id = _resolve_loop_vault_user_id(
         type("_VaultDb", (), {"_path": vault})(),
         chat_id=str(body.chat_id),
         tenant_id=tid,
         vault_user_id="admin",
     )
-    result = invoke_meditate_run(
+    result = invoke_loop_run(
         {
             "tenant_id": tid,
             "worker_id": wid,
             "chat_id": str(body.chat_id),
             "admin_chat_id": str(body.chat_id),
             "vault_db_path": vault,
-            "user_id": meditate_user_id,
+            "user_id": loop_user_id,
             "delta_interval_seconds": int(body.delta_interval_seconds),
             "targets": targets_obj.model_dump(),
         },
     )
     return {"ok": True, "result": result}
+
+
+@router.get("/meditate/status", dependencies=[Depends(require_admin_key)], include_in_schema=False)
+def admin_meditate_status_alias(
+    tenant_id: str = Query("default"),
+    worker_id: str = Query(""),
+) -> dict[str, Any]:
+    return admin_loop_status(tenant_id=tenant_id, worker_id=worker_id)
+
+
+@router.post("/meditate/tick", dependencies=[Depends(require_admin_key)], include_in_schema=False)
+def admin_meditate_tick_alias(body: AdminLoopTickBody) -> dict[str, Any]:
+    return admin_loop_tick(body)
 
 
 @router.post("/code/approve", dependencies=[Depends(require_admin_key)])

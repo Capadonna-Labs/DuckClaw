@@ -1360,6 +1360,21 @@ def _migration_033_harness_core_to_main(db: Any) -> None:
                 ON CONFLICT (tenant_id) DO NOTHING
                 """
             )
+        has_loop = db.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'harness_core' AND table_name = 'loop_runs'"
+        ).fetchone()
+        if has_loop and int(has_loop[0]) > 0:
+            db.execute(
+                """
+                INSERT INTO main.loop_runs (
+                    run_id, tenant_id, distance_vector, actions_json, status, created_at
+                )
+                SELECT run_id, tenant_id, distance_vector, actions_json, status, created_at
+                FROM harness_core.loop_runs
+                ON CONFLICT (run_id) DO NOTHING
+                """
+            )
         has_runs = db.execute(
             "SELECT COUNT(*) FROM information_schema.tables "
             "WHERE table_schema = 'harness_core' AND table_name = 'meditate_runs'"
@@ -1375,9 +1390,22 @@ def _migration_033_harness_core_to_main(db: Any) -> None:
                 ON CONFLICT (run_id) DO NOTHING
                 """
             )
+            db.execute(
+                """
+                INSERT INTO main.loop_runs (
+                    run_id, tenant_id, distance_vector, actions_json, status, created_at
+                )
+                SELECT run_id, tenant_id, distance_vector, actions_json, status, created_at
+                FROM harness_core.meditate_runs m
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM main.loop_runs l WHERE l.run_id = m.run_id
+                )
+                """
+            )
     except Exception as exc:
         _log.warning("migration 033 harness_core copy skipped: %s", exc)
     for stmt in (
+        "DROP TABLE IF EXISTS harness_core.loop_runs",
         "DROP TABLE IF EXISTS harness_core.meditate_runs",
         "DROP TABLE IF EXISTS harness_core.homeostasis_targets",
         "DROP SCHEMA IF EXISTS harness_core",
@@ -1386,6 +1414,12 @@ def _migration_033_harness_core_to_main(db: Any) -> None:
             db.execute(stmt)
         except Exception:
             pass
+
+
+def _migration_034_default_mcp_higgsfield(db: Any) -> None:
+    from duckclaw.mcp_connector_defaults import backfill_default_mcp_connectors_and_grants
+
+    backfill_default_mcp_connectors_and_grants(db)
 
 
 _M033_HOMEOSTASIS_MAIN = [
@@ -1421,6 +1455,16 @@ _M033_HOMEOSTASIS_MAIN = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS main.loop_runs (
+        run_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL,
+        distance_vector JSON,
+        actions_json JSON,
+        status VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 ]
 
 
@@ -1435,6 +1479,7 @@ _MIGRATION_HOOKS: dict[int, MigrationHook] = {
     31: _migration_031_user_agent_draft_policy_v2,
     32: _migration_032_user_agent_draft_policy_v2_refresh,
     33: _migration_033_harness_core_to_main,
+    34: _migration_034_default_mcp_higgsfield,
 }
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
@@ -1471,4 +1516,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (31, "user_agent_draft_policy_v2", []),
     (32, "user_agent_draft_policy_v2_refresh", []),
     (33, "homeostasis_main_schema", _M033_HOMEOSTASIS_MAIN),
+    (34, "default_mcp_higgsfield", []),
 ]

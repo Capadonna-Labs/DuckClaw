@@ -45,7 +45,16 @@ _CORE_READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
         "models",
         "network",
         "prompt",
+        "loop",
+        "loop-approve",
+        "loop_approve",
+        "loop-reject",
+        "loop_reject",
         "meditate",
+        "meditate-approve",
+        "meditate_approve",
+        "meditate-reject",
+        "meditate_reject",
         "provider",
         "red",
         "reject-code",
@@ -72,9 +81,31 @@ def _truncate_fly_log(text: str, max_len: int = 200) -> str:
     return value if len(value) <= max_len else value[:max_len] + "..."
 
 
+def _fly_command_requires_write_access(message: str) -> bool:
+    """Subcomandos fly que mutan vault/chat state necesitan DuckClaw read_only=False."""
+    name, args = parse_command(message)
+    if not name:
+        return False
+    cmd = name.replace("_", "-")
+    if cmd in LEGACY_RW_FLY_COMMANDS:
+        return True
+    args_norm = (args or "").strip().lower()
+    if cmd in ("loop", "meditate"):
+        if not args_norm:
+            return False
+        first = args_norm.split()[0]
+        if first in ("--status", "status"):
+            return False
+        if first in ("on", "off", "--delta", "--self", "--now"):
+            return True
+        return False
+    return False
+
+
 def _open_fly_duckclaw(vault_db_path: str, message: str) -> DuckClaw:
     _name, _args = parse_command(message)
-    return DuckClaw(vault_db_path, read_only=True, engine="python")
+    read_only = not _fly_command_requires_write_access(message)
+    return DuckClaw(vault_db_path, read_only=read_only, engine="python")
 
 
 def _audit_fly_vault_resolution(vault_db_path: str, fly_engine: str) -> None:

@@ -174,3 +174,84 @@ def test_playground_chat_invalid_mime(admin_client: TestClient, monkeypatch: pyt
         },
     )
     assert r.status_code == 400
+
+
+def test_playground_fly_command_skips_vlm_with_images(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core import vlm_ingest as vlm
+
+    async def _fail_enrich(*_a, **_k):
+        raise AssertionError("VLM must not run for fly commands")
+
+    monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fail_enrich)
+
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
+    import routers.admin_domains.playground_chat as playground_chat_router
+    from test_admin_router import _mock_playground_team
+
+    async def _fake_invoke(*_a, **_k):
+        return {"response": "fly-ok", "assigned_worker_id": "default"}
+
+    monkeypatch.setattr(
+        playground_chat_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["default"]),
+    )
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
+
+    r = admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={
+            "worker_id": "default",
+            "user_incoming": "/loop --status",
+            "message": "[KNOWLEDGE_SCOPE]\nscope\n[/KNOWLEDGE_SCOPE]\n/loop --status",
+            "chat_id": "admin-playground",
+            "images": [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+        },
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_playground_vlm_all_failed_degrades_instead_of_502(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core import vlm_ingest as vlm
+
+    async def _raise_all_failed(*_a, **_k):
+        raise vlm.VlmIngestAllFailed(RuntimeError("mlx down"))
+
+    monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _raise_all_failed)
+
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
+    import routers.admin_domains.playground_chat as playground_chat_router
+    from test_admin_router import _mock_playground_team
+
+    seen: dict[str, str] = {}
+
+    async def _fake_invoke(prepared, *_a, **_k):
+        seen["message"] = prepared.msg
+        return {"response": "ok", "assigned_worker_id": "default"}
+
+    monkeypatch.setattr(
+        playground_chat_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["default"]),
+    )
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
+
+    r = admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={
+            "worker_id": "default",
+            "message": "describe",
+            "chat_id": "admin-playground",
+            "images": [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert "VLM" in seen.get("message", "") or "visión" in seen.get("message", "")

@@ -15,7 +15,8 @@ Contrato canónico del singleton writer (`services/db-writer/`). Gateway, agente
 | `duckdb_write_queue` | `main.execute_write` | Comandos tipados y SQL legacy |
 | `duckclaw:state_delta:context` | `context_injection_handler` | `CONTEXT_INJECTION` / semantic memory |
 | `duckclaw:state_delta:visual` | `visual_state_delta_handler` | `VISUAL_ASSET_UPSERT` |
-| `duckclaw:state_delta:meditate` | `meditate_state_delta_handler` | `PURGE_STALE_TASKS`, `QUARANTINE_MEMORY` |
+| `duckclaw:state_delta:loop` | `loop_state_delta_handler` | `PURGE_STALE_TASKS`, `QUARANTINE_MEMORY`, `UPSERT_LOOP_AUDIT` |
+| `duckclaw:state_delta:meditate` | (legacy alias queue; dual consumer) | mismo handler |
 | `duckclaw:state_delta:reports` | `reports_state_delta_handler` | `CUSTOM_REPORT_UPSERT` |
 
 Nombres overrideables vía env (`DUCKCLAW_*_STATE_DELTA_QUEUE`, `QUEUE_NAME`). El writer consume las cinco en paralelo (`asyncio.gather`) con cola **reliable** (ver abajo).

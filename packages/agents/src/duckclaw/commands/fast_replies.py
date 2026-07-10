@@ -53,6 +53,17 @@ def _strip_scope_preamble(text: str) -> str:
     return re.sub(r"\[KNOWLEDGE_SCOPE\].*?\[/KNOWLEDGE_SCOPE\]", "", text or "", flags=re.DOTALL).strip()
 
 
+def resolve_fly_command_text(*, user_incoming: str, message: str) -> str:
+    """Comando fly real aunque playground haya envuelto el mensaje con RAG scope."""
+    raw = (user_incoming or "").strip()
+    if raw.startswith("/"):
+        return raw
+    stripped = _strip_scope_preamble(message or "")
+    if stripped.startswith("/"):
+        return stripped.split("\n", 1)[0].strip()
+    return raw
+
+
 # Pedidos de ejemplo meta (sin dataset concreto): no invocar plan + worker
 # Nota: ``pued(es|as|a|e)`` cubre «puedes», «puedas», «puede», «pueda» (no usar ``pueda?s?``, que no casa «puedes»).
 _CAPABILITIES_EXAMPLE_SMALLTALK = re.compile(

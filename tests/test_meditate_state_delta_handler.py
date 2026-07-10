@@ -53,7 +53,7 @@ def test_apply_quarantine_memory(tmp_path: Path, monkeypatch) -> None:
     con.close()
 
     monkeypatch.setattr(
-        "meditate_state_delta_handler.validate_user_db_path",
+        "loop_state_delta_handler.validate_user_db_path",
         lambda *_a, **_k: True,
     )
     payload = {
@@ -88,7 +88,7 @@ def test_upsert_homeostasis_manifest(tmp_path: Path, monkeypatch) -> None:
     con.close()
 
     monkeypatch.setattr(
-        "meditate_state_delta_handler.validate_user_db_path",
+        "loop_state_delta_handler.validate_user_db_path",
         lambda *_a, **_k: True,
     )
     manifest = {

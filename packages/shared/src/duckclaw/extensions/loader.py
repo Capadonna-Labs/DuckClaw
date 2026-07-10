@@ -148,7 +148,7 @@ def load_extension_module(
         spec.loader.exec_module(mod)
     except Exception:
         sys.modules.pop(fq, None)
-        _log.debug("extension module %s failed", path, exc_info=True)
+        _log.warning("extension module %s failed to import", path, exc_info=True)
         return None
     _MODULE_CACHE[cache_key] = mod
     return mod

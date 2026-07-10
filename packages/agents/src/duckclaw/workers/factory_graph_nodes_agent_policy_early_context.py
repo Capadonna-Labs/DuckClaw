@@ -29,6 +29,7 @@ def bind_agent_turn_tool_context(
         from duckclaw.forge.skills.goals_tool_context import (
             set_goals_tool_chat_id,
             set_goals_tool_db_path,
+            set_goals_tool_tenant_id,
             set_goals_tool_worker_id,
         )
         from duckclaw.forge.skills.knowledge_tool_context import (
@@ -43,6 +44,7 @@ def bind_agent_turn_tool_context(
         set_goals_tool_chat_id(str(chat_ctx))
         set_goals_tool_worker_id(worker_id)
         set_goals_tool_db_path(str(path))
+        set_goals_tool_tenant_id(tenant_ctx)
         set_knowledge_tool_tenant_id(tenant_ctx)
         project_ctx = str(state.get("project_id") or "")
         set_knowledge_tool_project_id(project_ctx)

@@ -5,9 +5,11 @@ import type { AdminHealth } from '@/types/admin';
 const TTL_MS = 45_000;
 const STALE_GRACE_MS = 180_000;
 const OFFLINE_AFTER_FAILURES = 3;
+const RECOVERY_MAX_MS = 300_000;
 
 let inflight: Promise<AdminHealth | null> | null = null;
 let consecutiveFailures = 0;
+let recoveryStartedAt = 0;
 
 type GatewayHealthState = {
   data: AdminHealth | null;
@@ -32,9 +34,11 @@ export const useGatewayHealthStore = create<GatewayHealthState>((set, get) => ({
   fetchedAt: 0,
   beginRecovery: () => {
     consecutiveFailures = 0;
+    recoveryStartedAt = Date.now();
     set({ recovering: true, error: false });
   },
   endRecovery: () => {
+    recoveryStartedAt = 0;
     set({ recovering: false });
   },
   refresh: async (force = false) => {
@@ -63,6 +67,15 @@ export const useGatewayHealthStore = create<GatewayHealthState>((set, get) => ({
       .catch(() => {
         consecutiveFailures += 1;
         const prev = get();
+        const recoveryTimedOut =
+          prev.recovering &&
+          recoveryStartedAt > 0 &&
+          Date.now() - recoveryStartedAt > RECOVERY_MAX_MS;
+        if (recoveryTimedOut) {
+          recoveryStartedAt = 0;
+          set({ recovering: false, error: true, data: prev.data, fetchedAt: Date.now() });
+          return prev.data;
+        }
         const keepStale = staleDataStillUsable(prev.data, prev.fetchedAt);
         if (prev.recovering) {
           set({ data: prev.data, error: false, fetchedAt: Date.now() });

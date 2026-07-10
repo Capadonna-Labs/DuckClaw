@@ -7,6 +7,7 @@ import { ChatMarkdown, looksLikeMarkdown } from '@/components/chat/ChatMarkdown'
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import {
+  formatToolDisplayName,
   formatToolDurationMs,
   parseToolNameFromHeartbeatText,
 } from '@/lib/toolHeartbeat';
@@ -20,8 +21,9 @@ export function formatChatIdentityPrefix(workerId?: string, swarmSlot = 1): stri
 
 /** Quita prefijo duplicado en heartbeat (UI ya muestra worker + tipo). */
 function ToolHeartbeatBody({ message: m }: { message: ChatMsg }) {
-  const toolName =
-    (m.toolName || '').trim() || parseToolNameFromHeartbeatText(m.text || '') || 'tool';
+  const toolName = formatToolDisplayName(
+    (m.toolName || '').trim() || parseToolNameFromHeartbeatText(m.text || '') || 'tool'
+  );
   const running =
     m.toolPhase === 'running' ||
     m.toolPhase === 'start' ||

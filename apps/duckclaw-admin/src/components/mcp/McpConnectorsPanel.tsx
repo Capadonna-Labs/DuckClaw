@@ -2,11 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   CheckCircle2,
   ExternalLink,
   KeyRound,
   Loader2,
+  LogIn,
   Plug,
   RefreshCw,
   TestTube2,
@@ -20,12 +22,14 @@ import {
   type McpConnectorSummary,
   type McpConnectorTestResult,
 } from '@/services/adminService';
+import { pollWriteTask } from '@/lib/pollWriteTask';
 
 type McpConnectorsPanelProps = {
   canWrite: boolean;
 };
 
 export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
+  const searchParams = useSearchParams();
   const [connectors, setConnectors] = useState<McpConnectorSummary[]>([]);
   const [presets, setPresets] = useState<McpConnectorPreset[]>([]);
   const [workers, setWorkers] = useState<TemplateSummary[]>([]);
@@ -35,6 +39,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   const [selectedPreset, setSelectedPreset] = useState('');
   const [authTokens, setAuthTokens] = useState<Record<string, string>>({});
   const [grantWorkerByConnector, setGrantWorkerByConnector] = useState<Record<string, string>>({});
+  const [grantNotices, setGrantNotices] = useState<Record<string, string>>({});
   const [testResults, setTestResults] = useState<Record<string, McpConnectorTestResult>>({});
 
   const load = useCallback(() => {
@@ -60,6 +65,33 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   useEffect(() => {
     load();
   }, [load]);
+
+  useEffect(() => {
+    const oauth = searchParams.get('oauth');
+    if (oauth === 'success') {
+      setError(null);
+      load();
+    } else if (oauth === 'error') {
+      const msg = searchParams.get('msg') || 'OAuth falló';
+      setError(decodeURIComponent(msg));
+    }
+  }, [searchParams, load]);
+
+  const oauthRedirectUri = () =>
+    `${window.location.origin}/api/admin/mcp/connectors/oauth/callback`;
+
+  const connectHiggsfield = async (connectorId: string) => {
+    if (busyId) return;
+    setBusyId(`oauth:${connectorId}`);
+    setError(null);
+    try {
+      const result = await adminService.startMcpConnectorOAuth(connectorId, oauthRedirectUri());
+      window.location.href = result.authorization_url;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo iniciar OAuth');
+      setBusyId(null);
+    }
+  };
 
   const presetById = useMemo(
     () => Object.fromEntries(presets.map((preset) => [preset.preset_id, preset])),
@@ -125,8 +157,29 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     if (!workerId || busyId) return;
     setBusyId(`grant:${connectorId}`);
     setError(null);
+    setGrantNotices((prev) => {
+      const next = { ...prev };
+      delete next[connectorId];
+      return next;
+    });
     try {
-      await adminService.grantMcpConnector(connectorId, workerId);
+      const result = await adminService.grantMcpConnector(connectorId, workerId);
+      const polled = await pollWriteTask(result.task_id);
+      if (polled.state === 'failed') {
+        throw new Error(polled.detail || 'Grant no se aplicó en DB');
+      }
+      const connector = connectors.find((c) => c.connector_id === connectorId);
+      const workerLabel = workers.find((w) => w.id === workerId)?.display_name || workerId;
+      const skillHint =
+        connector?.preset_id === 'higgsfield'
+          ? ' Skill higgsfield activada en pestaña Agentes (manifest).'
+          : connector?.preset_id
+            ? ` Skill ${connector.preset_id} activada en manifest si aplica.`
+            : '';
+      setGrantNotices((prev) => ({
+        ...prev,
+        [connectorId]: `Grant aplicado a ${workerLabel}.${skillHint}`,
+      }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo asignar el worker');
     } finally {
@@ -212,6 +265,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
               busyId={busyId}
               authToken={authTokens[connector.connector_id] || ''}
               grantWorkerId={grantWorkerByConnector[connector.connector_id] || workers[0]?.id || ''}
+              grantNotice={grantNotices[connector.connector_id]}
               testResult={testResults[connector.connector_id]}
               onAuthTokenChange={(value) =>
                 setAuthTokens((prev) => ({ ...prev, [connector.connector_id]: value }))
@@ -220,6 +274,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
                 setGrantWorkerByConnector((prev) => ({ ...prev, [connector.connector_id]: value }))
               }
               onSaveAuth={() => saveAuth(connector.connector_id)}
+              onConnectOAuth={() => connectHiggsfield(connector.connector_id)}
               onTest={() => runTest(connector.connector_id)}
               onGrant={() => grantWorker(connector.connector_id)}
               onDeactivate={() => deactivate(connector.connector_id)}
@@ -280,10 +335,12 @@ function ConnectorCard({
   busyId,
   authToken,
   grantWorkerId,
+  grantNotice,
   testResult,
   onAuthTokenChange,
   onGrantWorkerChange,
   onSaveAuth,
+  onConnectOAuth,
   onTest,
   onGrant,
   onDeactivate,
@@ -294,16 +351,20 @@ function ConnectorCard({
   busyId: string | null;
   authToken: string;
   grantWorkerId: string;
+  grantNotice?: string;
   testResult?: McpConnectorTestResult;
   onAuthTokenChange: (value: string) => void;
   onGrantWorkerChange: (value: string) => void;
   onSaveAuth: () => void;
+  onConnectOAuth: () => void;
   onTest: () => void;
   onGrant: () => void;
   onDeactivate: () => void;
 }) {
-  const needsBearer = connector.auth_kind === 'bearer';
+  const needsBearer = connector.auth_kind === 'bearer' || connector.preset_id === 'higgsfield';
+  const isHiggsfield = connector.preset_id === 'higgsfield';
   const authReady = !needsBearer || connector.has_auth;
+  const showAuthBadge = needsBearer || isHiggsfield;
 
   return (
     <article className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
@@ -329,7 +390,7 @@ function ConnectorCard({
           >
             {connector.enabled ? 'habilitado' : 'deshabilitado'}
           </span>
-          {needsBearer && (
+          {showAuthBadge && (
             <span
               className={
                 connector.has_auth
@@ -337,21 +398,44 @@ function ConnectorCard({
                   : 'rounded-full bg-amber-100 px-2 py-1 text-amber-800'
               }
             >
-              {connector.has_auth ? 'auth OK' : 'falta Bearer'}
+              {connector.has_auth ? 'auth OK' : isHiggsfield ? 'falta OAuth' : 'falta Bearer'}
             </span>
           )}
         </div>
       </div>
 
-      {canWrite && needsBearer && (
+      {canWrite && isHiggsfield && (
         <div className="mt-4 rounded-2xl border border-gov-gray-100 p-4 dark:border-dark-border">
           <div className="flex items-center gap-2 text-sm font-bold">
-            <KeyRound size={16} /> Token Bearer (v1 manual)
+            <LogIn size={16} /> Conectar cuenta Higgsfield
           </div>
-          <p className="mt-1 text-xs text-gov-gray-500">
-            Higgsfield usa OAuth en clientes nativos. En v1 pega aquí el Bearer capturado tras autorizar en
-            Claude/Cursor (DevTools → Network → header Authorization).
+          <p className="mt-2 text-xs text-gov-gray-600 dark:text-dark-muted">
+            Inicia sesión con tu cuenta Higgsfield desde DuckClaw. La sesión queda guardada en el servidor para
+            workers con skill <code className="font-mono">higgsfield</code>.
           </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onConnectOAuth}
+              disabled={busyId === `oauth:${connector.connector_id}`}
+              className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
+            >
+              {busyId === `oauth:${connector.connector_id}` ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <LogIn size={14} />
+              )}
+              {connector.has_auth ? 'Reconectar Higgsfield' : 'Conectar Higgsfield'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {canWrite && needsBearer && !isHiggsfield && (
+        <div className="mt-4 rounded-2xl border border-gov-gray-100 p-4 dark:border-dark-border">
+          <div className="flex items-center gap-2 text-sm font-bold">
+            <KeyRound size={16} /> Token Bearer
+          </div>
           <div className="mt-3 flex flex-wrap gap-2">
             <input
               type="password"
@@ -419,6 +503,15 @@ function ConnectorCard({
           </>
         )}
       </div>
+
+      {grantNotice && (
+        <div className="mt-4 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900 dark:border-green-900/50 dark:bg-green-950/20 dark:text-green-200">
+          <div className="flex items-center gap-2 font-bold">
+            <CheckCircle2 size={16} />
+            {grantNotice}
+          </div>
+        </div>
+      )}
 
       {testResult && (
         <div

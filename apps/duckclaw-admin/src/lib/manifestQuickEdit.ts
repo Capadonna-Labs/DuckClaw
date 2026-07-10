@@ -7,13 +7,19 @@ export type ManifestQuickState = {
   browserSandbox: boolean;
   webSearch: boolean;
   baselineOff: boolean;
+  /** Pasos con herramientas por turno (manifest `agent_node.max_tool_rounds`). */
+  maxToolRounds: number;
 };
+
+export const DEFAULT_MAX_TOOL_ROUNDS = 10;
+export const MAX_TOOL_ROUNDS_CEILING = 50;
 
 const DEFAULT_STATE: ManifestQuickState = {
   toolProfile: 'general',
   browserSandbox: false,
   webSearch: false,
   baselineOff: false,
+  maxToolRounds: DEFAULT_MAX_TOOL_ROUNDS,
 };
 
 function readScalar(yaml: string, key: string): string | null {
@@ -28,6 +34,17 @@ function readBool(yaml: string, key: string): boolean {
   return ['true', 'yes', '1', 'on'].includes(raw.toLowerCase());
 }
 
+function readAgentNodeMaxToolRounds(yaml: string): number {
+  const blockMatch = yaml.match(/^agent_node:\s*\n((?:  .+\n)*)/m);
+  if (!blockMatch) return DEFAULT_MAX_TOOL_ROUNDS;
+  const inner = blockMatch[1];
+  const mtr = inner.match(/^  max_tool_rounds:\s*(\d+)\s*$/m);
+  if (!mtr) return DEFAULT_MAX_TOOL_ROUNDS;
+  const n = Number.parseInt(mtr[1], 10);
+  if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_TOOL_ROUNDS;
+  return Math.min(MAX_TOOL_ROUNDS_CEILING, n);
+}
+
 export function parseManifestQuick(yaml: string): ManifestQuickState {
   const profile = (readScalar(yaml, 'tool_profile') || 'general').toLowerCase();
   const toolProfile: ToolProfile =
@@ -38,6 +55,7 @@ export function parseManifestQuick(yaml: string): ManifestQuickState {
     browserSandbox: readBool(yaml, 'browser_sandbox'),
     webSearch,
     baselineOff: readScalar(yaml, 'baseline') === 'false',
+    maxToolRounds: readAgentNodeMaxToolRounds(yaml),
   };
 }
 
@@ -83,6 +101,33 @@ function upsertResearchSkill(yaml: string, enabled: boolean): string {
   return yaml;
 }
 
+function upsertAgentNodeMaxToolRounds(yaml: string, rounds: number): string {
+  const value = Math.max(1, Math.min(MAX_TOOL_ROUNDS_CEILING, Math.floor(rounds)));
+  const blockRe = /^agent_node:\s*\n((?:  .+\n)*)/m;
+  const hasBlock = blockRe.test(yaml);
+  const roundsLine = `  max_tool_rounds: ${value}`;
+
+  if (value === DEFAULT_MAX_TOOL_ROUNDS) {
+    if (!hasBlock) return yaml;
+    let out = yaml.replace(/^  max_tool_rounds:\s*\d+\s*\n/m, '');
+    const afterRemove = out.match(blockRe);
+    if (afterRemove && !/^  \S/m.test(afterRemove[1])) {
+      out = out.replace(/^agent_node:\s*\n/m, '');
+    }
+    return out;
+  }
+
+  if (hasBlock) {
+    if (/^  max_tool_rounds:\s*\d+\s*$/m.test(yaml)) {
+      return yaml.replace(/^  max_tool_rounds:\s*\d+\s*$/m, roundsLine);
+    }
+    return yaml.replace(/^agent_node:\s*\n/m, `agent_node:\n${roundsLine}\n`);
+  }
+
+  const trimmed = yaml.trimEnd();
+  return `${trimmed}\nagent_node:\n${roundsLine}\n`;
+}
+
 export function applyManifestQuick(yaml: string, state: ManifestQuickState): string {
   let out = yaml.trimEnd() + '\n';
   out = upsertScalar(out, 'tool_profile', state.toolProfile);
@@ -93,6 +138,7 @@ export function applyManifestQuick(yaml: string, state: ManifestQuickState): str
     out = out.replace(/^baseline:\s*.+\n?/m, '');
   }
   out = upsertResearchSkill(out, state.webSearch);
+  out = upsertAgentNodeMaxToolRounds(out, state.maxToolRounds);
   return out.replace(/\n{3,}/g, '\n\n');
 }
 

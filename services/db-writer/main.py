@@ -11,17 +11,63 @@ from typing import Any
 # Multi-Vault: rutas bajo db/ deben resolver igual que el Gateway (cwd suele ser services/db-writer).
 _writer_file = Path(__file__).resolve()
 _repo_root = _writer_file.parent.parent.parent  # db-writer -> services -> repo
-os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_repo_root))
+_env_file = _repo_root / ".env"
+if _env_file.is_file():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_env_file, override=False)
+    except Exception:
+        pass
+_extension_root = (os.environ.get("DUCKCLAW_EXTENSION_ROOT") or "").strip()
+if _extension_root:
+    os.environ.setdefault("DUCKCLAW_EXTENSION_ROOT", _extension_root)
+    os.environ.setdefault("DUCKCLAW_REPO_ROOT", _extension_root)
+else:
+    os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_repo_root))
 
 import sys
 _path_src = str(_repo_root / "packages" / "shared" / "src")
-if _path_src not in sys.path:
-    sys.path.insert(0, _path_src)
+_path_agents = str(_repo_root / "packages" / "agents" / "src")
+for _p in (_path_src, _path_agents):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from duckclaw.extensions.state_delta import load_state_delta_handler_bindings
 
 # Resolve extension handlers before built-in handlers register the top-level ``models`` package.
 _extension_state_delta_bindings = load_state_delta_handler_bindings()
+
+
+def _log_extension_state_delta_bindings() -> None:
+    """Log loaded extension StateDelta handlers; warn if manifest declares handlers none loaded."""
+    if _extension_state_delta_bindings:
+        logger.info(
+            "extension StateDelta handlers: %s",
+            ", ".join(f"{b.label}@{b.queue_name}" for b in _extension_state_delta_bindings),
+        )
+        return
+    try:
+        from duckclaw.extensions.manifest import load_fly_extension_manifest
+
+        manifest = load_fly_extension_manifest()
+        declared = [
+            e
+            for e in (manifest.state_delta_handlers or ())
+            if (getattr(e, "entrypoint", None) or "").strip()
+        ]
+        if declared:
+            labels = ", ".join(
+                (getattr(e, "label", None) or getattr(e, "entrypoint", None) or "handler")
+                for e in declared[:5]
+            )
+            logger.warning(
+                "Extension manifest declares StateDelta handlers (%s) but db-writer loaded none. "
+                "Revisa DUCKCLAW_EXTENSION_ROOT y workers/duckclaw/db_writer.",
+                labels,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("extension binding verify skipped: %s", exc)
 
 import duckdb
 import redis.asyncio as redis
@@ -35,9 +81,16 @@ from db_writer_ops import (
     run_reliable_queue_loop,
 )
 try:
+    from loop_state_delta_handler import handle_loop_state_delta_message
+except ImportError:
+    handle_loop_state_delta_message = None
+
+try:
     from meditate_state_delta_handler import handle_meditate_state_delta_message
 except ImportError:
     handle_meditate_state_delta_message = None
+if handle_loop_state_delta_message is None and handle_meditate_state_delta_message is not None:
+    handle_loop_state_delta_message = handle_meditate_state_delta_message
 
 try:
     from reports_state_delta_handler import handle_reports_state_delta_message
@@ -60,7 +113,7 @@ from duckclaw.db_write_queue import (
     task_status_redis_key,
 )
 from duckclaw.gateway_db import get_gateway_db_path
-from duckclaw.vaults import resolve_user_id_for_db_path
+from duckclaw.vaults import db_root, resolve_user_id_for_db_path
 
 # Configuración de logging robusto
 logging.basicConfig(
@@ -307,7 +360,14 @@ async def _handle_typed_command(
             user_id, target_db_path, tenant_id if tenant_id != "default" else None
         )
     except ValueError as exc:
-        logger.warning("[%s] Rejected: %s", task_id, exc)
+        logger.warning(
+            "[%s] Rejected: %s (db_path=%s db_root=%s user_id=%s)",
+            task_id,
+            exc,
+            target_db_path,
+            db_root(),
+            user_id,
+        )
         await _publish_task_status(
             redis_client, task_id,
             DbWriteTaskStatus(status="failed", detail=str(exc)),
@@ -400,7 +460,14 @@ async def execute_write(redis_client: redis.Redis, message: str) -> None:
             return
         resolved_uid = resolve_user_id_for_db_path(user_id, target_db_path, tenant_id=tenant_id)
         if resolved_uid is None:
-            logger.warning("[%s] Rechazado: db_path fuera del directorio permitido del usuario.", task_id)
+            logger.warning(
+                "[%s] Rechazado: db_path fuera del directorio permitido del usuario "
+                "(db_path=%s db_root=%s user_id=%s).",
+                task_id,
+                target_db_path,
+                db_root(),
+                user_id,
+            )
             await _publish_task_status(
                 redis_client,
                 task_id,
@@ -562,22 +629,47 @@ async def _visual_state_delta_loop(redis_client: redis.Redis) -> None:
     )
 
 
-async def _meditate_state_delta_loop(redis_client: redis.Redis) -> None:
-    if handle_meditate_state_delta_message is None:
-        logger.warning("MEDITATE_STATE_DELTA handler no disponible; omitiendo loop")
+async def _loop_state_delta_loop(redis_client: redis.Redis) -> None:
+    if handle_loop_state_delta_message is None:
+        logger.warning("LOOP_STATE_DELTA handler no disponible; omitiendo loop")
         return
-    q = str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip()
+    q = str(settings.LOOP_STATE_DELTA_QUEUE_NAME).strip()
     logger.info(
-        "Escuchando cola MEDITATE_STATE_DELTA (reliable, PURGE_STALE_TASKS, QUARANTINE_MEMORY): %s",
+        "Escuchando cola LOOP_STATE_DELTA (reliable, PURGE_STALE_TASKS, QUARANTINE_MEMORY): %s",
         q,
     )
 
     async def _handler(redis_client: redis.Redis, message: str) -> None:
         try:
-            await handle_meditate_state_delta_message(redis_client, message)
+            await handle_loop_state_delta_message(redis_client, message)
         except Exception as exc:  # noqa: BLE001
             await push_dlq(redis_client, q, message, str(exc))
-            logger.exception("MEDITATE_STATE_DELTA handler no capturó excepción: %s", exc)
+            logger.exception("LOOP_STATE_DELTA handler no capturó excepción: %s", exc)
+
+    await run_reliable_queue_loop(
+        redis_client,
+        q,
+        _handler,
+        lease_sec=settings.PROCESSING_LEASE_SEC,
+    )
+
+
+async def _legacy_meditate_state_delta_loop(redis_client: redis.Redis) -> None:
+    """Drain legacy queue duckclaw:state_delta:meditate during migration."""
+    if handle_loop_state_delta_message is None:
+        return
+    q = str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip()
+    loop_q = str(settings.LOOP_STATE_DELTA_QUEUE_NAME).strip()
+    if not q or q == loop_q:
+        return
+    logger.info("Escuchando cola legacy MEDITATE_STATE_DELTA (migración → loop): %s", q)
+
+    async def _handler(redis_client: redis.Redis, message: str) -> None:
+        try:
+            await handle_loop_state_delta_message(redis_client, message)
+        except Exception as exc:  # noqa: BLE001
+            await push_dlq(redis_client, q, message, str(exc))
+            logger.exception("legacy MEDITATE_STATE_DELTA handler error: %s", exc)
 
     await run_reliable_queue_loop(
         redis_client,
@@ -659,8 +751,12 @@ def _all_reliable_queues(extra_bindings: list[Any] | None = None) -> list[str]:
     ]
     if handle_visual_state_delta_message is not None:
         queues.append(str(settings.VISUAL_STATE_DELTA_QUEUE_NAME).strip())
-    if handle_meditate_state_delta_message is not None:
-        queues.append(str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip())
+    if handle_loop_state_delta_message is not None:
+        queues.append(str(settings.LOOP_STATE_DELTA_QUEUE_NAME).strip())
+        legacy_meditate_q = str(settings.MEDITATE_STATE_DELTA_QUEUE_NAME).strip()
+        loop_q = str(settings.LOOP_STATE_DELTA_QUEUE_NAME).strip()
+        if legacy_meditate_q and legacy_meditate_q != loop_q:
+            queues.append(legacy_meditate_q)
     if handle_reports_state_delta_message is not None:
         queues.append(str(settings.REPORTS_STATE_DELTA_QUEUE_NAME).strip())
     if handle_vlm_state_delta_message is not None:
@@ -688,7 +784,8 @@ async def process_queue():
             _sql_queue_loop(redis_client),
             _context_injection_loop(redis_client),
             _visual_state_delta_loop(redis_client),
-            _meditate_state_delta_loop(redis_client),
+            _loop_state_delta_loop(redis_client),
+            _legacy_meditate_state_delta_loop(redis_client),
             _reports_state_delta_loop(redis_client),
             _vlm_state_delta_loop(redis_client),
             *extension_tasks,
@@ -702,6 +799,7 @@ async def process_queue():
 
 if __name__ == "__main__":
     logger.info("Iniciando DuckClaw DB Writer...")
+    _log_extension_state_delta_bindings()
     try:
         from startup_bootstrap import run_startup_bootstrap
 

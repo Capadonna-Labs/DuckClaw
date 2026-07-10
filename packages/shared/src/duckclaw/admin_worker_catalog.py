@@ -628,11 +628,29 @@ def update_catalog_worker_file(
         manifest_snapshot = dict(parsed)
 
     catalog_skills_synced = {"attached": 0, "updated": 0, "detached": 0}
+    mcp_grants_synced = {"granted": [], "revoked": []}
     if rel.lower() in ("manifest.yaml", "manifest.yml"):
         catalog_skills_synced = sync_worker_catalog_skills_from_manifest(
             db,
             worker_uid=worker_uid,
             manifest=manifest_snapshot,
+        )
+        tenant_id = "default"
+        worker = get_worker_by_uid(db, worker_uid)
+        if worker:
+            tenant_id = str(worker.get("tenant_id") or "default")
+        from duckclaw.mcp_connector_defaults import (
+            ensure_default_mcp_connectors,
+            sync_worker_mcp_grants_from_manifest,
+        )
+
+        ensure_default_mcp_connectors(db, tenant_id=tenant_id, actor_email=actor_email)
+        mcp_grants_synced = sync_worker_mcp_grants_from_manifest(
+            db,
+            worker_uid=worker_uid,
+            tenant_id=tenant_id,
+            manifest=manifest_snapshot,
+            actor_email=actor_email,
         )
 
     version = add_worker_version(
@@ -649,6 +667,7 @@ def update_catalog_worker_file(
         "version": version["version"],
         "context_synced": context_synced,
         "catalog_skills_synced": catalog_skills_synced,
+        "mcp_grants_synced": mcp_grants_synced,
     }
 
 

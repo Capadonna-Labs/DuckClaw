@@ -1,4 +1,4 @@
-"""Zero-trust validation for meditate corrective actions."""
+"""Zero-trust validation for loop corrective actions."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from harness_core.states.meditate_state import CorrectiveAction, CorrectiveActionType
+from harness_core.states.loop_state import CorrectiveAction, CorrectiveActionType
 
 _log = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard,
   Bot,
@@ -36,6 +36,7 @@ import {
   type AdminNavItem,
 } from '@/config/adminNav';
 import { pathnameMatchesHub } from '@/lib/adminHubRoutes';
+import { PlataformaNavSelector } from '@/components/layout/PlataformaNavSelector';
 import { cn } from '@/lib/utils';
 import type { LucideIcon } from 'lucide-react';
 
@@ -217,6 +218,15 @@ function NavGroup({
   const renderItem = (item: AdminNavItem) => {
     const Icon = NAV_ICONS[item.href] ?? LayoutDashboard;
     const childActive = pathnameMatchesHub(pathname, item.href);
+
+    if (item.href === '/plataforma') {
+      return (
+        <Suspense key={`${item.href}-${item.label}`} fallback={null}>
+          <PlataformaNavSelector icon={Icon} label={item.label} onNavigate={onNavigate} />
+        </Suspense>
+      );
+    }
+
     return (
       <Link
         key={`${item.href}-${item.label}`}

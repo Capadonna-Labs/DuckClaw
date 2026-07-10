@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Database, FolderUp, RefreshCw, UploadCloud } from 'lucide-react';
+import { Database, FolderOpen, FolderUp, RefreshCw, UploadCloud } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
+import { KnowledgeFolderPicker } from '@/components/knowledge/KnowledgeFolderPicker';
 import { KnowledgePlaygroundBanner } from '@/components/knowledge/KnowledgePlaygroundBanner';
 import { KnowledgeSourceCard } from '@/components/knowledge/KnowledgeSourceCard';
 import {
@@ -49,25 +50,12 @@ export default function KnowledgePage() {
   const [computeEmbeddings, setComputeEmbeddings] = useState(true);
   const [folderPreview, setFolderPreview] = useState<KnowledgeFolderPreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [vaultRoots, setVaultRoots] = useState<{ path: string; label: string; exists: boolean }[]>([]);
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [indexingJobs, setIndexingJobs] = useState<Record<string, IndexingJobState>>({});
 
   useEffect(() => {
     if (initialWorker) setWorkerUid(initialWorker);
   }, [initialWorker]);
-
-  useEffect(() => {
-    adminService
-      .getKnowledgeConfig()
-      .then((cfg) => {
-        const roots = cfg.allowed_roots.filter((r) => r.exists);
-        setVaultRoots(roots);
-        if (roots.length === 1) {
-          setServerPath(roots[0].path);
-        }
-      })
-      .catch(() => setVaultRoots([]));
-  }, []);
 
   useEffect(() => {
     adminService
@@ -237,13 +225,14 @@ export default function KnowledgePage() {
     }
   }, [computeEmbeddings, displayName, files, loadSources, projectId, waitForKnowledgeJob, workerUid]);
 
-  const previewServerPath = useCallback(async () => {
-    if (!serverPath.trim()) return;
+  const previewServerPath = useCallback(async (pathOverride?: string) => {
+    const path = (pathOverride ?? serverPath).trim();
+    if (!path) return;
     setPreviewBusy(true);
     setError(null);
     setFolderPreview(null);
     try {
-      const preview = await adminService.previewKnowledgeFolder(serverPath.trim());
+      const preview = await adminService.previewKnowledgeFolder(path);
       setFolderPreview(preview);
       if (preview.file_count === 0) {
         setError('No hay archivos .md/.txt/.pdf indexables en esa carpeta.');
@@ -497,36 +486,28 @@ export default function KnowledgePage() {
             Importar carpeta del servidor
           </h2>
           <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-            Ruta absoluta en este Mac (p. ej. carpeta de Obsidian o documentación). Se indexan .md, PDF y similares;
-            carpetas ocultas como <code className="font-mono text-[10px]">.obsidian</code> se omiten.
+            Elige una carpeta en el Mac del Gateway con el explorador o pega la ruta absoluta. Luego comprueba
+            antes de indexar.
           </p>
-          <input
-            value={serverPath}
-            onChange={(e) => {
-              setServerPath(e.target.value);
-              setFolderPreview(null);
-            }}
-            placeholder="/Users/tu-usuario/Documentos/MiBiblioteca"
-            className="mt-4 w-full rounded-xl border border-gov-blue-100 px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
-          />
-          {vaultRoots.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {vaultRoots.map((root) => (
-                <button
-                  key={root.path}
-                  type="button"
-                  onClick={() => {
-                    setServerPath(root.path);
-                    setFolderPreview(null);
-                    setError(null);
-                  }}
-                  className="rounded-lg border border-gov-blue-200 bg-gov-blue-50 px-3 py-1.5 text-xs font-bold text-gov-blue-900 hover:bg-gov-blue-100 dark:border-dark-border dark:bg-dark-bg dark:text-dark-cyan"
-                >
-                  Usar {root.label}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <input
+              value={serverPath}
+              onChange={(e) => {
+                setServerPath(e.target.value);
+                setFolderPreview(null);
+              }}
+              placeholder="/Users/tu-usuario/Documentos/MiBiblioteca"
+              className="min-w-0 flex-1 rounded-xl border border-gov-blue-100 px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
+            />
+            <button
+              type="button"
+              onClick={() => setFolderPickerOpen(true)}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-gov-blue-200 px-4 py-2 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
+            >
+              <FolderOpen size={16} />
+              Explorar
+            </button>
+          </div>
           {folderPreview && (
             <div className="mt-3 rounded-xl border border-gov-blue-50 bg-gov-blue-50/60 p-3 text-xs text-gov-gray-700 dark:border-dark-border dark:bg-dark-bg dark:text-dark-muted">
               <p className="font-bold">{formatFolderPreviewLine(folderPreview)}</p>
@@ -629,6 +610,18 @@ export default function KnowledgePage() {
           </div>
         )}
       </section>
+
+      <KnowledgeFolderPicker
+        open={folderPickerOpen}
+        initialPath={serverPath}
+        onClose={() => setFolderPickerOpen(false)}
+        onSelect={(path) => {
+          setServerPath(path);
+          setFolderPreview(null);
+          setError(null);
+          void previewServerPath(path);
+        }}
+      />
     </div>
   );
 }

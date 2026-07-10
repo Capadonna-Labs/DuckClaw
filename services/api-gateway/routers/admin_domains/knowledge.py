@@ -217,6 +217,17 @@ async def get_knowledge_source_indexing_progress(
     }
 
 
+@router.get("/knowledge/browse", dependencies=[Depends(require_admin_key)])
+async def browse_knowledge_folders(path: str = "") -> dict[str, Any]:
+    from core.heavy_work import run_heavy_work
+    from duckclaw.forge.rag.knowledge_paths import browse_knowledge_directories
+
+    try:
+        return await run_heavy_work(lambda: browse_knowledge_directories(path))
+    except Exception as exc:
+        raise problem(400, str(exc), "knowledge_browse") from exc
+
+
 @router.get("/knowledge/config", dependencies=[Depends(require_admin_key)])
 async def knowledge_config() -> dict[str, Any]:
     from duckclaw.forge.rag.knowledge_auto_sync import auto_sync_enabled, auto_sync_poll_seconds

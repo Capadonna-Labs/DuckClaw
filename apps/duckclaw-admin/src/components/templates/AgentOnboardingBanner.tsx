@@ -2,8 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Database, MessageCircle, Sparkles, X } from 'lucide-react';
-import { knowledgeHref, playgroundHref, readLastProjectId } from '@/lib/onboardingFlow';
+import { Database, Sparkles, X } from 'lucide-react';
+import { knowledgeHref, readLastProjectId } from '@/lib/onboardingFlow';
 
 type AgentOnboardingBannerProps = {
   workerId: string;
@@ -26,7 +26,7 @@ export function AgentOnboardingBanner({ workerId, onDismiss }: AgentOnboardingBa
             Agente creado — siguiente paso
           </p>
           <p className="mt-1 text-xs text-emerald-900/80 dark:text-emerald-100/80">
-            Conecta documentos para RAG o prueba el agente en Playground. Exporta informes a Word/PDF desde el chat.
+            Conecta documentos para RAG o abre Playground desde el menú lateral cuando quieras probar el agente.
           </p>
         </div>
         {onDismiss && (
@@ -47,13 +47,6 @@ export function AgentOnboardingBanner({ workerId, onDismiss }: AgentOnboardingBa
         >
           <Database size={14} />
           Conectar RAG
-        </Link>
-        <Link
-          href={playgroundHref(projectId, workerId)}
-          className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-gov-blue-800"
-        >
-          <MessageCircle size={14} />
-          Playground
         </Link>
       </div>
     </section>

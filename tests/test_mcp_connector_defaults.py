@@ -10,6 +10,7 @@ import pytest
 
 from duckclaw.admin_mcp_connectors import list_worker_mcp_connectors
 from duckclaw.mcp_connector_defaults import (
+    backfill_default_mcp_connectors_and_grants,
     ensure_default_mcp_connectors,
     manifest_has_skill,
     sync_worker_mcp_grants_from_manifest,
@@ -99,3 +100,22 @@ def test_sync_revokes_when_higgsfield_removed(mcp_db) -> None:
     ).fetchone()
     assert row is not None
     assert row[0] is False
+
+
+def test_backfill_default_mcp_connectors_idempotent_with_multiple_tenants(mcp_db) -> None:
+    mcp_db.execute(
+        "INSERT INTO main.admin_worker_catalog "
+        "(worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, active) "
+        "VALUES ('wrk_a', 'tenant_a', 'a@test.local', 'worker-a', 'A', 'runtime', true)"
+    )
+    mcp_db.execute(
+        "INSERT INTO main.admin_worker_catalog "
+        "(worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, active) "
+        "VALUES ('wrk_b', 'tenant_b', 'b@test.local', 'worker-b', 'B', 'runtime', true)"
+    )
+    backfill_default_mcp_connectors_and_grants(mcp_db)
+    backfill_default_mcp_connectors_and_grants(mcp_db)
+    count = mcp_db.execute(
+        "SELECT COUNT(*) FROM main.admin_mcp_connectors WHERE connector_id = 'mcp_higgsfield'"
+    ).fetchone()[0]
+    assert int(count) == 1

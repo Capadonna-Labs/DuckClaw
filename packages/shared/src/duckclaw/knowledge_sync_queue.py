@@ -376,7 +376,7 @@ def process_knowledge_sync_job(job: KnowledgeSyncJob) -> dict[str, Any]:
         set_job_status(job.job_id, status="failed", detail=reason)
         return {"ok": False, "reason": reason}
 
-    if job.kind == "folder_ingest" and outcome.scanned == 0 and outcome.upserted == 0:
+    if job.kind in ("folder_ingest", "folder_sync") and outcome.scanned == 0 and outcome.upserted == 0:
         reason = "no_files_indexed"
         try:
             from duckclaw.forge.rag.knowledge_auto_sync import _enqueue_source_error_status

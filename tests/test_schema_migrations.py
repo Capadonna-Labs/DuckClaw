@@ -20,7 +20,7 @@ def test_migrations_create_expected_tables() -> None:
     con = duckdb.connect(str(tmp / "test.duckdb"))
 
     applied = run_pending_migrations(con)
-    assert len(applied) == 34, f"Expected 34 migrations, got {len(applied)}: {applied}"
+    assert len(applied) == 1, f"Expected 1 baseline migration, got {len(applied)}: {applied}"
 
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
@@ -408,10 +408,10 @@ def test_phase4_tables_have_key_columns() -> None:
 
 def test_versioned_migrations_use_create_not_alter() -> None:
     """Fresh installs must not rely on ALTER TABLE in numbered migrations."""
-    from duckclaw.schema_migrations import _ALL_MIGRATIONS
+    from duckclaw.schema_migrations import _ALL_MIGRATIONS, _LEGACY_MIGRATION_DDL
 
     alters: list[str] = []
-    for version, name, ddl in _ALL_MIGRATIONS:
+    for version, name, ddl in _ALL_MIGRATIONS + _LEGACY_MIGRATION_DDL:
         for stmt in ddl:
             normalized = stmt.strip().upper()
             if normalized.startswith("ALTER TABLE"):

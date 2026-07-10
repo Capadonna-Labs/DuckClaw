@@ -202,11 +202,13 @@ async function proxy(req: NextRequest, segments: string[]) {
   }
 
   let bodyText = '';
+  let bodyRead = false;
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     const ct = req.headers.get('content-type');
     const isMultipart = ct?.toLowerCase().includes('multipart/form-data') ?? false;
     if (!isMultipart) {
       bodyText = await req.text();
+      bodyRead = true;
     }
   }
   if (sub === 'ops/run' && req.method === 'POST') {
@@ -236,10 +238,7 @@ async function proxy(req: NextRequest, segments: string[]) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     if (isMultipart) {
       init.body = await req.arrayBuffer();
-    } else if (!bodyText) {
-      bodyText = await req.text();
-      init.body = bodyText;
-    } else {
+    } else if (bodyRead && bodyText.length > 0) {
       init.body = bodyText;
     }
   }

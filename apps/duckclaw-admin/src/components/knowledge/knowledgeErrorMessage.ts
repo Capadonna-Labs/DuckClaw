@@ -18,11 +18,11 @@ export function formatKnowledgeError(raw: string): string {
     ],
     [
       /Ruta truncada|truncada/i,
-      'La ruta se cortó al pegar (común en Google Drive). Pulsa «Usar vault del servidor».',
+      'La ruta se cortó al pegar (común en Google Drive). Usa el explorador de carpetas o pega la ruta absoluta completa.',
     ],
     [
       /no existe|not found/i,
-      'Esa ruta no existe en el Mac del Gateway. Usa «Usar vault del servidor» o pega la ruta completa hasta MacMiniVault.',
+      'Esa ruta no existe en el Mac del Gateway. Usa el explorador de carpetas o pega la ruta absoluta.',
     ],
     [
       /No hay archivos indexables/i,

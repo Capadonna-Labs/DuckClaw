@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import { ChevronDown, ChevronUp, FolderSync, Trash2 } from 'lucide-react';
 import type { KnowledgeSource } from '@/services/adminService';
 import { KnowledgeStatusBadge } from '@/components/knowledge/KnowledgeStatusBadge';
@@ -101,13 +100,10 @@ export function KnowledgeSourceCard({
               {source.source_id}
             </p>
           )}
-          {source.chunk_count === 0 && (
-            <Link
-              href={`/playground?project=${encodeURIComponent(projectId)}`}
-              className="mt-2 inline-block text-xs font-bold text-gov-blue-800 underline dark:text-dark-cyan"
-            >
-              El agente no verá contenido hasta que haya fragmentos — probar en Playground →
-            </Link>
+          {source.chunk_count === 0 && source.status !== 'ready' && (
+            <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+              Sin fragmentos indexados todavía. Reimporta o sincroniza la fuente.
+            </p>
           )}
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">

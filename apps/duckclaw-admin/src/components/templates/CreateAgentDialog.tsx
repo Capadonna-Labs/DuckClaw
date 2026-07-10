@@ -60,7 +60,6 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
   const [error, setError] = useState<string | null>(null);
   const [createdId, setCreatedId] = useState<string | null>(null);
   const [instructionTab, setInstructionTab] = useState<InstructionTab>('system_prompt');
-  const [showAdvancedCapabilities, setShowAdvancedCapabilities] = useState(false);
   const dialogScrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -85,7 +84,6 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
     setError(null);
     setCreatedId(null);
     setInstructionTab('system_prompt');
-    setShowAdvancedCapabilities(false);
   };
 
   const resetAndClose = () => {
@@ -294,7 +292,9 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                   placeholder="Ej: Agente DevOps que revisa logs PM2, diagnostica el gateway y propone fixes en sandbox..."
                   className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
                 />
-                <p className="text-xs text-gov-gray-500 dark:text-dark-muted">Mínimo 10 caracteres. Nada se guarda hasta confirmar el borrador.</p>
+                <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+                  Mínimo 10 caracteres ({behaviorPrompt.trim().length}/4000). Nada se guarda hasta confirmar.
+                </p>
               </label>
             </>
           )}
@@ -330,9 +330,12 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                 <textarea
                   value={draft.description}
                   onChange={(e) => updateDraft({ description: clampInput(e.target.value, 2048) })}
-                  rows={2}
+                  rows={4}
                   className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
                 />
+                <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+                  {draft.description.length}/2048 caracteres
+                </p>
               </label>
               <div className="rounded-xl border p-3 dark:border-dark-border">
                 <div className="flex flex-wrap gap-2">
@@ -408,55 +411,9 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                   Capacidades incluidas
                 </p>
                 <p className="mt-1 text-sm text-gov-gray-700 dark:text-dark-muted">
-                  Por defecto tu agente puede consultar datos, leer documentos, generar informes y ejecutar
-                  scripts en un entorno aislado. No tienes que configurar nada más.
+                  Perfil <strong>Asistente completo</strong>: consulta datos, documentos, informes y scripts en
+                  sandbox. Ajusta herramientas concretas después en el editor del agente.
                 </p>
-                <p className="mt-2 text-xs font-semibold text-gov-gray-600 dark:text-dark-muted">
-                  Perfil activo: Asistente completo
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowAdvancedCapabilities((v) => !v)}
-                  className="mt-2 text-xs font-bold text-gov-blue-800 underline dark:text-dark-cyan"
-                >
-                  {showAdvancedCapabilities ? 'Ocultar opciones avanzadas' : 'Cambiar nivel (opcional)'}
-                </button>
-                {showAdvancedCapabilities && (
-                  <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                    <label className="block space-y-1">
-                      <span className="text-xs font-bold">Nivel de capacidades</span>
-                      <select
-                        value={draft.tool_profile}
-                        onChange={(e) =>
-                          updateDraft({ tool_profile: e.target.value as UserAgentDraft['tool_profile'] })
-                        }
-                        className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
-                      >
-                        <option value="general">Asistente completo (recomendado)</option>
-                        <option value="rag_only">Solo documentación</option>
-                        <option value="minimal">Conversación ligera</option>
-                      </select>
-                    </label>
-                    <div className="flex flex-col justify-end gap-2 text-sm">
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={draft.browser_sandbox}
-                          onChange={(e) => updateDraft({ browser_sandbox: e.target.checked })}
-                        />
-                        Abrir sitios web
-                      </label>
-                      <label className="inline-flex items-center gap-2">
-                        <input
-                          type="checkbox"
-                          checked={draft.web_search}
-                          onChange={(e) => updateDraft({ web_search: e.target.checked })}
-                        />
-                        Buscar en internet
-                      </label>
-                    </div>
-                  </div>
-                )}
               </section>
               {draft.suggested_skills.length > 0 && (
                 <div className="rounded-xl border p-3 dark:border-dark-border">

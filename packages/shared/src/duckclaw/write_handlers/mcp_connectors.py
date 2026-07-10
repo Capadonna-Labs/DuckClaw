@@ -95,8 +95,8 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
     validate_connector_egress(connector)
 
     existing = conn.execute(
-        "SELECT connector_id FROM main.admin_mcp_connectors WHERE connector_id = ? AND tenant_id = ?",
-        [connector_id, tenant_id],
+        "SELECT connector_id FROM main.admin_mcp_connectors WHERE connector_id = ? LIMIT 1",
+        [connector_id],
     ).fetchone()
     if existing:
         conn.execute(
@@ -108,7 +108,7 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
                 tool_denylist_json = ?, read_only = ?, egress_hosts_json = ?,
                 preset_id = ?, enabled = ?, active = true, metadata_json = ?,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE connector_id = ? AND tenant_id = ?
+            WHERE connector_id = ?
             """,
             [
                 actor,
@@ -128,7 +128,6 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
                 enabled,
                 json.dumps(connector["metadata"], ensure_ascii=False, sort_keys=True),
                 connector_id,
-                tenant_id,
             ],
         )
         return

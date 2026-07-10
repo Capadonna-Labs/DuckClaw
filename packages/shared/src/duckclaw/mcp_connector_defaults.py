@@ -64,11 +64,11 @@ def manifest_has_skill(manifest: dict[str, Any] | None, skill_id: str) -> bool:
     return _normalize_skill_name(skill_id) in manifest_skill_names(manifest)
 
 
-def _connector_exists(db: Any, *, connector_id: str, tenant_id: str) -> bool:
+def _connector_exists(db: Any, *, connector_id: str, tenant_id: str = "") -> bool:
+    del tenant_id  # connector_id is globally unique (PRIMARY KEY)
     row = db.execute(
-        "SELECT connector_id FROM main.admin_mcp_connectors "
-        "WHERE connector_id = ? AND tenant_id = ? AND active = true LIMIT 1",
-        [connector_id, tenant_id],
+        "SELECT connector_id FROM main.admin_mcp_connectors WHERE connector_id = ? LIMIT 1",
+        [connector_id],
     )
     if hasattr(row, "fetchone"):
         return row.fetchone() is not None
@@ -193,7 +193,7 @@ def enable_worker_manifest_skill_for_mcp_preset(
 
 
 def backfill_default_mcp_connectors_and_grants(db: Any) -> dict[str, Any]:
-    """Migration hook: ensure connectors per tenant and sync grants for active workers."""
+    """Migration hook: ensure connectors once, then sync grants per tenant/worker."""
     from duckclaw.admin_worker_catalog import get_latest_worker_version
 
     tenant_rows = _fetchall(
@@ -205,12 +205,11 @@ def backfill_default_mcp_connectors_and_grants(db: Any) -> dict[str, Any]:
     if not tenant_ids:
         tenant_ids = ["default"]
 
-    connector_summary: dict[str, dict[str, Any]] = {}
+    connector_summary = ensure_default_mcp_connectors(
+        db, tenant_id=tenant_ids[0], actor_email="system"
+    )
     grant_summary: list[dict[str, Any]] = []
     for tenant_id in tenant_ids:
-        connector_summary[tenant_id] = ensure_default_mcp_connectors(
-            db, tenant_id=tenant_id, actor_email="system"
-        )
         worker_rows = _fetchall(
             db.execute(
                 "SELECT worker_uid FROM main.admin_worker_catalog "

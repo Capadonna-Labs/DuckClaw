@@ -251,6 +251,7 @@ def _execute_folder_sync_locked(
     force: bool,
     job_id: str = "",
 ) -> SyncResult:
+    from duckclaw.forge.rag.knowledge_core import iter_allowed_files
     from duckclaw.knowledge_indexer_guard import assert_indexer_process_for_mutation
 
     assert_indexer_process_for_mutation(operation="folder_sync")
@@ -262,6 +263,11 @@ def _execute_folder_sync_locked(
         root = validate_knowledge_ingest_root(source_uri)
     except (ValueError, FileNotFoundError) as exc:
         result.skipped_reason = str(exc)
+        return result
+
+    indexable_files = iter_allowed_files(root)
+    if not indexable_files:
+        result.skipped_reason = "no_indexable_files"
         return result
 
     fingerprint = folder_mtime_fingerprint(root)

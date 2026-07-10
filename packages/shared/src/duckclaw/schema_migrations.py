@@ -1103,10 +1103,6 @@ _M021_FRAMEWORK_POLICY_PACK = [
     "SELECT 1 AS framework_policy_pack_v1_noop",
 ]
 
-_M022_FRAMEWORK_PACK_REFRESH = [
-    "SELECT 1 AS framework_pack_refresh_v2_noop",
-]
-
 _M023_REPORT_ENGINE = [
     """
     CREATE TABLE IF NOT EXISTS main.admin_report_templates (
@@ -1262,32 +1258,13 @@ _M028_SKILL_CATALOG = [
 ]
 
 
-_M030_USER_AGENT_DRAFT_POLICY = [
-    """
-    INSERT INTO main.prompt_policy_registry
-      (policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active)
-    SELECT
-      'ppol_admin_user_agent_draft_v1',
-      'manager_task',
-      'admin_user_agent_draft',
-      1,
-      'active',
-      content,
-      sha256(content),
-      '{"seed":"schema_migration_030","scope":"admin_user_agent"}',
-      true
-    FROM (
-      SELECT '{"draft_prompt_template":"Responde SOLO JSON válido, sin markdown, sin texto extra.\\nNo inventes secretos. No escribas en DB. Solo prepara un borrador revisable de un agente runtime.\\nSchema exacto:\\n{{\\"display_name\\":\\"string\\",\\"worker_id\\":\\"string\\",\\"description\\":\\"string\\",\\"system_prompt\\":\\"string\\",\\"soul\\":\\"string\\",\\"tool_profile\\":\\"general|minimal|rag_only\\",\\"skills\\":[\\"string\\"],\\"browser_sandbox\\":false,\\"web_search\\":false,\\"suggested_skills\\":[{{\\"name\\":\\"string\\",\\"reason\\":\\"string\\",\\"available\\":true}}],\\"questions\\":[\\"string\\"]}}\\nHints opcionales: display_name={display_name_hint}, worker_id={worker_id_hint}\\nSkills detectadas o sugeridas: {suggested_skills_json}\\nComportamiento deseado del agente:\\n{prompt}","fallback":{"display_name_template":"Asistente {title}","worker_id_template":"{slug}-agent","description_template":"Agente orientado a: {goal}","system_prompt_template":"Eres un agente especializado. Tu misión es ayudar con: {goal}.\\n\\nReglas:\\n- Pide datos faltantes antes de asumir.\\n- Usa herramientas del manifest solo cuando aporten valor.\\n- Responde en español claro y accionable.","soul_template":"# Personalidad\\n- Profesional y directo\\n- Prioriza verificabilidad\\n\\n# Enfoque\\n{goal}","tool_profile":"general","skills":[],"browser_sandbox":false,"web_search":false,"model_error_note_template":"> Nota: no se pudo invocar el modelo configurado; se usó análisis local estructurado.","questions":["¿Qué resultado concreto debe entregar este agente?","¿Qué fuentes de datos o herramientas debe usar?","¿Hay restricciones de tono, seguridad o aprobación humana?"]}}' AS content
-    )
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM main.prompt_policy_registry
-      WHERE policy_type = 'manager_task'
-        AND policy_name = 'admin_user_agent_draft'
-        AND version = 1
-    )
-    """,
-]
+_M030_USER_AGENT_DRAFT_POLICY: list[str] = []
+
+
+def _migration_030_user_agent_draft_policy(db: Any) -> None:
+    from duckclaw.user_agent_draft_policy import apply_user_agent_draft_policy
+
+    apply_user_agent_draft_policy(db, force=False)
 
 
 def _migration_024_framework_report_engine_policy(db: Any) -> None:
@@ -1314,12 +1291,6 @@ def _migration_021_apply_framework_policy_pack(db: Any) -> None:
     apply_framework_policy_pack(db)
 
 
-def _migration_022_refresh_framework_packs(db: Any) -> None:
-    from duckclaw.framework_policy_pack import apply_framework_policy_pack
-
-    apply_framework_policy_pack(db)
-
-
 def _migration_028_seed_skill_catalog(db: Any) -> None:
     from duckclaw.skill_catalog import seed_framework_skill_catalog_if_empty
 
@@ -1330,18 +1301,6 @@ def _migration_029_sync_skill_catalog_github_mcp(db: Any) -> None:
     from duckclaw.skill_catalog import sync_framework_skill_catalog_from_pack
 
     sync_framework_skill_catalog_from_pack(db)
-
-
-def _migration_031_user_agent_draft_policy_v2(db: Any) -> None:
-    from duckclaw.user_agent_draft_policy import apply_user_agent_draft_policy
-
-    apply_user_agent_draft_policy(db, force=True)
-
-
-def _migration_032_user_agent_draft_policy_v2_refresh(db: Any) -> None:
-    from duckclaw.user_agent_draft_policy import apply_user_agent_draft_policy
-
-    apply_user_agent_draft_policy(db, force=True)
 
 
 def _migration_033_harness_core_to_main(db: Any) -> None:
@@ -1365,6 +1324,7 @@ def _migration_033_harness_core_to_main(db: Any) -> None:
             "WHERE table_schema = 'harness_core' AND table_name = 'loop_runs'"
         ).fetchone()
         if has_loop and int(has_loop[0]) > 0:
+            _ensure_main_loop_runs_table(db)
             db.execute(
                 """
                 INSERT INTO main.loop_runs (
@@ -1390,6 +1350,7 @@ def _migration_033_harness_core_to_main(db: Any) -> None:
                 ON CONFLICT (run_id) DO NOTHING
                 """
             )
+            _ensure_main_loop_runs_table(db)
             db.execute(
                 """
                 INSERT INTO main.loop_runs (
@@ -1414,6 +1375,47 @@ def _migration_033_harness_core_to_main(db: Any) -> None:
             db.execute(stmt)
         except Exception:
             pass
+
+
+_M035_LOOP_RUNS = [
+    """
+    CREATE TABLE IF NOT EXISTS main.loop_runs (
+        run_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL,
+        distance_vector JSON,
+        actions_json JSON,
+        status VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+]
+
+
+def _ensure_main_loop_runs_table(db: Any) -> None:
+    for stmt in _M035_LOOP_RUNS:
+        sql = stmt.strip()
+        if sql:
+            db.execute(sql)
+
+
+def _migration_035_loop_runs_backfill(db: Any) -> None:
+    """Dual-write alias: meditate_runs rows also appear in loop_runs."""
+    try:
+        _ensure_main_loop_runs_table(db)
+        db.execute(
+            """
+            INSERT INTO main.loop_runs (
+                run_id, tenant_id, distance_vector, actions_json, status, created_at
+            )
+            SELECT run_id, tenant_id, distance_vector, actions_json, status, created_at
+            FROM main.meditate_runs m
+            WHERE NOT EXISTS (
+                SELECT 1 FROM main.loop_runs l WHERE l.run_id = m.run_id
+            )
+            """
+        )
+    except Exception as exc:
+        _log.warning("migration 035 loop_runs backfill skipped: %s", exc)
 
 
 def _migration_034_default_mcp_higgsfield(db: Any) -> None:
@@ -1455,34 +1457,10 @@ _M033_HOMEOSTASIS_MAIN = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
-    """
-    CREATE TABLE IF NOT EXISTS main.loop_runs (
-        run_id VARCHAR PRIMARY KEY,
-        tenant_id VARCHAR NOT NULL,
-        distance_vector JSON,
-        actions_json JSON,
-        status VARCHAR NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """,
 ]
 
 
-_MIGRATION_HOOKS: dict[int, MigrationHook] = {
-    21: _migration_021_apply_framework_policy_pack,
-    22: _migration_022_refresh_framework_packs,
-    24: _migration_024_framework_report_engine_policy,
-    25: _migration_025_framework_report_engine_tool_routing,
-    26: _migration_026_framework_document_lanes,
-    28: _migration_028_seed_skill_catalog,
-    29: _migration_029_sync_skill_catalog_github_mcp,
-    31: _migration_031_user_agent_draft_policy_v2,
-    32: _migration_032_user_agent_draft_policy_v2_refresh,
-    33: _migration_033_harness_core_to_main,
-    34: _migration_034_default_mcp_higgsfield,
-}
-
-_ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
+_LEGACY_MIGRATION_DDL: list[tuple[int, str, list[str]]] = [
     (1, "initial_core", _M001_INITIAL_CORE),
     (2, "worker_versions", _M002_WORKER_VERSIONS),
     (3, "worker_contexts", _M003_WORKER_CONTEXTS),
@@ -1503,8 +1481,7 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (18, "authorized_users", _M018_AUTHORIZED_USERS),
     (19, "managed_workspace_draft_policy", _M019_MANAGED_WORKSPACE_DRAFT_POLICY),
     (20, "framework_capability_policies", _M020_FRAMEWORK_CAPABILITY_POLICIES),
-    (21, "framework_policy_pack_v1", _M021_FRAMEWORK_POLICY_PACK),
-    (22, "framework_pack_refresh_v2", _M022_FRAMEWORK_PACK_REFRESH),
+    (21, "framework_policy_pack", _M021_FRAMEWORK_POLICY_PACK),
     (23, "report_engine_v1", _M023_REPORT_ENGINE),
     (24, "framework_report_engine_policy", _M024_FRAMEWORK_REPORT_ENGINE_POLICY),
     (25, "framework_report_engine_tool_routing", _M025_FRAMEWORK_REPORT_ENGINE_TOOL_ROUTING),
@@ -1513,8 +1490,46 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (28, "skill_catalog_v1", _M028_SKILL_CATALOG),
     (29, "skill_catalog_github_mcp", []),
     (30, "user_agent_draft_policy", _M030_USER_AGENT_DRAFT_POLICY),
-    (31, "user_agent_draft_policy_v2", []),
-    (32, "user_agent_draft_policy_v2_refresh", []),
     (33, "homeostasis_main_schema", _M033_HOMEOSTASIS_MAIN),
     (34, "default_mcp_higgsfield", []),
+    (35, "loop_runs_main", _M035_LOOP_RUNS),
+]
+
+
+def _build_baseline_ddl() -> list[str]:
+    """Single fresh-install DDL: concatenation of all legacy versioned statements."""
+    statements: list[str] = []
+    for _version, _name, ddl in _LEGACY_MIGRATION_DDL:
+        for stmt in ddl:
+            if stmt.strip():
+                statements.append(stmt)
+    return statements
+
+
+_M001_BASELINE = _build_baseline_ddl()
+
+
+def _migration_001_baseline_hooks(db: Any) -> None:
+    """Seed/backfill hooks that previously ran at numbered migration versions."""
+    for hook in (
+        _migration_021_apply_framework_policy_pack,
+        _migration_024_framework_report_engine_policy,
+        _migration_025_framework_report_engine_tool_routing,
+        _migration_026_framework_document_lanes,
+        _migration_028_seed_skill_catalog,
+        _migration_029_sync_skill_catalog_github_mcp,
+        _migration_030_user_agent_draft_policy,
+        _migration_033_harness_core_to_main,
+        _migration_034_default_mcp_higgsfield,
+        _migration_035_loop_runs_backfill,
+    ):
+        hook(db)
+
+
+_MIGRATION_HOOKS = {
+    1: _migration_001_baseline_hooks,
+}
+
+_ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
+    (1, "baseline_v1", _M001_BASELINE),
 ]

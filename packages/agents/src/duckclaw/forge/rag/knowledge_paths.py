@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 from duckclaw.forge.rag.knowledge_core import safe_relative_path
 
@@ -83,7 +84,7 @@ def resolve_knowledge_ingest_uri(source_uri: str) -> str:
         if len(existing) == 1:
             return str(existing[0])
         raise ValueError(
-            "Indica la ruta del vault o pulsa «Usar vault del servidor» si está configurado en .env."
+            "Indica la ruta de la carpeta o usa el explorador de carpetas del servidor."
         )
 
     target = Path(uri).expanduser()
@@ -104,7 +105,7 @@ def resolve_knowledge_ingest_uri(source_uri: str) -> str:
                 return str(root.resolve())
         raise ValueError(
             "Ruta truncada o Google Drive aún no montado. "
-            "Pulsa «Usar vault del servidor» en lugar de pegar a mano."
+            "Usa el explorador de carpetas o pega la ruta absoluta completa."
         )
 
     raise ValueError(f"Ruta de conocimiento no existe: {uri}")
@@ -119,6 +120,82 @@ def validate_knowledge_ingest_root(source_uri: str) -> Path:
     if not path_under_any_root(target, allowed):
         raise ValueError("Ruta de conocimiento fuera de raíces permitidas")
     return target
+
+
+def _is_allowed_root(target: Path, allowed: list[Path]) -> bool:
+    resolved = target.expanduser().resolve()
+    return any(resolved == root.expanduser().resolve() for root in allowed)
+
+
+def browse_knowledge_directories(path: str = "") -> dict[str, Any]:
+    """List selectable folders under configured ingest roots (admin folder picker)."""
+    allowed = knowledge_allowed_roots()
+    if not allowed:
+        raise ValueError("DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS no configurado para ingesta local")
+
+    uri = normalize_source_uri(path)
+    if not uri:
+        entries: list[dict[str, Any]] = []
+        for root in allowed:
+            resolved = root.expanduser().resolve()
+            entries.append(
+                {
+                    "name": resolved.name or str(resolved),
+                    "path": str(resolved),
+                    "kind": "root",
+                    "exists": resolved.exists(),
+                    "selectable": resolved.is_dir() and resolved.exists(),
+                }
+            )
+        return {
+            "path": "",
+            "parent_path": None,
+            "roots_mode": True,
+            "entries": sorted(entries, key=lambda item: str(item["name"]).lower()),
+        }
+
+    target = Path(uri).expanduser().resolve()
+    if not target.exists():
+        raise ValueError(f"Ruta de conocimiento no existe: {uri}")
+    if not path_under_any_root(target, allowed):
+        raise ValueError("Ruta de conocimiento fuera de raíces permitidas")
+    if not target.is_dir():
+        raise ValueError("La ruta debe ser una carpeta")
+
+    if _is_allowed_root(target, allowed):
+        parent_path: str | None = ""
+    else:
+        parent = target.parent.resolve()
+        parent_path = str(parent) if path_under_any_root(parent, allowed) else ""
+
+    entries = []
+    try:
+        children = sorted(target.iterdir(), key=lambda item: item.name.lower())
+    except PermissionError as exc:
+        raise ValueError(f"Sin permiso para listar la carpeta: {target}") from exc
+
+    for child in children:
+        if child.name.startswith("."):
+            continue
+        if not child.is_dir():
+            continue
+        resolved_child = child.resolve()
+        entries.append(
+            {
+                "name": child.name,
+                "path": str(resolved_child),
+                "kind": "directory",
+                "exists": True,
+                "selectable": True,
+            }
+        )
+
+    return {
+        "path": str(target),
+        "parent_path": parent_path,
+        "roots_mode": False,
+        "entries": entries,
+    }
 
 
 def resolve_knowledge_output_path(*, relative_path: str, output_root: str = "") -> Path:

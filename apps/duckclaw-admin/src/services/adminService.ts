@@ -361,6 +361,21 @@ export interface KnowledgeSource {
   document_paths?: string;
 }
 
+export type KnowledgeBrowseEntry = {
+  name: string;
+  path: string;
+  kind: 'root' | 'directory';
+  exists: boolean;
+  selectable: boolean;
+};
+
+export type KnowledgeBrowseResponse = {
+  path: string;
+  parent_path: string | null;
+  roots_mode: boolean;
+  entries: KnowledgeBrowseEntry[];
+};
+
 export interface KnowledgeSearchResult {
   chunk_id: string;
   source_id: string;
@@ -725,7 +740,7 @@ export const adminService = {
     ),
 
   saveTemplateFile: (workerId: string, filePath: string, content: string) =>
-    adminFetch<{ ok: boolean }>(
+    adminFetch<{ ok: boolean; task_id?: string; source?: string }>(
       `/templates/${encodeURIComponent(workerId)}/files/${encodeURIComponent(filePath)}`,
       {
         method: 'PUT',
@@ -1920,6 +1935,11 @@ export const adminService = {
       auto_sync: boolean;
       auto_sync_poll_sec: number;
     }>('/knowledge/config'),
+
+  browseKnowledgeFolders: (path = '') => {
+    const qs = path.trim() ? `?path=${encodeURIComponent(path.trim())}` : '';
+    return adminFetch<KnowledgeBrowseResponse>(`/knowledge/browse${qs}`);
+  },
 
   getKnowledgeSyncJobStatus: (jobId: string) =>
     adminFetch<{

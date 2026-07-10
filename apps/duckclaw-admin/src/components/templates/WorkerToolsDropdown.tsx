@@ -260,7 +260,7 @@ export function WorkerToolsDropdown({
       {open ? (
         <div className="absolute right-0 z-30 mt-2 w-[min(100vw-2rem,28rem)] rounded-2xl border border-gov-gray-200 bg-white p-3 shadow-xl dark:border-dark-border dark:bg-dark-surface">
           <p className="text-[11px] text-gov-gray-500 dark:text-dark-muted">
-            Cambios en memoria hasta pulsar Guardar.
+            Cambios en memoria. Pulsa <strong>Guardar</strong> arriba; se espera confirmación de DuckDB.
           </p>
 
           {categoriesError ? (

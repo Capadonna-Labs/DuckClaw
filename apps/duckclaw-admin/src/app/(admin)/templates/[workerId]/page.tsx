@@ -6,13 +6,14 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { adminService } from '@/services/adminService';
 import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
-import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2, Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2, Plus, Trash2, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { WorkerCapabilitiesCard } from '@/components/templates/WorkerCapabilitiesCard';
 import { ManifestGuidedPanel } from '@/components/templates/ManifestGuidedPanel';
 import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
 import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBanner';
 import { WorkerDisplayNameEditor } from '@/components/templates/WorkerDisplayNameEditor';
+import { pollWriteTask } from '@/lib/pollWriteTask';
 
 type MarkdownViewMode = 'edit' | 'preview' | 'split';
 
@@ -50,6 +51,7 @@ export default function TemplateEditorPage() {
   const [newContextTitle, setNewContextTitle] = useState('');
   const [contextError, setContextError] = useState<string | null>(null);
   const [manifestYaml, setManifestYaml] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const markdownFile = isMarkdownPath(tab);
   const isCatalogWorker = detail?.source === 'catalog' || detail?.read_only === true;
@@ -124,19 +126,33 @@ export default function TemplateEditorPage() {
   const save = async () => {
     if (!workerId || !canEditFiles) return;
     setMsg(null);
+    setError(null);
+    setSaving(true);
     try {
-      if (tab === 'manifest.yaml') {
-        await adminService.saveTemplateFile(workerId, tab, content);
-      } else {
-        await adminService.saveTemplateFile(workerId, tab, content);
-        if (manifestDirty) {
-          await adminService.saveTemplateFile(workerId, 'manifest.yaml', manifestYaml);
+      const taskIds: string[] = [];
+      const primary = await adminService.saveTemplateFile(workerId, tab, content);
+      if (primary.task_id) taskIds.push(primary.task_id);
+      if (tab !== 'manifest.yaml' && manifestDirty) {
+        const manifest = await adminService.saveTemplateFile(workerId, 'manifest.yaml', manifestYaml);
+        if (manifest.task_id) taskIds.push(manifest.task_id);
+      }
+      for (const taskId of taskIds) {
+        const polled = await pollWriteTask(taskId, { intervalMs: 400, maxAttempts: 60 });
+        if (polled.state === 'failed') {
+          throw new Error(polled.detail || 'Error al persistir en DuckDB');
+        }
+        if (polled.state === 'timeout' || polled.state === 'not_found') {
+          setMsg('Guardado encolado; refresca si no ves los cambios.');
+          await load();
+          return;
         }
       }
-      setMsg(isCatalogWorker ? 'Guardado en DuckDB (catálogo)' : 'Guardado en disco (canónico)');
-      load();
+      setMsg(isCatalogWorker ? 'Guardado en catálogo' : 'Guardado en disco (canónico)');
+      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error al guardar');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -238,34 +254,26 @@ export default function TemplateEditorPage() {
               setMsg('Nombre actualizado.');
             }}
           />
-          {isCatalogWorker && (
-            <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
-              Snapshot importado desde DuckDB. Los cambios se versionan en el catálogo y no modifican
-              carpetas de templates.
-            </p>
-          )}
         </div>
         <div className="flex gap-2 flex-wrap">
-          <Link
-            href={`/playground?worker=${encodeURIComponent(workerId)}`}
-            className="px-3 py-2 text-sm border rounded-xl dark:border-dark-border text-gov-blue-700 font-semibold"
-          >
-            Probar en Playground
-          </Link>
-          <button
-            type="button"
-            onClick={validate}
-            className="px-3 py-2 text-sm border rounded-xl dark:border-dark-border"
-          >
-            Validar
-          </button>
+          {!isCatalogWorker && (
+            <button
+              type="button"
+              onClick={validate}
+              className="px-3 py-2 text-sm border rounded-xl dark:border-dark-border"
+            >
+              Validar manifest
+            </button>
+          )}
           {canEditFiles && (
             <button
               type="button"
               onClick={save}
-              className="px-4 py-2 text-sm bg-gov-blue-700 text-white rounded-xl flex items-center gap-2"
+              disabled={saving}
+              className="px-4 py-2 text-sm bg-gov-blue-700 text-white rounded-xl flex items-center gap-2 disabled:opacity-60"
             >
-              <Save size={16} /> Guardar
+              {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+              {saving ? 'Guardando…' : 'Guardar'}
             </button>
           )}
         </div>
@@ -321,21 +329,8 @@ export default function TemplateEditorPage() {
             />
           )}
           <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
-          <section className="mt-2 rounded-xl border border-gov-blue-100 bg-white p-3 text-[11px] text-gov-gray-600 dark:border-dark-border dark:bg-dark-surface dark:text-dark-muted">
-            <p className="font-black uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted">
-              Cómo se usa en el chat
-            </p>
-            <p className="mt-2">
-              Lo que escribes en <strong>Instrucciones</strong> y <strong>Tono</strong> guía cómo responde el
-              agente cuando le hablas en Playground.
-            </p>
-            <p className="mt-1">
-              Pulsa <strong>Guardar</strong> para aplicar cambios. No hace falta tocar YAML ni tablas internas.
-            </p>
-          </section>
           <p className="text-[10px] text-gov-gray-500 px-2 py-2 border-t dark:border-dark-border mt-2">
-            La bóveda DuckDB se elige por conversación en Playground o en el chat flotante, no por
-            worker.
+            La bóveda DuckDB se elige por conversación en Playground, no por worker.
           </p>
         </aside>
 

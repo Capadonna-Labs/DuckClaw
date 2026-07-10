@@ -4,160 +4,154 @@ Plataforma multi-agente **DB-first**: DuckDB es el *control plane* (workers, pol
 
 Core genérico LangGraph/LangChain — sin verticales hardcodeadas en Python. Multi-tenant · Windows / Linux / macOS · Spec-driven (`docs/specs/`).
 
-**Fuente de verdad de arquitectura:** [`docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`](docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md)
-
 ---
 
-## Inicio rápido
+## Arquitectura DB-first (canonical)
 
-**Un comando, sin instalar nada antes** (instala `uv` automáticamente si falta):
+**Fuente de verdad:** [`docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`](docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md)
 
-```powershell
-# Windows — doble clic en install.cmd en el Explorador de archivos
-# o en terminal:
-install.cmd
-```
+### Una bóveda, un schema
 
-```bash
-# macOS / Linux / WSL
-./duckops-up.sh
-```
+| Concepto | Valor canónico |
+|----------|----------------|
+| **Hub DuckDB** | `db/private/default/duckclaw.duckdb` |
+| **Env** | `DUCKCLAW_GATEWAY_DB_PATH=db/private/default/duckclaw.duckdb` |
+| **Schema SQL** | Solo `main` (+ schemas internos DuckDB: `information_schema`, `pg_catalog`) |
+| **Migraciones** | `packages/shared/src/duckclaw/schema_migrations.py` — **33 versiones** (`uv run duckclaw-migrate`) |
+| **Bootstrap** | `bootstrap_core.py` — DDL idempotente **sin `ALTER TABLE ADD COLUMN`** |
 
-Si ya tienes `uv` en PATH:
+Tablas de homeostasis/meditate viven en **`main.homeostasis_targets`** y **`main.meditate_runs`** (migración M033). El paquete Python `harness_core/` es código Meditate/Heartbeat — **no** es un schema DuckDB separado.
 
-```bash
-uv run duckops up          # prereqs + migrate + PM2 + admin
-```
+**No usar:** `db/duckclaw.duckdb` (legacy), `db/system.duckdb`, `db/telegram.duckdb`, bóvedas AXIS antiguas. Fresh start: `bash scripts/fresh_dev_platform.sh`.
 
-`duckops up` instala en el paso 1: **uv**, **Redis**, **Node**, **pnpm**, **PM2** y ejecuta **`uv sync`** (crea `.venv` con todas las deps Python).
-
-Alternativa manual:
-
-```bash
-uv run duckops init        # wizard de configuración
-uv run duckops serve --gateway
-```
-
-Diagnóstico: `uv run duckops doctor` · `uv run duckclaw-healthcheck`  
-Migraciones hub: `uv run duckclaw-migrate`  
-Operación (Redis, PM2, Telegram): [`docs/COMANDOS.md`](docs/COMANDOS.md)
-
-Guía paso a paso: [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md)
-
----
-
-## Arquitectura DB-first (resumen)
+### Procesos y quién escribe
 
 ```mermaid
-flowchart LR
-  subgraph Ingress["Ingress"]
-    TG[Telegram / webhooks]
-    ADM[Admin UI BFF]
-    HTTP[Clientes HTTP]
+flowchart TB
+  subgraph Clients
+    ADM[duckclaw-admin BFF :3001]
+    HTTP[Clientes / Playground]
   end
 
-  subgraph Gateway["API Gateway — read_only"]
-    API[FastAPI · chat · admin API]
+  subgraph Gateway["DuckClaw-Gateway :8000 — read_only"]
+    API[FastAPI · admin_domains/* · chat]
   end
 
   subgraph Compute["Agents — read_only"]
-    MGR[Manager · routing por capabilities/policies]
-    WRK[Workers · tools · MCP connectors]
+    MGR[Manager · routing policies/capabilities]
+    WRK[Workers · tools · MCP]
   end
 
   subgraph Async["Redis"]
-    QW[(cola duckdb write)]
+    QW[(duckdb_write_queue)]
+    QK[(duckclaw:knowledge_sync_jobs)]
   end
 
-  subgraph Writer["Singleton"]
-    DW[DB-Writer — único RW en hub/vaults]
+  subgraph Writers["Singleton writers"]
+    DW[DB-Writer — mutaciones ACID hub/vaults]
+    KI[Knowledge-Indexer — ingest RAG carpetas]
   end
 
-  subgraph Hub["DuckDB hub — control plane"]
-    DB[(gateway.duckdb · schema_migrations)]
+  subgraph Hub["duckclaw.duckdb — control plane"]
+    DB[(main.* · admin_* · knowledge · policies)]
   end
 
-  TG --> API
   ADM --> API
   HTTP --> API
   API --> MGR --> WRK
-  API & WRK -->|"lectura"| DB
-  API & WRK -->|"Upsert*Command"| QW
-  QW --> DW -->|"ACID"| DB
+  API & WRK & KI -->|"SELECT read_only"| DB
+  API -->|"Upsert*Command"| QW
+  KI -->|"Upsert*Command docs/chunks"| QW
+  API -->|"enqueue folder_ingest"| QK
+  QW --> DW -->|"COMMIT"| DB
+  QK --> KI
 ```
+
+| Proceso PM2 | Rol | Escribe DuckDB |
+|-------------|-----|----------------|
+| **DuckClaw-Gateway** | HTTP, admin API, chat, encola comandos | ❌ `read_only=True` |
+| **DuckClaw-DB-Writer** | Consume `duckdb_write_queue` | ✅ único writer habitual |
+| **DuckClaw-Knowledge-Indexer** | Consume `duckclaw:knowledge_sync_jobs`, escanea vaults Obsidian | ❌ encola writes al DB-Writer |
+| **DuckClaw-Heartbeat** | Ticks proactivos / homeostasis | ❌ encola deltas |
+| **duckclaw-admin** | Next.js BFF → gateway (secretos solo server-side) | ❌ |
+
+Specs de límites: [`GATEWAY_PROCESS_BOUNDARIES.md`](docs/specs/features/platform/GATEWAY_PROCESS_BOUNDARIES.md) · [`GATEWAY_DB_WRITER_BOUNDARIES.md`](docs/specs/features/platform/GATEWAY_DB_WRITER_BOUNDARIES.md)
 
 ### Reglas que no negociar
 
 | Regla | Detalle |
 |-------|---------|
-| **Quién escribe** | Solo **DB-Writer** en rutas normales. Gateway/agentes: `read_only=True`. |
-| **Cómo mutar** | `duckclaw.write_commands` (Pydantic) → `enqueue_typed_command` → DB-Writer → `write_command_handlers`. |
+| **Quién escribe** | Solo **DB-Writer** en rutas normales. Gateway/agentes/indexer: `read_only=True`. |
+| **Cómo mutar** | `duckclaw.write_commands` (Pydantic) → `enqueue_write_command` / `enqueue_typed_command` → DB-Writer → `write_handlers/*`. |
 | **Dónde vive la verdad** | Tablas `main.admin_*`, `prompt_policy_registry`, knowledge, grants — no Markdown runtime ni `if worker_id == "…"`. |
-| **Verticales** | Quant, Finanz, PQRSD, Job Hunter, War Room, etc. **fuera del core** (extensiones o config DB creada por el usuario). |
-| **Airbag framework** | Solo 4 policies con fallback en código (`FRAMEWORK_POLICY_PACK`); el resto falla claro si falta fila en DB. |
+| **Verticales** | Quant, Finanz, PQRSD, Leila/Telegram bot legacy, etc. **fuera del core** (extensiones opt-in). |
+| **Telegram** | Integración opt-in; no arranca con el stack core. Ver Integraciones en admin. |
+| **Airbag framework** | 4 policies con fallback en código (`FRAMEWORK_POLICY_PACK`); el resto exige fila en DB. |
+| **RAG carpetas** | Gateway **solo encola**; ingest pesado en `DuckClaw-Knowledge-Indexer` + progreso Redis `duckclaw:knowledge_sync_status:{job_id}`. |
 
-Contrato cola/ledger: [`docs/specs/features/platform/DB_WRITER_CONTRACT.md`](docs/specs/features/platform/DB_WRITER_CONTRACT.md)
+Contrato cola/ledger: [`DB_WRITER_CONTRACT.md`](docs/specs/features/platform/DB_WRITER_CONTRACT.md)
 
-### Control plane en el hub (`gateway.duckdb`)
-
-Migraciones versionadas en `packages/shared/src/duckclaw/schema_migrations.py` (actualmente **v29**). Piezas principales:
+### Control plane en el hub
 
 | Dominio | Tablas / owners |
 |---------|-----------------|
+| **Identidad admin** | `admin_console_users`, `admin_user_profiles`, `admin_user_agents` |
 | **Workers** | `admin_worker_catalog`, contexts, capabilities, skills, assignments |
-| **Catálogo skills UI** | `admin_skill_categories`, `admin_skill_catalog_items` — seed `framework_skill_categories_v1` |
-| **Políticas** | `prompt_policy_registry`, `worker_prompt_bindings`, `tool_policy_directives`, `worker_runtime_policies` |
+| **Políticas** | `prompt_policy_registry`, `worker_prompt_bindings`, `worker_runtime_policies` |
 | **Proyectos** | `admin_projects`, `admin_project_agents`, members |
-| **Runtime** | `admin_runtime_settings` (tenant, chat, gateway, heartbeat, sandbox, LLM, secrets) |
-| **Acceso** | `admin_console_users`, whitelist Telegram, `user_shared_db_access` |
-| **RAG** | `admin_knowledge_sources`, documents, chunks — spec [`RAG_TRANSVERSAL_DB_FIRST.md`](docs/specs/features/platform/RAG_TRANSVERSAL_DB_FIRST.md) |
+| **Runtime** | `admin_runtime_settings` (tenant, chat, gateway, LLM, secrets) |
+| **RAG** | `admin_knowledge_sources`, documents, chunks — [`RAG_TRANSVERSAL_DB_FIRST.md`](docs/specs/features/platform/RAG_TRANSVERSAL_DB_FIRST.md) |
+| **Memoria semántica** | `main.semantic_memory` (context injection / VLM — distinto del RAG admin) |
+| **Homeostasis** | `main.homeostasis_targets`, `main.meditate_runs` |
+| **MCP** | `admin_mcp_connectors`, `admin_worker_mcp_grants` |
 | **Kanban / informes** | `admin_kanban_*`, `admin_report_*` |
-| **MCP conectores** | `admin_mcp_connectors`, `admin_worker_mcp_grants` — spec [`REMOTE_MCP_CONNECTORS.md`](docs/specs/features/integrations/REMOTE_MCP_CONNECTORS.md) |
-| **HITL transversal** | `code_decisions`, `agent_uncertainty_log` · `duckclaw.hitl.*` |
+| **HITL** | `code_decisions`, `agent_uncertainty_log` |
 
-Bóvedas por usuario/tenant (SQL + PGQ + VSS): [`docs/specs/features/platform/MULTI_VAULT_SYSTEM.md`](docs/specs/features/platform/MULTI_VAULT_SYSTEM.md)
+Bóvedas por usuario/tenant (Memoria Triple SQL+PGQ+VSS): [`MULTI_VAULT_SYSTEM.md`](docs/specs/features/platform/MULTI_VAULT_SYSTEM.md) — opcional; el hub canónico basta para admin + playground.
 
 ### Admin API
 
-Rutas bajo `/api/v1/admin` montadas desde `services/api-gateway/routers/admin.py` → **`admin_domains/*`** (un módulo por dominio). El router transicional `admin_db_first.py` solo conserva deuda mínima; **código nuevo va a `admin_domains/` + comando tipado en `packages/shared`**.
+Rutas bajo `/api/v1/admin` → `services/api-gateway/routers/admin_domains/*` (un módulo por dominio). Mutaciones = comando tipado → Redis → DB-Writer. **Código nuevo no va a god-routers.**
+
+---
+
+## Inicio rápido
+
+```bash
+# macOS / Linux — prereqs + migrate + PM2 + admin
+./duckops-up.sh
+# o
+uv run duckops up
+```
+
+Variables mínimas en `.env`:
+
+```bash
+DUCKCLAW_GATEWAY_DB_PATH=db/private/default/duckclaw.duckdb
+DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000
+REDIS_URL=redis://localhost:6379/0
+DUCKCLAW_ADMIN_API_KEY=...
+DUCKCLAW_ADMIN_EMAIL=...
+DUCKCLAW_ADMIN_PASSWORD=...
+```
+
+Diagnóstico: `uv run duckops doctor` · Migraciones: `uv run duckclaw-migrate` · Fresh vault: `bash scripts/fresh_dev_platform.sh`
+
+Guía: [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) · Comandos: [`docs/COMANDOS.md`](docs/COMANDOS.md)
 
 ---
 
 ## Admin UI
 
-Con el **gateway** en marcha (`:8000`):
-
 ```bash
-pnpm admin:install          # primera vez
-pnpm admin:dev              # dev → http://localhost:3001
+pnpm admin:install   # primera vez
+pnpm admin:dev       # http://localhost:3001
+pnpm dev:local       # gateway + db-writer + admin
 ```
 
-Stack local:
+Stack PM2: `uv run duckops stack deploy` (Gateway, DB-Writer, Knowledge-Indexer, Heartbeat).
 
-```bash
-pnpm dev:local              # gateway + db-writer + admin
-```
-
-**Producción** (PM2 spawn, admin `:3000`; dev local `:3001`):
-
-```bash
-pm2 start config/ecosystem.spawn.config.cjs
-pm2 save
-```
-
-`.env.local` en `apps/duckclaw-admin/`: `DUCKCLAW_GATEWAY_URL=http://127.0.0.1:8000` y `DUCKCLAW_ADMIN_API_KEY` (misma clave que el gateway). Guía completa: [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md).
-
-Si la UI sale sin estilos o congelada en «Esperando Gateway…» tras un error de compilación:
-
-```bash
-rm -rf apps/duckclaw-admin/.next && cd apps/duckclaw-admin && pnpm dev
-```
-
-Consola: **agentes** (catálogo DB), picker de **herramientas/manifest**, proyectos, **prompt policies**, playground, knowledge RAG, runtime settings, **conectores MCP** (`/mcp`), sandbox artifacts. Spec UI: [`docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md`](docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md)
-
-**GitHub MCP** (skill `github` en manifest): `GITHUB_TOKEN` + Docker accesible por el usuario PM2 (`docker` en PATH y grupo `docker`). Ver [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md#github-mcp-desde-admin).
-
-**Retirado:** API `/api/v1/admin/train/*` y pestaña `/train` — usar `uv run duckops train` y [`packages/agents/train/`](packages/agents/train/).
+Spec UI: [`docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md`](docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md) · Patrones: [`UIUX-PATTERNS.md`](UIUX-PATTERNS.md)
 
 ---
 
@@ -166,69 +160,36 @@ Consola: **agentes** (catálogo DB), picker de **herramientas/manifest**, proyec
 ```
 duckclaw/
 ├── packages/
-│   ├── shared/     # schema_migrations, write_commands, admin_* readers, presets
-│   ├── agents/     # manager, workers, forge, commands, MCP bridge
+│   ├── shared/     # schema_migrations, write_commands, admin_* readers, knowledge_sync_queue
+│   ├── agents/     # manager, workers, forge/rag, commands, MCP bridge
 │   ├── core/       # bindings C++ / performance
-│   └── duckops/    # CLI: up, init, doctor, serve, train
+│   └── duckops/    # CLI: up, init, doctor, stack deploy
 ├── services/
-│   ├── api-gateway/    # FastAPI · admin_domains/* · chat · webhooks
-│   ├── db-writer/      # consumidor singleton de la cola
-│   └── heartbeat/      # ticks proactivos (transversal, sin verticales)
-├── apps/
-│   └── duckclaw-admin/ # Next.js BFF → gateway (nunca secretos en browser)
-├── harness_core/       # Meditate / homeostasis infra (core activo, no legacy)
-├── integrations/       # Sensory node, edge devices, …
-├── docs/specs/         # SDD — leer antes de tocar packages/ o services/
-└── tests/              # guardrails DB-first: test_forge_legacy_cleanup, test_db_first_guardrails_static, …
+│   ├── api-gateway/       # FastAPI · admin_domains/* · chat
+│   ├── db-writer/         # consumidor singleton duckdb_write_queue
+│   ├── knowledge-indexer/   # consumidor duckclaw:knowledge_sync_jobs
+│   └── heartbeat/         # ticks proactivos
+├── apps/duckclaw-admin/   # Next.js BFF
+├── harness_core/          # Python Meditate/homeostasis (tablas en main.*)
+├── docs/specs/            # SDD — leer antes de tocar packages/ o services/
+└── tests/                 # guardrails DB-first
 ```
-
----
-
-## Componentes principales
-
-| Pieza | Rol DB-first |
-|-------|----------------|
-| **API Gateway** | Ingress, admin BFF proxy, encola `WriteCommand`, abre DuckDB RO |
-| **DB-Writer** | Aplica mutaciones en transacción; único writer habitual |
-| **Agents / Manager** | Routing por capabilities y `prompt_policy_registry`; fast plans desde DB |
-| **Workers factory** | Ensambla grafo desde catálogo DB + `skill_configs`; tools vía registry y MCP grants |
-| **duckclaw.commands.*** | Fly commands transversales; mutaciones vía comandos tipados |
-| **duckops** | Onboarding, migrate, healthcheck, PM2 |
-| **Admin UI** | CRUD control plane; mutaciones → gateway → cola → writer |
-
-Extensiones externas (fly commands, skills verticales): [`docs/extensions/fly-commands.md`](docs/extensions/fly-commands.md)
 
 ---
 
 ## Imports Python (puntos de entrada)
 
 ```python
-# DuckDB (vaults; usar read_only=True salvo db-writer)
 from duckclaw import DuckClaw
-
-# Migraciones / integridad hub
+from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.schema_migrations import run_pending_migrations, verify_migration_integrity
-
-# Cola singleton writer
 from duckclaw.db_write_queue import enqueue_typed_command
-
-# Comandos tipados (mutaciones)
-from duckclaw.write_commands import UpsertWorkerCommand, UpsertPromptPolicyCommand
-
-# Workers (catálogo DB + layout default)
-from duckclaw.workers import WorkerFactory, WorkerSpec, list_workers
-
-# Políticas de prompt
+from duckclaw.write_commands import UpsertWorkerCommand, CreateKnowledgeSourceCommand
+from duckclaw.workers import WorkerFactory, list_workers
 from duckclaw.prompt_policies import PromptPolicyResolver
-
-# RAG transversal
 from duckclaw.forge.rag import build_knowledge_context, search_knowledge
-
-# Extensiones desde repos externos (DUCKCLAW_EXTENSION_ROOT)
-from duckclaw.extensions import dispatch_extension_fly_command
+from duckclaw.knowledge_sync_queue import enqueue_knowledge_sync_job, get_job_status
 ```
-
-Entrenamiento SFT (filesystem, sin Redis): `packages/agents/train/` · `uv run duckops train`
 
 ---
 
@@ -240,14 +201,7 @@ uv run pytest tests/ -m "not integration" \
   --ignore tests/deprecated
 ```
 
-Guardrails de arquitectura (entre otros):
-
-- `tests/test_forge_legacy_cleanup.py` — sin residuos verticales en core
-- `tests/test_db_first_guardrails_static.py` — contratos docs/código
-- `tests/test_admin_router_split_static.py` — admin_domains por dominio
-- `tests/test_schema_migrations.py` — tablas esperadas por versión
-
-Pipeline completo Gateway → Redis → DB-Writer: [`tests/run_singleton_writer_pipeline.py`](tests/run_singleton_writer_pipeline.py)
+Guardrails: `test_forge_legacy_cleanup.py` · `test_db_first_guardrails_static.py` · `test_schema_migrations.py` · `test_knowledge_sync_queue.py`
 
 ---
 
@@ -255,12 +209,10 @@ Pipeline completo Gateway → Redis → DB-Writer: [`tests/run_singleton_writer_
 
 | Qué | Dónde |
 |-----|--------|
-| **Arquitectura DB-first (canonical)** | [`docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`](docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md) |
+| **Arquitectura DB-first** | [`DB_FIRST_CORE_REFACTOR.md`](docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md) |
+| Handoff agentes / estado sesión | [`docs/HANDOFF_AGENT_CONTEXT.md`](docs/HANDOFF_AGENT_CONTEXT.md) |
 | Índice docs | [`docs/README.md`](docs/README.md) |
-| Primeros pasos | [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) |
-| Índice specs plataforma | [`docs/specs/features/platform/README.md`](docs/specs/features/platform/README.md) |
-| Diagrama componentes | [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md) |
-| Infra bootstrap | [`docs/architecture/infra-bootstrap.md`](docs/architecture/infra-bootstrap.md) |
+| Specs plataforma | [`docs/specs/features/platform/README.md`](docs/specs/features/platform/README.md) |
 | Patrones UI admin | [`UIUX-PATTERNS.md`](UIUX-PATTERNS.md) |
 
 ---

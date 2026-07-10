@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,20 @@ def _upload_filename_labels(files: list[UploadFile]) -> list[str]:
     return labels
 
 
+def _indexing_metadata(
+    base: dict[str, Any] | None,
+    *,
+    sync_job_id: str,
+    file_count: int,
+) -> dict[str, Any]:
+    return {
+        **dict(base or {}),
+        "sync_job_id": sync_job_id,
+        "file_count": int(file_count),
+        "indexing_started_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 class KnowledgeSourceCreateBody(BaseModel):
     source_uri: str = Field(..., min_length=1, max_length=4096)
     display_name: str = Field(default="", max_length=160)
@@ -93,6 +108,13 @@ def _validate_knowledge_ingest_root(source_uri: str) -> Path:
     return validate_knowledge_ingest_root(source_uri)
 
 
+def _folder_file_count(source_uri: str) -> int:
+    from duckclaw.forge.rag.knowledge_core import scan_knowledge_folder
+
+    root = _validate_knowledge_ingest_root(source_uri)
+    return int(scan_knowledge_folder(root).file_count)
+
+
 @router.get("/knowledge/jobs/{job_id}", dependencies=[Depends(require_admin_key)])
 async def get_knowledge_sync_job(job_id: str) -> dict[str, Any]:
     from duckclaw.knowledge_sync_queue import get_job_status
@@ -101,6 +123,98 @@ async def get_knowledge_sync_job(job_id: str) -> dict[str, Any]:
     if not row:
         raise problem(404, f"Job de indexación no encontrado: {job_id}", job_id)
     return {"job_id": job_id.strip(), **row}
+
+
+@router.get("/knowledge/sources/{source_id}/indexing-progress", dependencies=[Depends(require_admin_key)])
+async def get_knowledge_source_indexing_progress(
+    source_id: str,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    """Progreso de indexación: job Redis + conteo de archivos (metadata o scan en vivo)."""
+    from core.admin_identity import open_gateway_db
+    from core.heavy_work import run_heavy_work
+    from duckclaw.admin_knowledge_read import get_knowledge_source
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.knowledge_sync_queue import get_job_status
+
+    sid = source_id.strip()
+    with open_gateway_db(read_only=True) as db:
+        profile = ensure_profile_for_user(db, email=actor)
+        source = get_knowledge_source(db, tenant_id=profile["tenant_id"], source_id=sid)
+
+    if not source:
+        raise problem(404, f"Fuente RAG no encontrada: {sid}", sid)
+
+    status = str(source.get("status") or "").lower()
+    if status != "indexing":
+        return {
+            "active": False,
+            "source_id": sid,
+            "status": status,
+            "document_count": int(source.get("document_count") or 0),
+            "chunk_count": int(source.get("chunk_count") or 0),
+        }
+
+    meta = dict(source.get("metadata") or {})
+    job_id = str(meta.get("sync_job_id") or "").strip()
+    file_count = meta.get("file_count")
+    if not isinstance(file_count, int):
+        try:
+            file_count = int(file_count) if file_count is not None else 0
+        except (TypeError, ValueError):
+            file_count = 0
+
+    source_uri = str(source.get("source_uri") or "").strip()
+    source_kind = str(source.get("source_kind") or "")
+    if file_count <= 0 and source_kind == "folder" and source_uri and not source_uri.startswith("upload://"):
+        try:
+
+            def _scan_count() -> int:
+                return _folder_file_count(source_uri)
+
+            file_count = int(await run_heavy_work(_scan_count))
+        except Exception as exc:
+            _log.debug("indexing-progress scan failed source=%s: %s", sid, exc)
+
+    job_row: dict[str, Any] | None = None
+    if job_id:
+        job_row = get_job_status(job_id)
+
+    progress = job_row.get("progress") if isinstance(job_row, dict) else None
+    if isinstance(progress, dict) and file_count > 0 and not progress.get("files_total"):
+        progress = {**progress, "files_total": file_count}
+
+    job_status = job_row.get("status") if isinstance(job_row, dict) else None
+    error_message: str | None = None
+    if isinstance(job_row, dict):
+        if job_status == "failed":
+            error_message = str(job_row.get("detail") or "Indexación falló")
+        elif job_status == "completed":
+            import json
+
+            try:
+                stats = json.loads(str(job_row.get("detail") or "{}"))
+                scanned = int(stats.get("scanned") or 0)
+                upserted = int(stats.get("upserted") or 0)
+                if file_count > 0 and scanned == 0 and upserted == 0:
+                    error_message = (
+                        "El job terminó sin indexar archivos. Pulsa Sincronizar de nuevo "
+                        "y revisa pm2 logs DuckClaw-Knowledge-Indexer."
+                    )
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
+
+    return {
+        "active": True,
+        "source_id": sid,
+        "job_id": job_id or None,
+        "job_status": job_status,
+        "progress": progress,
+        "file_count": file_count,
+        "document_count": int(source.get("document_count") or 0),
+        "chunk_count": int(source.get("chunk_count") or 0),
+        "error_message": error_message,
+    }
 
 
 @router.get("/knowledge/config", dependencies=[Depends(require_admin_key)])
@@ -199,23 +313,13 @@ async def create_knowledge_source(
 
     try:
         source_id = f"ksrc_{uuid.uuid4().hex[:16]}"
-        command = CreateKnowledgeSourceCommand(
-            source_id=source_id,
-            tenant_id=profile["tenant_id"],
-            actor_email=profile["email"],
-            project_id=body.project_id.strip(),
-            worker_uid=body.worker_uid.strip(),
-            source_kind=body.source_kind.strip() or "folder",  # type: ignore[arg-type]
-            source_uri=body.source_uri.strip(),
-            display_name=body.display_name.strip(),
-            status="indexing" if body.ingest else "pending",
-            metadata=body.metadata,
-        )
-        task_ids = [_enqueue_knowledge_command(command)]
         documents = 0
         skipped_hidden = 0
         skipped_unsupported = 0
         sync_job_id = ""
+        source_metadata = dict(body.metadata or {})
+        task_ids: list[str] = []
+
         if body.ingest:
             root = _validate_knowledge_ingest_root(body.source_uri)
             from duckclaw.forge.rag.knowledge_core import scan_knowledge_folder
@@ -235,7 +339,27 @@ async def create_knowledge_source(
                 tenant_id=profile["tenant_id"],
                 actor_email=profile["email"],
                 compute_embeddings=body.compute_embeddings,
+                files_total=documents,
             )
+            source_metadata = _indexing_metadata(
+                source_metadata,
+                sync_job_id=sync_job_id,
+                file_count=documents,
+            )
+
+        command = CreateKnowledgeSourceCommand(
+            source_id=source_id,
+            tenant_id=profile["tenant_id"],
+            actor_email=profile["email"],
+            project_id=body.project_id.strip(),
+            worker_uid=body.worker_uid.strip(),
+            source_kind=body.source_kind.strip() or "folder",  # type: ignore[arg-type]
+            source_uri=body.source_uri.strip(),
+            display_name=body.display_name.strip(),
+            status="indexing" if body.ingest else "pending",
+            metadata=source_metadata,
+        )
+        task_ids.append(_enqueue_knowledge_command(command))
     except Exception as exc:
         raise problem(400, str(exc), "knowledge_source") from exc
 
@@ -296,6 +420,21 @@ async def upload_knowledge_files(
         source_id = f"ksrc_{uuid.uuid4().hex[:16]}"
         upload_labels = [name for name, _data in file_payloads]
         resolved_display = _upload_display_name(display_name, upload_labels)
+        staging_dir = str(
+            stage_browser_upload(job_id=f"kupload_{source_id}", files=file_payloads)
+        )
+        job_id = enqueue_browser_upload_job(
+            source_id=source_id,
+            tenant_id=profile["tenant_id"],
+            actor_email=profile["email"],
+            staging_dir=staging_dir,
+            project_id=project_id.strip(),
+            worker_uid=worker_uid.strip(),
+            display_name=resolved_display,
+            file_names=upload_labels,
+            compute_embeddings=compute_embeddings,
+            files_total=len(file_payloads),
+        )
         source_cmd = CreateKnowledgeSourceCommand(
             source_id=source_id,
             tenant_id=profile["tenant_id"],
@@ -306,20 +445,13 @@ async def upload_knowledge_files(
             source_uri=f"upload://{source_id}",
             display_name=resolved_display,
             status="indexing",
-            metadata={"upload": True, "file_count": len(file_payloads), "file_names": upload_labels},
+            metadata=_indexing_metadata(
+                {"upload": True, "file_names": upload_labels},
+                sync_job_id=job_id,
+                file_count=len(file_payloads),
+            ),
         )
         task_id = _enqueue_knowledge_command(source_cmd)
-        job_id = enqueue_browser_upload_job(
-            source_id=source_id,
-            tenant_id=profile["tenant_id"],
-            actor_email=profile["email"],
-            staging_dir=str(stage_browser_upload(job_id=f"kupload_{source_id}", files=file_payloads)),
-            project_id=project_id.strip(),
-            worker_uid=worker_uid.strip(),
-            display_name=resolved_display,
-            file_names=upload_labels,
-            compute_embeddings=compute_embeddings,
-        )
     except Exception as exc:
         raise problem(400, "No se pudo encolar la carga RAG", str(exc)) from exc
 
@@ -360,6 +492,16 @@ async def sync_knowledge_source(
             raise problem(400, "Esta fuente no tiene ruta de servidor para sincronizar", source_id)
 
     try:
+        file_count = _folder_file_count(source_uri)
+        sync_job_id = enqueue_knowledge_sync_job(
+            kind="folder_sync",
+            source_id=source_id,
+            tenant_id=profile["tenant_id"],
+            actor_email=profile["email"],
+            force=True,
+            compute_embeddings=body.compute_embeddings,
+            files_total=file_count,
+        )
         indexing_cmd = CreateKnowledgeSourceCommand(
             source_id=source_id,
             tenant_id=profile["tenant_id"],
@@ -370,17 +512,13 @@ async def sync_knowledge_source(
             source_uri=source_uri,
             display_name=str(source.get("display_name") or ""),
             status="indexing",
-            metadata=dict(source.get("metadata") or {}),
+            metadata=_indexing_metadata(
+                dict(source.get("metadata") or {}),
+                sync_job_id=sync_job_id,
+                file_count=file_count,
+            ),
         )
         task_id = _enqueue_knowledge_command(indexing_cmd)
-        sync_job_id = enqueue_knowledge_sync_job(
-            kind="folder_sync",
-            source_id=source_id,
-            tenant_id=profile["tenant_id"],
-            actor_email=profile["email"],
-            force=True,
-            compute_embeddings=body.compute_embeddings,
-        )
     except Exception as exc:
         raise problem(400, str(exc), "knowledge_sync") from exc
 

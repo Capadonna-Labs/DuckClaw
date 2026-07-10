@@ -87,9 +87,22 @@ def _apply_quarantine(con: duckdb.DuckDBPyConnection, delta: LoopStateDelta) -> 
         )
 
 
+def _ensure_main_homeostasis_table(con: duckdb.DuckDBPyConnection) -> None:
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS main.homeostasis_targets (
+          tenant_id VARCHAR PRIMARY KEY,
+          targets_json JSON,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 def _apply_manifest(con: duckdb.DuckDBPyConnection, delta: LoopStateDelta) -> None:
     m = delta.manifest_mutation()
     tid = str(delta.tenant_id or "default")
+    _ensure_main_homeostasis_table(con)
     con.execute(
         """
         INSERT INTO main.homeostasis_targets (tenant_id, targets_json)

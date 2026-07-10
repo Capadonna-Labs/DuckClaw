@@ -223,7 +223,7 @@ def _persist_homeostasis_manifest_db(
 
 
 def _try_sync_write_homeostasis_manifest(db: Any, tenant_id: str, manifest: Any) -> bool:
-    """Write harness_core.homeostasis_targets when the DuckClaw handle is writable."""
+    """Write main.homeostasis_targets when the DuckClaw handle is writable."""
     if bool(getattr(db, "_read_only", False)):
         return False
     tid = str(tenant_id or "default").strip() or "default"
@@ -236,11 +236,10 @@ def _try_sync_write_homeostasis_manifest(db: Any, tenant_id: str, manifest: Any)
     except Exception:
         return False
     try:
-        # Ensure schema + upsert (same shape as db-writer meditate_state_delta).
         for stmt in (
-            "CREATE SCHEMA IF NOT EXISTS harness_core",
+            "CREATE SCHEMA IF NOT EXISTS main",
             """
-            CREATE TABLE IF NOT EXISTS harness_core.homeostasis_targets (
+            CREATE TABLE IF NOT EXISTS main.homeostasis_targets (
               tenant_id VARCHAR PRIMARY KEY,
               targets_json JSON,
               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -254,7 +253,7 @@ def _try_sync_write_homeostasis_manifest(db: Any, tenant_id: str, manifest: Any)
             else:
                 return False
         upsert = (
-            "INSERT INTO harness_core.homeostasis_targets (tenant_id, targets_json) "
+            "INSERT INTO main.homeostasis_targets (tenant_id, targets_json) "
             "VALUES (?, ?) "
             "ON CONFLICT (tenant_id) DO UPDATE SET "
             "targets_json = excluded.targets_json, updated_at = now()"
@@ -262,11 +261,10 @@ def _try_sync_write_homeostasis_manifest(db: Any, tenant_id: str, manifest: Any)
         if hasattr(db, "execute"):
             db.execute(upsert, [tid, payload])
         else:
-            # fallback: escape via single-quote JSON string
             esc_tid = tid.replace("'", "''")
             esc_payload = payload.replace("'", "''")
             db.query(
-                "INSERT INTO harness_core.homeostasis_targets (tenant_id, targets_json) "
+                "INSERT INTO main.homeostasis_targets (tenant_id, targets_json) "
                 f"VALUES ('{esc_tid}', '{esc_payload}'::JSON) "
                 "ON CONFLICT (tenant_id) DO UPDATE SET "
                 "targets_json = excluded.targets_json, updated_at = now()"
@@ -434,9 +432,9 @@ def execute_homeostasis_goals(
     """/goals — CRUD del manifiesto homeostasis (metas + umbrales infra) contrastado por /loop."""
     from harness_core.goal_priority import assign_sequential_priorities, next_goal_priority
     from harness_core.states.loop_state import DomainGoal, HomeostasisManifest
-    from harness_core.targets import load_homeostasis_manifest, set_infra_field
+    from harness_core.targets import load_homeostasis_manifest, resolve_homeostasis_tenant_id, set_infra_field
 
-    tid = str(tenant_id or "default").strip() or "default"
+    tid = resolve_homeostasis_tenant_id(db, chat_id, tenant_id)
     registry = _get_goals_registry_for_chat(db, chat_id, tenant_id=tid)
     raw = (args or "").strip()
     toks = raw.split()

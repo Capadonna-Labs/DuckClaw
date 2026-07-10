@@ -12,6 +12,22 @@ from harness_core.states.loop_state import DomainGoal, HomeostasisManifest, Home
 _log = logging.getLogger(__name__)
 
 _INFRA_KEYS = frozenset(HomeostasisTarget.model_fields.keys())
+_MANIFEST_TABLE_SCHEMAS = ("main", "harness_core")
+_CHAT_TENANT_STATE_KEYS = ("goals_proactive_tenant_id", "tenant_id")
+
+
+def resolve_homeostasis_tenant_id(db: Any, chat_id: Any, tenant_id: Any) -> str:
+    """Prefer chat-scoped tenant when gateway passes a generic default tenant_id."""
+    try:
+        from duckclaw.commands.chat_state import get_chat_state
+    except Exception:
+        get_chat_state = None  # type: ignore[assignment,misc]
+    if get_chat_state is not None and chat_id is not None:
+        for key in _CHAT_TENANT_STATE_KEYS:
+            raw = (get_chat_state(db, chat_id, key) or "").strip()
+            if raw:
+                return raw
+    return str(tenant_id or "default").strip() or "default"
 
 
 def _parse_targets_json(raw: Any) -> HomeostasisManifest:
@@ -40,17 +56,23 @@ def _parse_targets_json(raw: Any) -> HomeostasisManifest:
 
 def _query_manifest_row(db: Any, tenant_id: str) -> HomeostasisManifest:
     tid = (tenant_id or "default").strip() or "default"
-    try:
-        esc = tid.replace("'", "''")
-        raw = db.query(
-            f"SELECT targets_json FROM main.homeostasis_targets "
-            f"WHERE tenant_id = '{esc}' LIMIT 1"
-        )
-        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
-        if rows and isinstance(rows[0], dict):
-            return _parse_targets_json(rows[0].get("targets_json"))
-    except Exception as exc:
-        _log.debug("load_homeostasis_manifest query failed tenant=%s: %s", tid, exc)
+    esc = tid.replace("'", "''")
+    for schema in _MANIFEST_TABLE_SCHEMAS:
+        try:
+            raw = db.query(
+                f"SELECT targets_json FROM {schema}.homeostasis_targets "
+                f"WHERE tenant_id = '{esc}' LIMIT 1"
+            )
+            rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+            if rows and isinstance(rows[0], dict):
+                return _parse_targets_json(rows[0].get("targets_json"))
+        except Exception as exc:
+            _log.debug(
+                "load_homeostasis_manifest query failed tenant=%s schema=%s: %s",
+                tid,
+                schema,
+                exc,
+            )
     return HomeostasisManifest()
 
 
@@ -133,14 +155,7 @@ def get_manifest_goals_for_chat(
     tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Goals from homeostasis manifest (single source for /crons scheduler and /loop)."""
-    tid = (tenant_id or "").strip()
-    if not tid:
-        try:
-            from duckclaw.graphs.on_the_fly_commands import get_chat_state
-
-            tid = (get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
-        except Exception:
-            tid = "default"
+    tid = resolve_homeostasis_tenant_id(db, chat_id, tenant_id)
     return manifest_goals_as_dicts(load_homeostasis_manifest(db, tid, chat_id=chat_id))
 
 

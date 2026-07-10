@@ -4,7 +4,12 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['src/lib/opsSubprocessEnv.test.ts', 'src/lib/pollWriteTask.test.ts'],
+    include: [
+      'src/lib/opsSubprocessEnv.test.ts',
+      'src/lib/pollWriteTask.test.ts',
+      'src/lib/ansiLog.test.ts',
+      'src/components/chat/useAdminChatLoopPolling.test.ts',
+    ],
   },
   resolve: {
     alias: {

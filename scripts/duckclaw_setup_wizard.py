@@ -963,7 +963,7 @@ def _edit_gateway_service(
             except Exception as e:
                 console.print(f"[red]Error: {e}[/]")
                 console.print("[dim]Ejecuta manualmente: duckops serve --pm2 --gateway[/]")
-            _ensure_default_mcp_telegram_integration(repo_root, console)
+            _ensure_default_mcp_integrations(repo_root, console)
             return
         # No regenerar: permitir editar ruta DB, Redis, guardar trazas, etc.
         console.print("[dim]Edita los valores (Enter = mantener actual).[/]")
@@ -998,7 +998,7 @@ def _edit_gateway_service(
             f"trazas={'sí' if save_traces_yes else 'no'}, formato={traces_fmt}"
         )
         if not Confirm.ask("¿Seguir editando este servicio?", default=False):
-            _ensure_default_mcp_telegram_integration(repo_root, console)
+            _ensure_default_mcp_integrations(repo_root, console)
             return
 
 
@@ -1483,6 +1483,48 @@ def _ensure_default_mcp_telegram_integration(repo_root: Path, console: Console |
             "([bold]DUCKCLAW_TELEGRAM_MCP_ENABLED=1[/], [bold]config/mcp_servers.yaml[/]). "
             "Reinicia el API Gateway para aplicar.[/]"
         )
+
+
+def _ensure_default_mcp_higgsfield_connectors(repo_root: Path, console: Console | None = None) -> None:
+    """Provisiona conector MCP Higgsfield (mcp_higgsfield) en DuckDB si hay gateway DB."""
+    db_path = (os.environ.get("DUCKCLAW_DB_PATH") or "").strip()
+    if not db_path:
+        return
+    p = Path(db_path)
+    if not p.is_absolute():
+        p = (repo_root / p).resolve()
+    if not p.is_file():
+        return
+    _orig_path = sys.path.copy()
+    try:
+        sys.path.insert(0, str(repo_root))
+        from duckclaw import DuckClaw
+        from duckclaw.mcp_connector_defaults import ensure_default_mcp_connectors
+        from duckclaw.schema_migrations import run_pending_migrations
+
+        db = DuckClaw(str(p))
+        run_pending_migrations(db)
+        result = ensure_default_mcp_connectors(db, tenant_id="default", actor_email="system")
+        if console:
+            created = result.get("created") or []
+            if created:
+                console.print(
+                    f"[green]✓[/] Conectores MCP default creados: [bold]{', '.join(created)}[/]"
+                )
+            console.print(
+                "[dim]Higgsfield MCP: OAuth en Admin → Conectores MCP "
+                "(https://mcp.higgsfield.ai/mcp). No uses env var bearer.[/]"
+            )
+    except Exception as exc:
+        if console:
+            console.print(f"[dim]Bootstrap MCP Higgsfield omitido: {exc}[/]")
+    finally:
+        sys.path[:] = _orig_path
+
+
+def _ensure_default_mcp_integrations(repo_root: Path, console: Console | None = None) -> None:
+    _ensure_default_mcp_telegram_integration(repo_root, console)
+    _ensure_default_mcp_higgsfield_connectors(repo_root, console)
 
 
 def _ensure_db_file_exists(repo_root: Path, db_path: str, console: Console | None = None) -> bool:
@@ -2152,7 +2194,7 @@ def _run_section(
             if not run_now:
                 console.print("[dim]Configuración guardada. Ejecuta el bot cuando quieras.[/]")
                 if (state.get("channel") or "telegram").strip().lower() == "telegram":
-                    _ensure_default_mcp_telegram_integration(repo_root, console)
+                    _ensure_default_mcp_integrations(repo_root, console)
                 return True, "", None
             # Continúa hacia el lanzamiento directo (cae al final de save_launch)
 
@@ -2198,7 +2240,7 @@ def _run_section(
                 _ensure_db_file_exists(repo_root, db_path_save, console)
         state.pop("_used_preferences_skip", None)
         if (state.get("channel") or "telegram").strip().lower() == "telegram":
-            _ensure_default_mcp_telegram_integration(repo_root, console)
+            _ensure_default_mcp_integrations(repo_root, console)
         console.print()
         available_providers = _detect_available_deploy_providers()
         state["available_deploy_providers"] = available_providers
@@ -2432,7 +2474,7 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
             svc_state["token"] = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
             _edit_service_settings(console, svc_state, repo_root, DEPLOY_SERVICE_NAME, provider="systemd")
             if (svc_state.get("channel") or "telegram").strip().lower() == "telegram":
-                _ensure_default_mcp_telegram_integration(repo_root, console)
+                _ensure_default_mcp_integrations(repo_root, console)
             return 0
 
     elif _pm2_available():
@@ -2535,7 +2577,7 @@ def _main_inner(console: Console, repo_root: Path, bot_script: Path) -> int:
             _edit_service_settings(console, svc_state, repo_root, found_svc, provider="pm2")
             if not _is_gateway_service_name(found_svc, svc_state, repo_root):
                 if (svc_state.get("channel") or "telegram").strip().lower() == "telegram":
-                    _ensure_default_mcp_telegram_integration(repo_root, console)
+                    _ensure_default_mcp_integrations(repo_root, console)
             return 0
 
     # ── PASO 1: Cargar configuración guardada ─────────────────────────────

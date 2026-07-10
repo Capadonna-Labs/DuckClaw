@@ -28,8 +28,13 @@ from routers.admin_domains.playground.router import router
 from routers.admin_domains.playground.schemas import (
     PlaygroundKnowledgeScopeBody,
     PlaygroundModelBody,
+    PlaygroundSlmBody,
     PlaygroundVaultBody,
     PlaygroundWorkerBody,
+)
+from routers.admin_domains.playground.slm_settings import (
+    resolved_slm_for_playground_async,
+    slm_base_url,
 )
 from routers.admin_domains.playground.team_context import merge_playground_catalog_and_team_workers, playground_team_context
 from routers.admin_domains.playground.tenant_resolution import gateway_effective_tenant_id
@@ -135,8 +140,14 @@ async def playground_config(
             )
     except FileNotFoundError:
         pass
+    slm = await resolved_slm_for_playground_async(
+        chat_id=eff_chat,
+        tenant_id=eff_tenant,
+        repo_root=repo_root(),
+    )
     return {
         "llm": llm,
+        "slm": slm,
         "catalog": catalog,
         "config_chat_id": eff_chat,
         "knowledge_scope": knowledge_scope,
@@ -399,4 +410,61 @@ async def playground_set_model(
         "chat_id": chat_id,
         "llm": llm,
         "catalog": playground_llm_catalog(llm.get("provider", "")),
+    }
+
+
+@router.put("/playground/slm", dependencies=[Depends(require_admin_key)])
+async def playground_set_slm(
+    body: PlaygroundSlmBody,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    """Persiste SLM opcional (MLX-Inference) por conversación."""
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
+    chat_id = body.chat_id.strip()
+    adapter_value = (body.adapter_path or "").strip()
+    base_url_value = slm_base_url()
+    enabled_value = "true" if body.enabled else "false"
+
+    task_ids: list[str] = []
+    for key, value in (
+        ("slm_enabled", enabled_value),
+        ("slm_adapter_path", adapter_value),
+        ("slm_base_url", base_url_value),
+    ):
+        command = UpsertRuntimeSettingCommand(
+            tenant_id="default",
+            actor_email=runtime_session_actor(chat_id),
+            domain=RUNTIME_SESSION_DOMAIN,
+            key=key,
+            value=str(value or "")[:8192],
+            value_kind="string",
+            updated_by=actor,
+        )
+        try:
+            from duckclaw.gateway_enqueue import enqueue_admin_command
+
+            task_id = enqueue_admin_command(command)
+        except Exception as exc:
+            raise problem(400, "No se pudo actualizar el SLM", str(exc)) from exc
+        task_ids.append(task_id)
+
+    slm = await resolved_slm_for_playground_async(
+        chat_id=chat_id,
+        tenant_id="default",
+        repo_root=repo_root(),
+    )
+    return {
+        "ok": True,
+        "queued": True,
+        "task_id": task_ids[0] if task_ids else "",
+        "task_ids": task_ids,
+        "message": (
+            "✅ SLM actualizado."
+            if body.enabled
+            else "SLM desactivado para esta conversación."
+        ),
+        "chat_id": chat_id,
+        "slm": slm,
     }

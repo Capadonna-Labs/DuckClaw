@@ -1356,6 +1356,15 @@ export const adminService = {
       body: JSON.stringify({ bearer_token: bearerToken }),
     }),
 
+  startMcpConnectorOAuth: (connectorId: string, redirectUri?: string) =>
+    adminFetch<{ ok: boolean; authorization_url: string; state: string; redirect_uri: string }>(
+      `/mcp/connectors/${encodeURIComponent(connectorId)}/oauth/start`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ redirect_uri: redirectUri || '' }),
+      }
+    ),
+
   testMcpConnector: (connectorId: string) =>
     adminFetch<McpConnectorTestResult>(`/mcp/connectors/${encodeURIComponent(connectorId)}/test`, {
       method: 'POST',
@@ -1702,6 +1711,18 @@ export const adminService = {
     const qs = q.toString();
     return adminFetch<{
       llm: { provider: string; model: string; base_url: string; scope?: string };
+      slm?: {
+        enabled: boolean;
+        model: string;
+        model_short?: string;
+        adapter_path: string;
+        base_url: string;
+        mlx_status: 'online' | 'offline' | 'unknown';
+        pm2_name: string;
+        adapters: { id: string; label: string; path: string; active?: boolean }[];
+        hint?: string;
+        scope?: string;
+      };
       config_chat_id?: string;
       knowledge_scope?: string;
       catalog: {
@@ -2100,6 +2121,31 @@ export const adminService = {
         keys_ok?: boolean;
       }[];
     }>('/playground/model', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+
+  setPlaygroundSlm: (body: {
+    chat_id: string;
+    enabled: boolean;
+    adapter_path?: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      message: string;
+      chat_id: string;
+      slm: {
+        enabled: boolean;
+        model: string;
+        model_short?: string;
+        adapter_path: string;
+        base_url: string;
+        mlx_status: 'online' | 'offline' | 'unknown';
+        pm2_name: string;
+        adapters: { id: string; label: string; path: string; active?: boolean }[];
+        hint?: string;
+      };
+    }>('/playground/slm', {
       method: 'PUT',
       body: JSON.stringify(body),
     }),

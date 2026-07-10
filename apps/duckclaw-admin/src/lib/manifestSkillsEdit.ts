@@ -24,6 +24,16 @@ const DEFAULT_COMFYUI_CONFIG: Record<string, unknown> = {
   enabled: true,
 };
 
+const DEFAULT_HIGGSFIELD_CONFIG: Record<string, unknown> = {
+  enabled: true,
+  token_env: 'HIGGSFIELD_API_KEY',
+};
+
+const DEFAULT_FAL_CONFIG: Record<string, unknown> = {
+  enabled: true,
+  token_env: 'FAL_KEY',
+};
+
 const DEFAULT_GITHUB_CONFIG: Record<string, unknown> = {
   enabled: true,
   token_env: 'GITHUB_TOKEN',
@@ -124,6 +134,8 @@ function defaultConfigForSkill(skillId: string): Record<string, unknown> | null 
   const normalized = normalizeSkillId(skillId);
   if (normalized === 'research') return { ...DEFAULT_RESEARCH_CONFIG };
   if (normalized === 'comfyui') return { ...DEFAULT_COMFYUI_CONFIG };
+  if (normalized === 'higgsfield') return { ...DEFAULT_HIGGSFIELD_CONFIG };
+  if (normalized === 'fal') return { ...DEFAULT_FAL_CONFIG };
   if (normalized === 'github') return { ...DEFAULT_GITHUB_CONFIG };
   return null;
 }

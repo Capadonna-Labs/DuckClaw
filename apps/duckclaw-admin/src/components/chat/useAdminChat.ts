@@ -29,6 +29,7 @@ import {
 } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
 import { accumulateUsageTokens } from '@/lib/formatTokenCount';
+import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 import { mutationHeaders } from '@/lib/csrfClient';
 import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
 import { playTtsAudio, primeAudioPlayback, type TtsAudioFormat } from '@/lib/playTtsAudio';
@@ -120,6 +121,49 @@ export function isThinkingStatusHeartbeat(m: ChatMsg | undefined): boolean {
 /** Remove stale "Pensando…" status heartbeats from persisted chat history. */
 export function stripThinkingStatusHeartbeats(messages: ChatMsg[]): ChatMsg[] {
   return messages.filter((m) => !isThinkingStatusHeartbeat(m));
+}
+
+/** Server history includes loop system user turn plus assistant reply. */
+export function conversationHasLoopResult(messages: ChatMsg[]): boolean {
+  return (
+    messages.some(
+      (m) =>
+        m.role === 'user' &&
+        ((m.text || '').includes('[Ciclo loop]') ||
+          (m.text || '').includes('[Ciclo meditate]'))
+    ) && messages.some((m) => m.role === 'assistant')
+  );
+}
+
+export function isLoopProgressHeartbeat(text: string): boolean {
+  const t = text || '';
+  return (
+    t.includes('[loop]') ||
+    t.includes('[meditate]') ||
+    t.includes('[loop] active_mode_started') ||
+    t.includes('[loop] self_tick_dispatched') ||
+    t.includes('[meditate] active_mode_started') ||
+    t.includes('[meditate] self_tick_dispatched')
+  );
+}
+
+/** True si el hilo indica /loop activo (footer o status reciente). */
+export function conversationIndicatesLoopScheduling(messages: ChatMsg[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const t = (m.text || '').toLowerCase();
+    if (t.includes('modo /loop:** inactivo') || t.includes('modo /loop: inactivo')) {
+      return false;
+    }
+    if (t.includes('modo /loop activo') || t.includes('próximo ciclo /loop')) {
+      return true;
+    }
+    if (t.includes('/loop off') || t.includes('detenido')) {
+      return false;
+    }
+  }
+  return false;
 }
 
 function workerStorageKey(chatId: string): string {
@@ -306,6 +350,8 @@ export function useAdminChat({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
+  const loopHistoryReloadRef = useRef<ReturnType<typeof window.setTimeout>[]>([]);
+  const [loopSchedulePolling, setLoopSchedulePolling] = useState(false);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
 
@@ -411,14 +457,25 @@ export function useAdminChat({
 
   const historyTenantId = (config?.effective_tenant_id || 'default').trim() || 'default';
 
-  const reloadHistory = useCallback(() => {
-    if (!enabled || !chatId || loadingRef.current) return;
+  const clearLoopHistoryReload = useCallback(() => {
+    loopHistoryReloadRef.current.forEach((id) => window.clearTimeout(id));
+    loopHistoryReloadRef.current = [];
+  }, []);
+
+  const reloadHistory = useCallback((opts?: { force?: boolean }) => {
+    if (!enabled || !chatId) return;
+    const force = Boolean(opts?.force);
+    if (!force && loadingRef.current) return;
     setHistoryLoading(true);
     adminService
       .getConversation(chatId, historyTenantId)
       .then((data) => {
-        if (loadingRef.current) return;
+        if (!force && loadingRef.current) return;
         const fromServer = historyToChatMessages(data.messages, historyTenantId);
+        const hasLoopResult = conversationHasLoopResult(fromServer);
+        if (hasLoopResult) {
+          clearLoopHistoryReload();
+        }
         const activeWorker = workerId || initialWorker || '';
         const storedEphemeral = readEphemeralHeartbeats(chatId, activeWorker);
         setMessages((prev) => {
@@ -426,14 +483,51 @@ export function useAdminChat({
             collectEphemeralMessages(prev),
             activeWorker
           );
-          const ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
+          let ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
+          if (hasLoopResult) {
+            ephemeral = ephemeral.filter(
+              (m) =>
+                !(
+                  m.role === 'heartbeat' &&
+                  isLoopProgressHeartbeat(m.text || '')
+                )
+            );
+          }
           const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
           return mergeHistoryWithEphemeral(withImages, ephemeral);
         });
       })
       .catch(() => undefined)
       .finally(() => setHistoryLoading(false));
-  }, [chatId, enabled, historyTenantId, initialWorker, workerId]);
+  }, [chatId, clearLoopHistoryReload, enabled, historyTenantId, initialWorker, workerId]);
+
+  const loopPollingActive = useMemo(
+    () => loopSchedulePolling || conversationIndicatesLoopScheduling(messages),
+    [loopSchedulePolling, messages]
+  );
+
+  useVisibilityAwareInterval(() => {
+    if (!enabled || !chatId || loadingRef.current) return;
+    reloadHistory({ force: true });
+  }, loopPollingActive && enabled ? 12_000 : null);
+
+  useEffect(() => {
+    return () => {
+      loopHistoryReloadRef.current.forEach((id) => window.clearTimeout(id));
+      loopHistoryReloadRef.current = [];
+    };
+  }, []);
+
+  const scheduleLoopHistoryReload = useCallback(() => {
+    clearLoopHistoryReload();
+    reloadHistory({ force: true });
+    const delays = [2_000, 4_000, 6_000, 10_000, 15_000, 20_000, 30_000, 45_000, 60_000, 90_000, 120_000];
+    loopHistoryReloadRef.current = delays.map((ms) =>
+      window.setTimeout(() => {
+        reloadHistory({ force: true });
+      }, ms)
+    );
+  }, [chatId, clearLoopHistoryReload, reloadHistory]);
 
   useEffect(() => {
     if (!enabled || !chatId) {
@@ -456,7 +550,17 @@ export function useAdminChat({
             collectEphemeralMessages(prev),
             activeWorker
           );
-          const ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
+          let ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
+          const hasLoopResult = conversationHasLoopResult(fromServer);
+          if (hasLoopResult) {
+            ephemeral = ephemeral.filter(
+              (m) =>
+                !(
+                  m.role === 'heartbeat' &&
+                  isLoopProgressHeartbeat(m.text || '')
+                )
+            );
+          }
           const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
           const merged = mergeHistoryWithEphemeral(withImages, ephemeral);
           return merged;
@@ -537,6 +641,7 @@ export function useAdminChat({
           ? userPreviewsFromPayload(payloadImages)
           : undefined;
     const userLabel = text;
+    let loopFollowUp = /^\/(loop|meditate)\b/i.test(text.trim());
 
     setLoading(true);
     thinkingStartedAt.current = Date.now();
@@ -584,7 +689,7 @@ export function useAdminChat({
 
     const appendHeartbeat = (payload: {
       text: string;
-      kind?: 'plan' | 'tool' | 'status' | 'visual';
+      kind?: 'plan' | 'tool' | 'status' | 'visual' | 'loop_tick';
       worker_id?: string;
       swarm_slot?: number;
       artifact_id?: string;
@@ -722,6 +827,13 @@ export function useAdminChat({
         }
         return [...m, hb];
       });
+      if (
+        (effectiveKind === 'status' || payload.kind === 'loop_tick') &&
+        (isLoopProgressHeartbeat(payload.text) || payload.kind === 'loop_tick')
+      ) {
+        setLoopSchedulePolling(true);
+        scheduleLoopHistoryReload();
+      }
     };
 
     primeAudioPlayback();
@@ -779,6 +891,23 @@ export function useAdminChat({
             }
             if ((meta.response || '').trim()) {
               authoritativeResponse = meta.response.trim();
+            }
+            if (
+              authoritativeResponse.includes('Ciclo loop iniciado') ||
+              authoritativeResponse.includes('Ciclo meditate iniciado') ||
+              authoritativeResponse.includes('Modo /loop activo') ||
+              authoritativeResponse.includes('Modo /meditate activo')
+            ) {
+              loopFollowUp = true;
+              setLoopSchedulePolling(true);
+            }
+            const respLower = authoritativeResponse.toLowerCase();
+            if (
+              respLower.includes('modo /loop') &&
+              (respLower.includes('inactivo') || respLower.includes('detenido'))
+            ) {
+              setLoopSchedulePolling(false);
+              clearLoopHistoryReload();
             }
             if (meta.assigned_worker_id && meta.assigned_worker_id !== workerId) {
               assignedSuffix = ` (worker: ${meta.assigned_worker_id})`;
@@ -902,6 +1031,9 @@ export function useAdminChat({
       }
       setLoading(false);
       setThinking(false);
+      if (loopFollowUp && !abortController.signal.aborted) {
+        scheduleLoopHistoryReload();
+      }
       onConversationActivity?.();
     }
   },
@@ -910,6 +1042,7 @@ export function useAdminChat({
       config?.effective_tenant_id,
       config?.telegram_user_id,
       finalizeCancelledGeneration,
+      clearLoopHistoryReload,
       onConversationActivity,
       onSandboxArtifacts,
       workerId,
@@ -918,6 +1051,8 @@ export function useAdminChat({
       vaultPath,
       imageAttachments,
       voiceResponseMode,
+      reloadHistory,
+      scheduleLoopHistoryReload,
     ]
   );
 

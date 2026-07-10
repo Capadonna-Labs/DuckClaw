@@ -8,10 +8,45 @@ extensions that expose catalog rows.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
 _log = logging.getLogger(__name__)
+
+
+def open_gateway_catalog_db_readonly() -> Any | None:
+    """Hub DuckDB (admin_worker_catalog). Fly commands open vault, not hub."""
+    try:
+        from duckclaw import DuckClaw
+        from duckclaw.gateway_db import get_gateway_db_path
+
+        path = (get_gateway_db_path() or "").strip()
+        if not path or not os.path.isfile(path):
+            return None
+        return DuckClaw(path, read_only=True, engine="python")
+    except Exception as exc:
+        _log.debug("open_gateway_catalog_db_readonly failed: %s", exc)
+        return None
+
+
+def list_workers_for_fly(
+    *,
+    tenant_id: str = "default",
+    templates_root: Optional[Path] = None,
+) -> list[str]:
+    """Catalog-aware worker list for slash/fly commands (hub DB + effective tenant)."""
+    tid = (tenant_id or "default").strip() or "default"
+    catalog_db = open_gateway_catalog_db_readonly()
+    try:
+        workers = list_workers(templates_root=templates_root, db=catalog_db, tenant_id=tid)
+        return workers
+    finally:
+        if catalog_db is not None:
+            try:
+                catalog_db.close()
+            except Exception:
+                pass
 
 
 def _filesystem_worker_ids(templates_root: Optional[Path] = None) -> list[str]:

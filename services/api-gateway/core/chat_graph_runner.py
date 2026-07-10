@@ -23,6 +23,99 @@ _gateway_log = logging.getLogger("duckclaw.gateway")
 _obs_log = get_obs_logger()
 
 
+async def _run_context_fold_fly_command(
+    prepared: PreparedChatInvoke,
+    *,
+    session_id: str,
+    worker_id: str,
+    message: str,
+    redis_client: Any,
+    cmd_args: str,
+    execute_with_meta_fn: Any,
+) -> tuple[dict[str, Any], float]:
+    """Persistencia bóveda + Redis para /summarize."""
+    from duckclaw.commands.context_fold_store import save_context_fold_summary
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+    from duckclaw.graphs.conversation_traces import append_context_fold_conversation_trace
+    from core.chat_history import redis_save_chat_history
+
+    t0 = time.monotonic()
+    vpath = (prepared.vault_db_path or "").strip()
+    fly_db = GatewayDbEphemeralReadonly(vpath) if vpath else None
+    fold_meta: dict[str, Any] = {}
+    cmd_reply = ""
+    try:
+        if vpath:
+            Path(vpath).parent.mkdir(parents=True, exist_ok=True)
+        cmd_reply, fold_meta = execute_with_meta_fn(
+            fly_db,
+            session_id,
+            cmd_args,
+            tenant_id=prepared.tenant_id,
+            history=prepared.history_for_model,
+            vault_db_path=vpath or None,
+            worker_id=worker_id,
+            entry_worker_id=worker_id,
+        )
+    except Exception as exc:
+        _gateway_log.error(
+            "context fold command failed chat=%s: %s",
+            format_chat_id_for_terminal(session_id),
+            exc,
+        )
+        cmd_reply = f"⚠️ Error al compactar: {exc}"
+    vault_summary = (fold_meta.get("summary_for_vault") or "").strip()
+    vault_saved = False
+    if vault_summary and vpath:
+        vault_saved = save_context_fold_summary(
+            vpath,
+            session_id,
+            vault_summary,
+            tenant_id=prepared.tenant_id,
+        )
+    kept_history = fold_meta.get("kept_history")
+    if redis_client is not None and isinstance(kept_history, list) and kept_history:
+        await redis_save_chat_history(
+            redis_client,
+            prepared.tenant_id,
+            session_id,
+            kept_history,
+        )
+    elapsed_ms = int((time.monotonic() - t0) * 1000)
+    ctx_tokens = fold_meta.get("context_estimated_tokens")
+    trace_status = "SUCCESS" if not str(cmd_reply).startswith("⚠️") else "FAILED"
+    try:
+        append_context_fold_conversation_trace(
+            session_id,
+            message,
+            cmd_reply,
+            worker_id=worker_id,
+            elapsed_ms=elapsed_ms,
+            status=trace_status,
+            context_estimated_tokens=int(ctx_tokens)
+            if isinstance(ctx_tokens, (int, float))
+            else None,
+            messages_before=len(prepared.history_for_model or []),
+            kept_history=kept_history if isinstance(kept_history, list) else None,
+            summary_chars=len(vault_summary) if vault_summary else None,
+            vault_saved=vault_saved if vault_summary else None,
+        )
+    except Exception:
+        pass
+    return (
+        {
+            "response": cmd_reply,
+            "session_id": session_id,
+            "worker_id": worker_id,
+            "elapsed_ms": elapsed_ms,
+            "context_estimated_tokens": int(ctx_tokens)
+            if isinstance(ctx_tokens, (int, float))
+            else None,
+        },
+        time.monotonic(),
+    )
+
+
 async def run_chat_graph(
     prepared: PreparedChatInvoke,
     *,
@@ -52,98 +145,31 @@ async def run_chat_graph(
 
     skip_lock = prepared.skip_session_lock
     async with maybe_chat_lock_for_request(redis_client, session_id, skip_lock):
-        if message.startswith("/"):
+        from duckclaw.commands.fast_replies import resolve_fly_command_text
+
+        fly_message = resolve_fly_command_text(
+            user_incoming=prepared.user_incoming,
+            message=message,
+        )
+        if fly_message.startswith("/"):
             from duckclaw.graphs.on_the_fly_commands import parse_command
 
-            cmd_name, cmd_args = parse_command(message)
+            cmd_name, cmd_args = parse_command(fly_message)
             if cmd_name == "summarize":
-                from duckclaw.commands.context_fold_store import save_context_fold_summary
                 from duckclaw.commands.context_summarize import execute_summarize_with_meta
-                from duckclaw.gateway_db import GatewayDbEphemeralReadonly
-                from duckclaw.graphs.conversation_traces import append_context_fold_conversation_trace
-                from core.chat_history import redis_save_chat_history
 
-                t_summarize = time.monotonic()
-                vpath = (prepared.vault_db_path or "").strip()
-                fly_db = GatewayDbEphemeralReadonly(vpath) if vpath else None
-                sum_meta: dict[str, Any] = {}
-                cmd_reply = ""
-                try:
-                    if vpath:
-                        Path(vpath).parent.mkdir(parents=True, exist_ok=True)
-                    cmd_reply, sum_meta = execute_summarize_with_meta(
-                        fly_db,
-                        session_id,
-                        cmd_args,
-                        tenant_id=prepared.tenant_id,
-                        history=prepared.history_for_model,
-                        vault_db_path=vpath or None,
-                        worker_id=worker_id,
-                    )
-                except Exception as exc:
-                    _gateway_log.error(
-                        "summarize command failed chat=%s: %s",
-                        format_chat_id_for_terminal(session_id),
-                        exc,
-                    )
-                    cmd_reply = f"⚠️ Error al compactar: {exc}"
-                vault_summary = (sum_meta.get("summary_for_vault") or "").strip()
-                vault_saved = False
-                if vault_summary and vpath:
-                    vault_saved = save_context_fold_summary(
-                        vpath,
-                        session_id,
-                        vault_summary,
-                        tenant_id=prepared.tenant_id,
-                    )
-                kept_history = sum_meta.get("kept_history")
-                if (
-                    redis_client is not None
-                    and isinstance(kept_history, list)
-                    and kept_history
-                ):
-                    await redis_save_chat_history(
-                        redis_client,
-                        prepared.tenant_id,
-                        session_id,
-                        kept_history,
-                    )
-                elapsed_summarize = int((time.monotonic() - t_summarize) * 1000)
-                ctx_tokens = sum_meta.get("context_estimated_tokens")
-                trace_status = "SUCCESS" if not str(cmd_reply).startswith("⚠️") else "FAILED"
-                try:
-                    append_context_fold_conversation_trace(
-                        session_id,
-                        message,
-                        cmd_reply,
-                        worker_id=worker_id,
-                        elapsed_ms=elapsed_summarize,
-                        status=trace_status,
-                        context_estimated_tokens=int(ctx_tokens)
-                        if isinstance(ctx_tokens, (int, float))
-                        else None,
-                        messages_before=len(prepared.history_for_model or []),
-                        kept_history=kept_history if isinstance(kept_history, list) else None,
-                        summary_chars=len(vault_summary) if vault_summary else None,
-                        vault_saved=vault_saved if vault_summary else None,
-                    )
-                except Exception:
-                    pass
-                return (
-                    {
-                        "response": cmd_reply,
-                        "session_id": session_id,
-                        "worker_id": worker_id,
-                        "elapsed_ms": elapsed_summarize,
-                        "context_estimated_tokens": int(ctx_tokens)
-                        if isinstance(ctx_tokens, (int, float))
-                        else None,
-                    },
-                    time.monotonic(),
+                return await _run_context_fold_fly_command(
+                    prepared,
+                    session_id=session_id,
+                    worker_id=worker_id,
+                    message=message,
+                    redis_client=redis_client,
+                    cmd_args=cmd_args,
+                    execute_with_meta_fn=execute_summarize_with_meta,
                 )
 
             fly_response = await invoke_legacy_fly_command(
-                message=message,
+                message=fly_message,
                 session_id=session_id,
                 worker_id=worker_id,
                 tenant_id=prepared.tenant_id,
@@ -178,6 +204,45 @@ async def run_chat_graph(
         except Exception:
             pass
 
+        # Modo /loop on: turnos agent↔user — wrap user reply when awaiting.
+        graph_message = message
+        if not prepared.is_system_prompt and not fly_message.startswith("/"):
+            vpath = (prepared.vault_db_path or "").strip()
+            if vpath:
+                try:
+                    from duckclaw import DuckClaw
+                    from duckclaw.commands.loop import (
+                        build_loop_active_user_continuation,
+                        is_loop_active_mode,
+                        is_loop_awaiting_user,
+                        set_loop_awaiting_user,
+                    )
+
+                    vdb = DuckClaw(vpath, read_only=False, engine="python")
+                    try:
+                        if is_loop_active_mode(vdb, session_id) and is_loop_awaiting_user(
+                            vdb, session_id
+                        ):
+                            graph_message = build_loop_active_user_continuation(
+                                vdb,
+                                session_id,
+                                prepared.tenant_id,
+                                prepared.user_incoming or message,
+                            )
+                            set_loop_awaiting_user(
+                                vdb,
+                                session_id,
+                                False,
+                                tenant_id=(prepared.tenant_id or "default"),
+                            )
+                    finally:
+                        try:
+                            vdb.close()
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
         t0 = time.monotonic()
         admin_pg_vault_prev = os.environ.get("DUCKCLAW_ADMIN_PLAYGROUND_VAULT")
         if prepared.auth_policy in {"trusted_admin_console", "trusted_channel_route"}:
@@ -191,7 +256,7 @@ async def run_chat_graph(
 
             try:
                 result = await ainvoke_manager_ephemeral(
-                    message,
+                    graph_message,
                     prepared.history_for_model,
                     session_id,
                     tenant_id=prepared.tenant_id,
@@ -200,7 +265,8 @@ async def run_chat_graph(
                     user_incoming=prepared.user_incoming,
                     vault_db_path=prepared.vault_db_path,
                     shared_db_path=prepared.shared_db_path,
-                    is_system_prompt=prepared.is_system_prompt,
+                    is_system_prompt=prepared.is_system_prompt
+                    or graph_message.strip().startswith("[SYSTEM_EVENT:"),
                     outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
                     entry_worker_id=(worker_id or "").strip() or None,
                     integration_channel=(dc.channel or "").strip() or None,

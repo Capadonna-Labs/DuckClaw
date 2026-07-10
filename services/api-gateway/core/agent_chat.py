@@ -64,8 +64,7 @@ async def invoke_chat(
 
     result, t0 = await run_chat_graph(prepared, redis_client=redis_client)
     if isinstance(result, dict) and "reply" not in result and "response" in result:
-        return result
-
+        result = {**result, "reply": str(result.get("response") or "")}
     return await finalize_chat_response(
         prepared,
         result,

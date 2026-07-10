@@ -89,26 +89,51 @@ def _parse_presets_yaml(raw: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 @lru_cache(maxsize=1)
-def load_mcp_connector_presets() -> dict[str, dict[str, Any]]:
+def load_mcp_connector_presets_raw() -> dict[str, Any]:
     path = resolve_mcp_connector_presets_path()
     if not path.is_file():
         raise FileNotFoundError(f"MCP connector presets not found: {path}")
-    try:
-        import yaml
+    import yaml
 
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        if not isinstance(raw, dict):
-            raise ValueError("mcp_connector_presets.yaml must be a mapping")
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("mcp_connector_presets.yaml must be a mapping")
+    return raw
+
+
+@lru_cache(maxsize=1)
+def load_mcp_connector_presets() -> dict[str, dict[str, Any]]:
+    try:
+        raw = load_mcp_connector_presets_raw()
         presets = _parse_presets_yaml(raw)
         if not presets:
             raise ValueError("mcp_connector_presets.yaml requires at least one preset")
         return presets
     except Exception as exc:
-        _log.warning("mcp_connector_presets: load %s: %s", path, exc)
+        _log.warning("mcp_connector_presets: load %s: %s", resolve_mcp_connector_presets_path(), exc)
         raise
 
 
+def default_mcp_connector_preset_ids() -> list[str]:
+    raw = load_mcp_connector_presets_raw()
+    ids = raw.get("default_connectors")
+    if not isinstance(ids, list):
+        return []
+    known = load_mcp_connector_presets()
+    out: list[str] = []
+    for item in ids:
+        key = str(item or "").strip().lower()
+        if key and key in known and key not in out:
+            out.append(key)
+    return out
+
+
+def default_mcp_connector_id(preset_id: str) -> str:
+    return f"mcp_{str(preset_id or '').strip().lower()}"
+
+
 def clear_mcp_connector_presets_cache() -> None:
+    load_mcp_connector_presets_raw.cache_clear()
     load_mcp_connector_presets.cache_clear()
 
 

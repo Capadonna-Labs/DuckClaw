@@ -98,7 +98,6 @@ def bootstrap_core_schema(con: Any, *, seed_admin: bool = True) -> None:
         """
     )
 
-
 def core_unexpected_schemas_present(con: Any, schema_names: tuple[str, ...]) -> list[str]:
     """Nombres de esquemas no esperados presentes en una conexión."""
     names = tuple(str(name).strip() for name in schema_names if str(name).strip())

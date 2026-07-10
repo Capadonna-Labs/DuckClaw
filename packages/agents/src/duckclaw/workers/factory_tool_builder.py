@@ -38,7 +38,7 @@ def _ensure_worker_duckdb_extensions(db: Any, spec: WorkerSpec) -> None:
             pass
 
 
-def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
+def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -> list:
     """Build tool list: template skills + read/admin SQL (with allow-list)."""
     from langchain_core.tools import StructuredTool
 
@@ -282,7 +282,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec) -> list:
                 or getattr(spec, "logical_worker_id", None)
                 or ""
             ),
-            tenant_id=str(getattr(spec, "tenant_id", None) or "default"),
+            tenant_id=str(tenant_id or "default"),
         )
     except Exception:
         _log.warning("MCP connector tools registration skipped", exc_info=True)

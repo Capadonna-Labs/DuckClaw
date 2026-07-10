@@ -11,19 +11,25 @@ def test_mcp_connectors_routes_live_in_domain_module() -> None:
     assert "router.include_router(mcp_connectors_router)" in admin
     assert 'router = APIRouter(prefix="/mcp/connectors", tags=["admin-mcp-connectors"])' in module
     assert '@router.get("/presets", dependencies=[Depends(require_admin_key)])' in module
-    assert '@router.post("/{connector_id}/test", dependencies=[Depends(require_admin_key)])' in module
+    assert '@router.post("/{connector_id}/oauth/start", dependencies=[Depends(require_admin_key)])' in module
+    assert '@router.post("/oauth/complete", dependencies=[Depends(require_admin_key)])' in module
 
 
 def test_mcp_hub_links_connectors_page() -> None:
     hub = Path("apps/duckclaw-admin/src/app/(admin)/mcp/page.tsx").read_text(encoding="utf-8")
-    page = Path("apps/duckclaw-admin/src/app/(admin)/mcp/connectors/page.tsx").read_text(encoding="utf-8")
+    unified = Path("apps/duckclaw-admin/src/components/mcp/McpUnifiedView.tsx").read_text(encoding="utf-8")
     panel = Path("apps/duckclaw-admin/src/components/mcp/McpConnectorsPanel.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    callback = Path(
+        "apps/duckclaw-admin/src/app/api/admin/mcp/connectors/oauth/callback/route.ts"
+    ).read_text(encoding="utf-8")
 
-    assert 'href: "/mcp/connectors"' in hub
-    assert "Conectores MCP" in page
-    assert "McpConnectorsPanel" in page
+    assert "McpUnifiedView" in hub
+    assert "McpConnectorsPanel" in unified
+    assert "connectors" in unified
     assert "listMcpConnectors" in panel
     assert "testMcpConnector" in service
     assert "grantMcpConnector" in service
-    assert "createMcpConnector" in service
+    assert "startMcpConnectorOAuth" in service
+    assert "Conectar Higgsfield" in panel
+    assert "oauth/complete" in callback

@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
-import resource
 import sys
 import time
 from typing import Any
 
+try:
+    import resource
+except ImportError:  # Windows
+    resource = None  # type: ignore[assignment]
+
 
 def _process_rss_mb() -> float | None:
+    if resource is None:
+        return None
     try:
         usage = resource.getrusage(resource.RUSAGE_SELF)
         rss = float(usage.ru_maxrss)

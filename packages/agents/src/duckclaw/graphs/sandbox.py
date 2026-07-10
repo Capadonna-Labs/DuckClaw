@@ -952,6 +952,32 @@ def cleanup_sandbox_session_for_chat(chat_id: str) -> None:
     _get_manager().cleanup(sid)
 
 
+def _sandbox_effective_timeout_sec(
+    policy: SecurityPolicy,
+    *,
+    image_override: str | None = None,
+) -> int:
+    """Timeout efectivo: policy YAML + piso browser/env."""
+    base = max(1, min(int(policy.max_execution_time_seconds), 600))
+    if image_override:
+        raw = (
+            (os.environ.get("DUCKCLAW_BROWSER_SANDBOX_TIMEOUT_SEC") or "").strip()
+            or (os.environ.get("STRIX_BROWSER_SANDBOX_TIMEOUT_SEC") or "").strip()
+            or "120"
+        )
+    else:
+        raw = (os.environ.get("STRIX_SANDBOX_TIMEOUT") or os.environ.get("DUCKCLAW_SANDBOX_MIN_TIMEOUT_SEC") or "").strip()
+    try:
+        floor = int(raw) if raw else 0
+    except ValueError:
+        floor = 0
+    if image_override and floor <= 0:
+        floor = 120
+    if floor > 0:
+        base = max(base, min(floor, 600))
+    return base
+
+
 def run_in_sandbox(
     db: Any,
     llm: Any,
@@ -994,7 +1020,7 @@ def run_in_sandbox(
     else:
         policy = load_security_policy(wid)
     secret_env = _load_allowed_secrets(policy)
-    timeout_sec = max(1, min(int(policy.max_execution_time_seconds), 600))
+    timeout_sec = _sandbox_effective_timeout_sec(policy, image_override=image_override)
 
     # Protocolo de firewall: inyectar datos si se requiere
     if data_sql:

@@ -33,6 +33,13 @@ class Settings(BaseSettings):
             "DUCKCLAW_VISUAL_STATE_DELTA_QUEUE",
         ),
     )
+    LOOP_STATE_DELTA_QUEUE_NAME: str = Field(
+        default="duckclaw:state_delta:loop",
+        validation_alias=AliasChoices(
+            "LOOP_STATE_DELTA_QUEUE_NAME",
+            "DUCKCLAW_LOOP_STATE_DELTA_QUEUE",
+        ),
+    )
     MEDITATE_STATE_DELTA_QUEUE_NAME: str = Field(
         default="duckclaw:state_delta:meditate",
         validation_alias=AliasChoices(

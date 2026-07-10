@@ -46,6 +46,27 @@ def _default_zero_trust_policy() -> SecurityPolicy:
     )
 
 
+def _extension_worker_policy_path(worker_id: str) -> Path | None:
+    """Optional security_policy.yaml under DUCKCLAW_EXTENSION_ROOT worker templates."""
+    wid = (worker_id or "").strip()
+    if not wid:
+        return None
+    raw = (os.environ.get("DUCKCLAW_EXTENSION_ROOT") or "").strip()
+    if not raw:
+        return None
+    candidate = (
+        Path(raw).expanduser().resolve()
+        / "workers"
+        / "duckclaw"
+        / "templates"
+        / wid
+        / "security_policy.yaml"
+    )
+    if candidate.is_file():
+        return candidate
+    return None
+
+
 def load_security_policy(worker_id: str, worker_dir: Path | None = None) -> SecurityPolicy:
     """
     Load and validate worker security_policy.yaml.
@@ -56,13 +77,17 @@ def load_security_policy(worker_id: str, worker_dir: Path | None = None) -> Secu
     if worker_dir is not None:
         policy_path = worker_dir / "security_policy.yaml"
     else:
-        try:
-            from duckclaw.workers.manifest import get_worker_dir
+        ext = _extension_worker_policy_path(worker_id)
+        if ext is not None:
+            policy_path = ext
+        else:
+            try:
+                from duckclaw.workers.manifest import get_worker_dir
 
-            wd = get_worker_dir(worker_id)
-            policy_path = wd / "security_policy.yaml"
-        except Exception:
-            policy_path = None
+                wd = get_worker_dir(worker_id)
+                policy_path = wd / "security_policy.yaml"
+            except Exception:
+                policy_path = None
 
     if policy_path is None or not policy_path.is_file():
         return _default_zero_trust_policy()

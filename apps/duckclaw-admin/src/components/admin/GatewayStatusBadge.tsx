@@ -45,7 +45,7 @@ export function PlatformStatusStrip() {
   const checking = !recovering && !error && data == null && fetchedAt === 0;
   const online = !recovering && !error && data != null && isGatewayHealthy(data.status);
   const gatewayLabel = recovering
-    ? 'Reiniciando…'
+    ? '—'
     : checking
       ? 'Comprobando…'
       : error

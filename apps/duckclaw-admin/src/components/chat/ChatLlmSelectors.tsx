@@ -8,6 +8,7 @@ import {
   modelLabelForOption,
   isOpenRouterProvider,
   SELECTABLE_LLM_PROVIDERS,
+  LLM_ONLY_PROVIDERS,
 } from '@/lib/llmModelPresets';
 import { SearchableModelSelect } from '@/components/chat/SearchableModelSelect';
 
@@ -47,7 +48,7 @@ export function ChatLlmSelectors({
   const [error, setError] = useState<string | null>(null);
 
   const selectableCatalog = useMemo(
-    () => catalog.filter((c) => SELECTABLE_LLM_PROVIDERS.has(c.id)),
+    () => catalog.filter((c) => LLM_ONLY_PROVIDERS.has(c.id)),
     [catalog]
   );
 
@@ -73,7 +74,7 @@ export function ChatLlmSelectors({
   const applyModel = async (next: { provider?: string; model?: string }) => {
     if (!chatId || disabled || pending) return;
     const pid = (next.provider ?? activeProvider).trim().toLowerCase();
-    if (next.provider && !SELECTABLE_LLM_PROVIDERS.has(pid)) return;
+    if (next.provider && !LLM_ONLY_PROVIDERS.has(pid)) return;
     const item = selectableCatalog.find((c) => c.id === pid);
     if (item?.kind === 'api' && item.keys_ok === false) {
       setError(`Configura las API keys en .env para ${item.label}`);

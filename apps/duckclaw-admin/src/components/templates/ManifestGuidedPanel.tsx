@@ -3,6 +3,8 @@
 import { Sparkles } from 'lucide-react';
 import {
   applyManifestQuick,
+  DEFAULT_MAX_TOOL_ROUNDS,
+  MAX_TOOL_ROUNDS_CEILING,
   parseManifestQuick,
   type ManifestQuickState,
   type ToolProfile,
@@ -125,7 +127,7 @@ export function ManifestGuidedPanel({ yaml, onChange, disabled }: ManifestGuided
             <summary className="cursor-pointer px-1 py-1 text-[10px] font-bold uppercase tracking-wide text-gov-gray-500">
               Avanzado
             </summary>
-            <div className="mt-1 px-1 pb-1">
+            <div className="mt-1 px-1 pb-1 space-y-3">
               <ToggleRow
                 label="Sin capacidades base de plataforma"
                 hint="Solo para perfiles técnicos; puede romper flujos habituales"
@@ -133,6 +135,52 @@ export function ManifestGuidedPanel({ yaml, onChange, disabled }: ManifestGuided
                 disabled={disabled}
                 onChange={(baselineOff) => patch({ baselineOff })}
               />
+              <div className="rounded-xl border border-gov-gray-200 bg-white/70 px-3 py-2.5 dark:border-dark-border dark:bg-dark-surface/50">
+                <label className="block text-xs font-bold text-gov-gray-900 dark:text-dark-text">
+                  Pasos con herramientas por turno
+                </label>
+                <p className="mt-0.5 text-[10px] leading-snug text-gov-gray-600 dark:text-dark-muted">
+                  Cuántas veces puede invocar tools el agente antes de cortar el turno (default{' '}
+                  {DEFAULT_MAX_TOOL_ROUNDS}). Sube el valor si ves &quot;Alcancé el límite de pasos
+                  con herramientas&quot;.
+                </p>
+                <div className="mt-2 flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={1}
+                    max={MAX_TOOL_ROUNDS_CEILING}
+                    step={1}
+                    value={state.maxToolRounds}
+                    disabled={disabled}
+                    className="flex-1 accent-gov-blue-700 dark:accent-dark-cyan"
+                    onChange={(e) =>
+                      patch({
+                        maxToolRounds: Math.max(
+                          1,
+                          Math.min(MAX_TOOL_ROUNDS_CEILING, Number(e.target.value) || DEFAULT_MAX_TOOL_ROUNDS)
+                        ),
+                      })
+                    }
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    max={MAX_TOOL_ROUNDS_CEILING}
+                    step={1}
+                    value={state.maxToolRounds}
+                    disabled={disabled}
+                    className="w-16 rounded-lg border border-gov-gray-200 px-2 py-1 text-center text-xs font-bold tabular-nums dark:border-dark-border dark:bg-dark-bg"
+                    onChange={(e) => {
+                      const n = Number.parseInt(e.target.value, 10);
+                      patch({
+                        maxToolRounds: Number.isFinite(n)
+                          ? Math.max(1, Math.min(MAX_TOOL_ROUNDS_CEILING, n))
+                          : DEFAULT_MAX_TOOL_ROUNDS,
+                      });
+                    }}
+                  />
+                </div>
+              </div>
             </div>
           </details>
         </div>

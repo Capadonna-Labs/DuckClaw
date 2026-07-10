@@ -1,62 +1,50 @@
 'use client';
 
 import { Suspense, useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { AdminHubShell } from '@/components/admin/AdminHubShell';
+import { PageShell } from '@/components/admin/PageShell';
 import PoliciesPageView from '@/components/policies/PoliciesPageView';
 import SkillsHubView from '@/components/skills/SkillsHubView';
 import { McpUnifiedView } from '@/components/mcp/McpUnifiedView';
 import GenImagePageView from '@/components/gen/GenImagePageView';
 import DuckDbPageView from '@/components/duckdb/DuckDbPageView';
 import RuntimePageView from '@/components/runtime/RuntimePageView';
-
-const TABS = [
-  { id: 'reglas', label: 'Reglas base', hint: 'Policies de framework y wizard' },
-  { id: 'skills', label: 'Skills', hint: 'Catálogo de capacidades' },
-  { id: 'mcp', label: 'MCP', hint: 'Conectores y servidor MCP' },
-  { id: 'imagenes', label: 'Imágenes', hint: 'Generación visual ComfyUI' },
-  { id: 'duckdb', label: 'DuckDB', hint: 'Explorador de datos y grafos' },
-  { id: 'runtime', label: 'Runtime', hint: 'Ajustes agent_config por vault' },
-] as const;
-
-type PlataformaTab = (typeof TABS)[number]['id'];
-
-function parseTab(raw: string | null): PlataformaTab {
-  const ids = new Set<string>(TABS.map((t) => t.id));
-  if (raw && ids.has(raw)) return raw as PlataformaTab;
-  return 'reglas';
-}
+import {
+  PLATAFORMA_TABS,
+  parsePlataformaTab,
+  type PlataformaTabId,
+} from '@/config/plataformaNav';
 
 function PlataformaHubContent() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<PlataformaTab>(() => parseTab(searchParams.get('tab')));
+  const [tab, setTab] = useState<PlataformaTabId>(() => parsePlataformaTab(searchParams.get('tab')));
 
   useEffect(() => {
-    setTab(parseTab(searchParams.get('tab')));
+    setTab(parsePlataformaTab(searchParams.get('tab')));
   }, [searchParams]);
 
-  const selectTab = (next: PlataformaTab) => {
-    setTab(next);
-    router.replace(`/plataforma?tab=${next}`, { scroll: false });
-  };
+  const activeMeta = PLATAFORMA_TABS.find((t) => t.id === tab);
 
   return (
-    <AdminHubShell
-      title="Plataforma"
-      description="Reglas, capacidades, datos y runtime del framework."
-      tabs={TABS}
-      activeTabId={tab}
-      onSelectTab={(id) => selectTab(parseTab(id))}
-    >
+    <PageShell className="space-y-6">
+      <header>
+        <p className="text-xs font-black uppercase tracking-[0.2em] text-gov-blue-700 dark:text-dark-cyan">
+          Plataforma
+        </p>
+        <h1 className="text-3xl font-black dark:text-dark-text">{activeMeta?.label ?? 'Plataforma'}</h1>
+        {activeMeta?.hint ? (
+          <p className="mt-1 max-w-3xl text-sm text-gov-gray-500 dark:text-dark-muted">{activeMeta.hint}</p>
+        ) : null}
+      </header>
+
       {tab === 'reglas' && <PoliciesPageView embedded />}
       {tab === 'skills' && <SkillsHubView embedded />}
       {tab === 'mcp' && <McpUnifiedView embedded />}
       {tab === 'imagenes' && <GenImagePageView embedded />}
       {tab === 'duckdb' && <DuckDbPageView embedded />}
       {tab === 'runtime' && <RuntimePageView embedded />}
-    </AdminHubShell>
+    </PageShell>
   );
 }
 

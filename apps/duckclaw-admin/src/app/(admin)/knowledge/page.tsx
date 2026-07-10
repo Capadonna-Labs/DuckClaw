@@ -1,9 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Database, FolderOpen, FolderUp, RefreshCw, UploadCloud } from 'lucide-react';
+import { Database, FolderOpen, RefreshCw, UploadCloud } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
 import { KnowledgeFolderPicker } from '@/components/knowledge/KnowledgeFolderPicker';
@@ -29,7 +29,22 @@ type IndexingJobState = {
 };
 
 const ACCEPTED_EXTENSIONS = '.md,.markdown,.txt,.json,.csv,.pdf,.docx,.doc,.pptx,.html,.htm';
-const DIRECTORY_INPUT_PROPS = { webkitdirectory: '', directory: '' };
+
+function defaultSourceLabel(serverPath: string, files: File[]): string {
+  const path = serverPath.trim();
+  if (path) {
+    return path.split('/').filter(Boolean).pop() || 'Carpeta';
+  }
+  const first = files[0];
+  if (!first) return 'Documentos';
+  const relative = (first as File & { webkitRelativePath?: string }).webkitRelativePath?.trim();
+  if (relative) {
+    const top = relative.split('/').filter(Boolean)[0];
+    if (top) return top;
+  }
+  const base = first.name.replace(/\.[^.]+$/, '').trim();
+  return base || 'Documentos';
+}
 
 export default function KnowledgePage() {
   const searchParams = useSearchParams();
@@ -42,7 +57,6 @@ export default function KnowledgePage() {
   const [sources, setSources] = useState<KnowledgeSource[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [serverPath, setServerPath] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,10 +66,23 @@ export default function KnowledgePage() {
   const [previewBusy, setPreviewBusy] = useState(false);
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [indexingJobs, setIndexingJobs] = useState<Record<string, IndexingJobState>>({});
+  const [looseUploadOpen, setLooseUploadOpen] = useState(false);
+  const [allowedRootsConfigured, setAllowedRootsConfigured] = useState<boolean | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (initialWorker) setWorkerUid(initialWorker);
   }, [initialWorker]);
+
+  useEffect(() => {
+    adminService
+      .getKnowledgeConfig()
+      .then((config) => {
+        const roots = config.allowed_roots ?? [];
+        setAllowedRootsConfigured(roots.some((root) => root.exists));
+      })
+      .catch(() => setAllowedRootsConfigured(false));
+  }, []);
 
   useEffect(() => {
     adminService
@@ -207,11 +234,10 @@ export default function KnowledgePage() {
         files,
         project_id: projectId,
         worker_uid: workerUid,
-        display_name: displayName.trim() || undefined,
+        display_name: defaultSourceLabel('', files),
         compute_embeddings: computeEmbeddings,
       });
       setFiles([]);
-      setDisplayName('');
       setNotice(`Carga encolada: ${result.documents} documento(s).`);
       await loadSources();
       void waitForKnowledgeJob(result.sync_job_id, 'Indexando carga', {
@@ -223,7 +249,7 @@ export default function KnowledgePage() {
     } finally {
       setBusy(false);
     }
-  }, [computeEmbeddings, displayName, files, loadSources, projectId, waitForKnowledgeJob, workerUid]);
+  }, [computeEmbeddings, files, loadSources, projectId, waitForKnowledgeJob, workerUid]);
 
   const previewServerPath = useCallback(async (pathOverride?: string) => {
     const path = (pathOverride ?? serverPath).trim();
@@ -252,7 +278,7 @@ export default function KnowledgePage() {
     try {
       const result = await adminService.createKnowledgeSource({
         source_uri: serverPath.trim(),
-        display_name: displayName.trim() || serverPath.split('/').filter(Boolean).pop() || 'Ruta servidor',
+        display_name: defaultSourceLabel(serverPath, []),
         source_kind: 'folder',
         project_id: projectId,
         worker_uid: workerUid,
@@ -260,7 +286,6 @@ export default function KnowledgePage() {
         compute_embeddings: computeEmbeddings,
       });
       setServerPath('');
-      setDisplayName('');
       setFolderPreview(null);
       setNotice(
         result.status === 'indexing'
@@ -277,7 +302,7 @@ export default function KnowledgePage() {
     } finally {
       setBusy(false);
     }
-  }, [computeEmbeddings, displayName, loadSources, projectId, serverPath, waitForKnowledgeJob, workerUid]);
+  }, [computeEmbeddings, loadSources, projectId, serverPath, waitForKnowledgeJob, workerUid]);
 
   const syncSource = useCallback(
     async (source: KnowledgeSource) => {
@@ -362,196 +387,177 @@ export default function KnowledgePage() {
         loading={loading}
       />
 
-      <section className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Alcance</h2>
-          <div className="mt-4 grid gap-3 md:grid-cols-2">
-            <label className="block text-sm font-bold text-gov-gray-700 dark:text-dark-text">
-              Alcance
-              <select
-                value={projectId}
-                onChange={(e) => {
-                  setProjectId(e.target.value);
-                  setWorkerUid('');
-                }}
-                className="mt-1 w-full rounded-xl border border-gov-blue-100 px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
-              >
-                <option value="">Plataforma (todos los agentes)</option>
-                {projects.map((project) => (
-                  <option key={project.project_id} value={project.project_id}>
-                    Proyecto: {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+      <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
+        <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Alcance</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <label className="block text-sm font-bold text-gov-gray-700 dark:text-dark-text">
+            Alcance
+            <select
+              value={projectId}
+              onChange={(e) => {
+                setProjectId(e.target.value);
+                setWorkerUid('');
+              }}
+              className="mt-1 w-full rounded-xl border border-gov-blue-100 px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+            >
+              <option value="">Plataforma (todos los agentes)</option>
+              {projects.map((project) => (
+                <option key={project.project_id} value={project.project_id}>
+                  Proyecto: {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
-            <label className="block text-sm font-bold text-gov-gray-700 dark:text-dark-text">
-              Agente opcional
-              <select
-                value={workerUid}
-                onChange={(e) => setWorkerUid(e.target.value)}
-                disabled={!projectId}
-                className="mt-1 w-full rounded-xl border border-gov-blue-100 px-3 py-2 text-sm disabled:opacity-60 dark:border-dark-border dark:bg-dark-bg"
-              >
-                <option value="">Todo el proyecto</option>
-                {agents.map((agent) => (
-                  <option key={agent.worker_uid} value={agent.worker_uid}>
-                    {agent.display_name || agent.worker_id}
-                  </option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs font-normal text-gov-gray-500 dark:text-dark-muted">
-                «Todo el proyecto» = RAG compartido por todos los agentes. Si falla, elige un agente concreto.
-              </p>
-            </label>
-          </div>
-        </div>
-
-        <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Nombre de la fuente</h2>
-          <input
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            placeholder="Ej. AWS Security Docs"
-            className="mt-4 w-full rounded-xl border border-gov-blue-100 px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
-          />
-          <p className="mt-2 text-xs text-gov-gray-500 dark:text-dark-muted">
-            Si lo dejas vacío, DuckClaw usará el nombre del proyecto o carpeta.
-          </p>
+          <label className="block text-sm font-bold text-gov-gray-700 dark:text-dark-text">
+            Agente opcional
+            <select
+              value={workerUid}
+              onChange={(e) => setWorkerUid(e.target.value)}
+              disabled={!projectId}
+              className="mt-1 w-full rounded-xl border border-gov-blue-100 px-3 py-2 text-sm disabled:opacity-60 dark:border-dark-border dark:bg-dark-bg"
+            >
+              <option value="">Todo el proyecto</option>
+              {agents.map((agent) => (
+                <option key={agent.worker_uid} value={agent.worker_uid}>
+                  {agent.display_name || agent.worker_id}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs font-normal text-gov-gray-500 dark:text-dark-muted">
+              «Todo el proyecto» = RAG compartido por todos los agentes. Si falla, elige un agente concreto.
+            </p>
+          </label>
         </div>
       </section>
 
-      <section className="grid gap-4 lg:grid-cols-2">
-        <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-          <h2 className="flex items-center gap-2 text-lg font-black text-gov-gray-900 dark:text-dark-text">
-            <UploadCloud size={18} />
-            Subir archivos desde tu PC
-          </h2>
-          <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
-            Markdown, texto, JSON, CSV. PDF/Word si el servidor tiene{' '}
-            <code className="font-mono text-[10px]">markitdown</code> instalado (
-            <code className="font-mono text-[10px]">uv sync</code> o{' '}
-            <code className="font-mono text-[10px]">duckops up</code>).
-          </p>
-          <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm font-bold text-gov-gray-700 dark:text-dark-text">
-            <input
-              type="checkbox"
-              checked={computeEmbeddings}
-              onChange={(e) => setComputeEmbeddings(e.target.checked)}
-              className="rounded border-gov-blue-200"
-            />
-            Búsqueda semántica (embeddings)
-          </label>
-          <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
-            Recomendado activado. Si lo apagas, solo busca por palabras exactas.
-          </p>
-          <p className="mt-4 text-xs font-black uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted">
-            Seleccionar archivos
-          </p>
+      <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
+        <h2 className="flex items-center gap-2 text-lg font-black text-gov-gray-900 dark:text-dark-text">
+          <UploadCloud size={18} />
+          Agregar documentos
+        </h2>
+        <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
+          Elige una carpeta para indexar. Los agentes la consultarán en el chat.
+        </p>
+
+        <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm font-bold text-gov-gray-700 dark:text-dark-text">
           <input
-            type="file"
-            multiple
-            accept={ACCEPTED_EXTENSIONS}
-            onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-            className="mt-2 w-full rounded-2xl border border-dashed border-gov-blue-200 p-5 text-sm dark:border-dark-border"
+            type="checkbox"
+            checked={computeEmbeddings}
+            onChange={(e) => setComputeEmbeddings(e.target.checked)}
+            className="rounded border-gov-blue-200"
           />
-          <p className="mt-4 text-xs font-black uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted">
-            Seleccionar carpeta
-          </p>
-          <input
-            type="file"
-            multiple
-            {...DIRECTORY_INPUT_PROPS}
-            onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
-            className="mt-3 w-full rounded-2xl border border-dashed border-gov-blue-100 p-4 text-sm dark:border-dark-border"
-          />
-          {files.length > 0 && (
-            <p className="mt-3 text-xs font-bold text-gov-gray-600 dark:text-dark-muted">
-              {files.length} archivo(s) seleccionado(s)
+          Búsqueda semántica (embeddings)
+        </label>
+        <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
+          Recomendado activado. Si lo apagas, solo busca por palabras exactas.
+        </p>
+
+        <div className="mt-4 space-y-4">
+          {allowedRootsConfigured === false ? (
+            <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+              Configura <code className="font-mono">DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS</code> en{' '}
+              <code className="font-mono">.env</code> y ejecuta{' '}
+              <code className="font-mono">uv run duckops stack deploy</code>.
             </p>
-          )}
+          ) : null}
+
           <button
             type="button"
-            onClick={() => void uploadFiles()}
-            disabled={files.length === 0 || busy}
-            className="mt-4 w-full rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
+            onClick={() => setFolderPickerOpen(true)}
+            disabled={allowedRootsConfigured === false || busy}
+            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gov-blue-200 px-4 py-3 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
           >
-            Importar archivos
+            <FolderOpen size={18} />
+            Elegir carpeta
           </button>
-        </div>
 
-        <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-          <h2 className="flex items-center gap-2 text-lg font-black text-gov-gray-900 dark:text-dark-text">
-            <FolderUp size={18} />
-            Importar carpeta del servidor
-          </h2>
-          <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-            Elige una carpeta en el Mac del Gateway con el explorador o pega la ruta absoluta. Luego comprueba
-            antes de indexar.
-          </p>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <input
-              value={serverPath}
-              onChange={(e) => {
-                setServerPath(e.target.value);
-                setFolderPreview(null);
-              }}
-              placeholder="/Users/tu-usuario/Documentos/MiBiblioteca"
-              className="min-w-0 flex-1 rounded-xl border border-gov-blue-100 px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
-            />
-            <button
-              type="button"
-              onClick={() => setFolderPickerOpen(true)}
-              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-gov-blue-200 px-4 py-2 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
-            >
-              <FolderOpen size={16} />
-              Explorar
-            </button>
-          </div>
-          {folderPreview && (
-            <div className="mt-3 rounded-xl border border-gov-blue-50 bg-gov-blue-50/60 p-3 text-xs text-gov-gray-700 dark:border-dark-border dark:bg-dark-bg dark:text-dark-muted">
+          {serverPath.trim() ? (
+            <p className="truncate font-mono text-[11px] text-gov-gray-600 dark:text-dark-muted">{serverPath}</p>
+          ) : null}
+
+          {previewBusy ? (
+            <p className="text-xs text-gov-gray-500 dark:text-dark-muted">Comprobando archivos indexables…</p>
+          ) : null}
+
+          {folderPreview && !previewBusy ? (
+            <div className="rounded-xl border border-gov-blue-50 bg-gov-blue-50/60 p-3 text-xs text-gov-gray-700 dark:border-dark-border dark:bg-dark-bg dark:text-dark-muted">
               <p className="font-bold">{formatFolderPreviewLine(folderPreview)}</p>
-              {folderPreview.sample_paths.length > 0 && (
+              {folderPreview.sample_paths.length > 0 ? (
                 <ul className="mt-2 space-y-0.5 font-mono text-[10px] opacity-80">
                   {folderPreview.sample_paths.map((path) => (
                     <li key={path} className="truncate">
                       {path}
                     </li>
                   ))}
-                  {folderPreview.file_count > folderPreview.sample_paths.length && (
+                  {folderPreview.file_count > folderPreview.sample_paths.length ? (
                     <li>… y {folderPreview.file_count - folderPreview.sample_paths.length} más</li>
-                  )}
+                  ) : null}
                 </ul>
-              )}
+              ) : null}
             </div>
-          )}
-          <label className="mt-3 flex cursor-pointer items-center gap-2 text-sm font-bold text-gov-gray-700 dark:text-dark-text">
-            <input
-              type="checkbox"
-              checked={computeEmbeddings}
-              onChange={(e) => setComputeEmbeddings(e.target.checked)}
-              className="rounded border-gov-blue-200"
-            />
-            Búsqueda semántica al importar
-          </label>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <button
-              type="button"
-              onClick={() => void previewServerPath()}
-              disabled={!serverPath.trim() || previewBusy || busy}
-              className="flex-1 rounded-xl border border-gov-blue-200 px-4 py-2 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
-            >
-              {previewBusy ? 'Comprobando…' : 'Comprobar carpeta'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void importServerPath()}
-              disabled={!serverPath.trim() || busy}
-              className="flex-1 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
-            >
-              {busy ? 'Importando…' : 'Importar e indexar'}
-            </button>
-          </div>
+          ) : null}
+
+          <button
+            type="button"
+            onClick={() => void importServerPath()}
+            disabled={
+              !serverPath.trim() ||
+              busy ||
+              previewBusy ||
+              !folderPreview ||
+              folderPreview.file_count === 0
+            }
+            className="w-full rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
+          >
+            {busy ? 'Indexando…' : 'Indexar'}
+          </button>
+        </div>
+
+        <div className="mt-6 border-t border-gov-blue-50 pt-4 dark:border-dark-border">
+          <button
+            type="button"
+            onClick={() => setLooseUploadOpen((open) => !open)}
+            className="text-xs font-bold text-gov-blue-800 hover:underline dark:text-dark-cyan"
+            aria-expanded={looseUploadOpen}
+          >
+            {looseUploadOpen ? '▾' : '▸'} Subir archivos sueltos (opcional)
+          </button>
+          {looseUploadOpen ? (
+            <div className="mt-3 space-y-3">
+              <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+                Markdown, texto, JSON, CSV. PDF/Word si markitdown está instalado en el host.
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPTED_EXTENSIONS}
+                className="sr-only"
+                onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex w-full items-center justify-center rounded-xl border border-gov-blue-200 px-4 py-2 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
+              >
+                Elegir archivos
+              </button>
+              {files.length > 0 ? (
+                <p className="text-xs font-bold text-gov-gray-600 dark:text-dark-muted">
+                  {files.length} archivo(s) seleccionado(s)
+                </p>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void uploadFiles()}
+                disabled={files.length === 0 || busy}
+                className="w-full rounded-xl border border-gov-blue-200 px-4 py-2 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
+              >
+                Subir e indexar
+              </button>
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -585,8 +591,8 @@ export default function KnowledgePage() {
         ) : sources.length === 0 ? (
           <p className="mt-4 rounded-2xl border border-dashed border-gov-blue-100 p-4 text-sm text-gov-gray-500 dark:border-dark-border dark:text-dark-muted">
             {projectId
-              ? 'Aún no hay documentos para este proyecto. Sube archivos arriba.'
-              : 'Aún no hay conocimiento global del framework. Sube archivos con alcance Framework.'}
+              ? 'Aún no hay documentos para este proyecto. Elige una carpeta arriba.'
+              : 'Aún no hay conocimiento global. Elige una carpeta con alcance Plataforma.'}
           </p>
         ) : (
           <div className="mt-4 grid gap-3">

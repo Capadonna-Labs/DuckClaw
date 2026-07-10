@@ -73,10 +73,10 @@ export function KnowledgeFolderPicker({
         <div className="flex items-start justify-between gap-3 border-b border-gov-gray-100 px-5 py-4 dark:border-dark-border">
           <div className="min-w-0">
             <p id="knowledge-folder-picker-title" className="text-lg font-black dark:text-dark-text">
-              Explorar carpetas del servidor
+              Elegir carpeta
             </p>
             <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
-              Solo rutas bajo <code className="font-mono">DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS</code>.
+              Carpetas bajo <code className="font-mono">DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS</code>.
             </p>
           </div>
           <button

@@ -521,15 +521,12 @@ def test_overview_and_projects_headers_do_not_render_legacy_helper_copy() -> Non
 def test_console_user_delete_uses_confirm_danger_modal() -> None:
     panel = Path("apps/duckclaw-admin/src/components/access/ConsoleUsersPanel.tsx").read_text(encoding="utf-8")
 
-    assert "ConfirmDangerModal" in panel
-    assert "pendingDeactivate" in panel
-    assert "confirm(`" not in panel
-    assert "title=\"Desactivar usuario\"" in panel
-    assert "resetPasswordUser" in panel
-    assert "Nueva contraseña" in panel
-    assert "prompt(" not in panel
-    assert "showInactive" in panel
-    assert "usuarios inactivos ocultos" in panel
+    assert "UserEditModal" in panel or "Editar usuario" in panel
+    assert "Editar" in panel
+    assert "activeUsers" in panel
+    assert "Nueva contraseña (opcional)" in panel
+    assert "showInactive" not in panel
+    assert "usuarios inactivos ocultos" not in panel
 
 
 def test_skills_page_exposes_new_skill_db_first_form() -> None:

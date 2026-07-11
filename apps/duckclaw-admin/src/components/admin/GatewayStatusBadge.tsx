@@ -60,11 +60,11 @@ export function PlatformStatusStrip() {
 
   return (
     <div
-      className="inline-flex min-h-[42px] items-stretch rounded-xl border border-gov-gray-200 bg-white/90 shadow-sm overflow-visible shrink-0 dark:border-dark-border dark:bg-dark-bg/80"
+      className="inline-flex min-h-[36px] items-stretch rounded-xl border border-gov-gray-200 bg-white/90 shadow-sm overflow-visible shrink-0 dark:border-dark-border dark:bg-dark-bg/80"
       aria-label="Estado de la plataforma"
     >
       <span
-        className={`inline-flex items-center gap-2 px-3.5 py-2.5 ${
+        className={`inline-flex items-center gap-1.5 px-2.5 py-2 ${
           recovering
             ? 'text-amber-800 dark:text-amber-300'
             : checking
@@ -77,7 +77,7 @@ export function PlatformStatusStrip() {
         aria-label={gatewayTitle}
       >
         <span
-          className={`inline-block h-3 w-3 rounded-full shrink-0 ${
+          className={`inline-block h-2.5 w-2.5 rounded-full shrink-0 ${
             recovering
               ? 'bg-amber-500 animate-pulse'
               : checking
@@ -88,20 +88,20 @@ export function PlatformStatusStrip() {
           }`}
           aria-hidden
         />
-        <span className="text-sm font-bold sm:text-base">{gatewayLabel}</span>
+        <span className="text-xs font-bold">{gatewayLabel}</span>
       </span>
 
       <span className="w-px self-stretch bg-gov-gray-200 dark:bg-dark-border" aria-hidden />
 
       <span
-        className="group relative inline-flex items-center gap-2 px-3.5 py-2.5 text-gov-blue-800 dark:text-dark-cyan cursor-default"
+        className="group relative inline-flex items-center gap-1.5 px-2.5 py-2 text-gov-blue-800 dark:text-dark-cyan cursor-default"
         title={workersTitle}
         aria-label={
           workers.length > 0 ? `Workers activos: ${workersCount}` : 'Sin workers activos'
         }
       >
-        <Bot size={18} className="shrink-0 opacity-90" aria-hidden />
-        <span className="text-sm font-black tabular-nums sm:text-base">{workersCount ?? '—'}</span>
+        <Bot size={15} className="shrink-0 opacity-90" aria-hidden />
+        <span className="text-xs font-black tabular-nums">{workersCount ?? '—'}</span>
         {workers.length > 0 ? (
           <span
             role="tooltip"

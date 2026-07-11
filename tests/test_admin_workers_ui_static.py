@@ -26,15 +26,14 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
     assert "import_axis" not in service
 
 
-def test_workers_ui_exposes_inactive_catalog_workers_and_reactivation() -> None:
+def test_workers_ui_lists_active_catalog_workers_only() -> None:
     page = TEMPLATES_PAGE.read_text(encoding="utf-8")
     service = ADMIN_SERVICE.read_text(encoding="utf-8")
 
-    assert "showInactive" in page
-    assert "include_inactive" in service
+    assert "showInactive" not in page
+    assert "Mostrar inactivos" not in page
+    assert "include_inactive: false" in page
     assert "reactivateTemplate" in service
-    assert "Reactivar" in page
-    assert "inactivo" in page
 
 
 def test_workers_ui_separates_deactivate_from_hard_delete() -> None:

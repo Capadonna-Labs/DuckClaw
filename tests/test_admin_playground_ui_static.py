@@ -272,9 +272,10 @@ def test_overview_uses_home_checklist_not_ops_panel() -> None:
     overview = Path("apps/duckclaw-admin/src/app/(admin)/overview/page.tsx").read_text(encoding="utf-8")
 
     assert "HomeChecklist" in overview
-    assert "Tu camino" in Path("apps/duckclaw-admin/src/components/admin/HomeChecklist.tsx").read_text(
+    assert "Primeros pasos" in Path("apps/duckclaw-admin/src/components/admin/HomeChecklist.tsx").read_text(
         encoding="utf-8"
     )
+    assert "Ir al chat" not in overview
     assert "PlatformQuickStart" not in overview
     assert "OverviewOpsPanel" not in overview
     assert "Pm2LiveLogsPanel" not in overview

@@ -1,7 +1,6 @@
 'use client';
 
 import dynamic from 'next/dynamic';
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { OverviewMetrics } from '@/types/admin';
@@ -39,21 +38,13 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-black text-gov-gray-900 dark:text-dark-text tracking-tight">
-            Inicio
-          </h1>
-          <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-            Estado del sistema y siguiente paso claro.
-          </p>
-        </div>
-        <Link
-          href="/playground"
-          className="rounded-xl bg-gov-blue-700 px-5 py-2.5 text-sm font-black text-white hover:bg-gov-blue-800"
-        >
-          Ir al chat
-        </Link>
+      <header>
+        <h1 className="text-3xl font-black text-gov-gray-900 dark:text-dark-text tracking-tight">
+          Inicio
+        </h1>
+        <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
+          Estado del stack y métricas de uso.
+        </p>
       </header>
 
       {error && <GatewayErrorBanner message={error} />}

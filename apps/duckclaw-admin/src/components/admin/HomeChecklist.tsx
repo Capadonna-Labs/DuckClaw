@@ -2,14 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, Circle, Database, MessageCircle } from 'lucide-react';
+import { Bot, CheckCircle2, Circle, Database } from 'lucide-react';
 import { adminService } from '@/services/adminService';
-import { playgroundHref, readLastCreatedWorker, readLastProjectId } from '@/lib/onboardingFlow';
 
-type StepState = 'pending' | 'ok' | 'warn';
+type StepState = 'pending' | 'ok';
 
 type ChecklistStep = {
-  id: string;
+  id: 'agent' | 'knowledge';
   title: string;
   detail: string;
   state: StepState;
@@ -18,16 +17,19 @@ type ChecklistStep = {
   optional?: boolean;
 };
 
+function isPrimaryCta(step: ChecklistStep, steps: ChecklistStep[]): boolean {
+  if (step.state === 'ok' || step.optional) return false;
+  const firstPending = steps.find((s) => s.state !== 'ok' && !s.optional);
+  return firstPending?.id === step.id;
+}
+
 export function HomeChecklist() {
-  const [steps, setSteps] = useState<ChecklistStep[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [steps, setSteps] = useState<ChecklistStep[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
-      setLoading(true);
-
       let agentOk = false;
       let agentDetail = 'Crea al menos un agente con instrucciones.';
       try {
@@ -39,6 +41,13 @@ export function HomeChecklist() {
           : 'Aún no hay agentes activos.';
       } catch {
         agentDetail = 'No se pudo leer el catálogo de agentes.';
+      }
+
+      if (cancelled) return;
+
+      if (agentOk) {
+        setSteps(null);
+        return;
       }
 
       let knowledgeOk = false;
@@ -53,20 +62,16 @@ export function HomeChecklist() {
         knowledgeDetail = 'No se pudo comprobar el gestor RAG.';
       }
 
-      const workerId = readLastCreatedWorker();
-      const projectId = readLastProjectId();
-      const chatHref = playgroundHref(projectId, workerId);
-
       if (cancelled) return;
 
       setSteps([
         {
           id: 'agent',
-          title: 'Agente listo',
+          title: 'Crear un agente',
           detail: agentDetail,
-          state: agentOk ? 'ok' : 'pending',
+          state: 'pending',
           href: '/templates',
-          cta: agentOk ? 'Ver agentes' : 'Crear agente',
+          cta: 'Crear agente',
         },
         {
           id: 'knowledge',
@@ -77,18 +82,7 @@ export function HomeChecklist() {
           cta: knowledgeOk ? 'Gestionar' : 'Importar (opcional)',
           optional: true,
         },
-        {
-          id: 'chat',
-          title: 'Probar en chat',
-          detail: agentOk
-            ? 'Abre Playground con tu agente y envía un mensaje.'
-            : 'Necesitas un agente antes de chatear.',
-          state: agentOk ? 'pending' : 'pending',
-          href: chatHref,
-          cta: 'Ir al chat',
-        },
       ]);
-      setLoading(false);
     }
 
     void load();
@@ -98,59 +92,56 @@ export function HomeChecklist() {
     };
   }, []);
 
-  const readyToChat = steps.some((s) => s.id === 'agent' && s.state === 'ok');
+  if (!steps) {
+    return null;
+  }
 
   return (
-    <section className="rounded-3xl border border-gov-blue-100 bg-gradient-to-br from-gov-blue-50 to-white p-5 dark:border-dark-border dark:from-dark-bg dark:to-dark-surface">
-      <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Tu camino</h2>
+    <section className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
+      <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Primeros pasos</h2>
       <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-        Agente → (opcional) conocimiento → chat. El estado del sistema está en la barra superior.
+        Crea un agente para empezar. El chat está en el menú lateral.
       </p>
 
       <ol className="mt-4 space-y-3">
-        {loading ? (
-          <li className="text-sm text-gov-gray-500 dark:text-dark-muted">Cargando checklist…</li>
-        ) : (
-          steps.map((step, index) => (
-            <li
-              key={step.id}
-              className="flex flex-col gap-3 rounded-2xl border border-white/80 bg-white/90 p-4 shadow-sm dark:border-dark-border dark:bg-dark-surface sm:flex-row sm:items-center sm:justify-between"
-            >
-              <div className="flex items-start gap-3">
-                <StepIcon step={step} index={index} />
-                <div>
-                  <p className="font-black text-gov-gray-900 dark:text-dark-text">
-                    {step.title}
-                    {step.optional && (
-                      <span className="ml-2 text-[10px] font-black uppercase tracking-wider text-gov-gray-400">
-                        opcional
-                      </span>
-                    )}
-                  </p>
-                  <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">{step.detail}</p>
-                </div>
+        {steps.map((step, index) => (
+          <li
+            key={step.id}
+            className="flex flex-col gap-3 rounded-2xl border border-gov-gray-100 bg-gov-gray-50/50 p-4 dark:border-dark-border dark:bg-dark-bg sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div className="flex items-start gap-3">
+              <StepIcon step={step} index={index} />
+              <div>
+                <p className="font-black text-gov-gray-900 dark:text-dark-text">
+                  {step.title}
+                  {step.optional && (
+                    <span className="ml-2 text-[10px] font-black uppercase tracking-wider text-gov-gray-400">
+                      opcional
+                    </span>
+                  )}
+                </p>
+                <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">{step.detail}</p>
               </div>
-              <Link
-                href={step.href}
-                className={`shrink-0 rounded-xl px-4 py-2 text-center text-sm font-bold ${
-                  step.id === 'chat' && readyToChat
-                    ? 'bg-gov-blue-700 text-white hover:bg-gov-blue-800'
-                    : 'border border-gov-blue-200 text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan'
-                }`}
-              >
-                {step.cta}
-              </Link>
-            </li>
-          ))
-        )}
+            </div>
+            <Link
+              href={step.href}
+              className={`shrink-0 rounded-xl px-4 py-2 text-center text-sm font-bold ${
+                isPrimaryCta(step, steps)
+                  ? 'bg-gov-blue-700 text-white hover:bg-gov-blue-800'
+                  : 'border border-gov-blue-200 text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan'
+              }`}
+            >
+              {step.cta}
+            </Link>
+          </li>
+        ))}
       </ol>
     </section>
   );
 }
 
 function StepIcon({ step, index }: { step: ChecklistStep; index: number }) {
-  const Icon =
-    step.id === 'agent' ? Bot : step.id === 'knowledge' ? Database : MessageCircle;
+  const Icon = step.id === 'agent' ? Bot : Database;
   const StatusIcon = step.state === 'ok' ? CheckCircle2 : Circle;
   return (
     <div className="relative shrink-0">

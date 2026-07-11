@@ -21,6 +21,8 @@ _DROP_LEGACY_SCHEMAS_CONFIRM = "DROP_LEGACY_SCHEMAS"
 class DuckdbQueryBody(BaseModel):
     query: str = Field(..., min_length=1)
     vault_path: str | None = None
+    limit: int | None = Field(default=None, ge=1, le=500)
+    offset: int | None = Field(default=None, ge=0)
 
 
 class DuckdbVectorSearchBody(BaseModel):
@@ -287,7 +289,7 @@ async def duckdb_run_query(
 
     try:
         try:
-            result = execute_select(con, body.query)
+            result = execute_select(con, body.query, limit=body.limit, offset=body.offset)
         except ValueError as exc:
             raise _problem(400, "Consulta no permitida", str(exc)) from exc
         except Exception as exc:

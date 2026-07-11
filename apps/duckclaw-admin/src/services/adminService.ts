@@ -472,6 +472,8 @@ export interface DuckdbQueryResult {
   rows: unknown[][];
   row_count: number;
   limit_applied?: number;
+  offset?: number;
+  has_more?: boolean;
 }
 
 export interface PgqGraphNode {
@@ -1111,7 +1113,12 @@ export const adminService = {
       body: JSON.stringify(body),
     }),
 
-  runDuckdbQuery: (body: { query: string; vault_path?: string }) =>
+  runDuckdbQuery: (body: {
+    query: string;
+    vault_path?: string;
+    limit?: number;
+    offset?: number;
+  }) =>
     adminFetch<DuckdbQueryResult>('/duckdb/query', {
       method: 'POST',
       body: JSON.stringify(body),

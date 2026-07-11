@@ -7,6 +7,18 @@ import logging
 import os
 import signal
 import time
+from pathlib import Path
+
+_repo_root = Path(__file__).resolve().parent.parent.parent
+_env_file = _repo_root / ".env"
+if _env_file.is_file():
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(_env_file, override=False)
+    except Exception:
+        pass
+os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(_repo_root))
 
 _log = logging.getLogger("knowledge-indexer")
 logging.basicConfig(level=logging.INFO)
@@ -79,8 +91,13 @@ async def _indexer_supervisor(*, poll_s: float, auto_sync: bool, warn_threshold:
             if auto_sync and idle_cycles * 2 >= poll_s:
                 idle_cycles = 0
                 try:
-                    from duckclaw.forge.rag.knowledge_auto_sync import run_auto_sync_poll
+                    from duckclaw.forge.rag.knowledge_auto_sync import (
+                        knowledge_sync_in_progress,
+                        run_auto_sync_poll,
+                    )
 
+                    if knowledge_sync_in_progress():
+                        continue
                     outcomes = await asyncio.to_thread(run_auto_sync_poll)
                     if outcomes:
                         _log.info("auto-sync cycle: %s source(s) updated", len(outcomes))

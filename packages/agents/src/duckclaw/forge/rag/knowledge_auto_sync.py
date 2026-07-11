@@ -95,7 +95,7 @@ def _enqueue_source_error_status(
         source_kind=str(source.get("source_kind") or "folder"),  # type: ignore[arg-type]
         source_uri=str(source.get("source_uri") or ""),
         display_name=str(source.get("display_name") or ""),
-        status="error",
+        status="failed",
         metadata={
             **dict(source.get("metadata") or {}),
             "last_error": reason[:500],
@@ -282,6 +282,35 @@ def _execute_folder_sync_locked(
         _last_fingerprint[source_id] = fingerprint
         result.scanned = plan.scanned
         result.skipped = plan.skipped
+        if str(source.get("status") or "") == "indexing" and existing:
+            tenant_id = str(source.get("tenant_id") or "default")
+            project_id = str(source.get("project_id") or "")
+            worker_uid = str(source.get("worker_uid") or "")
+            ready_cmd = CreateKnowledgeSourceCommand(
+                source_id=source_id,
+                tenant_id=tenant_id,
+                actor_email=actor_email,
+                project_id=project_id,
+                worker_uid=worker_uid,
+                source_kind="folder",
+                source_uri=source_uri,
+                display_name=str(source.get("display_name") or ""),
+                status="ready",
+                metadata={
+                    **dict(source.get("metadata") or {}),
+                    "last_sync_at": datetime.now(timezone.utc).isoformat(),
+                    "sync_stats": {
+                        "scanned": result.scanned,
+                        "upserted": 0,
+                        "skipped": result.skipped,
+                        "removed": 0,
+                        "chunks": 0,
+                        "recovered": True,
+                    },
+                },
+            )
+            result.task_ids.append(_enqueue_knowledge_command(ready_cmd))
+            return result
         result.skipped_reason = "no_changes"
         return result
 
@@ -811,46 +840,61 @@ def run_auto_sync_poll(*, compute_embeddings: bool = True) -> list[SyncResult]:
     if db is None:
         return []
 
-    outcomes: list[SyncResult] = []
+    sources: list[dict[str, Any]] = []
     try:
-        from duckclaw.admin_knowledge_read import list_folder_knowledge_sources, list_source_document_checksums
+        from duckclaw.admin_knowledge_read import list_folder_knowledge_sources
 
         sources = list_folder_knowledge_sources(db)
-        for source in sources:
-            source_id = str(source["source_id"])
-            try:
-                existing = list_source_document_checksums(db, source_id=source_id)
-                outcome = execute_folder_sync(
-                    source=source,
-                    existing=existing,
-                    actor_email=_AUTO_SYNC_ACTOR,
-                    compute_embeddings=compute_embeddings,
-                    force=False,
-                )
-                if outcome.skipped_reason in ("unchanged_fingerprint", "no_changes"):
-                    continue
-                if outcome.upserted or outcome.removed:
-                    _log.info(
-                        "knowledge auto-sync source=%s upserted=%s removed=%s skipped=%s",
-                        source_id,
-                        outcome.upserted,
-                        outcome.removed,
-                        outcome.skipped,
-                    )
-                outcomes.append(outcome)
-            except Exception as exc:
-                if _is_duckdb_lock_error(exc):
-                    _log.debug(
-                        "knowledge auto-sync deferred for %s (vault lock): %s",
-                        source_id,
-                        exc,
-                    )
-                    continue
-                _log.warning("knowledge auto-sync failed for %s: %s", source_id, exc)
     finally:
         if close_db:
             try:
                 db.close()
             except Exception:
                 pass
+
+    outcomes: list[SyncResult] = []
+    for source in sources:
+        source_id = str(source["source_id"])
+        try:
+            db_read, close_read = _open_hub_db()
+            if db_read is None:
+                continue
+            try:
+                from duckclaw.admin_knowledge_read import list_source_document_checksums
+
+                existing = list_source_document_checksums(db_read, source_id=source_id)
+            finally:
+                if close_read:
+                    try:
+                        db_read.close()
+                    except Exception:
+                        pass
+
+            outcome = execute_folder_sync(
+                source=source,
+                existing=existing,
+                actor_email=_AUTO_SYNC_ACTOR,
+                compute_embeddings=compute_embeddings,
+                force=False,
+            )
+            if outcome.skipped_reason in ("unchanged_fingerprint", "no_changes"):
+                continue
+            if outcome.upserted or outcome.removed:
+                _log.info(
+                    "knowledge auto-sync source=%s upserted=%s removed=%s skipped=%s",
+                    source_id,
+                    outcome.upserted,
+                    outcome.removed,
+                    outcome.skipped,
+                )
+            outcomes.append(outcome)
+        except Exception as exc:
+            if _is_duckdb_lock_error(exc):
+                _log.debug(
+                    "knowledge auto-sync deferred for %s (vault lock): %s",
+                    source_id,
+                    exc,
+                )
+                continue
+            _log.warning("knowledge auto-sync failed for %s: %s", source_id, exc)
     return outcomes

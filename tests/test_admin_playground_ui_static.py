@@ -442,8 +442,9 @@ def test_projects_page_only_renders_db_first_projects() -> None:
     assert "Legacy filesystem" not in page
     assert "forge/projects/" not in page
     assert "listWorkspaceProjectsPage" in page
-    assert "ProjectsCatalogToolbar" in page
-    assert "ProjectsTable" in page
+    assert "ProjectsControlPanel" in page
+    assert "ProjectsGrid" in page
+    assert "lg:grid-cols-12" in page
     assert 'href="/projects/orchestrator"' in page
     assert "orchestratorPrompt" not in page
     assert "createOrchestratorDraft" not in page

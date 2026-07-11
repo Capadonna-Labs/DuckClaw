@@ -1,10 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Link from 'next/link';
-import { FolderKanban, Plus } from 'lucide-react';
-import { ProjectsCatalogToolbar } from '@/components/projects/ProjectsCatalogToolbar';
-import { ProjectsTable } from '@/components/projects/ProjectsTable';
+import { FolderKanban } from 'lucide-react';
+import { ProjectsControlPanel } from '@/components/projects/ProjectsControlPanel';
+import { ProjectsGrid } from '@/components/projects/ProjectsGrid';
 import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 import { adminService } from '@/services/adminService';
 import type { WorkspaceProjectSummary, WorkspaceProjectsQuery } from '@/services/adminService';
@@ -25,11 +24,13 @@ export default function ProjectsPage() {
   const [direction, setDirection] = useState<CatalogDirection>('desc');
   const [limit, setLimit] = useState(25);
   const [offset, setOffset] = useState(0);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pendingDeleteProject, setPendingDeleteProject] = useState<WorkspaceProjectSummary | null>(null);
   const [deletingProject, setDeletingProject] = useState(false);
 
   const reload = useCallback(() => {
+    setLoading(true);
     setError(null);
     adminService
       .listWorkspaceProjectsPage({ q: query, status, sort, direction, limit, offset })
@@ -42,7 +43,8 @@ export default function ProjectsPage() {
         setProjects(page.projects);
         setTotal(page.total);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
+      .catch((e) => setError(e instanceof Error ? e.message : 'Error'))
+      .finally(() => setLoading(false));
   }, [query, status, sort, direction, limit, offset]);
 
   useEffect(() => {
@@ -100,62 +102,70 @@ export default function ProjectsPage() {
 
   return (
     <div className="space-y-6">
-      <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
-          <h1 className="flex items-center gap-2 text-3xl font-black text-gov-gray-900 dark:text-dark-text">
-            <FolderKanban size={28} /> Proyectos
-          </h1>
-          <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
-            Catálogo DB-first de proyectos activos e inactivos.
-          </p>
-        </div>
-        {canWrite && (
-          <Link
-            href="/projects/orchestrator"
-            className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white hover:bg-gov-blue-900"
-          >
-            <Plus size={16} /> Nuevo proyecto
-          </Link>
-        )}
+      <header>
+        <h1 className="flex items-center gap-2 text-3xl font-black text-gov-gray-900 dark:text-dark-text">
+          <FolderKanban size={28} />
+          Proyectos
+        </h1>
+        <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
+          Equipos de agentes con contexto compartido para el chat.
+        </p>
       </header>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {error ? (
+        <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+          {error}
+        </div>
+      ) : null}
 
-      <ProjectsCatalogToolbar
-        query={query}
-        status={status}
-        sort={sort}
-        direction={direction}
-        limit={limit}
-        onQueryChange={(value) => {
-          setQuery(value);
-          setOffset(0);
-        }}
-        onStatusChange={(value) => {
-          setStatus(value);
-          setOffset(0);
-        }}
-        onSortChange={(value) => {
-          setSort(value);
-          setOffset(0);
-        }}
-        onDirectionChange={(value) => {
-          setDirection(value);
-          setOffset(0);
-        }}
-        onLimitChange={(value) => {
-          setLimit(value);
-          setOffset(0);
-        }}
-      />
-
-      <ProjectsTable
-        projects={projects}
-        canWrite={canWrite}
-        onDelete={requestDeleteProject}
-        onDeactivate={(project) => void deactivateProject(project)}
-        onReactivate={(project) => void reactivateProject(project)}
-      />
+      <div className="grid gap-6 lg:grid-cols-12">
+        <div className="lg:col-span-4">
+          <ProjectsControlPanel
+            canWrite={canWrite}
+            query={query}
+            status={status}
+            sort={sort}
+            direction={direction}
+            limit={limit}
+            onQueryChange={(value) => {
+              setQuery(value);
+              setOffset(0);
+            }}
+            onStatusChange={(value) => {
+              setStatus(value);
+              setOffset(0);
+            }}
+            onSortChange={(value) => {
+              setSort(value);
+              setOffset(0);
+            }}
+            onDirectionChange={(value) => {
+              setDirection(value);
+              setOffset(0);
+            }}
+            onLimitChange={(value) => {
+              setLimit(value);
+              setOffset(0);
+            }}
+          />
+        </div>
+        <div className="lg:col-span-8">
+          <ProjectsGrid
+            projects={projects}
+            total={total}
+            page={page}
+            pageCount={pageCount}
+            canWrite={canWrite}
+            loading={loading}
+            onRefresh={reload}
+            onPrevPage={() => setOffset(Math.max(0, offset - limit))}
+            onNextPage={() => setOffset(offset + limit)}
+            onDelete={requestDeleteProject}
+            onDeactivate={(project) => void deactivateProject(project)}
+            onReactivate={(project) => void reactivateProject(project)}
+          />
+        </div>
+      </div>
 
       <ConfirmDangerModal
         isOpen={Boolean(pendingDeleteProject)}
@@ -176,30 +186,6 @@ export default function ProjectsPage() {
         onCancel={() => !deletingProject && setPendingDeleteProject(null)}
         onConfirm={() => void confirmDeleteProject()}
       />
-
-      <div className="flex items-center justify-between rounded-2xl border border-gov-blue-100 bg-white px-4 py-3 text-sm text-gov-gray-700 dark:border-dark-border dark:bg-dark-surface dark:text-dark-text">
-        <span>
-          Página {page} de {pageCount} · {total} proyectos
-        </span>
-        <div className="flex gap-2">
-          <button
-            type="button"
-            disabled={offset === 0}
-            onClick={() => setOffset(Math.max(0, offset - limit))}
-            className="rounded-xl border border-gov-blue-100 px-3 py-1 font-bold disabled:opacity-50 dark:border-dark-border"
-          >
-            Anterior
-          </button>
-          <button
-            type="button"
-            disabled={offset + limit >= total}
-            onClick={() => setOffset(offset + limit)}
-            className="rounded-xl border border-gov-blue-100 px-3 py-1 font-bold disabled:opacity-50 dark:border-dark-border"
-          >
-            Siguiente
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

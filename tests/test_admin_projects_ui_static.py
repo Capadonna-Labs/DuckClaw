@@ -6,7 +6,7 @@ from pathlib import Path
 
 def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/projects/page.tsx").read_text(encoding="utf-8")
-    table = Path("apps/duckclaw-admin/src/components/projects/ProjectsTable.tsx").read_text(encoding="utf-8")
+    table = Path("apps/duckclaw-admin/src/components/projects/ProjectCard.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
     workspace = Path("packages/shared/src/duckclaw/admin_workspace.py").read_text(encoding="utf-8")
     db_first_router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
@@ -24,9 +24,11 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     assert "page.total > 0" in page
     assert "Math.floor((page.total - 1) / limit) * limit" in page
     assert "setOffset(maxOffset)" in page
-    assert "ProjectsCatalogToolbar" in page
-    assert "ProjectsTable" in page
-    assert 'href="/projects/orchestrator"' in page
+    assert "ProjectsControlPanel" in page
+    assert "ProjectsGrid" in page
+    assert 'href="/projects/orchestrator"' in Path(
+        "apps/duckclaw-admin/src/components/projects/ProjectsControlPanel.tsx"
+    ).read_text(encoding="utf-8")
     assert "admin_project_agents" in workspace
     assert "Asignar agente" not in page
     assert "removeWorkspaceProjectAgent" not in page
@@ -90,8 +92,9 @@ def test_admin_service_exposes_paginated_workspace_projects_contract() -> None:
 
 
 def test_projects_catalog_exposes_inactive_filter_and_reversible_actions() -> None:
-    toolbar = Path("apps/duckclaw-admin/src/components/projects/ProjectsCatalogToolbar.tsx").read_text(encoding="utf-8")
-    table = Path("apps/duckclaw-admin/src/components/projects/ProjectsTable.tsx").read_text(encoding="utf-8")
+    toolbar = Path("apps/duckclaw-admin/src/components/projects/ProjectsControlPanel.tsx").read_text(encoding="utf-8")
+    card = Path("apps/duckclaw-admin/src/components/projects/ProjectCard.tsx").read_text(encoding="utf-8")
+    grid = Path("apps/duckclaw-admin/src/components/projects/ProjectsGrid.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
 
     assert "statusOptions" in toolbar
@@ -99,18 +102,19 @@ def test_projects_catalog_exposes_inactive_filter_and_reversible_actions() -> No
     assert "{ value: 'inactive', label: 'Inactivos' }" in toolbar
     assert "{ value: 'all', label: 'Todos' }" in toolbar
     assert "onStatusChange" in toolbar
-    assert "onDeactivate" in table
-    assert "onReactivate" in table
-    assert "project.status === 'inactive'" in table
-    assert "Activar" in table
-    assert "Desactivar" in table
-    assert "Eliminar definitivo" in table
+    assert "onDeactivate" in grid
+    assert "onReactivate" in grid
+    assert "project.status === 'inactive'" in card
+    assert "Activar proyecto" in card
+    assert "Desactivar proyecto" in card
+    assert "Eliminar definitivo" in card
     assert "deactivateWorkspaceProject:" in service
     assert "reactivateWorkspaceProject:" in service
 
 
 def test_projects_catalog_links_to_project_detail_page() -> None:
-    table = Path("apps/duckclaw-admin/src/components/projects/ProjectsTable.tsx").read_text(encoding="utf-8")
+    card = Path("apps/duckclaw-admin/src/components/projects/ProjectCard.tsx").read_text(encoding="utf-8")
+    grid = Path("apps/duckclaw-admin/src/components/projects/ProjectsGrid.tsx").read_text(encoding="utf-8")
     detail_page = Path("apps/duckclaw-admin/src/app/(admin)/projects/[projectId]/page.tsx")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
     workspace_router = Path(
@@ -128,12 +132,11 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     assert "listKnowledgeSources" in detail_text
     assert "Gestionar RAG" in detail_text
     assert "Importar fuente" not in detail_text
-    assert "Ver" in table
-    assert "Eye" in table
-    assert "href={`/projects/${encodeURIComponent(project.project_id)}`}" in table
-    assert "overflow-x-auto" in table
-    assert "min-w-[820px]" in table
-    assert "whitespace-nowrap" in table
+    assert "Abrir" in card
+    assert "Eye" in card
+    assert "href={`/projects/${encodeURIComponent(project.project_id)}`}" in card
+    assert "auto-fill" in grid
+    assert "project=${encodeURIComponent(project.project_id)}" in card
     assert "getWorkspaceProject:" in service
     assert "KnowledgeSource" in service
     assert "listKnowledgeSources:" in service
@@ -274,10 +277,12 @@ def test_projects_catalog_and_managed_workspace_draft_are_separate_routes() -> N
         "apps/duckclaw-admin/src/components/projects/ProjectManagedWorkspaceDraftWizard.tsx"
     ).read_text(encoding="utf-8")
 
-    assert 'href="/projects/orchestrator"' in projects_page
     assert "listWorkspaceProjectsPage" in projects_page
-    assert "ProjectsCatalogToolbar" in projects_page
-    assert "ProjectsTable" in projects_page
+    assert "ProjectsControlPanel" in projects_page
+    assert "ProjectsGrid" in projects_page
+    assert 'href="/projects/orchestrator"' in Path(
+        "apps/duckclaw-admin/src/components/projects/ProjectsControlPanel.tsx"
+    ).read_text(encoding="utf-8")
     assert "createOrchestratorDraft" not in projects_page
     assert "confirmOrchestratorDraft" not in projects_page
     assert "orchestratorPrompt" not in projects_page
@@ -301,7 +306,7 @@ def test_managed_workspace_draft_copy_and_symbols_avoid_orchestrator_product_nam
         Path("apps/duckclaw-admin/src/app/(admin)/templates/page.tsx"),
         Path("apps/duckclaw-admin/src/app/(admin)/projects/orchestrator/page.tsx"),
         Path("apps/duckclaw-admin/src/components/projects/ProjectManagedWorkspaceDraftWizard.tsx"),
-        Path("apps/duckclaw-admin/src/components/projects/ProjectsTable.tsx"),
+        Path("apps/duckclaw-admin/src/components/projects/ProjectsGrid.tsx"),
         Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts"),
         Path("apps/duckclaw-admin/src/app/api/admin/forge-projects/route.ts"),
         Path("apps/duckclaw-admin/src/services/adminService.ts"),

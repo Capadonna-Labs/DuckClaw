@@ -62,7 +62,7 @@ export function McpLiveBanner({
                 className="inline-flex items-center gap-1.5 rounded-lg bg-gov-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-gov-blue-800 disabled:opacity-50"
               >
                 <Play size={14} />
-                {opsRunning === 'pm2_start_mcp' ? 'Iniciando...' : 'Iniciar MCP (PM2)'}
+                {opsRunning === 'pm2_start_mcp' ? 'Iniciando...' : 'Iniciar servidor HTTP (PM2)'}
               </button>
             )}
             <button
@@ -72,7 +72,7 @@ export function McpLiveBanner({
               className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-bold hover:border-gov-blue-500 disabled:opacity-50 dark:border-dark-border"
             >
               <RefreshCw size={14} className={busy ? 'animate-spin' : ''} />
-              {opsRunning === 'pm2_restart_mcp' ? 'Reiniciando...' : 'Reiniciar MCP'}
+              {opsRunning === 'pm2_restart_mcp' ? 'Reiniciando...' : 'Reiniciar servidor HTTP'}
             </button>
           </>
         )}

@@ -13,7 +13,7 @@ const TABLE_ROWS: {
 }[] = [
   {
     id: 'console',
-    label: 'Usuarios consola',
+    label: 'Usuarios web',
     table: 'Acceso a la consola web',
     roleField: 'Admin o usuario',
   },
@@ -59,7 +59,7 @@ export function AccessPersistenceInfo({ dbPath, dbExists, activeTab }: Props) {
               Hub Gateway DuckDB
             </p>
             <p className="text-xs text-gov-gray-600 dark:text-dark-muted">
-              Usuarios consola y permisos compartidos (hub gateway)
+              Usuarios web y permisos compartidos (hub gateway)
             </p>
           </div>
         </div>

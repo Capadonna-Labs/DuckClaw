@@ -1,7 +1,6 @@
 'use client';
 
-import Link from 'next/link';
-import { ChevronDown, LogOut, Sun, Moon, Menu, Sparkles, RefreshCw, User } from 'lucide-react';
+import { ChevronDown, LogOut, Sun, Moon, Menu, Sparkles, RefreshCw } from 'lucide-react';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { useRouter, usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
@@ -222,17 +221,10 @@ function UserMenu({
             {email && (
               <p className="text-[10px] text-gov-gray-500 font-mono truncate">{email}</p>
             )}
+            {isAdmin && (
+              <p className="mt-1 text-[10px] uppercase text-gov-gray-500">Rol admin</p>
+            )}
           </div>
-          {isAdmin && (
-            <Link
-              href="/administracion?tab=cuenta"
-              onClick={() => setUserMenuOpen(false)}
-              className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-gov-blue-800 hover:bg-gov-blue-50 dark:text-dark-cyan dark:hover:bg-dark-bg"
-            >
-              <User size={16} />
-              Mi cuenta
-            </Link>
-          )}
           <button
             type="button"
             onClick={onLogout}

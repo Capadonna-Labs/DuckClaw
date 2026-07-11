@@ -31,5 +31,6 @@ def test_mcp_hub_links_connectors_page() -> None:
     assert "testMcpConnector" in service
     assert "grantMcpConnector" in service
     assert "startMcpConnectorOAuth" in service
-    assert "Conectar Higgsfield" in panel
+    assert "Conectar OAuth" in panel
+    assert "presetUsesOAuthPkce" in panel
     assert "oauth/complete" in callback

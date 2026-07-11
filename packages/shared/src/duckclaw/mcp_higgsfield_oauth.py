@@ -163,8 +163,11 @@ async def start_higgsfield_oauth(
     connector = get_mcp_connector(db, connector_id=connector_id, tenant_id=tenant_id)
     if not connector:
         raise ValueError(f"connector not found: {connector_id}")
-    if str(connector.get("preset_id") or "") != HIGGSFIELD_PRESET_ID:
-        raise ValueError("OAuth flow only supported for Higgsfield preset")
+    from duckclaw.mcp_connector_presets import preset_supports_oauth_pkce
+
+    preset_id = str(connector.get("preset_id") or "")
+    if not preset_supports_oauth_pkce(preset_id):
+        raise ValueError("OAuth PKCE no está habilitado para esta plantilla MCP")
 
     callback = resolve_oauth_redirect_uri(redirect_uri)
     meta = await _fetch_oauth_metadata()

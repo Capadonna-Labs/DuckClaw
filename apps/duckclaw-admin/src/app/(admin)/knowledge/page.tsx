@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Database, FolderOpen, RefreshCw, UploadCloud } from 'lucide-react';
+import { Database, RefreshCw, UploadCloud } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
-import { KnowledgeFolderPicker } from '@/components/knowledge/KnowledgeFolderPicker';
+import { KnowledgeFolderBrowser } from '@/components/knowledge/KnowledgeFolderBrowser';
 import { KnowledgePlaygroundBanner } from '@/components/knowledge/KnowledgePlaygroundBanner';
 import { KnowledgeSourceCard } from '@/components/knowledge/KnowledgeSourceCard';
 import {
@@ -64,7 +64,6 @@ export default function KnowledgePage() {
   const [computeEmbeddings, setComputeEmbeddings] = useState(true);
   const [folderPreview, setFolderPreview] = useState<KnowledgeFolderPreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
-  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const [indexingJobs, setIndexingJobs] = useState<Record<string, IndexingJobState>>({});
   const [looseUploadOpen, setLooseUploadOpen] = useState(false);
   const [allowedRootsConfigured, setAllowedRootsConfigured] = useState<boolean | null>(null);
@@ -437,7 +436,7 @@ export default function KnowledgePage() {
           Agregar documentos
         </h2>
         <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-          Elige una carpeta para indexar. Los agentes la consultarán en el chat.
+          Navega las carpetas permitidas en el servidor y elige una para indexar. Los agentes la consultarán en el chat.
         </p>
 
         <label className="mt-4 flex cursor-pointer items-center gap-2 text-sm font-bold text-gov-gray-700 dark:text-dark-text">
@@ -460,17 +459,20 @@ export default function KnowledgePage() {
               <code className="font-mono">.env</code> y ejecuta{' '}
               <code className="font-mono">uv run duckops stack deploy</code>.
             </p>
-          ) : null}
-
-          <button
-            type="button"
-            onClick={() => setFolderPickerOpen(true)}
-            disabled={allowedRootsConfigured === false || busy}
-            className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gov-blue-200 px-4 py-3 text-sm font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
-          >
-            <FolderOpen size={18} />
-            Elegir carpeta
-          </button>
+          ) : allowedRootsConfigured === true ? (
+            <KnowledgeFolderBrowser
+              selectedPath={serverPath}
+              initialPath={serverPath}
+              onSelect={(path) => {
+                setServerPath(path);
+                setFolderPreview(null);
+                setError(null);
+                void previewServerPath(path);
+              }}
+            />
+          ) : (
+            <p className="text-xs text-gov-gray-500 dark:text-dark-muted">Comprobando rutas permitidas…</p>
+          )}
 
           {serverPath.trim() ? (
             <p className="truncate font-mono text-[11px] text-gov-gray-600 dark:text-dark-muted">{serverPath}</p>
@@ -616,18 +618,6 @@ export default function KnowledgePage() {
           </div>
         )}
       </section>
-
-      <KnowledgeFolderPicker
-        open={folderPickerOpen}
-        initialPath={serverPath}
-        onClose={() => setFolderPickerOpen(false)}
-        onSelect={(path) => {
-          setServerPath(path);
-          setFolderPreview(null);
-          setError(null);
-          void previewServerPath(path);
-        }}
-      />
     </div>
   );
 }

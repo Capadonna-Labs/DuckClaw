@@ -100,7 +100,7 @@ presets:
 
 def test_list_mcp_connector_presets_includes_all_bundled_ids() -> None:
     presets = {p["preset_id"]: p for p in list_mcp_connector_presets()}
-    assert set(presets) == {"higgsfield", "mcp_fetch", "mcp_time"}
+    assert set(presets) == {"remote_http_oauth", "mcp_fetch", "mcp_time"}
 
 
 def _seed_worker(con: duckdb.DuckDBPyConnection, worker_id: str) -> str:

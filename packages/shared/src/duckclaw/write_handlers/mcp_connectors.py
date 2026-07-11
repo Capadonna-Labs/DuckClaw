@@ -23,6 +23,9 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
     actor = str(payload.get("actor_email") or "system").strip().lower()
     connector_id = str(payload.get("connector_id") or "").strip()
     preset_id = str(payload.get("preset_id") or "").strip().lower()
+    from duckclaw.mcp_connector_presets import resolve_preset_id
+
+    preset_id = resolve_preset_id(preset_id)
     preset = preset_payload(preset_id) if preset_id else None
     if not connector_id and preset_id:
         connector_id = f"mcp_{preset_id}"

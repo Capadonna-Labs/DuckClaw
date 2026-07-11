@@ -183,7 +183,9 @@ def get_mcp_connector_runtime(db: Any, *, connector_id: str, tenant_id: str = "d
 def _connector_has_auth(db: Any, connector: dict[str, Any]) -> bool:
     kind = str(connector.get("auth_kind") or "none").strip().lower()
     preset = str(connector.get("preset_id") or "").strip().lower()
-    if preset == "higgsfield" and kind in ("", "none"):
+    from duckclaw.mcp_connector_presets import preset_supports_oauth_pkce
+
+    if preset_supports_oauth_pkce(preset) and kind in ("", "none"):
         kind = "bearer"
     if kind in ("", "none"):
         return True

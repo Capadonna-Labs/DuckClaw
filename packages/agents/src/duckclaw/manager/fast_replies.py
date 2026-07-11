@@ -121,21 +121,20 @@ def _capabilities_fast_reply_text(
         )
     coord = (coordinator_id or "").strip()
     pool = [worker for worker in (delegation_pool or []) if (worker or "").strip()]
-    if coord and pool:
-        lines = "\n".join(f"- {worker}" for worker in pool)
-        body = prompt_policies.format("capability", "axis_coordinator", coord=coord, lines=lines)
+    worker = (coord or worker_id or "").strip()
+    tenant = (tenant_id or "default").strip() or "default"
+    if worker:
+        body = prompt_policies.format(
+            "capability",
+            "generic_worker",
+            worker_id=worker,
+            tenant_id=tenant,
+        )
     else:
-        worker = (worker_id or "").strip()
-        tenant = (tenant_id or "default").strip() or "default"
-        if worker:
-            body = prompt_policies.format(
-                "capability",
-                "generic_worker",
-                worker_id=worker,
-                tenant_id=tenant,
-            )
-        else:
-            body = prompt_policies.load("capability", "default_fallback")
+        body = prompt_policies.load("capability", "default_fallback")
+    if pool:
+        lines = "\n".join(f"- {agent}" for agent in pool)
+        body = f"{body}\n\nOtros agentes en este workspace:\n{lines}"
     user = (username or "").strip()
     if user and "@" in user:
         return f"{body}\n\n**Usuario de esta sesión:** {user}"

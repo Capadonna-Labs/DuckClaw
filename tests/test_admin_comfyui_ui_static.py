@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_comfyui_page_exposes_runtime_settings_db_first() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/gen/image/page.tsx").read_text(
+    page = Path("apps/duckclaw-admin/src/components/gen/GenImagePageView.tsx").read_text(
         encoding="utf-8"
     )
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")

@@ -1,9 +1,9 @@
 /** Pestañas del hub Integraciones — sidebar + contenido en /integraciones?tab= */
 
 export const INTEGRACIONES_TABS = [
-  { id: 'edge', label: 'Edge devices' },
-  { id: 'sensory', label: 'Sensory node' },
-  { id: 'telegram', label: 'Telegram' },
+  { id: 'edge', label: 'Edge devices', hint: 'Telemetría libedgecore y dashboard Streamlit' },
+  { id: 'sensory', label: 'Sensory node', hint: 'STT/TTS y laboratorio de voz' },
+  { id: 'telegram', label: 'Telegram', hint: 'Canal opcional y webhook ingress' },
 ] as const;
 
 export type IntegracionesTabId = (typeof INTEGRACIONES_TABS)[number]['id'];

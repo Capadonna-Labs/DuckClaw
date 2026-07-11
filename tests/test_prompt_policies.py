@@ -152,14 +152,14 @@ def test_classify_prompt_policy_health_marks_catalog_worker_without_row_as_inher
     create_worker(
         con,
         owner_email="ops@duckclaw.local",
-        worker_id="axis-maestro",
+        worker_id="team-lead",
         display_name="Axis Maestro",
     )
 
     classification = classify_prompt_policy_health(
         con,
         [
-            PromptPolicyRequirement("system_prompt", "axis-maestro", "worker"),
+            PromptPolicyRequirement("system_prompt", "team-lead", "worker"),
             PromptPolicyRequirement("system_prompt", "ghost-worker", "worker"),
         ],
     )
@@ -169,7 +169,7 @@ def test_classify_prompt_policy_health_marks_catalog_worker_without_row_as_inher
         PromptPolicyRequirement("system_prompt", "ghost-worker", "worker"),
     )
     assert classification.inherited == (
-        PromptPolicyRequirement("system_prompt", "axis-maestro", "worker"),
+        PromptPolicyRequirement("system_prompt", "team-lead", "worker"),
     )
     assert classification.is_ok is False
     assert INHERITED_SYSTEM_PROMPT_WARNING == "especialización pendiente"
@@ -236,7 +236,6 @@ def test_framework_capability_policies_are_seeded_by_migrations() -> None:
 
     resolver = PromptPolicyResolver(db=con)
     assert "{worker_id}" in resolver.load("capability", "generic_worker")
-    assert "{coord}" in resolver.load("capability", "axis_coordinator")
     assert resolver.load("capability", "default_fallback")
     default_prompt = resolver.load("system_prompt", "default")
     assert "## IDENTITY" in default_prompt
@@ -274,7 +273,7 @@ def test_system_prompt_worker_inherits_default_when_missing() -> None:
     con = duckdb.connect(":memory:")
     run_pending_migrations(con)
 
-    inherited = PromptPolicyResolver(db=con).load("system_prompt", "axis-maestro")
+    inherited = PromptPolicyResolver(db=con).load("system_prompt", "team-lead")
     default = PromptPolicyResolver(db=con).load("system_prompt", "default")
     assert inherited == default
 
@@ -317,8 +316,19 @@ def test_migration_021_upgrades_framework_pack_content() -> None:
     assert "## IDENTITY" in content
     assert "## PLATFORM SURFACE" in content
     assert "run_sandbox" in content
-    assert "REPORT ENGINE" in content
-    assert "render_report_instance" in content
+    assert "REPORT ENGINE" not in content
+    directive = con.execute(
+        """
+        SELECT content
+        FROM main.prompt_policy_registry
+        WHERE policy_type = 'directive'
+          AND policy_name = 'report_engine'
+          AND active = true
+        LIMIT 1
+        """
+    ).fetchone()
+    assert directive is not None
+    assert "render_report_instance" in directive[0]
     assert "framework_policy_pack_v1" in metadata
 
 

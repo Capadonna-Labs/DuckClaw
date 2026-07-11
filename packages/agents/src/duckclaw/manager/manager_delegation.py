@@ -6,16 +6,19 @@ from typing import Any
 
 from duckclaw.manager.manager_planner_llm import _llm_plan_from_model
 
+_PLANNER_FALLBACK = (
+    "Elige delegate_worker_id de la lista permitida y redacta tasks concisas "
+    "para el subagente elegido."
+)
+
+
 def _load_orchestrator_planner_prompt(coordinator_id: str, templates_root: Any) -> str:
     from duckclaw.workers.manifest import get_worker_dir
 
     path = get_worker_dir(coordinator_id, templates_root) / "orchestrator_planner.md"
     if path.is_file():
         return path.read_text(encoding="utf-8").strip()
-    return (
-        "Eres el planner del coordinador AXIS. Elige delegate_worker_id de la lista permitida "
-        "y redacta tasks para ese subagente."
-    )
+    return _PLANNER_FALLBACK
 
 
 def _resolve_orchestrator_delegate(
@@ -45,5 +48,6 @@ def _resolve_orchestrator_delegate(
     if not delegate:
         delegate = pick_delegate_heuristic(incoming, list(pool) + [coordinator_id], coordinator_id=coordinator_id)
     return delegate or coordinator_id
+
 
 __all__ = ["_load_orchestrator_planner_prompt", "_resolve_orchestrator_delegate"]

@@ -452,12 +452,11 @@ def load_telegram_creator_hint_from_repo_env(repo_root: Path) -> str:
     return ""
 
 
-# Orden alineado con gateway_db (sin DUCKCLAW_DB_PATH).
+# Orden alineado con gateway_db (sin DUCKCLAW_DB_PATH ni legacy AXIS).
 _ENV_PRIMARY_DUCKDB_KEYS: tuple[str, ...] = (
     "DUCKCLAW_GATEWAY_DB_PATH",
     "DUCKCLAW_TENANT_DB_PATH",
     "DUCKCLAW_VAULT_DB_PATH",
-    "DUCKCLAW_AXIS_DB_PATH",
     "DUCKDB_PATH",
 )
 
@@ -498,7 +497,7 @@ def load_duckdb_vault_hint_from_repo_env(repo_root: Path) -> str:
         ks = k.strip()
         if ks:
             vals[ks] = v.strip().strip("'\"")
-    for key in ("DUCKCLAW_AXIS_DB_PATH",) + _ENV_PRIMARY_DUCKDB_KEYS:
+    for key in _ENV_PRIMARY_DUCKDB_KEYS:
         hint = _env_duck_path_as_repo_relative(vals.get(key) or "", repo_root)
         if hint:
             return hint
@@ -790,10 +789,6 @@ def materialize(
     if team_raw:
         updates["DUCKCLAW_TEAM_MEMBERS"] = team_raw
     updates["DUCKCLAW_GATEWAY_DB_PATH"] = primary_rel
-    if "axis" in _low:
-        updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel
-    if _dw.startswith("axis"):
-        updates["DUCKCLAW_AXIS_DB_PATH"] = primary_rel
     # Gateways no-Finanz con tenant propio: bóveda inicial por slug de worker.
     if _dw and _dw != "default":
         updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = (draft.default_worker_id or "").strip()

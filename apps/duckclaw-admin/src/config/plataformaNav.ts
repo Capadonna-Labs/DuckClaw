@@ -1,12 +1,12 @@
 /** Pestañas del hub Plataforma — sidebar + contenido en /plataforma?tab= */
 
 export const PLATAFORMA_TABS = [
-  { id: 'reglas', label: 'Reglas base', hint: 'Policies de framework y wizard' },
-  { id: 'skills', label: 'Skills', hint: 'Capacidades del framework (manifest) — distinto de tools MCP externas' },
-  { id: 'mcp', label: 'MCP', hint: 'Conectores externos, servidor DuckClaw y catálogo' },
+  { id: 'reglas', label: 'Reglas base', hint: 'Policies de framework y borrador avanzado' },
+  { id: 'skills', label: 'Skills', hint: 'Catálogo DuckDB y skills del manifest por agente' },
+  { id: 'mcp', label: 'MCP', hint: 'Conectores externos y servidor DuckClaw MCP' },
   { id: 'imagenes', label: 'Imágenes', hint: 'Generación visual ComfyUI' },
-  { id: 'duckdb', label: 'DuckDB', hint: 'Explorador de datos y grafos' },
-  { id: 'runtime', label: 'Runtime', hint: 'Ajustes agent_config por vault' },
+  { id: 'duckdb', label: 'DuckDB', hint: 'Explorador de datos' },
+  { id: 'runtime', label: 'Runtime', hint: 'Overrides agent_config por bóveda y chat' },
 ] as const;
 
 export type PlataformaTabId = (typeof PLATAFORMA_TABS)[number]['id'];

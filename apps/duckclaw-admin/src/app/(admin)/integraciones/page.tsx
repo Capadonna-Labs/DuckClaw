@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { AdminHubShell } from '@/components/admin/AdminHubShell';
+import { PageShell } from '@/components/admin/PageShell';
 import EdgeDevicesPageView from '@/components/integrations/EdgeDevicesPageView';
 import SensoryNodePageView from '@/components/integrations/SensoryNodePageView';
 import TelegramIntegrationPageView from '@/components/integrations/TelegramIntegrationPageView';
@@ -15,20 +15,31 @@ import {
 
 function IntegracionesHubContent() {
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<IntegracionesTabId>(() => parseIntegracionesTab(searchParams.get('tab')));
+  const [tab, setTab] = useState<IntegracionesTabId>(() =>
+    parseIntegracionesTab(searchParams.get('tab'))
+  );
 
   useEffect(() => {
     setTab(parseIntegracionesTab(searchParams.get('tab')));
   }, [searchParams]);
 
-  const activeLabel = INTEGRACIONES_TABS.find((t) => t.id === tab)?.label ?? 'Integraciones';
+  const activeMeta = INTEGRACIONES_TABS.find((t) => t.id === tab);
 
   return (
-    <AdminHubShell title={activeLabel} description="Canales y nodos periféricos conectados a DuckClaw.">
+    <PageShell>
+      <header className="border-b border-gov-gray-200 pb-4 dark:border-dark-border">
+        <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">
+          {activeMeta?.label ?? 'Integraciones'}
+        </h1>
+        {activeMeta?.hint ? (
+          <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">{activeMeta.hint}</p>
+        ) : null}
+      </header>
+
       {tab === 'edge' && <EdgeDevicesPageView embedded />}
       {tab === 'sensory' && <SensoryNodePageView embedded />}
       {tab === 'telegram' && <TelegramIntegrationPageView embedded />}
-    </AdminHubShell>
+    </PageShell>
   );
 }
 

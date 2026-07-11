@@ -22,7 +22,7 @@ Core genérico LangGraph/LangChain — sin verticales hardcodeadas en Python. Mu
 
 Tablas de homeostasis/meditate viven en **`main.homeostasis_targets`** y **`main.meditate_runs`** (migración M033). El paquete Python `harness_core/` es código Meditate/Heartbeat — **no** es un schema DuckDB separado.
 
-**No usar:** `db/duckclaw.duckdb` (legacy), `db/system.duckdb`, `db/telegram.duckdb`, bóvedas AXIS antiguas. Fresh start: `bash scripts/fresh_dev_platform.sh`.
+**No usar:** `db/duckclaw.duckdb` (legacy en raíz), `db/system.duckdb`, `db/telegram.duckdb`, bóvedas `axis.duckdb` (legacy). Fresh start: `bash scripts/fresh_dev_platform.sh`. Migrar legacy: `bash scripts/migrate_legacy_axis_vault.sh`.
 
 ### Procesos y quién escribe
 

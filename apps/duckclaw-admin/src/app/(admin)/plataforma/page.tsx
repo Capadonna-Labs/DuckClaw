@@ -27,14 +27,13 @@ function PlataformaHubContent() {
   const activeMeta = PLATAFORMA_TABS.find((t) => t.id === tab);
 
   return (
-    <PageShell className="space-y-6">
-      <header>
-        <p className="text-xs font-black uppercase tracking-[0.2em] text-gov-blue-700 dark:text-dark-cyan">
-          Plataforma
-        </p>
-        <h1 className="text-3xl font-black dark:text-dark-text">{activeMeta?.label ?? 'Plataforma'}</h1>
+    <PageShell>
+      <header className="border-b border-gov-gray-200 pb-4 dark:border-dark-border">
+        <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">
+          {activeMeta?.label ?? 'Plataforma'}
+        </h1>
         {activeMeta?.hint ? (
-          <p className="mt-1 max-w-3xl text-sm text-gov-gray-500 dark:text-dark-muted">{activeMeta.hint}</p>
+          <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">{activeMeta.hint}</p>
         ) : null}
       </header>
 

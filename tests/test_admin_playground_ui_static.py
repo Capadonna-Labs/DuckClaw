@@ -535,18 +535,18 @@ def test_skills_page_exposes_new_skill_db_first_form() -> None:
     local_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/local/page.tsx").read_text(encoding="utf-8")
     service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
 
-    assert "redirect('/plataforma?tab=skills')" in redirect_page
+    assert "redirect('/plataforma?tab=skills&skillsTab=catalog')" in redirect_page
     assert "SkillCreateForm" in hub
-    assert "Modo desarrollador" in hub
+    assert "Modo desarrollador" in hub or "Desarrollador" in hub
     assert "useDeveloperMode" in hub
     assert "createSkill" not in hub
     assert "filterScope" not in hub
-    assert "Resumen de skills" in summary
+    assert "redirect('/plataforma?tab=skills&skillsTab=catalog')" in summary
     assert "readDeveloperMode" in new_page
     assert "createSkill" in create_form
     assert "implementationRef" in create_form
-    assert "Skills globales" in global_page
-    assert "Skills locales" in local_page
+    assert "redirect('/plataforma?tab=skills&skillsTab=catalog')" in global_page
+    assert "redirect('/plataforma?tab=skills&skillsTab=catalog')" in local_page
     assert "createSkill:" in service
 
 

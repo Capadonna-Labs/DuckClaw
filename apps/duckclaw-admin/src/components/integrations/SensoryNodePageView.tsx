@@ -1,100 +1,90 @@
 'use client';
 
 import Link from 'next/link';
-import SettingsSection from '@/components/settings/SettingsSection';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
-import { Mic } from 'lucide-react';
 import { VoiceLabPanel } from '@/components/sensory/VoiceLabPanel';
 
 const PM2_CMD = 'pm2 start config/ecosystem.sensory.config.cjs';
 const HEALTH_CURL = 'curl http://100.99.72.63:8001/health';
-const GATEWAY_HEALTH = 'curl -H "X-Admin-Key: $DUCKCLAW_ADMIN_API_KEY" http://127.0.0.1:8000/api/v1/sensory/health';
+const GATEWAY_HEALTH =
+  'curl -H "X-Admin-Key: $DUCKCLAW_ADMIN_API_KEY" http://127.0.0.1:8000/api/v1/sensory/health';
 
 export default function SensoryNodePageView({ embedded = false }: EmbeddedViewProps) {
   return (
     <ViewChrome embedded={embedded}>
-      {!embedded && (
-        <header>
-          <h1 className="text-3xl font-black dark:text-dark-text">Sensory node</h1>
-          <p className="text-sm text-gov-gray-500 mt-1">
-            STT (mlx-whisper) + TTS (OmniVoice) en Mac mini — paquete{' '}
-            <code className="text-xs">integrations/sensory-node/</code>
-          </p>
-        </header>
-      )}
+      <div className="space-y-4">
+        {!embedded && (
+          <header className="border-b border-gov-gray-200 pb-4 dark:border-dark-border">
+            <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">Sensory node</h1>
+            <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
+              STT + TTS en Mac mini — integrations/sensory-node/
+            </p>
+          </header>
+        )}
 
-      <SettingsSection
-        titulo="Laboratorio de voz"
-        descripcion="Nota de voz → transcripción → agente → respuesta hablada (sin Telegram)"
-        icono={<Mic size={22} />}
-      >
-        <VoiceLabPanel />
-      </SettingsSection>
+        <div className="grid gap-4 lg:grid-cols-12">
+          <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface lg:col-span-8">
+            <div className="border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+              <h2 className="text-base font-semibold text-gov-gray-900 dark:text-dark-text">
+                Laboratorio de voz
+              </h2>
+              <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">
+                Nota de voz → transcripción → agente → respuesta hablada
+              </p>
+            </div>
+            <div className="p-4">
+              <VoiceLabPanel />
+            </div>
+          </section>
 
-      <SettingsSection
-        titulo="API REST (fase interfaz)"
-        descripcion="El gateway VPS expone proxy hacia el nodo edge en Tailscale"
-        icono={<Mic size={22} />}
-      >
-        <ul className="text-sm text-gov-gray-600 dark:text-dark-muted space-y-2 list-disc pl-5">
-          <li>
-            <code className="text-xs">GET /api/v1/sensory/health</code>
-          </li>
-          <li>
-            <code className="text-xs">POST /api/v1/sensory/transcribe</code> — audio base64 → texto
-          </li>
-          <li>
-            <code className="text-xs">POST /api/v1/sensory/synthesize</code> — texto + voice_id → audio OGG
-          </li>
-        </ul>
-        <p className="text-xs text-gov-gray-500 mt-3">
-          Contrato completo: <code className="text-[10px]">integrations/sensory-node/SPEC.MD</code>
-        </p>
-      </SettingsSection>
+          <aside className="space-y-4 lg:col-span-4">
+            <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">API REST</p>
+              <ul className="mt-2 space-y-1.5 text-xs text-gov-gray-600 dark:text-dark-muted">
+                <li>
+                  <code className="font-mono">GET /api/v1/sensory/health</code>
+                </li>
+                <li>
+                  <code className="font-mono">POST /api/v1/sensory/transcribe</code>
+                </li>
+                <li>
+                  <code className="font-mono">POST /api/v1/sensory/synthesize</code>
+                </li>
+              </ul>
+              <p className="mt-2 text-xs text-gov-gray-500">
+                Spec: integrations/sensory-node/SPEC.MD
+              </p>
+            </section>
 
-      <SettingsSection
-        titulo="Mac mini (PM2)"
-        descripcion="Bind solo a IP Tailscale — no localhost ni en0"
-        icono={<Mic size={22} />}
-      >
-        <pre className="text-xs font-mono bg-gov-gray-50 dark:bg-dark-bg p-4 rounded-xl overflow-x-auto whitespace-pre-wrap">
-          {`# .env Mac mini
-DUCKCLAW_SENSORY_BIND_HOST=100.99.72.63
+            <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Mac mini (PM2)</p>
+              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gov-gray-50 p-3 font-mono text-[11px] dark:bg-dark-bg">
+                {`DUCKCLAW_SENSORY_BIND_HOST=100.99.72.63
 DUCKCLAW_SENSORY_PORT=8001
-DUCKCLAW_MCP_PORT=8010
-
 uv sync --project integrations/sensory-node
 ${PM2_CMD}`}
-        </pre>
-        <p className="text-xs text-gov-gray-500 mt-3">
-          Health directo: <code className="text-[10px]">{HEALTH_CURL}</code>
-        </p>
-      </SettingsSection>
+              </pre>
+              <p className="mt-2 break-all font-mono text-[10px] text-gov-gray-500">{HEALTH_CURL}</p>
+            </section>
 
-      <SettingsSection
-        titulo="Gateway VPS"
-        descripcion="Variable DUCKCLAW_SENSORY_BASE_URL apunta al Mac por tailnet"
-        icono={<Mic size={22} />}
-      >
-        <pre className="text-xs font-mono bg-gov-gray-50 dark:bg-dark-bg p-4 rounded-xl overflow-x-auto whitespace-pre-wrap">
-          {`DUCKCLAW_SENSORY_BASE_URL=http://100.99.72.63:8001
-# Proxy desde gateway local:
+            <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Gateway VPS</p>
+              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gov-gray-50 p-3 font-mono text-[11px] dark:bg-dark-bg">
+                {`DUCKCLAW_SENSORY_BASE_URL=http://100.99.72.63:8001
 ${GATEWAY_HEALTH}`}
-        </pre>
-        <p className="text-sm mt-3 text-gov-gray-600 dark:text-dark-muted">
-          Telegram (voz entrante / TTS saliente) se integrará en una fase posterior; la interfaz HTTP ya está
-          disponible para pruebas y clientes.
-        </p>
-        <p className="text-sm mt-3">
-          <Link href="/integrations/edge-devices" className="text-gov-blue-700 dark:text-dark-cyan font-medium">
-            Edge devices
-          </Link>
-          {' · '}
-          <Link href="/integrations" className="text-gov-blue-700 dark:text-dark-cyan font-medium">
-            Integraciones
-          </Link>
-        </p>
-      </SettingsSection>
+              </pre>
+              <p className="mt-3 text-xs">
+                <Link
+                  href="/integraciones?tab=edge"
+                  className="font-medium text-gov-blue-700 dark:text-dark-cyan"
+                >
+                  Edge devices
+                </Link>
+              </p>
+            </section>
+          </aside>
+        </div>
+      </div>
     </ViewChrome>
   );
 }

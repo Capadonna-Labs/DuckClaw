@@ -266,7 +266,7 @@ class TestWriteCommands:
             tenant_id="default",
             actor_email="test@d.local",
             user_id="owner123",
-            db_path="/tmp/axis.duckdb",
+            db_path="/tmp/duckclaw.duckdb",
             schemas=["cleanup_schema"],
             main_tables=["archived_default_orders"],
         )
@@ -275,7 +275,7 @@ class TestWriteCommands:
 
         assert raw["command_type"] == "drop_legacy_duckdb_objects"
         assert raw["user_id"] == "owner123"
-        assert raw["db_path"] == "/tmp/axis.duckdb"
+        assert raw["db_path"] == "/tmp/duckclaw.duckdb"
         assert raw["schemas"] == ["cleanup_schema"]
         assert raw["main_tables"] == ["archived_default_orders"]
 

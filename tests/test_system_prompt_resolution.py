@@ -118,3 +118,36 @@ def test_get_effective_system_prompt_uses_db_identity_pack(tmp_path: Path) -> No
     assert "## IDENTITY" in prompt
     assert "tenant-x" in prompt
     assert "soul.md" not in prompt.lower()
+
+
+def test_report_engine_directive_appended_only_when_skill_present(tmp_path: Path) -> None:
+    import duckdb
+
+    from duckclaw.prompt_policies.system_prompt import resolve_effective_system_prompt_for_worker
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    worker_dir = tmp_path / "default"
+    worker_dir.mkdir()
+
+    con = duckdb.connect(":memory:")
+    run_pending_migrations(con)
+
+    base_spec = _spec(worker_dir)
+    without = resolve_effective_system_prompt_for_worker(con, base_spec, tenant_id="t1")
+    assert "REPORT ENGINE" not in without
+
+    with_reports = WorkerSpec(
+        worker_id=base_spec.worker_id,
+        logical_worker_id=base_spec.logical_worker_id,
+        name=base_spec.name,
+        schema_name=base_spec.schema_name,
+        llm_required=base_spec.llm_required,
+        temperature=base_spec.temperature,
+        topology=base_spec.topology,
+        skills_list=["custom_reports"],
+        allowed_tables=base_spec.allowed_tables,
+        read_only=base_spec.read_only,
+        worker_dir=base_spec.worker_dir,
+    )
+    with_directive = resolve_effective_system_prompt_for_worker(con, with_reports, tenant_id="t1")
+    assert "REPORT ENGINE" in with_directive

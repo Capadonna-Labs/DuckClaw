@@ -121,7 +121,7 @@ def test_duckdb_tables_default_to_authenticated_actor_vault(
     repo_root = tmp_path / "repo"
     user_dir = repo_root / "db" / "private" / "owner123"
     user_dir.mkdir(parents=True)
-    user_db = user_dir / "axis.duckdb"
+    user_db = user_dir / "duckclaw.duckdb"
     con = duckdb.connect(str(user_db))
     con.execute("CREATE SCHEMA actor_schema")
     con.execute("CREATE TABLE actor_schema.visible_table (id INTEGER)")
@@ -142,7 +142,7 @@ def test_duckdb_tables_default_to_authenticated_actor_vault(
     assert data["actor_email"] == "owner@example.com"
     assert data["tenant_id"] == tenant_id_for_email("owner@example.com")
     assert data["tenant_id"] != "test-tenant"
-    assert data["vault_path"].endswith("db/private/owner123/axis.duckdb")
+    assert data["vault_path"].endswith("db/private/owner123/duckclaw.duckdb")
     assert data["schemas"]["actor_schema"] == ["visible_table"]
 
 
@@ -154,7 +154,7 @@ def test_duckdb_tables_show_extra_schemas_until_explicit_cleanup(
     repo_root = tmp_path / "repo"
     user_dir = repo_root / "db" / "private" / "owner123"
     user_dir.mkdir(parents=True)
-    user_db = user_dir / "axis.duckdb"
+    user_db = user_dir / "duckclaw.duckdb"
     con = duckdb.connect(str(user_db))
     con.execute("CREATE SCHEMA actor_schema")
     con.execute("CREATE TABLE actor_schema.visible_table (id INTEGER)")
@@ -186,7 +186,7 @@ def test_duckdb_legacy_schema_cleanup_requires_confirmation_and_drops_schema(
     repo_root = tmp_path / "repo"
     user_dir = repo_root / "db" / "private" / "owner123"
     user_dir.mkdir(parents=True)
-    user_db = user_dir / "axis.duckdb"
+    user_db = user_dir / "duckclaw.duckdb"
     con = duckdb.connect(str(user_db))
     con.execute("CREATE SCHEMA cleanup_schema")
     con.execute("CREATE TABLE cleanup_schema.legacy_table (id INTEGER)")
@@ -240,7 +240,7 @@ def test_duckdb_legacy_cleanup_detects_and_drops_configured_main_tables(
     repo_root = tmp_path / "repo"
     user_dir = repo_root / "db" / "private" / "owner123"
     user_dir.mkdir(parents=True)
-    user_db = user_dir / "axis.duckdb"
+    user_db = user_dir / "duckclaw.duckdb"
     con = duckdb.connect(str(user_db))
     con.execute("CREATE TABLE main.archived_default_orders (id INTEGER)")
     con.execute("CREATE TABLE main.archived_default_products (id INTEGER)")
@@ -321,7 +321,7 @@ def test_duckdb_legacy_schemas_can_be_configured_db_first(
     repo_root = tmp_path / "repo"
     user_dir = repo_root / "db" / "private" / "owner123"
     user_dir.mkdir(parents=True)
-    user_db = user_dir / "axis.duckdb"
+    user_db = user_dir / "duckclaw.duckdb"
     con = duckdb.connect(str(user_db))
     con.execute("CREATE SCHEMA custom_legacy")
     con.execute("CREATE TABLE custom_legacy.legacy_table (id INTEGER)")
@@ -382,7 +382,7 @@ def test_duckdb_query_insert(
     repo_root = tmp_path / "repo"
     user_dir = repo_root / "db" / "private" / "owner123"
     user_dir.mkdir(parents=True)
-    user_db = user_dir / "axis.duckdb"
+    user_db = user_dir / "duckclaw.duckdb"
     con = duckdb.connect(str(user_db))
     con.execute("CREATE SCHEMA sample_schema")
     con.execute("CREATE TABLE sample_schema.rows (id INTEGER, name VARCHAR)")
@@ -400,7 +400,7 @@ def test_duckdb_query_insert(
         "/api/v1/admin/duckdb/query",
         headers=headers,
         json={
-            "vault_path": "db/private/owner123/axis.duckdb",
+            "vault_path": "db/private/owner123/duckclaw.duckdb",
             "query": "INSERT INTO sample_schema.rows VALUES (2, 'beta')",
         },
     )
@@ -413,7 +413,7 @@ def test_duckdb_query_insert(
         "/api/v1/admin/duckdb/query",
         headers=headers,
         json={
-            "vault_path": "db/private/owner123/axis.duckdb",
+            "vault_path": "db/private/owner123/duckclaw.duckdb",
             "query": "SELECT id, name FROM sample_schema.rows ORDER BY id",
         },
     )

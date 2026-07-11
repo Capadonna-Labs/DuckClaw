@@ -107,6 +107,59 @@ def resolve_effective_system_prompt(
     )
 
 
+_REPORT_ENGINE_SKILL_MARKERS = frozenset({"custom_reports", "reports", "report_engine"})
+
+
+def _worker_includes_report_engine_directive(spec: WorkerSpec | None) -> bool:
+    if spec is None:
+        return False
+    skills = {
+        str(skill).strip().lower().replace("-", "_")
+        for skill in (getattr(spec, "skills_list", None) or [])
+        if str(skill or "").strip()
+    }
+    if skills & _REPORT_ENGINE_SKILL_MARKERS:
+        return True
+    return any("report" in skill for skill in skills)
+
+
+def _append_framework_directive(db: Any, base: str, directive_name: str) -> str:
+    body = (base or "").strip()
+    if not body:
+        return body
+    try:
+        directive = PromptPolicyResolver(db=db).load("directive", directive_name)
+    except FileNotFoundError:
+        return body
+    directive = (directive or "").strip()
+    if not directive:
+        return body
+    return f"{body}\n\n---\n\n{directive}"
+
+
+def resolve_effective_system_prompt_with_directives(
+    db: Any,
+    *,
+    worker_id: Optional[str] = None,
+    tenant_id: Optional[str] = None,
+    spec: WorkerSpec | None = None,
+    filesystem_fallback: str = "",
+) -> str:
+    """Resolve system prompt and append optional framework directives (e.g. report_engine)."""
+    base = resolve_effective_system_prompt(
+        db,
+        worker_id=worker_id,
+        tenant_id=tenant_id,
+        spec=spec,
+        filesystem_fallback=filesystem_fallback,
+    )
+    if db is None:
+        return base
+    if not _worker_includes_report_engine_directive(spec):
+        return base
+    return _append_framework_directive(db, base, "report_engine")
+
+
 def resolve_effective_system_prompt_for_worker(
     db: Any,
     spec: WorkerSpec,
@@ -116,7 +169,7 @@ def resolve_effective_system_prompt_for_worker(
     worker_id = (
         getattr(spec, "logical_worker_id", None) or spec.worker_id or "default"
     )
-    return resolve_effective_system_prompt(
+    return resolve_effective_system_prompt_with_directives(
         db,
         worker_id=worker_id,
         tenant_id=tenant_id,

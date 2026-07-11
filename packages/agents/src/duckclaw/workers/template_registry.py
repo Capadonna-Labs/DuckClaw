@@ -89,7 +89,7 @@ def resolve_template_id(
     """
     Resuelve input del usuario al id canónico (nombre de carpeta).
     1) Coincidencia en ``available`` (case-insensitive).
-    2) Alias global del registry (p. ej. maestro → AXIS-Maestro).
+    2) Alias global del registry (p. ej. maestro → team-lead).
     """
     if not (user_input or "").strip():
         return None

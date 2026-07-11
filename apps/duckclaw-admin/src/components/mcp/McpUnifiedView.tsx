@@ -115,47 +115,43 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
   const body = (
     <>
       {!embedded && (
-        <header>
-          <h1 className="text-3xl font-black dark:text-dark-text">MCP</h1>
-          <p className="mt-1 max-w-3xl text-sm text-gov-gray-500 dark:text-dark-muted">
-            Tres capas: conectores externos (registry + grants), configuración del servidor DuckClaw MCP, y
-            catálogo de referencia. Las skills de agente viven en{' '}
-            <span className="font-bold">Plataforma → Skills</span> (manifest); las tools MCP externas aquí en
-            Conectores.
+        <header className="border-b border-gov-gray-200 pb-4 dark:border-dark-border">
+          <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">MCP</h1>
+          <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
+            Conectores en DuckDB, servidor DuckClaw MCP y catálogo de referencia.
           </p>
         </header>
       )}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+      <div
+        className="flex flex-wrap gap-1 border-b border-gov-gray-200 dark:border-dark-border"
+        role="tablist"
+        aria-label="Secciones MCP"
+      >
         {MCP_TABS.map((item) => {
           const selected = tab === item.id;
           return (
             <button
               key={item.id}
               type="button"
+              role="tab"
+              aria-selected={selected}
               onClick={() => selectTab(item.id)}
-              className={`rounded-xl px-4 py-3 text-left sm:min-w-[160px] ${
+              className={`border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors -mb-px ${
                 selected
-                  ? 'bg-gov-blue-700 text-white'
-                  : 'border border-gov-blue-200 text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan'
+                  ? 'border-gov-blue-600 text-gov-blue-800 dark:border-dark-cyan dark:text-dark-cyan'
+                  : 'border-transparent text-gov-gray-500 hover:text-gov-gray-800 dark:hover:text-dark-text'
               }`}
             >
-              <span className="block text-sm font-black">{item.label}</span>
-              <span
-                className={`mt-0.5 block text-xs font-normal ${
-                  selected ? 'text-blue-100' : 'text-gov-gray-500 dark:text-dark-muted'
-                }`}
-              >
-                {item.hint}
-              </span>
+              {item.label}
             </button>
           );
         })}
       </div>
 
-      {!embedded && activeTab && (
+      {!embedded && activeTab ? (
         <p className="text-sm text-gov-gray-500 dark:text-dark-muted">{activeTab.hint}</p>
-      )}
+      ) : null}
 
       {(error || opsError) && (
         <p className="text-sm text-red-600">{error ?? opsError}</p>
@@ -187,7 +183,7 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
 
       {tab === 'catalog' && data && (
         <>
-          <section className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
+          <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
             <OfficialMcpReferenceTable servers={data.official_reference.servers} />
             <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold">
               <a
@@ -209,7 +205,7 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
             </div>
           </section>
 
-          <section className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
+          <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
             <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
               Servidores stdio (solo lectura)
             </h2>

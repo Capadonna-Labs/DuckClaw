@@ -36,6 +36,7 @@ import {
   type AdminNavItem,
 } from '@/config/adminNav';
 import { pathnameMatchesHub } from '@/lib/adminHubRoutes';
+import { IntegracionesNavSelector } from '@/components/layout/IntegracionesNavSelector';
 import { PlataformaNavSelector } from '@/components/layout/PlataformaNavSelector';
 import { cn } from '@/lib/utils';
 import type { LucideIcon } from 'lucide-react';
@@ -223,6 +224,14 @@ function NavGroup({
       return (
         <Suspense key={`${item.href}-${item.label}`} fallback={null}>
           <PlataformaNavSelector icon={Icon} label={item.label} onNavigate={onNavigate} />
+        </Suspense>
+      );
+    }
+
+    if (item.href === '/integraciones') {
+      return (
+        <Suspense key={`${item.href}-${item.label}`} fallback={null}>
+          <IntegracionesNavSelector icon={Icon} label={item.label} onNavigate={onNavigate} />
         </Suspense>
       );
     }

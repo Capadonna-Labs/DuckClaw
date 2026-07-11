@@ -119,8 +119,8 @@ def _user_agent_policy_error(exc: Exception):
 
 
 def _normalize_tool_profile(raw: str) -> str:
-    value = (raw or "general").strip().lower()
-    return value if value in _VALID_TOOL_PROFILES else "general"
+    del raw
+    return "general"
 
 
 def _user_agent_draft_prompt(

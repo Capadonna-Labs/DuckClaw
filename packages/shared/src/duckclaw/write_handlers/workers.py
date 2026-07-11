@@ -194,9 +194,7 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
         raise ValueError("system_prompt debe tener al menos 80 caracteres")
     if len(soul) < 20:
         raise ValueError("soul debe tener al menos 20 caracteres")
-    tool_profile = str(payload.get("tool_profile") or "general").strip().lower()
-    if tool_profile not in ("general", "minimal", "rag_only"):
-        tool_profile = "general"
+    tool_profile = "general"
     skills = [str(skill).strip()[:128] for skill in payload.get("skills") or [] if str(skill).strip()]
     if payload.get("web_search") and "research" not in {s.lower() for s in skills}:
         skills.append("research")

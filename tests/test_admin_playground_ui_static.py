@@ -209,6 +209,23 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
     assert 'href="/settings"' not in page
 
 
+def test_playground_run_settings_shows_worker_composition() -> None:
+    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    panel = Path("apps/duckclaw-admin/src/components/playground/PlaygroundRunSettingsPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    composition = Path(
+        "apps/duckclaw-admin/src/components/playground/PlaygroundWorkerCapabilitiesPanel.tsx"
+    ).read_text(encoding="utf-8")
+
+    assert "PlaygroundWorkerCapabilitiesPanel" in panel
+    assert "workerId={workerId}" in page
+    assert "capabilitiesRefreshKey" in page
+    assert "getWorkerCapabilities" in composition
+    assert "getWorkerMcpGrants" in composition
+    assert "Editar herramientas del agente" in composition
+
+
 def test_playground_config_panel_uses_compact_cards_and_modals() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
     toggle = Path("apps/duckclaw-admin/src/components/layout/PanelToggleButton.tsx").read_text(

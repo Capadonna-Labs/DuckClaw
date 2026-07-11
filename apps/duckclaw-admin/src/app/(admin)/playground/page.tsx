@@ -424,6 +424,8 @@ export default function PlaygroundPage() {
     <Pm2LiveLogsProvider autoStart={logsPanelOpen}>
       <PlaygroundRunSettingsPanel
         config={config}
+        workerId={workerId}
+        capabilitiesRefreshKey={sandboxRefreshKey}
         activeVaultPath={activeVaultPath}
         activeVaultScope={activeVaultScope}
         workerLabel={

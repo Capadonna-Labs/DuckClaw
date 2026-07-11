@@ -13,6 +13,8 @@ import {
   Terminal,
 } from 'lucide-react';
 
+import { PlaygroundWorkerCapabilitiesPanel } from '@/components/playground/PlaygroundWorkerCapabilitiesPanel';
+
 type PlaygroundConfig = {
   llm?: { provider?: string; model?: string };
   slm?: {
@@ -28,6 +30,8 @@ type SettingsModalKey = 'model' | 'vault' | 'routing' | 'instructions' | 'comman
 
 export type PlaygroundRunSettingsPanelProps = {
   config: PlaygroundConfig;
+  workerId: string;
+  capabilitiesRefreshKey?: number;
   activeVaultPath: string;
   activeVaultScope?: string;
   workerLabel: string;
@@ -63,6 +67,8 @@ function basenamePath(path: string): string {
 /** Panel lateral Run settings — estilo Google AI Studio. */
 export function PlaygroundRunSettingsPanel({
   config,
+  workerId,
+  capabilitiesRefreshKey,
   activeVaultPath,
   activeVaultScope,
   workerLabel,
@@ -193,6 +199,7 @@ export function PlaygroundRunSettingsPanel({
           open={toolsOpen}
           onToggle={() => setToolsOpen((v) => !v)}
         >
+          <PlaygroundWorkerCapabilitiesPanel workerId={workerId} refreshKey={capabilitiesRefreshKey} />
           <StudioToggleRow
             label="Logs PM2"
             hint={logsPanelOpen ? 'Consola abajo' : 'Mostrar consola de logs'}

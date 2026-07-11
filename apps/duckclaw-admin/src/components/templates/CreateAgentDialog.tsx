@@ -9,6 +9,7 @@ import type { UserAgentDraft } from '@/services/adminService';
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 import { WorkerCompositionPanel } from '@/components/templates/WorkerCompositionPanel';
 import { WorkerMcpGrantsPicker } from '@/components/templates/WorkerMcpGrantsPicker';
+import { SuggestedSkillsInstallPanel } from '@/components/templates/SuggestedSkillsInstallPanel';
 import { WorkerRoleTemplatePicker } from '@/components/templates/WorkerRoleTemplatePicker';
 import type { DraftComposition } from '@/lib/draftManifestYaml';
 import {
@@ -541,23 +542,13 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                 onSelectionChange={setPendingMcpConnectorIds}
                 disabled={busy}
               />
-              {draft.suggested_skills.some((skill) => !skill.available) && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50/80 p-3 dark:border-amber-900/50 dark:bg-amber-950/20">
-                  <p className="text-xs font-semibold text-amber-900 dark:text-amber-200">
-                    Skills sugeridas no instaladas
-                  </p>
-                  <ul className="mt-2 space-y-1.5">
-                    {draft.suggested_skills
-                      .filter((skill) => !skill.available)
-                      .map((skill) => (
-                        <li key={skill.name} className="text-xs text-amber-950 dark:text-amber-100">
-                          <span className="font-mono font-semibold">{skill.name}</span>
-                          <span className="text-amber-800 dark:text-amber-300"> — {skill.reason}</span>
-                        </li>
-                      ))}
-                  </ul>
-                </div>
-              )}
+              {(draft.suggested_skills?.length ?? 0) > 0 ? (
+                <SuggestedSkillsInstallPanel
+                  draft={draft}
+                  onDraftChange={updateDraft}
+                  disabled={busy}
+                />
+              ) : null}
             </>
           )}
         </div>

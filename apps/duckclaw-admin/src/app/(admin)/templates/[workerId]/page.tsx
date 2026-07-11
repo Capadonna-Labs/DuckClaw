@@ -14,9 +14,18 @@ import { ManifestGuidedPanel } from '@/components/templates/ManifestGuidedPanel'
 import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
 import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBanner';
 import { WorkerDisplayNameEditor } from '@/components/templates/WorkerDisplayNameEditor';
+import {
+  WorkerEditorSectionTabs,
+  defaultFileForSection,
+  sectionForFile,
+  type WorkerEditorSection,
+} from '@/components/templates/WorkerEditorSectionTabs';
 import { pollWriteTask } from '@/lib/pollWriteTask';
 
 type MarkdownViewMode = 'edit' | 'preview';
+
+const MANIFEST_PATH = 'manifest.yaml';
+const SECURITY_POLICY_PATH = 'security_policy.yaml';
 
 function isMarkdownPath(path: string): boolean {
   return /\.md$/i.test(path);
@@ -26,13 +35,34 @@ const EDITABLE = /\.(ya?ml|md|sql|txt|json|py)$/i;
 
 const PROMPT_FILES = ['system_prompt.md', 'soul.md', 'domain_closure.md', 'WORKER_OVERVIEW.md'];
 
-const TAB_LABELS: Record<string, string> = {
+const FILE_LABELS: Record<string, string> = {
   'system_prompt.md': 'Instrucciones de comportamiento',
   'soul.md': 'Tono y personalidad',
   'domain_closure.md': 'Límites del dominio',
-  'manifest.yaml': 'Configuración (manifest)',
-  'security_policy.yaml': 'Sandbox (política)',
+  'WORKER_OVERVIEW.md': 'Resumen del worker',
+  [MANIFEST_PATH]: 'Manifest (YAML crudo)',
+  [SECURITY_POLICY_PATH]: 'Política de sandbox',
 };
+
+function fileLabel(path: string): string {
+  return FILE_LABELS[path] ?? path.replace(/\.md$/i, '').replace(/_/g, ' ');
+}
+
+function partitionFiles(detail: TemplateDetail | null) {
+  if (!detail?.files) {
+    return { promptFiles: [] as string[], contextFiles: [] as string[], advancedFiles: [] as string[] };
+  }
+  const all = detail.files.map((f) => f.path).filter((p) => EDITABLE.test(p));
+  const promptFiles = PROMPT_FILES.filter((p) => all.includes(p));
+  const promptSet = new Set(promptFiles);
+  const contextFiles = [...(detail.contexts ?? [])]
+    .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
+    .map((ctx) => ctx.title)
+    .filter((path) => all.includes(path) && !promptSet.has(path));
+  const contextSet = new Set(contextFiles);
+  const advancedFiles = all.filter((p) => !promptSet.has(p) && !contextSet.has(p)).sort();
+  return { promptFiles, contextFiles, advancedFiles };
+}
 
 export default function TemplateEditorPage() {
   const { workerId } = useParams<{ workerId: string }>();
@@ -44,6 +74,7 @@ export default function TemplateEditorPage() {
   const canWrite = usuario?.rol === 'admin';
 
   const [detail, setDetail] = useState<TemplateDetail | null>(null);
+  const [section, setSection] = useState<WorkerEditorSection>('comportamiento');
   const [tab, setTab] = useState<string>('system_prompt.md');
   const [content, setContent] = useState('');
   const [markdownView, setMarkdownView] = useState<MarkdownViewMode>('preview');
@@ -62,41 +93,36 @@ export default function TemplateEditorPage() {
   const isCatalogWorker = detail?.source === 'catalog' || detail?.read_only === true;
   const canEditFiles = canWrite;
 
-  const { promptFiles, contextFiles, otherFiles } = useMemo(() => {
-    if (!detail?.files) {
-      return { promptFiles: [] as string[], contextFiles: [] as string[], otherFiles: [] as string[] };
-    }
-    const all = detail.files.map((f) => f.path).filter((p) => EDITABLE.test(p));
-    const prompts = PROMPT_FILES.filter((p) => all.includes(p));
-    const promptSet = new Set(prompts);
-    const contexts = [...(detail.contexts ?? [])]
-      .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
-      .map((ctx) => ctx.title)
-      .filter((path) => all.includes(path) && !promptSet.has(path));
-    const contextSet = new Set(contexts);
-    const rest = all.filter((p) => !promptSet.has(p) && !contextSet.has(p)).sort();
-    return { promptFiles: prompts, contextFiles: contexts, otherFiles: rest };
-  }, [detail]);
+  const { promptFiles, contextFiles, advancedFiles } = useMemo(() => partitionFiles(detail), [detail]);
 
-  const load = useCallback((preferredPath?: string) => {
-    if (!workerId) return Promise.resolve();
-    return adminService
-      .getTemplate(workerId)
-      .then((d) => {
-        setDetail(d);
-        const preferred =
-          (preferredPath && d.contents[preferredPath] !== undefined && preferredPath) ||
-          (focusFile && d.contents[focusFile] !== undefined && focusFile) ||
-          (d.contents['system_prompt.md'] !== undefined && 'system_prompt.md') ||
-          (d.contents['manifest.yaml'] !== undefined && 'manifest.yaml') ||
-          Object.keys(d.contents)[0] ||
-          'manifest.yaml';
-        setTab(preferred);
-        setContent(d.contents[preferred] ?? '');
-        setManifestYaml(d.contents['manifest.yaml'] ?? '');
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
-  }, [workerId, focusFile]);
+  const load = useCallback(
+    (preferredPath?: string) => {
+      if (!workerId) return Promise.resolve();
+      return adminService
+        .getTemplate(workerId)
+        .then((d) => {
+          setDetail(d);
+          const { promptFiles: prompts, contextFiles: contexts, advancedFiles: advanced } = partitionFiles(d);
+          const preferred =
+            (preferredPath && d.contents[preferredPath] !== undefined && preferredPath) ||
+            (focusFile && d.contents[focusFile] !== undefined && focusFile) ||
+            (d.contents['system_prompt.md'] !== undefined && 'system_prompt.md') ||
+            (d.contents[MANIFEST_PATH] !== undefined && MANIFEST_PATH) ||
+            Object.keys(d.contents)[0] ||
+            MANIFEST_PATH;
+          const nextSection =
+            preferred === MANIFEST_PATH && focusFile === MANIFEST_PATH
+              ? 'herramientas'
+              : sectionForFile(preferred, prompts, contexts);
+          setSection(nextSection);
+          setTab(preferred);
+          setContent(d.contents[preferred] ?? '');
+          setManifestYaml(d.contents[MANIFEST_PATH] ?? '');
+        })
+        .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
+    },
+    [workerId, focusFile]
+  );
 
   useEffect(() => {
     load();
@@ -104,28 +130,52 @@ export default function TemplateEditorPage() {
 
   useEffect(() => {
     if (!detail) return;
-    if (tab === 'manifest.yaml') {
+    if (tab === MANIFEST_PATH) {
       setContent(manifestYaml);
     } else {
       setContent(detail.contents[tab] ?? '');
     }
     if (!isMarkdownPath(tab)) setMarkdownView('preview');
-  }, [tab, detail, manifestYaml]);
+    // manifestYaml intentionally excluded: including it reset editor content while editing other tabs
+  }, [tab, detail]);
 
-  useEffect(() => {
-    if (tab === 'manifest.yaml') {
-      setManifestYaml(content);
-    }
-  }, [tab, content]);
-
-  const savedManifestYaml = detail?.contents?.['manifest.yaml'] ?? '';
+  const savedManifestYaml = detail?.contents?.[MANIFEST_PATH] ?? '';
   const manifestDirty = manifestYaml !== savedManifestYaml;
+  const currentFileDirty =
+    tab === MANIFEST_PATH ? manifestDirty : content !== (detail?.contents[tab] ?? '');
+  const hasUnsavedChanges =
+    currentFileDirty || (tab !== MANIFEST_PATH && manifestDirty);
 
   const onManifestChange = (nextYaml: string) => {
     setManifestYaml(nextYaml);
-    if (tab === 'manifest.yaml') {
+    if (tab === MANIFEST_PATH) {
       setContent(nextYaml);
     }
+  };
+
+  const handleContentChange = (next: string) => {
+    setContent(next);
+    if (tab === MANIFEST_PATH) {
+      setManifestYaml(next);
+    }
+  };
+
+  const selectSection = (nextSection: WorkerEditorSection) => {
+    setSection(nextSection);
+    if (nextSection === 'contextos' && contextFiles.length === 0) {
+      return;
+    }
+    setTab(defaultFileForSection(nextSection, promptFiles, contextFiles, advancedFiles));
+  };
+
+  const selectFile = (file: string, forceSection: WorkerEditorSection) => {
+    setTab(file);
+    setSection(forceSection);
+  };
+
+  const openHerramientas = () => {
+    setSection('herramientas');
+    setTab(MANIFEST_PATH);
   };
 
   const save = async () => {
@@ -137,8 +187,8 @@ export default function TemplateEditorPage() {
       const taskIds: string[] = [];
       const primary = await adminService.saveTemplateFile(workerId, tab, content);
       if (primary.task_id) taskIds.push(primary.task_id);
-      if (tab !== 'manifest.yaml' && manifestDirty) {
-        const manifest = await adminService.saveTemplateFile(workerId, 'manifest.yaml', manifestYaml);
+      if (tab !== MANIFEST_PATH && manifestDirty) {
+        const manifest = await adminService.saveTemplateFile(workerId, MANIFEST_PATH, manifestYaml);
         if (manifest.task_id) taskIds.push(manifest.task_id);
       }
       for (const taskId of taskIds) {
@@ -186,12 +236,13 @@ export default function TemplateEditorPage() {
         : `${newContextTitle.trim()}.md`;
       await adminService.createTemplateContext(workerId, {
         title,
-        content_md: `# ${title.replace(/\\.md$/i, '')}\n\n`,
+        content_md: `# ${title.replace(/\.md$/i, '')}\n\n`,
         sort_order: (detail?.contexts?.length ?? 0) * 10 + 100,
       });
       setNewContextTitle('');
+      setSection('contextos');
       setTab(title);
-      setMsg('Contexto creado en DuckDB');
+      setMsg('Contexto creado');
       await load(title);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error creando contexto');
@@ -225,6 +276,7 @@ export default function TemplateEditorPage() {
   if (!workerId) return null;
 
   const isContextTab = Boolean(detail?.contexts?.some((item) => item.title === tab));
+  const showSidebar = section !== 'herramientas';
 
   return (
     <div className="space-y-6">
@@ -249,7 +301,12 @@ export default function TemplateEditorPage() {
               setMsg('Nombre actualizado.');
             }}
           />
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {hasUnsavedChanges ? (
+              <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-black uppercase text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                Sin guardar
+              </span>
+            ) : null}
             {!isCatalogWorker && (
               <button
                 type="button"
@@ -288,76 +345,114 @@ export default function TemplateEditorPage() {
       )}
       {error && <p className="text-sm text-red-600 dark:text-red-300">{error}</p>}
 
-      <div className="grid gap-6 lg:grid-cols-12">
-        <div className="lg:col-span-3">
-          <aside className="space-y-3 rounded-2xl border border-gov-gray-100 bg-white p-3 dark:border-dark-border dark:bg-dark-surface lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
-            {isCatalogWorker && canWrite && (
-              <CatalogContextTools
-                title={newContextTitle}
-                error={contextError}
-                onTitleChange={(value) => {
-                  setNewContextTitle(value);
-                  setContextError(null);
-                }}
-                onCreate={createContext}
-                onRequestDelete={requestDeleteContext}
-                canDelete={isContextTab}
-              />
-            )}
-            <FileGroup
-              title="Comportamiento"
-              files={promptFiles}
-              tab={tab}
-              onSelect={setTab}
-              emptyHint="Sin system_prompt.md — vuelve a crear el agente o añade el archivo aquí."
-            />
-            {isCatalogWorker && (
-              <FileGroup
-                title="Contextos DB"
-                files={contextFiles}
-                tab={tab}
-                onSelect={setTab}
-                emptyHint="Sin contextos Markdown asociados todavía."
-              />
-            )}
-            <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
-          </aside>
-        </div>
+      <WorkerEditorSectionTabs
+        active={section}
+        showContextos={isCatalogWorker}
+        onChange={selectSection}
+      />
 
-        <div className="min-w-0 space-y-4 lg:col-span-9">
-          <WorkerCapabilitiesCard
-            workerId={workerId}
-            manifestYaml={manifestYaml}
-            manifestDirty={manifestDirty}
-            canEdit={canEditFiles}
-            refreshKey={msg}
-            onOpenManifest={() => setTab('manifest.yaml')}
-          />
+      <div className="grid gap-6 lg:grid-cols-12">
+        {showSidebar ? (
+          <div className="lg:col-span-3">
+            <aside className="space-y-3 rounded-2xl border border-gov-gray-100 bg-white p-3 dark:border-dark-border dark:bg-dark-surface lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
+              {section === 'comportamiento' && (
+                <FileNavGroup
+                  files={promptFiles}
+                  tab={tab}
+                  onSelect={(file) => selectFile(file, 'comportamiento')}
+                  emptyHint="Sin archivos de comportamiento."
+                />
+              )}
+              {section === 'contextos' && isCatalogWorker && (
+                <>
+                  <CatalogContextTools
+                    title={newContextTitle}
+                    error={contextError}
+                    onTitleChange={(value) => {
+                      setNewContextTitle(value);
+                      setContextError(null);
+                    }}
+                    onCreate={createContext}
+                    onRequestDelete={requestDeleteContext}
+                    canDelete={isContextTab}
+                  />
+                  <FileNavGroup
+                    files={contextFiles}
+                    tab={tab}
+                    onSelect={(file) => selectFile(file, 'contextos')}
+                    emptyHint="Aún no hay contextos. Añade uno arriba."
+                  />
+                </>
+              )}
+              {section === 'avanzado' && (
+                <FileNavGroup
+                  files={advancedFiles}
+                  tab={tab}
+                  onSelect={(file) => selectFile(file, 'avanzado')}
+                  emptyHint="Sin archivos técnicos."
+                  showPath
+                />
+              )}
+            </aside>
+          </div>
+        ) : null}
+
+        <div className={showSidebar ? 'min-w-0 space-y-4 lg:col-span-9' : 'min-w-0 space-y-4 lg:col-span-12'}>
+          {section !== 'herramientas' && (
+            <WorkerCapabilitiesCard
+              workerId={workerId}
+              manifestYaml={manifestYaml}
+              manifestDirty={manifestDirty}
+              canEdit={canEditFiles}
+              refreshKey={msg}
+              onOpenManifest={openHerramientas}
+            />
+          )}
 
           <section className="space-y-3 rounded-2xl border border-gov-gray-100 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
-            <div>
-              <h2 className="text-sm font-black text-gov-gray-900 dark:text-dark-text">
-                {TAB_LABELS[tab] ?? tab}
-              </h2>
-              <p className="mt-0.5 font-mono text-[11px] text-gov-gray-400 dark:text-dark-muted">{tab}</p>
-            </div>
+            {section !== 'herramientas' && !(section === 'contextos' && contextFiles.length === 0) && (
+              <div>
+                <h2 className="text-sm font-black text-gov-gray-900 dark:text-dark-text">{fileLabel(tab)}</h2>
+                {(section === 'avanzado' || !FILE_LABELS[tab]) && (
+                  <p className="mt-0.5 font-mono text-[11px] text-gov-gray-400 dark:text-dark-muted">{tab}</p>
+                )}
+              </div>
+            )}
 
-            {tab === 'manifest.yaml' && (
-              <ManifestGuidedPanel yaml={content} onChange={setContent} disabled={!canEditFiles} />
-            )}
-            {tab === 'security_policy.yaml' && <SecurityPolicyInfoPanel />}
-            {markdownFile && (
-              <MarkdownViewToggle mode={markdownView} onChange={setMarkdownView} />
-            )}
-            {tab !== 'manifest.yaml' && tab !== 'security_policy.yaml' && (
-              <TemplateFileEditor
-                content={content}
-                onChange={setContent}
-                readOnly={!canEditFiles}
-                markdownFile={markdownFile}
-                viewMode={markdownView}
+            {section === 'herramientas' && (
+              <ManifestGuidedPanel
+                yaml={manifestYaml}
+                onChange={onManifestChange}
+                disabled={!canEditFiles}
               />
             )}
+
+            {section === 'contextos' && contextFiles.length === 0 && (
+              <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
+                No hay contextos todavía. Usa el panel izquierdo para añadir uno.
+              </p>
+            )}
+
+            {section !== 'herramientas' &&
+              !(section === 'contextos' && contextFiles.length === 0) &&
+              tab === SECURITY_POLICY_PATH && <SecurityPolicyInfoPanel />}
+
+            {section !== 'herramientas' &&
+              !(section === 'contextos' && contextFiles.length === 0) &&
+              tab !== SECURITY_POLICY_PATH &&
+              markdownFile && <MarkdownViewToggle mode={markdownView} onChange={setMarkdownView} />}
+
+            {section !== 'herramientas' &&
+              !(section === 'contextos' && contextFiles.length === 0) &&
+              tab !== SECURITY_POLICY_PATH && (
+                <TemplateFileEditor
+                  content={content}
+                  onChange={handleContentChange}
+                  readOnly={!canEditFiles}
+                  markdownFile={markdownFile}
+                  viewMode={markdownView}
+                />
+              )}
           </section>
         </div>
       </div>
@@ -406,7 +501,7 @@ function CatalogContextTools({
       <input
         value={title}
         onChange={(e) => onTitleChange(e.target.value)}
-        placeholder="nuevo_contexto.md"
+        placeholder="runbook_ops.md"
         className="mt-2 w-full rounded-lg border px-2 py-1.5 text-[11px] dark:border-dark-border dark:bg-dark-bg"
       />
       {error && <p className="mt-1 px-1 text-[10px] font-semibold text-red-600">{error}</p>}
@@ -489,66 +584,67 @@ function TemplateFileEditor({
     );
   }
 
-  if (viewMode === 'preview') {
-    return (
-      <div
-        className="min-h-[420px] w-full overflow-y-auto rounded-2xl border bg-white p-4 dark:border-dark-border dark:bg-dark-bg"
-        aria-label="Vista previa Markdown"
-      >
-        {content.trim() ? (
-          <ChatMarkdown content={content} className="text-sm" />
-        ) : (
-          <p className="text-sm italic text-gov-gray-400 dark:text-dark-muted">Sin contenido</p>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <textarea
-      value={content}
-      onChange={(e) => onChange(e.target.value)}
-      readOnly={readOnly}
-      className={editorTextareaClass}
-      spellCheck={false}
-      aria-label="Editor Markdown"
-    />
+    <div
+      className="min-h-[420px] w-full overflow-y-auto rounded-2xl border bg-white p-4 dark:border-dark-border dark:bg-dark-bg"
+      aria-label="Vista previa Markdown"
+    >
+      {content.trim() ? (
+        <ChatMarkdown content={content} className="text-sm" />
+      ) : (
+        <p className="text-sm italic text-gov-gray-400 dark:text-dark-muted">Sin contenido</p>
+      )}
+    </div>
   );
 }
 
-function FileGroup({
-  title,
+function FileNavGroup({
   files,
   tab,
   onSelect,
   emptyHint,
+  showPath = false,
 }: {
-  title: string;
   files: string[];
   tab: string;
   onSelect: (f: string) => void;
   emptyHint?: string;
+  showPath?: boolean;
 }) {
+  if (files.length === 0) {
+    return emptyHint ? (
+      <p className="px-2 py-1 text-[11px] text-gov-gray-400 dark:text-dark-muted">{emptyHint}</p>
+    ) : null;
+  }
+
   return (
-    <div className="mb-3">
-      <p className="text-[10px] font-bold uppercase text-gov-gray-500 px-2 py-1">{title}</p>
-      {files.length === 0 && emptyHint ? (
-        <p className="text-[10px] text-gov-gray-400 px-2 py-1">{emptyHint}</p>
-      ) : null}
-      {files.map((f) => (
-        <button
-          key={f}
-          type="button"
-          onClick={() => onSelect(f)}
-          className={`block w-full text-left text-xs font-mono px-2 py-1.5 rounded-lg truncate ${
-            tab === f
-              ? 'bg-gov-blue-700 text-white'
-              : 'hover:bg-white dark:hover:bg-dark-surface'
-          }`}
-        >
-          {f}
-        </button>
-      ))}
+    <div className="space-y-1">
+      {files.map((f) => {
+        const selected = tab === f;
+        return (
+          <button
+            key={f}
+            type="button"
+            onClick={() => onSelect(f)}
+            className={`block w-full rounded-lg px-2 py-2 text-left transition-colors ${
+              selected
+                ? 'bg-gov-blue-700 text-white'
+                : 'hover:bg-gov-gray-50 dark:hover:bg-dark-bg'
+            }`}
+          >
+            <span className="block text-xs font-bold">{fileLabel(f)}</span>
+            {showPath ? (
+              <span
+                className={`mt-0.5 block truncate font-mono text-[10px] ${
+                  selected ? 'text-white/80' : 'text-gov-gray-400 dark:text-dark-muted'
+                }`}
+              >
+                {f}
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
     </div>
   );
 }

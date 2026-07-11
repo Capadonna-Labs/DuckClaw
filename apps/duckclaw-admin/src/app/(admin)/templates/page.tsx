@@ -10,9 +10,9 @@ import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 import { CreateAgentDialog } from '@/components/templates/CreateAgentDialog';
 import { isAdminRole } from '@/lib/roles';
 import { paginateItems } from '@/lib/pagination';
-import { agentDescription, agentMetadata } from '@/lib/agentCards';
+import { agentCardSubtitle, agentMetadata, agentWorkerIcon } from '@/lib/agentCards';
 import { filterVisibleTemplates } from '@/lib/templateVisibility';
-import { Bot, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Power, Trash2 } from 'lucide-react';
 
 const AGENTS_PAGE_SIZE = 5;
 
@@ -236,18 +236,21 @@ function AgentCard({
   onRequestHardDelete: (t: TemplateSummary) => void;
 }) {
   const metadata = agentMetadata(agent);
+  const subtitle = agentCardSubtitle(agent);
+  const Icon = agentWorkerIcon(agent.id);
   const isCatalogManaged = agent.source === 'catalog' && Boolean(agent.worker_uid);
   const isProtectedWorker = agent.id === 'default';
+  const showLifecycleActions = canWrite && isCatalogManaged && !isProtectedWorker;
 
   return (
-    <article className="group flex min-h-[190px] flex-col rounded-2xl border border-gov-gray-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-gov-blue-300 hover:shadow-md dark:border-dark-border dark:bg-dark-surface">
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gov-blue-50 text-gov-blue-700 dark:bg-dark-bg dark:text-dark-cyan">
-          <Bot size={18} />
+    <article className="group flex min-h-[176px] flex-col rounded-2xl border border-gov-gray-100 bg-white p-4 shadow-sm transition-all hover:-translate-y-0.5 hover:border-gov-blue-300 hover:shadow-md dark:border-dark-border dark:bg-dark-surface">
+      <div className="flex items-start gap-3.5">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gov-blue-50 text-gov-blue-700 dark:bg-dark-bg dark:text-dark-cyan">
+          <Icon size={22} strokeWidth={2.25} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
-            <h2 className="line-clamp-1 text-base font-black leading-tight text-gov-gray-900 dark:text-dark-text">
+            <h2 className="line-clamp-2 text-lg font-black leading-snug text-gov-gray-900 dark:text-dark-text">
               {agent.name ?? agent.id}
             </h2>
             <span className="shrink-0 rounded-full bg-gov-gray-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-gov-gray-500 dark:bg-dark-bg dark:text-dark-muted">
@@ -260,9 +263,11 @@ function AgentCard({
         </div>
       </div>
 
-      <p className="mt-3 line-clamp-3 min-h-[54px] text-xs leading-relaxed text-gov-gray-600 dark:text-dark-muted">
-        {agentDescription(agent)}
-      </p>
+      {subtitle ? (
+        <p className="mt-3 line-clamp-2 text-xs leading-relaxed text-gov-gray-600 dark:text-dark-muted">
+          {subtitle}
+        </p>
+      ) : null}
 
       {metadata.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -283,32 +288,37 @@ function AgentCard({
         </p>
       )}
 
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-gov-gray-100 pt-3 dark:border-dark-border">
+      <div className="mt-auto flex flex-wrap items-center gap-1.5 border-t border-gov-gray-100 pt-2.5 dark:border-dark-border">
         <Link
           href={`/templates/${agent.id}`}
-          className="rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-black text-white transition-colors hover:bg-gov-blue-800"
+          className="inline-flex items-center rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-black text-white transition-colors hover:bg-gov-blue-800"
         >
           {isAdmin ? 'Editar' : 'Abrir'}
         </Link>
-        {canWrite && isCatalogManaged && !isProtectedWorker && (
-          <div className="flex flex-wrap justify-end gap-1">
+        {showLifecycleActions ? (
+          <div className="ml-auto flex items-center gap-1">
             <button
               type="button"
               onClick={() => onRequestDeactivate(agent)}
-              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-700 transition-colors hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/30"
+              title="Desactivar del catálogo"
+              aria-label={`Desactivar ${agent.name ?? agent.id}`}
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-200 px-2.5 py-1.5 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30"
             >
-              Desactivar
+              <Power size={14} />
+              <span className="hidden sm:inline">Desactivar</span>
             </button>
             <button
               type="button"
               onClick={() => onRequestHardDelete(agent)}
-              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 dark:hover:bg-red-950/30"
+              title="Eliminar definitivo"
+              aria-label={`Eliminar ${agent.name ?? agent.id}`}
+              className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
             >
               <Trash2 size={14} />
-              Eliminar definitivo
+              <span className="hidden sm:inline">Eliminar</span>
             </button>
           </div>
-        )}
+        ) : null}
       </div>
     </article>
   );

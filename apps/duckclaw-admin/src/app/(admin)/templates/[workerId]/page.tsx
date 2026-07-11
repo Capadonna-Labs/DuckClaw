@@ -6,7 +6,8 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { adminService } from '@/services/adminService';
 import type { TemplateDetail } from '@/types/admin';
 import { useAuthStore } from '@/store/authStore';
-import { ChevronRight, Save, CheckCircle, Eye, FileCode, Columns2, Plus, Trash2, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
+import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
+import { ChevronRight, Save, CheckCircle, Eye, FileCode, Plus, Trash2, Loader2 } from 'lucide-react';
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { WorkerCapabilitiesCard } from '@/components/templates/WorkerCapabilitiesCard';
 import { ManifestGuidedPanel } from '@/components/templates/ManifestGuidedPanel';
@@ -15,7 +16,7 @@ import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBan
 import { WorkerDisplayNameEditor } from '@/components/templates/WorkerDisplayNameEditor';
 import { pollWriteTask } from '@/lib/pollWriteTask';
 
-type MarkdownViewMode = 'edit' | 'preview' | 'split';
+type MarkdownViewMode = 'edit' | 'preview';
 
 function isMarkdownPath(path: string): boolean {
   return /\.md$/i.test(path);
@@ -45,13 +46,17 @@ export default function TemplateEditorPage() {
   const [detail, setDetail] = useState<TemplateDetail | null>(null);
   const [tab, setTab] = useState<string>('system_prompt.md');
   const [content, setContent] = useState('');
-  const [markdownView, setMarkdownView] = useState<MarkdownViewMode>('edit');
+  const [markdownView, setMarkdownView] = useState<MarkdownViewMode>('preview');
   const [msg, setMsg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [newContextTitle, setNewContextTitle] = useState('');
   const [contextError, setContextError] = useState<string | null>(null);
   const [manifestYaml, setManifestYaml] = useState('');
   const [saving, setSaving] = useState(false);
+  const [pendingDeleteContext, setPendingDeleteContext] = useState<{ contextId: string; title: string } | null>(
+    null
+  );
+  const [deletingContext, setDeletingContext] = useState(false);
 
   const markdownFile = isMarkdownPath(tab);
   const isCatalogWorker = detail?.source === 'catalog' || detail?.read_only === true;
@@ -62,13 +67,13 @@ export default function TemplateEditorPage() {
       return { promptFiles: [] as string[], contextFiles: [] as string[], otherFiles: [] as string[] };
     }
     const all = detail.files.map((f) => f.path).filter((p) => EDITABLE.test(p));
+    const prompts = PROMPT_FILES.filter((p) => all.includes(p));
+    const promptSet = new Set(prompts);
     const contexts = [...(detail.contexts ?? [])]
       .sort((a, b) => Number(a.sort_order) - Number(b.sort_order))
       .map((ctx) => ctx.title)
-      .filter((path) => all.includes(path));
+      .filter((path) => all.includes(path) && !promptSet.has(path));
     const contextSet = new Set(contexts);
-    const prompts = PROMPT_FILES.filter((p) => all.includes(p));
-    const promptSet = new Set(prompts);
     const rest = all.filter((p) => !promptSet.has(p) && !contextSet.has(p)).sort();
     return { promptFiles: prompts, contextFiles: contexts, otherFiles: rest };
   }, [detail]);
@@ -104,7 +109,7 @@ export default function TemplateEditorPage() {
     } else {
       setContent(detail.contents[tab] ?? '');
     }
-    if (!isMarkdownPath(tab)) setMarkdownView('edit');
+    if (!isMarkdownPath(tab)) setMarkdownView('preview');
   }, [tab, detail, manifestYaml]);
 
   useEffect(() => {
@@ -193,58 +198,48 @@ export default function TemplateEditorPage() {
     }
   };
 
-  const deleteCurrentContext = async () => {
-    if (!workerId || !isCatalogWorker || !tab) return;
+  const requestDeleteContext = () => {
+    if (!isCatalogWorker || !tab) return;
     const ctx = detail?.contexts?.find((item) => item.title === tab);
     if (!ctx) return;
-    setMsg(null);
-    setError(null);
-    try {
-      await adminService.deleteTemplateContext(workerId, ctx.context_id);
-      setMsg('Contexto desactivado en DuckDB');
-      load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error eliminando contexto');
-    }
+    setPendingDeleteContext({ contextId: ctx.context_id, title: ctx.title });
   };
 
-  const moveCurrentContext = async (direction: -1 | 1) => {
-    if (!workerId || !isCatalogWorker || !detail?.contexts?.length) return;
-    const ordered = [...detail.contexts].sort((a, b) => Number(a.sort_order) - Number(b.sort_order));
-    const idx = ordered.findIndex((item) => item.title === tab);
-    const swapIdx = idx + direction;
-    if (idx < 0 || swapIdx < 0 || swapIdx >= ordered.length) return;
-    const current = ordered[idx];
-    const other = ordered[swapIdx];
+  const confirmDeleteContext = async () => {
+    if (!workerId || !pendingDeleteContext) return;
+    setMsg(null);
+    setError(null);
+    setDeletingContext(true);
     try {
-      await adminService.reorderTemplateContexts(workerId, [
-        { context_id: current.context_id, sort_order: Number(other.sort_order) },
-        { context_id: other.context_id, sort_order: Number(current.sort_order) },
-      ]);
-      setMsg('Orden actualizado en DuckDB');
-      load();
+      await adminService.deleteTemplateContext(workerId, pendingDeleteContext.contextId);
+      setPendingDeleteContext(null);
+      setMsg('Contexto eliminado');
+      await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error reordenando contexto');
+      setError(e instanceof Error ? e.message : 'Error eliminando contexto');
+    } finally {
+      setDeletingContext(false);
     }
   };
 
   if (!workerId) return null;
 
-  return (
-    <div className="space-y-4">
-      <nav className="flex items-center gap-2 text-sm text-gov-gray-500">
-        <Link href="/templates" className="hover:text-gov-blue-700">
-          Workers
-        </Link>
-        <ChevronRight size={14} />
-        <span className="font-mono text-gov-gray-900 dark:text-dark-text">{workerId}</span>
-        <span className="text-[10px] uppercase px-2 py-0.5 rounded bg-gov-cyan-100 text-gov-blue-800 dark:bg-dark-bg">
-          {isCatalogWorker ? 'catálogo DB' : 'canónico (archivo)'}
-        </span>
-      </nav>
+  const isContextTab = Boolean(detail?.contexts?.some((item) => item.title === tab));
 
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
+  return (
+    <div className="space-y-6">
+      <header className="space-y-3">
+        <nav className="flex flex-wrap items-center gap-2 text-sm text-gov-gray-500 dark:text-dark-muted">
+          <Link href="/templates" className="hover:text-gov-blue-700 dark:hover:text-dark-cyan">
+            Workers
+          </Link>
+          <ChevronRight size={14} />
+          <span className="font-mono text-gov-gray-900 dark:text-dark-text">{workerId}</span>
+          <span className="rounded-full bg-gov-cyan-100 px-2 py-0.5 text-[10px] font-black uppercase text-gov-blue-800 dark:bg-dark-bg dark:text-dark-cyan">
+            {isCatalogWorker ? 'catálogo DB' : 'canónico (archivo)'}
+          </span>
+        </nav>
+        <div className="flex flex-wrap items-start justify-between gap-4">
           <WorkerDisplayNameEditor
             workerId={workerId}
             displayName={detail?.display_name || workerId}
@@ -254,28 +249,28 @@ export default function TemplateEditorPage() {
               setMsg('Nombre actualizado.');
             }}
           />
-        </div>
-        <div className="flex gap-2 flex-wrap">
-          {!isCatalogWorker && (
-            <button
-              type="button"
-              onClick={validate}
-              className="px-3 py-2 text-sm border rounded-xl dark:border-dark-border"
-            >
-              Validar manifest
-            </button>
-          )}
-          {canEditFiles && (
-            <button
-              type="button"
-              onClick={save}
-              disabled={saving}
-              className="px-4 py-2 text-sm bg-gov-blue-700 text-white rounded-xl flex items-center gap-2 disabled:opacity-60"
-            >
-              {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-              {saving ? 'Guardando…' : 'Guardar'}
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {!isCatalogWorker && (
+              <button
+                type="button"
+                onClick={validate}
+                className="rounded-xl border px-3 py-2 text-sm dark:border-dark-border"
+              >
+                Validar manifest
+              </button>
+            )}
+            {canEditFiles && (
+              <button
+                type="button"
+                onClick={save}
+                disabled={saving}
+                className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
+              >
+                {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+                {saving ? 'Guardando…' : 'Guardar'}
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
@@ -286,89 +281,104 @@ export default function TemplateEditorPage() {
         />
       )}
 
-      <WorkerCapabilitiesCard
-        workerId={workerId}
-        manifestYaml={manifestYaml}
-        onManifestChange={onManifestChange}
-        manifestDirty={manifestDirty}
-        canEdit={canEditFiles}
-        refreshKey={msg}
-      />
+      {msg && (
+        <p className="flex items-center gap-1 text-sm text-green-700 dark:text-green-300">
+          <CheckCircle size={16} /> {msg}
+        </p>
+      )}
+      {error && <p className="text-sm text-red-600 dark:text-red-300">{error}</p>}
 
-      <div className="flex flex-col lg:flex-row gap-4">
-        <aside className="lg:w-56 shrink-0 max-h-48 lg:max-h-[520px] overflow-y-auto rounded-xl border dark:border-dark-border p-2 bg-gov-gray-50 dark:bg-dark-bg">
-          {isCatalogWorker && canWrite && (
-            <CatalogContextTools
-              title={newContextTitle}
-              error={contextError}
-              onTitleChange={(value) => {
-                setNewContextTitle(value);
-                setContextError(null);
-              }}
-              onCreate={createContext}
-              onMoveUp={() => moveCurrentContext(-1)}
-              onMoveDown={() => moveCurrentContext(1)}
-              onDelete={deleteCurrentContext}
-              canDelete={!!detail?.contexts?.some((item) => item.title === tab)}
-            />
-          )}
-          <FileGroup
-            title="Comportamiento"
-            files={promptFiles}
-            tab={tab}
-            onSelect={setTab}
-            emptyHint="Sin system_prompt.md — vuelve a crear el agente o añade el archivo aquí."
-          />
-          {isCatalogWorker && (
+      <div className="grid gap-6 lg:grid-cols-12">
+        <div className="lg:col-span-3">
+          <aside className="space-y-3 rounded-2xl border border-gov-gray-100 bg-white p-3 dark:border-dark-border dark:bg-dark-surface lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
+            {isCatalogWorker && canWrite && (
+              <CatalogContextTools
+                title={newContextTitle}
+                error={contextError}
+                onTitleChange={(value) => {
+                  setNewContextTitle(value);
+                  setContextError(null);
+                }}
+                onCreate={createContext}
+                onRequestDelete={requestDeleteContext}
+                canDelete={isContextTab}
+              />
+            )}
             <FileGroup
-              title="Contextos DB"
-              files={contextFiles}
+              title="Comportamiento"
+              files={promptFiles}
               tab={tab}
               onSelect={setTab}
-              emptyHint="Sin contextos Markdown asociados todavía."
+              emptyHint="Sin system_prompt.md — vuelve a crear el agente o añade el archivo aquí."
             />
-          )}
-          <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
-          <p className="text-[10px] text-gov-gray-500 px-2 py-2 border-t dark:border-dark-border mt-2">
-            La bóveda DuckDB se elige por conversación en Playground, no por worker.
-          </p>
-        </aside>
+            {isCatalogWorker && (
+              <FileGroup
+                title="Contextos DB"
+                files={contextFiles}
+                tab={tab}
+                onSelect={setTab}
+                emptyHint="Sin contextos Markdown asociados todavía."
+              />
+            )}
+            <FileGroup title="Config y datos" files={otherFiles} tab={tab} onSelect={setTab} />
+          </aside>
+        </div>
 
-        <div className="flex-1 min-w-0 space-y-2">
-          <p className="text-sm font-bold text-gov-gray-700 dark:text-dark-text">
-            {TAB_LABELS[tab] ?? tab}
-          </p>
-          <p className="text-[10px] font-mono text-gov-gray-400">{tab}</p>
-          {msg && (
-            <p className="text-sm text-green-700 flex items-center gap-1">
-              <CheckCircle size={16} /> {msg}
-            </p>
-          )}
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          {tab === 'manifest.yaml' && (
-            <ManifestGuidedPanel
-              yaml={content}
-              onChange={setContent}
-              disabled={!canEditFiles}
-            />
-          )}
-          {tab === 'security_policy.yaml' && <SecurityPolicyInfoPanel />}
-          {markdownFile && (
-            <MarkdownViewToggle
-              mode={markdownView}
-              canSplit={canWrite}
-              onChange={setMarkdownView}
-            />
-          )}
-          <TemplateFileEditor
-            content={content}
-            onChange={setContent}
-            readOnly={!canEditFiles}
-            markdownFile={markdownFile}
-            viewMode={markdownView}
+        <div className="min-w-0 space-y-4 lg:col-span-9">
+          <WorkerCapabilitiesCard
+            workerId={workerId}
+            manifestYaml={manifestYaml}
+            manifestDirty={manifestDirty}
+            canEdit={canEditFiles}
+            refreshKey={msg}
+            onOpenManifest={() => setTab('manifest.yaml')}
           />
+
+          <section className="space-y-3 rounded-2xl border border-gov-gray-100 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+            <div>
+              <h2 className="text-sm font-black text-gov-gray-900 dark:text-dark-text">
+                {TAB_LABELS[tab] ?? tab}
+              </h2>
+              <p className="mt-0.5 font-mono text-[11px] text-gov-gray-400 dark:text-dark-muted">{tab}</p>
+            </div>
+
+            {tab === 'manifest.yaml' && (
+              <ManifestGuidedPanel yaml={content} onChange={setContent} disabled={!canEditFiles} />
+            )}
+            {tab === 'security_policy.yaml' && <SecurityPolicyInfoPanel />}
+            {markdownFile && (
+              <MarkdownViewToggle mode={markdownView} onChange={setMarkdownView} />
+            )}
+            {tab !== 'manifest.yaml' && tab !== 'security_policy.yaml' && (
+              <TemplateFileEditor
+                content={content}
+                onChange={setContent}
+                readOnly={!canEditFiles}
+                markdownFile={markdownFile}
+                viewMode={markdownView}
+              />
+            )}
+          </section>
         </div>
       </div>
+
+      <ConfirmDangerModal
+        isOpen={Boolean(pendingDeleteContext)}
+        title="Eliminar contexto"
+        description="Se quitará este archivo de contexto del worker. No afecta system_prompt ni soul."
+        confirmLabel="Sí, eliminar contexto"
+        isLoading={deletingContext}
+        details={
+          pendingDeleteContext
+            ? [
+                { label: 'Archivo', value: pendingDeleteContext.title },
+                { label: 'Worker', value: workerId },
+              ]
+            : []
+        }
+        onCancel={() => !deletingContext && setPendingDeleteContext(null)}
+        onConfirm={() => void confirmDeleteContext()}
+      />
     </div>
   );
 }
@@ -379,23 +389,19 @@ function CatalogContextTools({
   canDelete,
   onTitleChange,
   onCreate,
-  onMoveUp,
-  onMoveDown,
-  onDelete,
+  onRequestDelete,
 }: {
   title: string;
   error: string | null;
   canDelete: boolean;
   onTitleChange: (v: string) => void;
   onCreate: () => void;
-  onMoveUp: () => void;
-  onMoveDown: () => void;
-  onDelete: () => void;
+  onRequestDelete: () => void;
 }) {
   return (
     <div className="mb-3 rounded-xl border border-gov-blue-100 bg-white p-2 dark:border-dark-border dark:bg-dark-surface">
       <p className="px-1 text-[10px] font-black uppercase text-gov-blue-700 dark:text-dark-cyan">
-        Contextos DB
+        Nuevo contexto
       </p>
       <input
         value={title}
@@ -412,42 +418,34 @@ function CatalogContextTools({
       >
         <Plus size={12} /> Añadir contexto
       </button>
-      <div className="mt-2 grid grid-cols-3 gap-1">
-        <button type="button" onClick={onMoveUp} className="rounded-lg border px-2 py-1 text-[10px] dark:border-dark-border">
-          <ArrowUp size={12} className="mx-auto" />
-        </button>
-        <button type="button" onClick={onMoveDown} className="rounded-lg border px-2 py-1 text-[10px] dark:border-dark-border">
-          <ArrowDown size={12} className="mx-auto" />
-        </button>
+      {canDelete ? (
         <button
           type="button"
-          onClick={onDelete}
-          disabled={!canDelete}
-          className="rounded-lg border px-2 py-1 text-[10px] text-red-600 disabled:opacity-40 dark:border-dark-border"
+          onClick={onRequestDelete}
+          className="mt-2 flex w-full items-center justify-center gap-1 rounded-lg border border-red-200 px-2 py-1.5 text-[11px] font-bold text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
         >
-          <Trash2 size={12} className="mx-auto" />
+          <Trash2 size={12} />
+          Eliminar contexto seleccionado
         </button>
-      </div>
+      ) : null}
     </div>
   );
 }
 
 function MarkdownViewToggle({
   mode,
-  canSplit,
   onChange,
 }: {
   mode: MarkdownViewMode;
-  canSplit: boolean;
   onChange: (m: MarkdownViewMode) => void;
 }) {
   const btn = (id: MarkdownViewMode, label: string, icon: ReactNode) => (
     <button
       type="button"
       onClick={() => onChange(id)}
-      className={`px-3 py-1.5 text-xs rounded-lg border flex items-center gap-1.5 ${
+      className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs ${
         mode === id
-          ? 'bg-gov-blue-700 text-white border-gov-blue-700'
+          ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
           : 'dark:border-dark-border hover:bg-gov-gray-50 dark:hover:bg-dark-surface'
       }`}
     >
@@ -457,9 +455,8 @@ function MarkdownViewToggle({
   );
   return (
     <div className="flex flex-wrap gap-2" role="tablist" aria-label="Vista del archivo Markdown">
-      {btn('edit', 'Markdown', <FileCode size={14} />)}
       {btn('preview', 'Vista previa', <Eye size={14} />)}
-      {canSplit ? btn('split', 'Dividido', <Columns2 size={14} />) : null}
+      {btn('edit', 'Markdown', <FileCode size={14} />)}
     </div>
   );
 }
@@ -495,39 +492,27 @@ function TemplateFileEditor({
   if (viewMode === 'preview') {
     return (
       <div
-        className="w-full min-h-[420px] p-4 rounded-2xl border dark:border-dark-border bg-white dark:bg-dark-surface overflow-y-auto"
+        className="min-h-[420px] w-full overflow-y-auto rounded-2xl border bg-white p-4 dark:border-dark-border dark:bg-dark-bg"
         aria-label="Vista previa Markdown"
       >
         {content.trim() ? (
           <ChatMarkdown content={content} className="text-sm" />
         ) : (
-          <p className="text-sm text-gov-gray-400 italic">Sin contenido</p>
+          <p className="text-sm italic text-gov-gray-400 dark:text-dark-muted">Sin contenido</p>
         )}
       </div>
     );
   }
 
   return (
-    <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-      <textarea
-        value={content}
-        onChange={(e) => onChange(e.target.value)}
-        readOnly={readOnly}
-        className={editorTextareaClass}
-        spellCheck={false}
-        aria-label="Editor Markdown"
-      />
-      <div
-        className="min-h-[420px] p-4 rounded-2xl border dark:border-dark-border bg-gov-gray-50/80 dark:bg-dark-bg overflow-y-auto"
-        aria-label="Vista previa Markdown"
-      >
-        {content.trim() ? (
-          <ChatMarkdown content={content} className="text-sm" />
-        ) : (
-          <p className="text-sm text-gov-gray-400 italic">La vista previa aparecerá aquí</p>
-        )}
-      </div>
-    </div>
+    <textarea
+      value={content}
+      onChange={(e) => onChange(e.target.value)}
+      readOnly={readOnly}
+      className={editorTextareaClass}
+      spellCheck={false}
+      aria-label="Editor Markdown"
+    />
   );
 }
 

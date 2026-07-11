@@ -6,7 +6,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES_PAGE = ROOT / "apps/duckclaw-admin/src/app/(admin)/templates/page.tsx"
 TEMPLATE_DETAIL_PAGE = ROOT / "apps/duckclaw-admin/src/app/(admin)/templates/[workerId]/page.tsx"
+WORKER_EDITOR_TABS = ROOT / "apps/duckclaw-admin/src/components/templates/WorkerEditorSectionTabs.tsx"
+WORKER_CAPABILITIES_CARD = ROOT / "apps/duckclaw-admin/src/components/templates/WorkerCapabilitiesCard.tsx"
+CREATE_AGENT_DIALOG = ROOT / "apps/duckclaw-admin/src/components/templates/CreateAgentDialog.tsx"
+WORKER_ROLE_TEMPLATES = ROOT / "apps/duckclaw-admin/src/lib/workerRoleTemplates.ts"
+WORKER_COMPOSITION_PRESETS = ROOT / "apps/duckclaw-admin/src/lib/workerCompositionPresets.ts"
 POLICIES_PAGE = ROOT / "apps/duckclaw-admin/src/app/(admin)/policies/page.tsx"
+POLICIES_VIEW = ROOT / "apps/duckclaw-admin/src/components/policies/PoliciesPageView.tsx"
 ADMIN_SERVICE = ROOT / "apps/duckclaw-admin/src/services/adminService.ts"
 
 
@@ -16,7 +22,7 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
 
     assert "importTemplatesToCatalog" in service
     assert "/templates/import" in service
-    assert "Crear borrador administrado" in page
+    assert "Nuevo agente" in page
     assert "catálogo DB-first" in page
     assert "Desactivar del catálogo" in page
     assert "Eliminar definitivo" in page
@@ -24,6 +30,8 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
     assert "rmtree" not in page
     assert "import_axis" not in page
     assert "import_axis" not in service
+    assert "font-black" not in page
+    assert "rounded-3xl" not in page
 
 
 def test_workers_ui_lists_active_catalog_workers_only() -> None:
@@ -54,25 +62,23 @@ def test_workers_ui_does_not_offer_deactivation_for_default_template() -> None:
     page = TEMPLATES_PAGE.read_text(encoding="utf-8")
 
     assert "isCatalogManaged" in page
+    assert "showLifecycleActions" in page
     assert "canWrite && isCatalogManaged && !isProtectedWorker" in page
-    assert "{!isInactive && (" in page
     assert "agent.source === 'catalog'" in page
     assert "agent.id === 'default'" in page
 
 
 def test_worker_detail_ui_marks_catalog_workers_read_only() -> None:
     detail_page = TEMPLATE_DETAIL_PAGE.read_text(encoding="utf-8")
+    tabs = WORKER_EDITOR_TABS.read_text(encoding="utf-8")
 
     assert "catálogo DB" in detail_page
     assert "isCatalogWorker" in detail_page
     assert "canEditFiles" in detail_page
-    assert "Snapshot importado desde DuckDB" in detail_page
-    assert "Guardado en DuckDB (catálogo)" in detail_page
-    assert "no modifican" in detail_page
-    assert "CatalogContextTools" in detail_page
     assert "WorkerEditorSectionTabs" in detail_page
-    assert "Comportamiento" in detail_page
-    assert "Configurar herramientas" in detail_page
+    assert "Comportamiento" in tabs
+    assert "Configurar herramientas" in WORKER_CAPABILITIES_CARD.read_text(encoding="utf-8")
+    assert "WorkerCapabilitiesCard" in detail_page
     assert "Sin guardar" in detail_page
     assert "Añadir contexto" in detail_page
     assert "deleteTemplateContext" in detail_page
@@ -89,17 +95,46 @@ def test_catalog_context_creation_gives_feedback_and_keeps_new_tab() -> None:
     assert "load(title)" in detail_page
 
 
-def test_policies_page_surfaces_agent_capabilities_without_legacy_paths() -> None:
-    page = POLICIES_PAGE.read_text(encoding="utf-8")
+def test_worker_editor_herramientas_includes_skill_picker() -> None:
+    detail_page = TEMPLATE_DETAIL_PAGE.read_text(encoding="utf-8")
 
-    assert "Tus agentes" in page
-    assert "Reglas base" in page
-    assert "¿Qué sigue?" in page
-    assert "listTemplates" in page
-    assert "listPromptPolicies" in page
-    assert "skills_list" in page
-    assert "Listo" in page
-    assert "Falta instrucciones" in page
-    assert 'href={`/templates/${encodeURIComponent(agent.id)}`}' in page
-    assert "forge/templates" not in page
-    assert "tenant" not in page.lower()
+    assert "WorkerSkillPickerPanel" in detail_page
+    assert "WorkerMcpGrantsPanel" in detail_page
+    assert "ManifestGuidedPanel" in detail_page
+    assert "useSkillsCatalog" in detail_page
+
+
+def test_create_agent_wizard_exposes_composition_panel() -> None:
+    dialog = CREATE_AGENT_DIALOG.read_text(encoding="utf-8")
+    roles = WORKER_ROLE_TEMPLATES.read_text(encoding="utf-8")
+    presets = WORKER_COMPOSITION_PRESETS.read_text(encoding="utf-8")
+
+    assert "WorkerCompositionPanel" in dialog
+    assert "WorkerRoleTemplatePicker" in dialog
+    assert "WorkerMcpGrantsPicker" in dialog
+    assert "DEFAULT_TOOL_PROFILE" in dialog
+    assert "pendingMcpConnectorIds" in dialog
+    assert "pollWriteTask" in dialog
+    assert "mergeSuggestedSkills" in dialog
+    assert "applyRoleTemplateToDraft" in dialog
+    assert "rounded-3xl" not in dialog
+    assert "font-black" not in dialog
+    assert "CAPABILITY_PRESETS" not in dialog
+    assert "WORKER_ROLE_TEMPLATES" in roles
+    assert "DEFAULT_TOOL_PROFILE" in roles
+    assert "TOOL_PROFILE_LABELS" in presets
+    assert "CAPABILITY_PRESETS" not in presets
+
+
+def test_policies_page_redirects_to_plataforma_reglas() -> None:
+    page = POLICIES_PAGE.read_text(encoding="utf-8")
+    view = POLICIES_VIEW.read_text(encoding="utf-8")
+
+    assert "redirect('/plataforma?tab=reglas')" in page
+    assert "Reglas base" in view
+    assert "listTemplates" in view
+    assert "listPromptPolicies" in view
+    assert "Listo" in view
+    assert "Falta instrucciones" in view
+    assert 'href={`/templates/${encodeURIComponent(agent.id)}`}' in view
+    assert "forge/templates" not in view

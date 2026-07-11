@@ -57,3 +57,19 @@ def test_worker_capabilities_not_found(admin_client: TestClient) -> None:
     assert response.status_code == 404
     detail = response.json().get("detail") or {}
     assert detail.get("status") == 404
+
+
+def test_worker_mcp_grants_requires_admin_key(admin_client: TestClient) -> None:
+    response = admin_client.get("/api/v1/admin/workers/default/mcp-grants")
+    assert response.status_code == 401
+
+
+def test_worker_mcp_grants_default_scaffold(admin_client: TestClient) -> None:
+    response = admin_client.get(
+        "/api/v1/admin/workers/default/mcp-grants",
+        headers={"X-Admin-Key": "test-admin-key"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["worker_id"] == "default"
+    assert isinstance(data["connectors"], list)

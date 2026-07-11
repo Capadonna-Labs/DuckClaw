@@ -11,6 +11,9 @@ import { ChevronRight, Save, CheckCircle, Eye, FileCode, Plus, Trash2, Loader2 }
 import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 import { WorkerCapabilitiesCard } from '@/components/templates/WorkerCapabilitiesCard';
 import { ManifestGuidedPanel } from '@/components/templates/ManifestGuidedPanel';
+import { WorkerSkillPickerPanel } from '@/components/templates/WorkerSkillPickerPanel';
+import { WorkerMcpGrantsPanel } from '@/components/templates/WorkerMcpGrantsPanel';
+import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
 import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBanner';
 import { WorkerDisplayNameEditor } from '@/components/templates/WorkerDisplayNameEditor';
@@ -94,6 +97,7 @@ export default function TemplateEditorPage() {
   const canEditFiles = canWrite;
 
   const { promptFiles, contextFiles, advancedFiles } = useMemo(() => partitionFiles(detail), [detail]);
+  const { globalSkills, localSkills } = useSkillsCatalog();
 
   const load = useCallback(
     (preferredPath?: string) => {
@@ -420,11 +424,22 @@ export default function TemplateEditorPage() {
             )}
 
             {section === 'herramientas' && (
-              <ManifestGuidedPanel
-                yaml={manifestYaml}
-                onChange={onManifestChange}
-                disabled={!canEditFiles}
-              />
+              <div className="space-y-4">
+                <ManifestGuidedPanel
+                  yaml={manifestYaml}
+                  onChange={onManifestChange}
+                  disabled={!canEditFiles}
+                />
+                <WorkerSkillPickerPanel
+                  manifestYaml={manifestYaml}
+                  onManifestChange={onManifestChange}
+                  disabled={!canEditFiles}
+                  workerId={workerId}
+                  globalSkills={globalSkills}
+                  localSkills={localSkills}
+                />
+                <WorkerMcpGrantsPanel workerId={workerId} canWrite={canEditFiles} disabled={!canEditFiles} />
+              </div>
             )}
 
             {section === 'contextos' && contextFiles.length === 0 && (

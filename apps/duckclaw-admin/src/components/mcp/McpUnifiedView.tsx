@@ -5,12 +5,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ExternalLink } from 'lucide-react';
 import { PageShell } from '@/components/admin/PageShell';
 import type { EmbeddedViewProps } from '@/components/admin/embeddedView';
-import { McpCmdBlock } from '@/components/mcp/McpCmdBlock';
+import { McpConfigurationPanel } from '@/components/mcp/McpConfigurationPanel';
 import { McpConnectorsPanel } from '@/components/mcp/McpConnectorsPanel';
-import { McpLiveBanner } from '@/components/mcp/McpLiveBanner';
 import { MCP_TABS, parseMcpTab, type McpTabId } from '@/components/mcp/mcpPageTabs';
 import { OfficialMcpReferenceTable } from '@/components/mcp/OfficialMcpReferenceTable';
 import { useMcpCatalog, useMcpLiveStatus } from '@/components/mcp/useMcpCatalog';
+import { useDeveloperMode } from '@/hooks/useDeveloperMode';
 import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { isAdminRole } from '@/lib/roles';
 import { adminService } from '@/services/adminService';
@@ -33,6 +33,7 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
   const [mcpSource, setMcpSource] = useState('default');
   const [settingsMsg, setSettingsMsg] = useState<string | null>(null);
   const [settingsSaving, setSettingsSaving] = useState(false);
+  const { developerMode } = useDeveloperMode();
   const canWrite = isAdminRole(usuario?.rol);
   const canRunOps = usuario?.rol === 'admin';
   const isUp = live?.reachable === true;
@@ -117,9 +118,10 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
         <header>
           <h1 className="text-3xl font-black dark:text-dark-text">MCP</h1>
           <p className="mt-1 max-w-3xl text-sm text-gov-gray-500 dark:text-dark-muted">
-            Conectores externos, servidor DuckClaw HTTP, runtime PM2 y catálogo en una sola vista.
-            Las tools de conectores aparecen como{' '}
-            <span className="font-mono">mcp__&#123;connector&#125;__&#123;tool&#125;</span>.
+            Tres capas: conectores externos (registry + grants), configuración del servidor DuckClaw MCP, y
+            catálogo de referencia. Las skills de agente viven en{' '}
+            <span className="font-bold">Plataforma → Skills</span> (manifest); las tools MCP externas aquí en
+            Conectores.
           </p>
         </header>
       )}
@@ -161,78 +163,26 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
 
       {tab === 'connectors' && <McpConnectorsPanel canWrite={canWrite} />}
 
-      {tab === 'runtime' && (
-        <>
-          <McpLiveBanner
-            live={live}
-            isUp={isUp}
-            canRunOps={canRunOps}
-            opsRunning={opsRunning}
-            onStart={() => void runMcpOp('pm2_start_mcp')}
-            onRestart={() => void runMcpOp('pm2_restart_mcp')}
-            onRefresh={refreshLive}
-          />
-          {opsOutput && (
-            <pre className="max-h-48 overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-900 p-4 font-mono text-xs text-slate-100">
-              {opsOutput}
-            </pre>
-          )}
-        </>
-      )}
-
       {tab === 'config' && (
-        <section className="grid max-w-xl gap-3 rounded-3xl border border-gov-gray-100 bg-white p-5 text-sm shadow-sm dark:border-dark-border dark:bg-dark-surface">
-          <label htmlFor="mcp-port" className="text-xs font-bold uppercase text-gov-gray-500">
-            Puerto DuckClaw MCP
-          </label>
-          <input
-            id="mcp-port"
-            value={mcpPort}
-            onChange={(e) => setMcpPort(e.target.value)}
-            disabled={!canRunOps}
-            className="w-full rounded-xl border px-3 py-2 font-mono dark:border-dark-border dark:bg-dark-bg"
-          />
-          <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
-            Fuente efectiva: <span className="font-mono">{mcpSource}</span> · setting{' '}
-            <span className="font-mono">mcp.port</span>
-          </p>
-          {canRunOps && (
-            <button
-              type="button"
-              onClick={() => void saveMcpSettings()}
-              disabled={settingsSaving}
-              className="w-fit rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-            >
-              {settingsSaving ? 'Guardando...' : 'Guardar en DuckDB'}
-            </button>
-          )}
-          {settingsMsg && (
-            <p className="text-xs text-gov-blue-700 dark:text-dark-cyan">{settingsMsg}</p>
-          )}
-        </section>
-      )}
-
-      {tab === 'server' && data && <McpCmdBlock data={data} live={live} isUp={isUp} />}
-
-      {tab === 'tools' && data && (
-        <section className="overflow-x-auto rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-gov-gray-500">
-                <th className="pb-2">Tool</th>
-                <th className="pb-2">Descripción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.duckclaw_mcp.tools.map((tool) => (
-                <tr key={tool.name} className="border-t dark:border-dark-border">
-                  <td className="py-2 font-mono text-xs">{tool.name}</td>
-                  <td className="py-2">{tool.description}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+        <McpConfigurationPanel
+          data={data}
+          live={live}
+          isUp={isUp}
+          canWrite={canWrite}
+          canRunOps={canRunOps}
+          developerMode={developerMode}
+          opsRunning={opsRunning}
+          opsOutput={opsOutput}
+          mcpPort={mcpPort}
+          mcpSource={mcpSource}
+          settingsMsg={settingsMsg}
+          settingsSaving={settingsSaving}
+          onMcpPortChange={setMcpPort}
+          onSaveSettings={() => void saveMcpSettings()}
+          onStart={() => void runMcpOp('pm2_start_mcp')}
+          onRestart={() => void runMcpOp('pm2_restart_mcp')}
+          onRefreshLive={refreshLive}
+        />
       )}
 
       {tab === 'catalog' && data && (

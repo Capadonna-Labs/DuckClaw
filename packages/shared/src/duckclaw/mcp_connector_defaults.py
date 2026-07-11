@@ -8,6 +8,7 @@ from typing import Any
 from duckclaw.mcp_connector_presets import (
     default_mcp_connector_id,
     default_mcp_connector_preset_ids,
+    manifest_skill_id_for_preset,
 )
 
 _log = logging.getLogger(__name__)
@@ -126,7 +127,8 @@ def sync_worker_mcp_grants_from_manifest(
         connector_id = default_mcp_connector_id(preset_id)
         if not _connector_exists(db, connector_id=connector_id, tenant_id=tenant_id):
             continue
-        if preset_id in skills:
+        skill_key = manifest_skill_id_for_preset(preset_id)
+        if skill_key in skills:
             _apply_grant_worker_mcp_connector(
                 db,
                 {
@@ -162,7 +164,9 @@ def enable_worker_manifest_skill_for_mcp_preset(
         sync_worker_catalog_skills_from_manifest,
     )
 
-    skill_id = _normalize_skill_name(preset_id)
+    from duckclaw.mcp_connector_presets import manifest_skill_id_for_preset
+
+    skill_id = _normalize_skill_name(manifest_skill_id_for_preset(preset_id))
     if not skill_id:
         return {"manifest_skill_enabled": False, "skill_id": ""}
 

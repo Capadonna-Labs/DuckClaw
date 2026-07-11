@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
 
 export default function McpServerRedirectPage() {
-  redirect('/mcp?tab=server');
+  redirect('/mcp?tab=config');
 }

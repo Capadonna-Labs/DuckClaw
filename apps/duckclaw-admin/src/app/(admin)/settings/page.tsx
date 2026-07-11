@@ -11,7 +11,7 @@ export default function SettingsRedirectPage() {
 
   useEffect(() => {
     if (isAdminRole(usuario?.rol)) {
-      router.replace('/administracion?tab=cuenta');
+      router.replace('/administracion?tab=acceso');
       return;
     }
     router.replace('/overview');

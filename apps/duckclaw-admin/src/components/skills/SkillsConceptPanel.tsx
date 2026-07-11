@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { BookOpen, ChevronDown, Database, FileCode, Layers, Puzzle } from 'lucide-react';
+import { BookOpen, Cable, ChevronDown, Database, FileCode, Layers, Puzzle } from 'lucide-react';
 import { useState } from 'react';
 
 const LAYERS = [
@@ -29,6 +29,21 @@ const LAYERS = [
     example: 'db://admin_worker_catalog/{uid}/skills/mi_tool.py',
     note: 'Atada a un solo agente. Ideal para lógica muy específica.',
   },
+  {
+    icon: Cable,
+    title: '4. Tools MCP externas (no es skill de catálogo)',
+    storage: 'DuckDB → `admin_mcp_connectors` + grants por worker',
+    activation: (
+      <>
+        <Link href="/plataforma?tab=mcp&mcpTab=connectors" className="font-bold text-gov-blue-800 underline dark:text-dark-cyan">
+          Plataforma → MCP → Conectores
+        </Link>
+        ; el LLM las ve como <span className="font-mono">mcp__&#123;connector&#125;__&#123;tool&#125;</span>
+      </>
+    ),
+    example: 'mcp__mcp_remote_http_oauth__… (según conector)',
+    note: 'OAuth/Bearer en Conectores. Distinto del servidor DuckClaw MCP y de las skills de manifest.',
+  },
 ] as const;
 
 export function SkillsConceptPanel({ defaultOpen = false }: { defaultOpen?: boolean }) {
@@ -52,7 +67,8 @@ export function SkillsConceptPanel({ defaultOpen = false }: { defaultOpen?: bool
             </h2>
             <p className="mt-1 max-w-2xl text-sm text-gov-gray-600 dark:text-dark-muted">
               Una <strong className="font-bold">skill</strong> es una capacidad que el LLM invoca como{' '}
-              <em>tool</em> (función). Hay tres capas; crear metadata en DB no basta — hay que{' '}
+              <em>tool</em> (función). Hay skills de plataforma, catálogo y locales; las tools MCP externas van
+              aparte. Crear metadata en DB no basta — hay que{' '}
               <strong className="font-bold">activarla en el manifest</strong> del agente.
             </p>
           </div>
@@ -66,7 +82,7 @@ export function SkillsConceptPanel({ defaultOpen = false }: { defaultOpen?: bool
 
       {open ? (
         <div className="space-y-3 border-t border-gov-blue-100/80 px-5 pb-5 pt-4 dark:border-dark-border">
-          <div className="grid gap-3 lg:grid-cols-3">
+          <div className="grid gap-3 lg:grid-cols-2">
             {LAYERS.map((layer) => (
               <article
                 key={layer.title}

@@ -2,7 +2,7 @@
 # Override: DUCKCLAW_MCP_PRESETS_PATH or {DUCKCLAW_REPO_ROOT}/config/mcp_connector_presets.yaml
 
 default_connectors:
-  - higgsfield
+  - remote_http_oauth
 
 defaults:
   tool_allowlist: ["*"]
@@ -17,16 +17,17 @@ profiles:
     read_only: true
 
 presets:
-  higgsfield:
-    display_name: Higgsfield (imagen/video)
+  remote_http_oauth:
+    display_name: HTTP remoto · OAuth PKCE
     transport: streamable_http
     endpoint_url: https://mcp.higgsfield.ai/mcp
     auth_kind: bearer
     read_only: false
     egress_hosts: [mcp.higgsfield.ai]
     metadata:
+      oauth_pkce: true
+      manifest_skill_id: higgsfield
       docs_url: https://higgsfield.ai/mcp
-      auth_hint: OAuth desde Admin DuckClaw → botón Conectar Higgsfield (PKCE).
 
   mcp_fetch:
     profile: stdio_npx_ro

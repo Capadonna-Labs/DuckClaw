@@ -2,8 +2,8 @@
 
 export const PLATAFORMA_TABS = [
   { id: 'reglas', label: 'Reglas base', hint: 'Policies de framework y wizard' },
-  { id: 'skills', label: 'Skills', hint: 'Catálogo de capacidades' },
-  { id: 'mcp', label: 'MCP', hint: 'Conectores y servidor MCP' },
+  { id: 'skills', label: 'Skills', hint: 'Capacidades del framework (manifest) — distinto de tools MCP externas' },
+  { id: 'mcp', label: 'MCP', hint: 'Conectores externos, servidor DuckClaw y catálogo' },
   { id: 'imagenes', label: 'Imágenes', hint: 'Generación visual ComfyUI' },
   { id: 'duckdb', label: 'DuckDB', hint: 'Explorador de datos y grafos' },
   { id: 'runtime', label: 'Runtime', hint: 'Ajustes agent_config por vault' },

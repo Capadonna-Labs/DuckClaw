@@ -24,6 +24,34 @@ _PRESET_DEFAULTS: dict[str, Any] = {
 }
 
 
+_PRESET_ID_ALIASES: dict[str, str] = {
+    "higgsfield": "remote_http_oauth",
+}
+
+
+def resolve_preset_id(preset_id: str) -> str:
+    key = str(preset_id or "").strip().lower()
+    return _PRESET_ID_ALIASES.get(key, key)
+
+
+def manifest_skill_id_for_preset(preset_id: str) -> str:
+    """Skill name in manifest that grants this connector (defaults to preset id)."""
+    payload = preset_payload(preset_id)
+    if not payload:
+        return resolve_preset_id(preset_id)
+    meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    skill = str(meta.get("manifest_skill_id") or "").strip().lower()
+    return skill or resolve_preset_id(preset_id)
+
+
+def preset_supports_oauth_pkce(preset_id: str) -> bool:
+    payload = preset_payload(preset_id)
+    if not payload:
+        return False
+    meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    return meta.get("oauth_pkce") is True
+
+
 def bundled_mcp_connector_presets_path() -> Path:
     return Path(__file__).resolve().parent / "seeds" / _SEED_FILENAME
 
@@ -129,7 +157,7 @@ def default_mcp_connector_preset_ids() -> list[str]:
 
 
 def default_mcp_connector_id(preset_id: str) -> str:
-    return f"mcp_{str(preset_id or '').strip().lower()}"
+    return f"mcp_{resolve_preset_id(preset_id)}"
 
 
 def clear_mcp_connector_presets_cache() -> None:
@@ -145,7 +173,7 @@ def list_mcp_connector_presets() -> list[dict[str, Any]]:
 
 
 def preset_payload(preset_id: str) -> dict[str, Any] | None:
-    key = (preset_id or "").strip().lower()
+    key = resolve_preset_id(preset_id)
     raw = load_mcp_connector_presets().get(key)
     if not raw:
         return None

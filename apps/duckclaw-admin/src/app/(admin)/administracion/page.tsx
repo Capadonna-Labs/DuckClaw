@@ -1,31 +1,30 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { AdminHubShell } from '@/components/admin/AdminHubShell';
 import AccessPageView from '@/components/admin/AccessPageView';
 import AuditPageView from '@/components/admin/AuditPageView';
-import { AccountSettingsPanel } from '@/components/settings/AccountSettingsPanel';
 import { useAuthStore } from '@/store/authStore';
 
 const TABS = [
-  { id: 'acceso', label: 'Acceso', hint: 'Usuarios consola y grants compartidos' },
+  { id: 'acceso', label: 'Acceso', hint: 'Usuarios web y permisos DuckDB compartido' },
   { id: 'auditoria', label: 'Auditoría', hint: 'Registro de acciones admin' },
-  { id: 'cuenta', label: 'Mi cuenta', hint: 'Perfil y cierre de sesión' },
 ] as const;
 
 type AdministracionTab = (typeof TABS)[number]['id'];
 
 function parseTab(raw: string | null): AdministracionTab {
-  if (raw === 'acceso' || raw === 'auditoria' || raw === 'cuenta') return raw;
+  if (raw === 'acceso' || raw === 'auditoria') return raw;
+  if (raw === 'cuenta') return 'acceso';
   return 'acceso';
 }
 
 function AdministracionHubContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { usuario, logout } = useAuthStore();
+  const { usuario } = useAuthStore();
   const [tab, setTab] = useState<AdministracionTab>(() => parseTab(searchParams.get('tab')));
 
   useEffect(() => {
@@ -43,11 +42,6 @@ function AdministracionHubContent() {
     router.replace(`/administracion?tab=${next}`, { scroll: false });
   };
 
-  const handleLogout = useCallback(async () => {
-    await logout();
-    router.replace('/login');
-  }, [logout, router]);
-
   if (usuario?.rol !== 'admin') {
     return null;
   }
@@ -55,14 +49,13 @@ function AdministracionHubContent() {
   return (
     <AdminHubShell
       title="Administración"
-      description="Acceso, auditoría y preferencias de operador."
+      description="Quién entra a la consola y trazabilidad de cambios."
       tabs={TABS}
       activeTabId={tab}
       onSelectTab={(id) => selectTab(parseTab(id))}
     >
       {tab === 'acceso' && <AccessPageView embedded />}
       {tab === 'auditoria' && <AuditPageView embedded />}
-      {tab === 'cuenta' && <AccountSettingsPanel onLogout={handleLogout} />}
     </AdminHubShell>
   );
 }

@@ -28,8 +28,8 @@ def mcp_db():
     con.close()
 
 
-def test_default_preset_ids_include_higgsfield() -> None:
-    assert "higgsfield" in default_mcp_connector_preset_ids()
+def test_default_preset_ids_include_remote_http_oauth() -> None:
+    assert "remote_http_oauth" in default_mcp_connector_preset_ids()
 
 
 def test_manifest_has_skill_parses_string_and_dict() -> None:
@@ -38,19 +38,19 @@ def test_manifest_has_skill_parses_string_and_dict() -> None:
     assert not manifest_has_skill({"skills": ["research"]}, "higgsfield")
 
 
-def test_ensure_default_mcp_connectors_creates_higgsfield(mcp_db) -> None:
+def test_ensure_default_mcp_connectors_creates_remote_http_oauth(mcp_db) -> None:
     result = ensure_default_mcp_connectors(mcp_db, tenant_id="default", actor_email="admin@test.local")
-    assert "mcp_higgsfield" in result["created"] or result["created"] == []
+    assert "mcp_remote_http_oauth" in result["created"] or result["created"] == []
     row = mcp_db.execute(
         "SELECT connector_id, preset_id, transport FROM main.admin_mcp_connectors "
-        "WHERE connector_id = 'mcp_higgsfield'"
+        "WHERE connector_id = 'mcp_remote_http_oauth'"
     ).fetchone()
     assert row is not None
-    assert row[1] == "higgsfield"
+    assert row[1] == "remote_http_oauth"
     assert row[2] == "streamable_http"
 
 
-def test_sync_grants_when_higgsfield_in_manifest(mcp_db) -> None:
+def test_sync_grants_when_manifest_skill_matches_connector(mcp_db) -> None:
     ensure_default_mcp_connectors(mcp_db, tenant_id="default", actor_email="admin@test.local")
     worker_uid = "wrk_test_hf"
     mcp_db.execute(
@@ -67,12 +67,12 @@ def test_sync_grants_when_higgsfield_in_manifest(mcp_db) -> None:
         manifest=manifest,
         actor_email="admin@test.local",
     )
-    assert "mcp_higgsfield" in result["granted"]
+    assert "mcp_remote_http_oauth" in result["granted"]
     connectors = list_worker_mcp_connectors(mcp_db, worker_uid=worker_uid, tenant_id="default")
-    assert any(c["connector_id"] == "mcp_higgsfield" for c in connectors)
+    assert any(c["connector_id"] == "mcp_remote_http_oauth" for c in connectors)
 
 
-def test_sync_revokes_when_higgsfield_removed(mcp_db) -> None:
+def test_sync_revokes_when_manifest_skill_removed(mcp_db) -> None:
     ensure_default_mcp_connectors(mcp_db, tenant_id="default", actor_email="admin@test.local")
     worker_uid = "wrk_test_revoke"
     mcp_db.execute(
@@ -95,7 +95,7 @@ def test_sync_revokes_when_higgsfield_removed(mcp_db) -> None:
     )
     row = mcp_db.execute(
         "SELECT active FROM main.admin_worker_mcp_grants "
-        "WHERE worker_uid = ? AND connector_id = 'mcp_higgsfield'",
+        "WHERE worker_uid = ? AND connector_id = 'mcp_remote_http_oauth'",
         [worker_uid],
     ).fetchone()
     assert row is not None
@@ -116,6 +116,6 @@ def test_backfill_default_mcp_connectors_idempotent_with_multiple_tenants(mcp_db
     backfill_default_mcp_connectors_and_grants(mcp_db)
     backfill_default_mcp_connectors_and_grants(mcp_db)
     count = mcp_db.execute(
-        "SELECT COUNT(*) FROM main.admin_mcp_connectors WHERE connector_id = 'mcp_higgsfield'"
+        "SELECT COUNT(*) FROM main.admin_mcp_connectors WHERE connector_id = 'mcp_remote_http_oauth'"
     ).fetchone()[0]
     assert int(count) == 1

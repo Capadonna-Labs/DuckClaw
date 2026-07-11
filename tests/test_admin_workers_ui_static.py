@@ -70,6 +70,10 @@ def test_worker_detail_ui_marks_catalog_workers_read_only() -> None:
     assert "Guardado en DuckDB (catálogo)" in detail_page
     assert "no modifican" in detail_page
     assert "CatalogContextTools" in detail_page
+    assert "WorkerEditorSectionTabs" in detail_page
+    assert "Comportamiento" in detail_page
+    assert "Configurar herramientas" in detail_page
+    assert "Sin guardar" in detail_page
     assert "Añadir contexto" in detail_page
     assert "deleteTemplateContext" in detail_page
     assert "ConfirmDangerModal" in detail_page

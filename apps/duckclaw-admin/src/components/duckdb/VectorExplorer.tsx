@@ -9,9 +9,9 @@ type Props = {
 };
 
 function distanceBadgeClass(distance: number | null): string {
-  if (distance === null) return 'bg-slate-700 text-slate-300';
-  if (distance < 0.3) return 'bg-emerald-900/60 text-emerald-300 border-emerald-700';
-  return 'bg-amber-900/50 text-amber-200 border-amber-700';
+  if (distance === null) return 'bg-gov-gray-100 text-gov-gray-700 dark:bg-dark-bg dark:text-dark-muted';
+  if (distance < 0.3) return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200';
+  return 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100';
 }
 
 function truncate(text: string, max = 400): string {
@@ -64,77 +64,84 @@ export function VectorExplorer({ vaultPath }: Props) {
   }, [search]);
 
   return (
-    <div className="flex flex-col gap-4 h-[calc(100vh-220px)] min-h-[420px]">
-      <div className="flex gap-2">
-        <div className="relative flex-1">
-          <Search
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500"
-            size={18}
-          />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void search(query);
-            }}
-            placeholder="Buscar en memoria semántica…"
-            className="w-full pl-10 pr-3 py-3 rounded-xl bg-slate-950 border border-slate-800 text-slate-100 text-sm"
-          />
+    <div className="flex min-h-[480px] flex-col gap-4">
+      <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+        <div className="border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+          <h2 className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Memoria vectorial</h2>
         </div>
-        <button
-          type="button"
-          onClick={() => void search(query)}
-          disabled={loading || !vaultPath}
-          className="px-5 py-3 rounded-xl bg-gov-blue-700 text-white text-sm font-bold disabled:opacity-50 shrink-0"
-        >
-          Buscar en Memoria
-        </button>
-      </div>
+        <div className="flex gap-2 p-4">
+          <div className="relative flex-1">
+            <Search
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-gov-gray-400"
+              size={16}
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void search(query);
+              }}
+              placeholder="Buscar en semantic_memory…"
+              className="w-full rounded-lg border border-gov-gray-200 bg-white py-2 pl-9 pr-3 text-sm dark:border-dark-border dark:bg-dark-bg"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => void search(query)}
+            disabled={loading || !vaultPath}
+            className="shrink-0 rounded-lg bg-gov-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            Buscar
+          </button>
+        </div>
+      </section>
 
       {warning && (
-        <p className="text-xs text-amber-400/90">{warning}</p>
+        <p className="text-xs text-amber-800 dark:text-amber-200">{warning}</p>
       )}
       {error && (
-        <p className="text-sm text-red-400 bg-red-950/40 border border-red-900/50 rounded-xl px-3 py-2">
+        <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-400">
           {error}
         </p>
       )}
 
       {loading && results.length === 0 ? (
         <div className="flex justify-center py-16">
-          <Loader2 className="animate-spin text-slate-500" size={36} />
+          <Loader2 className="animate-spin text-gov-gray-400" size={36} />
         </div>
       ) : notInitialized ? (
-        <div className="rounded-xl border border-slate-800 bg-slate-950 p-8 text-center">
-          <p className="text-slate-300 font-semibold">La memoria vectorial aún no ha sido inicializada</p>
-          <p className="text-slate-500 text-sm mt-2">
-            Ejecuta bootstrap o añade contexto con /context en Telegram para crear main.semantic_memory.
+        <section className="rounded-xl border border-gov-gray-200 bg-white p-8 text-center dark:border-dark-border dark:bg-dark-surface">
+          <p className="font-semibold text-gov-gray-900 dark:text-dark-text">
+            Memoria vectorial no inicializada
           </p>
-        </div>
+          <p className="mt-2 text-sm text-gov-gray-500 dark:text-dark-muted">
+            Añade contexto vía playground o bootstrap para crear main.semantic_memory.
+          </p>
+        </section>
       ) : results.length === 0 ? (
-        <p className="text-slate-500 text-sm text-center py-12">Sin resultados ({mode}).</p>
+        <p className="py-12 text-center text-sm text-gov-gray-500 dark:text-dark-muted">
+          Sin resultados ({mode}).
+        </p>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 overflow-y-auto flex-1 min-h-0 pr-1">
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
           {results.map((hit) => (
             <article
               key={hit.id}
-              className="rounded-xl border border-slate-800 bg-slate-950 p-4 flex flex-col gap-3"
+              className="flex flex-col gap-3 rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface"
             >
-              <p className="text-sm text-slate-200 leading-relaxed whitespace-pre-wrap break-words">
+              <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-gov-gray-800 dark:text-dark-text">
                 {truncate(hit.text)}
               </p>
               <div className="mt-auto flex flex-wrap items-center gap-2">
-                <span
-                  className={`text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${distanceBadgeClass(hit.distance)}`}
-                >
+                <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${distanceBadgeClass(hit.distance)}`}>
                   {hit.distance !== null
-                    ? `Similitud: ${hit.distance.toFixed(3)}`
+                    ? `Similitud ${hit.distance.toFixed(3)}`
                     : mode === 'recent'
                       ? 'Reciente'
                       : 'Léxico'}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400 font-mono space-y-0.5">
+              <p className="space-y-0.5 font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
                 {hit.metadata.source && <span className="block">source: {hit.metadata.source}</span>}
                 {hit.metadata.created_at && (
                   <span className="block">created: {hit.metadata.created_at}</span>

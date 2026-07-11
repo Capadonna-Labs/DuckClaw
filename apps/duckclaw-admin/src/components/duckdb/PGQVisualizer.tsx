@@ -2,7 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCw } from 'lucide-react';
 import { adminService, type PgqGraphNode } from '@/services/adminService';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
@@ -64,43 +64,64 @@ export function PGQVisualizer({ vaultPath }: Props) {
   }, []);
 
   return (
-    <div className="flex flex-col gap-2 h-[calc(100vh-220px)] min-h-[420px]">
-      {warning && (
-        <p className="text-xs text-amber-400 bg-amber-950/30 border border-amber-900/40 rounded-xl px-3 py-2">
-          {warning}
-        </p>
-      )}
-      {error && (
-        <p className="text-sm text-red-400 bg-red-950/40 border border-red-900/50 rounded-xl px-3 py-2">
-          {error}
-        </p>
-      )}
-      <div
-        ref={containerRef}
-        className="flex-1 min-h-0 rounded-xl border border-slate-800 overflow-hidden bg-[#0f172a] relative"
-      >
-        {loading ? (
-          <div className="absolute inset-0 flex items-center justify-center">
-            <Loader2 className="animate-spin text-slate-400" size={36} />
+    <div className="flex min-h-[480px] flex-col gap-3">
+      <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+          <div>
+            <h2 className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Grafo PGQ</h2>
+            <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+              {graph.nodes.length} nodos · {graph.links.length} enlaces
+            </p>
           </div>
-        ) : graph.nodes.length === 0 ? (
-          <p className="absolute inset-0 flex items-center justify-center text-slate-500 text-sm">
-            Sin nodos PGQ en esta bóveda.
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading || !vaultPath}
+            className="inline-flex items-center gap-1 rounded-lg border border-gov-gray-200 px-2.5 py-1.5 text-xs font-semibold dark:border-dark-border disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={loading ? 'animate-spin' : ''} />
+            Recargar
+          </button>
+        </div>
+
+        {warning && (
+          <p className="mx-4 mt-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+            {warning}
           </p>
-        ) : (
-          <ForceGraph2D
-            width={size.w}
-            height={size.h}
-            graphData={graph}
-            nodeLabel={(n) => `${(n as PgqGraphNode).label} (${(n as PgqGraphNode).group})`}
-            nodeCanvasObjectMode={() => 'after'}
-            nodeColor={(n) => GROUP_COLORS[(n as PgqGraphNode).group] ?? '#64748b'}
-            linkLabel={(l) => String((l as { label?: string }).label ?? '')}
-            linkColor={() => 'rgba(148, 163, 184, 0.45)'}
-            backgroundColor="#0f172a"
-          />
         )}
-      </div>
+        {error && (
+          <p className="mx-4 mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-400">
+            {error}
+          </p>
+        )}
+
+        <div
+          ref={containerRef}
+          className="relative m-4 min-h-[420px] overflow-hidden rounded-lg border border-gov-gray-200 bg-[#0f172a] dark:border-dark-border"
+        >
+          {loading ? (
+            <div className="absolute inset-0 flex items-center justify-center">
+              <Loader2 className="animate-spin text-slate-400" size={36} />
+            </div>
+          ) : graph.nodes.length === 0 ? (
+            <p className="absolute inset-0 flex items-center justify-center text-sm text-slate-500">
+              Sin nodos PGQ en esta bóveda.
+            </p>
+          ) : (
+            <ForceGraph2D
+              width={size.w}
+              height={size.h}
+              graphData={graph}
+              nodeLabel={(n) => `${(n as PgqGraphNode).label} (${(n as PgqGraphNode).group})`}
+              nodeCanvasObjectMode={() => 'after'}
+              nodeColor={(n) => GROUP_COLORS[(n as PgqGraphNode).group] ?? '#64748b'}
+              linkLabel={(l) => String((l as { label?: string }).label ?? '')}
+              linkColor={() => 'rgba(148, 163, 184, 0.45)'}
+              backgroundColor="#0f172a"
+            />
+          )}
+        </div>
+      </section>
     </div>
   );
 }

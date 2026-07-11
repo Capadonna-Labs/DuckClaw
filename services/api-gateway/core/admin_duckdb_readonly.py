@@ -135,6 +135,23 @@ def enforce_select_limit(sql: str, max_rows: int = _SELECT_LIMIT_DEFAULT) -> tup
     return f"SELECT * FROM ({q}) AS _admin_q LIMIT {max_rows}", True
 
 
+def apply_select_pagination(
+    sql: str,
+    *,
+    limit: int | None = None,
+    offset: int | None = None,
+    max_rows: int = _SELECT_LIMIT_DEFAULT,
+) -> tuple[str, dict[str, int]]:
+    """Wrap SELECT without explicit LIMIT using page size + offset (explorer pagination)."""
+    q = (sql or "").strip().rstrip(";")
+    if _LIMIT_RE.search(q):
+        return q, {}
+    page_limit = max(1, min(int(limit or max_rows), max_rows))
+    page_offset = max(0, int(offset or 0))
+    wrapped = f"SELECT * FROM ({q}) AS _admin_q LIMIT {page_limit} OFFSET {page_offset}"
+    return wrapped, {"limit_applied": page_limit, "offset": page_offset}
+
+
 def _json_cell(value: Any) -> Any:
     if value is None:
         return None
@@ -168,9 +185,15 @@ def fetch_table_catalog(con: Any) -> dict[str, Any]:
     return {"schemas": schemas}
 
 
-def execute_select(con: Any, sql: str) -> dict[str, Any]:
+def execute_select(
+    con: Any,
+    sql: str,
+    *,
+    limit: int | None = None,
+    offset: int | None = None,
+) -> dict[str, Any]:
     validate_readonly_sql(sql)
-    bounded, limit_applied = enforce_select_limit(sql)
+    bounded, pagination_meta = apply_select_pagination(sql, limit=limit, offset=offset)
     cur = con.execute(bounded)
     cols = [str(d[0]) for d in (cur.description or [])]
     raw_rows = cur.fetchall()
@@ -181,8 +204,10 @@ def execute_select(con: Any, sql: str) -> dict[str, Any]:
         "rows": rows,
         "row_count": len(rows),
     }
-    if limit_applied:
-        out["limit_applied"] = _SELECT_LIMIT_DEFAULT
+    if pagination_meta:
+        page_limit = int(pagination_meta["limit_applied"])
+        out.update(pagination_meta)
+        out["has_more"] = len(rows) >= page_limit
     return out
 
 

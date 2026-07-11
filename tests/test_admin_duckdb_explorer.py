@@ -440,7 +440,36 @@ def test_duckdb_query_enforces_limit(admin_client: TestClient, explorer_db: Path
         },
     )
     assert r.status_code == 200
-    assert r.json().get("limit_applied") in (None, 500)
+    assert r.json().get("limit_applied") == 500
+
+
+def test_duckdb_query_pagination_offset(admin_client: TestClient, tmp_path: Path) -> None:
+    dbf = tmp_path / "page.duckdb"
+    con = duckdb.connect(str(dbf))
+    con.execute("CREATE SCHEMA sample_schema")
+    con.execute("CREATE TABLE sample_schema.rows (id INTEGER, name VARCHAR)")
+    con.executemany(
+        "INSERT INTO sample_schema.rows VALUES (?, ?)",
+        [(1, "a"), (2, "b"), (3, "c"), (4, "d"), (5, "e")],
+    )
+    con.close()
+
+    r = admin_client.post(
+        "/api/v1/admin/duckdb/query",
+        headers=_ADMIN_HEADERS,
+        json={
+            "vault_path": str(dbf),
+            "query": "SELECT id, name FROM sample_schema.rows ORDER BY id",
+            "limit": 2,
+            "offset": 2,
+        },
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["rows"] == [[3, "c"], [4, "d"]]
+    assert data["limit_applied"] == 2
+    assert data["offset"] == 2
+    assert data["has_more"] is True
 
 
 def test_duckdb_pgq_graph(admin_client: TestClient, explorer_db: Path) -> None:

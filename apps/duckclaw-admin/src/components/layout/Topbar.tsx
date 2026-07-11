@@ -1,12 +1,12 @@
 'use client';
 
-import { ChevronDown, LogOut, Sun, Moon, Menu, Sparkles, RefreshCw } from 'lucide-react';
+import { Menu, Moon, RefreshCw, Sparkles, Sun } from 'lucide-react';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
-import { useRouter, usePathname } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { PlatformStatusStrip } from '@/components/admin/GatewayStatusBadge';
@@ -27,10 +27,9 @@ async function waitForGatewayHealth(maxAttempts = 20): Promise<boolean> {
 }
 
 export default function Topbar({ onMenuClick }: TopbarProps) {
-  const { usuario, logout } = useAuthStore();
+  const { usuario } = useAuthStore();
   const { theme, toggleTheme } = useTheme();
   const { sidebarOpen, toggleSidebar, chatDrawerOpen, toggleChatDrawer } = useLayoutUiStore();
-  const router = useRouter();
   const pathname = usePathname();
   const isChatTab = pathname === '/playground' || pathname.startsWith('/playground/');
   const canRunOps = usuario?.rol === 'admin';
@@ -44,11 +43,6 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
     }, 3000);
     return () => window.clearTimeout(timer);
   }, [stackRestartMessage]);
-
-  const handleLogout = () => {
-    logout();
-    router.replace('/login');
-  };
 
   const handleMenuToggle = () => {
     if (typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches) {
@@ -142,8 +136,6 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
           displayName={usuario?.nombre || usuario?.email || 'Usuario'}
           email={usuario?.email || ''}
           initials={usuario?.initials ?? obtenerIniciales(usuario?.nombre || usuario?.email || '')}
-          onLogout={handleLogout}
-          isAdmin={canRunOps}
         />
         {!isChatTab && (
           <button
@@ -170,72 +162,31 @@ function UserMenu({
   displayName,
   email,
   initials,
-  onLogout,
-  isAdmin,
 }: {
   displayName: string;
   email: string;
   initials: string;
-  onLogout: () => void;
-  isAdmin?: boolean;
 }) {
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const closeOnOutside = (event: MouseEvent) => {
-      if (!menuRef.current?.contains(event.target as Node)) setUserMenuOpen(false);
-    };
-    document.addEventListener('mousedown', closeOnOutside);
-    return () => document.removeEventListener('mousedown', closeOnOutside);
-  }, [userMenuOpen]);
-
   return (
-    <div ref={menuRef} className="relative pl-2 border-l dark:border-dark-border">
-      <button
-        type="button"
-        onClick={() => setUserMenuOpen((open) => !open)}
-        className="flex items-center gap-2 rounded-xl px-2 py-1.5 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
-        aria-label="Menú de usuario"
-        aria-expanded={userMenuOpen}
+    <div className="pl-2 border-l dark:border-dark-border">
+      <div
+        className="flex items-center gap-2 rounded-xl px-2 py-1.5"
+        aria-label={`Sesión: ${displayName}`}
       >
-        <span className="hidden lg:block text-right">
-          <span className="block text-xs font-bold dark:text-dark-text max-w-40 truncate">
-            {displayName}
-          </span>
-          {email && (
-            <span className="block text-[10px] text-gov-gray-500 font-mono normal-case max-w-40 truncate">
-              {email}
-            </span>
-          )}
-        </span>
-        <span className="w-9 h-9 rounded-full bg-gov-blue-700 text-white flex items-center justify-center text-xs font-bold">
+        <span className="w-9 h-9 shrink-0 rounded-full bg-gov-blue-700 text-white flex items-center justify-center text-xs font-bold">
           {initials}
         </span>
-        <ChevronDown size={14} className={userMenuOpen ? 'rotate-180 transition-transform' : 'transition-transform'} />
-      </button>
-      {userMenuOpen && (
-        <div className="absolute right-0 top-full mt-2 w-56 rounded-2xl border bg-white dark:bg-dark-surface dark:border-dark-border shadow-lg p-2 z-50">
-          <div className={`px-3 py-2 border-b dark:border-dark-border mb-1 ${isAdmin ? 'lg:hidden' : ''}`}>
-            <p className="text-xs font-bold dark:text-dark-text truncate">{displayName}</p>
-            {email && (
-              <p className="text-[10px] text-gov-gray-500 font-mono truncate">{email}</p>
-            )}
-            {isAdmin && (
-              <p className="mt-1 text-[10px] uppercase text-gov-gray-500">Rol admin</p>
-            )}
-          </div>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="w-full flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-          >
-            <LogOut size={16} />
-            Cerrar sesión
-          </button>
-        </div>
-      )}
+        <span className="hidden lg:block min-w-0 text-left">
+          <span className="block text-xs font-bold dark:text-dark-text truncate max-w-[12rem]">
+            {displayName}
+          </span>
+          {email ? (
+            <span className="block text-[10px] text-gov-gray-500 font-mono truncate max-w-[12rem]">
+              {email}
+            </span>
+          ) : null}
+        </span>
+      </div>
     </div>
   );
 }

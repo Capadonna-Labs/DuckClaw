@@ -292,6 +292,12 @@ def _open_hub_db_readonly():
     return DuckClaw(db_path, read_only=True), db_path
 
 
+def _requeue_knowledge_sync_job(job: KnowledgeSyncJob, *, detail: str) -> None:
+    client = _redis_client()
+    client.lpush(KNOWLEDGE_SYNC_QUEUE_KEY, job.to_json())
+    set_job_status(job.job_id, status="queued", detail=detail)
+
+
 def process_knowledge_sync_job(job: KnowledgeSyncJob) -> dict[str, Any]:
     """Execute one queued job — only valid inside DuckClaw-Knowledge-Indexer."""
     from duckclaw.admin_knowledge_read import get_knowledge_source, list_source_document_checksums
@@ -309,59 +315,50 @@ def process_knowledge_sync_job(job: KnowledgeSyncJob) -> dict[str, Any]:
         return {"ok": False, "reason": "no_hub_db"}
 
     source: dict[str, Any] | None = None
+    existing: dict[str, tuple[str, str, int]] = {}
     try:
-        if job.kind == "browser_upload":
-            source = get_knowledge_source(db, tenant_id=job.tenant_id, source_id=job.source_id)
-            if not source:
-                set_job_status(job.job_id, status="failed", detail="source_not_found")
-                return {"ok": False, "reason": "source_not_found"}
-            outcome = execute_browser_upload_for_source(
-                source=source,
-                actor_email=job.actor_email,
-                staging_dir=job.staging_dir,
-                compute_embeddings=job.compute_embeddings,
-            )
-        elif job.kind == "single_file_sync":
-            source = get_knowledge_source(db, tenant_id=job.tenant_id, source_id=job.source_id)
-            if not source:
-                set_job_status(job.job_id, status="failed", detail="source_not_found")
-                return {"ok": False, "reason": "source_not_found"}
-            outcome = execute_single_file_sync_for_source(
-                source=source,
-                actor_email=job.actor_email,
-                file_path=Path(job.file_path),
-                compute_embeddings=job.compute_embeddings,
-            )
-        elif job.kind == "folder_ingest":
-            source = get_knowledge_source(db, tenant_id=job.tenant_id, source_id=job.source_id)
-            if not source:
-                set_job_status(job.job_id, status="failed", detail="source_not_found")
-                return {"ok": False, "reason": "source_not_found"}
-            outcome = execute_folder_ingest_for_source(
-                source=source,
-                actor_email=job.actor_email,
-                compute_embeddings=job.compute_embeddings,
-                job_id=job.job_id,
-            )
-        else:
-            source = get_knowledge_source(db, tenant_id=job.tenant_id, source_id=job.source_id)
-            if not source:
-                set_job_status(job.job_id, status="failed", detail="source_not_found")
-                return {"ok": False, "reason": "source_not_found"}
+        source = get_knowledge_source(db, tenant_id=job.tenant_id, source_id=job.source_id)
+        if not source:
+            set_job_status(job.job_id, status="failed", detail="source_not_found")
+            return {"ok": False, "reason": "source_not_found"}
+        if job.kind == "folder_sync":
             existing = list_source_document_checksums(db, source_id=job.source_id)
-            outcome = execute_folder_sync(
-                source=source,
-                existing=existing,
-                actor_email=job.actor_email,
-                compute_embeddings=job.compute_embeddings,
-                force=job.force,
-                job_id=job.job_id,
-            )
     finally:
         db.close()
 
+    if job.kind == "browser_upload":
+        outcome = execute_browser_upload_for_source(
+            source=source,
+            actor_email=job.actor_email,
+            staging_dir=job.staging_dir,
+            compute_embeddings=job.compute_embeddings,
+        )
+    elif job.kind == "single_file_sync":
+        outcome = execute_single_file_sync_for_source(
+            source=source,
+            actor_email=job.actor_email,
+            file_path=Path(job.file_path),
+            compute_embeddings=job.compute_embeddings,
+        )
+    elif job.kind == "folder_ingest":
+        outcome = execute_folder_ingest_for_source(
+            source=source,
+            actor_email=job.actor_email,
+            compute_embeddings=job.compute_embeddings,
+            job_id=job.job_id,
+        )
+    else:
+        outcome = execute_folder_sync(
+            source=source,
+            existing=existing,
+            actor_email=job.actor_email,
+            compute_embeddings=job.compute_embeddings,
+            force=job.force,
+            job_id=job.job_id,
+        )
+
     if outcome.skipped_reason == "sync_in_progress":
-        set_job_status(job.job_id, status="deferred", detail=outcome.skipped_reason)
+        _requeue_knowledge_sync_job(job, detail=outcome.skipped_reason)
         return {"ok": False, "deferred": True, "reason": outcome.skipped_reason}
 
     if outcome.skipped_reason:

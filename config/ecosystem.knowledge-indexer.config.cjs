@@ -37,7 +37,6 @@ module.exports = {
         PYTHONUNBUFFERED: "1",
         DUCKCLAW_PM2_PROCESS_NAME: "DuckClaw-Knowledge-Indexer",
         DUCKCLAW_PROCESS_ROLE: "knowledge-indexer",
-        DUCKCLAW_KNOWLEDGE_AUTO_SYNC: "true",
       },
     },
   ],

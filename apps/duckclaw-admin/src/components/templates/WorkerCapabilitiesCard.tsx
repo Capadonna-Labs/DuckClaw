@@ -5,12 +5,7 @@ import { AlertTriangle, Loader2, Settings2, Wrench } from 'lucide-react';
 import { adminService, type WorkerCapabilities } from '@/services/adminService';
 import { parseManifestQuick } from '@/lib/manifestQuickEdit';
 import { parseManifestSkills } from '@/lib/manifestSkillsEdit';
-
-const PROFILE_LABELS: Record<string, string> = {
-  general: 'Asistente completo',
-  rag_only: 'Enfocado en documentación',
-  minimal: 'Consultas ligeras',
-};
+import { TOOL_PROFILE_LABELS } from '@/lib/workerCompositionPresets';
 
 type WorkerCapabilitiesCardProps = {
   workerId: string;
@@ -39,7 +34,7 @@ export function WorkerCapabilitiesCard({
     () => parseManifestSkills(manifestYaml).optionalSkillNames,
     [manifestYaml]
   );
-  const profileLabel = PROFILE_LABELS[manifestQuick.toolProfile] ?? 'Asistente completo';
+  const profileLabel = TOOL_PROFILE_LABELS[manifestQuick.toolProfile] ?? 'Asistente completo';
   const runtimeGaps = payload?.gaps ?? [];
 
   const load = useCallback(async () => {
@@ -71,10 +66,10 @@ export function WorkerCapabilitiesCard({
   const showRuntimeSection = loading || apiUnavailable || Boolean(error) || runtimeGaps.length > 0;
 
   return (
-    <section className="rounded-2xl border border-gov-gray-100 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
         <div>
-          <p className="flex items-center gap-2 text-sm font-black text-gov-gray-900 dark:text-dark-text">
+          <p className="flex items-center gap-2 text-sm font-semibold text-gov-gray-900 dark:text-dark-text">
             <Wrench size={16} className="text-gov-blue-700 dark:text-dark-cyan" />
             Herramientas del worker
           </p>
@@ -91,7 +86,7 @@ export function WorkerCapabilitiesCard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {manifestDirty ? (
-            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+            <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
               sin guardar
             </span>
           ) : null}
@@ -99,7 +94,7 @@ export function WorkerCapabilitiesCard({
             <button
               type="button"
               onClick={onOpenManifest}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-gov-blue-800"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-gov-blue-800"
             >
               <Settings2 size={14} />
               Configurar herramientas
@@ -109,7 +104,7 @@ export function WorkerCapabilitiesCard({
       </div>
 
       {showRuntimeSection ? (
-        <div className="mt-4 space-y-3">
+        <div className="space-y-3 px-4 py-3">
           {loading ? (
             <p className="flex items-center gap-2 text-xs text-gov-gray-500 dark:text-dark-muted">
               <Loader2 size={14} className="animate-spin" />

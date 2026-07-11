@@ -8,6 +8,8 @@ export default defineConfig({
       'src/lib/opsSubprocessEnv.test.ts',
       'src/lib/pollWriteTask.test.ts',
       'src/lib/ansiLog.test.ts',
+      'src/lib/draftManifestYaml.test.ts',
+      'src/lib/workerRoleTemplates.test.ts',
       'src/components/chat/useAdminChatLoopPolling.test.ts',
     ],
   },

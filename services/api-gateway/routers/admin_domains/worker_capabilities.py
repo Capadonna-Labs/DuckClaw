@@ -234,6 +234,43 @@ def build_worker_capabilities_payload(
     }
 
 
+def build_worker_mcp_grants_payload(
+    worker_id: str,
+    *,
+    actor: str = "admin-ui",
+) -> dict[str, Any]:
+    from duckclaw.admin_mcp_connectors import (
+        _connector_has_auth,
+        list_mcp_connectors,
+        list_worker_mcp_connectors,
+        resolve_worker_uid,
+    )
+
+    wid, _, _, tenant_id = _load_worker_spec(worker_id, actor=actor)
+    with open_gateway_db(read_only=True) as db:
+        worker_uid = resolve_worker_uid(db, worker_id=wid, tenant_id=tenant_id)
+        granted_ids: set[str] = set()
+        if worker_uid:
+            granted = list_worker_mcp_connectors(db, worker_uid=worker_uid, tenant_id=tenant_id)
+            granted_ids = {str(c.get("connector_id") or "") for c in granted if c.get("connector_id")}
+        connectors: list[dict[str, Any]] = []
+        for connector in list_mcp_connectors(db, tenant_id=tenant_id):
+            cid = str(connector.get("connector_id") or "")
+            if not cid:
+                continue
+            connectors.append(
+                {
+                    "connector_id": cid,
+                    "display_name": str(connector.get("display_name") or cid),
+                    "preset_id": str(connector.get("preset_id") or ""),
+                    "enabled": bool(connector.get("enabled", True)),
+                    "has_auth": bool(_connector_has_auth(db, connector)),
+                    "granted": cid in granted_ids,
+                }
+            )
+    return {"worker_id": wid, "connectors": connectors}
+
+
 @router.get("/{worker_id}/capabilities", dependencies=[Depends(require_admin_key)])
 async def get_worker_capabilities(
     worker_id: str,
@@ -241,3 +278,12 @@ async def get_worker_capabilities(
 ) -> dict[str, Any]:
     """Skills declaradas vs efectivas y tools registradas en runtime para un worker."""
     return build_worker_capabilities_payload(worker_id, actor=actor)
+
+
+@router.get("/{worker_id}/mcp-grants", dependencies=[Depends(require_admin_key)])
+async def get_worker_mcp_grants(
+    worker_id: str,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    """Conectores MCP del tenant con estado de grant para el worker."""
+    return build_worker_mcp_grants_payload(worker_id, actor=actor)

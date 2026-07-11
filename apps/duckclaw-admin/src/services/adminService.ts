@@ -295,6 +295,20 @@ export interface WorkerCapabilities {
   gaps: string[];
 }
 
+export interface WorkerMcpGrantRow {
+  connector_id: string;
+  display_name: string;
+  preset_id: string;
+  enabled: boolean;
+  has_auth: boolean;
+  granted: boolean;
+}
+
+export interface WorkerMcpGrantsPayload {
+  worker_id: string;
+  connectors: WorkerMcpGrantRow[];
+}
+
 export interface PromptPolicyUpsertInput {
   policy_type: string;
   policy_name: string;
@@ -740,6 +754,9 @@ export const adminService = {
     adminFetchOptional<WorkerCapabilities>(
       `/workers/${encodeURIComponent(workerId)}/capabilities`
     ),
+
+  getWorkerMcpGrants: (workerId: string) =>
+    adminFetch<WorkerMcpGrantsPayload>(`/workers/${encodeURIComponent(workerId)}/mcp-grants`),
 
   saveTemplateFile: (workerId: string, filePath: string, content: string) =>
     adminFetch<{ ok: boolean; task_id?: string; source?: string }>(

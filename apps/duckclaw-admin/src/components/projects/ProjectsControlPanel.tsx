@@ -1,11 +1,10 @@
 'use client';
 
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Plus, RefreshCw } from 'lucide-react';
 import type { WorkspaceProjectsQuery } from '@/services/adminService';
 
 type CatalogSort = NonNullable<WorkspaceProjectsQuery['sort']>;
-type CatalogDirection = NonNullable<WorkspaceProjectsQuery['direction']>;
 type CatalogStatus = NonNullable<WorkspaceProjectsQuery['status']>;
 
 export type ProjectsControlPanelProps = {
@@ -13,13 +12,13 @@ export type ProjectsControlPanelProps = {
   query: string;
   status: CatalogStatus;
   sort: CatalogSort;
-  direction: CatalogDirection;
   limit: number;
+  loading?: boolean;
   onQueryChange: (value: string) => void;
   onStatusChange: (value: CatalogStatus) => void;
   onSortChange: (value: CatalogSort) => void;
-  onDirectionChange: (value: CatalogDirection) => void;
   onLimitChange: (value: number) => void;
+  onRefresh: () => void;
 };
 
 const sortOptions: { value: CatalogSort; label: string }[] = [
@@ -27,11 +26,6 @@ const sortOptions: { value: CatalogSort; label: string }[] = [
   { value: 'created_at', label: 'Creado' },
   { value: 'name', label: 'Nombre' },
   { value: 'agent_count', label: 'Agentes' },
-];
-
-const directionOptions: { value: CatalogDirection; label: string }[] = [
-  { value: 'desc', label: 'Descendente' },
-  { value: 'asc', label: 'Ascendente' },
 ];
 
 const statusOptions: { value: CatalogStatus; label: string }[] = [
@@ -47,13 +41,13 @@ export function ProjectsControlPanel({
   query,
   status,
   sort,
-  direction,
   limit,
+  loading = false,
   onQueryChange,
   onStatusChange,
   onSortChange,
-  onDirectionChange,
   onLimitChange,
+  onRefresh,
 }: ProjectsControlPanelProps) {
   return (
     <aside className="rounded-2xl border border-gov-gray-100 bg-white p-4 shadow-sm dark:border-dark-border dark:bg-dark-surface lg:sticky lg:top-4 space-y-4">
@@ -97,20 +91,6 @@ export function ProjectsControlPanel({
           </select>
         </label>
         <label className="block text-xs font-bold text-gov-gray-700 dark:text-dark-text">
-          Dirección
-          <select
-            value={direction}
-            onChange={(event) => onDirectionChange(event.target.value as CatalogDirection)}
-            className="mt-1 w-full rounded-xl border border-gov-gray-200 px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
-          >
-            {directionOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-xs font-bold text-gov-gray-700 dark:text-dark-text">
           Por página
           <select
             value={limit}
@@ -125,6 +105,15 @@ export function ProjectsControlPanel({
           </select>
         </label>
       </div>
+      <button
+        type="button"
+        onClick={onRefresh}
+        disabled={loading}
+        className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-gov-gray-200 px-3 py-2 text-xs font-bold text-gov-blue-800 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
+      >
+        <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+        Refrescar
+      </button>
       {canWrite ? (
         <Link
           href="/projects/orchestrator"

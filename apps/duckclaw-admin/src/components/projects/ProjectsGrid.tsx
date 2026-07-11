@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { WorkspaceProjectSummary } from '@/services/adminService';
 import { ProjectCard } from '@/components/projects/ProjectCard';
 
@@ -11,8 +11,6 @@ export type ProjectsGridProps = {
   page: number;
   pageCount: number;
   canWrite: boolean;
-  loading?: boolean;
-  onRefresh: () => void;
   onPrevPage: () => void;
   onNextPage: () => void;
   onDelete: (project: WorkspaceProjectSummary) => void;
@@ -26,8 +24,6 @@ export function ProjectsGrid({
   page,
   pageCount,
   canWrite,
-  loading = false,
-  onRefresh,
   onPrevPage,
   onNextPage,
   onDelete,
@@ -36,25 +32,11 @@ export function ProjectsGrid({
 }: ProjectsGridProps) {
   return (
     <section className="min-w-0 space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Proyectos</h2>
-          {total > 0 ? (
-            <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">
-              {total} proyecto{total === 1 ? '' : 's'} · página {page}/{pageCount}
-            </p>
-          ) : null}
-        </div>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={loading}
-          className="inline-flex items-center gap-2 rounded-xl border border-gov-gray-200 px-3 py-2 text-xs font-bold text-gov-blue-800 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan"
-        >
-          <RefreshCw size={14} />
-          Refrescar
-        </button>
-      </div>
+      {total > 0 ? (
+        <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+          {total} proyecto{total === 1 ? '' : 's'} · página {page}/{pageCount}
+        </p>
+      ) : null}
 
       {projects.length === 0 ? (
         <div className="rounded-2xl border border-dashed border-gov-gray-200 p-8 text-center dark:border-dark-border">

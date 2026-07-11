@@ -10,8 +10,9 @@ import type { WorkspaceProjectSummary, WorkspaceProjectsQuery } from '@/services
 import { useAuthStore } from '@/store/authStore';
 
 type CatalogSort = NonNullable<WorkspaceProjectsQuery['sort']>;
-type CatalogDirection = NonNullable<WorkspaceProjectsQuery['direction']>;
 type CatalogStatus = NonNullable<WorkspaceProjectsQuery['status']>;
+
+const CATALOG_DIRECTION = 'desc' as const;
 
 export default function ProjectsPage() {
   const { usuario } = useAuthStore();
@@ -21,7 +22,6 @@ export default function ProjectsPage() {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<CatalogStatus>('active');
   const [sort, setSort] = useState<CatalogSort>('updated_at');
-  const [direction, setDirection] = useState<CatalogDirection>('desc');
   const [limit, setLimit] = useState(25);
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -33,7 +33,7 @@ export default function ProjectsPage() {
     setLoading(true);
     setError(null);
     adminService
-      .listWorkspaceProjectsPage({ q: query, status, sort, direction, limit, offset })
+      .listWorkspaceProjectsPage({ q: query, status, sort, direction: CATALOG_DIRECTION, limit, offset })
       .then((page) => {
         const maxOffset = Math.max(0, Math.floor((page.total - 1) / limit) * limit);
         if (page.projects.length === 0 && page.total > 0 && offset > maxOffset) {
@@ -45,7 +45,7 @@ export default function ProjectsPage() {
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'))
       .finally(() => setLoading(false));
-  }, [query, status, sort, direction, limit, offset]);
+  }, [query, status, sort, limit, offset]);
 
   useEffect(() => {
     reload();
@@ -125,8 +125,8 @@ export default function ProjectsPage() {
             query={query}
             status={status}
             sort={sort}
-            direction={direction}
             limit={limit}
+            loading={loading}
             onQueryChange={(value) => {
               setQuery(value);
               setOffset(0);
@@ -139,14 +139,11 @@ export default function ProjectsPage() {
               setSort(value);
               setOffset(0);
             }}
-            onDirectionChange={(value) => {
-              setDirection(value);
-              setOffset(0);
-            }}
             onLimitChange={(value) => {
               setLimit(value);
               setOffset(0);
             }}
+            onRefresh={reload}
           />
         </div>
         <div className="lg:col-span-8">
@@ -156,8 +153,6 @@ export default function ProjectsPage() {
             page={page}
             pageCount={pageCount}
             canWrite={canWrite}
-            loading={loading}
-            onRefresh={reload}
             onPrevPage={() => setOffset(Math.max(0, offset - limit))}
             onNextPage={() => setOffset(offset + limit)}
             onDelete={requestDeleteProject}

@@ -1,33 +1,46 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Container, Loader2, Wrench } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Loader2, Settings2, Wrench } from 'lucide-react';
 import { adminService, type WorkerCapabilities } from '@/services/adminService';
-import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
-import { WorkerToolsDropdown } from '@/components/templates/WorkerToolsDropdown';
+import { parseManifestQuick } from '@/lib/manifestQuickEdit';
+import { parseManifestSkills } from '@/lib/manifestSkillsEdit';
+
+const PROFILE_LABELS: Record<string, string> = {
+  general: 'Asistente completo',
+  rag_only: 'Enfocado en documentación',
+  minimal: 'Consultas ligeras',
+};
 
 type WorkerCapabilitiesCardProps = {
   workerId: string;
   manifestYaml: string;
-  onManifestChange: (nextYaml: string) => void;
   manifestDirty?: boolean;
   canEdit?: boolean;
   refreshKey?: string | null;
+  onOpenManifest?: () => void;
 };
 
 export function WorkerCapabilitiesCard({
   workerId,
   manifestYaml,
-  onManifestChange,
   manifestDirty,
   canEdit,
   refreshKey,
+  onOpenManifest,
 }: WorkerCapabilitiesCardProps) {
   const [payload, setPayload] = useState<WorkerCapabilities | null>(null);
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const { globalSkills, localSkills } = useSkillsCatalog();
+
+  const manifestQuick = useMemo(() => parseManifestQuick(manifestYaml), [manifestYaml]);
+  const optionalSkills = useMemo(
+    () => parseManifestSkills(manifestYaml).optionalSkillNames,
+    [manifestYaml]
+  );
+  const profileLabel = PROFILE_LABELS[manifestQuick.toolProfile] ?? 'Asistente completo';
+  const runtimeGaps = payload?.gaps ?? [];
 
   const load = useCallback(async () => {
     if (!workerId) return;
@@ -55,52 +68,57 @@ export function WorkerCapabilitiesCard({
     void load();
   }, [load, refreshKey]);
 
+  const showRuntimeSection = loading || apiUnavailable || Boolean(error) || runtimeGaps.length > 0;
+
   return (
     <section className="rounded-2xl border border-gov-gray-100 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="flex items-center gap-2 text-sm font-black text-gov-gray-900 dark:text-dark-text">
             <Wrench size={16} className="text-gov-blue-700 dark:text-dark-cyan" />
-            Capabilities del worker
+            Herramientas del worker
           </p>
           <p className="mt-1 text-[11px] text-gov-gray-500 dark:text-dark-muted">
-            Estado del sandbox y herramientas opcionales del manifest.
+            Perfil: <span className="font-semibold text-gov-gray-700 dark:text-dark-text">{profileLabel}</span>
+            {optionalSkills.length > 0 ? (
+              <>
+                {' '}
+                · extras:{' '}
+                <span className="font-mono text-[10px]">{optionalSkills.join(', ')}</span>
+              </>
+            ) : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {manifestDirty ? (
             <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-black uppercase text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-              manifest sin guardar
+              sin guardar
             </span>
           ) : null}
-          {payload?.framework_baseline ? (
-            <span className="rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-black uppercase text-green-800 dark:bg-green-950/40 dark:text-green-300">
-              baseline
-            </span>
+          {canEdit && onOpenManifest ? (
+            <button
+              type="button"
+              onClick={onOpenManifest}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-gov-blue-800"
+            >
+              <Settings2 size={14} />
+              Configurar herramientas
+            </button>
           ) : null}
-          <WorkerToolsDropdown
-            manifestYaml={manifestYaml}
-            onManifestChange={onManifestChange}
-            disabled={!canEdit}
-            workerId={workerId}
-            globalSkills={globalSkills}
-            localSkills={localSkills}
-          />
         </div>
       </div>
 
-      {loading ? (
-        <p className="mt-4 flex items-center gap-2 text-xs text-gov-gray-500 dark:text-dark-muted">
-          <Loader2 size={14} className="animate-spin" />
-          Cargando capabilities…
-        </p>
-      ) : (
+      {showRuntimeSection ? (
         <div className="mt-4 space-y-3">
+          {loading ? (
+            <p className="flex items-center gap-2 text-xs text-gov-gray-500 dark:text-dark-muted">
+              <Loader2 size={14} className="animate-spin" />
+              Comprobando runtime…
+            </p>
+          ) : null}
           {apiUnavailable && (
             <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-              No se pudo contactar{' '}
-              <code className="font-mono">GET /workers/{'{id}'}/capabilities</code>. El dropdown usa
-              el manifest en memoria.
+              No se pudo comprobar el runtime del worker.
             </p>
           )}
           {error && !apiUnavailable && (
@@ -108,49 +126,21 @@ export function WorkerCapabilitiesCard({
               {error}
             </p>
           )}
-
-          {payload?.sandbox && (
-            <div className="flex flex-wrap gap-2">
-              <StatusPill
-                ok={payload.sandbox.registered}
-                label={payload.sandbox.registered ? 'Sandbox registrado' : 'Sin sandbox'}
-              />
-              <StatusPill
-                ok={payload.sandbox.docker_ok}
-                label={payload.sandbox.docker_ok ? 'Docker OK' : 'Docker no disponible'}
-                icon={<Container size={12} />}
-              />
-              {payload.optional?.tavily ? <StatusPill ok label="Tavily activo" /> : null}
-              {payload.optional?.browser_sandbox ? (
-                <StatusPill ok label="Browser sandbox" />
-              ) : null}
-            </div>
-          )}
+          {runtimeGaps.length > 0 ? (
+            <ul className="space-y-1.5 rounded-xl border border-amber-200 bg-amber-50/80 px-3 py-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+              {runtimeGaps.map((gap) => (
+                <li
+                  key={gap}
+                  className="flex items-start gap-2 text-[11px] text-amber-950 dark:text-amber-100"
+                >
+                  <AlertTriangle size={13} className="mt-0.5 shrink-0" />
+                  {gap}
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </div>
-      )}
+      ) : null}
     </section>
-  );
-}
-
-function StatusPill({
-  ok,
-  label,
-  icon,
-}: {
-  ok: boolean;
-  label: string;
-  icon?: React.ReactNode;
-}) {
-  return (
-    <span
-      className={
-        ok
-          ? 'inline-flex items-center gap-1 rounded-full bg-green-50 px-2.5 py-1 text-[10px] font-bold text-green-800 dark:bg-green-950/40 dark:text-green-300'
-          : 'inline-flex items-center gap-1 rounded-full bg-gov-gray-100 px-2.5 py-1 text-[10px] font-bold text-gov-gray-600 dark:bg-dark-bg dark:text-dark-muted'
-      }
-    >
-      {icon}
-      {label}
-    </span>
   );
 }

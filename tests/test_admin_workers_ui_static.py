@@ -72,7 +72,8 @@ def test_worker_detail_ui_marks_catalog_workers_read_only() -> None:
     assert "CatalogContextTools" in detail_page
     assert "Añadir contexto" in detail_page
     assert "deleteTemplateContext" in detail_page
-    assert "reorderTemplateContexts" in detail_page
+    assert "ConfirmDangerModal" in detail_page
+    assert "Eliminar contexto seleccionado" in detail_page
 
 
 def test_catalog_context_creation_gives_feedback_and_keeps_new_tab() -> None:

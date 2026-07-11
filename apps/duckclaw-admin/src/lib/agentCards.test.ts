@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { agentDescription, agentMetadata } from './agentCards';
+import { agentCardSubtitle, agentDescription, agentMetadata, agentWorkerIcon } from './agentCards';
 
 assert.equal(
   agentDescription({
@@ -10,6 +10,23 @@ assert.equal(
   }),
   'Descripción cargada desde manifest.yaml'
 );
+
+assert.equal(
+  agentDescription({ id: 'bare_worker', name: 'BareWorker' }),
+  ''
+);
+
+assert.equal(
+  agentCardSubtitle({
+    id: 'research_worker',
+    name: 'ResearchWorker',
+    skills_list: ['rag_search', 'web_fetch', 'code_exec', 'notify'],
+  }),
+  '4 skills: rag_search, web_fetch, code_exec +1'
+);
+
+assert.equal(agentWorkerIcon('devops'), agentWorkerIcon('devops'));
+assert.notEqual(agentWorkerIcon('devops'), agentWorkerIcon('research_worker'));
 
 assert.deepEqual(
   agentMetadata({ id: 'research_worker', name: 'ResearchWorker', schema_name: 'research_worker', temperature: 0.3 }),

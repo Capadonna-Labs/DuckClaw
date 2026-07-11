@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import Link from 'next/link';
 import SettingsSection from '@/components/settings/SettingsSection';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
 import { TelegramUsersPanel } from '@/components/access/TelegramUsersPanel';
@@ -56,14 +55,6 @@ export default function TelegramIntegrationPageView({ embedded = false }: Embedd
           </p>
         </header>
       )}
-
-      <section className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-950 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-        <p className="font-bold">Integración avanzada, no requerida para empezar</p>
-        <p className="mt-1 text-xs text-amber-900/90 dark:text-amber-100/90">
-          Usa Playground y <Link href="/administracion?tab=acceso" className="underline font-semibold">Usuarios consola</Link>{' '}
-          para operar sin bot. Esta sección solo aplica si expones DuckClaw por Telegram.
-        </p>
-      </section>
 
       <SettingsSection
         titulo="Configuración Telegram"

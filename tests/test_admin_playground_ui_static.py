@@ -132,20 +132,15 @@ def test_topbar_hamburger_toggles_desktop_sidebar() -> None:
     assert "PlatformStatusStrip" in topbar
 
 
-def test_user_logout_lives_in_topbar_user_menu_only() -> None:
+def test_user_logout_lives_in_sidebar_footer() -> None:
     topbar = Path("apps/duckclaw-admin/src/components/layout/Topbar.tsx").read_text(encoding="utf-8")
     sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
 
     assert "UserMenu" in topbar
-    assert "userMenuOpen" in topbar
-    assert "aria-label=\"Menú de usuario\"" in topbar
-    assert "Cerrar sesión" in topbar
-    assert "LogOut" in topbar
-    assert "hidden md:inline\">Salir" not in topbar
-    assert "className=\"flex items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30\"" not in topbar
-    assert "<footer" not in sidebar
-    assert "Cerrar sesión" not in sidebar
-    assert "roleDisplayName" not in sidebar
+    assert "Cerrar sesión" not in topbar
+    assert "SidebarFooter" in sidebar
+    assert "Cerrar sesión" in sidebar
+    assert "LogOut" in sidebar
 
 
 def test_playground_new_query_creates_new_conversation() -> None:

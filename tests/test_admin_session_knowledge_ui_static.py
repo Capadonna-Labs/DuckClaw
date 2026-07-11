@@ -18,16 +18,27 @@ def test_playground_shows_session_database_chip() -> None:
     assert "BD sin resolver" in chip
 
 
-def test_knowledge_page_status_badges_and_playground_banner() -> None:
+def test_knowledge_page_status_badges_and_scope_layout() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/knowledge/page.tsx").read_text(encoding="utf-8")
-    assert "KnowledgeSourceCard" in page
-    assert "KnowledgePlaygroundBanner" in page
+    assert "KnowledgeSourcesGrid" in page
+    assert "KnowledgeControlPanel" in page
+    assert "KnowledgeScopeStatus" in page
+    assert "KnowledgePlaygroundBanner" not in page
+    assert "lg:grid-cols-12" in page
     card = Path("apps/duckclaw-admin/src/components/knowledge/KnowledgeSourceCard.tsx").read_text(
         encoding="utf-8"
     )
     assert "KnowledgeStatusBadge" in card
-    banner = Path(
-        "apps/duckclaw-admin/src/components/knowledge/KnowledgePlaygroundBanner.tsx"
+    assert "md:flex-row" not in card
+    assert "Ver archivos" not in card
+    status = Path("apps/duckclaw-admin/src/components/knowledge/KnowledgeScopeStatus.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "return null" in status
+    assert "auto-fill" in Path(
+        "apps/duckclaw-admin/src/components/knowledge/KnowledgeSourcesGrid.tsx"
     ).read_text(encoding="utf-8")
-    assert "Listo para el chat" in banner
-    assert "Playground" in banner
+    grid = Path("apps/duckclaw-admin/src/components/knowledge/KnowledgeSourcesGrid.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "sourcesSummaryLabel" in grid

@@ -42,6 +42,9 @@ def test_knowledge_page_semantic_search_toggle() -> None:
     from pathlib import Path
 
     page = Path("apps/duckclaw-admin/src/app/(admin)/knowledge/page.tsx").read_text(encoding="utf-8")
+    panel = Path("apps/duckclaw-admin/src/components/knowledge/KnowledgeControlPanel.tsx").read_text(
+        encoding="utf-8"
+    )
     assert "computeEmbeddings" in page
-    assert "Búsqueda semántica" in page
-    assert ".pdf" in page
+    assert "Búsqueda semántica" in panel
+    assert ".pdf" in panel

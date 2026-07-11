@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard,
@@ -28,6 +28,7 @@ import {
   Monitor,
   UserCircle,
   Box,
+  LogOut,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import {
@@ -165,7 +166,32 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
           );
         })}
       </div>
+      <SidebarFooter onMobileClose={onMobileClose} />
     </nav>
+  );
+}
+
+function SidebarFooter({ onMobileClose }: { onMobileClose?: () => void }) {
+  const router = useRouter();
+  const { logout } = useAuthStore();
+
+  const handleLogout = () => {
+    logout();
+    onMobileClose?.();
+    router.replace('/login');
+  };
+
+  return (
+    <div className="shrink-0 border-t border-gov-blue-700 px-3 py-3 dark:border-dark-border">
+      <button
+        type="button"
+        onClick={handleLogout}
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold text-red-300 transition-colors hover:bg-gov-blue-700/50 hover:text-red-200"
+      >
+        <LogOut size={18} />
+        Cerrar sesión
+      </button>
+    </div>
   );
 }
 

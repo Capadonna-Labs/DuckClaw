@@ -8,8 +8,8 @@ Garantizar que DuckClaw **nunca falle en el primer mensaje** por policies de fra
 
 | Capa | Fuente | Alcance | Cuándo aplica |
 |------|--------|---------|---------------|
-| **0 — Airbag** | `framework_fallbacks.py` + `framework_policy_pack_v1.json` | Solo las 4 keys de `FRAMEWORK_PROMPT_POLICY_REQUIREMENTS` | Fila activa ausente en `main.prompt_policy_registry` |
-| **1 — Semilla** | Migración 021 (`apply_framework_policy_pack`) | Mismas 4 policies + metadata `seed: framework_policy_pack_v1` | Tras `duckclaw-migrate` / `run_pending_migrations` |
+| **0 — Airbag** | `framework_fallbacks.py` + `framework_policy_pack_v1.json` | Solo las 3 keys de `FRAMEWORK_PROMPT_POLICY_REQUIREMENTS` | Fila activa ausente en `main.prompt_policy_registry` |
+| **1 — Semilla** | Migración 021 (`apply_framework_policy_pack`) | Airbag + directivas opcionales del pack (p. ej. `directive/report_engine`) | Tras `duckclaw-migrate` / `run_pending_migrations` |
 | **2 — Usuario** | Admin API / consola | Cualquier policy en registry | Edición, versionado, `active=false` sin borrar |
 
 **Workers y dominio** (`system_prompt/<worker_id>`, `directive/*`, `manager_task/*` custom) siguen **DB-first estricto**: sin fallback silencioso en código salvo la regla de herencia documentada abajo.
@@ -19,11 +19,12 @@ Garantizar que DuckClaw **nunca falle en el primer mensaje** por policies de fra
 | `policy_type` | `policy_name` | Uso runtime |
 |---------------|---------------|-------------|
 | `capability` | `generic_worker` | Respuesta rápida “¿qué puedes hacer?” con `{worker_id}`, `{tenant_id}` |
-| `capability` | `axis_coordinator` | Manager con pool de agentes: `{coord}`, `{lines}` |
 | `capability` | `default_fallback` | Sin worker identificado |
 | `system_prompt` | `default` | Plantilla madre de identidad y reglas del agente genérico |
 
-Placeholders en JSON/pack: `{tenant_id}`, `{worker_id}`, `{coord}`, `{lines}` — **no** usar `{{}}`.
+**Directivas opcionales** (siembra del pack, no airbag): `directive/report_engine` — se anexa al system prompt en runtime cuando aplica.
+
+Placeholders en JSON/pack: `{tenant_id}`, `{worker_id}` — **no** usar `{{}}`.
 
 ## Herencia `system_prompt/<worker_id>`
 
@@ -58,7 +59,7 @@ Archivo canónico: `packages/shared/src/duckclaw/seeds/framework_policy_pack_v1.
 }
 ```
 
-- **Una entrada por policy** de framework (4 filas).
+- **Airbag:** 3 policies obligatorias + directivas opcionales en el mismo JSON.
 - `content` incluye secciones inspiradas en SOUL / AGENTS / TOOLS / RULES (OpenClaw/Hermes/ECC) fusionadas en `system_prompt/default`.
 - Capability policies: texto corto (3–8 líneas), no duplicar el system prompt completo.
 

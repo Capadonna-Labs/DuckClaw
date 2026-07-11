@@ -118,6 +118,9 @@ def stop_pm2_services(
 
 
 def duckdb_paths_to_unlock(repo: Path) -> list[Path]:
+    from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH
+
+    workspace_name = Path(DEFAULT_SESSION_DB_RELPATH).name
     paths: list[Path] = []
     try:
         from duckclaw.gateway_db import get_gateway_db_path
@@ -131,7 +134,11 @@ def duckdb_paths_to_unlock(repo: Path) -> list[Path]:
         pass
     private = repo / "db" / "private"
     if private.is_dir():
-        for vault_db in sorted(private.glob("*/axis.duckdb")):
+        for vault_db in sorted(private.glob(f"*/{workspace_name}")):
+            if vault_db.is_file():
+                paths.append(vault_db)
+        legacy_name = "axis.duckdb"
+        for vault_db in sorted(private.glob(f"*/{legacy_name}")):
             if vault_db.is_file():
                 paths.append(vault_db)
     # Dedup preservando orden

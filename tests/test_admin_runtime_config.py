@@ -19,7 +19,7 @@ def test_runtime_vaults_are_scoped_to_authenticated_actor(
     other_dir = repo_root / "db" / "private" / "other456"
     owner_dir.mkdir(parents=True)
     other_dir.mkdir(parents=True)
-    duckdb.connect(str(owner_dir / "axis.duckdb")).close()
+    duckdb.connect(str(owner_dir / "duckclaw.duckdb")).close()
     duckdb.connect(str(other_dir / "hidden.duckdb")).close()
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
     monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
@@ -34,7 +34,7 @@ def test_runtime_vaults_are_scoped_to_authenticated_actor(
     data = response.json()
     paths = [item["path"] for item in data["vaults"]]
     assert data["vault_user_id"] == "owner123"
-    assert any(path.endswith("db/private/owner123/axis.duckdb") for path in paths)
+    assert any(path.endswith("db/private/owner123/duckclaw.duckdb") for path in paths)
     assert not any("other456" in path for path in paths)
 
 

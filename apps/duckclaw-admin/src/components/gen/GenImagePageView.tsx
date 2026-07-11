@@ -1,12 +1,11 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import SettingsSection from '@/components/settings/SettingsSection';
 import { adminService } from '@/services/adminService';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { parseArtifactIdFromPath } from '@/lib/artifactPreview';
 import { useAuthStore } from '@/store/authStore';
-import { Database, Image as ImageIcon, RefreshCw, Sparkles } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
 
 const ASPECT_FALLBACK = ['1:1', '16:9', '9:16', '4:3', '3:4'];
@@ -91,7 +90,7 @@ export default function GenImagePageView({ embedded = false }: EmbeddedViewProps
       const msg = e instanceof Error ? e.message : 'Error al cargar';
       setError(
         msg.includes('404') || msg.includes('502')
-          ? `${friendlyGatewayError(msg)} Si ComfyUI corre en PM2 pero el estado falla, recarga esta página; si Generar falla, reinicia el Gateway.`
+          ? `${friendlyGatewayError(msg)} Recarga la página o reinicia el Gateway si Generar falla.`
           : friendlyGatewayError(msg)
       );
     }
@@ -121,15 +120,13 @@ export default function GenImagePageView({ embedded = false }: EmbeddedViewProps
       const out = await adminService.runOps(opId);
       if (out.exit_code !== 0) {
         setError(out.stderr || out.stdout || `Ops ${opId} falló`);
-      } else {
-        setError(null);
       }
       await loadMeta();
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error en operación PM2';
       setError(
         msg === opId || msg.includes('Comando no permitido')
-          ? `PM2 local: ${msg}. Reinicia el admin (pnpm dev) o ejecuta en el Mac: pm2 ${opId.replace('pm2_', '').replace(/_/g, ' ')}`
+          ? `PM2 local: ${msg}`
           : msg
       );
     } finally {
@@ -215,250 +212,253 @@ export default function GenImagePageView({ embedded = false }: EmbeddedViewProps
 
   return (
     <ViewChrome embedded={embedded}>
-      <header className="flex flex-wrap items-start justify-between gap-4">
+      <div className="space-y-4">
         {!embedded && (
-          <div>
-            <h1 className="text-3xl font-black dark:text-dark-text">Image</h1>
-            <p className="text-sm text-gov-gray-500 dark:text-dark-muted mt-1">
-              Generación txt2img vía ComfyUI ({status?.url || 'COMFYUI_API_URL'})
+          <header className="border-b border-gov-gray-200 pb-4 dark:border-dark-border">
+            <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">Imágenes</h1>
+            <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
+              Generación txt2img vía ComfyUI
             </p>
-          </div>
+          </header>
         )}
-        <button
-          type="button"
-          onClick={() => void loadMeta()}
-          className={`inline-flex items-center gap-2 px-3 py-2 text-sm rounded-lg border border-gov-gray-200 dark:border-dark-border hover:bg-gov-gray-50 dark:hover:bg-dark-bg ${embedded ? 'ml-auto' : ''}`}
-        >
-          <RefreshCw size={16} />
-          Actualizar estado
-        </button>
-      </header>
 
-      {error && (
-        <p className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/40 px-3 py-2 rounded-lg">
-          {error}
-        </p>
-      )}
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => void loadMeta()}
+            className="inline-flex items-center gap-2 rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs font-semibold text-gov-gray-700 dark:border-dark-border dark:text-dark-muted"
+          >
+            <RefreshCw size={14} />
+            Actualizar
+          </button>
+        </div>
 
-      <SettingsSection
-        titulo="Configuración ComfyUI"
-        descripcion="Runtime Settings DB-first; .env queda como fallback de arranque."
-        icono={<Database size={22} />}
-      >
-        <div className="grid gap-3 max-w-2xl text-sm">
-          <label htmlFor="comfyui-api-url" className="block">
-            <span className="text-xs font-bold uppercase text-gov-gray-500">API URL</span>
-            <input
-              id="comfyui-api-url"
-              value={comfyApiUrl}
-              onChange={(e) => setComfyApiUrl(e.target.value)}
-              disabled={!canWriteSettings}
-              className="mt-1 w-full rounded-xl border px-3 py-2 font-mono dark:border-dark-border dark:bg-dark-bg"
-            />
-          </label>
-          <label htmlFor="comfyui-timeout-sec" className="block max-w-xs">
-            <span className="text-xs font-bold uppercase text-gov-gray-500">Timeout segundos</span>
-            <input
-              id="comfyui-timeout-sec"
-              value={comfyTimeoutSec}
-              onChange={(e) => setComfyTimeoutSec(e.target.value)}
-              disabled={!canWriteSettings}
-              className="mt-1 w-full rounded-xl border px-3 py-2 font-mono dark:border-dark-border dark:bg-dark-bg"
-            />
-          </label>
-          <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
-            Fuente efectiva: <span className="font-mono">{comfySource}</span> · setting{' '}
-            <span className="font-mono">comfyui.api_url</span>; timeout{' '}
-            <span className="font-mono">{comfyTimeoutSource}</span> · setting{' '}
-            <span className="font-mono">comfyui.timeout_sec</span>
+        {error && (
+          <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-400">
+            {error}
           </p>
-          {canWriteSettings && (
-            <button
-              type="button"
-              onClick={() => void saveComfySettings()}
-              disabled={settingsSaving}
-              className="w-fit rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
-            >
-              {settingsSaving ? 'Guardando…' : 'Guardar en DuckDB'}
-            </button>
-          )}
-          {settingsMsg && <p className="text-xs text-gov-blue-700 dark:text-dark-cyan">{settingsMsg}</p>}
-        </div>
-      </SettingsSection>
+        )}
 
-      <SettingsSection
-        titulo="Servicio ComfyUI"
-        descripcion="PM2 y health check del API local"
-        icono={<Sparkles size={22} />}
-      >
-        <div className="flex flex-wrap items-center gap-3 mb-4">
-          <span
-            className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${
-              comfyOnline
-                ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
-                : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100'
-            }`}
-          >
-            {comfyOnline ? 'Online' : 'Offline'}
-            {status?.latency_ms != null && comfyOnline ? ` · ${status.latency_ms} ms` : ''}
-          </span>
-          {status?.error && !comfyOnline && (
-            <span className="text-xs text-gov-gray-500">{status.error}</span>
-          )}
-          {comfyOnline && !checkpointsReady && (
-            <span className="text-xs text-amber-800 dark:text-amber-200">
-              Sin checkpoints: copia un .safetensors en{' '}
-              <code className="text-[10px]">COMFYUI_HOME/models/checkpoints/</code> y reinicia ComfyUI.
-            </span>
-          )}
-          {comfyOnline && checkpointsReady && status?.checkpoints?.length ? (
-            <span className="text-xs text-gov-gray-500">
-              Checkpoints: {status.checkpoints.slice(0, 3).join(', ')}
-              {status.checkpoints.length > 3 ? ` (+${status.checkpoints.length - 3})` : ''}
-            </span>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled={opsBusy !== null}
-            onClick={() => void runOp('pm2_start_comfyui')}
-            className="px-3 py-2 text-sm font-medium rounded-lg bg-gov-blue-700 text-white hover:bg-gov-blue-800 disabled:opacity-50"
-          >
-            {opsBusy === 'pm2_start_comfyui' ? 'Iniciando…' : 'Iniciar ComfyUI (PM2)'}
-          </button>
-          <button
-            type="button"
-            disabled={opsBusy !== null}
-            onClick={() => void runOp('pm2_restart_comfyui')}
-            className="px-3 py-2 text-sm font-medium rounded-lg border border-gov-gray-300 dark:border-dark-border hover:bg-gov-gray-50 dark:hover:bg-dark-bg disabled:opacity-50"
-          >
-            {opsBusy === 'pm2_restart_comfyui' ? 'Reiniciando…' : 'Reiniciar ComfyUI'}
-          </button>
-        </div>
-        <p className="text-xs text-gov-gray-500 mt-3">
-          Define <code className="text-[10px]">COMFYUI_HOME</code> en .env si no usas{' '}
-          <code className="text-[10px]">~/ComfyUI</code>. Tras cambiar .env:{' '}
-          <code className="text-[10px]">pm2 restart DuckClaw-Gateway --update-env</code>
-        </p>
-      </SettingsSection>
+        <div className="grid gap-4 lg:grid-cols-12">
+          <div className="space-y-4 lg:col-span-8">
+            <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+              <div className="border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+                <h2 className="text-base font-semibold text-gov-gray-900 dark:text-dark-text">Generar</h2>
+              </div>
+              <div className="space-y-4 p-4">
+                <label className="block text-sm">
+                  <span className="font-medium text-gov-gray-800 dark:text-dark-text">Prompt</span>
+                  <textarea
+                    value={prompt}
+                    onChange={(e) => setPrompt(e.target.value)}
+                    rows={4}
+                    className="mt-1 w-full rounded-lg border border-gov-gray-200 bg-white px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+                    placeholder="Describe la imagen…"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="font-medium text-gov-gray-800 dark:text-dark-text">Negative prompt</span>
+                  <input
+                    value={negativePrompt}
+                    onChange={(e) => setNegativePrompt(e.target.value)}
+                    className="mt-1 w-full rounded-lg border border-gov-gray-200 bg-white px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+                  />
+                </label>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <label className="block text-sm">
+                    <span className="font-medium text-gov-gray-800 dark:text-dark-text">Template</span>
+                    <select
+                      value={template}
+                      onChange={(e) => setTemplate(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gov-gray-200 bg-white px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+                    >
+                      {(templates.length
+                        ? templates
+                        : [{ id: defaultTemplate, label: defaultTemplate, aspect_ratios: ASPECT_FALLBACK }]
+                      ).map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="font-medium text-gov-gray-800 dark:text-dark-text">Aspect ratio</span>
+                    <select
+                      value={aspectRatio}
+                      onChange={(e) => setAspectRatio(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gov-gray-200 bg-white px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+                    >
+                      {aspectOptions.map((ar) => (
+                        <option key={ar} value={ar}>
+                          {ar}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-sm">
+                    <span className="font-medium text-gov-gray-800 dark:text-dark-text">Tenant</span>
+                    <input
+                      value={tenantId}
+                      onChange={(e) => setTenantId(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gov-gray-200 bg-white px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+                    />
+                  </label>
+                </div>
+                <div className="flex flex-wrap items-center gap-3">
+                  <button
+                    type="button"
+                    disabled={loading || !canGenerate}
+                    onClick={() => void onGenerate()}
+                    className="rounded-lg bg-gov-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-gov-blue-800 disabled:opacity-50"
+                  >
+                    {loading ? 'Generando…' : 'Generar'}
+                  </button>
+                  {loading && (
+                    <span className="text-sm tabular-nums text-gov-gray-600 dark:text-dark-muted">
+                      {formatElapsedSec(generatingElapsedMs)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </section>
 
-      <SettingsSection
-        titulo="Generar imagen"
-        descripcion="Workflow API comfy_default (u otro template)"
-        icono={<ImageIcon size={22} />}
-      >
-        <div className="grid gap-4 max-w-2xl">
-          <label className="block text-sm">
-            <span className="font-medium">Prompt</span>
-            <textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={4}
-              className="mt-1 w-full rounded-lg border border-gov-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2 text-sm"
-              placeholder="Describe la imagen…"
-            />
-          </label>
-          <label className="block text-sm">
-            <span className="font-medium">Negative prompt</span>
-            <input
-              value={negativePrompt}
-              onChange={(e) => setNegativePrompt(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-gov-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2 text-sm"
-            />
-          </label>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <label className="block text-sm">
-              <span className="font-medium">Template</span>
-              <select
-                value={template}
-                onChange={(e) => setTemplate(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gov-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2 text-sm"
-              >
-                {(templates.length ? templates : [{ id: defaultTemplate, label: defaultTemplate, aspect_ratios: ASPECT_FALLBACK }]).map(
-                  (t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  )
-                )}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="font-medium">Aspect ratio</span>
-              <select
-                value={aspectRatio}
-                onChange={(e) => setAspectRatio(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gov-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2 text-sm"
-              >
-                {aspectOptions.map((ar) => (
-                  <option key={ar} value={ar}>
-                    {ar}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="block text-sm">
-              <span className="font-medium">Tenant</span>
-              <input
-                value={tenantId}
-                onChange={(e) => setTenantId(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-gov-gray-200 dark:border-dark-border bg-white dark:bg-dark-bg px-3 py-2 text-sm"
-              />
-            </label>
-          </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              disabled={loading || !canGenerate}
-              onClick={() => void onGenerate()}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-lg bg-gov-blue-700 text-white hover:bg-gov-blue-800 disabled:opacity-50"
-            >
-              {loading ? 'Generando…' : 'Generar'}
-            </button>
-            {loading && (
-              <span className="text-sm font-medium text-gov-gray-600 dark:text-dark-muted tabular-nums">
-                Tiempo transcurrido: {formatElapsedSec(generatingElapsedMs)}
-              </span>
+            {result && (
+              <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+                <div className="border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+                  <h2 className="text-base font-semibold text-gov-gray-900 dark:text-dark-text">Resultado</h2>
+                </div>
+                <div className="p-4">
+                  {previewSrc ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={previewSrc}
+                      alt="Generada por ComfyUI"
+                      className="mb-3 max-h-[min(70vh,640px)] w-auto max-w-full rounded-lg border border-gov-gray-200 dark:border-dark-border"
+                    />
+                  ) : (
+                    <p className="mb-3 text-sm text-amber-800 dark:text-amber-200">
+                      Imagen en disco; vista previa no disponible.
+                      {result.artifact_id ? ` ID: ${result.artifact_id}` : ''}
+                    </p>
+                  )}
+                  {result.file_path && (
+                    <p className="break-all font-mono text-xs text-gov-gray-600 dark:text-dark-muted">
+                      {result.file_path}
+                    </p>
+                  )}
+                  {result.elapsedMs != null && (
+                    <p className="mt-2 text-sm tabular-nums text-gov-gray-600 dark:text-dark-muted">
+                      {formatElapsedSec(result.elapsedMs)}
+                    </p>
+                  )}
+                </div>
+              </section>
             )}
           </div>
-        </div>
-      </SettingsSection>
 
-      {result && (
-        <SettingsSection
-          titulo="Resultado"
-          descripcion="Artefacto guardado en el vault del tenant"
-          icono={<ImageIcon size={22} />}
-        >
-          {previewSrc ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={previewSrc}
-              alt="Generada por ComfyUI"
-              className="max-w-full max-h-[min(70vh,640px)] w-auto rounded-xl border border-gov-gray-200 dark:border-dark-border mb-3 shadow-sm"
-            />
-          ) : (
-            <p className="text-sm text-amber-800 dark:text-amber-200 mb-3">
-              Imagen generada en disco; no se pudo cargar la vista previa.
-              {result.artifact_id ? ` ID: ${result.artifact_id}` : ''}
-            </p>
-          )}
-          {result.file_path && (
-            <p className="text-xs font-mono text-gov-gray-600 dark:text-dark-muted break-all">
-              {result.file_path}
-            </p>
-          )}
-          {result.prompt_id && (
-            <p className="text-xs text-gov-gray-500 mt-1">prompt_id: {result.prompt_id}</p>
-          )}
-          {result.elapsedMs != null && (
-            <p className="text-sm font-medium text-gov-gray-600 dark:text-dark-muted mt-2 tabular-nums">
-              Tiempo de generación: {formatElapsedSec(result.elapsedMs)}
-            </p>
-          )}
-        </SettingsSection>
-      )}
+          <aside className="space-y-4 lg:col-span-4">
+            <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Servicio</p>
+              <div className="mt-3 space-y-2 text-sm">
+                <span
+                  className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    comfyOnline
+                      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                      : 'bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100'
+                  }`}
+                >
+                  {comfyOnline ? 'Online' : 'Offline'}
+                  {status?.latency_ms != null && comfyOnline ? ` · ${status.latency_ms} ms` : ''}
+                </span>
+                {status?.error && !comfyOnline && (
+                  <p className="text-xs text-gov-gray-500">{status.error}</p>
+                )}
+                {comfyOnline && !checkpointsReady && (
+                  <p className="text-xs text-amber-800 dark:text-amber-200">
+                    Sin checkpoints en el directorio de modelos.
+                  </p>
+                )}
+                {comfyOnline && checkpointsReady && status?.checkpoints?.length ? (
+                  <p className="text-xs text-gov-gray-500">
+                    {status.checkpoints.slice(0, 2).join(', ')}
+                    {status.checkpoints.length > 2 ? ` (+${status.checkpoints.length - 2})` : ''}
+                  </p>
+                ) : null}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={opsBusy !== null}
+                  onClick={() => void runOp('pm2_start_comfyui')}
+                  className="rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                >
+                  {opsBusy === 'pm2_start_comfyui' ? 'Iniciando…' : 'Iniciar PM2'}
+                </button>
+                <button
+                  type="button"
+                  disabled={opsBusy !== null}
+                  onClick={() => void runOp('pm2_restart_comfyui')}
+                  className="rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs font-semibold dark:border-dark-border disabled:opacity-50"
+                >
+                  {opsBusy === 'pm2_restart_comfyui' ? 'Reiniciando…' : 'Reiniciar'}
+                </button>
+              </div>
+            </section>
+
+            <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+              <div className="border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+                <h2 className="text-base font-semibold text-gov-gray-900 dark:text-dark-text">
+                  Configuración ComfyUI
+                </h2>
+              </div>
+              <div className="space-y-3 p-4 text-sm">
+                <label htmlFor="comfyui-api-url" className="block">
+                  <span className="text-xs font-medium text-gov-gray-600 dark:text-dark-muted">API URL</span>
+                  <input
+                    id="comfyui-api-url"
+                    value={comfyApiUrl}
+                    onChange={(e) => setComfyApiUrl(e.target.value)}
+                    disabled={!canWriteSettings}
+                    className="mt-1 w-full rounded-lg border border-gov-gray-200 px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
+                  />
+                </label>
+                <label htmlFor="comfyui-timeout-sec" className="block">
+                  <span className="text-xs font-medium text-gov-gray-600 dark:text-dark-muted">
+                    Timeout (s)
+                  </span>
+                  <input
+                    id="comfyui-timeout-sec"
+                    value={comfyTimeoutSec}
+                    onChange={(e) => setComfyTimeoutSec(e.target.value)}
+                    disabled={!canWriteSettings}
+                    className="mt-1 w-full rounded-lg border border-gov-gray-200 px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
+                  />
+                </label>
+                <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+                  Fuente: <span className="font-mono">{comfySource}</span> ·{' '}
+                  <span className="font-mono">comfyui.api_url</span> · timeout{' '}
+                  <span className="font-mono">{comfyTimeoutSource}</span> ·{' '}
+                  <span className="font-mono">comfyui.timeout_sec</span>
+                </p>
+                {canWriteSettings && (
+                  <button
+                    type="button"
+                    onClick={() => void saveComfySettings()}
+                    disabled={settingsSaving}
+                    className="rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                  >
+                    {settingsSaving ? 'Guardando…' : 'Guardar en DuckDB'}
+                  </button>
+                )}
+                {settingsMsg && (
+                  <p className="text-xs text-gov-blue-700 dark:text-dark-cyan">{settingsMsg}</p>
+                )}
+              </div>
+            </section>
+          </aside>
+        </div>
+      </div>
     </ViewChrome>
   );
 }

@@ -7,6 +7,7 @@ import type { TemplateSummary } from '@/types/admin';
 import { formatWriteTaskPollNotice, pollWriteTask } from '@/lib/pollWriteTask';
 import { useAuthStore } from '@/store/authStore';
 import type { EmbeddedViewProps } from '@/components/admin/embeddedView';
+import { ChatMarkdown } from '@/components/chat/ChatMarkdown';
 
 const MANAGED_DRAFT_POLICY_TYPE = 'manager_task';
 const MANAGED_DRAFT_POLICY_NAME = 'admin_workspace_managed_draft';
@@ -17,19 +18,15 @@ type PolicyTab = 'workspace' | 'framework';
 
 const TAB_COPY: Record<
   PolicyTab,
-  { label: string; hint: string; title: string; audience: string }
+  { label: string; title: string }
 > = {
   framework: {
     label: 'Reglas base',
-    hint: 'Cómo debe comportarse DuckClaw en general (tono, límites, RAG).',
     title: 'Reglas base de DuckClaw',
-    audience: 'Afecta a todos los agentes. La mayoría de equipos solo revisa esto una vez.',
   },
   workspace: {
-    label: 'Wizard de proyectos',
-    hint: 'JSON avanzado del asistente al crear proyectos nuevos.',
+    label: 'Avanzado',
     title: 'Borrador del asistente de proyectos',
-    audience: 'Solo para quien personaliza el flujo «crear proyecto» en la consola.',
   },
 };
 
@@ -37,7 +34,7 @@ function humanHealthSummary(health: PromptPolicyHealth): string {
   if (health.ok) {
     return `Todo en orden: ${health.checked_count} reglas necesarias están cargadas.`;
   }
-  return `Faltan ${health.missing_count} de ${health.checked_count} reglas. Usa «Volver a reglas de fábrica» o «Copiar instrucciones a agentes».`;
+    return `Faltan ${health.missing_count} de ${health.checked_count} reglas. Usa «Reglas de fábrica» o «Copiar a agentes».`;
 }
 
 function agentSkillsLabel(skills: string[] | undefined): string {
@@ -73,7 +70,6 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
   const [health, setHealth] = useState<PromptPolicyHealth | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<PolicyTab>('framework');
-  const [frameworkPolicies, setFrameworkPolicies] = useState<PromptPolicy[]>([]);
   const [frameworkContent, setFrameworkContent] = useState('');
   const [restoringFramework, setRestoringFramework] = useState(false);
   const [syncingCatalog, setSyncingCatalog] = useState(false);
@@ -82,39 +78,18 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
   const [agentsLoading, setAgentsLoading] = useState(true);
   const [agentsError, setAgentsError] = useState<string | null>(null);
 
-  const agentsWithoutPrompt = useMemo(
-    () =>
-      agents.filter((agent) => {
-        const workerId = agent.worker_id ?? agent.id;
-        return !workerPromptPolicies.has(workerId);
-      }),
-    [agents, workerPromptPolicies]
-  );
-
   const nextVersion = useMemo(() => latestVersion(policies) + 1, [policies]);
 
   const loadFramework = useCallback(() => {
     adminService
       .listPromptPolicies({
-        policy_type: 'capability',
+        policy_type: FRAMEWORK_POLICY_TYPE,
+        policy_name: FRAMEWORK_POLICY_NAME,
         include_inactive: true,
       })
-      .then((rows) => {
-        const frameworkRows = rows.filter((row) =>
-          ['generic_worker', 'axis_coordinator', 'default_fallback'].includes(row.policy_name)
-        );
-        return adminService
-          .listPromptPolicies({
-            policy_type: FRAMEWORK_POLICY_TYPE,
-            policy_name: FRAMEWORK_POLICY_NAME,
-            include_inactive: true,
-          })
-          .then((systemRows) => {
-            const merged = [...systemRows, ...frameworkRows];
-            setFrameworkPolicies(merged);
-            const activeDefault = systemRows.find((row) => row.active) ?? systemRows[0];
-            setFrameworkContent(activeDefault?.content ?? '');
-          });
+      .then((systemRows) => {
+        const activeDefault = systemRows.find((row) => row.active) ?? systemRows[0];
+        setFrameworkContent(activeDefault?.content ?? '');
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'No se pudo cargar framework pack'));
   }, []);
@@ -322,80 +297,24 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
   return (
     <div className="space-y-6">
       {!embedded && (
-        <header>
-          <p className="text-xs font-black uppercase tracking-[0.18em] text-gov-blue-700 dark:text-dark-cyan">
-            Comportamiento de los agentes
-          </p>
-          <h1 className="mt-1 text-3xl font-black text-gov-gray-900 dark:text-dark-text">
+        <header className="border-b border-gov-gray-200 pb-4 dark:border-dark-border">
+          <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">
             Instrucciones y reglas
           </h1>
-          <p className="mt-1 max-w-3xl text-sm text-gov-gray-600 dark:text-dark-muted">
-            Aquí defines <strong className="font-bold text-gov-gray-800 dark:text-dark-text">cómo hablan y qué pueden hacer</strong>{' '}
-            tus agentes. No hace falta tocar código: guardas texto y DuckClaw lo aplica en el chat.
+          <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
+            Comportamiento global de los agentes y borrador avanzado del wizard de proyectos.
           </p>
         </header>
-      )}
-
-      {!embedded && (
-      <section className="rounded-2xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-        <p className="text-sm font-black text-gov-gray-900 dark:text-dark-text">¿Qué sigue?</p>
-        <ol className="mt-3 space-y-2 text-sm text-gov-gray-700 dark:text-dark-muted">
-          <li className="flex gap-2">
-            <span className="font-black text-gov-blue-700 dark:text-dark-cyan">1.</span>
-            <span>
-              Revisa <strong className="font-bold">Reglas base</strong> (pestaña abajo). Si algo falló al instalar, pulsa{' '}
-              <em>Volver a reglas de fábrica</em>.
-            </span>
-          </li>
-          <li className="flex gap-2">
-            <span className="font-black text-gov-blue-700 dark:text-dark-cyan">2.</span>
-            <span>
-              Comprueba que cada agente tenga instrucciones: en la columna derecha, badge{' '}
-              <em>Listo</em> o pulsa <em>Copiar instrucciones a agentes</em>
-              {agentsWithoutPrompt.length > 0
-                ? ` (${agentsWithoutPrompt.length} sin instrucciones aún).`
-                : '.'}
-            </span>
-          </li>
-          <li className="flex gap-2">
-            <span className="font-black text-gov-blue-700 dark:text-dark-cyan">3.</span>
-            <span>
-              Opcional: sube documentos en{' '}
-              <Link href="/knowledge" className="font-bold text-gov-blue-800 underline dark:text-dark-cyan">
-                Gestor RAG
-              </Link>{' '}
-              con alcance <em>Framework</em> (global) o por proyecto. Prueba en{' '}
-              <Link href="/playground" className="font-bold text-gov-blue-800 underline dark:text-dark-cyan">
-                Playground
-              </Link>
-              .
-            </span>
-          </li>
-        </ol>
-      </section>
-      )}
-
-      {activeTab === 'workspace' && (
-        <section className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-          <p className="font-bold">Zona avanzada</p>
-          <p className="mt-1">
-            Este JSON solo lo usa el asistente al crear proyectos nuevos. Si no sabes qué es, quédate en{' '}
-            <button
-              type="button"
-              onClick={() => setActiveTab('framework')}
-              className="font-bold underline"
-            >
-              Reglas base
-            </button>
-            .
-          </p>
-        </section>
       )}
 
       {error && <p className="rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error}</p>}
       {message && <p className="rounded-xl bg-green-50 px-4 py-3 text-sm text-green-700">{message}</p>}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+      <div
+        className="flex flex-wrap gap-1 border-b border-gov-gray-200 dark:border-dark-border"
+        role="tablist"
+        aria-label="Secciones de políticas"
+      >
         {(Object.keys(TAB_COPY) as PolicyTab[]).map((tab) => {
           const copy = TAB_COPY[tab];
           const selected = activeTab === tab;
@@ -403,87 +322,69 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
             <button
               key={tab}
               type="button"
+              role="tab"
+              aria-selected={selected}
               onClick={() => setActiveTab(tab)}
-              className={`rounded-xl px-4 py-3 text-left sm:min-w-[200px] ${
+              className={`border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors -mb-px ${
                 selected
-                  ? 'bg-gov-blue-700 text-white'
-                  : 'border border-gov-blue-200 text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan'
+                  ? 'border-gov-blue-600 text-gov-blue-800 dark:border-dark-cyan dark:text-dark-cyan'
+                  : 'border-transparent text-gov-gray-500 hover:text-gov-gray-800 dark:hover:text-dark-text'
               }`}
             >
-              <span className="block text-sm font-black">{copy.label}</span>
-              <span
-                className={`mt-0.5 block text-xs font-normal ${
-                  selected ? 'text-blue-100' : 'text-gov-gray-500 dark:text-dark-muted'
-                }`}
-              >
-                {copy.hint}
-              </span>
+              {copy.label}
             </button>
           );
         })}
       </div>
 
-      <p className="text-sm text-gov-gray-500 dark:text-dark-muted">{TAB_COPY[activeTab].audience}</p>
-
       {activeTab === 'framework' ? (
-        <section className="grid gap-4 lg:grid-cols-[1fr_300px]">
-          <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
+        <section className="grid gap-4 lg:grid-cols-12">
+          <div className="lg:col-span-8">
+            <div className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+                <h2 className="text-base font-semibold text-gov-gray-900 dark:text-dark-text">
                   {TAB_COPY.framework.title}
                 </h2>
-                <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
-                  Texto maestro: idioma, tono, cuándo usar herramientas y cómo tratar el conocimiento (RAG).
-                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={reloadAll}
+                    className="rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs font-semibold text-gov-gray-700 hover:bg-gov-gray-50 dark:border-dark-border dark:text-dark-muted"
+                  >
+                    Actualizar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={syncCatalog}
+                    disabled={!canWrite || syncingCatalog}
+                    className="rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs font-semibold text-gov-gray-700 hover:bg-gov-gray-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-dark-border dark:text-dark-muted"
+                  >
+                    {syncingCatalog ? 'Copiando…' : 'Copiar a agentes'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={restoreFramework}
+                    disabled={!canWrite || restoringFramework}
+                    className="rounded-lg bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {restoringFramework ? 'Restaurando…' : 'Reglas de fábrica'}
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={reloadAll}
-                  className="rounded-xl border border-gov-blue-200 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
-                >
-                  Actualizar vista
-                </button>
-                <button
-                  type="button"
-                  onClick={syncCatalog}
-                  disabled={!canWrite || syncingCatalog}
-                  title="Lleva las instrucciones del catálogo a cada agente que aún no las tenga"
-                  className="rounded-xl border border-gov-blue-200 px-3 py-2 text-xs font-black text-gov-blue-800 hover:bg-gov-blue-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-dark-border dark:text-dark-cyan"
-                >
-                  {syncingCatalog ? 'Copiando…' : 'Copiar instrucciones a agentes'}
-                </button>
-                <button
-                  type="button"
-                  onClick={restoreFramework}
-                  disabled={!canWrite || restoringFramework}
-                  title="Restaura el paquete de reglas que viene con el repositorio"
-                  className="rounded-xl bg-amber-600 px-3 py-2 text-xs font-black text-white hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {restoringFramework ? 'Restaurando…' : 'Volver a reglas de fábrica'}
-                </button>
+              <div className="max-h-[min(70vh,720px)] overflow-y-auto p-4">
+                {frameworkContent ? (
+                  <ChatMarkdown content={frameworkContent} className="text-sm" />
+                ) : (
+                  <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
+                    No hay reglas base activas.
+                  </p>
+                )}
               </div>
             </div>
-            <details className="group mb-4 rounded-2xl border border-gov-blue-50 dark:border-dark-border">
-              <summary className="cursor-pointer list-none px-4 py-3 text-sm font-bold text-gov-blue-800 dark:text-dark-cyan">
-                Ver texto técnico (solo lectura)
-              </summary>
-              <textarea
-                value={frameworkContent}
-                readOnly
-                spellCheck={false}
-                className="min-h-[320px] w-full border-t border-gov-blue-50 bg-gov-gray-50 p-4 font-mono text-xs leading-5 text-gov-gray-800 outline-none dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
-                aria-label="Reglas base activas"
-              />
-            </details>
-            <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
-              «Volver a reglas de fábrica» no borra las instrucciones personalizadas de cada agente en el catálogo.
-            </p>
           </div>
-          <aside className="space-y-4">
-            <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-              <p className="text-sm font-black text-gov-gray-900 dark:text-dark-text">Estado</p>
+          <aside className="space-y-4 lg:col-span-4">
+            <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Estado</p>
               <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">
                 Comprueba que DuckClaw tenga todas las reglas mínimas para funcionar.
               </p>
@@ -521,8 +422,8 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
                 </div>
               ) : null}
             </section>
-            <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-              <p className="text-sm font-black text-gov-gray-900 dark:text-dark-text">Tus agentes</p>
+            <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Agentes</p>
               <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">
                 ¿Pueden chatear con instrucciones cargadas? Edita cada uno en Plantillas.
               </p>
@@ -585,17 +486,12 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
           </aside>
         </section>
       ) : (
-      <section className="grid gap-4 lg:grid-cols-[1fr_300px]">
-        <div className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
-                {TAB_COPY.workspace.title}
-              </h2>
-              <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
-                Contrato JSON que lee el asistente al preparar un proyecto nuevo (avanzado).
-              </p>
-            </div>
+      <section className="grid gap-4 lg:grid-cols-12">
+        <div className="lg:col-span-8 rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+            <h2 className="text-base font-semibold text-gov-gray-900 dark:text-dark-text">
+              {TAB_COPY.workspace.title}
+            </h2>
             <button
               type="button"
               onClick={reloadAll}
@@ -606,19 +502,19 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
           </div>
 
           {loading ? (
-            <p className="text-sm text-gov-gray-500 dark:text-dark-muted">Cargando borrador…</p>
+            <p className="p-4 text-sm text-gov-gray-500 dark:text-dark-muted">Cargando borrador…</p>
           ) : (
             <textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
               spellCheck={false}
-              className="min-h-[520px] w-full rounded-2xl border border-gov-blue-100 bg-gov-gray-50 p-4 font-mono text-xs leading-5 text-gov-gray-800 outline-none focus:border-gov-blue-400 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
+              className="min-h-[520px] w-full border-0 bg-gov-gray-50 p-4 font-mono text-xs leading-5 text-gov-gray-800 outline-none dark:bg-dark-bg dark:text-dark-text"
               aria-label="JSON del borrador del wizard de proyectos"
               readOnly={!canWrite}
             />
           )}
 
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gov-gray-100 px-4 py-3 dark:border-dark-border">
             <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
               Siguiente versión al guardar: <span className="font-mono">{nextVersion}</span>
               {!canWrite && ' — Solo administradores pueden editar.'}
@@ -634,10 +530,10 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
           </div>
         </div>
 
-        <aside className="space-y-4">
-          <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
+        <aside className="space-y-4 lg:col-span-4">
+          <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-black text-gov-gray-900 dark:text-dark-text">Estado</p>
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Estado</p>
               <button
                 type="button"
                 onClick={loadHealth}
@@ -678,8 +574,8 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
             )}
           </section>
 
-          <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-            <p className="text-sm font-black text-gov-gray-900 dark:text-dark-text">Historial de versiones</p>
+          <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+            <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Historial</p>
           <div className="mt-3 space-y-2">
             {policies.length === 0 && (
               <p className="text-sm text-gov-gray-500 dark:text-dark-muted">Aún no hay versiones guardadas.</p>

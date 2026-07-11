@@ -35,6 +35,10 @@ _OPS_ALLOWLIST: dict[str, list[str]] = {
     "pm2_start_comfyui": ["pm2", "start", "config/ecosystem.comfyui.config.cjs", "--update-env"],
     "pm2_restart_comfyui": ["pm2", "restart", "ComfyUI", "--update-env"],
     "pm2_logs_comfyui": ["pm2", "logs", "ComfyUI", "--lines", "40", "--nostream"],
+    "build_edge_native": ["bash", "scripts/build_edge_native.sh"],
+    "pm2_start_edge_streamlit": ["pm2", "start", "config/ecosystem.edge-devices.config.cjs", "--update-env"],
+    "pm2_restart_edge_streamlit": ["pm2", "restart", "Edge-Streamlit", "--update-env"],
+    "pm2_logs_edge_streamlit": ["pm2", "logs", "Edge-Streamlit", "--lines", "40", "--nostream"],
     "doctor": ["uv", "run", "python", "scripts/doctor.py"],
     "bootstrap_dbs": ["uv", "run", "python", "scripts/bootstrap_dbs.py"],
 }
@@ -113,6 +117,10 @@ async def list_ops_commands() -> dict[str, Any]:
         "pm2_start_comfyui": "Iniciar ComfyUI (ecosystem.comfyui.config.cjs)",
         "pm2_restart_comfyui": "Reiniciar ComfyUI",
         "pm2_logs_comfyui": "Últimas líneas log ComfyUI",
+        "build_edge_native": "Compilar libedgecore (integrations/edge-devices/native)",
+        "pm2_start_edge_streamlit": "Iniciar dashboard Edge (Streamlit :8501)",
+        "pm2_restart_edge_streamlit": "Reiniciar dashboard Edge (Streamlit)",
+        "pm2_logs_edge_streamlit": "Últimas líneas log Edge Streamlit",
         "doctor": "Diagnóstico local (doctor.py)",
         "bootstrap_dbs": "Bootstrap DuckDB (tablas agent_config, etc.)",
     }

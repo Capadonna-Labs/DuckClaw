@@ -15,7 +15,7 @@ def test_core_pm2_names_include_gateway_and_writer() -> None:
 def test_duckdb_paths_includes_private_axis_glob(tmp_path: Path) -> None:
     vault = tmp_path / "db" / "private" / "7822026745"
     vault.mkdir(parents=True)
-    axis = vault / "axis.duckdb"
+    axis = vault / "duckclaw.duckdb"
     axis.write_text("stub", encoding="utf-8")
     paths = duckdb_paths_to_unlock(tmp_path)
     assert axis.resolve() in [p.resolve() for p in paths]

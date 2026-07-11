@@ -238,7 +238,7 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
                             value={row.vault_env_var}
                             onChange={(e) => updateRow(i, { vault_env_var: e.target.value })}
                             className="w-full min-w-[10rem] px-2 py-1.5 font-mono text-xs border rounded-lg dark:border-dark-border dark:bg-dark-bg"
-                            placeholder="DUCKCLAW_AXIS_DB_PATH"
+                            placeholder="DUCKCLAW_GATEWAY_DB_PATH"
                           />
                         ) : (
                           <span className="font-mono text-xs px-2">{row.vault_env_var || '—'}</span>

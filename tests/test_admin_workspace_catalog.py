@@ -42,15 +42,15 @@ def test_worker_catalog_keeps_identity_separate_from_import_snapshots(gateway_db
         worker = create_worker(
             adapter,
             owner_email="alice@test.local",
-            worker_id="axis-coder",
-            display_name="AXIS Coder",
+            worker_id="dev-coder",
+            display_name="Dev Coder",
             source_template_id="default",
         )
         version = add_worker_version(
             adapter,
             worker_uid=worker["worker_uid"],
             created_by="alice@test.local",
-            manifest_snapshot={"id": "axis-coder", "name": "AXIS Coder"},
+            manifest_snapshot={"id": "dev-coder", "name": "Dev Coder"},
             files_snapshot={"system_prompt.md": "# Contexto"},
             change_note="Import inicial",
         )
@@ -61,7 +61,7 @@ def test_worker_catalog_keeps_identity_separate_from_import_snapshots(gateway_db
         con.close()
 
     assert worker["tenant_id"] == profile["tenant_id"]
-    assert worker["worker_id"] == "axis-coder"
+    assert worker["worker_id"] == "dev-coder"
     assert version["version"] == 1
     assert "manifest_json" not in catalog_columns
     assert "files_json" not in catalog_columns
@@ -213,20 +213,20 @@ def test_worker_catalog_enforces_tenant_scoped_unique_worker_ids(gateway_db: Pat
         create_worker(
             adapter,
             owner_email="alice@test.local",
-            worker_id="axis-coder",
-            display_name="AXIS Coder",
+            worker_id="dev-coder",
+            display_name="Dev Coder",
         )
         create_worker(
             adapter,
             owner_email="bob@test.local",
-            worker_id="axis-coder",
-            display_name="Bob AXIS Coder",
+            worker_id="dev-coder",
+            display_name="Bob Dev Coder",
         )
         with pytest.raises(ValueError, match="worker_id ya existe"):
             create_worker(
                 adapter,
                 owner_email="alice@test.local",
-                worker_id="axis-coder",
+                worker_id="dev-coder",
                 display_name="Duplicate",
             )
     finally:
@@ -609,14 +609,14 @@ def test_contexts_skills_and_capabilities_are_many_to_many(gateway_db: Path) -> 
         coder = create_worker(
             adapter,
             owner_email="alice@test.local",
-            worker_id="axis-coder",
-            display_name="AXIS Coder",
+            worker_id="dev-coder",
+            display_name="Dev Coder",
         )
         mirror = create_worker(
             adapter,
             owner_email="alice@test.local",
             worker_id="axis-mirror",
-            display_name="AXIS Mirror",
+            display_name="Ops Mirror",
         )
         add_worker_context(adapter, worker_uid=coder["worker_uid"], title="Dominio", content_md="# Dominio", sort_order=20)
         add_worker_context(adapter, worker_uid=coder["worker_uid"], title="Estilo", content_md="# Estilo", sort_order=10)
@@ -675,13 +675,13 @@ def test_projects_attach_agents_and_list_only_actor_workspace(gateway_db: Path) 
         alice_worker = create_worker(
             adapter,
             owner_email="alice@test.local",
-            worker_id="axis-coder",
-            display_name="AXIS Coder",
+            worker_id="dev-coder",
+            display_name="Dev Coder",
         )
         alice_project = create_project(
             adapter,
             owner_email="alice@test.local",
-            name="AXIS Platform",
+            name="Platform Alpha",
             description="Trabajo privado de Alice",
         )
         bob_project = create_project(
@@ -725,7 +725,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
             db,
             owner_email="admin@test.local",
             worker_id="axis-radar",
-            display_name="AXIS Radar",
+            display_name="Ops Radar",
         )
     finally:
         db.close()
@@ -733,7 +733,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
     created = gateway_admin_client.post(
         "/api/v1/admin/workspace/projects",
         headers=headers,
-        json={"name": "Operación AXIS", "description": "Proyecto DB-first"},
+        json={"name": "Proyecto Alpha", "description": "Proyecto DB-first"},
     )
     assert created.status_code == 200
     assert created.json()["task_id"]
@@ -944,7 +944,7 @@ def test_resource_events_record_cross_cutting_audit_without_owning_permissions(g
         project = create_project(
             adapter,
             owner_email="alice@test.local",
-            name="AXIS Platform",
+            name="Platform Alpha",
             description="Auditado",
         )
         record_resource_event(
@@ -954,7 +954,7 @@ def test_resource_events_record_cross_cutting_audit_without_owning_permissions(g
             resource_kind="project",
             resource_id=project["project_id"],
             event_type="project.created",
-            payload={"name": "AXIS Platform", "secret": "redacted"},
+            payload={"name": "Platform Alpha", "secret": "redacted"},
         )
         events = list_resource_events(adapter, tenant_id=project["tenant_id"])
     finally:
@@ -1018,8 +1018,8 @@ def test_gateway_templates_lists_actor_catalog_not_filesystem_templates(
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-coder",
-            display_name="AXIS Coder",
+            worker_id="dev-coder",
+            display_name="Dev Coder",
         )
     finally:
         db.close()
@@ -1032,10 +1032,10 @@ def test_gateway_templates_lists_actor_catalog_not_filesystem_templates(
     assert response.status_code == 200
     templates = {item["id"]: item for item in response.json()["templates"]}
     assert "default" not in templates
-    assert templates["axis-coder"]["name"] == "AXIS Coder"
-    assert templates["axis-coder"]["worker_uid"]
-    assert templates["axis-coder"]["visibility"] == "private"
-    assert templates["axis-coder"]["source_template_id"] == "default"
+    assert templates["dev-coder"]["name"] == "Dev Coder"
+    assert templates["dev-coder"]["worker_uid"]
+    assert templates["dev-coder"]["visibility"] == "private"
+    assert templates["dev-coder"]["source_template_id"] == "default"
     assert "BI-Analyst" not in templates
 
 
@@ -1224,7 +1224,7 @@ def test_get_visible_worker_for_actor_accepts_boolean_active_rows(gateway_db: Pa
             db,
             owner_email="admin@test.local",
             worker_id="bi-analyst",
-            display_name="AXIS Maestro",
+            display_name="Team Lead",
         )
         worker = get_visible_worker_for_actor(
             db,
@@ -1323,8 +1323,8 @@ def test_playground_config_uses_db_first_visible_workers_not_all_filesystem_temp
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-coder",
-            display_name="AXIS Coder",
+            worker_id="dev-coder",
+            display_name="Dev Coder",
         )
     finally:
         db.close()
@@ -1337,7 +1337,7 @@ def test_playground_config_uses_db_first_visible_workers_not_all_filesystem_temp
     assert response.status_code == 200
     workers = {item["id"]: item for item in response.json()["workers"]}
     assert "default" not in workers
-    assert workers["axis-coder"]["label"] == "AXIS Coder"
+    assert workers["dev-coder"]["label"] == "Dev Coder"
     assert "BI-Analyst" not in workers
 
 
@@ -1353,8 +1353,8 @@ def test_admin_health_uses_actor_visible_db_first_workers(
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-coder",
-            display_name="AXIS Coder",
+            worker_id="dev-coder",
+            display_name="Dev Coder",
         )
         create_worker(
             db,
@@ -1373,7 +1373,7 @@ def test_admin_health_uses_actor_visible_db_first_workers(
     assert response.status_code == 200
     data = response.json()
     assert data["workers_count"] == 1
-    assert set(data["workers"]) == {"axis-coder"}
+    assert set(data["workers"]) == {"dev-coder"}
 
 
 def test_playground_llm_scope_does_not_report_legacy(gateway_admin_client) -> None:
@@ -1457,18 +1457,18 @@ def test_playground_config_and_chat_support_db_first_project_scope(
             db,
             owner_email="admin@test.local",
             worker_id="axis-radar",
-            display_name="AXIS Radar",
+            display_name="Ops Radar",
         )
         create_worker(
             db,
             owner_email="admin@test.local",
             worker_id="axis-sentinel",
-            display_name="AXIS Sentinel",
+            display_name="Ops Sentinel",
         )
         project = create_project(
             db,
             owner_email="admin@test.local",
-            name="Operación AXIS",
+            name="Proyecto Alpha",
             description="Scope para Playground",
         )
         attach_agent_to_project(
@@ -1483,7 +1483,7 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     config = gateway_admin_client.get("/api/v1/admin/playground/config", headers=headers)
     assert config.status_code == 200
     projects = {item["project_id"]: item for item in config.json()["projects"]}
-    assert projects[project["project_id"]]["name"] == "Operación AXIS"
+    assert projects[project["project_id"]]["name"] == "Proyecto Alpha"
     assert [agent["worker_id"] for agent in projects[project["project_id"]]["agents"]] == ["axis-radar"]
 
     captured: dict[str, str] = {}
@@ -1508,7 +1508,7 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     assert chat.json()["project_id"] == project["project_id"]
     assert chat.json()["worker_id"] == "axis-radar"
     assert "[PROJECT_CONTEXT]" in captured["message"]
-    assert "Operación AXIS" in captured["message"]
+    assert "Proyecto Alpha" in captured["message"]
     assert "Scope para Playground" in captured["message"]
     assert "hola" in captured["message"]
 
@@ -1526,8 +1526,8 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     assert default_project_chat.json()["project_id"] == project["project_id"]
     assert default_project_chat.json()["worker_id"] == "axis-radar"
     assert "[PROJECT_CONTEXT]" in captured["message"]
-    assert "Operación AXIS" in captured["message"]
-    assert "AXIS Radar" not in captured["message"]
+    assert "Proyecto Alpha" in captured["message"]
+    assert "Ops Radar" not in captured["message"]
     assert "axis-radar" in captured["message"]
     assert "guíame" in captured["message"]
 

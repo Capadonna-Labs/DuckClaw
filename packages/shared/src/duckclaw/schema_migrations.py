@@ -1015,37 +1015,13 @@ _M020_FRAMEWORK_CAPABILITY_POLICIES = [
       '{"seed":"schema_migration_020","scope":"framework"}',
       true
     FROM (
-      SELECT 'Como agente {worker_id} puedo conversar, consultar DuckDB (solo lectura cuando aplica), usar herramientas del manifest y coordinar subtareas. Indica tu objetivo de forma concreta.' AS content
+      SELECT 'Como agente {worker_id} puedo conversar, consultar DuckDB (solo lectura cuando aplica) y usar herramientas del manifest. Indica tu objetivo de forma concreta.' AS content
     )
     WHERE NOT EXISTS (
       SELECT 1
       FROM main.prompt_policy_registry
       WHERE policy_type = 'capability'
         AND policy_name = 'generic_worker'
-        AND version = 1
-    )
-    """,
-    """
-    INSERT INTO main.prompt_policy_registry
-      (policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active)
-    SELECT
-      'ppol_capability_axis_coordinator_v1',
-      'capability',
-      'axis_coordinator',
-      1,
-      'active',
-      content,
-      sha256(content),
-      '{"seed":"schema_migration_020","scope":"framework"}',
-      true
-    FROM (
-      SELECT 'Coordino el equipo desde {coord}. Agentes disponibles:\n{lines}\nIndica qué agente o tarea necesitas.' AS content
-    )
-    WHERE NOT EXISTS (
-      SELECT 1
-      FROM main.prompt_policy_registry
-      WHERE policy_type = 'capability'
-        AND policy_name = 'axis_coordinator'
         AND version = 1
     )
     """,

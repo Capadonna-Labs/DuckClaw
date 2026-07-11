@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from duckops.sovereign.duckdb_health import human_bytes, resolve_duckdb_path
+from duckclaw.gateway_db import DEFAULT_SESSION_DB_RELPATH
 from duckops.sovereign.draft import SovereignDraft
-from duckops.sovereign.wizard_reset import NEUTRAL_DUCKDB_VAULT
+from duckops.sovereign.duckdb_health import human_bytes, resolve_duckdb_path
+from duckops.sovereign.materialize import load_duckdb_vault_hint_from_repo_env
 
-AXIS_VAULT_BASENAME = "axis.duckdb"
-DEFAULT_AXIS_REL = "db/private/admin_duckclaw_local/axis.duckdb"
+WORKSPACE_VAULT_BASENAME = "duckclaw.duckdb"
+LEGACY_VAULT_BASENAME = "axis.duckdb"
+DEFAULT_WORKSPACE_REL = DEFAULT_SESSION_DB_RELPATH
 
 
 @dataclass(frozen=True)
@@ -24,34 +25,6 @@ class DuckDbPick:
     @property
     def size_human(self) -> str:
         return human_bytes(self.size_bytes) if self.exists else "—"
-
-
-def _parse_env_file(repo_root: Path) -> dict[str, str]:
-    envp = repo_root / ".env"
-    if not envp.is_file():
-        return {}
-    out: dict[str, str] = {}
-    for line in envp.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if not s or s.startswith("#") or "=" not in s:
-            continue
-        k, _, v = s.partition("=")
-        if k.strip():
-            out[k.strip()] = v.strip().strip("'\"")
-    return out
-
-
-def _rel_from_repo(repo_root: Path, raw: str) -> str:
-    v = (raw or "").strip()
-    if not v:
-        return ""
-    p = Path(v)
-    if p.is_absolute():
-        try:
-            return str(p.resolve().relative_to(repo_root.resolve()))
-        except ValueError:
-            return v
-    return v
 
 
 def discover_duckdb_files(repo_root: Path) -> list[DuckDbPick]:
@@ -74,12 +47,23 @@ def discover_duckdb_files(repo_root: Path) -> list[DuckDbPick]:
     return picks
 
 
-def find_axis_duckdb_in_repo(repo_root: Path) -> str | None:
-    """Primera ruta ``**/axis.duckdb`` bajo ``db/``."""
+def find_legacy_axis_vault_in_repo(repo_root: Path) -> str | None:
+    """Primera ruta ``**/axis.duckdb`` bajo ``db/`` (solo migración legacy)."""
     db_dir = repo_root / "db"
     if not db_dir.is_dir():
         return None
-    hits = sorted(db_dir.rglob(AXIS_VAULT_BASENAME))
+    hits = sorted(db_dir.rglob(LEGACY_VAULT_BASENAME))
+    if not hits:
+        return None
+    return str(hits[0].relative_to(repo_root))
+
+
+def find_workspace_vault_in_repo(repo_root: Path) -> str | None:
+    """Primera ruta ``**/duckclaw.duckdb`` bajo ``db/``."""
+    db_dir = repo_root / "db"
+    if not db_dir.is_dir():
+        return None
+    hits = sorted(db_dir.rglob(WORKSPACE_VAULT_BASENAME))
     if not hits:
         return None
     return str(hits[0].relative_to(repo_root))
@@ -90,29 +74,31 @@ def suggest_duckdb_vault_path(
     draft: SovereignDraft | None = None,
 ) -> str:
     """
-    Prioridad: borrador válido → ``DUCKCLAW_AXIS_DB_PATH`` → ``axis.duckdb`` en disco
-    → ruta por defecto bajo ``db/private/``.
+    Prioridad: borrador válido → claves gateway en ``.env`` → ``duckclaw.duckdb`` en disco
+    → legacy ``axis.duckdb`` → ruta por defecto bajo ``db/private/``.
     """
     if draft is not None:
         cur = (draft.duckdb_vault_path or "").strip()
         if cur and resolve_duckdb_path(repo_root, cur).is_file():
             if "siata" not in cur.lower():
                 return cur
-    env = _parse_env_file(repo_root)
-    axis_env = _rel_from_repo(repo_root, env.get("DUCKCLAW_AXIS_DB_PATH") or "")
-    if axis_env:
-        return axis_env
-    found = find_axis_duckdb_in_repo(repo_root)
+    env_hint = load_duckdb_vault_hint_from_repo_env(repo_root)
+    if env_hint:
+        return env_hint
+    found = find_workspace_vault_in_repo(repo_root)
     if found:
         return found
+    legacy = find_legacy_axis_vault_in_repo(repo_root)
+    if legacy:
+        return legacy
     owner = ""
     if draft is not None:
         owner = (draft.wizard_creator_telegram_user_id or "").strip()
     if owner.isdigit():
-        candidate = f"db/private/{owner}/{AXIS_VAULT_BASENAME}"
+        candidate = f"db/private/{owner}/{WORKSPACE_VAULT_BASENAME}"
         if resolve_duckdb_path(repo_root, candidate).is_file():
             return candidate
-    return DEFAULT_AXIS_REL
+    return DEFAULT_WORKSPACE_REL
 
 
 def format_db_folder_summary(repo_root: Path, picks: list[DuckDbPick]) -> str:
@@ -133,6 +119,8 @@ def build_neutral_duckdb_picker(
     Opciones sin sesiones previas ni .env: solo archivos en ``db/`` + crear bóveda neutra.
     Devuelve (labels, values, initial_index).
     """
+    from duckops.sovereign.wizard_reset import NEUTRAL_DUCKDB_VAULT
+
     picks = discover_duckdb_files(repo_root)
     labels: list[str] = []
     values: list[str] = []
@@ -159,7 +147,7 @@ def format_duckdb_picker_block(
     if not picks:
         return (
             "[yellow]No hay .duckdb en db/[/]\n"
-            f"[dim]Enter usa la ruta sugerida ({DEFAULT_AXIS_REL}).[/]"
+            f"[dim]Enter usa la ruta sugerida ({DEFAULT_WORKSPACE_REL}).[/]"
         )
     hid = (highlight_rel or "").strip()
     lines: list[str] = []
@@ -167,8 +155,8 @@ def format_duckdb_picker_block(
         mark = ""
         if p.suggested or p.rel_path == hid:
             mark = " [bold cyan]← sugerido[/]"
-        elif p.rel_path.endswith(AXIS_VAULT_BASENAME):
-            mark = " [dim](axis)[/]"
+        elif p.rel_path.endswith(LEGACY_VAULT_BASENAME):
+            mark = " [dim](legacy)[/]"
         ex = f"[green]{p.size_human}[/]" if p.exists else "[dim]nuevo[/]"
         lines.append(f"  [dim]{i:2}.[/] [bold]{p.rel_path}[/] · {ex}{mark}")
     extra = len(picks) - max_lines

@@ -25,7 +25,8 @@ uv run duckops stack down 2>/dev/null || true
 echo "==> Eliminando bóveda anterior: $VAULT"
 rm -f "$VAULT" "${VAULT}.wal" 2>/dev/null || true
 
-echo "==> Opcional: borrar vaults legacy AXIS (7822026745)…"
+echo "==> Opcional: migrar vaults legacy axis.duckdb → duckclaw.duckdb…"
+echo "    bash scripts/migrate_legacy_axis_vault.sh"
 if [[ -d db/private/7822026745 ]]; then
   rm -rf db/private/7822026745
   echo "    eliminado db/private/7822026745/"

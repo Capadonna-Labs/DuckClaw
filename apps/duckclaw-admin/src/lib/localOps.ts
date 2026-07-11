@@ -15,7 +15,13 @@ import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
 export { HOST_ONLY_OPS };
 
 /** Ops de integración: ejecutables pero no listados en comandos generales de plataforma. */
-export const INTEGRATION_ONLY_OPS = new Set(['start_telegram_ingress']);
+export const INTEGRATION_ONLY_OPS = new Set([
+  'start_telegram_ingress',
+  'build_edge_native',
+  'pm2_start_edge_streamlit',
+  'pm2_restart_edge_streamlit',
+  'pm2_logs_edge_streamlit',
+]);
 
 export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = {
   pm2_list: { label: 'PM2 — listar procesos', argv: ['pm2', 'list'] },
@@ -75,6 +81,22 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
   pm2_logs_comfyui: {
     label: 'Últimas líneas log ComfyUI',
     argv: ['pm2', 'logs', 'ComfyUI', '--lines', '40', '--nostream'],
+  },
+  build_edge_native: {
+    label: 'Compilar libedgecore (native/)',
+    argv: ['bash', 'scripts/build_edge_native.sh'],
+  },
+  pm2_start_edge_streamlit: {
+    label: 'Iniciar dashboard Edge (Streamlit)',
+    argv: ['pm2', 'start', 'config/ecosystem.edge-devices.config.cjs', '--update-env'],
+  },
+  pm2_restart_edge_streamlit: {
+    label: 'Reiniciar dashboard Edge (Streamlit)',
+    argv: ['pm2', 'restart', 'Edge-Streamlit', '--update-env'],
+  },
+  pm2_logs_edge_streamlit: {
+    label: 'Últimas líneas log Edge Streamlit',
+    argv: ['pm2', 'logs', 'Edge-Streamlit', '--lines', '40', '--nostream'],
   },
   doctor: { label: 'Diagnóstico local (doctor.py)', argv: ['uv', 'run', 'python', 'scripts/doctor.py'] },
   bootstrap_dbs: {

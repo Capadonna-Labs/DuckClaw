@@ -153,7 +153,7 @@ def build_plan_node(
                 planned_final = _coord_prefix + (planned_final or incoming).strip()
             log_sys(
                 _obs,
-                "AXIS coordinador %s → delegado %s",
+                "Coordinador %s → delegado %s",
                 coordinator_id,
                 assigned,
             )

@@ -1,14 +1,12 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { RefreshCw } from 'lucide-react';
 import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
 import { SkillCreateForm } from '@/components/skills/SkillCreateForm';
 import { SkillInventory } from '@/components/skills/SkillInventory';
-import { SkillSummary } from '@/components/skills/SkillSummary';
-import { SkillsConceptPanel } from '@/components/skills/SkillsConceptPanel';
 import { PlatformSkillsPanel } from '@/components/skills/PlatformSkillsPanel';
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 import { useDeveloperMode } from '@/hooks/useDeveloperMode';
@@ -17,8 +15,8 @@ import { adminService, type SkillCatalogItem } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
 
 const BASE_TABS = [
-  { id: 'catalog', label: 'Catálogo DB' },
-  { id: 'platform', label: 'Plataforma' },
+  { id: 'catalog', label: 'Catálogo' },
+  { id: 'platform', label: 'Framework' },
 ] as const;
 
 const CREATE_TAB = { id: 'create', label: 'Crear' } as const;
@@ -76,8 +74,6 @@ export default function SkillsHubView({ embedded = false }: EmbeddedViewProps) {
     void loadSkills().catch(() => undefined);
   }, [loadSkills]);
 
-  const showEmptyGlobalHint = useMemo(() => globalSkills.length === 0, [globalSkills.length]);
-
   const confirmHardDelete = async () => {
     if (!pendingHardDelete || !canWrite) return;
     setDeleting(true);
@@ -95,88 +91,96 @@ export default function SkillsHubView({ embedded = false }: EmbeddedViewProps) {
 
   return (
     <ViewChrome embedded={embedded}>
-      {!embedded && (
-        <header>
-          <h1 className="text-3xl font-black dark:text-dark-text">Skills</h1>
-          <p className="mt-1 max-w-2xl text-sm text-gov-gray-500 dark:text-dark-muted">
-            Capacidades que el agente expone al LLM como herramientas. Inventario, creación y skills del
-            framework en un solo lugar.
-          </p>
-        </header>
-      )}
-
-      <div className="space-y-6">
-        <SkillsConceptPanel defaultOpen={showEmptyGlobalHint} />
-
-        <SkillSummary
-          globalCount={globalSkills.length}
-          localCount={localSkills.length}
-          onCreateClick={developerMode ? () => selectTab('create') : undefined}
-        />
-
+      <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-3">
-            <nav className="flex flex-wrap gap-1 rounded-xl border border-gov-gray-200 bg-gov-gray-50 p-1 dark:border-dark-border dark:bg-dark-bg">
-              {visibleTabs.map((item) => (
+          <div
+            className="flex flex-wrap gap-1 border-b border-gov-gray-200 dark:border-dark-border"
+            role="tablist"
+            aria-label="Secciones de skills"
+          >
+            {visibleTabs.map((item) => {
+              const selected = tab === item.id;
+              return (
                 <button
                   key={item.id}
                   type="button"
+                  role="tab"
+                  aria-selected={selected}
                   onClick={() => selectTab(item.id)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
-                    tab === item.id
-                      ? 'bg-white text-gov-blue-800 shadow-sm dark:bg-dark-surface dark:text-dark-cyan'
-                      : 'text-gov-gray-600 hover:text-gov-gray-900 dark:text-dark-muted dark:hover:text-dark-text'
+                  className={`border-b-2 px-4 py-2.5 text-sm font-semibold transition-colors -mb-px ${
+                    selected
+                      ? 'border-gov-blue-600 text-gov-blue-800 dark:border-dark-cyan dark:text-dark-cyan'
+                      : 'border-transparent text-gov-gray-500 hover:text-gov-gray-800 dark:hover:text-dark-text'
                   }`}
                 >
                   {item.label}
                 </button>
-              ))}
-            </nav>
-            <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl border border-gov-gray-200 px-3 py-2 text-xs dark:border-dark-border">
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs dark:border-dark-border">
               <input
                 type="checkbox"
                 checked={developerMode}
                 onChange={(e) => setDeveloperMode(e.target.checked)}
                 className="rounded"
               />
-              <span className="font-semibold text-gov-gray-700 dark:text-dark-muted">Modo desarrollador</span>
+              <span className="font-medium text-gov-gray-700 dark:text-dark-muted">Desarrollador</span>
             </label>
+            <button
+              type="button"
+              onClick={refresh}
+              className="inline-flex items-center gap-2 rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs font-semibold text-gov-gray-700 dark:border-dark-border dark:text-dark-muted"
+            >
+              <RefreshCw size={14} />
+              Refrescar
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={refresh}
-            className="inline-flex items-center gap-2 rounded-xl border border-gov-gray-200 px-3 py-2 text-xs font-bold text-gov-gray-700 dark:border-dark-border dark:text-dark-muted"
-          >
-            <RefreshCw size={14} />
-            Refrescar
-          </button>
         </div>
 
         {error && <p className="text-sm text-red-600">{error}</p>}
         {deleteError && <p className="text-sm text-red-600">{deleteError}</p>}
 
         {tab === 'catalog' && (
-          <div className="space-y-6">
-            <SkillInventory
-              title="Catálogo global"
-              subtitle="Filas en main.admin_skills — reutilizables entre agentes."
-              items={globalSkills}
-              canDelete={canWrite}
-              onHardDelete={setPendingHardDelete}
-              emptyHint={
-                developerMode
-                  ? 'Crea metadata en la pestaña Crear, implementa el bridge Python y actívala en el manifest del agente.'
-                  : 'Los agentes ya incluyen capacidades de plataforma (datos, documentos, informes). Activa «Modo desarrollador» solo si vas a registrar skills custom en DuckDB.'
-              }
-              onCreateClick={developerMode ? () => selectTab('create') : undefined}
-            />
-            <SkillInventory
-              title="Skills locales por agente"
-              subtitle="Archivos skills/*.py dentro del snapshot de cada worker."
-              items={localSkills}
-              showWorker
-              emptyHint="Sube o edita archivos .py en el bundle del agente (editor → archivos skills/)."
-            />
+          <div className="grid gap-4 lg:grid-cols-12">
+            <div className="space-y-4 lg:col-span-8">
+              <SkillInventory
+                title="Catálogo global"
+                subtitle="main.admin_skills"
+                items={globalSkills}
+                canDelete={canWrite}
+                onHardDelete={setPendingHardDelete}
+                emptyHint={
+                  developerMode
+                    ? 'Sin filas en catálogo. Crea metadata en la pestaña Crear.'
+                    : 'Activa modo desarrollador para registrar skills custom en DuckDB.'
+                }
+                onCreateClick={developerMode ? () => selectTab('create') : undefined}
+              />
+              <SkillInventory
+                title="Locales por agente"
+                subtitle="skills/*.py en el snapshot del worker"
+                items={localSkills}
+                showWorker
+                emptyHint="Archivos en el editor del agente → pestaña Herramientas / archivos skills/."
+              />
+            </div>
+            <aside className="lg:col-span-4">
+              <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
+                <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Resumen</p>
+                <dl className="mt-3 space-y-2 text-sm">
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gov-gray-500 dark:text-dark-muted">Globales</dt>
+                    <dd className="font-mono font-semibold">{globalSkills.length}</dd>
+                  </div>
+                  <div className="flex justify-between gap-2">
+                    <dt className="text-gov-gray-500 dark:text-dark-muted">Locales</dt>
+                    <dd className="font-mono font-semibold">{localSkills.length}</dd>
+                  </div>
+                </dl>
+              </section>
+            </aside>
           </div>
         )}
 
@@ -195,7 +199,7 @@ export default function SkillsHubView({ embedded = false }: EmbeddedViewProps) {
       <ConfirmDangerModal
         isOpen={!!pendingHardDelete}
         title="Eliminar skill definitivamente"
-        description="Borra la fila en main.admin_skills y sus enlaces en admin_worker_skills. No elimina código Python en disco salvo que lo hayas subido aparte."
+        description="Borra la fila en main.admin_skills y sus enlaces en admin_worker_skills."
         confirmLabel="Sí, eliminar definitivamente"
         isLoading={deleting}
         details={

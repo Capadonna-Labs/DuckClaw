@@ -181,7 +181,7 @@ def test_playground_config_uses_actor_runtime_defaults(
     monkeypatch.setenv("DUCKCLAW_RUNTIME_AGENTS_DIR", str(tmp_path / "runtime-agents"))
     monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _apply_typed_command_inline)
     monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
-    vault_path = tmp_path / "axis.duckdb"
+    vault_path = tmp_path / "duckclaw.duckdb"
     duckdb.connect(str(vault_path)).close()
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
 
@@ -190,7 +190,7 @@ def test_playground_config_uses_actor_runtime_defaults(
         headers=headers,
         json={
             "worker_id": "axis_bot",
-            "display_name": "AXIS Bot",
+            "display_name": "Demo Bot",
             "source_template_id": "default",
         },
     )

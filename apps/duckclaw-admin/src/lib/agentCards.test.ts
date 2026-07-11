@@ -34,7 +34,7 @@ assert.deepEqual(
 );
 
 assert.deepEqual(
-  agentMetadata({ id: 'axis-maestro', name: 'AXIS Maestro', schema_name: 'axis_maestro_worker' }),
+  agentMetadata({ id: 'team-lead', name: 'Team Lead', schema_name: 'team_lead_worker' }),
   [{ label: 'Schema', value: 'axis_maestro_worker' }]
 );
 

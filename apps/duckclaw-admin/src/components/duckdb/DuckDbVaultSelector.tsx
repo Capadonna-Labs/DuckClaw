@@ -35,7 +35,7 @@ export function DuckDbVaultSelector({ value, onChange }: Props) {
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="flex-1 min-w-0 max-w-xl px-3 py-2 rounded-xl border dark:border-dark-border dark:bg-dark-bg font-mono text-xs"
+        className="flex-1 min-w-0 max-w-xl rounded-lg border px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
       >
         {vaults.length === 0 && <option value="">(sin bóvedas)</option>}
         {vaults.map((v) => (

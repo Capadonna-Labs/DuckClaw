@@ -573,7 +573,7 @@ def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch
     monkeypatch.setattr(
         playground_chat_router,
         "_playground_team_context",
-        lambda **_: _mock_playground_team(workers=["axis-maestro"]),
+        lambda **_: _mock_playground_team(workers=["team-lead"]),
     )
     monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
     db = DuckClaw(str(gateway_db), read_only=False, engine="python")
@@ -581,21 +581,21 @@ def test_playground_chat(admin_client: TestClient, gateway_db: Path, monkeypatch
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-maestro",
-            display_name="AXIS Maestro",
+            worker_id="team-lead",
+            display_name="Team Lead",
         )
     finally:
         db.close()
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
         headers={"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"},
-        json={"worker_id": "axis-maestro", "message": "hola"},
+        json={"worker_id": "team-lead", "message": "hola"},
     )
     assert r.status_code == 200
     data = r.json()
     assert data.get("ok") is True
     assert data.get("response") == "respuesta-mock"
-    assert data.get("worker_id") == "axis-maestro"
+    assert data.get("worker_id") == "team-lead"
 
 
 def test_playground_chat_rejects_worker_outside_team(
@@ -616,7 +616,7 @@ def test_playground_chat_rejects_worker_outside_team(
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
         headers={"X-Admin-Key": "test-admin-key"},
-        json={"worker_id": "AXIS-Maestro", "message": "hola"},
+        json={"worker_id": "Team-Lead", "message": "hola"},
     )
     assert r.status_code == 403
 

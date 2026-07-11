@@ -84,6 +84,12 @@ export function formatOpsOutput(r: OpsRunResult): string {
   if (r.op_id === 'start_telegram_ingress' && ok) {
     lines.push('Tailscale Funnel activo. Prueba un mensaje al bot en Telegram.');
   }
+  if ((r.op_id === 'pm2_start_edge_streamlit' || r.op_id === 'pm2_restart_edge_streamlit') && ok) {
+    lines.push('Dashboard Edge en http://127.0.0.1:8501 — compila libedgecore si la UI avisa que falta la .so.');
+  }
+  if (r.op_id === 'build_edge_native' && ok) {
+    lines.push('libedgecore lista en integrations/edge-devices/native/.');
+  }
 
   if (r.executed_via === 'local') {
     lines.push('Ejecutado en este equipo (consola del admin)');

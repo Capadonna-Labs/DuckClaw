@@ -113,12 +113,12 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
                 type="button"
                 onClick={() => void restartStack()}
                 disabled={stackRestarting}
-                className="inline-flex min-h-[42px] items-center gap-2 rounded-xl border border-gov-blue-100 px-3.5 py-2.5 text-sm font-bold text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 sm:text-base dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
+                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-gov-blue-100 px-2.5 py-2 text-xs font-bold text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
                 title="Reinicia gateway, db-writer y heartbeat (migraciones DuckDB + PM2)"
                 aria-label={stackRestarting ? 'Reiniciando sistema' : 'Reiniciar sistema'}
               >
-                <RefreshCw size={20} className={stackRestarting ? 'animate-spin' : ''} />
-                <span className="whitespace-nowrap">
+                <RefreshCw size={17} className={stackRestarting ? 'animate-spin' : ''} />
+                <span className="hidden sm:inline whitespace-nowrap">
                   {stackRestarting ? 'Reiniciando…' : 'Reiniciar sistema'}
                 </span>
               </button>

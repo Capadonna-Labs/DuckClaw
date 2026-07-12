@@ -206,7 +206,7 @@ Para alinear `system_prompt/<worker>` del catálogo con los snapshots en DuckDB 
 6. **Retirar `DUCKCLAW_BOT_MODE=echo`** del wizard clásico cuando se confirme que ningún runtime lo lee (hoy solo lo escribe `duckclaw_setup_wizard.py`).
 7. **Documentar Sovereign** en spec propia (`SOVEREIGN_WIZARD_V2.md` referenciada en wizard legacy) si no existe en `docs/specs/`.
 8. **Plug-and-play real:** build C++ db-writer, MLX opcional, Telegram opcional para smoke, `npm run dev` admin manual, migraciones en hub preexistente sin schema admin.
-9. **Smoke login admin** + primer turno Playground (e2e).
+9. ~~**Smoke login admin** + primer turno Playground (e2e).~~ **Hecho (2026-07-12).** `pytest test_admin_onboarding_smoke.py`; `duckops smoke` → login + config + chat (si LLM OK).
 
 ---
 

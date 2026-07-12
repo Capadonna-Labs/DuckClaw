@@ -11,8 +11,13 @@ app = typer.Typer()
 def cmd_smoke(
     ctx: typer.Context,
     repo: str | None = typer.Option(None, "--repo", "-C", help="Raíz del monorepo."),
+    smoke_chat: bool = typer.Option(
+        True,
+        "--smoke-chat/--no-smoke-chat",
+        help="Incluir POST playground/chat (requiere LLM configurado).",
+    ),
 ) -> None:
-    """Diagnóstico + probe GET /health (alias de duckops doctor --smoke)."""
+    """Diagnóstico + probe GET /health y happy path admin (alias de duckops doctor --smoke)."""
     if ctx.invoked_subcommand is not None:
         return
     from pathlib import Path
@@ -21,6 +26,6 @@ def cmd_smoke(
 
     root = Path(repo).resolve() if repo else None
     try:
-        cmd_doctor(ctx, repo=root, smoke=True)
+        cmd_doctor(ctx, repo=root, smoke=True, smoke_chat=smoke_chat)
     except typer.Exit as exc:
         raise typer.Exit(exc.exit_code) from exc

@@ -54,13 +54,14 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.research_bridge:register_research_skill",
         empty_config_registers=False,
-        keyword_context={"llm": "llm"},
+        keyword_context={"llm": "llm", "db": "db", "tenant_id": "tenant_id"},
     ),
     SkillToolRegistrar(
         skill_name="openweather",
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.openweather_bridge:register_openweather_skill",
         positional_context=("research_config",),
+        keyword_context={"db": "db", "tenant_id": "tenant_id"},
     ),
     SkillToolRegistrar(
         skill_name="tailscale",

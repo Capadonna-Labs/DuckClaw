@@ -33,10 +33,15 @@ _DEFAULT_VIDEO_TIMEOUT_SEC = 300.0
 _DEFAULT_IMAGE_TIMEOUT_SEC = 120.0
 
 
-def _hf_key(token_env: str | None = None) -> str:
+def _hf_key(
+    token_env: str | None = None,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+) -> str:
     from duckclaw.higgsfield_env import resolve_higgsfield_api_key
 
-    return resolve_higgsfield_api_key(token_env)
+    return resolve_higgsfield_api_key(token_env, db=db, tenant_id=tenant_id)
 
 
 def _poll_timeout_sec(media_type: str) -> float:
@@ -378,8 +383,8 @@ def register_higgsfield_skill(
     except Exception:
         _log.debug("Higgsfield MCP preference check skipped", exc_info=True)
     token_env = str(cfg.get("token_env") or "HIGGSFIELD_API_KEY")
-    if not _hf_key(token_env):
-        _log.warning("Higgsfield disabled: missing %s", token_env)
+    if not _hf_key(token_env, db=duckclaw_db, tenant_id=tenant_id):
+        _log.warning("Higgsfield disabled: missing API key (Integraciones o %s)", token_env)
         return
     try:
         from langchain_core.tools import StructuredTool

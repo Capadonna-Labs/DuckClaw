@@ -25,6 +25,7 @@ from routers.admin_domains.fly_commands_catalog import router as fly_commands_ca
 from routers.admin_domains.gateway_resources import router as gateway_resources_router
 from routers.admin_domains.forge_projects import router as forge_projects_router
 from routers.admin_domains.hitl_admin import router as hitl_admin_router
+from routers.admin_domains.integration_catalog import router as integration_catalog_router
 from routers.admin_domains.kanban import router as kanban_router
 from routers.admin_domains.knowledge import router as knowledge_router
 from routers.admin_domains.mcp_connectors import router as mcp_connectors_router
@@ -91,6 +92,7 @@ router.include_router(env_config_router)
 router.include_router(fly_commands_catalog_router)
 router.include_router(forge_projects_router)
 router.include_router(gateway_resources_router)
+router.include_router(integration_catalog_router)
 router.include_router(hitl_admin_router)
 router.include_router(kanban_router)
 router.include_router(kanban_runtime_router)

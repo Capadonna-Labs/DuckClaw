@@ -64,8 +64,18 @@ _FALLBACKS: dict[tuple[str, str], dict[str, str]] = {
     ("comfyui", "timeout_sec"): {
         "env_key": "COMFYUI_TIMEOUT_SEC",
         "default": "300",
-    }
+    },
 }
+
+
+def _merged_fallbacks() -> dict[tuple[str, str], dict[str, Any]]:
+    try:
+        from duckclaw.integration_catalog import integration_setting_fallbacks
+
+        merged.update(integration_setting_fallbacks())
+    except Exception:
+        pass
+    return merged
 
 
 def ensure_admin_runtime_settings_table(db: Any) -> None:
@@ -132,7 +142,14 @@ def _public_setting(row: dict[str, Any], *, value: Any, source: str) -> dict[str
     return out
 
 
-def _fallback_row(domain: str, key: str, *, env_key: str, default: str) -> dict[str, Any]:
+def _fallback_row(
+    domain: str,
+    key: str,
+    *,
+    env_key: str,
+    default: str,
+    secret: bool = False,
+) -> dict[str, Any]:
     value = (os.environ.get(env_key) or default or "").strip()
     return {
         "setting_id": "",
@@ -142,7 +159,7 @@ def _fallback_row(domain: str, key: str, *, env_key: str, default: str) -> dict[
         "key": key,
         "value_text": value,
         "value_kind": "string",
-        "secret": False,
+        "secret": secret,
         "source": "env" if os.environ.get(env_key) is not None else "default",
     }
 
@@ -207,11 +224,38 @@ def resolve_runtime_setting(
         value = _row_value(row)
         return {**_public_setting(row, value=value, source="db"), "value": value}
 
+    if dom == "integrations":
+        from duckclaw.integration_secrets import (
+            _env_candidates,
+            _resolve_from_db,
+            _resolve_from_env,
+            integration_spec_for_setting_key,
+        )
+        spec = integration_spec_for_setting_key(setting_key)
+        if spec is not None:
+            db_val = _resolve_from_db(db, spec=spec, tenant_id=tenant_id, actor_email=actor_email)
+            env_val = _resolve_from_env(_env_candidates(None, spec.env_keys))
+            value = db_val or env_val
+            source = "db" if db_val else ("env" if env_val else "default")
+            row = {
+                "setting_id": "",
+                "tenant_id": tenant_id,
+                "actor_email": actor_email,
+                "domain": dom,
+                "key": setting_key,
+                "value_kind": "string",
+                "secret": True,
+                "updated_at": "",
+            }
+            return {**_public_setting(row, value=value, source=source), "value": value}
+
+    fallback_meta = _merged_fallbacks().get((dom, setting_key), {})
     fallback = _fallback_row(
         dom,
         setting_key,
-        env_key=env_key or _FALLBACKS.get((dom, setting_key), {}).get("env_key", ""),
-        default=default or _FALLBACKS.get((dom, setting_key), {}).get("default", ""),
+        env_key=env_key or fallback_meta.get("env_key", ""),
+        default=default or fallback_meta.get("default", ""),
+        secret=bool(fallback_meta.get("secret", False)),
     )
     value = _row_value(fallback)
     return {**_public_setting(fallback, value=value, source=str(fallback["source"])), "value": value}
@@ -243,13 +287,13 @@ def list_runtime_settings_effective(
         f"AND actor_email IN ('{actor}', '')",
     )
     keys = {(str(row.get("domain") or ""), str(row.get("key") or "")) for row in rows}
-    for domain, key in _FALLBACKS:
+    for domain, key in _merged_fallbacks():
         if normalized_domains and domain not in normalized_domains:
             continue
         keys.add((domain, key))
     out: list[dict[str, Any]] = []
     for domain, key in sorted(keys):
-        fallback = _FALLBACKS.get((domain, key), {})
+        fallback = _merged_fallbacks().get((domain, key), {})
         item = resolve_runtime_setting(
             db,
             tenant_id=tenant_id,

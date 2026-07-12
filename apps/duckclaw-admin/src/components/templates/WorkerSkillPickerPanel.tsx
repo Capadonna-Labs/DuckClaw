@@ -3,6 +3,10 @@
 import { useCallback, useMemo, useState } from 'react';
 import { ChevronsDownUp, ChevronsUpDown, Loader2, Search } from 'lucide-react';
 import type { SkillCatalogItem } from '@/services/adminService';
+import { IntegrationSecretsBanner } from '@/components/integrations/IntegrationSecretsBanner';
+import { useIntegrationCatalog } from '@/components/integrations/useIntegrationCatalog';
+import { missingIntegrationsForSkills } from '@/lib/integrationGaps';
+import { skillIdsFromManifestYaml } from '@/lib/onboardingChecklist';
 import {
   applyReportsBundle,
   parseManifestSkills,
@@ -163,8 +167,13 @@ export function WorkerSkillPickerPanel({
   const [query, setQuery] = useState('');
   const { platformCategories, baselineProfiles, loading: categoriesLoading, error: categoriesError } =
     useSkillCategoriesCatalog();
+  const { catalog } = useIntegrationCatalog();
 
   const parsed = useMemo(() => parseManifestSkills(manifestYaml), [manifestYaml]);
+  const integrationGaps = useMemo(
+    () => missingIntegrationsForSkills(catalog, skillIdsFromManifestYaml(manifestYaml)),
+    [catalog, manifestYaml]
+  );
   const selected = useMemo(
     () => new Set(parsed.optionalSkillNames.map(normalizeSkillId)),
     [parsed.optionalSkillNames]
@@ -304,6 +313,8 @@ export function WorkerSkillPickerPanel({
           </div>
         </>
       )}
+
+      <IntegrationSecretsBanner gaps={integrationGaps} compact />
     </section>
   );
 }

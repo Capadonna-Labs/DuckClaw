@@ -445,6 +445,40 @@ def cmd_doctor(
             sync_detail if sync_ok else sync_detail,
         )
 
+    from duckops.onboarding_health import (
+        check_custom_agents_in_catalog,
+        check_integration_bootstrap,
+        check_llm_bootstrap,
+    )
+
+    llm_health = check_llm_bootstrap(root)
+    if not _emit("LLM bootstrap", llm_health.ok, llm_health.detail):
+        if strict:
+            critical_ok = False
+
+    if db_path:
+        try:
+            import duckdb
+
+            con = duckdb.connect(db_path, read_only=True)
+            try:
+                agents_health = check_custom_agents_in_catalog(con)
+                _emit(
+                    "Primer agente",
+                    agents_health.ok,
+                    agents_health.detail,
+                )
+                integrations = check_integration_bootstrap(con)
+                _emit(
+                    "Integraciones API keys",
+                    integrations.ok,
+                    integrations.summary() + " (opcional hasta activar skills)",
+                )
+            finally:
+                con.close()
+        except Exception as exc:
+            _emit("Onboarding", False, str(exc)[:160])
+
     gateway_listening = False
     gateway_port = 8000
     try:

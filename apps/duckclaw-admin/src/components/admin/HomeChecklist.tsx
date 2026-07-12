@@ -71,7 +71,7 @@ export function HomeChecklist() {
           detail: agentDetail,
           state: 'pending',
           href: '/templates',
-          cta: 'Crear agente',
+          cta: 'Abrir wizard',
         },
         {
           id: 'knowledge',

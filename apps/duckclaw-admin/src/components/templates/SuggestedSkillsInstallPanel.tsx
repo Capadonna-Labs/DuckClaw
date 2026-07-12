@@ -6,6 +6,8 @@ import { CheckCircle2, Loader2, Plus, Wrench } from 'lucide-react';
 import { adminService, type UserAgentDraft } from '@/services/adminService';
 import { useSkillCategoriesCatalog } from '@/components/skills/useSkillCategoriesCatalog';
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
+import { IntegrationSecretsBanner } from '@/components/integrations/IntegrationSecretsBanner';
+import { useIntegrationCatalog } from '@/components/integrations/useIntegrationCatalog';
 import {
   buildCatalogSkillCreateBody,
   catalogSkillNamesFromLists,
@@ -14,6 +16,7 @@ import {
   resolveSuggestedSkillInstall,
   type SuggestedSkillRow,
 } from '@/lib/suggestedSkillInstall';
+import { effectiveSkillIdsFromDraft, missingIntegrationsForSkills } from '@/lib/integrationGaps';
 import { pollWriteTask } from '@/lib/pollWriteTask';
 
 type SuggestedSkillsInstallPanelProps = {
@@ -35,6 +38,7 @@ export function SuggestedSkillsInstallPanel({
 }: SuggestedSkillsInstallPanelProps) {
   const { globalSkills, localSkills, loadSkills } = useSkillsCatalog();
   const { platformCategories } = useSkillCategoriesCatalog();
+  const { catalog } = useIntegrationCatalog();
   const [busySkill, setBusySkill] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -48,8 +52,20 @@ export function SuggestedSkillsInstallPanel({
     [globalSkills, localSkills]
   );
 
+  const integrationGaps = useMemo(
+    () =>
+      missingIntegrationsForSkills(
+        catalog,
+        effectiveSkillIdsFromDraft({
+          skills: draft.skills ?? [],
+          web_search: draft.web_search,
+        })
+      ),
+    [catalog, draft.skills, draft.web_search]
+  );
+
   const rows = draft.suggested_skills ?? [];
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && integrationGaps.length === 0) return null;
 
   const activateInDraft = (skillName: string) => {
     onDraftChange({ skills: mergeSkillIntoDraft(draft.skills, skillName) });
@@ -90,8 +106,11 @@ export function SuggestedSkillsInstallPanel({
         Skills sugeridas por la IA
       </p>
       <p className="mt-1 text-[10px] text-gov-gray-500 dark:text-dark-muted">
-        Plataforma: basta con activarlas en el manifest. Custom: registro en DuckDB + código Python del bridge.
+        Plataforma: activar en manifest. Custom: registro en catálogo + bridge Python. API keys en
+        Integraciones.
       </p>
+
+      <IntegrationSecretsBanner gaps={integrationGaps} compact className="mt-3" />
 
       {notice ? (
         <p className="mt-2 rounded-lg bg-emerald-50 px-2 py-1.5 text-[10px] text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-200">
@@ -104,69 +123,71 @@ export function SuggestedSkillsInstallPanel({
         </p>
       ) : null}
 
-      <ul className="mt-3 space-y-2">
-        {rows.map((skill) => {
-          const kind = resolveSuggestedSkillInstall({
-            skill,
-            draftSkills: draft.skills,
-            platformSkillIds,
-            catalogSkillNames,
-          });
-          const busy = busySkill === skill.name;
+      {rows.length > 0 ? (
+        <ul className="mt-3 space-y-2">
+          {rows.map((skill) => {
+            const kind = resolveSuggestedSkillInstall({
+              skill,
+              draftSkills: draft.skills,
+              platformSkillIds,
+              catalogSkillNames,
+            });
+            const busy = busySkill === skill.name;
 
-          return (
-            <li
-              key={skill.name}
-              className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-gov-gray-100 px-2 py-2 dark:border-dark-border"
-            >
-              <div className="min-w-0">
-                <p className="font-mono text-xs font-semibold text-gov-gray-900 dark:text-dark-text">
-                  {skill.name}
-                </p>
-                <p className="text-[10px] text-gov-gray-500 dark:text-dark-muted">{skill.reason}</p>
-              </div>
-              <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-                {kind === 'activated' ? (
-                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
-                    <CheckCircle2 size={12} />
-                    En el agente
-                  </span>
-                ) : null}
-                {kind === 'platform' || kind === 'catalog' ? (
-                  <button
-                    type="button"
-                    disabled={disabled || busy}
-                    onClick={() => activateInDraft(skill.name)}
-                    className="inline-flex items-center gap-1 rounded-lg bg-gov-blue-700 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-50"
-                  >
-                    {busy ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
-                    Activar
-                  </button>
-                ) : null}
-                {kind === 'custom' ? (
-                  <>
+            return (
+              <li
+                key={skill.name}
+                className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-gov-gray-100 px-2 py-2 dark:border-dark-border"
+              >
+                <div className="min-w-0">
+                  <p className="font-mono text-xs font-semibold text-gov-gray-900 dark:text-dark-text">
+                    {skill.name}
+                  </p>
+                  <p className="text-[10px] text-gov-gray-500 dark:text-dark-muted">{skill.reason}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                  {kind === 'activated' ? (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300">
+                      <CheckCircle2 size={12} />
+                      En el agente
+                    </span>
+                  ) : null}
+                  {kind === 'platform' || kind === 'catalog' ? (
                     <button
                       type="button"
                       disabled={disabled || busy}
-                      onClick={() => void registerInCatalog(skill)}
-                      className="inline-flex items-center gap-1 rounded-lg border border-gov-gray-200 px-2 py-1 text-[10px] font-semibold dark:border-dark-border disabled:opacity-50"
+                      onClick={() => activateInDraft(skill.name)}
+                      className="inline-flex items-center gap-1 rounded-lg bg-gov-blue-700 px-2 py-1 text-[10px] font-semibold text-white disabled:opacity-50"
                     >
-                      {busy ? <Loader2 size={10} className="animate-spin" /> : null}
-                      Registrar
+                      {busy ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />}
+                      Activar
                     </button>
-                    <Link
-                      href={`/plataforma?tab=skills&skillsTab=catalog`}
-                      className="text-[10px] font-semibold text-gov-blue-700 hover:underline dark:text-dark-cyan"
-                    >
-                      Implementar
-                    </Link>
-                  </>
-                ) : null}
-              </div>
-            </li>
-          );
-        })}
-      </ul>
+                  ) : null}
+                  {kind === 'custom' ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={disabled || busy}
+                        onClick={() => void registerInCatalog(skill)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-gov-gray-200 px-2 py-1 text-[10px] font-semibold dark:border-dark-border disabled:opacity-50"
+                      >
+                        {busy ? <Loader2 size={10} className="animate-spin" /> : null}
+                        Registrar
+                      </button>
+                      <Link
+                        href={`/plataforma?tab=skills&skillsTab=catalog`}
+                        className="text-[10px] font-semibold text-gov-blue-700 hover:underline dark:text-dark-cyan"
+                      >
+                        Implementar
+                      </Link>
+                    </>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </section>
   );
 }

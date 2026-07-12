@@ -113,37 +113,6 @@ def _rollback_gateway_db(repo: Path, print_fn) -> bool:
     return True
 
 
-def _post_migrate_catalog_hint(print_fn) -> None:
-    """One-line hint when catalog worker prompts are missing after migrate."""
-    try:
-        from duckclaw.gateway_db import get_gateway_db_path
-        import duckdb
-
-        from duckops.policy_health import check_catalog_worker_system_prompts, check_framework_prompt_policies
-
-        db_path = (get_gateway_db_path() or "").strip()
-        if not db_path:
-            return
-        con = duckdb.connect(db_path, read_only=True)
-        try:
-            catalog = check_catalog_worker_system_prompts(con)
-            framework = check_framework_prompt_policies(con)
-        finally:
-            con.close()
-    except Exception:
-        return
-
-    if not catalog.ok:
-        print_fn(
-            "  hint: faltan prompts por agente — en admin → Prompt policies → Sync catálogo "
-            f"({catalog.summary()})."
-        )
-    elif framework.degraded:
-        print_fn(
-            "  hint: policies framework en modo degradado — Restaurar defaults o Sync catálogo en admin."
-        )
-
-
 def _which_uv() -> str | None:
     import shutil
 
@@ -333,7 +302,9 @@ def cmd_up(
             detail = "rollback aplicado" if rolled_back else "rollback no disponible"
             typer.secho(f"migrate falló ({detail}).", fg=typer.colors.RED)
             raise typer.Exit(1)
-        _post_migrate_catalog_hint(typer.echo)
+        from duckops.post_migrate import run_post_migrate_housekeeping
+
+        run_post_migrate_housekeeping(root, typer.echo)
     else:
         typer.secho("Migraciones omitidas (--no-migrate).", fg=typer.colors.YELLOW)
     typer.echo("")
@@ -385,6 +356,38 @@ def cmd_up(
         typer.echo("  Contraseña: (ver DUCKCLAW_ADMIN_PASSWORD en .env)")
     typer.echo("  Tras login web → Playground (chat con agentes)")
     typer.echo(f"  Plataforma: {platform_label()}")
+
+    from duckops.onboarding_health import (
+        check_custom_agents_in_catalog,
+        check_llm_bootstrap,
+        format_dev_next_steps,
+    )
+
+    llm_health = check_llm_bootstrap(root)
+    if not llm_health.ok:
+        typer.secho(f"  LLM: {llm_health.detail}", fg=typer.colors.YELLOW)
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path
+        import duckdb
+
+        db_path = (get_gateway_db_path() or "").strip()
+        if db_path:
+            hub = Path(db_path)
+            if not hub.is_absolute():
+                hub = (root / hub).resolve()
+            if hub.is_file():
+                con = duckdb.connect(str(hub), read_only=True)
+                try:
+                    agents_health = check_custom_agents_in_catalog(con)
+                finally:
+                    con.close()
+                if not agents_health.ok:
+                    typer.secho(f"  Siguiente paso: {agents_health.detail}", fg=typer.colors.YELLOW)
+                    typer.echo("  Próximos pasos:")
+                    for line in format_dev_next_steps(agents=agents_health, llm=llm_health):
+                        typer.echo(f"    · {line}")
+    except Exception:
+        pass
 
     code = run_post_up_loop(
         root,

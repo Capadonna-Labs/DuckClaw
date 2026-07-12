@@ -68,7 +68,7 @@ def provider_status_message(provider: VisualProvider) -> str:
     lines = [
         f"Proveedor activo: {provider}",
         f"  local (ComfyUI): {'disponible' if local_ok else 'no configurado (COMFYUI_API_URL)'}",
-        f"  fal (Fal.ai): {'disponible' if fal_ok else 'no configurado (FAL_KEY)'}",
-        f"  higgsfield: {'disponible' if hf_ok else 'no configurado (HIGGSFIELD_API_KEY)'}",
+        f"  fal (Fal.ai): {'disponible' if fal_ok else 'sin clave (Integraciones → API keys o FAL_KEY)'}",
+        f"  higgsfield: {'disponible' if hf_ok else 'sin clave (Integraciones → API keys o HIGGSFIELD_API_KEY)'}",
     ]
     return "\n".join(lines)

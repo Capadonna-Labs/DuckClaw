@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -34,10 +33,12 @@ def _run_async(coro: Any) -> Any:
         return pool.submit(asyncio.run, coro).result()
 
 
-def _github_mcp_call(tool_name: str, payload: dict[str, Any]) -> str:
-    token = (os.environ.get("GITHUB_TOKEN") or "").strip()
+def _github_mcp_call(tool_name: str, payload: dict[str, Any], db: Any | None = None) -> str:
+    from duckclaw.github_token import resolve_github_token
+
+    token = resolve_github_token(db=db)
     if not token:
-        return json.dumps({"error": "GITHUB_TOKEN missing"})
+        return json.dumps({"error": "GitHub token missing (Integraciones → github.token o GITHUB_TOKEN)"})
     branch_err = reject_protected_branch_mutation(tool_name, payload)
     if branch_err:
         return json.dumps({"error": branch_err})
@@ -164,7 +165,7 @@ def approve_code_decision(
         "files": [{"path": file_path, "content": content}],
         "message": f"{title}\n\n{rationale}"[:500],
     }
-    push_raw = _github_mcp_call("push_files", push_payload)
+    push_raw = _github_mcp_call("push_files", push_payload, db=db)
     if "error" in push_raw.lower():
         try:
             parsed = json.loads(push_raw)
@@ -185,7 +186,7 @@ def approve_code_decision(
             f"**Rationale:** {rationale}"
         ),
     }
-    pr_raw = _github_mcp_call("create_pull_request", pr_payload)
+    pr_raw = _github_mcp_call("create_pull_request", pr_payload, db=db)
     pr_number = None
     pr_url = ""
     try:

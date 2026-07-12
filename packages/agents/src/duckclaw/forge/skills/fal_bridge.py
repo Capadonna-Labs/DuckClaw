@@ -413,7 +413,7 @@ async def _fal_generate_async(
     api_key = _fal_key(token_env)
     if not api_key:
         return _error_json(
-            "API key Fal no configurada. Define FAL_API_KEY o FAL_KEY en .env del gateway."
+            "API key Fal no configurada. Admin → Integraciones → API keys (o FAL_KEY / FAL_API_KEY en .env)."
         )
 
     ctx = _tool_context()

@@ -114,8 +114,10 @@ def execute_sensors(db: Any) -> str:
     blocks.append("")
     try:
         from duckclaw.forge.skills.research_bridge import _tavily_available
+        from duckclaw.integration_secrets import integration_api_key_configured
     except Exception:
-        _tavily_available = lambda: False  # type: ignore[misc, assignment]
+        _tavily_available = lambda **_: False  # type: ignore[misc, assignment]
+        integration_api_key_configured = lambda *a, **k: False  # type: ignore[misc, assignment]
 
     tav_pkg = False
     try:
@@ -124,13 +126,13 @@ def execute_sensors(db: Any) -> str:
         tav_pkg = True
     except ImportError:
         pass
-    tav_key = bool((os.environ.get("TAVILY_API_KEY") or "").strip())
-    tav_ready = bool(_tavily_available())
+    tav_key = bool(integration_api_key_configured("tavily", db=db))
+    tav_ready = bool(_tavily_available(db=db))
     blocks.append("🔎 Tavily (research)")
     if tav_ready and tav_pkg and tav_key:
-        blocks.append(_sensor_line_bullet("✅", "Listo · paquete · TAVILY_API_KEY · bridge"))
+        blocks.append(_sensor_line_bullet("✅", "Listo · paquete · clave · bridge"))
     elif not tav_pkg and not tav_key:
-        blocks.append(_sensor_line_bullet("⚠️", "Sin paquete tavily ni clave"))
+        blocks.append(_sensor_line_bullet("⚠️", "Sin paquete tavily ni clave (Integraciones o TAVILY_API_KEY)"))
     else:
         blocks.append(
             _sensor_line_bullet(
@@ -140,6 +142,13 @@ def execute_sensors(db: Any) -> str:
         )
 
     blocks.append("")
+    try:
+        from duckclaw.integration_readiness import integration_catalog_sensor_lines
+
+        blocks.extend(integration_catalog_sensor_lines(db))
+    except Exception as exc:
+        blocks.append("🔑 Integraciones (API keys)")
+        blocks.append(_sensor_line_bullet("❌", f"Error — {str(exc)[:100]}"))
     try:
         blocks.extend(_browser_sandbox_sensor_lines())
     except Exception as exc:

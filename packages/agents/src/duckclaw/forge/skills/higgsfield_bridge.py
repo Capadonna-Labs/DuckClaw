@@ -198,7 +198,7 @@ async def _higgsfield_generate_async(
     api_key = _hf_key(token_env)
     if not api_key:
         return _error_json(
-            "API key Higgsfield no configurada. Define HIGGSFIELD_API_KEY en .env del gateway."
+            "API key Higgsfield no configurada. Admin → Integraciones → API keys (o HIGGSFIELD_API_KEY en .env)."
         )
 
     ctx = _tool_context()

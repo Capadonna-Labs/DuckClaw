@@ -123,6 +123,9 @@ Bridges que consumen:
 - `research_bridge` (Tavily)
 - `openweather_bridge` (OpenWeather + contexto Tavily opcional)
 - `higgsfield_env` / `fal_env`
+- `github_token` → `github/mcp_bridge`, HITL `code_decision_service`
+
+Diagnóstico transversal: `integration_readiness` (`/sensors`, `duckops doctor`).
 
 ## Skills custom (futuro)
 

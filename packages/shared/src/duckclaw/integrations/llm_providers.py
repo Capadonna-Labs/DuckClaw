@@ -141,8 +141,20 @@ def build_openrouter_llm(
 
 def mlx_openai_compatible_base_url() -> str:
     """Base OpenAI-compatible para ``mlx_lm.server`` (``MLX_PORT``, default 8080)."""
-    port = (os.environ.get("MLX_PORT") or "8080").strip() or "8080"
-    return f"http://127.0.0.1:{port}/v1"
+    explicit = (os.environ.get("DUCKCLAW_MLX_BASE_URL") or "").strip().rstrip("/")
+    if explicit:
+        resolved = explicit if explicit.endswith("/v1") else f"{explicit}/v1"
+    else:
+        host = (os.environ.get("DUCKCLAW_MLX_HOST") or "").strip()
+        port = (os.environ.get("MLX_PORT") or "8080").strip() or "8080"
+        if host.startswith("http://") or host.startswith("https://"):
+            base = host.rstrip("/")
+            resolved = base if base.endswith("/v1") else f"{base}/v1"
+        elif host:
+            resolved = f"http://{host}:{port}/v1"
+        else:
+            resolved = f"http://127.0.0.1:{port}/v1"
+    return resolved
 
 
 def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
@@ -660,6 +672,44 @@ def reconcile_worker_provider_label(
 # E4B alinea con checkpoints locales típicos (p. ej. ``gemma4-e4b``); E2B sigue disponible vía repo HF explícito.
 MLX_GEMMA4_DEFAULT_REPO_ID = "mlx-community/gemma-4-e4b-it-4bit"
 
+_MLX_FOREIGN_MODEL_PREFIXES = (
+    "z-ai/",
+    "anthropic/",
+    "openai/",
+    "google/",
+    "deepseek/",
+    "meta-llama/",
+    "nvidia/",
+    "qwen/",
+    "arcee-ai/",
+)
+
+
+def _mlx_default_model_id() -> str:
+    return (
+        (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+        or "mlx-community/Llama-3.2-1B-Instruct"
+    )
+
+
+def looks_like_foreign_api_model_for_mlx(model: str) -> bool:
+    """OpenRouter/API slugs (p. ej. z-ai/glm-5.2) no son ids válidos para mlx_lm.server."""
+    m = (model or "").strip().lower()
+    if not m:
+        return True
+    if m.startswith("mlx-community/"):
+        return False
+    if m.startswith("/") or m.startswith(("./", "../")):
+        return False
+    if m == "openrouter/free":
+        return True
+    return any(m.startswith(p) for p in _MLX_FOREIGN_MODEL_PREFIXES)
+
+
+def coerce_mlx_llm_model(model: str) -> str:
+    """Normaliza modelo guardado en chat antes de persistir o invocar MLX."""
+    return mlx_openai_compatible_model_name(model)
+
 
 def _is_gemma4_short_name(requested: str) -> bool:
     t = (requested or "").strip().lower().replace("_", "-")
@@ -694,16 +744,15 @@ def mlx_openai_compatible_model_name(requested: str) -> str:
     r = (requested or "").strip()
     if _is_gemma4_short_name(r):
         return _resolve_gemma4_openai_model_id()
+    mid = _mlx_default_model_id()
     if not r:
-        return (
-            (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
-            or "mlx-community/Llama-3.2-1B-Instruct"
-        )
+        return mid
+    if looks_like_foreign_api_model_for_mlx(r):
+        return mid
     if r.startswith("/") or r.startswith(("./", "../")):
         return r
     if "/" in r:
         return r
-    mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
     return mid or r
 
 
@@ -927,6 +976,26 @@ def strip_markdown_json_fence(text: str) -> str:
     return block.strip()
 
 
+def _repair_common_mlx_tool_json_typos(text: str) -> str:
+    """MLX/Llama sin tool API suele emitir JSON casi válido con typos (evidencia: ``{"}}``)."""
+    s = (text or "").strip()
+    if not s:
+        return s
+    s = re.sub(
+        r'"parameters"\s*:\s*\{\s*"\}',
+        '"parameters": {}',
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(
+        r'"arguments"\s*:\s*\{\s*"\}',
+        '"arguments": {}',
+        s,
+        flags=re.IGNORECASE,
+    )
+    return s
+
+
 def coerce_json_tool_invoke(reply: str) -> tuple[str, dict[str, Any]] | None:
     """
     Algunos servidores OpenAI-compat (p. ej. MLX) devuelven la tool como JSON en ``content``
@@ -934,7 +1003,7 @@ def coerce_json_tool_invoke(reply: str) -> tuple[str, dict[str, Any]] | None:
     """
     import json as _json
 
-    s = strip_markdown_json_fence(reply)
+    s = _repair_common_mlx_tool_json_typos(strip_markdown_json_fence(reply))
     if not s.startswith("{"):
         return None
     try:

@@ -80,15 +80,29 @@ _or_attribution_logged = False
 _log = logging.getLogger(__name__)
 
 
-def build_openrouter_llm(model: str = "", base_url: str = "") -> Any:
+def build_openrouter_llm(
+    model: str = "",
+    base_url: str = "",
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> Any:
     """
     Cliente OpenRouter (LangChain ChatOpenAI) con app attribution headers.
     Compatible con OpenAI SDK; los headers son obligatorios para rankings públicos.
     """
-    key = (os.environ.get("OPENROUTER_API_KEY") or "").strip()
+    from duckclaw.llm_bootstrap import resolve_llm_api_key
+
+    key = resolve_llm_api_key(
+        "openrouter",
+        db=db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    )
     if not key:
         raise RuntimeError(
-            "OPENROUTER_API_KEY no configurado. Obtener en openrouter.ai/keys"
+            "OPENROUTER_API_KEY no configurado. Admin → Integraciones → API keys o openrouter.ai/keys"
         )
     try:
         from langchain_openai import ChatOpenAI
@@ -1168,6 +1182,9 @@ def build_llm(
     base_url: str = "",
     *,
     prefer_env_provider: bool = True,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
 ) -> Optional[Any]:
     """
     Construye un LLM según el proveedor.
@@ -1208,10 +1225,19 @@ def build_llm(
     if p == "openai":
         try:
             from langchain_openai import ChatOpenAI
+            from duckclaw.llm_bootstrap import resolve_llm_api_key
+
+            api_key = resolve_llm_api_key(
+                "openai",
+                db=db,
+                tenant_id=tenant_id,
+                actor_email=actor_email,
+            ) or None
             return ChatOpenAI(
                 model=m or "gpt-4o-mini",
                 temperature=0,
                 base_url=url or None,
+                api_key=api_key,
             )
         except Exception:
             raise RuntimeError("OpenAI requiere langchain-openai y OPENAI_API_KEY.")
@@ -1219,20 +1245,28 @@ def build_llm(
     if p == "anthropic":
         try:
             from langchain_anthropic import ChatAnthropic
+            from duckclaw.llm_bootstrap import resolve_llm_api_key
+
+            api_key = resolve_llm_api_key(
+                "anthropic",
+                db=db,
+                tenant_id=tenant_id,
+                actor_email=actor_email,
+            ) or None
             return ChatAnthropic(
                 model=m or "claude-3-5-haiku-20241022",
                 temperature=0,
+                api_key=api_key,
             )
         except Exception:
             raise RuntimeError("Anthropic requiere langchain-anthropic y ANTHROPIC_API_KEY.")
 
     if p == "gemini":
-        key = (
-            (os.environ.get("GOOGLE_API_KEY") or "").strip()
-            or (os.environ.get("GEMINI_API_KEY") or "").strip()
-        )
+        from duckclaw.llm_bootstrap import resolve_llm_api_key
+
+        key = resolve_llm_api_key("google", db=db, tenant_id=tenant_id, actor_email=actor_email)
         if not key:
-            raise RuntimeError("Gemini requiere GOOGLE_API_KEY (o GEMINI_API_KEY).")
+            raise RuntimeError("Gemini requiere GOOGLE_API_KEY (Integraciones → Google Gemini o .env).")
         try:
             from langchain_google_genai import ChatGoogleGenerativeAI
 
@@ -1247,20 +1281,31 @@ def build_llm(
     if p == "deepseek":
         try:
             from langchain_openai import ChatOpenAI
+            from duckclaw.llm_bootstrap import resolve_llm_api_key
 
+            api_key = resolve_llm_api_key(
+                "deepseek",
+                db=db,
+                tenant_id=tenant_id,
+                actor_email=actor_email,
+            )
+            if not api_key:
+                raise RuntimeError("DeepSeek requiere DEEPSEEK_API_KEY (Integraciones o .env).")
             return ChatOpenAI(
                 model=m or "deepseek-chat",
                 temperature=0,
                 base_url=url or "https://api.deepseek.com/v1",
-                api_key=(os.environ.get("DEEPSEEK_API_KEY") or "").strip(),
+                api_key=api_key,
             )
         except Exception:
-            raise RuntimeError("DeepSeek requiere DEEPSEEK_API_KEY.")
+            raise RuntimeError("DeepSeek requiere DEEPSEEK_API_KEY (Integraciones o .env).")
 
     if p == "groq":
-        key = (os.environ.get("GROQ_API_KEY") or "").strip()
+        from duckclaw.llm_bootstrap import resolve_llm_api_key
+
+        key = resolve_llm_api_key("groq", db=db, tenant_id=tenant_id, actor_email=actor_email)
         if not key:
-            raise RuntimeError("Groq requiere GROQ_API_KEY.")
+            raise RuntimeError("Groq requiere GROQ_API_KEY (Integraciones o .env).")
         try:
             from langchain_openai import ChatOpenAI
 
@@ -1294,7 +1339,7 @@ def build_llm(
             raise RuntimeError("Groq requiere langchain-openai y GROQ_API_KEY.")
 
     if p == "openrouter":
-        return build_openrouter_llm(m, url)
+        return build_openrouter_llm(m, url, db=db, tenant_id=tenant_id, actor_email=actor_email)
 
     if p == "ollama":
         try:

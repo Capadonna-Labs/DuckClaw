@@ -97,7 +97,31 @@ async def playground_config(
         tenant_id=eff_tenant,
         actor_email=str(profile.get("email") or actor),
     )
-    catalog = playground_llm_catalog(llm.get("provider", ""))
+    catalog: list[dict[str, Any]] = []
+    llm_gap: dict[str, str] | None = None
+    actor_email = str(profile.get("email") or actor)
+    try:
+        with open_gateway_db(read_only=True) as db:
+            from duckclaw.llm_bootstrap import build_llm_gap
+
+            catalog = playground_llm_catalog(
+                llm.get("provider", ""),
+                db=db,
+                tenant_id=eff_tenant,
+                actor_email=actor_email,
+            )
+            llm_gap = build_llm_gap(
+                db,
+                provider=llm.get("provider", ""),
+                tenant_id=eff_tenant,
+                actor_email=actor_email,
+            )
+    except FileNotFoundError:
+        catalog = playground_llm_catalog(
+            llm.get("provider", ""),
+            tenant_id=eff_tenant,
+            actor_email=actor_email,
+        )
     team_hint = (team_ctx.get("team_hint") or "") + workers_payload.get("team_hint_extra", "")
     selected_worker_id = ""
     redis_client = getattr(request.app.state, "redis", None)
@@ -147,6 +171,7 @@ async def playground_config(
     )
     return {
         "llm": llm,
+        "llm_gap": llm_gap,
         "slm": slm,
         "catalog": catalog,
         "config_chat_id": eff_chat,
@@ -401,6 +426,27 @@ async def playground_set_model(
         task_ids.append(task_id)
 
     llm = resolved_llm_for_chat(chat_id)
+    catalog: list[dict[str, Any]] = []
+    llm_gap: dict[str, str] | None = None
+    try:
+        from core.admin_identity import open_gateway_db
+        from duckclaw.llm_bootstrap import build_llm_gap
+
+        with open_gateway_db(read_only=True) as db:
+            catalog = playground_llm_catalog(
+                llm.get("provider", ""),
+                db=db,
+                tenant_id="default",
+                actor_email=runtime_session_actor(chat_id),
+            )
+            llm_gap = build_llm_gap(
+                db,
+                provider=llm.get("provider", ""),
+                tenant_id="default",
+                actor_email=runtime_session_actor(chat_id),
+            )
+    except FileNotFoundError:
+        catalog = playground_llm_catalog(llm.get("provider", ""))
     return {
         "ok": True,
         "queued": True,
@@ -409,7 +455,8 @@ async def playground_set_model(
         "message": "✅ Modelo actualizado. Los próximos mensajes usarán esta config.",
         "chat_id": chat_id,
         "llm": llm,
-        "catalog": playground_llm_catalog(llm.get("provider", "")),
+        "catalog": catalog,
+        "llm_gap": llm_gap,
     }
 
 

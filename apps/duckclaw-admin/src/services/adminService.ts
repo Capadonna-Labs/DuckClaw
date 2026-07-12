@@ -1798,6 +1798,13 @@ export const adminService = {
     const qs = q.toString();
     return adminFetch<{
       llm: { provider: string; model: string; base_url: string; scope?: string };
+      llm_gap?: {
+        provider: string;
+        label: string;
+        message: string;
+        admin_href: string;
+        integration_id?: string;
+      } | null;
       slm?: {
         enabled: boolean;
         model: string;

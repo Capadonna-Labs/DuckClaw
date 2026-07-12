@@ -451,31 +451,30 @@ def cmd_doctor(
         check_llm_bootstrap,
     )
 
-    llm_health = check_llm_bootstrap(root)
-    if not _emit("LLM bootstrap", llm_health.ok, llm_health.detail):
-        if strict:
-            critical_ok = False
-
     if db_path:
         try:
-            import duckdb
+            from duckclaw.gateway_db import ReadOnlyDbConnection
 
-            con = duckdb.connect(db_path, read_only=True)
+            db = ReadOnlyDbConnection(db_path)
             try:
-                agents_health = check_custom_agents_in_catalog(con)
+                llm_health = check_llm_bootstrap(root, db=db)
+                if not _emit("LLM bootstrap", llm_health.ok, llm_health.detail):
+                    if strict:
+                        critical_ok = False
+                agents_health = check_custom_agents_in_catalog(db)
                 _emit(
                     "Primer agente",
                     agents_health.ok,
                     agents_health.detail,
                 )
-                integrations = check_integration_bootstrap(con)
+                integrations = check_integration_bootstrap(db)
                 _emit(
                     "Integraciones API keys",
                     integrations.ok,
                     integrations.summary() + " (opcional hasta activar skills)",
                 )
             finally:
-                con.close()
+                db.close()
         except Exception as exc:
             _emit("Onboarding", False, str(exc)[:160])
 

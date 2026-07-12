@@ -179,7 +179,7 @@ def initialize_worker_graph_context(
     if llm is None and provider != "none_llm":
         from duckclaw.integrations.llm_providers import build_llm
 
-        llm = build_llm(provider, model, base_url)
+        llm = build_llm(provider, model, base_url, db=db, tenant_id=tenant_id)
     elif llm is None:
         llm = None
 

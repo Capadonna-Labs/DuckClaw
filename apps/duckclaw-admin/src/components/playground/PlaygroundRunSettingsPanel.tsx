@@ -14,9 +14,17 @@ import {
 } from 'lucide-react';
 
 import { PlaygroundWorkerCapabilitiesPanel } from '@/components/playground/PlaygroundWorkerCapabilitiesPanel';
+import { LlmSecretsBanner } from '@/components/integrations/LlmSecretsBanner';
 
 type PlaygroundConfig = {
   llm?: { provider?: string; model?: string };
+  llm_gap?: {
+    provider: string;
+    label: string;
+    message: string;
+    admin_href: string;
+    integration_id?: string;
+  } | null;
   slm?: {
     enabled?: boolean;
     model_short?: string;
@@ -135,10 +143,9 @@ export function PlaygroundRunSettingsPanel({
           </div>
         </button>
 
+        <LlmSecretsBanner gap={config?.llm_gap} className="mt-2" />
+
         <div>
-          <p className="mb-1.5 text-xs font-medium text-gov-gray-600 dark:text-dark-muted">
-            System instructions
-          </p>
           <button
             type="button"
             onClick={() => onOpen('instructions')}

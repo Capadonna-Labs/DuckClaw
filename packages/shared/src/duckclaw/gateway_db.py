@@ -56,6 +56,27 @@ class GatewayDbEphemeralReadonly:
     def execute(self, _sql: str, _params: Any = None) -> Any:
         return None
 
+
+class ReadOnlyDbConnection:
+    """Conexión DuckDB RO con ``._read_only`` para guards de schema en lecturas."""
+
+    __slots__ = ("_con", "_read_only")
+
+    def __init__(self, path: str) -> None:
+        import duckdb
+
+        self._con = duckdb.connect(path, read_only=True)
+        self._read_only = True
+
+    def execute(self, sql: str, params: Any = None) -> Any:
+        if params is not None:
+            return self._con.execute(sql, params)
+        return self._con.execute(sql)
+
+    def close(self) -> None:
+        self._con.close()
+
+
 def resolve_env_duckdb_path(raw: str) -> str:
     """
     Absolutiza una ruta de archivo DuckDB.

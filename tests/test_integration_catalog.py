@@ -21,6 +21,7 @@ def test_load_integration_secrets_pack_has_groups() -> None:
     assert len(groups) >= 2
     ids = {entry.integration_id for entry in list_integration_catalog_entries()}
     assert "tavily" in ids
+    assert "deepseek" in ids
     assert "openweather" in ids
     assert "fal" in ids
 

@@ -48,13 +48,33 @@ Precedencia lectura: tenant → global → actor → `.env` bootstrap.
 | `higgsfield.api_key` | Skill `higgsfield` REST | `HIGGSFIELD_API_KEY`, `HIGGSFIELD_KEY` |
 | `github.token` | GitHub / MCP stdio | `GITHUB_TOKEN` |
 
+### Grupo `llm_inference` (Bloque B)
+
+Proveedores LLM del playground y workers — mismo patrón DB-first, dominio `integrations`:
+
+| Setting key | Proveedor | Env fallback |
+|-------------|-----------|--------------|
+| `deepseek.api_key` | DeepSeek | `DEEPSEEK_API_KEY` |
+| `groq.api_key` | Groq | `GROQ_API_KEY` |
+| `openai.api_key` | OpenAI | `OPENAI_API_KEY` |
+| `anthropic.api_key` | Anthropic | `ANTHROPIC_API_KEY` |
+| `openrouter.api_key` | OpenRouter | `OPENROUTER_API_KEY` |
+| `google.api_key` | Gemini / Google | `GOOGLE_API_KEY`, `GEMINI_API_KEY` |
+| `huggingface.api_key` | HuggingFace | `HF_TOKEN`, `HUGGINGFACE_API_KEY` |
+
+Resolución runtime: `duckclaw.llm_bootstrap` (`resolve_llm_api_key`, `build_llm_gap`, `evaluate_llm_bootstrap`).
+
+MLX no usa API key remota — requiere `DUCKCLAW_LLM_BASE_URL` (o `llm.base_url` en runtime).
+
+Gaps UI: `LlmSecretsBanner` en Playground (`llm_gap` en `GET /playground/config`).
+
 Todas con `secret=true` (write-only en UI).
 
 ## Qué sigue en `.env`
 
-Bootstrap e infra: `REDIS_URL`, `DUCKCLAW_GATEWAY_DB_PATH`, `DUCKCLAW_ADMIN_API_KEY`, LLM keys del gateway.
+Bootstrap e infra: `REDIS_URL`, `DUCKCLAW_GATEWAY_DB_PATH`, `DUCKCLAW_ADMIN_API_KEY`.
 
-Ver `.env.example` — sección integraciones opcionales como fallback.
+LLM keys pueden vivir en Integraciones → API keys (grupo **LLM e inferencia**) o en `.env` como fallback legacy.
 
 ## ¿Por qué JSON?
 

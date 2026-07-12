@@ -65,6 +65,18 @@ _FALLBACKS: dict[tuple[str, str], dict[str, str]] = {
         "env_key": "COMFYUI_TIMEOUT_SEC",
         "default": "300",
     },
+    ("llm", "provider"): {
+        "env_key": "DUCKCLAW_LLM_PROVIDER",
+        "default": "deepseek",
+    },
+    ("llm", "model"): {
+        "env_key": "DUCKCLAW_LLM_MODEL",
+        "default": "",
+    },
+    ("llm", "base_url"): {
+        "env_key": "DUCKCLAW_LLM_BASE_URL",
+        "default": "",
+    },
 }
 
 

@@ -7,17 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-_LLM_PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
-    "deepseek": ("DEEPSEEK_API_KEY",),
-    "groq": ("GROQ_API_KEY",),
-    "openai": ("OPENAI_API_KEY",),
-    "anthropic": ("ANTHROPIC_API_KEY",),
-    "openrouter": ("OPENROUTER_API_KEY",),
-    "google": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
-    "gemini": ("GOOGLE_API_KEY", "GEMINI_API_KEY"),
-}
-_LOCAL_LLM_PROVIDERS = frozenset({"mlx", "ollama", "local"})
-
 
 @dataclass(frozen=True)
 class LlmBootstrapHealth:
@@ -53,58 +42,20 @@ def _flat_env(repo_root: Path) -> dict[str, str]:
     return merged_root_and_proposed_flat_env(repo_root)
 
 
-def _env_has_any(keys: tuple[str, ...]) -> bool:
-    for key in keys:
-        if (os.environ.get(key) or "").strip():
-            return True
-    return False
+def check_llm_bootstrap(repo_root: Path, db: Any | None = None) -> LlmBootstrapHealth:
+    from duckclaw.llm_bootstrap import evaluate_llm_bootstrap
 
-
-def check_llm_bootstrap(repo_root: Path) -> LlmBootstrapHealth:
     env = _flat_env(repo_root)
-    provider = (
-        (os.environ.get("DUCKCLAW_LLM_PROVIDER") or env.get("DUCKCLAW_LLM_PROVIDER") or "deepseek")
-        .strip()
-        .lower()
-    )
-    model = (os.environ.get("DUCKCLAW_LLM_MODEL") or env.get("DUCKCLAW_LLM_MODEL") or "").strip()
-
-    if provider in _LOCAL_LLM_PROVIDERS:
-        base = (os.environ.get("DUCKCLAW_LLM_BASE_URL") or env.get("DUCKCLAW_LLM_BASE_URL") or "").strip()
-        if base:
-            return LlmBootstrapHealth(
-                ok=True,
-                provider=provider,
-                detail=f"{provider} · {model or 'local'} · {base}",
-            )
-        return LlmBootstrapHealth(
-            ok=False,
-            provider=provider,
-            detail=f"{provider} sin DUCKCLAW_LLM_BASE_URL (inferencia local)",
-        )
-
-    env_keys = _LLM_PROVIDER_ENV_KEYS.get(provider, ())
-    if not env_keys:
-        return LlmBootstrapHealth(
-            ok=True,
-            provider=provider,
-            detail=f"{provider} · {model or 'default'} (sin env key conocida — revisa .env)",
-        )
-
-    if _env_has_any(env_keys):
-        key_name = next(k for k in env_keys if (os.environ.get(k) or "").strip())
-        return LlmBootstrapHealth(
-            ok=True,
-            provider=provider,
-            detail=f"{provider} · {model or 'default'} · {key_name} presente",
-        )
-
-    keys_label = " o ".join(env_keys)
-    return LlmBootstrapHealth(
-        ok=False,
-        provider=provider,
-        detail=f"falta {keys_label} para {provider} (wizard o .env)",
-    )
+    tenant_id = "default"
+    if db is not None:
+        try:
+            row = db.execute("SELECT tenant_id FROM main.admin_user_profiles LIMIT 1").fetchone()
+            if row:
+                tenant_id = str(row[0] if not isinstance(row, dict) else row.get("tenant_id") or "default")
+        except Exception:
+            pass
+    status = evaluate_llm_bootstrap(repo_root=repo_root, db=db, tenant_id=tenant_id)
+    return LlmBootstrapHealth(ok=status.ok, provider=status.provider, detail=status.detail)
 
 
 def check_custom_agents_in_catalog(db: Any) -> AgentCatalogHealth:
@@ -141,7 +92,7 @@ def format_dev_next_steps(*, agents: AgentCatalogHealth, llm: LlmBootstrapHealth
     if not agents.ok:
         lines.append("Plantillas → Crear agente (wizard de 2 pasos)")
     if not llm.ok:
-        lines.append("Configura LLM en .env o vuelve a ejecutar duckops init (proveedor + API key)")
+        lines.append("Integraciones → API keys (grupo LLM e inferencia) o duckops init")
     lines.append("Playground → chatea con el agente que creaste")
     lines.append("Opcional: Integraciones → API keys (Tavily, OpenWeather, …)")
     return lines

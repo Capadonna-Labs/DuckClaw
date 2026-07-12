@@ -180,22 +180,54 @@ def resolved_llm_for_playground(
     }
 
 
-def playground_llm_catalog(active_provider: str) -> list[dict[str, Any]]:
+def llm_keys_configured(
+    provider_id: str,
+    env_keys: list[str],
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> bool:
+    from duckclaw.llm_bootstrap import llm_api_key_configured
+
+    if llm_api_key_configured(
+        provider_id,
+        db=db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    ):
+        return True
+    for key in env_keys:
+        if (os.environ.get(key) or "").strip():
+            return True
+    return len(env_keys) == 0
+
+
+def playground_llm_catalog(
+    active_provider: str,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> list[dict[str, Any]]:
     active = (active_provider or "").strip().lower()
     catalog: list[dict[str, Any]] = []
     for item in LLM_PROVIDER_CATALOG:
         row = dict(item)
         row["active"] = row["id"] == active
-        row["keys_ok"] = llm_keys_configured(row.get("env_keys") or [])
+        row["keys_ok"] = llm_keys_configured(
+            str(row["id"]),
+            row.get("env_keys") or [],
+            db=db,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+        )
+        integration_id = row["id"]
+        if row["id"] == "gemini":
+            integration_id = "google"
+        row["integration_id"] = integration_id
         catalog.append(row)
     return catalog
-
-
-def llm_keys_configured(env_keys: list[str]) -> bool:
-    for key in env_keys:
-        if (os.environ.get(key) or "").strip():
-            return True
-    return len(env_keys) == 0
 
 
 async def playground_voice_status() -> dict[str, bool]:

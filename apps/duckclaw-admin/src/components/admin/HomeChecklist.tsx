@@ -2,29 +2,16 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, Circle, Database } from 'lucide-react';
+import { Bot, CheckCircle2, Circle, Database, KeyRound } from 'lucide-react';
 import { adminService } from '@/services/adminService';
-
-type StepState = 'pending' | 'ok';
-
-type ChecklistStep = {
-  id: 'agent' | 'knowledge';
-  title: string;
-  detail: string;
-  state: StepState;
-  href: string;
-  cta: string;
-  optional?: boolean;
-};
-
-function isPrimaryCta(step: ChecklistStep, steps: ChecklistStep[]): boolean {
-  if (step.state === 'ok' || step.optional) return false;
-  const firstPending = steps.find((s) => s.state !== 'ok' && !s.optional);
-  return firstPending?.id === step.id;
-}
+import {
+  buildOnboardingChecklistSteps,
+  isPrimaryChecklistCta,
+  type OnboardingChecklistStep,
+} from '@/lib/onboardingChecklist';
 
 export function HomeChecklist() {
-  const [steps, setSteps] = useState<ChecklistStep[] | null>(null);
+  const [steps, setSteps] = useState<OnboardingChecklistStep[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,12 +30,20 @@ export function HomeChecklist() {
         agentDetail = 'No se pudo leer el catálogo de agentes.';
       }
 
-      if (cancelled) return;
-
-      if (agentOk) {
-        setSteps(null);
-        return;
+      let llmGap = null;
+      let catalog = null;
+      try {
+        const [playground, integrationCatalog] = await Promise.all([
+          adminService.getPlaygroundConfig(),
+          adminService.getIntegrationCatalog(),
+        ]);
+        llmGap = playground.llm_gap ?? null;
+        catalog = integrationCatalog;
+      } catch {
+        // Playground / integraciones pueden fallar si el gateway no está listo.
       }
+
+      if (cancelled) return;
 
       let knowledgeOk = false;
       let knowledgeDetail = 'Opcional: documentos para todo el framework.';
@@ -64,25 +59,16 @@ export function HomeChecklist() {
 
       if (cancelled) return;
 
-      setSteps([
-        {
-          id: 'agent',
-          title: 'Crear un agente',
-          detail: agentDetail,
-          state: 'pending',
-          href: '/templates',
-          cta: 'Abrir wizard',
-        },
-        {
-          id: 'knowledge',
-          title: 'Conocimiento',
-          detail: knowledgeDetail,
-          state: knowledgeOk ? 'ok' : 'pending',
-          href: '/knowledge',
-          cta: knowledgeOk ? 'Gestionar' : 'Importar (opcional)',
-          optional: true,
-        },
-      ]);
+      setSteps(
+        buildOnboardingChecklistSteps({
+          agentOk,
+          agentDetail,
+          llmGap,
+          catalog,
+          knowledgeOk,
+          knowledgeDetail,
+        })
+      );
     }
 
     void load();
@@ -100,7 +86,7 @@ export function HomeChecklist() {
     <section className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
       <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Primeros pasos</h2>
       <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-        Crea un agente para empezar. El chat está en el menú lateral.
+        Crea un agente, configura el LLM y chatea desde el menú lateral.
       </p>
 
       <ol className="mt-4 space-y-3">
@@ -126,7 +112,7 @@ export function HomeChecklist() {
             <Link
               href={step.href}
               className={`shrink-0 rounded-xl px-4 py-2 text-center text-sm font-bold ${
-                isPrimaryCta(step, steps)
+                isPrimaryChecklistCta(step, steps)
                   ? 'bg-gov-blue-700 text-white hover:bg-gov-blue-800'
                   : 'border border-gov-blue-200 text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan'
               }`}
@@ -140,8 +126,9 @@ export function HomeChecklist() {
   );
 }
 
-function StepIcon({ step, index }: { step: ChecklistStep; index: number }) {
-  const Icon = step.id === 'agent' ? Bot : Database;
+function StepIcon({ step, index }: { step: OnboardingChecklistStep; index: number }) {
+  const Icon =
+    step.id === 'agent' ? Bot : step.id === 'integrations' ? KeyRound : Database;
   const StatusIcon = step.state === 'ok' ? CheckCircle2 : Circle;
   return (
     <div className="relative shrink-0">

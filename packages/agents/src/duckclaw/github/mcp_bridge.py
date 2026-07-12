@@ -206,6 +206,10 @@ async def connect_github_mcp(
     hitl_destructive: bool = True,
     read_only: bool = True,
     toolsets_override: Optional[str] = None,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
 ) -> list[Any]:
     del allowed_repos
 
@@ -213,9 +217,16 @@ async def connect_github_mcp(
         return []
 
     tok_key = token_env if (token_env or "").strip() else "GITHUB_TOKEN"
-    token = os.environ.get(tok_key, "").strip()
+    from duckclaw.github_token import resolve_github_token
+
+    token = resolve_github_token(
+        tok_key,
+        db=db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    )
     if not token:
-        _log.warning("GitHub MCP disabled: PAT missing (%s).", tok_key)
+        _log.warning("GitHub MCP disabled: PAT missing (%s / Integraciones → github.token).", tok_key)
         return []
 
     try:
@@ -333,6 +344,9 @@ def register_github_skill(
     mcp_read_only: bool | None = None,
     logical_worker_id: str = "",
     manifest_worker_slug: Optional[str] = None,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
 ) -> None:
     if manifest_github_config is None:
         return
@@ -361,6 +375,9 @@ def register_github_skill(
                 hitl_destructive=cfg.get("hitl_destructive", True),
                 read_only=read_only,
                 toolsets_override=toolsets,
+                db=db,
+                tenant_id=tenant_id,
+                actor_email=actor_email,
             )
         )
         tools_list.extend(gh_tools)

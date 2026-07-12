@@ -130,15 +130,10 @@ def check_custom_agents_in_catalog(db: Any) -> AgentCatalogHealth:
 
 
 def check_integration_bootstrap(db: Any, *, tenant_id: str = "default") -> IntegrationBootstrapHealth:
-    from duckclaw.integration_catalog import list_integration_catalog_entries
-    from duckclaw.integration_secrets import integration_api_key_configured
+    from duckclaw.integration_readiness import missing_integration_labels
 
-    missing: list[str] = []
-    for entry in list_integration_catalog_entries():
-        if integration_api_key_configured(entry.integration_id, db=db, tenant_id=tenant_id):
-            continue
-        missing.append(entry.label)
-    return IntegrationBootstrapHealth(missing_labels=tuple(missing))
+    missing = missing_integration_labels(db, tenant_id=tenant_id)
+    return IntegrationBootstrapHealth(missing_labels=missing)
 
 
 def format_dev_next_steps(*, agents: AgentCatalogHealth, llm: LlmBootstrapHealth) -> list[str]:

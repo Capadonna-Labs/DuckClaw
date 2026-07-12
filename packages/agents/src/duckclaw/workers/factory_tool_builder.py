@@ -270,6 +270,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
                 or getattr(spec, "worker_id", None)
                 or ""
             ),
+            db=db,
         )
     try:
         from duckclaw.forge.skills.mcp_connector_bridge import register_worker_mcp_connector_tools

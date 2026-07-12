@@ -6,6 +6,7 @@ import { AlertTriangle, ExternalLink, Loader2, Wrench } from 'lucide-react';
 import { adminService, type WorkerCapabilities } from '@/services/adminService';
 import { TOOL_PROFILE_LABELS } from '@/lib/workerCompositionPresets';
 import { DEFAULT_TOOL_PROFILE } from '@/lib/workerRoleTemplates';
+import { integrationSettingsHref } from '@/lib/integrationApiKeys';
 
 type PlaygroundWorkerCapabilitiesPanelProps = {
   workerId: string;
@@ -118,10 +119,20 @@ export function PlaygroundWorkerCapabilitiesPanel({
           {gaps.slice(0, 4).map((gap) => (
             <li
               key={gap}
-              className="flex items-start gap-1.5 text-[10px] leading-snug text-amber-950 dark:text-amber-100"
+              className="flex flex-col gap-1 text-[10px] leading-snug text-amber-950 dark:text-amber-100"
             >
-              <AlertTriangle size={11} className="mt-0.5 shrink-0" aria-hidden />
-              {gap}
+              <span className="flex items-start gap-1.5">
+                <AlertTriangle size={11} className="mt-0.5 shrink-0" aria-hidden />
+                {gap}
+              </span>
+              {gap.toLowerCase().includes('tavily') ? (
+                <Link
+                  href={integrationSettingsHref()}
+                  className="pl-4 font-semibold text-gov-blue-700 hover:underline dark:text-dark-cyan"
+                >
+                  Configurar API key Tavily →
+                </Link>
+              ) : null}
             </li>
           ))}
           {gaps.length > 4 ? (

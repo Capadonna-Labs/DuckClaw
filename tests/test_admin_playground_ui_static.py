@@ -93,6 +93,7 @@ def test_integrations_are_nested_inside_agents_selector() -> None:
     assert "href: '/integraciones'" in more_body
     assert "href: '/integrations/edge-devices'" not in more_body
     assert "EdgeDevicesPageView" in integraciones_hub
+    assert "IntegrationApiKeysPageView" in integraciones_hub
     assert "TelegramIntegrationPageView" in integraciones_hub
     assert "{ type: 'group', group: PRIMARY_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: MORE_NAV_GROUP }" in structure_body

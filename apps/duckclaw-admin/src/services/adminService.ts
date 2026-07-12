@@ -104,6 +104,38 @@ export interface SkillCategoriesCatalogResponse {
   pack_version?: string;
 }
 
+export interface IntegrationCatalogItem {
+  id: string;
+  setting_key: string;
+  domain: string;
+  label: string;
+  description: string;
+  env_fallback: string;
+  env_keys: string[];
+  related_skills: string[];
+  docs_url?: string | null;
+  default_scope: 'tenant' | 'global' | 'actor';
+  configured: boolean;
+  source: string;
+}
+
+export interface IntegrationCatalogGroup {
+  id: string;
+  title: string;
+  description: string;
+  sort_order: number;
+  integrations: IntegrationCatalogItem[];
+}
+
+export interface IntegrationCatalogResponse {
+  pack_version: string;
+  pack_source?: string;
+  tenant_id: string;
+  actor_email: string;
+  groups: IntegrationCatalogGroup[];
+  integrations: IntegrationCatalogItem[];
+}
+
 export interface CreateSkillInput {
   name: string;
   description?: string;
@@ -970,7 +1002,8 @@ export const adminService = {
     value_kind?: string;
     secret?: boolean;
   }[]) =>
-    adminFetch<{ ok: boolean; updated: string[] }>('/settings/runtime', {
+    adminFetch<{ ok: boolean; updated: string[]; task_id?: string; task_ids?: string[] }>(
+      '/settings/runtime', {
       method: 'PATCH',
       body: JSON.stringify({ settings }),
     }),
@@ -1328,6 +1361,8 @@ export const adminService = {
 
   getSkillCategories: () =>
     adminFetch<SkillCategoriesCatalogResponse>('/catalog/skill-categories'),
+
+  getIntegrationCatalog: () => adminFetch<IntegrationCatalogResponse>('/integrations/catalog'),
 
   createSkill: (body: CreateSkillInput) =>
     adminFetch<{ ok: boolean; skill: SkillCatalogItem }>('/catalog/skills', {

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { PageShell } from '@/components/admin/PageShell';
+import IntegrationApiKeysPageView from '@/components/integrations/IntegrationApiKeysPageView';
 import EdgeDevicesPageView from '@/components/integrations/EdgeDevicesPageView';
 import SensoryNodePageView from '@/components/integrations/SensoryNodePageView';
 import TelegramIntegrationPageView from '@/components/integrations/TelegramIntegrationPageView';
@@ -36,6 +37,7 @@ function IntegracionesHubContent() {
         ) : null}
       </header>
 
+      {tab === 'keys' && <IntegrationApiKeysPageView embedded />}
       {tab === 'edge' && <EdgeDevicesPageView embedded />}
       {tab === 'sensory' && <SensoryNodePageView embedded />}
       {tab === 'telegram' && <TelegramIntegrationPageView embedded />}

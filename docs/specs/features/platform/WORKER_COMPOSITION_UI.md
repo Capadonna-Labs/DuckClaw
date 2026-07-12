@@ -49,7 +49,11 @@ Panel **Herramientas** en Run settings: `PlaygroundWorkerCapabilitiesPanel` (sol
 
 - Edición inline de skills en Playground
 - Multi-tenant presets
-- Instalación one-click de skills sugeridas
+- Secrets por skill custom (`skill_secret.*`) — ver `INTEGRATION_SECRETS.md`
+
+## Skills sugeridas (wizard)
+
+`SuggestedSkillsInstallPanel`: activar skills de plataforma, registrar custom en catálogo. API keys de integración en `/integraciones?tab=keys`.
 
 ## Tests
 

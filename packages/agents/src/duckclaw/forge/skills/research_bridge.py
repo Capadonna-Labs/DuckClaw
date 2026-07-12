@@ -35,6 +35,23 @@ class TavilySearchInput(BaseModel):
 _TAVILY_ENV = "TAVILY_API_KEY"
 
 
+def _resolve_tavily_api_key(
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> str:
+    from duckclaw.integration_secrets import resolve_integration_api_key
+
+    return resolve_integration_api_key(
+        "tavily",
+        db=db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+        token_env=_TAVILY_ENV,
+    )
+
+
 def _hostname_from_domain_spec(spec: str) -> str:
     """Normaliza entrada YAML o URL a hostname (p. ej. https://www.medellin.gov.co/foo → medellin.gov.co)."""
     s = (spec or "").strip()
@@ -86,11 +103,17 @@ def _run_async_from_sync(coro) -> Any:
         return future.result()
 
 
-def _tavily_available() -> bool:
+def _tavily_available(
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> bool:
     """True si tavily-python está instalado y hay API key."""
     try:
         import tavily  # noqa: F401
-        return bool(os.environ.get(_TAVILY_ENV, "").strip())
+
+        return bool(_resolve_tavily_api_key(db=db, tenant_id=tenant_id, actor_email=actor_email))
     except ImportError:
         return False
 
@@ -123,14 +146,20 @@ def _format_tavily_results(response: Any) -> str:
     return "\n".join(parts) if parts else "No se encontraron resultados."
 
 
-def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
+def _tavily_search_tool(
+    config: Optional[dict] = None,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> Optional[Any]:
     """
     Crea un StructuredTool para búsqueda Tavily.
     config: tavily_enabled, search_depth, include_answer, max_results, topic, include_raw_content,
     include_domains (lista de hostnames o URLs; se pasan a Tavily para acotar resultados).
     Por defecto include_raw_content=False (menos tokens); max_results por defecto 15 para margen de filtrado.
     """
-    if not _tavily_available():
+    if not _tavily_available(db=db, tenant_id=tenant_id, actor_email=actor_email):
         return None
     cfg = config or {}
     if cfg.get("tavily_enabled") is False:
@@ -139,7 +168,7 @@ def _tavily_search_tool(config: Optional[dict] = None) -> Optional[Any]:
     from langchain_core.tools import StructuredTool
     from tavily import TavilyClient
 
-    api_key = os.environ.get(_TAVILY_ENV, "").strip()
+    api_key = _resolve_tavily_api_key(db=db, tenant_id=tenant_id, actor_email=actor_email)
     if not api_key:
         return None
 
@@ -253,6 +282,8 @@ def register_research_skill(
     research_config: Optional[dict] = None,
     *,
     llm: Optional[Any] = None,
+    db: Any | None = None,
+    tenant_id: str = "default",
 ) -> None:
     """
     Registra las herramientas de investigación (Tavily, browser-use) en la lista.
@@ -261,13 +292,13 @@ def register_research_skill(
     if not research_config:
         return
     try:
-        tavily_tool = _tavily_search_tool(research_config)
+        tavily_tool = _tavily_search_tool(research_config, db=db, tenant_id=tenant_id)
         if tavily_tool:
             tools_list.append(tavily_tool)
         elif research_config.get("tavily_enabled", True):
             _log.warning(
                 "research: tavily_enabled pero tavily_search no registrada "
-                "(¿tavily-python instalado y TAVILY_API_KEY en el proceso del gateway?)."
+                "(¿tavily-python instalado y API key Tavily en Integraciones o TAVILY_API_KEY?)."
             )
         browser_tool = _browser_navigate_tool(research_config, llm=llm)
         if browser_tool:

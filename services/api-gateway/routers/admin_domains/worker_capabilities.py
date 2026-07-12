@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 
@@ -125,11 +124,25 @@ def _runtime_tools_for_worker(
     return tool_names, "run_sandbox" in tools_by_name
 
 
-def _optional_flags(manifest_data: dict[str, Any], skills_effective: list[str]) -> dict[str, bool]:
-    tavily_env = bool(str(os.environ.get("TAVILY_API_KEY") or "").strip())
+def _optional_flags(
+    manifest_data: dict[str, Any],
+    skills_effective: list[str],
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> dict[str, bool]:
+    from duckclaw.integration_secrets import integration_api_key_configured
+
+    tavily_configured = integration_api_key_configured(
+        "tavily",
+        db=db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    )
     tavily_skill = "research" in skills_effective
     return {
-        "tavily": tavily_env and tavily_skill,
+        "tavily": tavily_configured and tavily_skill,
         "browser_sandbox": bool(manifest_data.get("browser_sandbox")),
     }
 
@@ -142,15 +155,28 @@ def _compute_gaps(
     docker_ok: bool,
     manifest_data: dict[str, Any],
     optional: dict[str, bool],
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
 ) -> list[str]:
+    from duckclaw.integration_secrets import integration_api_key_configured
+
     gaps: list[str] = []
     runtime_set = set(tools_runtime)
 
     if sandbox_registered and not docker_ok:
         gaps.append("run_sandbox registrado pero Docker no está disponible en el host")
 
-    if "research" in skills_effective and not bool(str(os.environ.get("TAVILY_API_KEY") or "").strip()):
-        gaps.append("skill research efectiva pero falta TAVILY_API_KEY")
+    if "research" in skills_effective and not integration_api_key_configured(
+        "tavily",
+        db=db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    ):
+        gaps.append(
+            "skill research efectiva pero falta API key Tavily "
+            "(Admin → Integraciones → API keys, o TAVILY_API_KEY en .env bootstrap)"
+        )
 
     if manifest_data.get("browser_sandbox") and "run_browser_sandbox" not in runtime_set:
         gaps.append("browser_sandbox en manifest pero run_browser_sandbox no está registrado")
@@ -208,15 +234,26 @@ def build_worker_capabilities_payload(
     except Exception:
         docker_ok = False
 
-    optional = _optional_flags(manifest_data, skills_effective)
-    gaps = _compute_gaps(
-        skills_effective=skills_effective,
-        tools_runtime=tools_runtime,
-        sandbox_registered=sandbox_registered,
-        docker_ok=docker_ok,
-        manifest_data=manifest_data,
-        optional=optional,
-    )
+    actor_email = effective_actor_email(actor)
+    with open_gateway_db(read_only=True) as db:
+        optional = _optional_flags(
+            manifest_data,
+            skills_effective,
+            db=db,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+        )
+        gaps = _compute_gaps(
+            skills_effective=skills_effective,
+            tools_runtime=tools_runtime,
+            sandbox_registered=sandbox_registered,
+            docker_ok=docker_ok,
+            manifest_data=manifest_data,
+            optional=optional,
+            db=db,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+        )
 
     return {
         "worker_id": wid,

@@ -1,31 +1,40 @@
-"""Resolucion zero-trust de API key Fal.ai desde variables de entorno."""
+"""Resolucion zero-trust de API key Fal.ai (DB-first + env fallback)."""
 
 from __future__ import annotations
 
-import os
-
-_FAL_KEY_CANDIDATES = ("FAL_KEY", "FAL_API_KEY")
+from typing import Any
 
 
-def resolve_fal_api_key(token_env: str | None = None) -> str:
-    """
-    Devuelve la API key Fal sin loguearla.
+def resolve_fal_api_key(
+    token_env: str | None = None,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> str:
+    from duckclaw.integration_secrets import resolve_integration_api_key
 
-    Prioridad:
-    1. token_env del manifest (p. ej. FAL_KEY)
-    2. FAL_KEY
-    3. FAL_API_KEY (alias comun en .env)
-    """
-    if (token_env or "").strip():
-        val = (os.environ.get(token_env.strip()) or "").strip()
-        if val:
-            return val
-    for key in _FAL_KEY_CANDIDATES:
-        val = (os.environ.get(key) or "").strip()
-        if val:
-            return val
-    return ""
+    return resolve_integration_api_key(
+        "fal",
+        db=db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+        token_env=token_env,
+    )
 
 
-def fal_api_key_configured(token_env: str | None = None) -> bool:
-    return bool(resolve_fal_api_key(token_env))
+def fal_api_key_configured(
+    token_env: str | None = None,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> bool:
+    return bool(
+        resolve_fal_api_key(
+            token_env,
+            db=db,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+        )
+    )

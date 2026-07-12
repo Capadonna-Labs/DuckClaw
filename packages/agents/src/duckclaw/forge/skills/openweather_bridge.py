@@ -52,13 +52,28 @@ def _sanitize_lang(lang: str | None, default_lang: str = "es") -> str:
     return dflt or "es"
 
 
-def _fetch_openweather_current(*, city: str, country: str | None, units: str, lang: str) -> dict[str, Any]:
-    api_key = (os.environ.get(_OPENWEATHER_KEY_ENV) or "").strip()
+def _fetch_openweather_current(
+    *,
+    city: str,
+    country: str | None,
+    units: str,
+    lang: str,
+    db: Any | None = None,
+    tenant_id: str = "default",
+) -> dict[str, Any]:
+    from duckclaw.integration_secrets import resolve_integration_api_key
+
+    api_key = resolve_integration_api_key(
+        "openweather",
+        db=db,
+        tenant_id=tenant_id,
+        token_env=_OPENWEATHER_KEY_ENV,
+    )
     if not api_key:
         return {
             "ok": False,
             "error": f"missing_api_key:{_OPENWEATHER_KEY_ENV}",
-            "message": "Falta OPENWEATHER_API_KEY en el entorno del proceso.",
+            "message": "Falta API key OpenWeather (Integraciones → API keys o OPENWEATHER_API_KEY).",
         }
     q = city.strip()
     if country and country.strip():
@@ -150,12 +165,26 @@ def _should_add_context(weather_data: dict[str, Any]) -> bool:
     return has_rain or any(tok in desc or tok in cond for tok in severe_tokens)
 
 
-def _tavily_context_notes(city: str, country: str | None, *, max_notes: int = 3) -> list[str]:
+def _tavily_context_notes(
+    city: str,
+    country: str | None,
+    *,
+    max_notes: int = 3,
+    db: Any | None = None,
+    tenant_id: str = "default",
+) -> list[str]:
     try:
         from tavily import TavilyClient
     except ImportError:
         return []
-    api_key = (os.environ.get(_TAVILY_KEY_ENV) or "").strip()
+    from duckclaw.integration_secrets import resolve_integration_api_key
+
+    api_key = resolve_integration_api_key(
+        "tavily",
+        db=db,
+        tenant_id=tenant_id,
+        token_env=_TAVILY_KEY_ENV,
+    )
     if not api_key:
         return []
     place = f"{city}, {country}" if country else city
@@ -189,7 +218,11 @@ def _tavily_context_notes(city: str, country: str | None, *, max_notes: int = 3)
 
 
 def _openweather_current_tool(
-    openweather_config: Optional[dict] = None, research_config: Optional[dict] = None
+    openweather_config: Optional[dict] = None,
+    research_config: Optional[dict] = None,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
 ) -> Optional[Any]:
     from langchain_core.tools import StructuredTool
 
@@ -209,6 +242,8 @@ def _openweather_current_tool(
             country=country,
             units=resolved_units,
             lang=resolved_lang,
+            db=db,
+            tenant_id=tenant_id,
         )
         if not fetched.get("ok"):
             return json.dumps(
@@ -237,6 +272,8 @@ def _openweather_current_tool(
             out["context_notes"] = _tavily_context_notes(
                 city=data["location"].get("city") or city,
                 country=data["location"].get("country") or country,
+                db=db,
+                tenant_id=tenant_id,
             )
         return json.dumps(out, ensure_ascii=False)
 
@@ -255,11 +292,19 @@ def register_openweather_skill(
     tools_list: list[Any],
     openweather_config: Optional[dict] = None,
     research_config: Optional[dict] = None,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
 ) -> None:
     if openweather_config is None:
         return
     try:
-        tool = _openweather_current_tool(openweather_config, research_config)
+        tool = _openweather_current_tool(
+            openweather_config,
+            research_config,
+            db=db,
+            tenant_id=tenant_id,
+        )
         if tool:
             tools_list.append(tool)
     except Exception as exc:

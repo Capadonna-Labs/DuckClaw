@@ -11,6 +11,7 @@ export default defineConfig({
       'src/lib/draftManifestYaml.test.ts',
       'src/lib/workerRoleTemplates.test.ts',
       'src/lib/suggestedSkillInstall.test.ts',
+      'src/lib/integrationGaps.test.ts',
       'src/components/chat/useAdminChatLoopPolling.test.ts',
     ],
   },

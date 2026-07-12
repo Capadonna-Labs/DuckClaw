@@ -107,7 +107,7 @@ key = resolve_integration_api_key("mi_saas", db=db, tenant_id=tenant_id)
 
 5. **Reiniciar gateway** — el pack se cachea al arranque (`lru_cache`); tras cambiar JSON en dev, reinicia PM2.
 
-La UI **Integraciones → API keys** muestra la nueva fila automáticamente.
+La UI y los gaps de Playground/Wizard leen `integration_gaps` / `GET /integrations/catalog` — nuevas entradas en JSON aparecen sin cambiar React.
 
 ## API / UI
 

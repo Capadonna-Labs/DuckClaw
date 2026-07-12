@@ -28,6 +28,7 @@ def test_worker_capabilities_default_scaffold(admin_client: TestClient) -> None:
     assert "docker_ok" in data["sandbox"]
     assert isinstance(data["optional"], dict)
     assert isinstance(data["gaps"], list)
+    assert isinstance(data.get("integration_gaps"), list)
 
 
 def test_worker_capabilities_reports_sandbox_when_registered(

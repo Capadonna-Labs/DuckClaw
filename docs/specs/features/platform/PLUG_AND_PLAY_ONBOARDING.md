@@ -200,9 +200,12 @@ Para alinear `system_prompt/<worker>` del catálogo con los snapshots en DuckDB 
 1. ~~**Admin bootstrap en `duckops init`:** paso TUI obligatorio email/password (o API key) antes de Review final.~~ **Hecho (slice 2026-06-17).**
 2. ~~**`duckops serve` unificado:** subcomando o flag que encadene gateway + db-writer + verificación Redis (hoy: `serve --gateway --pm2 --stack`).~~ **Hecho (slice 2026-06-17).**
 3. ~~**Smoke:** `duckops doctor --smoke` y alias `duckops smoke`.~~ **Hecho (slice 2026-06-17).**
-4. **Retirar `DUCKCLAW_BOT_MODE=echo`** del wizard clásico cuando se confirme que ningún runtime lo lee (hoy solo lo escribe `duckclaw_setup_wizard.py`).
-5. **Documentar Sovereign** en spec propia (`SOVEREIGN_WIZARD_V2.md` referenciada en wizard legacy) si no existe en `docs/specs/`.
-6. **Plug-and-play real:** build C++ db-writer, MLX opcional, Telegram opcional para smoke, `npm run dev` admin manual, migraciones en hub preexistente sin schema admin.
+4. ~~**Post-migrate housekeeping:** `duckops up` materializa policies framework y sync `system_prompt` del catálogo sin paso manual en admin.~~ **Hecho (2026-07-11).**
+5. ~~**Doctor onboarding:** filas LLM bootstrap, primer agente (wizard), integraciones opcionales.~~ **Hecho (2026-07-11).** Sin agente semilla automático — el dev crea el suyo en Plantillas.
+6. **Retirar `DUCKCLAW_BOT_MODE=echo`** del wizard clásico cuando se confirme que ningún runtime lo lee (hoy solo lo escribe `duckclaw_setup_wizard.py`).
+7. **Documentar Sovereign** en spec propia (`SOVEREIGN_WIZARD_V2.md` referenciada en wizard legacy) si no existe en `docs/specs/`.
+8. **Plug-and-play real:** build C++ db-writer, MLX opcional, Telegram opcional para smoke, `npm run dev` admin manual, migraciones en hub preexistente sin schema admin.
+9. **Smoke login admin** + primer turno Playground (e2e).
 
 ---
 

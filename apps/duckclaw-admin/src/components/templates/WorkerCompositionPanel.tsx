@@ -4,11 +4,14 @@ import { useMemo } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { SkillCatalogItem } from '@/services/adminService';
 import { WorkerSkillPickerPanel } from '@/components/templates/WorkerSkillPickerPanel';
+import { IntegrationSecretsBanner } from '@/components/integrations/IntegrationSecretsBanner';
+import { useIntegrationCatalog } from '@/components/integrations/useIntegrationCatalog';
 import {
   buildDraftManifestYaml,
   parseDraftCompositionFromManifest,
   type DraftComposition,
 } from '@/lib/draftManifestYaml';
+import { effectiveSkillIdsFromDraft, missingIntegrationsForSkills } from '@/lib/integrationGaps';
 import { DEFAULT_TOOL_PROFILE } from '@/lib/workerRoleTemplates';
 
 type WorkerCompositionPanelProps = {
@@ -65,6 +68,19 @@ export function WorkerCompositionPanel({
     [composition]
   );
 
+  const { catalog } = useIntegrationCatalog();
+  const integrationGaps = useMemo(
+    () =>
+      missingIntegrationsForSkills(
+        catalog,
+        effectiveSkillIdsFromDraft({
+          skills: normalizedComposition.skills,
+          web_search: normalizedComposition.web_search,
+        })
+      ),
+    [catalog, normalizedComposition.skills, normalizedComposition.web_search]
+  );
+
   const manifestYaml = useMemo(
     () => buildDraftManifestYaml(normalizedComposition),
     [normalizedComposition]
@@ -95,7 +111,7 @@ export function WorkerCompositionPanel({
       <div className="grid gap-2 sm:grid-cols-2">
         <ToggleRow
           label="Buscar en internet"
-          hint="Activa skill research (Tavily) si hay API key"
+          hint="Activa skill research; configura Tavily en Integraciones si falta API key"
           checked={normalizedComposition.web_search}
           disabled={disabled}
           onChange={(web_search) => patchComposition({ web_search })}
@@ -108,6 +124,8 @@ export function WorkerCompositionPanel({
           onChange={(browser_sandbox) => patchComposition({ browser_sandbox })}
         />
       </div>
+
+      <IntegrationSecretsBanner gaps={integrationGaps} compact />
 
       {showSkillPicker ? (
         <WorkerSkillPickerPanel

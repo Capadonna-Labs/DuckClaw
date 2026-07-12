@@ -69,6 +69,7 @@ _FALLBACKS: dict[tuple[str, str], dict[str, str]] = {
 
 
 def _merged_fallbacks() -> dict[tuple[str, str], dict[str, Any]]:
+    merged: dict[tuple[str, str], dict[str, Any]] = dict(_FALLBACKS)
     try:
         from duckclaw.integration_catalog import integration_setting_fallbacks
 

@@ -323,8 +323,21 @@ export interface WorkerCapabilities {
   optional: {
     tavily: boolean;
     browser_sandbox: boolean;
+    integrations?: Record<string, boolean>;
   };
   gaps: string[];
+  integration_gaps?: IntegrationGapPayload[];
+}
+
+export interface IntegrationGapPayload {
+  skill: string;
+  integration_id: string;
+  label: string;
+  setting_key: string;
+  env_fallback: string;
+  configured: boolean;
+  admin_href: string;
+  message: string;
 }
 
 export interface WorkerMcpGrantRow {

@@ -6,7 +6,8 @@ import { AlertTriangle, ExternalLink, Loader2, Wrench } from 'lucide-react';
 import { adminService, type WorkerCapabilities } from '@/services/adminService';
 import { TOOL_PROFILE_LABELS } from '@/lib/workerCompositionPresets';
 import { DEFAULT_TOOL_PROFILE } from '@/lib/workerRoleTemplates';
-import { integrationSettingsHref } from '@/lib/integrationApiKeys';
+import { IntegrationSecretsBanner } from '@/components/integrations/IntegrationSecretsBanner';
+import { integrationGapViewsFromPayload } from '@/lib/integrationGaps';
 
 type PlaygroundWorkerCapabilitiesPanelProps = {
   workerId: string;
@@ -83,6 +84,10 @@ export function PlaygroundWorkerCapabilitiesPanel({
   const profileLabel = TOOL_PROFILE_LABELS[DEFAULT_TOOL_PROFILE];
   const optionalDeclared = payload.skills_declared;
   const gaps = payload.gaps ?? [];
+  const integrationGaps = integrationGapViewsFromPayload(payload.integration_gaps);
+  const textGaps = gaps.filter(
+    (gap) => !integrationGaps.some((row) => row.message === gap)
+  );
 
   return (
     <div className="space-y-2 px-2 py-1">
@@ -114,29 +119,21 @@ export function PlaygroundWorkerCapabilitiesPanel({
         </div>
       ) : null}
 
-      {gaps.length > 0 ? (
+      <IntegrationSecretsBanner gaps={integrationGaps} compact className="mx-0" />
+
+      {textGaps.length > 0 ? (
         <ul className="space-y-1 rounded-lg border border-amber-200/80 bg-amber-50/70 px-2 py-1.5 dark:border-amber-900/40 dark:bg-amber-950/20">
-          {gaps.slice(0, 4).map((gap) => (
+          {textGaps.slice(0, 4).map((gap) => (
             <li
               key={gap}
-              className="flex flex-col gap-1 text-[10px] leading-snug text-amber-950 dark:text-amber-100"
+              className="flex items-start gap-1.5 text-[10px] leading-snug text-amber-950 dark:text-amber-100"
             >
-              <span className="flex items-start gap-1.5">
-                <AlertTriangle size={11} className="mt-0.5 shrink-0" aria-hidden />
-                {gap}
-              </span>
-              {gap.toLowerCase().includes('tavily') ? (
-                <Link
-                  href={integrationSettingsHref()}
-                  className="pl-4 font-semibold text-gov-blue-700 hover:underline dark:text-dark-cyan"
-                >
-                  Configurar API key Tavily →
-                </Link>
-              ) : null}
+              <AlertTriangle size={11} className="mt-0.5 shrink-0" aria-hidden />
+              {gap}
             </li>
           ))}
-          {gaps.length > 4 ? (
-            <li className="text-[10px] text-amber-800 dark:text-amber-200">+{gaps.length - 4} más</li>
+          {textGaps.length > 4 ? (
+            <li className="text-[10px] text-amber-800 dark:text-amber-200">+{textGaps.length - 4} más</li>
           ) : null}
         </ul>
       ) : null}

@@ -102,6 +102,9 @@ def clear_integration_catalog_cache() -> None:
     load_integration_secrets_pack.cache_clear()
     list_integration_catalog_entries.cache_clear()
     integration_catalog_by_id.cache_clear()
+    from duckclaw.integration_gaps import clear_integration_gaps_cache
+
+    clear_integration_gaps_cache()
 
 
 @lru_cache(maxsize=1)

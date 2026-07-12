@@ -131,18 +131,18 @@ def _optional_flags(
     db: Any | None = None,
     tenant_id: str = "default",
     actor_email: str = "",
-) -> dict[str, bool]:
-    from duckclaw.integration_secrets import integration_api_key_configured
+) -> dict[str, Any]:
+    from duckclaw.integration_gaps import build_optional_integration_flags
 
-    tavily_configured = integration_api_key_configured(
-        "tavily",
+    integrations = build_optional_integration_flags(
+        skills_effective,
         db=db,
         tenant_id=tenant_id,
         actor_email=actor_email,
     )
-    tavily_skill = "research" in skills_effective
     return {
-        "tavily": tavily_configured and tavily_skill,
+        "integrations": integrations,
+        "tavily": bool(integrations.get("tavily")) and "research" in skills_effective,
         "browser_sandbox": bool(manifest_data.get("browser_sandbox")),
     }
 
@@ -158,25 +158,23 @@ def _compute_gaps(
     db: Any | None = None,
     tenant_id: str = "default",
     actor_email: str = "",
-) -> list[str]:
-    from duckclaw.integration_secrets import integration_api_key_configured
+) -> tuple[list[str], list[dict[str, Any]]]:
+    from duckclaw.integration_gaps import build_integration_secret_gaps, integration_gap_messages
 
     gaps: list[str] = []
+    integration_gaps: list[dict[str, Any]] = []
     runtime_set = set(tools_runtime)
 
     if sandbox_registered and not docker_ok:
         gaps.append("run_sandbox registrado pero Docker no está disponible en el host")
 
-    if "research" in skills_effective and not integration_api_key_configured(
-        "tavily",
+    integration_gaps = build_integration_secret_gaps(
+        skills_effective,
         db=db,
         tenant_id=tenant_id,
         actor_email=actor_email,
-    ):
-        gaps.append(
-            "skill research efectiva pero falta API key Tavily "
-            "(Admin → Integraciones → API keys, o TAVILY_API_KEY en .env bootstrap)"
-        )
+    )
+    gaps.extend(integration_gap_messages(integration_gaps))
 
     if manifest_data.get("browser_sandbox") and "run_browser_sandbox" not in runtime_set:
         gaps.append("browser_sandbox en manifest pero run_browser_sandbox no está registrado")
@@ -209,10 +207,14 @@ def _compute_gaps(
         if normalized in (pack.get("optional_skills") or {}):
             if normalized == "research" and not optional.get("tavily"):
                 continue
+            if any(
+                row.get("skill") == normalized for row in integration_gaps if not row.get("configured", True)
+            ):
+                continue
             continue
         gaps.append(f"skill '{normalized}' sin tool homónima en runtime")
 
-    return gaps
+    return gaps, integration_gaps
 
 
 def build_worker_capabilities_payload(
@@ -243,7 +245,7 @@ def build_worker_capabilities_payload(
             tenant_id=tenant_id,
             actor_email=actor_email,
         )
-        gaps = _compute_gaps(
+        gaps, integration_gaps = _compute_gaps(
             skills_effective=skills_effective,
             tools_runtime=tools_runtime,
             sandbox_registered=sandbox_registered,
@@ -268,6 +270,7 @@ def build_worker_capabilities_payload(
         },
         "optional": optional,
         "gaps": gaps,
+        "integration_gaps": integration_gaps,
     }
 
 

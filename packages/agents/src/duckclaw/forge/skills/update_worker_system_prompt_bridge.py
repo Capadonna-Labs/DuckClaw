@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Literal
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
 
-class UpdateMySystemPromptInput(BaseModel):
+class UpdateSystemPromptInput(BaseModel):
     instructions: str = Field(..., min_length=10, max_length=12000)
     mode: Literal["append", "replace"] = Field(
         default="append",
@@ -18,12 +19,54 @@ class UpdateMySystemPromptInput(BaseModel):
     )
 
 
-def update_my_system_prompt(instructions: str, mode: str = "append") -> str:
+# Deprecated alias schema (same fields) for legacy tool calls.
+class UpdateMySystemPromptInput(UpdateSystemPromptInput):
+    pass
+
+
+def _same_db_path(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    try:
+        return Path(left).resolve() == Path(right).resolve()
+    except Exception:
+        return left == right
+
+
+def _resolve_prompt_db(bound_db: Any, *, writable: bool = True) -> tuple[Any, bool]:
+    """
+    Resolve DB handle for prompt policy writes.
+
+    Reuses the worker-bound DuckClaw when it targets the same vault file to avoid
+    DuckDB "different configuration than existing connections" lock errors.
+    """
+    from duckclaw.forge.skills.goals_tool_context import get_goals_tool_db_path
+
+    db_path = (get_goals_tool_db_path() or "").strip()
+    base_path = str(getattr(bound_db, "_path", "") or "").strip()
+    want_path = (db_path or base_path).strip()
+
+    if not want_path:
+        from duckclaw.graphs.graph_server import get_db
+
+        return get_db(), False
+
+    if bound_db is not None and base_path and _same_db_path(base_path, want_path):
+        return bound_db, False
+
+    if db_path:
+        from duckclaw import DuckClaw
+
+        return DuckClaw(db_path, read_only=not writable, engine="python"), True
+
+    return bound_db, False
+
+
+def _update_system_prompt_impl(bound_db: Any, instructions: str, mode: str = "append") -> str:
     """Actualiza el system prompt del worker activo vía db-writer (DB-first)."""
     from duckclaw.commands.model_setup import _set_system_prompt_policy, get_effective_system_prompt
     from duckclaw.forge.skills.goals_tool_context import get_goals_tool_db_path, get_goals_tool_worker_id
     from duckclaw.forge.skills.knowledge_tool_context import get_session_actor_email
-    from duckclaw.graphs.graph_server import get_db
 
     worker_id = (get_goals_tool_worker_id() or "").strip()
     db_path = (get_goals_tool_db_path() or "").strip()
@@ -40,7 +83,7 @@ def update_my_system_prompt(instructions: str, mode: str = "append") -> str:
             ensure_ascii=False,
         )
 
-    db = get_db(db_path) if db_path else get_db()
+    db, close_after = _resolve_prompt_db(bound_db, writable=True)
     try:
         current = (get_effective_system_prompt(db, worker_id) or "").strip()
         if write_mode == "replace":
@@ -63,11 +106,24 @@ def update_my_system_prompt(instructions: str, mode: str = "append") -> str:
             },
             ensure_ascii=False,
         )
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)[:500]}, ensure_ascii=False)
     finally:
-        try:
-            db.close()
-        except Exception:
-            pass
+        if close_after:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
+def update_system_prompt(instructions: str, mode: str = "append") -> str:
+    """Backward-compatible entry without bound db (gateway/tests only)."""
+    return _update_system_prompt_impl(None, instructions, mode)
+
+
+def update_my_system_prompt(instructions: str, mode: str = "append") -> str:
+    """Deprecated alias of update_system_prompt."""
+    return update_system_prompt(instructions, mode)
 
 
 def _maybe_sync_catalog_file(*, db_path: str, worker_id: str, actor: str, content: str) -> None:
@@ -90,16 +146,40 @@ def _maybe_sync_catalog_file(*, db_path: str, worker_id: str, actor: str, conten
         return
 
 
-def register_update_my_system_prompt_tool(tools_list: list[Any]) -> None:
+def register_update_system_prompt_tools(tools_list: list[Any], db: Any = None) -> None:
+    """Register canonical update_system_prompt plus deprecated update_my_system_prompt alias."""
+
+    def _update_system_prompt(instructions: str, mode: str = "append") -> str:
+        return _update_system_prompt_impl(db, instructions, mode)
+
+    def _update_my_system_prompt(instructions: str, mode: str = "append") -> str:
+        return _update_system_prompt(instructions, mode)
+
     tools_list.append(
         StructuredTool.from_function(
-            func=update_my_system_prompt,
-            name="update_my_system_prompt",
+            func=_update_system_prompt,
+            name="update_system_prompt",
             description=(
                 "Persiste cambios en tu system prompt (auto-mejora). "
                 "Usa mode=append para añadir reglas aprendidas o mode=replace para reescribirlo. "
                 "Requiere instrucciones concretas (mín. 10 caracteres)."
             ),
+            args_schema=UpdateSystemPromptInput,
+        )
+    )
+    tools_list.append(
+        StructuredTool.from_function(
+            func=_update_my_system_prompt,
+            name="update_my_system_prompt",
+            description=(
+                "[deprecated — usa update_system_prompt] Persiste cambios en tu system prompt. "
+                "mode=append | mode=replace. Mín. 10 caracteres."
+            ),
             args_schema=UpdateMySystemPromptInput,
         )
     )
+
+
+def register_update_my_system_prompt_tool(tools_list: list[Any], db: Any = None) -> None:
+    """Backward-compatible entrypoint."""
+    register_update_system_prompt_tools(tools_list, db)

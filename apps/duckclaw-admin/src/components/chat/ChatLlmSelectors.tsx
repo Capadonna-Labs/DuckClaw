@@ -8,7 +8,10 @@ import {
   modelLabelForOption,
   isOpenRouterProvider,
   SELECTABLE_LLM_PROVIDERS,
-  LLM_ONLY_PROVIDERS,
+  mlxInferenceModelPaths,
+  defaultMlxModel,
+  isForeignModelForMlx,
+  type MlxInferenceCatalog,
 } from '@/lib/llmModelPresets';
 import { SearchableModelSelect } from '@/components/chat/SearchableModelSelect';
 
@@ -26,6 +29,8 @@ type Props = {
   provider: string;
   model: string;
   catalog: CatalogItem[];
+  /** Modelos/adapters expuestos por MLX-Inference PM2 (mismo origen que SLM config). */
+  mlxInference?: MlxInferenceCatalog | null;
   onUpdated: () => void;
   disabled?: boolean;
   /** @deprecated Usa `size="compact"` */
@@ -38,6 +43,7 @@ export function ChatLlmSelectors({
   provider,
   model,
   catalog,
+  mlxInference,
   onUpdated,
   disabled,
   compact,
@@ -48,33 +54,47 @@ export function ChatLlmSelectors({
   const [error, setError] = useState<string | null>(null);
 
   const selectableCatalog = useMemo(
-    () => catalog.filter((c) => LLM_ONLY_PROVIDERS.has(c.id)),
+    () => catalog.filter((c) => SELECTABLE_LLM_PROVIDERS.has(c.id)),
     [catalog]
   );
 
   const activeProvider = (provider || '').trim().toLowerCase();
   const catalogItem = selectableCatalog.find((c) => c.id === activeProvider);
+  const mlxModelPaths = useMemo(
+    () => (activeProvider === 'mlx' ? mlxInferenceModelPaths(mlxInference) : []),
+    [activeProvider, mlxInference]
+  );
   const modelOptions = useMemo(
     () =>
-      modelOptionsForProvider(activeProvider, catalogItem?.model_example, model),
-    [activeProvider, catalogItem?.model_example, model]
+      modelOptionsForProvider(
+        activeProvider,
+        catalogItem?.model_example,
+        activeProvider === 'mlx' && isForeignModelForMlx(model) ? '' : model,
+        mlxModelPaths
+      ),
+    [activeProvider, catalogItem?.model_example, model, mlxModelPaths]
   );
-  const currentModel = model.trim() || modelOptions[0] || '';
+  const currentModel =
+    (activeProvider === 'mlx' && isForeignModelForMlx(model)
+      ? defaultMlxModel(mlxInference)
+      : model.trim()) ||
+    modelOptions[0] ||
+    '';
   const openRouter = isOpenRouterProvider(activeProvider);
 
   const searchableOptions = useMemo(
     () =>
       modelOptions.map((m) => ({
         value: m,
-        label: modelLabelForOption(activeProvider, m),
+        label: modelLabelForOption(activeProvider, m, mlxInference),
       })),
-    [modelOptions, activeProvider]
+    [modelOptions, activeProvider, mlxInference]
   );
 
   const applyModel = async (next: { provider?: string; model?: string }) => {
     if (!chatId || disabled || pending) return;
     const pid = (next.provider ?? activeProvider).trim().toLowerCase();
-    if (next.provider && !LLM_ONLY_PROVIDERS.has(pid)) return;
+    if (next.provider && !SELECTABLE_LLM_PROVIDERS.has(pid)) return;
     const item = selectableCatalog.find((c) => c.id === pid);
     if (item?.kind === 'api' && item.keys_ok === false) {
       setError(`Configura las API keys en .env para ${item.label}`);
@@ -83,10 +103,13 @@ export function ChatLlmSelectors({
     setError(null);
     setPending(next.provider ? 'provider' : 'model');
     try {
+      const modelArg =
+        next.model?.trim() ||
+        (next.provider && pid === 'mlx' ? defaultMlxModel(mlxInference) : undefined);
       await adminService.setPlaygroundModel({
         chat_id: chatId,
         provider: pid,
-        ...(next.model?.trim() ? { model: next.model.trim() } : {}),
+        ...(modelArg ? { model: modelArg } : {}),
       });
       onUpdated();
     } catch (e) {
@@ -171,7 +194,7 @@ export function ChatLlmSelectors({
               )}
               {modelOptions.map((m) => (
                 <option key={m} value={m}>
-                  {modelLabelForOption(activeProvider, m)}
+                  {modelLabelForOption(activeProvider, m, mlxInference)}
                 </option>
               ))}
             </select>
@@ -187,6 +210,12 @@ export function ChatLlmSelectors({
           )}
         </div>
       </label>
+      {activeProvider === 'mlx' && size === 'modal' && (
+        <p className="text-[10px] text-gov-gray-400 dark:text-dark-muted leading-snug">
+          Inferencia local vía PM2 MLX-Inference (OpenAI-compatible). El adapter activo en PM2 define el
+          modelo cargado; cambiar LoRA puede requerir reiniciar MLX-Inference.
+        </p>
+      )}
       {error && (
         <p className={`w-full ${size === 'modal' ? 'text-xs' : 'text-[10px]'} text-red-500 dark:text-red-400`}>
           {error}

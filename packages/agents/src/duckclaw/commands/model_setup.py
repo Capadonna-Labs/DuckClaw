@@ -280,8 +280,9 @@ def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str,
         ul = u.lower()
         if (not u) or "groq.com" in ul or "deepseek.com" in ul:
             u = mlx_openai_compatible_base_url()
-        if not m:
-            m = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
+        from duckclaw.integrations.llm_providers import mlx_openai_compatible_model_name
+
+        m = mlx_openai_compatible_model_name(m)
     _debug_log_model_config(
         hypothesis_id="H_sources_priority",
         location="model_setup._effective_llm_triplet_for_chat_ui",

@@ -43,6 +43,7 @@ from duckclaw.workers.skill_tool_registry import (
 from duckclaw.workers.tool_binding import (
     filter_tools_for_sandbox,
     groq_tools_without_reddit_for_bind as _groq_tools_without_reddit_for_bind,
+    mlx_tools_for_bind as _mlx_tools_for_bind,
 )
 
 _log = logging.getLogger(__name__)
@@ -197,7 +198,7 @@ def initialize_worker_graph_context(
         except Exception as _fb_exc:
             _log.debug("LLM fallback skipped: %s", _fb_exc)
 
-    _cp_early = _normalized_context_pruning(spec)
+    _cp_early = _normalized_context_pruning(spec, provider=provider)
     llm_summary: Any = None
     if llm is not None and _cp_early.get("enabled"):
         llm_summary = _build_summary_llm(llm, provider=provider, model=model, base_url=base_url)
@@ -290,7 +291,7 @@ def initialize_worker_graph_context(
     # Cierre de dominio = última instrucción al modelo (domain_closure.md del worker).
     effective_prompt = append_domain_closure_block(effective_prompt, spec)
     _lid = (getattr(spec, "logical_worker_id", None) or spec.worker_id or "").strip()
-    _cp = _normalized_context_pruning(spec)
+    _cp = _normalized_context_pruning(spec, provider=provider)
     use_cm = bool(_cp.get("enabled"))
     _schema_digest = ""
     if _cp.get("enabled"):
@@ -314,10 +315,19 @@ def initialize_worker_graph_context(
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}
 
     _groq_bind = (provider or "").strip().lower() == "groq"
+    _mlx_bind = (provider or "").strip().lower() in ("mlx", "iotcorelabs")
     _tools_for_llm_bind = _groq_tools_without_reddit_for_bind(tools) if _groq_bind else tools
     _tools_sandbox_off_bind = (
         _groq_tools_without_reddit_for_bind(tools_sandbox_off) if _groq_bind else tools_sandbox_off
     )
+    if _mlx_bind:
+        _tools_for_llm_bind = _mlx_tools_for_bind(_tools_for_llm_bind)
+        _tools_sandbox_off_bind = _mlx_tools_for_bind(_tools_sandbox_off_bind)
+        _log.info(
+            "MLX: bind cap %d tools (sandbox_off %d) para caber en budget Metal.",
+            len(_tools_for_llm_bind),
+            len(_tools_sandbox_off_bind),
+        )
     if _groq_bind:
         _log.info(
             "Groq: bind genérico sin reddit_* (%d tools; forzados Reddit/otros usan set acorde).",

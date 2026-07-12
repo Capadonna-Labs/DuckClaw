@@ -11,7 +11,7 @@ from fastapi import Depends, Query, Request
 import duckclaw.db_write_queue as db_write_queue
 from duckclaw.commands.model_setup import _DEFAULT_BASE_URL_BY_PROVIDER, _DEFAULT_MODEL_BY_PROVIDER, _PROVIDERS
 from duckclaw.gateway_db import get_gateway_db_path
-from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
+from duckclaw.integrations.llm_providers import coerce_mlx_llm_model, mlx_openai_compatible_base_url
 from duckclaw.runtime_session_settings import RUNTIME_SESSION_DOMAIN, runtime_session_actor
 from duckclaw.write_commands import UpsertRuntimeSettingCommand
 from routers.admin_domains.admin_common import actor_from_header, problem, repo_root, require_admin_key
@@ -396,10 +396,12 @@ async def playground_set_model(
     if prov == "mlx":
         default_model = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
         default_base_url = mlx_openai_compatible_base_url()
+        raw_model = (body.model or "").strip() if body.model is not None else default_model
+        model_value = coerce_mlx_llm_model(raw_model or default_model)
     else:
         default_model = _DEFAULT_MODEL_BY_PROVIDER.get(prov, "")
         default_base_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(prov, "")
-    model_value = (body.model or "").strip() if body.model is not None else default_model
+        model_value = (body.model or "").strip() if body.model is not None else default_model
     base_url_value = (body.base_url or "").strip() if body.base_url is not None else default_base_url
 
     task_ids: list[str] = []

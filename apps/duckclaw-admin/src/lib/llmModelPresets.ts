@@ -1,5 +1,6 @@
 /** Proveedores seleccionables desde la UI admin (alineado con gateway /model). */
 export const SELECTABLE_LLM_PROVIDERS = new Set([
+  'mlx',
   'ollama',
   'openai',
   'anthropic',
@@ -9,7 +10,7 @@ export const SELECTABLE_LLM_PROVIDERS = new Set([
   'openrouter',
 ]);
 
-/** MLX va en el selector SLM, no en LLM remoto. */
+/** Alias histórico: MLX es proveedor LLM local (MLX-Inference), no el SLM opcional. */
 export const LLM_ONLY_PROVIDERS = SELECTABLE_LLM_PROVIDERS;
 
 /** Slugs OpenRouter con etiqueta legible (id = valor enviado al gateway). */
@@ -40,6 +41,27 @@ const OPENROUTER_LABEL_BY_ID = Object.fromEntries(
   OPENROUTER_MODEL_PRESETS.map((p) => [p.id, p.label])
 ) as Record<string, string>;
 
+const MLX_FOREIGN_MODEL_PREFIXES = [
+  'z-ai/',
+  'anthropic/',
+  'openai/',
+  'google/',
+  'deepseek/',
+  'meta-llama/',
+  'nvidia/',
+  'qwen/',
+  'arcee-ai/',
+];
+
+/** Modelos HF MLX sugeridos (mlx_lm / MLX-Inference). */
+export const MLX_MODEL_PRESETS: string[] = [
+  'mlx-community/Qwen2.5-Coder-3B-Instruct-4bit',
+  'mlx-community/Qwen2.5-7B-Instruct-4bit',
+  'mlx-community/Llama-3.2-3B-Instruct-4bit',
+  'mlx-community/Llama-3.3-70B-Instruct-4bit',
+  'mlx-community/gemma-4-e4b-it-4bit',
+];
+
 /** Modelos sugeridos por proveedor (complementa model_example del catálogo). */
 export const LLM_MODEL_PRESETS: Record<string, string[]> = {
   deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-chat', 'deepseek-reasoner'],
@@ -49,19 +71,78 @@ export const LLM_MODEL_PRESETS: Record<string, string[]> = {
   gemini: ['gemini-2.0-flash', 'gemini-2.5-pro', 'gemini-1.5-pro'],
   openrouter: OPENROUTER_MODEL_PRESETS.map((p) => p.id),
   ollama: ['llama3.2', 'mistral', 'qwen2.5'],
-  mlx: [],
+  mlx: MLX_MODEL_PRESETS,
+};
+
+export type MlxInferenceCatalog = {
+  model?: string;
+  model_short?: string;
+  adapters?: { id: string; label: string; path: string; active?: boolean }[];
 };
 
 export function isOpenRouterProvider(providerId: string): boolean {
   return (providerId || '').trim().toLowerCase() === 'openrouter';
 }
 
-export function modelLabelForOption(providerId: string, modelId: string): string {
+export function isForeignModelForMlx(modelId: string): boolean {
+  const m = (modelId || '').trim().toLowerCase();
+  if (!m) return true;
+  if (m.startsWith('mlx-community/')) return false;
+  if (m.startsWith('/') || m.startsWith('./') || m.startsWith('../')) return false;
+  if (m === 'openrouter/free') return true;
+  return MLX_FOREIGN_MODEL_PREFIXES.some((p) => m.startsWith(p));
+}
+
+export function defaultMlxModel(mlx?: MlxInferenceCatalog | null): string {
+  const envModel = (mlx?.model || '').trim();
+  if (envModel && !isForeignModelForMlx(envModel)) return envModel;
+  return MLX_MODEL_PRESETS[0] || '';
+}
+
+function mlxPathBasename(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts[parts.length - 1] || path;
+}
+
+export function mlxInferenceModelPaths(mlx?: MlxInferenceCatalog | null): string[] {
+  if (!mlx) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const add = (value?: string) => {
+    const v = (value || '').trim();
+    if (!v || seen.has(v) || isForeignModelForMlx(v)) return;
+    seen.add(v);
+    out.push(v);
+  };
+  add(mlx.model);
+  for (const adapter of mlx.adapters ?? []) add(adapter.path);
+  return out;
+}
+
+export function modelLabelForOption(
+  providerId: string,
+  modelId: string,
+  mlxCatalog?: MlxInferenceCatalog | null
+): string {
   const pid = (providerId || '').trim().toLowerCase();
   const mid = (modelId || '').trim();
   if (!mid) return '—';
   if (pid === 'openrouter') {
     return OPENROUTER_LABEL_BY_ID[mid] ?? mid;
+  }
+  if (pid === 'mlx') {
+    const adapter = (mlxCatalog?.adapters ?? []).find((a) => a.path === mid);
+    if (adapter?.label) return adapter.label;
+    if (mid.includes('/') && !mid.includes('mlx-community')) {
+      return `${mlxPathBasename(mid)} (LoRA)`;
+    }
+    if (mlxCatalog?.model_short && mid === mlxCatalog.model) {
+      return `${mlxCatalog.model_short} (base PM2)`;
+    }
+    const short = mlxPathBasename(mid);
+    if (short.includes('Qwen')) return `Qwen · ${short}`;
+    if (short.includes('Llama')) return `Llama · ${short}`;
+    if (short.includes('gemma')) return `Gemma · ${short}`;
   }
   return mid;
 }
@@ -69,7 +150,8 @@ export function modelLabelForOption(providerId: string, modelId: string): string
 export function modelOptionsForProvider(
   providerId: string,
   catalogModelExample?: string,
-  currentModel?: string
+  currentModel?: string,
+  extraModels?: string[]
 ): string[] {
   const pid = (providerId || '').trim().toLowerCase();
   const seen = new Set<string>();
@@ -77,10 +159,13 @@ export function modelOptionsForProvider(
   const add = (m: string) => {
     const v = (m || '').trim();
     if (!v || seen.has(v)) return;
+    if (pid === 'mlx' && isForeignModelForMlx(v)) return;
     seen.add(v);
     out.push(v);
   };
-  add((currentModel || '').trim());
+  const current = (currentModel || '').trim();
+  if (current && !(pid === 'mlx' && isForeignModelForMlx(current))) add(current);
+  for (const m of extraModels ?? []) add(m);
   for (const m of LLM_MODEL_PRESETS[pid] ?? []) add(m);
   const example = (catalogModelExample || '').trim();
   if (example) add(example);

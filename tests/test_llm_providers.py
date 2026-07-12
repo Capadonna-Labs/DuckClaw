@@ -120,6 +120,12 @@ def test_sanitize_worker_reply_phase1_keeps_tool_headers() -> None:
     assert "Estado: ok" in out
 
 
+def test_coerce_json_tool_invoke_repairs_mlx_typo_parameters() -> None:
+    raw = '{"name": "assess_crons_alignment", "parameters": {"}}'
+    got = coerce_json_tool_invoke(raw)
+    assert got == ("assess_crons_alignment", {})
+
+
 def test_coerce_json_tool_invoke_parameters_and_arguments_string() -> None:
     raw = '{"name": "read_sql", "parameters": {"query": "SELECT 1"}}'
     got = coerce_json_tool_invoke(raw)

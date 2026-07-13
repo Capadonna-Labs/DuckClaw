@@ -76,7 +76,7 @@ def check_custom_agents_in_catalog(db: Any) -> AgentCatalogHealth:
     return AgentCatalogHealth(
         ok=False,
         custom_count=0,
-        detail="sin agentes propios — Plantillas → Crear agente (wizard)",
+        detail="sin agentes propios - Plantillas -> Crear agente (wizard)",
     )
 
 
@@ -90,9 +90,9 @@ def check_integration_bootstrap(db: Any, *, tenant_id: str = "default") -> Integ
 def format_dev_next_steps(*, agents: AgentCatalogHealth, llm: LlmBootstrapHealth) -> list[str]:
     lines: list[str] = []
     if not agents.ok:
-        lines.append("Plantillas → Crear agente (wizard de 2 pasos)")
+        lines.append("Plantillas -> Crear agente (wizard de 2 pasos)")
     if not llm.ok:
-        lines.append("Integraciones → API keys (grupo LLM e inferencia) o duckops init")
-    lines.append("Playground → chatea con el agente que creaste")
-    lines.append("Opcional: Integraciones → API keys (Tavily, OpenWeather, …)")
+        lines.append("Integraciones -> API keys (grupo LLM e inferencia) o duckops init")
+    lines.append("Playground -> chatea con el agente que creaste")
+    lines.append("Opcional: Integraciones -> API keys (Tavily, OpenWeather, ...)")
     return lines

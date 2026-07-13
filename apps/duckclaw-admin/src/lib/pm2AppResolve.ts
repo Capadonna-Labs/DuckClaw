@@ -1,7 +1,6 @@
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+import { parsePm2Jlist, pm2JlistStdout } from '@/lib/pm2Jlist';
 
-const execFileAsync = promisify(execFile);
+const PM2_JLIST_TIMEOUT_MS = 12_000;
 
 export const GATEWAY_PM2_CANDIDATES = [
   'DuckClaw-Gateway',
@@ -11,15 +10,10 @@ export const GATEWAY_PM2_CANDIDATES = [
 
 export const DB_WRITER_PM2_CANDIDATES = ['DuckClaw-DB-Writer', 'duckclaw-db-writer'] as const;
 
-async function pm2RegisteredNames(cwd: string): Promise<Set<string>> {
+async function pm2RegisteredNames(_cwd: string): Promise<Set<string>> {
   try {
-    const { stdout } = await execFileAsync('pm2', ['jlist'], {
-      cwd,
-      timeout: 12_000,
-      maxBuffer: 2 * 1024 * 1024,
-    });
-    const apps = JSON.parse(stdout) as { name?: string }[];
-    if (!Array.isArray(apps)) return new Set();
+    const stdout = await pm2JlistStdout(PM2_JLIST_TIMEOUT_MS);
+    const apps = parsePm2Jlist(stdout) as { name?: string }[];
     return new Set(
       apps.map((a) => (a.name || '').trim()).filter((n): n is string => Boolean(n))
     );

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import subprocess
@@ -44,11 +45,12 @@ async def root():
 
 @router.get("/health")
 async def health(request: Request):
+    metrics = await asyncio.to_thread(collect_gateway_health_metrics)
     return {
         "status": "ok",
         "service": "api-gateway",
         "telegram_path_routes_registered": telegram_path_route_count(request.app),
-        "metrics": collect_gateway_health_metrics(),
+        "metrics": metrics,
     }
 
 

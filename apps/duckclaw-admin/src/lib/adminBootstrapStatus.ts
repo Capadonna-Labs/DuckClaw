@@ -1,6 +1,5 @@
 import { adminApiKey, gatewayBase, gatewayConnectHint, gatewayProxyHeaders } from '@/lib/gatewayProxy';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { parsePm2Jlist, pm2JlistStdout } from '@/lib/pm2Jlist';
 
 export type AdminBootstrapStatus = {
   gatewayConfigured: boolean;
@@ -17,10 +16,8 @@ export type AdminBootstrapStatus = {
   checkedAt: string;
 };
 
-const GATEWAY_STATUS_TIMEOUT_MS = 2_500;
-const PM2_JLIST_COMMAND = 'pm2 jlist';
+const GATEWAY_STATUS_TIMEOUT_MS = 8_000;
 const PM2_CACHE_MS = 30_000;
-const execFileAsync = promisify(execFile);
 
 let pm2Cache: {
   status: AdminBootstrapStatus['pm2Status'];
@@ -45,26 +42,40 @@ async function resolvePm2GatewayStatus(): Promise<{
     return { status: pm2Cache.status, restartCount: pm2Cache.restartCount };
   }
   try {
-    const [bin, arg] = PM2_JLIST_COMMAND.split(' ');
-    const { stdout } = await execFileAsync(bin, [arg], { timeout: 2_000 });
-    const rows = JSON.parse(stdout || '[]') as unknown;
-    if (!Array.isArray(rows)) return { status: 'unknown', restartCount: null };
+    const stdout = await pm2JlistStdout(5_000);
+    const rows = parsePm2Jlist(stdout);
+    if (!rows.length && !stdout) {
+      const miss = { status: 'unknown' as const, restartCount: null };
+      pm2Cache = { ...miss, expiresAt: Date.now() + PM2_CACHE_MS };
+      return miss;
+    }
     const gateway = rows.find((row) => {
       if (!row || typeof row !== 'object') return false;
       return (row as { name?: string }).name === 'DuckClaw-Gateway';
     }) as { pm2_env?: { status?: string; restart_time?: number } } | undefined;
-    if (!gateway) return { status: 'missing', restartCount: null };
+    if (!gateway) {
+      const miss = { status: 'missing' as const, restartCount: null };
+      pm2Cache = { ...miss, expiresAt: Date.now() + PM2_CACHE_MS };
+      return miss;
+    }
     const status = gateway.pm2_env?.status;
     const restartCount =
       typeof gateway.pm2_env?.restart_time === 'number' ? gateway.pm2_env.restart_time : null;
     if (status === 'online' || status === 'stopped' || status === 'errored') {
-      const resolved = { status, restartCount };
+      const resolved = { status, restartCount } as {
+        status: AdminBootstrapStatus['pm2Status'];
+        restartCount: number | null;
+      };
       pm2Cache = { ...resolved, expiresAt: Date.now() + PM2_CACHE_MS };
       return resolved;
     }
-    return { status: 'unknown', restartCount };
+    const unknown = { status: 'unknown' as const, restartCount };
+    pm2Cache = { ...unknown, expiresAt: Date.now() + PM2_CACHE_MS };
+    return unknown;
   } catch {
-    return { status: 'unknown', restartCount: null };
+    const fail = { status: 'unknown' as const, restartCount: null };
+    pm2Cache = { ...fail, expiresAt: Date.now() + PM2_CACHE_MS };
+    return fail;
   }
 }
 

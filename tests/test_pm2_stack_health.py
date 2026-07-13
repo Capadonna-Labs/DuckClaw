@@ -95,6 +95,31 @@ def test_collect_pm2_stack_health_missing_pm2_returns_empty(monkeypatch: pytest.
     assert collect_pm2_stack_health() == []
 
 
+def test_collect_pm2_stack_health_skips_when_pm2_managed_gateway(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DUCKCLAW_PM2_MATCHED_APP_NAME", "DuckClaw-Gateway")
+
+    def fake_run_pm2(*_args, **_kwargs):
+        raise AssertionError("pm2 jlist must not run inside PM2-managed gateway")
+
+    monkeypatch.setattr("duckclaw.ops.toolchain.run_pm2", fake_run_pm2)
+    assert collect_pm2_stack_health() == []
+
+
+def test_collect_pm2_stack_health_skips_gateway_pm2_process_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("DUCKCLAW_PM2_MATCHED_APP_NAME", raising=False)
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "DuckClaw-Gateway")
+
+    def fake_run_pm2(*_args, **_kwargs):
+        raise AssertionError("pm2 jlist must not run inside PM2-managed gateway")
+
+    monkeypatch.setattr("duckclaw.ops.toolchain.run_pm2", fake_run_pm2)
+    assert collect_pm2_stack_health() == []
+
+
 def test_collect_gateway_health_metrics_includes_pm2_processes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

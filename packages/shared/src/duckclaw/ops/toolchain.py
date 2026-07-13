@@ -277,6 +277,24 @@ def is_pm2_available() -> bool:
     return resolve_pm2_executable() is not None
 
 
+def _pm2_subprocess_argv(exe: str, args: tuple[str, ...]) -> list[str]:
+    """Windows: ``pm2.cmd`` abre ventana cmd; usar ``node …/pm2/bin/pm2`` si existe."""
+    if platform.system() == "Windows":
+        node = resolve_node()
+        if node:
+            for directory in _npm_global_bin_dirs():
+                script = directory / "node_modules" / "pm2" / "bin" / "pm2"
+                if script.is_file():
+                    return [node, str(script), *args]
+    return [exe, *args]
+
+
+def _subprocess_no_window_kwargs() -> dict[str, int]:
+    if platform.system() == "Windows":
+        return {"creationflags": subprocess.CREATE_NO_WINDOW}
+    return {}
+
+
 def run_pm2(
     *args: str,
     timeout: int | None = 120,
@@ -292,7 +310,7 @@ def run_pm2(
             "PM2 no está en PATH. Instálalo con: npm install -g pm2 "
             "(luego cierra y reabre la terminal o ejecuta install.cmd)."
         )
-    argv = [exe, *args]
+    argv = _pm2_subprocess_argv(exe, args)
     try:
         return subprocess.run(
             argv,
@@ -303,6 +321,7 @@ def run_pm2(
             timeout=timeout,
             cwd=str(cwd) if cwd else None,
             check=check,
+            **_subprocess_no_window_kwargs(),
         )
     except FileNotFoundError as exc:
         raise ToolchainError(f"No se pudo ejecutar PM2 ({exe}): {exc}") from exc

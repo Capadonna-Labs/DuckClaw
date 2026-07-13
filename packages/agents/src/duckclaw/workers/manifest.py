@@ -106,8 +106,10 @@ def _parse_skill_bindings(skills_list: list[Any]) -> tuple[list[str], dict[str, 
             return
         if normalized not in skill_names:
             skill_names.append(normalized)
-        if config is not None and normalized not in skill_configs:
-            skill_configs[normalized] = dict(config) if isinstance(config, dict) else {}
+        if normalized not in skill_configs:
+            skill_configs[normalized] = (
+                dict(config) if isinstance(config, dict) else {}
+            )
 
     for item in skills_list:
         if isinstance(item, str):

@@ -5,10 +5,13 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   KeyRound,
   Loader2,
   LogIn,
   RefreshCw,
+  Search,
   TestTube2,
   Trash2,
   UserPlus,
@@ -21,9 +24,13 @@ import {
   type McpConnectorTestResult,
 } from '@/services/adminService';
 import { pollWriteTask } from '@/lib/pollWriteTask';
+import { EmptyState } from '@/components/shared/EmptyState';
 import {
-  presetUsesOAuthPkce,
-} from '@/lib/mcpPresetAuth';
+  filterMcpConnectors,
+  MCP_CONNECTORS_PAGE_SIZE,
+} from '@/lib/mcpConnectorsList';
+import { presetUsesOAuthPkce } from '@/lib/mcpPresetAuth';
+import { paginateItems } from '@/lib/pagination';
 
 type McpConnectorsPanelProps = {
   canWrite: boolean;
@@ -41,6 +48,8 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   const [grantWorkerByConnector, setGrantWorkerByConnector] = useState<Record<string, string>>({});
   const [grantNotices, setGrantNotices] = useState<Record<string, string>>({});
   const [testResults, setTestResults] = useState<Record<string, McpConnectorTestResult>>({});
+  const [query, setQuery] = useState('');
+  const [page, setPage] = useState(1);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -54,6 +63,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
         setConnectors(connectorRows);
         setPresets(presetRows);
         setWorkers(workerRows.filter((w) => w.active !== false && w.status !== 'inactive'));
+        setPage(1);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'No se pudieron cargar conectores'))
       .finally(() => setLoading(false));
@@ -94,6 +104,28 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     () => Object.fromEntries(presets.map((preset) => [preset.preset_id, preset])),
     [presets]
   );
+
+  const filteredConnectors = useMemo(
+    () => filterMcpConnectors(connectors, query),
+    [connectors, query]
+  );
+
+  const paginated = useMemo(
+    () => paginateItems(filteredConnectors, page, MCP_CONNECTORS_PAGE_SIZE),
+    [filteredConnectors, page]
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [query]);
+
+  useEffect(() => {
+    if (page !== paginated.currentPage) setPage(paginated.currentPage);
+  }, [page, paginated.currentPage]);
+
+  const visibleStart =
+    paginated.totalItems === 0 ? 0 : (paginated.currentPage - 1) * MCP_CONNECTORS_PAGE_SIZE + 1;
+  const visibleEnd = Math.min(paginated.currentPage * MCP_CONNECTORS_PAGE_SIZE, paginated.totalItems);
 
   const saveAuth = async (connectorId: string) => {
     const token = (authTokens[connectorId] || '').trim();
@@ -202,31 +234,71 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
             </p>
           </div>
         ) : (
-          connectors.map((connector) => (
-            <ConnectorCard
-              key={connector.connector_id}
-              connector={connector}
-              preset={connector.preset_id ? presetById[connector.preset_id] : undefined}
-              canWrite={canWrite}
-              workers={workers}
-              busyId={busyId}
-              authToken={authTokens[connector.connector_id] || ''}
-              grantWorkerId={grantWorkerByConnector[connector.connector_id] || workers[0]?.id || ''}
-              grantNotice={grantNotices[connector.connector_id]}
-              testResult={testResults[connector.connector_id]}
-              onAuthTokenChange={(value) =>
-                setAuthTokens((prev) => ({ ...prev, [connector.connector_id]: value }))
-              }
-              onGrantWorkerChange={(value) =>
-                setGrantWorkerByConnector((prev) => ({ ...prev, [connector.connector_id]: value }))
-              }
-              onSaveAuth={() => saveAuth(connector.connector_id)}
-              onConnectOAuth={() => connectOAuth(connector.connector_id)}
-              onTest={() => runTest(connector.connector_id)}
-              onGrant={() => grantWorker(connector.connector_id)}
-              onDeactivate={() => deactivate(connector.connector_id)}
-            />
-          ))
+          <>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <label className="relative block flex-1">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gov-gray-400"
+                />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Buscar conector…"
+                  className="w-full rounded-xl border border-gov-gray-200 py-2 pl-9 pr-3 text-sm dark:border-dark-border dark:bg-dark-bg"
+                />
+              </label>
+              <p className="text-xs font-medium text-gov-gray-500 dark:text-dark-muted">
+                {paginated.totalItems} conector{paginated.totalItems === 1 ? '' : 'es'}
+                {paginated.totalItems > 0
+                  ? ` · mostrando ${visibleStart}-${visibleEnd}`
+                  : query.trim()
+                    ? ' · sin coincidencias'
+                    : ''}
+              </p>
+            </div>
+
+            {filteredConnectors.length === 0 ? (
+              <EmptyState variant="filtered" />
+            ) : (
+              <>
+                {paginated.items.map((connector) => (
+                  <ConnectorCard
+                    key={connector.connector_id}
+                    connector={connector}
+                    preset={connector.preset_id ? presetById[connector.preset_id] : undefined}
+                    canWrite={canWrite}
+                    workers={workers}
+                    busyId={busyId}
+                    authToken={authTokens[connector.connector_id] || ''}
+                    grantWorkerId={grantWorkerByConnector[connector.connector_id] || workers[0]?.id || ''}
+                    grantNotice={grantNotices[connector.connector_id]}
+                    testResult={testResults[connector.connector_id]}
+                    onAuthTokenChange={(value) =>
+                      setAuthTokens((prev) => ({ ...prev, [connector.connector_id]: value }))
+                    }
+                    onGrantWorkerChange={(value) =>
+                      setGrantWorkerByConnector((prev) => ({ ...prev, [connector.connector_id]: value }))
+                    }
+                    onSaveAuth={() => saveAuth(connector.connector_id)}
+                    onConnectOAuth={() => connectOAuth(connector.connector_id)}
+                    onTest={() => runTest(connector.connector_id)}
+                    onGrant={() => grantWorker(connector.connector_id)}
+                    onDeactivate={() => deactivate(connector.connector_id)}
+                  />
+                ))}
+
+                {paginated.totalPages > 1 && (
+                  <ConnectorPaginationControls
+                    page={paginated.currentPage}
+                    totalPages={paginated.totalPages}
+                    onPageChange={setPage}
+                  />
+                )}
+              </>
+            )}
+          </>
         )}
       </section>
 
@@ -242,6 +314,42 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
           Ir al Playground →
         </Link>
       </div>
+    </div>
+  );
+}
+
+function ConnectorPaginationControls({
+  page,
+  totalPages,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  onPageChange: (page: number) => void;
+}) {
+  return (
+    <div className="flex items-center justify-center gap-2 pt-2">
+      <button
+        type="button"
+        onClick={() => onPageChange(page - 1)}
+        disabled={page <= 1}
+        className="inline-flex items-center gap-1 rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 dark:border-dark-border"
+      >
+        <ChevronLeft size={14} />
+        Anterior
+      </button>
+      <span className="min-w-16 text-center text-xs font-medium text-gov-gray-500 dark:text-dark-muted">
+        {page}/{totalPages}
+      </span>
+      <button
+        type="button"
+        onClick={() => onPageChange(page + 1)}
+        disabled={page >= totalPages}
+        className="inline-flex items-center gap-1 rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-40 dark:border-dark-border"
+      >
+        Siguiente
+        <ChevronRight size={14} />
+      </button>
     </div>
   );
 }

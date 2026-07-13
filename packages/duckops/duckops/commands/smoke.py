@@ -21,6 +21,14 @@ def cmd_smoke(
 
     root = Path(repo).resolve() if repo else None
     try:
-        cmd_doctor(ctx, repo=root, smoke=True)
+        cmd_doctor(
+            ctx,
+            repo=root,
+            smoke=True,
+            bootstrap=False,
+            yes=False,
+            strict=False,
+            repair_session_db=False,
+        )
     except typer.Exit as exc:
         raise typer.Exit(exc.exit_code) from exc

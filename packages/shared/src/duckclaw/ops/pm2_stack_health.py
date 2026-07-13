@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Any
 
@@ -111,8 +112,24 @@ def parse_pm2_jlist(payload: object) -> list[dict[str, Any]]:
     return rows
 
 
+def _skip_pm2_jlist_self_probe() -> bool:
+    # ponytail: proceso DuckClaw bajo PM2 no debe invocar `pm2 jlist` (bloqueo/deadlock Windows).
+    if (os.environ.get("DUCKCLAW_PM2_MATCHED_APP_NAME") or "").strip():
+        return True
+    if not (os.environ.get("DUCKCLAW_PM2_PROCESS_NAME") or "").strip():
+        return False
+    try:
+        from duckclaw.process_role import is_gateway_process
+
+        return is_gateway_process()
+    except Exception:
+        return False
+
+
 def collect_pm2_stack_health(*, timeout_sec: int = PM2_JLIST_TIMEOUT_SEC) -> list[dict[str, Any]]:
     """Ejecuta ``pm2 jlist`` con timeout corto; devuelve [] si PM2 no está disponible."""
+    if _skip_pm2_jlist_self_probe():
+        return []
     try:
         from duckclaw.ops.toolchain import run_pm2
 

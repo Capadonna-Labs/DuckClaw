@@ -167,7 +167,7 @@ class LlmBootstrapStatus:
             "admin_href": "/integraciones?tab=keys",
             "message": (
                 f"Proveedor LLM «{label}» activo pero falta API key "
-                "(Admin → Integraciones → API keys o .env bootstrap)."
+                "(Admin -> Integraciones -> API keys o .env bootstrap)."
             ),
         }
 
@@ -230,7 +230,7 @@ def evaluate_llm_bootstrap(
         ok=False,
         provider=provider,
         model=model,
-        detail=f"falta {keys_label} para {provider} (Integraciones → API keys o duckops init)",
+        detail=f"falta {keys_label} para {provider} (Integraciones -> API keys o duckops init)",
         integration_id=integration_id,
         integration_label=integration_label,
     )
@@ -263,6 +263,6 @@ def build_llm_gap(
         "admin_href": "/integraciones?tab=keys",
         "message": (
             f"Proveedor LLM «{label}» activo pero falta API key "
-            "(Admin → Integraciones → API keys o .env bootstrap)."
+            "(Admin -> Integraciones -> API keys o .env bootstrap)."
         ),
     }

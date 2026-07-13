@@ -6,6 +6,9 @@ import sys
 import time
 from typing import Any
 
+PM2_METRICS_CACHE_SEC = 30
+_pm2_metrics_cache: dict[str, Any] = {"expires_at": 0.0, "rows": []}
+
 try:
     import resource
 except ImportError:  # Windows
@@ -48,6 +51,22 @@ def _knowledge_queue_depth() -> int | None:
         return None
 
 
+def _cached_pm2_stack_health() -> list[dict[str, Any]]:
+    now = time.time()
+    if now < float(_pm2_metrics_cache["expires_at"]):
+        rows = _pm2_metrics_cache["rows"]
+        return rows if isinstance(rows, list) else []
+    try:
+        from duckclaw.ops.pm2_stack_health import collect_pm2_stack_health
+
+        rows = collect_pm2_stack_health()
+    except Exception:
+        rows = []
+    _pm2_metrics_cache["expires_at"] = now + PM2_METRICS_CACHE_SEC
+    _pm2_metrics_cache["rows"] = rows
+    return rows
+
+
 def _db_write_queue_depth() -> int | None:
     try:
         import redis
@@ -71,13 +90,7 @@ def collect_gateway_health_metrics() -> dict[str, Any]:
         pass
 
     cache = _worker_graph_cache_stats()
-    pm2_processes: list[dict[str, Any]] = []
-    try:
-        from duckclaw.ops.pm2_stack_health import collect_pm2_stack_health
-
-        pm2_processes = collect_pm2_stack_health()
-    except Exception:
-        pm2_processes = []
+    pm2_processes = _cached_pm2_stack_health()
 
     embed_batch_size: int | None = None
     try:

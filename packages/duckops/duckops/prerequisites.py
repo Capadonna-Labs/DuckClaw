@@ -554,19 +554,102 @@ def install_redis(print_fn: PrintFn = _default_print, *, assume_yes: bool = Fals
     return False
 
 
-def _windows_node_under_program_files() -> bool:
-    """Node en Program Files suele bloquear corepack sin permisos de administrador."""
+def _finalize_pnpm_install(print_fn: PrintFn) -> bool:
+    augment_path_for_windows_tools()
+    from duckclaw.ops.toolchain import resolve_pnpm_executable
+
+    _ensure_npm_global_tool_visible(resolve_pnpm_executable)
+    if check_pnpm().ok:
+        return True
+    print_fn(
+        "ERROR pnpm: instalado pero no aparece en PATH. "
+        "Cierra la ventana y ejecuta install.cmd otra vez."
+    )
+    return False
+
+
+def _try_install_pnpm_corepack(print_fn: PrintFn) -> bool:
+    corepack = shutil.which("corepack")
+    if not corepack:
+        return False
+    print_fn("Intentando vía corepack...")
+    try:
+        proc = _run([corepack, "enable", "pnpm"], timeout=120)
+    except FileNotFoundError:
+        return False
+    except subprocess.CalledProcessError:
+        return False
+    return proc.returncode == 0
+
+
+def _try_install_pnpm_winget(print_fn: PrintFn) -> bool:
     if not _is_windows():
         return False
-    node = shutil.which("node")
-    if not node:
+    winget = _winget_path()
+    if not winget:
         return False
+    print_fn("Intentando vía winget...")
     try:
-        parent = Path(node).resolve().parent
-        pf = _windows_program_files().resolve()
-        return parent == pf or pf in parent.parents
-    except OSError:
+        proc = _run(
+            [
+                winget,
+                "install",
+                "pnpm.pnpm",
+                "--silent",
+                "--accept-package-agreements",
+                "--accept-source-agreements",
+            ],
+            timeout=1200,
+        )
+    except FileNotFoundError:
         return False
+    except subprocess.CalledProcessError:
+        return False
+    if proc.returncode != 0:
+        return False
+    augment_path_for_windows_tools()
+    return True
+
+
+def _try_install_pnpm_npm_global(print_fn: PrintFn) -> bool:
+    npm = shutil.which("npm")
+    if not npm:
+        return False
+    print_fn("Intentando vía npm global (fallback)...")
+    try:
+        code = _run_interactive([npm, "install", "-g", "pnpm@9"], timeout=600)
+    except FileNotFoundError:
+        return False
+    except subprocess.CalledProcessError:
+        return False
+    if code != 0 and not _is_windows():
+        try:
+            code = _run_interactive(["sudo", npm, "install", "-g", "pnpm@9"], timeout=600)
+        except FileNotFoundError:
+            return False
+        except subprocess.CalledProcessError:
+            return False
+    return code == 0
+
+
+def install_pnpm(print_fn: PrintFn = _default_print) -> bool:
+    if check_pnpm().ok:
+        return True
+
+    if _try_install_pnpm_corepack(print_fn) and _finalize_pnpm_install(print_fn):
+        return True
+
+    if _try_install_pnpm_winget(print_fn) and _finalize_pnpm_install(print_fn):
+        return True
+
+    if _try_install_pnpm_npm_global(print_fn) and _finalize_pnpm_install(print_fn):
+        return True
+
+    if not shutil.which("npm"):
+        print_fn("ERROR pnpm: npm no esta en PATH. Instala Node.js y reinicia la terminal.")
+    else:
+        print_fn("ERROR pnpm: no se pudo instalar pnpm (corepack, winget ni npm global).")
+    return False
 
 
 def _ensure_npm_global_tool_visible(resolve_executable: Callable[[], str | None]) -> None:
@@ -575,60 +658,6 @@ def _ensure_npm_global_tool_visible(resolve_executable: Callable[[], str | None]
 
     refresh_session_path()
     prepend_executable_dir(resolve_executable())
-
-
-def install_pnpm(print_fn: PrintFn = _default_print) -> bool:
-    if check_pnpm().ok:
-        return True
-    corepack = shutil.which("corepack")
-    if corepack and not _windows_node_under_program_files():
-        print_fn("corepack enable + pnpm@9 (packageManager del monorepo)...")
-        enable_code = _run_interactive([corepack, "enable"], timeout=120)
-        if enable_code == 127:
-            print_fn("corepack no encontrado; se usara npm install -g pnpm.")
-        elif enable_code != 0:
-            print_fn("corepack enable falló.")
-        elif _run_interactive(
-            [corepack, "prepare", "pnpm@9.15.0", "--activate"],
-            timeout=300,
-        ) == 0:
-            augment_path_for_windows_tools()
-            from duckclaw.ops.toolchain import resolve_pnpm_executable
-
-            _ensure_npm_global_tool_visible(resolve_pnpm_executable)
-            if check_pnpm().ok:
-                return True
-    elif corepack and _windows_node_under_program_files():
-        print_fn(
-            "Node en Program Files: se omite corepack (requiere admin); "
-            "usando npm install -g pnpm@9."
-        )
-    npm = shutil.which("npm")
-    if not npm:
-        print_fn("ERROR pnpm: npm no esta en PATH. Instala Node.js y reinicia la terminal.")
-        return False
-    print_fn("npm install -g pnpm@9 ...")
-    code = _run_interactive([npm, "install", "-g", "pnpm@9"], timeout=600)
-    if code != 0 and not _is_windows():
-        print_fn("pnpm: prueba con sudo npm install -g pnpm@9 si falló por permisos.")
-        code = _run_interactive(["sudo", npm, "install", "-g", "pnpm@9"], timeout=600)
-    if code == 127:
-        print_fn("ERROR pnpm: npm no se pudo ejecutar (no esta en PATH).")
-        return False
-    if code != 0:
-        print_fn(f"ERROR pnpm: npm install -g pnpm fallo (codigo {code}).")
-        return False
-    augment_path_for_windows_tools()
-    from duckclaw.ops.toolchain import resolve_pnpm_executable
-
-    _ensure_npm_global_tool_visible(resolve_pnpm_executable)
-    if not check_pnpm().ok:
-        print_fn(
-            "ERROR pnpm: instalado pero no aparece en PATH. "
-            "Cierra la ventana y ejecuta install.cmd otra vez."
-        )
-        return False
-    return True
 
 
 def install_node(print_fn: PrintFn = _default_print, *, assume_yes: bool = False) -> bool:

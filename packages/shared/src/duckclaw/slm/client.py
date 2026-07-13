@@ -26,6 +26,14 @@ def validate_slm_xml_output(text: str) -> dict[str, Any]:
     }
 
 
+def _message_text(message: dict[str, Any]) -> str:
+    """MLX Qwen3.x may return chain-of-thought in ``reasoning`` with empty ``content``."""
+    content = (message.get("content") or "").strip()
+    if content:
+        return content
+    return (message.get("reasoning") or "").strip()
+
+
 def execute_slm_http(
     request: ExecuteSLMRequest,
     *,
@@ -61,7 +69,7 @@ def execute_slm_http(
             if not choices:
                 return "🔴 Ceguera Sensorial (SLM Crash): respuesta vacía del MLX-Inference."
             message = choices[0].get("message") or {}
-            content = (message.get("content") or "").strip()
+            content = _message_text(message)
             if not content:
                 return "🔴 Ceguera Sensorial (SLM Crash): contenido vacío en message.content."
             adapter_note = ""

@@ -15,6 +15,8 @@ from duckclaw.workers.provider_input_budget import (
     groq_tool_message_max_chars,
     mlx_max_estimated_input_tokens,
     mlx_tool_message_max_chars,
+    mlx_effective_message_cap,
+    mlx_max_bound_tools,
     normalized_context_pruning,
     split_for_pruning,
 )
@@ -207,3 +209,66 @@ def test_split_for_pruning_keeps_ai_tool_call_with_following_tool_result() -> No
 
     assert head == [non_system[0]]
     assert tail == [ai_with_tool, tool_result]
+
+
+def test_mlx_max_estimated_input_tokens_default_20k(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_MLX_MAX_INPUT_TOKENS", raising=False)
+    configure_provider_budget_runtime_db_provider(None)
+
+    assert mlx_max_estimated_input_tokens() == 20_000
+
+
+def test_normalized_context_pruning_mlx_uses_20k_threshold(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_MLX_MAX_INPUT_TOKENS", raising=False)
+    spec = SimpleNamespace(context_pruning_config=None)
+
+    out = normalized_context_pruning(spec, provider="mlx")
+
+    assert out.get("enabled") is True
+    assert out["max_estimated_tokens"] == 20_000
+
+
+def test_normalized_context_pruning_openrouter_keeps_global_threshold(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_CONTEXT_PRUNE_MAX_TOKENS_M", raising=False)
+    spec = SimpleNamespace(context_pruning_config=None)
+
+    out = normalized_context_pruning(spec, provider="openrouter")
+
+    assert out["max_estimated_tokens"] == 4_000_000
+
+
+def test_mlx_provider_input_budget_trims_large_history(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_MLX_MAX_INPUT_TOKENS", raising=False)
+    messages = [
+        SystemMessage(content="system " + "s" * 2000),
+        HumanMessage(content="old " + "x" * 120_000),
+        HumanMessage(content="recent question"),
+    ]
+
+    out = apply_provider_input_budget(messages, provider="mlx")
+
+    assert out[-1].content == "recent question"
+    assert estimate_tokens_from_messages(out) <= 20_000
+
+
+def test_mlx_max_bound_tools_default(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_MLX_MAX_INPUT_TOKENS", raising=False)
+    configure_provider_budget_runtime_db_provider(None)
+
+    assert mlx_max_bound_tools() == 45
+
+
+def test_mlx_effective_message_cap_reserves_tool_headroom() -> None:
+    configure_provider_budget_runtime_db_provider(None)
+    assert mlx_effective_message_cap(bound_tools_n=45) == 4250
+    assert mlx_effective_message_cap(bound_tools_n=0) == 20_000
+
+
+def test_mlx_tools_for_bind_caps_surface() -> None:
+    from duckclaw.workers.tool_binding import mlx_tools_for_bind
+
+    tools = [SimpleNamespace(name=f"tool_{i}") for i in range(120)]
+    tools[0] = SimpleNamespace(name="read_sql")
+    out = mlx_tools_for_bind(tools, max_tools=10)
+    assert len(out) == 10
+    assert getattr(out[0], "name") == "read_sql"

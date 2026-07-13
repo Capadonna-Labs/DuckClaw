@@ -113,7 +113,24 @@ def context_prune_tool_content_max_chars_default() -> int:
         return 8000
 
 
-def normalized_context_pruning(spec: Any) -> dict[str, Any]:
+def context_prune_max_estimated_tokens_for_provider(
+    provider: str | None = None,
+    *,
+    db: Any = None,
+) -> int:
+    """MLX/local inference: fold early (~20k). Cloud providers keep global prune threshold."""
+    label = (provider or "").strip().lower()
+    if label in ("mlx", "iotcorelabs"):
+        return mlx_max_estimated_input_tokens(db=db)
+    return context_prune_max_estimated_tokens()
+
+
+def normalized_context_pruning(
+    spec: Any,
+    *,
+    provider: str | None = None,
+    db: Any = None,
+) -> dict[str, Any]:
     """
     Política de context monitor: ON por defecto (env global), opt-out en manifest.
 
@@ -129,7 +146,7 @@ def normalized_context_pruning(spec: Any) -> dict[str, Any]:
     cfg = {
         "enabled": True,
         "max_messages": context_prune_max_messages_default(),
-        "max_estimated_tokens": context_prune_max_estimated_tokens(),
+        "max_estimated_tokens": context_prune_max_estimated_tokens_for_provider(provider, db=db),
         "keep_last_messages": context_prune_keep_last_messages_default(),
         "tool_content_max_chars": context_prune_tool_content_max_chars_default(),
         "sandbox_heartbeat": bool(manifest.get("sandbox_heartbeat", True)),
@@ -258,11 +275,53 @@ def mlx_max_estimated_input_tokens(*, db: Any = None) -> int:
     return _runtime_budget_int(
         "mlx.max_input_tokens",
         env_key="DUCKCLAW_MLX_MAX_INPUT_TOKENS",
-        default=7000,
+        default=20000,
         minimum=2000,
+        maximum=30000,
+        db=db,
+    )
+
+
+def mlx_tokens_per_bound_tool_estimate(*, db: Any = None) -> int:
+    """Observed ~350 tokens/tool on mlx_lm (68k prompt with 147 tools + 17k msgs)."""
+    return _runtime_budget_int(
+        "mlx.tokens_per_bound_tool",
+        env_key="DUCKCLAW_MLX_TOKENS_PER_BOUND_TOOL",
+        default=350,
+        minimum=100,
+        maximum=800,
+        db=db,
+    )
+
+
+def mlx_message_reserve_tokens(*, db: Any = None) -> int:
+    return _runtime_budget_int(
+        "mlx.message_reserve_tokens",
+        env_key="DUCKCLAW_MLX_MESSAGE_RESERVE_TOKENS",
+        default=4000,
+        minimum=1000,
         maximum=12000,
         db=db,
     )
+
+
+def mlx_max_bound_tools(*, db: Any = None) -> int:
+    base = mlx_max_estimated_input_tokens(db=db)
+    reserve = mlx_message_reserve_tokens(db=db)
+    per_tool = mlx_tokens_per_bound_tool_estimate(db=db)
+    return max(8, (base - reserve) // max(1, per_tool))
+
+
+def mlx_tool_schema_reserve_tokens(bound_tools_n: int, *, db: Any = None) -> int:
+    n = max(0, int(bound_tools_n or 0))
+    if n <= 0:
+        return 0
+    base = mlx_max_estimated_input_tokens(db=db)
+    return min(base - 2000, n * mlx_tokens_per_bound_tool_estimate(db=db))
+
+
+def mlx_effective_message_cap(*, bound_tools_n: int = 0, db: Any = None) -> int:
+    return max(2000, mlx_max_estimated_input_tokens(db=db) - mlx_tool_schema_reserve_tokens(bound_tools_n, db=db))
 
 
 def mlx_tool_message_max_chars(*, db: Any = None) -> int:
@@ -276,25 +335,36 @@ def mlx_tool_message_max_chars(*, db: Any = None) -> int:
     )
 
 
-def apply_mlx_message_budget(messages: list[Any], *, provider: str) -> list[Any]:
+def apply_mlx_message_budget(
+    messages: list[Any],
+    *,
+    provider: str,
+    bound_tools_n: int = 0,
+) -> list[Any]:
     if (provider or "").strip().lower() not in ("mlx", "iotcorelabs") or not messages:
         return messages
     return trim_messages_to_estimated_cap(
         messages,
-        cap=mlx_max_estimated_input_tokens(),
+        cap=mlx_effective_message_cap(bound_tools_n=bound_tools_n),
         tool_cap=mlx_tool_message_max_chars(),
         note_brand="MLX",
     )
 
 
-def apply_provider_input_budget(messages: list[Any], *, provider: str) -> list[Any]:
+def apply_provider_input_budget(
+    messages: list[Any],
+    *,
+    provider: str,
+    bound_tools_n: int = 0,
+) -> list[Any]:
     """Provider-specific context trimming for Groq TPM and MLX VRAM limits."""
     provider_label = (provider or "").strip().lower()
     if provider_label == "groq":
         return apply_groq_message_budget(messages, provider=provider)
     if provider_label in ("mlx", "iotcorelabs"):
-        return apply_mlx_message_budget(messages, provider=provider)
+        return apply_mlx_message_budget(messages, provider=provider, bound_tools_n=bound_tools_n)
     return messages
+
 
 
 def split_for_pruning(non_system: list[Any], keep_last: int) -> tuple[list[Any], list[Any]]:
@@ -328,11 +398,15 @@ __all__ = [
     "configure_provider_budget_runtime_db_provider",
     "context_prune_globally_enabled",
     "context_prune_max_estimated_tokens",
+    "context_prune_max_estimated_tokens_for_provider",
     "estimate_tokens_from_messages",
     "groq_max_estimated_input_tokens",
     "groq_tool_message_max_chars",
+    "mlx_effective_message_cap",
+    "mlx_max_bound_tools",
     "mlx_max_estimated_input_tokens",
     "mlx_tool_message_max_chars",
+    "mlx_tool_schema_reserve_tokens",
     "normalized_context_pruning",
     "split_for_pruning",
     "trim_messages_to_estimated_cap",

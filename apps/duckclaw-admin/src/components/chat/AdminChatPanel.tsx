@@ -303,6 +303,7 @@ export function AdminChatPanel({
                         provider={config?.llm?.provider ?? ''}
                         model={config?.llm?.model ?? ''}
                         catalog={config?.catalog ?? []}
+                        mlxInference={config?.slm}
                         onUpdated={() => reloadConfig()}
                         disabled={config?.authorized === false || loading}
                         compact
@@ -401,6 +402,7 @@ export function AdminChatPanel({
                       provider={config?.llm?.provider ?? ''}
                       model={config?.llm?.model ?? ''}
                       catalog={config?.catalog ?? []}
+                      mlxInference={config?.slm}
                       onUpdated={() => reloadConfig()}
                       disabled={config?.authorized === false || loading}
                       compact={false}

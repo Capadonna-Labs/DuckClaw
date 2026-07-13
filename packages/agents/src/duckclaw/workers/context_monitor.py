@@ -159,9 +159,10 @@ def apply_context_monitor_state(
         int(pruning_config.get("tool_content_max_chars", 8000)),
     )
     estimated_tokens = estimate_tokens_from_messages(messages)
+    _max_tok = int(pruning_config.get("max_estimated_tokens", 4000))
     needs_pruning = bool(force_prune) or (
         len(messages) > int(pruning_config.get("max_messages", 10))
-        or estimated_tokens > int(pruning_config.get("max_estimated_tokens", 4000))
+        or estimated_tokens > _max_tok
     )
     if not needs_pruning:
         return _with_identity_fields(state, {**state, "messages": messages}, identity_fields)

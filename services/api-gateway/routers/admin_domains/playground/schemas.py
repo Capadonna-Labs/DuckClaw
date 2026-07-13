@@ -72,12 +72,12 @@ LLM_PROVIDER_CATALOG: list[dict[str, Any]] = [
     },
     {
         "id": "mlx",
-        "label": "MLX (Mac local)",
+        "label": "MLX-Inference (Mac local)",
         "kind": "local",
         "env_keys": [],
         "base_url_example": "http://127.0.0.1:8080/v1",
-        "model_example": "gemma / tu modelo MLX",
-        "hint": "pm2 start config/ecosystem.mlx.config.cjs antes del gateway",
+        "model_example": "",
+        "hint": "PM2 MLX-Inference (mlx_lm.server). DUCKCLAW_MLX_BASE_URL o DUCKCLAW_MLX_HOST + MLX_PORT.",
     },
     {
         "id": "huggingface",

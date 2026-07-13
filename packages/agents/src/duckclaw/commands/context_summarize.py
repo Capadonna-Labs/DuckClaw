@@ -173,7 +173,9 @@ def run_manual_context_fold(
         spec = load_manifest(wid, db=catalog_db, tenant_id=tid)
     except Exception as exc:
         return None, str(exc), empty_meta
-    pruning = normalized_context_pruning(spec)
+
+    provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
+    pruning = normalized_context_pruning(spec, provider=provider)
     if not pruning.get("enabled"):
         return None, (
             f"Context monitor desactivado para el worker `{wid}` "
@@ -185,7 +187,6 @@ def run_manual_context_fold(
         return None, "No hay suficiente historial para compactar (mínimo 2 mensajes).", empty_meta
 
     prompt_base = append_domain_closure_block(load_system_prompt(spec), spec)
-    provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
     try:
         from duckclaw.integrations.llm_providers import build_llm
 

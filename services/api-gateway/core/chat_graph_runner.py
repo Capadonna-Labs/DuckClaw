@@ -55,7 +55,6 @@ async def _run_context_fold_fly_command(
             history=prepared.history_for_model,
             vault_db_path=vpath or None,
             worker_id=worker_id,
-            entry_worker_id=worker_id,
         )
     except Exception as exc:
         _gateway_log.error(

@@ -22,6 +22,11 @@ def make_prepare_node(ctx: WorkerGraphContext):
     effective_prompt = ctx.effective_prompt
     _context_prompt_base = ctx.context_prompt_base
     provider = ctx.provider
+    _mlx_bind_tools_n = (
+        len(ctx.tools_for_llm_bind or [])
+        if (provider or "").strip().lower() in ("mlx", "iotcorelabs")
+        else 0
+    )
 
     def prepare_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
         cfg = config or {}
@@ -75,7 +80,11 @@ def make_prepare_node(ctx: WorkerGraphContext):
         else:
             user_content = incoming
         messages.append(HumanMessage(content=user_content))
-        messages = _apply_provider_input_budget(messages, provider=provider)
+        messages = _apply_provider_input_budget(
+            messages,
+            provider=provider,
+            bound_tools_n=_mlx_bind_tools_n,
+        )
         # LangGraph puede reemplazar/limitar el state entre nodos; preservamos chat_id para
         # que _sandbox_enabled_for_state (y otros flags por sesión) lean el ID correcto.
         out = {**state, "messages": messages, "incoming": incoming}

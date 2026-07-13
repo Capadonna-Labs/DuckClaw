@@ -76,6 +76,47 @@ def test_playground_set_model_provider(
     assert not any(str(row[0]).startswith("chat_admin-conv-test_llm_") for row in agent_config_rows)
 
 
+def test_playground_set_model_mlx_provider(
+    admin_client: TestClient, gateway_with_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MLX_MODEL_ID", "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit")
+    monkeypatch.setenv("DUCKCLAW_MLX_HOST", "100.99.72.63")
+    monkeypatch.setenv("MLX_PORT", "8080")
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _apply_typed_command_inline)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
+    r = admin_client.put(
+        "/api/v1/admin/playground/model",
+        headers=_HEADERS,
+        json={"chat_id": "admin-conv-mlx", "provider": "mlx"},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data["ok"] is True
+    assert data["llm"]["provider"] == "mlx"
+    assert "Qwen2.5-Coder" in (data["llm"]["model"] or "")
+    assert any(c["id"] == "mlx" and c.get("active") for c in data["catalog"])
+
+
+def test_playground_set_model_mlx_rejects_openrouter_slug(
+    admin_client: TestClient, gateway_with_agent_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("MLX_MODEL_ID", "mlx-community/Qwen2.5-Coder-3B-Instruct-4bit")
+    monkeypatch.setattr("duckclaw.db_write_queue.enqueue_typed_command", _apply_typed_command_inline)
+    monkeypatch.setattr("duckclaw.db_write_queue.poll_task_status_sync", lambda *args, **kwargs: None)
+    r = admin_client.put(
+        "/api/v1/admin/playground/model",
+        headers=_HEADERS,
+        json={
+            "chat_id": "admin-conv-mlx-glm",
+            "provider": "mlx",
+            "model": "z-ai/glm-5.2",
+        },
+    )
+    assert r.status_code == 200
+    assert "Qwen2.5-Coder" in (r.json()["llm"]["model"] or "")
+    assert "glm" not in (r.json()["llm"]["model"] or "").lower()
+
+
 def test_playground_config_reflects_chat_override(
     admin_client: TestClient, gateway_with_agent_config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

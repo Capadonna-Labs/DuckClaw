@@ -175,7 +175,17 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                     )
                 )
             ] + [m for m in _msg_list if not isinstance(m, SystemMessage)]
-        _groq_msgs = _apply_provider_input_budget(_msg_list, provider=provider)
+        _mlx_provider = (provider or "").strip().lower() in ("mlx", "iotcorelabs")
+        _bind_est = (
+            len(_tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind)
+            if _mlx_provider
+            else 0
+        )
+        _groq_msgs = _apply_provider_input_budget(
+            _msg_list,
+            provider=provider,
+            bound_tools_n=_bind_est,
+        )
         _invoked_llm: Any = llm_with_tools
         if force_admin_sql:
             _fa = llm_force_admin_sql_on if sandbox_enabled else llm_force_admin_sql_off
@@ -268,6 +278,19 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 _auto_tools = without_storage_tools(_auto_tools)
             if len(_auto_tools) < len(_bind_base_identity):
                 _invoked_llm = _bind_tools(llm, _auto_tools)
+        if _mlx_provider:
+            _bound_n = _bind_est
+            try:
+                _lk = getattr(_invoked_llm, "kwargs", None)
+                if isinstance(_lk, dict) and _lk.get("tools"):
+                    _bound_n = len(_lk.get("tools") or [])
+            except Exception:
+                pass
+            _groq_msgs = _apply_provider_input_budget(
+                _msg_list,
+                provider=provider,
+                bound_tools_n=_bound_n,
+            )
         _llm_invoke_exc: BaseException | None = None
         try:
             _raise_if_chat_cancelled_from_state(state)
@@ -323,6 +346,29 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             _resp_content = (lc_message_content_to_text(resp) or "").strip()
         except Exception:
             _resp_content = str(getattr(resp, "content", "") or "").strip()
+        if not tool_calls and _llm_invoke_exc is None and _mlx_provider and _resp_content:
+            from duckclaw.integrations.llm_providers import extract_embedded_tool_invokes
+            from uuid import uuid4
+
+            _embedded = extract_embedded_tool_invokes(_resp_content)
+            if _embedded:
+                _synth_calls: list[dict[str, Any]] = []
+                for _ename, _eparams in _embedded:
+                    _synth_calls.append(
+                        {
+                            "id": f"call_{uuid4().hex[:12]}",
+                            "name": _ename,
+                            "args": _eparams if isinstance(_eparams, dict) else {},
+                        }
+                    )
+                resp = AIMessage(content="", tool_calls=_synth_calls)
+                tool_calls = _synth_calls
+                _resp_content = ""
+                _log.info(
+                    "[%s] MLX JSON tool → synthesized tool_calls=%s",
+                    _wl,
+                    [tc.get("name") for tc in _synth_calls],
+                )
         if (
             not tool_calls
             and _llm_invoke_exc is None

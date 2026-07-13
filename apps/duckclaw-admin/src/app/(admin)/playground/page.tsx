@@ -481,7 +481,7 @@ export default function PlaygroundPage() {
       {settingsModal === 'model' && (
         <SettingsModal
           title="Model selection"
-          description="LLM remoto (profesor) y SLM local opcional (MLX-Inference PM2)."
+          description="Proveedor LLM (nube o MLX-Inference local). SLM opcional abajo es herramienta aparte."
           size="wide"
           onClose={() => setSettingsModal(null)}
         >
@@ -498,6 +498,7 @@ export default function PlaygroundPage() {
                   provider={config?.llm?.provider ?? ''}
                   model={config?.llm?.model ?? ''}
                   catalog={config?.catalog ?? []}
+                  mlxInference={config?.slm}
                   onUpdated={loadConfig}
                   disabled={config?.authorized === false || chat.loading}
                   size="modal"

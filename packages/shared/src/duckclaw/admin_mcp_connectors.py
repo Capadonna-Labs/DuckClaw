@@ -202,16 +202,133 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
     secret_key = str(connector.get("auth_secret_key") or "").strip()
     if not secret_key:
         return ""
-    resolved = resolve_runtime_setting(
-        db,
-        tenant_id=str(connector.get("tenant_id") or "default"),
-        actor_email=str(connector.get("owner_email") or "system"),
-        domain="mcp_connector",
-        key=secret_key,
-    )
-    if resolved.get("secret"):
-        return str(resolved.get("value") or "").strip()
-    return str(resolved.get("value") or "").strip()
+    tenant_id = str(connector.get("tenant_id") or "default")
+    owner = str(connector.get("owner_email") or "system").strip().lower()
+    token = ""
+    updated_at = None
+    for actor in (owner, ""):
+        resolved = resolve_runtime_setting(
+            db,
+            tenant_id=tenant_id,
+            actor_email=actor,
+            domain="mcp_connector",
+            key=secret_key,
+        )
+        token = str(resolved.get("value") or "").strip()
+        if token:
+            break
+    if not token:
+        # ponytail: OAuth guarda bearer bajo actor de sesión, no owner_email del conector.
+        row = _fetchone(
+            db.execute(
+                "SELECT value_text, updated_at FROM main.admin_runtime_settings "
+                "WHERE active = true AND domain = 'mcp_connector' AND key = ? AND tenant_id = ? "
+                "AND secret = true AND length(trim(coalesce(value_text, ''))) > 0 "
+                "ORDER BY updated_at DESC LIMIT 1",
+                [secret_key, tenant_id],
+            )
+        )
+        if row:
+            if isinstance(row, dict):
+                token = str(row.get("value_text") or "").strip()
+                updated_at = row.get("updated_at")
+            else:
+                token = str(row[0] or "").strip()
+                updated_at = row[1] if len(row) > 1 else None
+
+    preset_id = str(connector.get("preset_id") or "").strip()
+    from duckclaw.mcp_connector_presets import is_google_workspace_preset
+
+    if not is_google_workspace_preset(preset_id):
+        return token
+
+    connector_id = str(connector.get("connector_id") or "").strip()
+    refresh_key = f"{connector_id}.refresh" if connector_id else ""
+    refresh = ""
+    if refresh_key:
+        for actor in (owner, ""):
+            resolved = resolve_runtime_setting(
+                db,
+                tenant_id=tenant_id,
+                actor_email=actor,
+                domain="mcp_connector",
+                key=refresh_key,
+            )
+            refresh = str(resolved.get("value") or "").strip()
+            if refresh:
+                break
+        if not refresh:
+            row = _fetchone(
+                db.execute(
+                    "SELECT value_text FROM main.admin_runtime_settings "
+                    "WHERE active = true AND domain = 'mcp_connector' AND key = ? AND tenant_id = ? "
+                    "AND secret = true AND length(trim(coalesce(value_text, ''))) > 0 "
+                    "ORDER BY updated_at DESC LIMIT 1",
+                    [refresh_key, tenant_id],
+                )
+            )
+            if row:
+                refresh = str(row[0] if not isinstance(row, dict) else row.get("value_text") or "").strip()
+
+    if not refresh:
+        return token
+
+    # ponytail: Google access tokens ~1h; refresh if missing/stale without tokeninfo roundtrip.
+    stale = True
+    if token and updated_at is not None:
+        try:
+            from datetime import datetime, timezone
+
+            ts = updated_at
+            if hasattr(ts, "tzinfo") and ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            age_s = (datetime.now(timezone.utc) - ts).total_seconds()
+            stale = age_s > 3000
+        except Exception:
+            stale = True
+    elif not token:
+        stale = True
+    else:
+        # updated_at unknown — verify with tokeninfo once
+        try:
+            import httpx
+
+            info = httpx.get(
+                "https://oauth2.googleapis.com/tokeninfo",
+                params={"access_token": token},
+                timeout=8.0,
+            )
+            stale = info.status_code >= 400
+        except Exception:
+            stale = True
+
+    if not stale:
+        return token
+
+    try:
+        from duckclaw.mcp_google_workspace_oauth import refresh_google_access_token
+
+        fresh = refresh_google_access_token(refresh)
+    except Exception:
+        return token
+    if not fresh:
+        return token
+    if not getattr(db, "_read_only", False):
+        try:
+            from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
+
+            _apply_set_mcp_connector_auth(
+                db,
+                {
+                    "tenant_id": tenant_id,
+                    "actor_email": owner or "system",
+                    "connector_id": connector_id,
+                    "bearer_token": fresh,
+                },
+            )
+        except Exception:
+            pass
+    return fresh
 
 
 def list_worker_mcp_connectors(

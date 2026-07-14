@@ -58,7 +58,7 @@ export default function SensoryNodePageView({ embedded = false }: EmbeddedViewPr
 
             <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
               <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Mac mini (PM2)</p>
-              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gov-gray-50 p-3 font-mono text-[11px] dark:bg-dark-bg">
+              <pre className="scrollbar-hide mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gov-gray-50 p-3 font-mono text-[11px] dark:bg-dark-bg">
                 {`DUCKCLAW_SENSORY_BIND_HOST=100.99.72.63
 DUCKCLAW_SENSORY_PORT=8001
 uv sync --project integrations/sensory-node
@@ -69,7 +69,7 @@ ${PM2_CMD}`}
 
             <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
               <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Gateway VPS</p>
-              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gov-gray-50 p-3 font-mono text-[11px] dark:bg-dark-bg">
+              <pre className="scrollbar-hide mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gov-gray-50 p-3 font-mono text-[11px] dark:bg-dark-bg">
                 {`DUCKCLAW_SENSORY_BASE_URL=http://100.99.72.63:8001
 ${GATEWAY_HEALTH}`}
               </pre>

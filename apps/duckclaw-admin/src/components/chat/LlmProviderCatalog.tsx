@@ -47,7 +47,7 @@ export function LlmProviderCatalog({ chatId, catalog, onUpdated, disabled }: Pro
 
   return (
     <div className="space-y-2">
-      <ul className="space-y-2 max-h-48 overflow-y-auto text-xs">
+      <ul className="scrollbar-thin space-y-2 max-h-48 overflow-y-auto text-xs">
         {catalog.map((p) => {
           const selectable = SELECTABLE_LLM_PROVIDERS.has(p.id);
           const isPending = pendingId === p.id;

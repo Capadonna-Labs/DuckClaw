@@ -614,6 +614,7 @@ class SetMcpConnectorAuthCommand(WriteCommand):
     command_type: Literal["set_mcp_connector_auth"] = "set_mcp_connector_auth"
     connector_id: str
     bearer_token: str
+    refresh_token: str = ""
 
 
 class GrantWorkerMcpConnectorCommand(WriteCommand):

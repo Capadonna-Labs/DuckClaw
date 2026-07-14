@@ -154,6 +154,25 @@ except ImportError as _admin_imp_err:
     _gateway_log.error("Admin router omitido: %s", _admin_imp_err)
 
 try:
+    from routers.admin_domains.mcp_connectors import oauth_callback_public
+
+    @app.get("/api/v1/oauth/callback", include_in_schema=False)
+    async def notion_oauth_callback_alias(
+        code: str = "",
+        state: str = "",
+        error: str = "",
+        error_description: str = "",
+    ):
+        return await oauth_callback_public(
+            code=code,
+            state=state,
+            error=error,
+            error_description=error_description,
+        )
+except ImportError as _oauth_alias_err:
+    _gateway_log.warning("OAuth callback alias omitido: %s", _oauth_alias_err)
+
+try:
     from routers.sensory import router as sensory_router
 
     app.include_router(sensory_router)

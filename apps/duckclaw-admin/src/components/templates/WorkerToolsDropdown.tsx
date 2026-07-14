@@ -73,7 +73,7 @@ function CollapsibleCategory({
         </span>
       </button>
       {open ? (
-        <div className="max-h-48 space-y-0.5 overflow-y-auto border-t border-gov-gray-100 px-1 py-1 dark:border-dark-border">
+        <div className="scrollbar-thin max-h-48 space-y-0.5 overflow-y-auto border-t border-gov-gray-100 px-1 py-1 dark:border-dark-border">
           {children}
         </div>
       ) : null}
@@ -314,7 +314,7 @@ export function WorkerToolsDropdown({
                   {allExpanded ? 'Colapsar todo' : 'Expandir todo'}
                 </button>
               ) : null}
-              <div className="mt-1 max-h-[min(60vh,24rem)] space-y-2 overflow-y-auto">
+              <div className="scrollbar-thin mt-1 max-h-[min(60vh,24rem)] space-y-2 overflow-y-auto">
                 {categories.map((category) => {
                   const baseline = isBaselineCategory(category);
                   const activeCount = baseline

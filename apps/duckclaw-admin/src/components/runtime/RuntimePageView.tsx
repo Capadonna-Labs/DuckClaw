@@ -119,7 +119,7 @@ export default function RuntimePageView({ embedded = false }: EmbeddedViewProps)
                 <span className="font-mono">{chatId}</span>
               </p>
             </div>
-            <div className="overflow-x-auto">
+            <div className="scrollbar-hide overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-gov-gray-50 text-left dark:bg-dark-bg">
                   <tr>

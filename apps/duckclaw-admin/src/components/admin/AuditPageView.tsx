@@ -64,7 +64,7 @@ function AuditTable({ entries }: { entries: AuditEntry[] }) {
   }
 
   return (
-    <div className="overflow-x-auto rounded-2xl border dark:border-dark-border max-h-[70vh]">
+    <div className="scrollbar-thin overflow-x-auto rounded-2xl border dark:border-dark-border max-h-[70vh]">
       <table className="w-full text-sm">
         <thead className="sticky top-0 bg-gov-gray-50 dark:bg-dark-bg text-left">
           <tr>

@@ -227,10 +227,10 @@ async def start_connector_oauth(
     tenant_id = str(profile.get("tenant_id") or "default")
     actor_email = str(profile.get("email") or actor)
     try:
-        from duckclaw.mcp_higgsfield_oauth import start_higgsfield_oauth
+        from duckclaw.mcp_connector_oauth import start_mcp_connector_oauth
 
         with open_gateway_db(read_only=True) as db:
-            result = await start_higgsfield_oauth(
+            result = await start_mcp_connector_oauth(
                 db,
                 connector_id=connector_id,
                 tenant_id=tenant_id,
@@ -251,20 +251,19 @@ async def complete_connector_oauth(
 ) -> dict[str, Any]:
     del actor
     try:
-        from duckclaw.mcp_higgsfield_oauth import (
-            build_oauth_completion_commands,
-            exchange_oauth_code_for_token,
-        )
+        from duckclaw.mcp_connector_oauth import exchange_mcp_oauth_code_for_token
+        from duckclaw.mcp_higgsfield_oauth import build_oauth_completion_commands
         from duckclaw.write_commands import SetMcpConnectorAuthCommand
 
         bundle = build_oauth_completion_commands(code=body.code.strip(), state=body.state.strip())
         pending = bundle["pending"]
-        tokens = await exchange_oauth_code_for_token(code=body.code.strip(), pending=pending)
+        tokens = await exchange_mcp_oauth_code_for_token(code=body.code.strip(), pending=pending)
         command = SetMcpConnectorAuthCommand(
             tenant_id=str(pending.get("tenant_id") or "default"),
             actor_email=str(pending.get("actor_email") or "system"),
             connector_id=str(pending.get("connector_id") or ""),
             bearer_token=tokens["access_token"],
+            refresh_token=str(tokens.get("refresh_token") or ""),
         )
         task_id = _enqueue(command)
         return {"ok": True, "task_id": task_id, "connector_id": command.connector_id}
@@ -272,6 +271,35 @@ async def complete_connector_oauth(
         raise _problem(400, "OAuth complete failed", str(exc)) from exc
     except Exception as exc:
         raise _problem(502, "OAuth complete failed", str(exc)) from exc
+
+
+def _debug_oauth_callback_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
+    # #region agent log
+    import json
+    import time
+
+    payload = {
+        "sessionId": "97f3cb",
+        "hypothesisId": hypothesis_id,
+        "location": "mcp_connectors.py:oauth_callback_public",
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    for path in (
+        os.environ.get("DUCKCLAW_DEBUG_LOG_PATH", "").strip(),
+        "/root/duckclaw/debug-97f3cb.log",
+        os.path.join(os.environ.get("DUCKCLAW_REPO_ROOT", "."), "debug-97f3cb.log"),
+    ):
+        if not path:
+            continue
+        try:
+            with open(path, "a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            break
+        except OSError:
+            continue
+    # #endregion
 
 
 @router.get("/oauth/callback")
@@ -285,6 +313,16 @@ async def oauth_callback_public(
     import logging
 
     _log = logging.getLogger(__name__)
+    _debug_oauth_callback_log(
+        "H1",
+        "oauth callback hit",
+        {
+            "has_code": bool(code.strip()),
+            "has_state": bool(state.strip()),
+            "error": (error or "")[:80],
+            "gateway_port": os.environ.get("PORT", ""),
+        },
+    )
     admin_base = (os.environ.get("DUCKCLAW_ADMIN_URL") or "").strip().rstrip("/")
     if not admin_base or "0.0.0.0" in admin_base:
         host = (os.environ.get("DUCKCLAW_ADMIN_PUBLIC_HOST") or "").strip()
@@ -300,25 +338,33 @@ async def oauth_callback_public(
     if not code.strip() or not state.strip():
         return RedirectResponse(url=f"{fail}&msg=missing_code_or_state", status_code=302)
     try:
-        from duckclaw.mcp_higgsfield_oauth import (
-            build_oauth_completion_commands,
-            exchange_oauth_code_for_token,
-        )
+        from duckclaw.mcp_connector_oauth import exchange_mcp_oauth_code_for_token
+        from duckclaw.mcp_higgsfield_oauth import build_oauth_completion_commands
         from duckclaw.write_commands import SetMcpConnectorAuthCommand
 
         bundle = build_oauth_completion_commands(code=code.strip(), state=state.strip())
         pending = bundle["pending"]
-        tokens = await exchange_oauth_code_for_token(code=code.strip(), pending=pending)
+        tokens = await exchange_mcp_oauth_code_for_token(code=code.strip(), pending=pending)
         command = SetMcpConnectorAuthCommand(
             tenant_id=str(pending.get("tenant_id") or "default"),
             actor_email=str(pending.get("actor_email") or "system"),
             connector_id=str(pending.get("connector_id") or ""),
             bearer_token=tokens["access_token"],
+            refresh_token=str(tokens.get("refresh_token") or ""),
         )
         _enqueue(command)
+        _debug_oauth_callback_log(
+            "H1",
+            "oauth callback success",
+            {
+                "connector_id": str(pending.get("connector_id") or ""),
+                "has_refresh": bool(tokens.get("refresh_token")),
+            },
+        )
         return RedirectResponse(url=ok, status_code=302)
     except Exception as exc:
         _log.warning("MCP OAuth callback failed: %s", exc)
+        _debug_oauth_callback_log("H2", "oauth callback failed", {"error": str(exc)[:200]})
         msg = str(exc).strip()[:120]
         return RedirectResponse(url=f"{fail}&msg={msg}", status_code=302)
 

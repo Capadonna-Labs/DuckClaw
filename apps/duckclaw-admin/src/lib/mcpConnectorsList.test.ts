@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { McpConnectorSummary } from '@/services/adminService';
-import { filterMcpConnectors, MCP_CONNECTORS_PAGE_SIZE } from './mcpConnectorsList';
+import { filterMcpConnectors, looksLikeAutofillEmail, MCP_CONNECTORS_PAGE_SIZE } from './mcpConnectorsList';
 import { paginateItems } from './pagination';
 
 function sample(id: string, name: string, extra: Partial<McpConnectorSummary> = {}): McpConnectorSummary {
@@ -31,6 +31,11 @@ const fixtures = [
 ];
 
 describe('filterMcpConnectors', () => {
+  it('detects login autofill email shape', () => {
+    expect(looksLikeAutofillEmail('user@example.com')).toBe(true);
+    expect(looksLikeAutofillEmail('higgsfield')).toBe(false);
+  });
+
   it('returns all rows when query is empty', () => {
     expect(filterMcpConnectors(fixtures, '')).toHaveLength(3);
   });

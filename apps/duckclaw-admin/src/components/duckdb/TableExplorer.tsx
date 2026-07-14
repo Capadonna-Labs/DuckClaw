@@ -292,7 +292,7 @@ export function TableExplorer({ vaultPath, refreshKey = 0 }: Props) {
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
         <div className="flex min-h-0 flex-1 gap-0">
-          <aside className="w-[28%] min-w-[180px] max-w-[260px] overflow-y-auto border-r border-gov-gray-100 p-2 dark:border-dark-border">
+          <aside className="scrollbar-thin w-[28%] min-w-[180px] max-w-[260px] overflow-y-auto border-r border-gov-gray-100 p-2 dark:border-dark-border">
             {catalogLoading ? (
               <div className="flex justify-center py-8">
                 <Loader2 className="animate-spin text-gov-gray-400" size={24} />

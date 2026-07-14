@@ -283,7 +283,7 @@ function KanbanColumn({
         <p className="text-[10px] text-gov-gray-500">{column.hint}</p>
         <span className="text-xs font-mono text-gov-gray-400">{countLabel}</span>
       </div>
-      <div className="flex-1 p-2 space-y-2 overflow-y-auto max-h-[60vh]">
+      <div className="scrollbar-thin flex-1 p-2 space-y-2 overflow-y-auto max-h-[60vh]">
         {cards.map((card) => (
           <KanbanCardView
             key={card.id}

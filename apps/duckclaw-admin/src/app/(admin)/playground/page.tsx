@@ -720,7 +720,7 @@ export default function PlaygroundPage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="min-h-0 flex-1 overflow-y-auto p-4 space-y-3 overscroll-contain">
+            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4 space-y-3 overscroll-contain">
               {runSettingsPanel}
             </div>
           </aside>
@@ -854,7 +854,7 @@ function PlaygroundHistoryView({ tenantId, onSelectConversation }: { tenantId?: 
           Nueva conversación
         </Link>
       </header>
-      <div className="h-full min-h-0 overflow-y-auto p-4">
+      <div className="scrollbar-thin h-full min-h-0 overflow-y-auto p-4">
         {!tenantId?.trim() && (
           <p className="text-sm text-gov-gray-400 text-center py-10">Cargando perfil…</p>
         )}
@@ -983,7 +983,7 @@ function SettingsModal({
             <X size={18} />
           </button>
         </header>
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
       </section>
     </div>
   );

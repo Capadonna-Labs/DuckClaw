@@ -45,13 +45,13 @@ export function MarkdownSnippetPanel({
         <p className="text-xs text-gov-gray-400 italic">{emptyLabel}</p>
       ) : mode === 'raw' ? (
         <pre
-          className={`text-[10px] font-mono whitespace-pre-wrap overflow-y-auto text-gov-gray-600 dark:text-dark-muted rounded-xl border dark:border-dark-border bg-gov-gray-50 dark:bg-dark-bg p-3 ${maxHeightClass}`}
+          className={`scrollbar-thin text-[10px] font-mono whitespace-pre-wrap overflow-y-auto text-gov-gray-600 dark:text-dark-muted rounded-xl border dark:border-dark-border bg-gov-gray-50 dark:bg-dark-bg p-3 ${maxHeightClass}`}
         >
           {content}
         </pre>
       ) : (
         <div
-          className={`overflow-y-auto rounded-xl border dark:border-dark-border bg-gov-gray-50 dark:bg-dark-bg p-3 ${maxHeightClass}`}
+          className={`scrollbar-thin overflow-y-auto rounded-xl border dark:border-dark-border bg-gov-gray-50 dark:bg-dark-bg p-3 ${maxHeightClass}`}
         >
           <ChatMarkdown content={content} className="text-xs prose-sm" />
         </div>

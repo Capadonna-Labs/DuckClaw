@@ -488,7 +488,7 @@ export function AdminChatPanel({
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className={`flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-h-0 w-full ${
+          className={`scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-h-0 w-full ${
             isCompact ? '' : 'min-h-[320px]'
           }`}
         >

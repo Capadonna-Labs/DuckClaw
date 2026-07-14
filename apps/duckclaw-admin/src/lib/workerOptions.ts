@@ -18,6 +18,67 @@ export function workersInclude(workers: WorkerOption[] | undefined, id: string):
   return workerOptionIds(workers).includes(id);
 }
 
+/**
+ * Nombre visible para UI. Vacío si solo hay id técnico (evita pintar `d` / slugs crudos).
+ */
+export function resolveWorkerDisplayName(
+  workers: WorkerOption[] | undefined,
+  workerId: string | undefined
+): string {
+  const id = (workerId || '').trim();
+  if (!id) return '';
+  const match = (workers ?? []).find((w) => workerOptionId(w) === id);
+  if (!match) return '';
+  const label = workerOptionLabel(match).trim();
+  if (!label || label === id) return '';
+  return label;
+}
+
+/** Etiqueta de identidad en chat: solo nombre visible. Sin slot swarm. */
+export function formatChatIdentityPrefix(displayName?: string, _swarmSlot = 1): string {
+  const label = (displayName || '').trim();
+  return label || 'Agente';
+}
+
+/**
+ * Quita prefijos de identidad legacy del cuerpo del mensaje
+ * (`d 1`, `devops 1`, `Agente 1`, markdown bold, etc.).
+ */
+export function stripChatIdentityNoise(
+  text: string,
+  options?: {
+    workerId?: string;
+    displayName?: string;
+  }
+): string {
+  let body = (text || '').trim();
+  if (!body) return body;
+
+  const tokens = [options?.displayName, options?.workerId]
+    .map((t) => (t || '').trim())
+    .filter(Boolean);
+
+  for (const token of tokens) {
+    const esc = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    body = body
+      .replace(new RegExp(`^${esc}(?:\\s+\\d+)?(?:\\s*[—–-]\\s*)?`, 'u'), '')
+      .replace(new RegExp(`^\\*\\*${esc}(?:\\s+\\d+)?\\s*·[^*]+\\*\\*\\s*`, 'iu'), '')
+      .trim();
+  }
+
+  body = body.replace(/^Agente(?:\s+\d+)?(?:\s*[—–-]\s*)?/u, '').trim();
+
+  // Mensaje que es SOLO "{id|slug} {slot}" (p. ej. "d 1") → vacío.
+  if (/^[^\s]{1,64}\s+\d+$/u.test(body)) {
+    return '';
+  }
+
+  // Primera línea solo identidad técnica + slot, resto del mensaje debajo.
+  body = body.replace(/^[^\s]{1,64}\s+\d+\s*\n+/u, '').trim();
+
+  return body;
+}
+
 /** Clave canónica para emparejar workers (aliases legacy incluidos). */
 export function normalizeWorkerKey(id: string): string {
   const slug = id.trim().toLowerCase().replace(/[^a-z0-9]/g, '');

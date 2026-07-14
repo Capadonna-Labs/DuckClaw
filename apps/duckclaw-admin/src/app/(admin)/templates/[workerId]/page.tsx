@@ -102,17 +102,33 @@ export default function TemplateEditorPage() {
   const load = useCallback(
     (preferredPath?: string) => {
       if (!workerId) return Promise.resolve();
-      return adminService
-        .getTemplate(workerId)
-        .then((d) => {
-          setDetail(d);
-          const { promptFiles: prompts, contextFiles: contexts, advancedFiles: advanced } = partitionFiles(d);
+      return Promise.all([
+        adminService.getTemplate(workerId),
+        adminService.listTemplates().catch(() => [] as Awaited<ReturnType<typeof adminService.listTemplates>>),
+      ])
+        .then(([d, templates]) => {
+          const listed = templates.find((t) => t.id === workerId || t.worker_id === workerId);
+          const fromDetail = (d.display_name || d.name || '').trim();
+          const fromList = (listed?.display_name || listed?.name || '').trim();
+          // Si el gateway rellena display_name con el worker_id, preferir el nombre del listado.
+          const visibleName =
+            (fromDetail && fromDetail !== workerId ? fromDetail : '') ||
+            (fromList && fromList !== workerId ? fromList : '') ||
+            fromList ||
+            '';
+          const enriched = {
+            ...d,
+            display_name: visibleName || undefined,
+            name: visibleName || d.name,
+          };
+          setDetail(enriched);
+          const { promptFiles: prompts, contextFiles: contexts, advancedFiles: advanced } = partitionFiles(enriched);
           const preferred =
-            (preferredPath && d.contents[preferredPath] !== undefined && preferredPath) ||
-            (focusFile && d.contents[focusFile] !== undefined && focusFile) ||
-            (d.contents['system_prompt.md'] !== undefined && 'system_prompt.md') ||
-            (d.contents[MANIFEST_PATH] !== undefined && MANIFEST_PATH) ||
-            Object.keys(d.contents)[0] ||
+            (preferredPath && enriched.contents[preferredPath] !== undefined && preferredPath) ||
+            (focusFile && enriched.contents[focusFile] !== undefined && focusFile) ||
+            (enriched.contents['system_prompt.md'] !== undefined && 'system_prompt.md') ||
+            (enriched.contents[MANIFEST_PATH] !== undefined && MANIFEST_PATH) ||
+            Object.keys(enriched.contents)[0] ||
             MANIFEST_PATH;
           const nextSection =
             preferred === MANIFEST_PATH && focusFile === MANIFEST_PATH
@@ -120,8 +136,8 @@ export default function TemplateEditorPage() {
               : sectionForFile(preferred, prompts, contexts);
           setSection(nextSection);
           setTab(preferred);
-          setContent(d.contents[preferred] ?? '');
-          setManifestYaml(d.contents[MANIFEST_PATH] ?? '');
+          setContent(enriched.contents[preferred] ?? '');
+          setManifestYaml(enriched.contents[MANIFEST_PATH] ?? '');
         })
         .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
     },
@@ -290,7 +306,9 @@ export default function TemplateEditorPage() {
             Workers
           </Link>
           <ChevronRight size={14} />
-          <span className="font-mono text-gov-gray-900 dark:text-dark-text">{workerId}</span>
+          <span className="text-gov-gray-900 dark:text-dark-text">
+            {(detail?.display_name || detail?.name || '').trim() || 'Agente'}
+          </span>
           <span className="rounded-full bg-gov-cyan-100 px-2 py-0.5 text-[10px] font-black uppercase text-gov-blue-800 dark:bg-dark-bg dark:text-dark-cyan">
             {isCatalogWorker ? 'catálogo DB' : 'canónico (archivo)'}
           </span>
@@ -298,10 +316,12 @@ export default function TemplateEditorPage() {
         <div className="flex flex-wrap items-start justify-between gap-4">
           <WorkerDisplayNameEditor
             workerId={workerId}
-            displayName={detail?.display_name || workerId}
+            displayName={(detail?.display_name || detail?.name || '').trim()}
             canEdit={canEditFiles && isCatalogWorker}
             onSaved={(next) => {
-              setDetail((prev) => (prev ? { ...prev, display_name: next } : prev));
+              setDetail((prev) =>
+                prev ? { ...prev, display_name: next, name: next } : prev
+              );
               setMsg('Nombre actualizado.');
             }}
           />

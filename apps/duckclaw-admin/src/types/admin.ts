@@ -13,6 +13,7 @@ export interface TemplateSummary {
   worker_uid?: string;
   worker_id?: string;
   name?: string;
+  display_name?: string;
   description?: string;
   description_source?: string;
   source?: string;
@@ -56,6 +57,7 @@ export interface TemplateDetail {
   source?: 'catalog' | 'filesystem' | string;
   read_only?: boolean;
   display_name?: string;
+  name?: string;
   worker_uid?: string;
   version?: number;
   files: { path: string; size: number }[];

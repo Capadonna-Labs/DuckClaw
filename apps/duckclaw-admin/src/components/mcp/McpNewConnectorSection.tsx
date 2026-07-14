@@ -88,7 +88,7 @@ export function McpNewConnectorSection({ canWrite, onCreated }: McpNewConnectorS
       const id = presetById[selectedPreset]
         ? presetConnectorId(presetById[selectedPreset])
         : `mcp_${selectedPreset}`;
-      setSuccess(`Conector ${id} creado. Autoriza y asigna agentes en la pestaña Conectores.`);
+      setSuccess(`Conector ${id} creado. Autoriza OAuth/Bearer y otorga workers en la lista de abajo.`);
       onCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo crear el conector');

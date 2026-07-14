@@ -12,11 +12,19 @@ import {
   parseToolNameFromHeartbeatText,
 } from '@/lib/toolHeartbeat';
 import { stripContextBlocksForDisplay } from '@/lib/chatMessageImages';
+import {
+  formatChatIdentityPrefix,
+  stripChatIdentityNoise,
+} from '@/lib/workerOptions';
 
-export function formatChatIdentityPrefix(workerId?: string, swarmSlot = 1): string {
-  const slot = Number.isFinite(swarmSlot) && swarmSlot >= 1 ? Math.floor(swarmSlot) : 1;
-  const workerLabel = (workerId || '').trim();
-  return workerLabel ? `${workerLabel} ${slot}` : String(slot);
+export function stripHeartbeatBodyPrefix(
+  text: string,
+  workerId?: string,
+  swarmSlot = 1,
+  displayName?: string
+): string {
+  void swarmSlot;
+  return stripChatIdentityNoise(text, { workerId, displayName });
 }
 
 /** Quita prefijo duplicado en heartbeat (UI ya muestra worker + tipo). */
@@ -52,36 +60,14 @@ function ToolHeartbeatBody({ message: m }: { message: ChatMsg }) {
   );
 }
 
-export function stripHeartbeatBodyPrefix(
-  text: string,
-  workerId?: string,
-  swarmSlot = 1
-): string {
-  let body = (text || '').trim();
-  if (!body) return body;
-
-  const identity = formatChatIdentityPrefix(workerId, swarmSlot);
-  if (identity) {
-    const esc = identity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    body = body.replace(new RegExp(`^${esc}(?:\\s*[—–-]\\s*)?`, 'u'), '').trim();
-  }
-
-  const workerBase = (workerId || '').trim();
-  if (workerBase) {
-    const escBase = workerBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    body = body
-      .replace(new RegExp(`^\\*\\*${escBase}(?:\\s+\\d+)?\\s*·[^*]+\\*\\*\\s*`, 'iu'), '')
-      .trim();
-  }
-  return body;
-}
-
 export function ChatBubble({
   message: m,
   onRetry,
   canRetry = false,
   onEdit,
   canEdit = false,
+  identityLabel = '',
+  activeWorkerId = '',
 }: {
   message: ChatMsg;
   /** Reenvía el mensaje de usuario asociado a este turno. */
@@ -90,18 +76,31 @@ export function ChatBubble({
   /** Carga el mensaje de usuario en el input para editar y reenviar. */
   onEdit?: () => void;
   canEdit?: boolean;
+  /** Nombre visible del worker (nunca el worker_id técnico). */
+  identityLabel?: string;
+  /** worker_id activo (para strip aunque el mensaje no traiga workerId). */
+  activeWorkerId?: string;
 }) {
   const isUser = m.role === 'user';
   const isError = m.role === 'error';
   const isHeartbeat = m.role === 'heartbeat';
   const isInterrupted = Boolean(m.interrupted);
   const isAssistant = m.role === 'assistant';
-  const displayText =
-    isHeartbeat && m.text
-      ? stripHeartbeatBodyPrefix(m.text, m.workerId, m.swarmSlot ?? 1)
-      : isUser && m.text
-        ? stripContextBlocksForDisplay(m.text)
-        : m.text;
+  const technicalId = (m.workerId || activeWorkerId || '').trim();
+  const displayText = (() => {
+    if (!m.text) return m.text;
+    if (isHeartbeat || isAssistant) {
+      return stripChatIdentityNoise(m.text, {
+        workerId: technicalId,
+        displayName: identityLabel,
+      });
+    }
+    if (isUser) {
+      return stripContextBlocksForDisplay(m.text);
+    }
+    return m.text;
+  })();
+  const identityPrefix = formatChatIdentityPrefix(identityLabel);
   const hasCopyableText = Boolean((displayText || '').trim());
   const canCopy =
     !m.streaming && !isHeartbeat && hasCopyableText && (isAssistant || isUser);
@@ -161,6 +160,15 @@ export function ChatBubble({
     !(displayText || '').trim() &&
     !(m.imagePreviews?.length);
   if (isEmptyAssistantShell) return null;
+
+  // Solo era el prefijo técnico "d 1" / id+slot — no mostrar burbuja vacía.
+  const isIdentityOnlyAssistant =
+    isAssistant &&
+    !m.streaming &&
+    !(displayText || '').trim() &&
+    !(m.imagePreviews?.length) &&
+    !m.audioBase64;
+  if (isIdentityOnlyAssistant) return null;
 
   return (
     <div
@@ -234,7 +242,7 @@ export function ChatBubble({
       {isHeartbeat && (
         <p className="text-[10px] font-bold uppercase tracking-wider text-sky-700/90 dark:text-sky-300/90 mb-1">
           <span className="normal-case text-sky-800 dark:text-sky-200">
-            {formatChatIdentityPrefix(m.workerId, m.swarmSlot ?? 1)}
+            {identityPrefix}
           </span>
           {' · '}
           {heartbeatLabel}
@@ -365,16 +373,13 @@ export function ThinkingDots({ size = 'md', className = '' }: ThinkingDotsProps)
 
 export type ThinkingBubbleProps = {
   startedAt: number;
-  /** Worker activo en el selector (p. ej. platform-orchestrator, ui-designer). */
-  workerId?: string;
-  /** Instancia swarm 1..n; la base siempre es 1. */
-  swarmSlot?: number;
+  /** Nombre visible del worker (nunca el worker_id técnico). */
+  identityLabel?: string;
 };
 
 export function ThinkingBubble({
   startedAt,
-  workerId = '',
-  swarmSlot = 1,
+  identityLabel = '',
 }: ThinkingBubbleProps) {
   const [elapsedSec, setElapsedSec] = useState(0);
 
@@ -389,7 +394,7 @@ export function ThinkingBubble({
   }, [startedAt]);
 
   const elapsedLabel = elapsedSec.toFixed(2);
-  const identityPrefix = formatChatIdentityPrefix(workerId, swarmSlot);
+  const identityPrefix = formatChatIdentityPrefix(identityLabel);
 
   return (
     <div

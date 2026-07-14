@@ -24,7 +24,9 @@ import {
   type McpConnectorTestResult,
 } from '@/services/adminService';
 import { pollWriteTask } from '@/lib/pollWriteTask';
+import ConfirmModal from '@/components/admin/ConfirmModal';
 import EmptyState from '@/components/shared/EmptyState';
+import { McpNewConnectorSection } from '@/components/mcp/McpNewConnectorSection';
 import {
   filterMcpConnectors,
   looksLikeAutofillEmail,
@@ -50,11 +52,34 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   const [authTokens, setAuthTokens] = useState<Record<string, string>>({});
   const [grantWorkerByConnector, setGrantWorkerByConnector] = useState<Record<string, string>>({});
   const [grantNotices, setGrantNotices] = useState<Record<string, string>>({});
+  /** worker_id → connector_ids con grant activo */
+  const [grantsByWorker, setGrantsByWorker] = useState<Record<string, string[]>>({});
   const [testResults, setTestResults] = useState<Record<string, McpConnectorTestResult>>({});
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const autofillClearedRef = useRef(false);
+
+  const refreshGrants = useCallback(async (workerRows: TemplateSummary[]) => {
+    if (workerRows.length === 0) {
+      setGrantsByWorker({});
+      return;
+    }
+    const entries = await Promise.all(
+      workerRows.map(async (worker) => {
+        try {
+          const payload = await adminService.getWorkerMcpGrants(worker.id);
+          const granted = (payload.connectors ?? [])
+            .filter((row) => row.granted)
+            .map((row) => row.connector_id);
+          return [worker.id, granted] as const;
+        } catch {
+          return [worker.id, [] as string[]] as const;
+        }
+      })
+    );
+    setGrantsByWorker(Object.fromEntries(entries));
+  }, []);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -64,15 +89,17 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
       adminService.listMcpConnectorPresets(),
       adminService.listTemplates(),
     ])
-      .then(([connectorRows, presetRows, workerRows]) => {
+      .then(async ([connectorRows, presetRows, workerRows]) => {
+        const activeWorkers = workerRows.filter((w) => w.active !== false && w.status !== 'inactive');
         setConnectors(connectorRows);
         setPresets(presetRows);
-        setWorkers(workerRows.filter((w) => w.active !== false && w.status !== 'inactive'));
+        setWorkers(activeWorkers);
         setPage(1);
+        await refreshGrants(activeWorkers);
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'No se pudieron cargar conectores'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshGrants]);
 
   useEffect(() => {
     load();
@@ -198,7 +225,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   };
 
   const grantWorker = async (connectorId: string) => {
-    const workerId = grantWorkerByConnector[connectorId];
+    const workerId = grantWorkerByConnector[connectorId] || workers[0]?.id;
     if (!workerId || busyId) return;
     setBusyId(`grant:${connectorId}`);
     setError(null);
@@ -219,9 +246,13 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
       const skillHint = presetId
         ? ` Skill ${presetId} activada en manifest si aplica.`
         : '';
+      const alreadyHad = (grantsByWorker[workerId] || []).includes(connectorId);
+      await refreshGrants(workers);
       setGrantNotices((prev) => ({
         ...prev,
-        [connectorId]: `Grant aplicado a ${workerLabel}.${skillHint}`,
+        [connectorId]: alreadyHad
+          ? `Grant ya existía para ${workerLabel} (re-aplicar = UPSERT, sin duplicar).`
+          : `Grant aplicado a ${workerLabel}. Verifica en Agentes → ${workerLabel} → Conectores MCP (checkbox Autorizado), o Playground · contador «N MCP».${skillHint}`,
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo asignar el worker');
@@ -256,11 +287,28 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
         </p>
       )}
 
+      {canWrite ? (
+        <section className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
+          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
+            Nuevo desde plantilla
+          </h2>
+          <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
+            El catálogo de plantillas viene de{' '}
+            <span className="font-mono text-xs">mcp_connector_presets.yaml</span>. Tras crear,
+            autoriza OAuth/Bearer y otorga acceso a workers aquí mismo.
+          </p>
+          <div className="mt-4">
+            <McpNewConnectorSection canWrite={canWrite} onCreated={load} />
+          </div>
+        </section>
+      ) : null}
+
       <section className="space-y-4">
         {connectors.length === 0 ? (
           <div className="rounded-3xl border border-dashed border-gov-gray-200 p-8 text-center dark:border-dark-border">
             <p className="text-sm text-gov-gray-500">
-              Sin conectores activos. Crea uno en la pestaña <strong className="font-bold">Configuración</strong>.
+              Sin conectores activos. Usa <strong className="font-bold">Nuevo desde plantilla</strong>{' '}
+              arriba (o revisa presets tras reiniciar el gateway).
             </p>
           </div>
         ) : (
@@ -314,7 +362,16 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
               <EmptyState variant="filtered" />
             ) : (
               <>
-                {paginated.items.map((connector) => (
+                {paginated.items.map((connector) => {
+                  const selectedWorkerId =
+                    grantWorkerByConnector[connector.connector_id] || workers[0]?.id || '';
+                  const grantedWorkerLabels = workers
+                    .filter((w) => (grantsByWorker[w.id] || []).includes(connector.connector_id))
+                    .map((w) => w.name || w.id);
+                  const selectedAlreadyGranted = (grantsByWorker[selectedWorkerId] || []).includes(
+                    connector.connector_id
+                  );
+                  return (
                   <ConnectorCard
                     key={connector.connector_id}
                     connector={connector}
@@ -323,8 +380,10 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
                     workers={workers}
                     busyId={busyId}
                     authToken={authTokens[connector.connector_id] || ''}
-                    grantWorkerId={grantWorkerByConnector[connector.connector_id] || workers[0]?.id || ''}
+                    grantWorkerId={selectedWorkerId}
                     grantNotice={grantNotices[connector.connector_id]}
+                    grantedWorkerLabels={grantedWorkerLabels}
+                    selectedWorkerAlreadyGranted={selectedAlreadyGranted}
                     testResult={testResults[connector.connector_id]}
                     onAuthTokenChange={(value) =>
                       setAuthTokens((prev) => ({ ...prev, [connector.connector_id]: value }))
@@ -338,7 +397,8 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
                     onGrant={() => grantWorker(connector.connector_id)}
                     onDeactivate={() => deactivate(connector.connector_id)}
                   />
-                ))}
+                  );
+                })}
 
                 {paginated.totalPages > 1 && (
                   <ConnectorPaginationControls
@@ -414,6 +474,8 @@ function ConnectorCard({
   authToken,
   grantWorkerId,
   grantNotice,
+  grantedWorkerLabels,
+  selectedWorkerAlreadyGranted,
   testResult,
   onAuthTokenChange,
   onGrantWorkerChange,
@@ -431,6 +493,8 @@ function ConnectorCard({
   authToken: string;
   grantWorkerId: string;
   grantNotice?: string;
+  grantedWorkerLabels: string[];
+  selectedWorkerAlreadyGranted: boolean;
   testResult?: McpConnectorTestResult;
   onAuthTokenChange: (value: string) => void;
   onGrantWorkerChange: (value: string) => void;
@@ -445,9 +509,50 @@ function ConnectorCard({
   const needsAuth = needsBearer || usesOAuth;
   const authReady = !needsAuth || connector.has_auth;
   const showAuthBadge = needsAuth;
+  const [grantConfirmOpen, setGrantConfirmOpen] = useState(false);
+
+  const selectedWorker = workers.find((w) => w.id === grantWorkerId);
+  const workerLabel = (selectedWorker?.name || selectedWorker?.id || grantWorkerId).trim();
+
+  const openGrantConfirm = () => {
+    if (!grantWorkerId || busyId === `grant:${connector.connector_id}`) return;
+    setGrantConfirmOpen(true);
+  };
+
+  const confirmGrant = () => {
+    setGrantConfirmOpen(false);
+    onGrant();
+  };
 
   return (
     <article className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
+      <ConfirmModal
+        isOpen={grantConfirmOpen}
+        title={
+          selectedWorkerAlreadyGranted
+            ? 'Reaplicar grant (idempotente)'
+            : 'Otorgar conector al agente'
+        }
+        description={
+          selectedWorkerAlreadyGranted
+            ? 'Este worker ya tiene grant activo. Confirmar solo reafirma el mismo acceso (UPSERT); no duplica permisos.'
+            : 'El worker podrá invocar las tools MCP de este conector en Playground y runtime.'
+        }
+        confirmLabel={selectedWorkerAlreadyGranted ? 'Reaplicar grant' : 'Sí, dar grant'}
+        isLoading={busyId === `grant:${connector.connector_id}`}
+        details={[
+          { label: 'Conector', value: connector.display_name || connector.connector_id },
+          { label: 'ID', value: connector.connector_id },
+          { label: 'Worker', value: workerLabel },
+          {
+            label: 'Estado',
+            value: selectedWorkerAlreadyGranted ? 'Ya autorizado' : 'Sin grant',
+          },
+        ]}
+        onConfirm={confirmGrant}
+        onCancel={() => setGrantConfirmOpen(false)}
+      />
+
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
@@ -480,6 +585,13 @@ function ConnectorCard({
             >
               {connector.has_auth ? 'auth OK' : usesOAuth ? 'falta OAuth' : 'falta Bearer'}
             </span>
+          )}
+          {grantedWorkerLabels.length > 0 ? (
+            <span className="rounded-full bg-gov-blue-100 px-2 py-1 text-gov-blue-900 dark:bg-gov-blue-950/40 dark:text-gov-blue-200">
+              grant: {grantedWorkerLabels.join(', ')}
+            </span>
+          ) : (
+            <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-800">sin grants</span>
           )}
         </div>
       </div>
@@ -566,11 +678,22 @@ function ConnectorCard({
             </select>
             <button
               type="button"
-              onClick={onGrant}
+              onClick={openGrantConfirm}
               disabled={!grantWorkerId || busyId === `grant:${connector.connector_id}`}
-              className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
+              className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-50 ${
+                selectedWorkerAlreadyGranted
+                  ? 'bg-gov-gray-600 dark:bg-dark-muted dark:text-dark-bg'
+                  : 'bg-gov-blue-700 dark:bg-dark-cyan dark:text-dark-bg'
+              }`}
             >
-              <UserPlus size={14} /> Grant worker
+              {busyId === `grant:${connector.connector_id}` ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : selectedWorkerAlreadyGranted ? (
+                <CheckCircle2 size={14} />
+              ) : (
+                <UserPlus size={14} />
+              )}
+              {selectedWorkerAlreadyGranted ? 'Ya otorgado · reaplicar' : 'Grant worker'}
             </button>
             <button
               type="button"

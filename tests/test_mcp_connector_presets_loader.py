@@ -100,7 +100,27 @@ presets:
 
 def test_list_mcp_connector_presets_includes_all_bundled_ids() -> None:
     presets = {p["preset_id"]: p for p in list_mcp_connector_presets()}
-    assert set(presets) == {"remote_http_oauth", "mcp_fetch", "mcp_time"}
+    assert {
+        "remote_http_oauth",
+        "notion",
+        "google_workspace",
+        "google_calendar",
+        "google_maps",
+        "tavily",
+        "mcp_fetch",
+        "mcp_time",
+    }.issubset(presets)
+
+
+def test_tavily_preset_is_remote_bearer() -> None:
+    payload = preset_payload("tavily")
+    assert payload is not None
+    assert payload["transport"] == "streamable_http"
+    assert payload["endpoint_url"] == "https://mcp.tavily.com/mcp/"
+    assert payload["auth_kind"] == "bearer"
+    assert "mcp.tavily.com" in payload["egress_hosts"]
+    assert payload["metadata"]["manifest_skill_id"] == "research"
+    assert payload["metadata"].get("oauth_pkce") is not True
 
 
 def _seed_worker(con: duckdb.DuckDBPyConnection, worker_id: str) -> str:

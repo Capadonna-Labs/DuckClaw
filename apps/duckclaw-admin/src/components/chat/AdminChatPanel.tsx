@@ -32,7 +32,7 @@ import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
 import { ChatSlmSelector } from '@/components/chat/ChatSlmSelector';
 import { ConversationQuickPicker } from '@/components/chat/ConversationQuickPicker';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
-import { workerOptionId, workerOptionLabel } from '@/lib/workerOptions';
+import { workerOptionId, workerOptionLabel, resolveWorkerDisplayName } from '@/lib/workerOptions';
 import { PlaygroundChatStudioHeader } from '@/components/playground/PlaygroundChatStudioHeader';
 import { useComposeClipboard } from '@/components/chat/useComposeClipboard';
 
@@ -138,6 +138,17 @@ export function AdminChatPanel({
 
   const isCompact = variant === 'compact';
 
+  const resolvedWorkerLabel = useMemo(() => {
+    return resolveWorkerDisplayName(config?.workers, workerId);
+  }, [config?.workers, workerId]);
+
+  const workerDisplayName = resolvedWorkerLabel || 'Agente';
+
+  const labelForWorkerId = useCallback(
+    (id?: string) => resolveWorkerDisplayName(config?.workers, id || workerId) || workerDisplayName,
+    [config?.workers, workerId, workerDisplayName]
+  );
+
   const liveVoice = usePipecatLiveVoice({
     enabled: liveVoiceAvailable,
     onDisconnected: () => reloadHistory(),
@@ -232,7 +243,7 @@ export function AdminChatPanel({
                     {chatPanelTitle(sectionTitle)}
                   </p>
                   <p className="text-[10px] text-gov-gray-500 truncate">
-                    {workerId || '…'}
+                    {workerDisplayName}
                   </p>
                 </div>
                 <div className="flex items-center gap-0.5 shrink-0">
@@ -496,7 +507,7 @@ export function AdminChatPanel({
           <p className="text-sm text-gov-gray-400 text-center py-8">
             {emptyHint ??
               (workerId
-                ? `Escribe un mensaje para hablar con ${workerId}`
+                ? `Escribe un mensaje para hablar con ${workerDisplayName}`
                 : 'Escribe un mensaje para hablar con …')}
           </p>
         )}
@@ -518,8 +529,7 @@ export function AdminChatPanel({
               <ThinkingBubble
                 key={`${i}-thinking`}
                 startedAt={thinkingStartedAt.current}
-                workerId={thinkingIdentity.workerId || workerId}
-                swarmSlot={thinkingIdentity.swarmSlot}
+                identityLabel={labelForWorkerId(thinkingIdentity.workerId || workerId)}
               />
             );
           }
@@ -543,6 +553,8 @@ export function AdminChatPanel({
                   : `${i}-${m.role}`
               }
               message={m}
+              identityLabel={labelForWorkerId(m.workerId || workerId)}
+              activeWorkerId={workerId}
               canRetry={
                 !loading &&
                 ((m.role === 'user' &&
@@ -585,7 +597,7 @@ export function AdminChatPanel({
         <LiveVoiceBar
           status={liveVoice.status}
           speakingPhase={liveVoice.speakingPhase}
-          workerLabel={workerId || '…'}
+          workerLabel={workerDisplayName}
           elapsedLabel={liveVoice.elapsedLabel}
           userSubtitle={liveVoice.userSubtitle}
           botSubtitle={liveVoice.botSubtitle}

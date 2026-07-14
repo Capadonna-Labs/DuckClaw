@@ -273,35 +273,6 @@ async def complete_connector_oauth(
         raise _problem(502, "OAuth complete failed", str(exc)) from exc
 
 
-def _debug_oauth_callback_log(hypothesis_id: str, message: str, data: dict[str, Any]) -> None:
-    # #region agent log
-    import json
-    import time
-
-    payload = {
-        "sessionId": "97f3cb",
-        "hypothesisId": hypothesis_id,
-        "location": "mcp_connectors.py:oauth_callback_public",
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    for path in (
-        os.environ.get("DUCKCLAW_DEBUG_LOG_PATH", "").strip(),
-        "/root/duckclaw/debug-97f3cb.log",
-        os.path.join(os.environ.get("DUCKCLAW_REPO_ROOT", "."), "debug-97f3cb.log"),
-    ):
-        if not path:
-            continue
-        try:
-            with open(path, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-            break
-        except OSError:
-            continue
-    # #endregion
-
-
 @router.get("/oauth/callback")
 async def oauth_callback_public(
     code: str = "",
@@ -313,16 +284,6 @@ async def oauth_callback_public(
     import logging
 
     _log = logging.getLogger(__name__)
-    _debug_oauth_callback_log(
-        "H1",
-        "oauth callback hit",
-        {
-            "has_code": bool(code.strip()),
-            "has_state": bool(state.strip()),
-            "error": (error or "")[:80],
-            "gateway_port": os.environ.get("PORT", ""),
-        },
-    )
     admin_base = (os.environ.get("DUCKCLAW_ADMIN_URL") or "").strip().rstrip("/")
     if not admin_base or "0.0.0.0" in admin_base:
         host = (os.environ.get("DUCKCLAW_ADMIN_PUBLIC_HOST") or "").strip()
@@ -353,18 +314,9 @@ async def oauth_callback_public(
             refresh_token=str(tokens.get("refresh_token") or ""),
         )
         _enqueue(command)
-        _debug_oauth_callback_log(
-            "H1",
-            "oauth callback success",
-            {
-                "connector_id": str(pending.get("connector_id") or ""),
-                "has_refresh": bool(tokens.get("refresh_token")),
-            },
-        )
         return RedirectResponse(url=ok, status_code=302)
     except Exception as exc:
         _log.warning("MCP OAuth callback failed: %s", exc)
-        _debug_oauth_callback_log("H2", "oauth callback failed", {"error": str(exc)[:200]})
         msg = str(exc).strip()[:120]
         return RedirectResponse(url=f"{fail}&msg={msg}", status_code=302)
 

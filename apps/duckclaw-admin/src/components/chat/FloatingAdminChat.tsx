@@ -15,6 +15,7 @@ import {
   projectIdFromPathname,
   readLastProjectId,
 } from '@/lib/floatingChatProject';
+import { resolveWorkerDisplayName } from '@/lib/workerOptions';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 
 function workerFromPath(pathname: string): string {
@@ -52,8 +53,8 @@ export function FloatingAdminChat() {
     enabled: Boolean(conv.sessionId),
     onConversationActivity: conv.bumpRefresh,
   });
-  const { workerId, loading, messages, historyLoading, scrollToBottom } = chat;
-  const activeWorkerLabel = workerId || '…';
+  const { workerId, loading, messages, historyLoading, scrollToBottom, config } = chat;
+  const activeWorkerLabel = resolveWorkerDisplayName(config?.workers, workerId) || 'Agente';
 
   const openPanel = useCallback(() => setOpen(true), [setOpen]);
 

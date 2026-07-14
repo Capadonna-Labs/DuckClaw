@@ -3,6 +3,8 @@
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
+import { MermaidBlock } from '@/components/chat/MermaidBlock';
+import { isMermaidLanguage, preprocessBareMermaidBlocks } from '@/components/chat/chatMarkdownMermaid';
 
 export { looksLikeMarkdown } from './chatMarkdownDetection';
 
@@ -153,6 +155,10 @@ function buildMarkdownComponents(variant: MarkdownVariant): Components {
     ),
     code: ({ className, children, ...props }) => {
       const isBlock = Boolean(className?.includes('language-'));
+      if (isBlock && isMermaidLanguage(className)) {
+        const source = String(children).replace(/\n$/, '');
+        return <MermaidBlock source={source} variant={variant} />;
+      }
       if (isBlock) {
         return (
           <code className={`${className ?? ''} font-mono text-inherit`} {...props}>
@@ -187,7 +193,9 @@ type ChatMarkdownProps = {
  */
 export function ChatMarkdown({ content, className = '', variant = 'assistant' }: ChatMarkdownProps) {
   const { body: rawBody, workerNote } = splitPlaygroundWorkerSuffix(content);
-  const body = variant === 'assistant' ? dedupeAssistantWorkerHeaders(rawBody) : rawBody.trim();
+  const normalized =
+    variant === 'assistant' ? dedupeAssistantWorkerHeaders(rawBody) : rawBody.trim();
+  const body = preprocessBareMermaidBlocks(normalized);
   const components = variant === 'user' ? buildMarkdownComponents('user') : markdownComponents;
 
   if (!body.trim() && !workerNote) {

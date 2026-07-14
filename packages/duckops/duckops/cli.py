@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from duckops.commands import audit, bootstrap, comfyui, configure, db, deploy, doctor, down, ingress, init, mcp, serve, smoke, stack, train, up
+from duckops.commands import audit, bootstrap, comfyui, configure, db, deploy, doctor, down, ingress, init, mcp, serve, smoke, smoke_tools, stack, train, up
 
 app = typer.Typer(
     name="duckops",
@@ -37,6 +37,11 @@ app.add_typer(
     smoke.app,
     name="smoke",
     help="Smoke local: doctor + GET /health.",
+)
+app.add_typer(
+    smoke_tools.app,
+    name="smoke-tools",
+    help="Smoke playground: capabilities + turno read_sql.",
 )
 app.add_typer(
     configure.app,

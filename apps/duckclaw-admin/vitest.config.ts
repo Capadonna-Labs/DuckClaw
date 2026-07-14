@@ -15,6 +15,8 @@ export default defineConfig({
       'src/lib/mcpConnectorsList.test.ts',
       'src/lib/onboardingChecklist.test.ts',
       'src/components/chat/useAdminChatLoopPolling.test.ts',
+      'src/components/chat/chatMarkdownMermaid.test.ts',
+      'src/components/chat/chatMarkdown.test.ts',
     ],
   },
   resolve: {

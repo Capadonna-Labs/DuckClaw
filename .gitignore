@@ -101,3 +101,6 @@ _auto_publish_fix/
 _reports_fix_staging/
 _reports_staging/
 debug-*.log
+
+# VPS-only deploy patches, probes, host-specific ops (never commit)
+_vps_local/

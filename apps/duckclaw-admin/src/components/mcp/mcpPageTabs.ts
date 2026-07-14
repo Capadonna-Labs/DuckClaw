@@ -4,23 +4,23 @@ export const MCP_TABS: { id: McpTabId; label: string; hint: string }[] = [
   {
     id: 'connectors',
     label: 'Conectores',
-    hint: 'OAuth, pruebas y grants por worker sobre conectores ya creados',
+    hint: 'Plantillas empaquetadas → instancia en DuckDB (OAuth, pruebas, grants por worker)',
   },
   {
     id: 'config',
-    label: 'Configuración',
-    hint: 'Alta de conectores, runtime PM2, puerto y endpoint HTTP',
+    label: 'Servidor',
+    hint: 'Proceso DuckClaw MCP (PM2), puerto y salud HTTP',
   },
   {
     id: 'catalog',
-    label: 'Catálogo',
-    hint: 'Referencia oficial MCP y stdio empaquetados',
+    label: 'Referencia',
+    hint: 'Registro oficial MCP y stdio locales (documentación; no crea conectores)',
   },
 ];
 
 const TAB_IDS = new Set<McpTabId>(MCP_TABS.map((t) => t.id));
 
-/** Tabs retirados — redirigen a Configuración unificada. */
+/** Tabs retirados — redirigen a la sección unificada. */
 const LEGACY_TAB_ALIASES: Record<string, McpTabId> = {
   runtime: 'config',
   server: 'config',

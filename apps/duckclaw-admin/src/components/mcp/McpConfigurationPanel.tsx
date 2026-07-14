@@ -1,6 +1,5 @@
 'use client';
 
-import { McpNewConnectorSection } from '@/components/mcp/McpNewConnectorSection';
 import { McpServerControl } from '@/components/mcp/McpServerControl';
 import type { McpCatalog, McpLive } from '@/components/mcp/useMcpCatalog';
 
@@ -48,7 +47,7 @@ export function McpConfigurationPanel({
   data,
   live,
   isUp,
-  canWrite,
+  canWrite: _canWrite,
   canRunOps,
   developerMode,
   opsRunning,
@@ -66,15 +65,8 @@ export function McpConfigurationPanel({
   return (
     <div className="space-y-6">
       <ConfigSection
-        title="Nuevo conector"
-        description="Elige una plantilla empaquetada (transporte, auth, endpoint). Tras crearlo, autoriza OAuth o Bearer y asigna workers en Conectores."
-      >
-        <McpNewConnectorSection canWrite={canWrite} />
-      </ConfigSection>
-
-      <ConfigSection
         title="Servidor HTTP DuckClaw"
-        description="Arranca el proceso PM2 y comprueba salud desde el banner de estado."
+        description="Arranca el proceso PM2 y comprueba salud. La alta de conectores está en la pestaña Conectores."
       >
         <McpServerControl
           data={data}
@@ -106,7 +98,8 @@ export function McpConfigurationPanel({
             className="w-full rounded-xl border px-3 py-2 font-mono dark:border-dark-border dark:bg-dark-bg"
           />
           <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
-            Fuente: <span className="font-mono">{mcpSource}</span> · <span className="font-mono">mcp.port</span>
+            Fuente: <span className="font-mono">{mcpSource}</span> ·{' '}
+            <span className="font-mono">mcp.port</span>
           </p>
           {canRunOps ? (
             <button

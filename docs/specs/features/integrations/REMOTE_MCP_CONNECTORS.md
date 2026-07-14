@@ -42,7 +42,7 @@ Prefix: `/api/v1/admin/mcp/connectors`
 | Método | Ruta | Descripción |
 |--------|------|-------------|
 | GET | `/` | Lista conectores del tenant |
-| GET | `/presets` | Perfiles empaquetados (Higgsfield, Fetch, Time) |
+| GET | `/presets` | Perfiles empaquetados (Higgsfield, Notion, Google*, Tavily, Fetch, Time) |
 | POST | `/` | Crear desde body o `preset_id` |
 | PATCH | `/{connector_id}` | Metadata, allowlist, enabled |
 | POST | `/{connector_id}/auth` | Guardar Bearer (secret) |

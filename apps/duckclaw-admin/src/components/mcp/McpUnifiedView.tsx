@@ -118,7 +118,7 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
         <header className="border-b border-gov-gray-200 pb-4 dark:border-dark-border">
           <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">MCP</h1>
           <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
-            Conectores en DuckDB, servidor DuckClaw MCP y catálogo de referencia.
+            Conectores (plantillas → DuckDB), servidor DuckClaw MCP y referencia oficial.
           </p>
         </header>
       )}
@@ -184,7 +184,15 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
       {tab === 'catalog' && data && (
         <>
           <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
-            <OfficialMcpReferenceTable servers={data.official_reference.servers} />
+            <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
+              Referencia oficial MCP
+            </h2>
+            <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
+              Documentación del registry — no es el listado de plantillas ni los conectores en DuckDB.
+            </p>
+            <div className="mt-4">
+              <OfficialMcpReferenceTable servers={data.official_reference.servers} />
+            </div>
             <div className="mt-4 flex flex-wrap gap-3 text-xs font-bold">
               <a
                 href={data.official_reference.registry_url}

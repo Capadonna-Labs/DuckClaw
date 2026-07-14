@@ -198,6 +198,7 @@ def list_templates_payload(
                 "worker_uid": worker_uid,
                 "worker_id": str(row.get("worker_id") or wid),
                 "name": str(row.get("display_name") or row.get("name") or wid),
+                "display_name": str(row.get("display_name") or row.get("name") or wid),
                 "source": str(row.get("source") or "catalog"),
                 "visibility": str(row.get("visibility") or "private"),
                 "source_template_id": str(row.get("source_template_id") or "default"),
@@ -238,6 +239,10 @@ def catalog_template_detail(db: Any, *, actor_email: str, worker_id: str) -> dic
             files.insert(0, {"path": "manifest.yaml"})
     return {
         "id": worker["worker_id"],
+        "worker_uid": worker["worker_uid"],
+        "worker_id": worker["worker_id"],
+        "name": str(worker.get("display_name") or worker["worker_id"]),
+        "display_name": str(worker.get("display_name") or worker["worker_id"]),
         "source": "catalog",
         "read_only": True,
         "files": files,

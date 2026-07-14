@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import time
 from typing import Any
@@ -22,48 +21,11 @@ GOOGLE_OIDC_METADATA_URL = "https://accounts.google.com/.well-known/openid-confi
 GOOGLE_WORKSPACE_OAUTH_PROVIDER = "google_workspace"
 
 
-def _debug_oauth_log(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
-    # #region agent log
-    payload = {
-        "sessionId": "97f3cb",
-        "hypothesisId": hypothesis_id,
-        "location": location,
-        "message": message,
-        "data": data,
-        "timestamp": int(time.time() * 1000),
-    }
-    for path in (
-        os.environ.get("DUCKCLAW_DEBUG_LOG_PATH", "").strip(),
-        "/root/duckclaw/debug-97f3cb.log",
-        os.path.join(os.environ.get("DUCKCLAW_REPO_ROOT", "."), "debug-97f3cb.log"),
-    ):
-        if not path:
-            continue
-        try:
-            with open(path, "a", encoding="utf-8") as handle:
-                handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
-            break
-        except OSError:
-            continue
-    # #endregion
-
-
 def resolve_google_redirect_uri(explicit: str | None = None) -> str:
     # ponytail: Google exige match exacto con URI registrada en GCP; env gana sobre origin del Admin (:8443).
     env_redirect = (os.environ.get("GOOGLE_OAUTH_REDIRECT_URI") or "").strip()
     if env_redirect:
-        chosen = env_redirect.rstrip("/")
-        _debug_oauth_log(
-            "H1",
-            "mcp_google_workspace_oauth.py:resolve_redirect",
-            "using GOOGLE_OAUTH_REDIRECT_URI",
-            {
-                "explicit_host": (explicit or "").split("/")[2] if explicit and "/" in explicit else "",
-                "chosen_path": urlparse(chosen).path,
-                "has_port": bool(urlparse(chosen).port),
-            },
-        )
-        return chosen
+        return env_redirect.rstrip("/")
     explicit_clean = (explicit or "").strip()
     if explicit_clean:
         return explicit_clean.rstrip("/")
@@ -186,21 +148,6 @@ async def start_google_workspace_oauth(
     preset_scopes = preset_google_oauth_scopes(preset_id)
     if preset_scopes:
         scope_string = _normalize_scopes(preset_scopes)
-    prm_scopes = prm.get("scopes_supported") if isinstance(prm.get("scopes_supported"), list) else []
-    _debug_oauth_log(
-        "H2",
-        "mcp_google_workspace_oauth.py:start",
-        "google oauth start",
-        {
-            "connector_id": connector_id,
-            "endpoint_host": urlparse(endpoint_url).netloc,
-            "redirect_path": urlparse(callback).path,
-            "prm_scope_count": len(prm_scopes),
-            "chosen_scope_count": len(scope_string.split()),
-            "has_gmail_modify": "gmail.modify" in scope_string,
-            "read_only": bool(read_only),
-        },
-    )
     auth_endpoint = str(oidc.get("authorization_endpoint") or "").strip()
     if not auth_endpoint:
         raise ValueError("Google OIDC metadata missing authorization_endpoint")
@@ -266,16 +213,6 @@ async def exchange_google_code_for_token(*, code: str, pending: dict[str, Any]) 
     }
     if resource:
         token_payload["resource"] = resource
-    _debug_oauth_log(
-        "H3",
-        "mcp_google_workspace_oauth.py:exchange",
-        "google token exchange",
-        {
-            "endpoint_host": urlparse(endpoint_url).netloc,
-            "has_resource": bool(resource),
-            "resource_host": urlparse(resource).netloc if resource else "",
-        },
-    )
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.post(
             token_endpoint,
@@ -310,21 +247,9 @@ def refresh_google_access_token(refresh_token: str) -> str:
             headers={"Accept": "application/json"},
         )
         if resp.status_code >= 400:
-            _debug_oauth_log(
-                "H4",
-                "mcp_google_workspace_oauth.py:refresh",
-                "google refresh failed",
-                {"status": resp.status_code},
-            )
             return ""
         tokens = resp.json()
     access = str(tokens.get("access_token") or "").strip()
-    _debug_oauth_log(
-        "H4",
-        "mcp_google_workspace_oauth.py:refresh",
-        "google refresh ok",
-        {"has_access": bool(access)},
-    )
     return access
 
 

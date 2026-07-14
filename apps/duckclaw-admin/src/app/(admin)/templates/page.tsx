@@ -257,15 +257,12 @@ function AgentCard({
           <div className="min-w-0 flex-1">
             <div className="flex items-start justify-between gap-2">
               <h2 className="line-clamp-2 text-base font-semibold leading-snug text-gov-gray-900 dark:text-dark-text">
-                {agent.name ?? agent.id}
+                {agent.display_name || agent.name || agent.id}
               </h2>
               <span className="shrink-0 rounded-full bg-gov-gray-100 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-gov-gray-500 dark:bg-dark-bg dark:text-dark-muted">
                 {isAdmin ? 'worker' : 'agente'}
               </span>
             </div>
-            <p className="mt-0.5 line-clamp-1 font-mono text-[11px] text-gov-gray-400 dark:text-dark-muted">
-              {agent.id}
-            </p>
           </div>
         </div>
       </div>
@@ -308,7 +305,7 @@ function AgentCard({
               type="button"
               onClick={() => onRequestDeactivate(agent)}
               title="Desactivar del catálogo"
-              aria-label={`Desactivar ${agent.name ?? agent.id}`}
+              aria-label={`Desactivar ${agent.display_name || agent.name || agent.id}`}
               className="inline-flex items-center gap-1 rounded-lg border border-amber-200 px-2.5 py-1.5 text-xs font-semibold text-amber-800 hover:bg-amber-50 dark:border-amber-900/50 dark:text-amber-300 dark:hover:bg-amber-950/30"
             >
               <Power size={14} />
@@ -318,7 +315,7 @@ function AgentCard({
               type="button"
               onClick={() => onRequestHardDelete(agent)}
               title="Eliminar definitivo"
-              aria-label={`Eliminar ${agent.name ?? agent.id}`}
+              aria-label={`Eliminar ${agent.display_name || agent.name || agent.id}`}
               className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50 dark:border-red-900/50 dark:text-red-300 dark:hover:bg-red-950/30"
             >
               <Trash2 size={14} />

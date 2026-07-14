@@ -22,3 +22,22 @@ uv run duckops down --all
 cd apps/duckclaw-admin
 pnpm install
 pnpm dev
+
+--------- MCP CONNECTOR PRESETS ----------
+# El YAML NO es migración DuckDB: se lee en runtime (lru_cache).
+# Bundled: packages/shared/src/duckclaw/seeds/mcp_connector_presets.yaml
+# Override: config/mcp_connector_presets.yaml  o  DUCKCLAW_MCP_PRESETS_PATH=/ruta.yaml
+
+# Tras editar presets (Notion, Calendar, …) → reinicia gateway:
+pm2 restart DuckClaw-API-Gateway
+# o: uv run duckops stack deploy --no-migrate
+
+# Ver plantillas expuestas al Admin:
+curl -s -H "X-Admin-Key: $DUCKCLAW_ADMIN_API_KEY" \
+  http://127.0.0.1:8000/api/v1/admin/mcp/connectors/presets | jq '.presets[].preset_id'
+
+# Capas:
+#   presets YAML  = plantillas (GET /presets) → UI Conectores → "Nuevo desde plantilla"
+#   admin_mcp_connectors = instancias en DuckDB (OAuth, grants, test)
+#   default_connectors: en el YAML = auto-materializan al boot / ensure_default_mcp_connectors
+#   tab Referencia = registry oficial MCP (docs), no crea conectores

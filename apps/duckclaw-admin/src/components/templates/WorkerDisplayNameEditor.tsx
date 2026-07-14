@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Pencil, Check, X } from 'lucide-react';
 import { adminService } from '@/services/adminService';
+import { pollWriteTask } from '@/lib/pollWriteTask';
 import { clampInput, LIMITS } from '@/lib/validation';
 
 type WorkerDisplayNameEditorProps = {
@@ -55,7 +56,16 @@ export function WorkerDisplayNameEditor({
     setError(null);
     try {
       const result = await adminService.patchTemplate(workerId, { display_name: next });
-      onSaved(result.display_name);
+      if (result.task_id) {
+        const polled = await pollWriteTask(result.task_id);
+        if (polled.state === 'failed') {
+          throw new Error(polled.detail || 'El rename no se aplicó en DB');
+        }
+        if (polled.state === 'timeout' || polled.state === 'not_found') {
+          throw new Error('No se confirmó el rename en DB; reintenta o refresca.');
+        }
+      }
+      onSaved(result.display_name || next);
       setEditing(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar el nombre');
@@ -64,12 +74,10 @@ export function WorkerDisplayNameEditor({
     }
   };
 
+  const title = displayName.trim() || 'Sin nombre';
+
   if (!canEdit) {
-    return (
-      <h1 className="text-2xl font-black dark:text-dark-text">
-        {displayName || workerId}
-      </h1>
-    );
+    return <h1 className="text-2xl font-black dark:text-dark-text">{title}</h1>;
   }
 
   if (editing) {
@@ -95,7 +103,7 @@ export function WorkerDisplayNameEditor({
             className="inline-flex items-center gap-1 rounded-xl bg-gov-blue-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-50"
           >
             <Check size={16} />
-            Guardar
+            {saving ? 'Guardando…' : 'Guardar'}
           </button>
           <button
             type="button"
@@ -107,27 +115,23 @@ export function WorkerDisplayNameEditor({
             Cancelar
           </button>
         </div>
-        <p className="font-mono text-xs text-gov-gray-500 dark:text-dark-muted">{workerId}</p>
         {error && <p className="text-sm text-red-600 dark:text-red-300">{error}</p>}
       </div>
     );
   }
 
   return (
-    <div className="space-y-1">
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-2xl font-black dark:text-dark-text">{displayName || workerId}</h1>
-        <button
-          type="button"
-          onClick={startEdit}
-          className="inline-flex items-center gap-1 rounded-lg border border-gov-blue-100 px-2 py-1 text-xs font-bold text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
-          title="Editar nombre visible"
-        >
-          <Pencil size={12} />
-          Renombrar
-        </button>
-      </div>
-      <p className="font-mono text-xs text-gov-gray-500 dark:text-dark-muted">{workerId}</p>
+    <div className="flex flex-wrap items-center gap-2">
+      <h1 className="text-2xl font-black dark:text-dark-text">{title}</h1>
+      <button
+        type="button"
+        onClick={startEdit}
+        className="inline-flex items-center gap-1 rounded-lg border border-gov-blue-100 px-2 py-1 text-xs font-bold text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
+        title="Editar nombre visible"
+      >
+        <Pencil size={12} />
+        Renombrar
+      </button>
     </div>
   );
 }

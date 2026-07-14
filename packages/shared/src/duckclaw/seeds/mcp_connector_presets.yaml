@@ -90,6 +90,22 @@ presets:
       admin_label: HTTP remoto · OAuth PKCE (Maps)
       docs_url: https://developers.google.com/maps/ai/grounding-lite/reference/mcp
 
+  # Remote MCP (docs): https://docs.tavily.com/documentation/mcp
+  # Auth: API key como Bearer (o ?tavilyApiKey= en URL). OAuth opcional en clientes MCP-native.
+  tavily:
+    display_name: Tavily
+    transport: streamable_http
+    endpoint_url: https://mcp.tavily.com/mcp/
+    auth_kind: bearer
+    read_only: true
+    egress_hosts: [mcp.tavily.com]
+    metadata:
+      oauth_pkce: false
+      manifest_skill_id: research
+      integration_id: tavily
+      admin_label: HTTP remoto · Bearer (Tavily API key)
+      docs_url: https://docs.tavily.com/documentation/mcp
+
   mcp_fetch:
     profile: stdio_npx_ro
     display_name: MCP Fetch (local stdio)

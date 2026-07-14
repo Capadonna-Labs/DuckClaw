@@ -16,6 +16,24 @@ profiles:
     auth_kind: none
     read_only: true
 
+  stdio_npx_rw:
+    transport: stdio
+    launch_command: npx
+    auth_kind: none
+    read_only: false
+
+  stdio_uvx_ro:
+    transport: stdio
+    launch_command: uvx
+    auth_kind: none
+    read_only: true
+
+  stdio_uvx_rw:
+    transport: stdio
+    launch_command: uvx
+    auth_kind: none
+    read_only: false
+
 presets:
   remote_http_oauth:
     display_name: Higgsfield
@@ -136,3 +154,290 @@ presets:
     launch_args: ["-y", "@modelcontextprotocol/server-time"]
     metadata:
       install: npx -y @modelcontextprotocol/server-time
+
+  # ═══════════════════════════════════════════
+  # Infra / Cloud
+  # ═══════════════════════════════════════════
+
+  terraform:
+    profile: stdio_npx_rw
+    display_name: Terraform
+    launch_args: ["-y", "mcp-server-terraform"]
+    metadata:
+      install: npx -y mcp-server-terraform
+      manifest_skill_id: terraform
+      admin_label: Terraform IaC (local stdio)
+      docs_url: https://www.npmjs.com/package/mcp-server-terraform
+
+  aws:
+    profile: stdio_npx_rw
+    display_name: AWS
+    launch_args: ["-y", "@yawlabs/aws-mcp"]
+    metadata:
+      install: npx -y @yawlabs/aws-mcp
+      manifest_skill_id: aws
+      admin_label: AWS (local stdio, SSO-ready)
+      docs_url: https://www.npmjs.com/package/@yawlabs/aws-mcp
+      # Soporta AWS SSO + IAM Identity Center. Describe EC2, lista S3, sugiere hardening IAM.
+
+  kubernetes_lens:
+    profile: stdio_npx_rw
+    display_name: Kubernetes Lens
+    launch_args: ["-y", "lens-mcp-server"]
+    metadata:
+      install: npx -y lens-mcp-server
+      manifest_skill_id: kubernetes
+      admin_label: Kubernetes Lens (local stdio)
+      docs_url: https://www.npmjs.com/package/lens-mcp-server
+      # Integración con AWS EKS y Azure AKS directa.
+
+  # ═══════════════════════════════════════════
+  # Observabilidad / Incident Management
+  # ═══════════════════════════════════════════
+
+  datadog:
+    transport: stdio
+    launch_command: npx
+    launch_args: ["-y", "@winor30/mcp-server-datadog"]
+    display_name: Datadog
+    auth_kind: bearer
+    read_only: false
+    metadata:
+      install: npx -y @winor30/mcp-server-datadog
+      oauth_pkce: false
+      manifest_skill_id: datadog
+      admin_label: Datadog · Bearer (API + App key)
+      docs_url: https://www.npmjs.com/package/@winor30/mcp-server-datadog
+      env_vars: [DATADOG_API_KEY, DATADOG_APP_KEY, DATADOG_SITE]
+
+  pagerduty:
+    transport: stdio
+    launch_command: npx
+    launch_args: ["-y", "@aparkerio/pagerduty-mcp-server"]
+    display_name: PagerDuty
+    auth_kind: bearer
+    read_only: false
+    metadata:
+      install: npx -y @aparkerio/pagerduty-mcp-server
+      oauth_pkce: false
+      manifest_skill_id: pagerduty
+      admin_label: PagerDuty Incidentes · Bearer (API key)
+      docs_url: https://www.npmjs.com/package/@aparkerio/pagerduty-mcp-server
+      env_vars: [PAGERDUTY_API_KEY]
+      # Hasta 30% reducción en MTTR según benchmarks.
+
+  # ═══════════════════════════════════════════
+  # Ofimática / Productividad
+  # ═══════════════════════════════════════════
+
+  microsoft_365:
+    transport: stdio
+    launch_command: npx
+    launch_args: ["-y", "@softeria/ms-365-mcp-server"]
+    display_name: Microsoft 365 (Graph API)
+    auth_kind: bearer
+    read_only: false
+    metadata:
+      install: npx -y @softeria/ms-365-mcp-server
+      oauth_pkce: false
+      manifest_skill_id: microsoft_365
+      admin_label: Microsoft 365 Graph API · Bearer (token Entra ID)
+      docs_url: https://www.npmjs.com/package/@softeria/ms-365-mcp-server
+      env_vars: [M365_CLIENT_ID, M365_CLIENT_SECRET, M365_TENANT_ID]
+
+
+  excel:
+    profile: stdio_uvx_rw
+    display_name: Excel (haris-musa)
+    launch_args: ["excel-mcp-server"]
+    metadata:
+      install: uvx excel-mcp-server
+      manifest_skill_id: excel
+      admin_label: Excel local (uvx, haris-musa)
+      docs_url: https://github.com/haris-musa/excel-mcp-server
+
+  adeu_docx:
+    profile: stdio_npx_rw
+    display_name: Adeu DOCX
+    launch_args: ["-y", "@adeu/mcp-server"]
+    metadata:
+      install: npx -y @adeu/mcp-server
+      manifest_skill_id: adeu
+      admin_label: Adeu redlining DOCX (local stdio)
+      docs_url: https://github.com/dealfluence/adeu
+      # Edición con track changes, diff y sanitización de documentos Word .docx.
+
+  # ═══════════════════════════════════════════
+  # Bases de Datos
+  # ═══════════════════════════════════════════
+
+  google_db_toolbox:
+    profile: stdio_uvx_rw
+    display_name: Google MCP Toolbox for Databases
+    launch_args: ["mcp-toolbox-database"]
+    metadata:
+      install: uvx mcp-toolbox-database
+      manifest_skill_id: google_db
+      admin_label: Google DB Toolbox multi-DB (uvx)
+      docs_url: https://github.com/google/mcp-toolbox-database
+      # Postgres, MySQL, SQL Server, BigQuery, Spanner, AlloyDB y más.
+
+  postgres:
+    profile: stdio_npx_rw
+    display_name: PostgreSQL
+    launch_args: ["-y", "postgres-mcp-server"]
+    metadata:
+      install: npx -y postgres-mcp-server
+      manifest_skill_id: postgres
+      admin_label: PostgreSQL (local stdio, requiere connection string)
+      docs_url: https://www.npmjs.com/package/postgres-mcp-server
+      # Requiere DATABASE_URL gestionado como secreto de plataforma (postgresql://...).
+      secret_env: [DATABASE_URL]
+
+  neon:
+    transport: stdio
+    launch_command: uvx
+    launch_args: ["neon-mcp-server"]
+    display_name: Neon (serverless Postgres)
+    auth_kind: bearer
+    read_only: false
+    metadata:
+      install: uvx neon-mcp-server
+      oauth_pkce: false
+      manifest_skill_id: neon
+      admin_label: Neon Serverless Postgres · Bearer (API key)
+      docs_url: https://neon.tech/docs/ai/mcp-server
+      env_vars: [NEON_API_KEY]
+
+  pg_edge_postgres:
+    profile: stdio_uvx_rw
+    display_name: pgEdge Postgres
+    launch_args: ["pgedge-mcp"]
+    metadata:
+      install: uvx pgedge-mcp
+      manifest_skill_id: pg_edge
+      admin_label: pgEdge Postgres distribuido (uvx)
+      docs_url: https://www.pgedge.com/docs/mcp
+
+  supabase:
+    transport: stdio
+    launch_command: npx
+    launch_args: ["-y", "@supabase/mcp-server-supabase"]
+    display_name: Supabase
+    auth_kind: bearer
+    read_only: false
+    metadata:
+      install: npx -y @supabase/mcp-server-supabase
+      oauth_pkce: false
+      manifest_skill_id: supabase
+      admin_label: Supabase · Bearer (access token)
+      docs_url: https://www.npmjs.com/package/@supabase/mcp-server-supabase
+      env_vars: [SUPABASE_ACCESS_TOKEN]
+
+  aws_aurora:
+    profile: stdio_uvx_rw
+    display_name: AWS Aurora (MySQL/PostgreSQL)
+    launch_args: ["aws-aurora-mcp"]
+    metadata:
+      install: uvx aws-aurora-mcp
+      manifest_skill_id: aws_aurora
+      admin_label: AWS Aurora MySQL/PostgreSQL (uvx)
+      docs_url: https://aws.amazon.com/rds/aurora/
+      # Compatible con Aurora MySQL y Aurora PostgreSQL.
+
+  mysql:
+    profile: stdio_npx_rw
+    display_name: MySQL
+    launch_args: ["-y", "mysql-mcp-server"]
+    metadata:
+      install: npx -y mysql-mcp-server
+      manifest_skill_id: mysql
+      admin_label: MySQL (local stdio, requiere connection string)
+      docs_url: https://www.npmjs.com/package/mysql-mcp-server
+      # Requiere MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE como secretos de plataforma.
+      secret_env: [MYSQL_HOST, MYSQL_PORT, MYSQL_USER, MYSQL_PASSWORD, MYSQL_DATABASE]
+
+  dbutils:
+    profile: stdio_uvx_rw
+    display_name: DBUtils (Postgres + SQLite)
+    launch_args: ["dbutils-mcp"]
+    metadata:
+      install: uvx dbutils-mcp
+      manifest_skill_id: dbutils
+      admin_label: DBUtils Postgres + SQLite (uvx)
+      docs_url: https://pypi.org/project/dbutils-mcp/
+      # Multi-DB ligero: PostgreSQL y SQLite.
+
+  duckdb:
+    profile: stdio_npx_rw
+    display_name: DuckDB
+    launch_args: ["-y", "duckdb-mcp-server"]
+    metadata:
+      install: npx -y duckdb-mcp-server
+      manifest_skill_id: duckdb
+      admin_label: DuckDB analítico embebido (local stdio)
+      docs_url: https://duckdb.org/docs/
+
+  snowflake:
+    transport: stdio
+    launch_command: uvx
+    launch_args: ["mcp-server-snowflake"]
+    display_name: Snowflake
+    auth_kind: bearer
+    read_only: false
+    metadata:
+      install: uvx mcp-server-snowflake
+      oauth_pkce: false
+      manifest_skill_id: snowflake
+      admin_label: Snowflake · Bearer (OAuth token o credenciales)
+      docs_url: https://docs.snowflake.com/en/developer-guide/snowflake-mcp
+      env_vars: [SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PASSWORD, SNOWFLAKE_DATABASE, SNOWFLAKE_WAREHOUSE, SNOWFLAKE_ROLE]
+
+  sqlite:
+    profile: stdio_uvx_rw
+    display_name: SQLite
+    launch_args: ["sqlite-mcp-server"]
+    metadata:
+      install: uvx sqlite-mcp-server
+      manifest_skill_id: sqlite
+      admin_label: SQLite embebido (uvx)
+      docs_url: https://www.sqlite.org/docs.html
+
+  cockroachdb:
+    profile: stdio_uvx_rw
+    display_name: CockroachDB
+    launch_args: ["cockroachdb-mcp-server"]
+    metadata:
+      install: uvx cockroachdb-mcp-server
+      manifest_skill_id: cockroachdb
+      admin_label: CockroachDB distribuido (uvx, requiere connection string)
+      docs_url: https://www.cockroachlabs.com/docs/
+      # Requiere DATABASE_URL gestionado como secreto de plataforma (postgresql:// cockroach).
+      secret_env: [DATABASE_URL]
+
+  redis:
+    profile: stdio_uvx_rw
+    display_name: Redis
+    launch_args: ["redis-mcp"]
+    metadata:
+      install: uvx redis-mcp
+      manifest_skill_id: redis
+      admin_label: Redis cache (local stdio, requiere connection string)
+      docs_url: https://redis.io/docs/
+      # Requiere REDIS_URL gestionado como secreto de plataforma (redis://...).
+      secret_env: [REDIS_URL]
+
+  mongodb:
+    transport: stdio
+    launch_command: uvx
+    launch_args: ["mongodb-mcp-server"]
+    display_name: MongoDB
+    auth_kind: bearer
+    read_only: false
+    metadata:
+      install: uvx mongodb-mcp-server
+      oauth_pkce: false
+      manifest_skill_id: mongodb
+      admin_label: MongoDB Atlas · Bearer (API key o connection string)
+      docs_url: https://www.mongodb.com/docs/
+      env_vars: [MONGODB_URI, MONGODB_ATLAS_API_KEY, MONGODB_ATLAS_API_SECRET]

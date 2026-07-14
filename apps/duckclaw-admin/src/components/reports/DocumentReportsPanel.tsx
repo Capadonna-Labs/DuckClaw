@@ -73,7 +73,7 @@ export function DocumentReportsPanel() {
             Actualizar lista
           </button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2">
           {loading ? (
             <p className="p-3 text-xs text-slate-500">Cargando…</p>
           ) : error ? (
@@ -159,7 +159,7 @@ export function DocumentReportsPanel() {
                   sandbox="allow-same-origin"
                 />
               </div>
-              <div className="flex w-64 shrink-0 flex-col overflow-y-auto bg-slate-900 p-4">
+              <div className="scrollbar-thin flex w-64 shrink-0 flex-col overflow-y-auto bg-slate-900 p-4">
                 <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Secciones
                 </h4>

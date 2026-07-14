@@ -358,7 +358,7 @@ export default function TemplateEditorPage() {
       <div className="grid gap-6 lg:grid-cols-12">
         {showSidebar ? (
           <div className="lg:col-span-3">
-            <aside className="space-y-3 rounded-2xl border border-gov-gray-100 bg-white p-3 dark:border-dark-border dark:bg-dark-surface lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
+            <aside className="scrollbar-thin space-y-3 rounded-2xl border border-gov-gray-100 bg-white p-3 dark:border-dark-border dark:bg-dark-surface lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto">
               {section === 'comportamiento' && (
                 <FileNavGroup
                   files={promptFiles}
@@ -601,7 +601,7 @@ function TemplateFileEditor({
 
   return (
     <div
-      className="min-h-[420px] w-full overflow-y-auto rounded-2xl border bg-white p-4 dark:border-dark-border dark:bg-dark-bg"
+      className="scrollbar-thin min-h-[420px] w-full overflow-y-auto rounded-2xl border bg-white p-4 dark:border-dark-border dark:bg-dark-bg"
       aria-label="Vista previa Markdown"
     >
       {content.trim() ? (

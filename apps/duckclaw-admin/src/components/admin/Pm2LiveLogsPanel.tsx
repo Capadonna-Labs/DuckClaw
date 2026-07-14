@@ -22,7 +22,7 @@ const LOG_VIEWPORT_SHELL_CLASS =
   'flex min-h-[180px] max-h-[min(50vh,420px)] min-w-0 flex-col overflow-hidden';
 
 const LOG_VIEWPORT_SCROLL_CLASS =
-  'h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-2 font-mono text-[10px] leading-relaxed text-gov-gray-800 sm:p-3 sm:text-[11px] dark:text-slate-200';
+  'scrollbar-thin h-full min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain p-2 font-mono text-[10px] leading-relaxed text-gov-gray-800 sm:p-3 sm:text-[11px] dark:text-slate-200';
 
 /** Clases compartidas para viewport PM2 con scroll interno acotado. */
 export const PM2_LOG_VIEWPORT_SHELL_CLASS = LOG_VIEWPORT_SHELL_CLASS;

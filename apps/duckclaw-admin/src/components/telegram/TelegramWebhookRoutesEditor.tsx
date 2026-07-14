@@ -131,7 +131,7 @@ export function TelegramWebhookRoutesEditor({ canWrite }: { canWrite: boolean })
 
         {!jsonMode && (
           <>
-            <div className="overflow-x-auto rounded-2xl border dark:border-dark-border">
+            <div className="scrollbar-hide overflow-x-auto rounded-2xl border dark:border-dark-border">
               <table className="w-full text-sm">
                 <thead className="bg-gov-gray-50 dark:bg-dark-bg text-left text-gov-gray-500">
                   <tr>

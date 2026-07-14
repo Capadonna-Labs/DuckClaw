@@ -139,7 +139,7 @@ export default function Sidebar({ onMobileClose }: SidebarProps = {}) {
           <BrandTitles />
         </div>
       </div>
-      <div className="flex-1 min-h-0 px-3 py-3 space-y-3 overflow-y-auto">
+      <div className="flex-1 min-h-0 px-3 py-3 space-y-3 overflow-y-auto scrollbar-thin">
         {entries.map((entry) => {
           if (entry.type === 'item') {
             return (

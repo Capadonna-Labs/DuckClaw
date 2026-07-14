@@ -22,7 +22,7 @@ export function OfficialMcpReferenceTable({
     return <p className="py-4 text-sm text-gov-gray-500">Sin servidores oficiales cargados.</p>;
   }
   return (
-    <div className="overflow-x-auto rounded-2xl border dark:border-dark-border">
+    <div className="scrollbar-hide overflow-x-auto rounded-2xl border dark:border-dark-border">
       <table className="w-full text-sm">
         <thead className="bg-gov-gray-50 text-left text-gov-gray-500 dark:bg-dark-bg">
           <tr>

@@ -84,7 +84,7 @@ export function McpServerControl({
       ) : null}
 
       {opsOutput ? (
-        <pre className="max-h-48 overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-900 p-4 font-mono text-xs text-slate-100">
+        <pre className="scrollbar-hide max-h-48 overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-900 p-4 font-mono text-xs text-slate-100">
           {opsOutput}
         </pre>
       ) : null}
@@ -95,7 +95,7 @@ export function McpServerControl({
             Transparente para usuarios del chat: solo aparecen si un cliente MCP se conecta a este servidor. No
             confundir con tools de la pestaña Conectores.
           </p>
-          <div className="overflow-x-auto">
+          <div className="scrollbar-hide overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-gov-gray-500">

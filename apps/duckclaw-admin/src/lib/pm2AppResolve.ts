@@ -10,7 +10,7 @@ export const GATEWAY_PM2_CANDIDATES = [
 
 export const DB_WRITER_PM2_CANDIDATES = ['DuckClaw-DB-Writer', 'duckclaw-db-writer'] as const;
 
-async function pm2RegisteredNames(_cwd: string): Promise<Set<string>> {
+async function pm2RegisteredNames(): Promise<Set<string>> {
   try {
     const stdout = await pm2JlistStdout(PM2_JLIST_TIMEOUT_MS);
     const apps = parsePm2Jlist(stdout) as { name?: string }[];
@@ -27,7 +27,7 @@ export async function resolvePm2AppName(
   cwd: string,
   envVar?: string
 ): Promise<string> {
-  const names = await pm2RegisteredNames(cwd);
+  const names = await pm2RegisteredNames();
   const preferred = envVar ? (process.env[envVar] || '').trim() : '';
   if (preferred && (!names.size || names.has(preferred))) return preferred;
   for (const candidate of candidates) {

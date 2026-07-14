@@ -106,7 +106,7 @@ export function KnowledgeFolderBrowser({
         </p>
       </div>
 
-      <div className="max-h-[280px] min-h-[200px] overflow-y-auto px-2 py-2">
+      <div className="scrollbar-thin max-h-[280px] min-h-[200px] overflow-y-auto px-2 py-2">
         {loading ? (
           <p className="flex items-center gap-2 px-2 py-6 text-sm text-gov-gray-500 dark:text-dark-muted">
             <Loader2 size={16} className="animate-spin" />

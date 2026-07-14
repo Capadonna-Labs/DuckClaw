@@ -209,7 +209,7 @@ export function ConsoleUsersPanel() {
       {error && <p className="text-red-600 text-sm">{error}</p>}
       {msg && <p className="text-green-700 text-sm">{msg}</p>}
 
-      <div className="overflow-x-auto rounded-2xl border dark:border-dark-border">
+      <div className="scrollbar-hide overflow-x-auto rounded-2xl border dark:border-dark-border">
         <table className="w-full min-w-[560px] text-sm">
           <thead className="bg-gov-gray-50 dark:bg-dark-bg text-left">
             <tr>

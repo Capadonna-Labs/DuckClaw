@@ -182,6 +182,7 @@ async def start_higgsfield_oauth(
             "connector_id": connector_id,
             "tenant_id": tenant_id,
             "actor_email": actor_email,
+            "preset_id": preset_id or "remote_http_oauth",
             "code_verifier": verifier,
             "redirect_uri": callback,
             "client_id": client_id,

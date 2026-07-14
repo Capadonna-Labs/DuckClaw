@@ -102,7 +102,7 @@ function SkillTable({
   }
 
   return (
-    <div className="max-h-[50vh] overflow-x-auto rounded-2xl border dark:border-dark-border">
+    <div className="scrollbar-hide max-h-[50vh] overflow-x-auto rounded-2xl border dark:border-dark-border">
       <table className="w-full text-sm">
         <thead className="sticky top-0 bg-gov-gray-50 dark:bg-dark-bg">
           <tr>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -24,9 +24,10 @@ import {
   type McpConnectorTestResult,
 } from '@/services/adminService';
 import { pollWriteTask } from '@/lib/pollWriteTask';
-import { EmptyState } from '@/components/shared/EmptyState';
+import EmptyState from '@/components/shared/EmptyState';
 import {
   filterMcpConnectors,
+  looksLikeAutofillEmail,
   MCP_CONNECTORS_PAGE_SIZE,
 } from '@/lib/mcpConnectorsList';
 import { presetUsesOAuthPkce } from '@/lib/mcpPresetAuth';
@@ -35,6 +36,8 @@ import { paginateItems } from '@/lib/pagination';
 type McpConnectorsPanelProps = {
   canWrite: boolean;
 };
+
+const MCP_CONNECTOR_FILTER_INPUT_ID = 'mcp-connector-filter';
 
 export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   const searchParams = useSearchParams();
@@ -50,6 +53,8 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   const [testResults, setTestResults] = useState<Record<string, McpConnectorTestResult>>({});
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const autofillClearedRef = useRef(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -74,6 +79,23 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   }, [load]);
 
   useEffect(() => {
+    if (loading || autofillClearedRef.current || connectors.length === 0) return;
+    const input = searchInputRef.current;
+    if (!input) return;
+    const domValue = input.value;
+    const reactValue = query;
+    const domLooksLikeEmail = looksLikeAutofillEmail(domValue);
+    const reactLooksLikeEmail = looksLikeAutofillEmail(reactValue);
+
+    if (domLooksLikeEmail || reactLooksLikeEmail) {
+      autofillClearedRef.current = true;
+      setQuery('');
+      input.value = '';
+      return;
+    }
+  }, [loading, query, connectors.length]);
+
+  useEffect(() => {
     const oauth = searchParams.get('oauth');
     if (oauth === 'success') {
       setError(null);
@@ -92,7 +114,15 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     setBusyId(`oauth:${connectorId}`);
     setError(null);
     try {
-      const result = await adminService.startMcpConnectorOAuth(connectorId, oauthRedirectUri());
+      const connector = connectors.find((c) => c.connector_id === connectorId);
+      const preset = connector?.preset_id ? presetById[connector.preset_id] : undefined;
+      const isGoogleWorkspace =
+        preset?.metadata?.oauth_provider === 'google_workspace' ||
+        (connector?.preset_id || '').startsWith('google_');
+      const result = await adminService.startMcpConnectorOAuth(
+        connectorId,
+        isGoogleWorkspace ? '' : oauthRedirectUri()
+      );
       window.location.href = result.authorization_url;
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo iniciar OAuth');
@@ -184,7 +214,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
         throw new Error(polled.detail || 'Grant no se aplicó en DB');
       }
       const connector = connectors.find((c) => c.connector_id === connectorId);
-      const workerLabel = workers.find((w) => w.id === workerId)?.display_name || workerId;
+      const workerLabel = workers.find((w) => w.id === workerId)?.name || workerId;
       const presetId = connector?.preset_id?.trim();
       const skillHint = presetId
         ? ` Skill ${presetId} activada en manifest si aplica.`
@@ -236,16 +266,37 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
         ) : (
           <>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <label className="relative block flex-1">
+              <label htmlFor={MCP_CONNECTOR_FILTER_INPUT_ID} className="relative block flex-1">
                 <Search
                   size={14}
                   className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gov-gray-400"
                 />
                 <input
-                  type="search"
+                  ref={searchInputRef}
+                  id={MCP_CONNECTOR_FILTER_INPUT_ID}
+                  name="duckclaw-mcp-connector-filter"
+                  type="text"
+                  inputMode="search"
+                  role="searchbox"
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  readOnly
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-1p-ignore="true"
+                  data-lpignore="true"
+                  onFocus={(e) => e.currentTarget.removeAttribute('readonly')}
+                  onChange={(e) => {
+                    const next = e.target.value;
+                    if (looksLikeAutofillEmail(next)) {
+                      setQuery('');
+                      return;
+                    }
+                    setQuery(next);
+                  }}
                   placeholder="Buscar conector…"
+                  aria-label="Buscar conector MCP"
                   className="w-full rounded-xl border border-gov-gray-200 py-2 pl-9 pr-3 text-sm dark:border-dark-border dark:bg-dark-bg"
                 />
               </label>
@@ -557,7 +608,7 @@ function ConnectorCard({
               : testResult.error || 'Test falló'}
           </div>
           {testResult.tools.length > 0 && (
-            <ul className="mt-2 max-h-40 space-y-1 overflow-y-auto font-mono text-xs">
+            <ul className="scrollbar-thin mt-2 max-h-40 space-y-1 overflow-y-auto font-mono text-xs">
               {testResult.tools.map((tool) => (
                 <li key={tool.name}>{tool.name}</li>
               ))}

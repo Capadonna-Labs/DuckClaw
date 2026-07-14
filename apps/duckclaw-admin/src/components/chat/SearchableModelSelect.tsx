@@ -169,7 +169,7 @@ export function SearchableModelSelect({
               aria-label="Buscar modelo"
             />
           </div>
-          <ul className={`max-h-52 overflow-y-auto py-1 ${compact ? 'text-[10px]' : 'text-xs'}`}>
+          <ul className={`scrollbar-thin max-h-52 overflow-y-auto py-1 ${compact ? 'text-[10px]' : 'text-xs'}`}>
             {filtered.map((o) => {
               const active = o.value === value;
               return (

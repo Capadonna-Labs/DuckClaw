@@ -371,7 +371,7 @@ export default function PromptPoliciesPage({ embedded = false }: EmbeddedViewPro
                   </button>
                 </div>
               </div>
-              <div className="max-h-[min(70vh,720px)] overflow-y-auto p-4">
+              <div className="scrollbar-thin max-h-[min(70vh,720px)] overflow-y-auto p-4">
                 {frameworkContent ? (
                   <ChatMarkdown content={frameworkContent} className="text-sm" />
                 ) : (

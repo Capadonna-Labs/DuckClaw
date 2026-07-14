@@ -167,7 +167,7 @@ export default function TrainDataStep({ source, onSourceChange, hfDataset, onHfD
           </p>
         </div>
 
-        <div className="mt-4 overflow-x-auto">
+        <div className="scrollbar-hide mt-4 overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b dark:border-dark-border text-gov-gray-400">

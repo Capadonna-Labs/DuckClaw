@@ -68,7 +68,7 @@ function CollapsibleCategory({
         ) : null}
       </button>
       {open ? (
-        <div className="max-h-52 space-y-0.5 overflow-y-auto border-t border-gov-gray-100 px-1 py-1 dark:border-dark-border">
+        <div className="scrollbar-thin max-h-52 space-y-0.5 overflow-y-auto border-t border-gov-gray-100 px-1 py-1 dark:border-dark-border">
           {children}
         </div>
       ) : null}

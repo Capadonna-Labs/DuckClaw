@@ -69,7 +69,7 @@ export default function TrainRunStep({ config, backend }: TrainRunStepProps) {
 
       <div>
         <p className="text-xs font-bold text-gov-gray-400 uppercase tracking-wide mb-2">Logs</p>
-        <div className="rounded-2xl bg-gov-gray-900 dark:bg-black/60 border border-gov-gray-800 dark:border-dark-border p-4 h-40 overflow-y-auto font-mono text-xs text-gov-gray-500">
+        <div className="scrollbar-thin rounded-2xl bg-gov-gray-900 dark:bg-black/60 border border-gov-gray-800 dark:border-dark-border p-4 h-40 overflow-y-auto font-mono text-xs text-gov-gray-500">
           <p className="text-gov-gray-600">$ Pendiente de conexion con nodo de entrenamiento...</p>
           <p className="text-gov-gray-700 mt-1">Configura el backend y presiona &quot;Iniciar entrenamiento&quot; para comenzar.</p>
         </div>

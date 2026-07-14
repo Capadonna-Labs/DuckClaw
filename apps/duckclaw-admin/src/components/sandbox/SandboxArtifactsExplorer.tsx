@@ -218,7 +218,7 @@ function PreviewPane({
           </button>
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-3">
         {preview.status === 'loading' ? (
           <p className="flex items-center gap-2 text-xs text-slate-500">
             <Loader2 size={14} className="animate-spin" />
@@ -523,7 +523,7 @@ export function SandboxArtifactsExplorer({
 
       <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
         <aside className="flex w-full shrink-0 flex-col border-b border-slate-800 lg:w-80 lg:border-b-0 lg:border-r">
-          <div className="max-h-48 overflow-y-auto lg:max-h-none lg:flex-1">
+          <div className="scrollbar-thin max-h-48 overflow-y-auto lg:max-h-none lg:flex-1">
             {loading ? (
               <p className="p-3 text-xs text-slate-500">Cargando runs…</p>
             ) : error ? (
@@ -582,7 +582,7 @@ export function SandboxArtifactsExplorer({
               {artifactsLoading ? (
                 <p className="px-3 pb-2 text-xs text-slate-500">Cargando…</p>
               ) : (
-                <ul className="max-h-40 overflow-y-auto pb-2">
+                <ul className="scrollbar-thin max-h-40 overflow-y-auto pb-2">
                   {artifactGroups.map(([folder, items]) => (
                     <li key={folder || '__root__'}>
                       {folder ? (

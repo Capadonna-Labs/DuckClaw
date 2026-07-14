@@ -346,7 +346,7 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
         </nav>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
+      <div className="scrollbar-thin flex-1 overflow-y-auto px-5 py-4">
         {error ? (
           <p
             role="alert"

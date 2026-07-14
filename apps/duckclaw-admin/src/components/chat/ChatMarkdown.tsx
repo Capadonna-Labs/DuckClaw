@@ -80,16 +80,16 @@ function buildMarkdownComponents(variant: MarkdownVariant): Components {
     : 'border-l-4 border-gov-blue-400 dark:border-dark-cyan pl-3 my-3 text-gov-gray-600 dark:text-dark-muted italic';
   const hr = isUser ? 'my-4 border-white/25' : 'my-4 border-gov-gray-200 dark:border-dark-border';
   const tableWrap = isUser
-    ? 'my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-white/25 [-webkit-overflow-scrolling:touch]'
-    : 'my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gov-gray-200 dark:border-dark-border [-webkit-overflow-scrolling:touch]';
+    ? 'scrollbar-hide my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-white/25 [-webkit-overflow-scrolling:touch]'
+    : 'scrollbar-hide my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gov-gray-200 dark:border-dark-border [-webkit-overflow-scrolling:touch]';
   const thead = isUser
     ? 'bg-white/10 text-left'
     : 'bg-gov-gray-100 dark:bg-dark-sidebar text-left';
   const thBorder = isUser ? 'border-b border-white/20' : 'border-b border-gov-gray-200 dark:border-dark-border';
   const tdBorder = isUser ? 'border-b border-white/15' : 'border-b border-gov-gray-100 dark:border-dark-border';
   const pre = isUser
-    ? 'my-3 overflow-x-auto rounded-xl bg-black/25 text-white p-3 text-xs leading-relaxed font-mono'
-    : 'my-3 overflow-x-auto rounded-xl bg-gov-gray-900 dark:bg-[#010409] text-gov-gray-50 p-3 text-xs leading-relaxed font-mono';
+    ? 'scrollbar-hide my-3 overflow-x-auto rounded-xl bg-black/25 text-white p-3 text-xs leading-relaxed font-mono'
+    : 'scrollbar-hide my-3 overflow-x-auto rounded-xl bg-gov-gray-900 dark:bg-[#010409] text-gov-gray-50 p-3 text-xs leading-relaxed font-mono';
   const inlineCode = isUser
     ? 'px-1.5 py-0.5 rounded-md bg-white/15 text-[0.85em] font-mono text-white'
     : 'px-1.5 py-0.5 rounded-md bg-gov-gray-200/90 dark:bg-dark-border text-[0.85em] font-mono text-gov-blue-900 dark:text-dark-cyan';

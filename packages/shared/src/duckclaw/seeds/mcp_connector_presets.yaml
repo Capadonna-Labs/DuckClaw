@@ -18,7 +18,7 @@ profiles:
 
 presets:
   remote_http_oauth:
-    display_name: HTTP remoto · OAuth PKCE
+    display_name: Higgsfield
     transport: streamable_http
     endpoint_url: https://mcp.higgsfield.ai/mcp
     auth_kind: bearer
@@ -28,6 +28,67 @@ presets:
       oauth_pkce: true
       manifest_skill_id: higgsfield
       docs_url: https://higgsfield.ai/mcp
+
+  notion:
+    display_name: Notion
+    transport: streamable_http
+    endpoint_url: https://mcp.notion.com/mcp
+    auth_kind: bearer
+    read_only: false
+    egress_hosts: [mcp.notion.com]
+    metadata:
+      oauth_pkce: true
+      manifest_skill_id: notion
+      docs_url: https://developers.notion.com/docs/mcp
+
+  google_workspace:
+    display_name: Google Workspace
+    transport: streamable_http
+    endpoint_url: https://workspacemcp.googleapis.com/mcp/v1
+    auth_kind: bearer
+    read_only: true
+    egress_hosts: [workspacemcp.googleapis.com, oauth2.googleapis.com, accounts.google.com]
+    metadata:
+      oauth_pkce: true
+      oauth_provider: google_workspace
+      manifest_skill_id: google_workspace
+      admin_label: HTTP remoto · OAuth PKCE
+      docs_url: https://developers.google.com/workspace/guides/universal-search-mcp
+
+  google_calendar:
+    display_name: Google Calendar
+    transport: streamable_http
+    endpoint_url: https://calendarmcp.googleapis.com/mcp/v1
+    auth_kind: bearer
+    read_only: false
+    egress_hosts: [calendarmcp.googleapis.com, oauth2.googleapis.com, accounts.google.com]
+    metadata:
+      oauth_pkce: true
+      oauth_provider: google_workspace
+      manifest_skill_id: google_calendar
+      admin_label: HTTP remoto · OAuth PKCE (Calendar)
+      docs_url: https://developers.google.com/workspace/calendar/api/guides/configure-mcp-server
+      # Doc oficial Calendar MCP (Data Access) + calendar.events para create/update/delete
+      google_oauth_scopes:
+        - openid
+        - https://www.googleapis.com/auth/calendar.calendarlist.readonly
+        - https://www.googleapis.com/auth/calendar.events.freebusy
+        - https://www.googleapis.com/auth/calendar.events.readonly
+        - https://www.googleapis.com/auth/calendar.events
+
+  google_maps:
+    display_name: Google Maps
+    transport: streamable_http
+    endpoint_url: https://mapstools.googleapis.com/mcp
+    auth_kind: bearer
+    read_only: true
+    egress_hosts: [mapstools.googleapis.com, oauth2.googleapis.com, accounts.google.com]
+    metadata:
+      oauth_pkce: true
+      oauth_provider: google_workspace
+      manifest_skill_id: google_maps
+      admin_label: HTTP remoto · OAuth PKCE (Maps)
+      docs_url: https://developers.google.com/maps/ai/grounding-lite/reference/mcp
 
   mcp_fetch:
     profile: stdio_npx_ro

@@ -156,7 +156,7 @@ export function ConversationInbox({
 
       {error && <p className="text-xs text-red-600 px-3 py-1">{error}</p>}
 
-      <ul className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
+      <ul className="scrollbar-thin flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
         {loading && items.length === 0 && (
           <li className="text-xs text-gov-gray-400 text-center py-6">Cargando…</li>
         )}

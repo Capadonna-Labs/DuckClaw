@@ -52,6 +52,34 @@ def preset_supports_oauth_pkce(preset_id: str) -> bool:
     return meta.get("oauth_pkce") is True
 
 
+def preset_oauth_provider(preset_id: str) -> str:
+    payload = preset_payload(preset_id)
+    if not payload:
+        return ""
+    meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    return str(meta.get("oauth_provider") or "").strip().lower()
+
+
+def preset_google_oauth_scopes(preset_id: str) -> list[str] | None:
+    """Optional fixed scope list from preset metadata (e.g. Calendar MCP write)."""
+    payload = preset_payload(preset_id)
+    if not payload:
+        return None
+    meta = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    raw = meta.get("google_oauth_scopes")
+    if not isinstance(raw, list):
+        return None
+    scopes = [str(x).strip() for x in raw if str(x).strip()]
+    return scopes or None
+
+
+def is_google_workspace_preset(preset_id: str) -> bool:
+    key = resolve_preset_id(preset_id)
+    if key in ("google_workspace",) or key.startswith("google_"):
+        return True
+    return preset_oauth_provider(key) == "google_workspace"
+
+
 def bundled_mcp_connector_presets_path() -> Path:
     return Path(__file__).resolve().parent / "seeds" / _SEED_FILENAME
 

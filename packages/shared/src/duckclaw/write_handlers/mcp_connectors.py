@@ -207,6 +207,20 @@ def _apply_set_mcp_connector_auth(conn: Any, payload: dict) -> None:
             "updated_by": actor,
         },
     )
+    refresh = str(payload.get("refresh_token") or "").strip()
+    if refresh:
+        _apply_upsert_runtime_setting(
+            conn,
+            {
+                "tenant_id": tenant_id,
+                "actor_email": actor,
+                "domain": "mcp_connector",
+                "key": f"{connector_id}.refresh",
+                "value": refresh,
+                "secret": True,
+                "updated_by": actor,
+            },
+        )
 
 
 def _apply_grant_worker_mcp_connector(conn: Any, payload: dict) -> None:

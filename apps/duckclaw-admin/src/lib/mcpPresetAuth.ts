@@ -46,6 +46,14 @@ export function presetAuthKindLabel(preset: McpConnectorPreset): string {
   return kind;
 }
 
+/** Presets que requieren connection strings gestionados como secretos de plataforma. */
+const SECRET_ENV_PRESETS = new Set([
+  'postgres',
+  'mysql',
+  'cockroachdb',
+  'redis',
+]);
+
 export function presetAuthHint(preset: McpConnectorPreset): string {
   if (presetUsesOAuthPkce(preset)) {
     return 'Tras crear el conector, usa «Conectar OAuth» en su tarjeta.';
@@ -54,7 +62,16 @@ export function presetAuthHint(preset: McpConnectorPreset): string {
     if (preset.preset_id === 'github') {
       return 'Tras crear, pega un GitHub PAT como Bearer (scopes según repos/orgs). Docs: servidor MCP remoto de GitHub.';
     }
+    const envVars = preset.metadata?.env_vars as string[] | undefined;
+    if (envVars?.length) {
+      return `Tras crear, pega el token Bearer. Requiere: ${envVars.join(', ')}.`;
+    }
     return 'Tras crear el conector, pega el token Bearer en su tarjeta.';
+  }
+  if (preset.preset_id && SECRET_ENV_PRESETS.has(preset.preset_id)) {
+    const vars = preset.metadata?.secret_env as string[] | undefined;
+    const list = vars?.join(', ') ?? 'connection strings';
+    return `Configura los secretos de plataforma requeridos: ${list}.`;
   }
   return 'No requiere credenciales adicionales.';
 }

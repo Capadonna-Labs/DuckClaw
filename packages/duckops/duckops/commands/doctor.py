@@ -279,7 +279,12 @@ def _check_db_writer() -> tuple[bool, str]:
 def cmd_doctor(
     ctx: typer.Context,
     repo: Path | None = typer.Option(None, "--repo", "-C", help="Raíz del monorepo."),
-    smoke: bool = typer.Option(False, "--smoke", help="Además, probe GET /health si el gateway escucha."),
+    smoke: bool = typer.Option(False, "--smoke", help="Probe GET /health y happy path admin (login + playground)."),
+    smoke_chat: bool = typer.Option(
+        True,
+        "--smoke-chat/--no-smoke-chat",
+        help="Con --smoke: incluir POST playground/chat (requiere LLM configurado).",
+    ),
     bootstrap: bool = typer.Option(
         False,
         "--bootstrap",
@@ -510,6 +515,35 @@ def cmd_doctor(
         else:
             detail = "gateway no escucha — ejecuta: uv run duckops serve --gateway --pm2 --stack"
         if not _emit("Smoke /health", smoke_ok, detail):
+            critical_ok = False
+
+        if gateway_listening and smoke_ok and is_admin_key_valid(admin_key):
+            if admin_bootstrap_ready(admin_email, admin_pass, admin_key):
+                from duckops.admin_path_smoke import run_admin_path_smoke
+
+                admin_checks = run_admin_path_smoke(
+                    base_url=f"http://127.0.0.1:{gateway_port}",
+                    admin_email=admin_email,
+                    admin_password=admin_pass,
+                    admin_api_key=admin_key or "",
+                    chat_turn=smoke_chat,
+                )
+                for row in admin_checks:
+                    if not _emit(row.name, row.ok, row.detail):
+                        critical_ok = False
+            else:
+                _emit(
+                    "Smoke admin path",
+                    False,
+                    "DUCKCLAW_ADMIN_EMAIL/PASSWORD incompletos — omitido",
+                )
+                critical_ok = False
+        elif smoke_ok and gateway_listening:
+            _emit(
+                "Smoke admin path",
+                False,
+                "DUCKCLAW_ADMIN_API_KEY ausente o placeholder",
+            )
             critical_ok = False
 
     if not critical_ok:

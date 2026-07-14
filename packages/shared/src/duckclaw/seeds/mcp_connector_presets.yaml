@@ -106,6 +106,23 @@ presets:
       admin_label: HTTP remoto · Bearer (Tavily API key)
       docs_url: https://docs.tavily.com/documentation/mcp
 
+  # Remote GitHub MCP (docs):
+  # https://docs.github.com/en/copilot/how-tos/provide-context/use-mcp-in-your-ide/set-up-the-github-mcp-server
+  # Auth: PAT como Bearer (OAuth one-click es del host Copilot IDE; DuckClaw usa PAT).
+  github:
+    display_name: GitHub
+    transport: streamable_http
+    endpoint_url: https://api.githubcopilot.com/mcp/
+    auth_kind: bearer
+    read_only: false
+    egress_hosts: [api.githubcopilot.com]
+    metadata:
+      oauth_pkce: false
+      manifest_skill_id: github
+      admin_label: HTTP remoto · Bearer (GitHub PAT)
+      docs_url: https://docs.github.com/es/copilot/how-tos/provide-context/use-mcp-in-your-ide/set-up-the-github-mcp-server
+      repo_url: https://github.com/github/github-mcp-server
+
   mcp_fetch:
     profile: stdio_npx_ro
     display_name: MCP Fetch (local stdio)

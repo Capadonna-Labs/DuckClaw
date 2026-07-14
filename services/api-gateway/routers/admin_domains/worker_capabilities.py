@@ -280,7 +280,6 @@ def build_worker_mcp_grants_payload(
     actor: str = "admin-ui",
 ) -> dict[str, Any]:
     from duckclaw.admin_mcp_connectors import (
-        _connector_has_auth,
         list_mcp_connectors,
         list_worker_mcp_connectors,
         resolve_worker_uid,
@@ -304,7 +303,9 @@ def build_worker_mcp_grants_payload(
                     "display_name": str(connector.get("display_name") or cid),
                     "preset_id": str(connector.get("preset_id") or ""),
                     "enabled": bool(connector.get("enabled", True)),
-                    "has_auth": bool(_connector_has_auth(db, connector)),
+                    # list_mcp_connectors already computes has_auth then pops auth_secret_key;
+                    # recomputing here always yields False for bearer connectors.
+                    "has_auth": bool(connector.get("has_auth")),
                     "granted": cid in granted_ids,
                 }
             )

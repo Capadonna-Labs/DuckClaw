@@ -107,6 +107,7 @@ def test_list_mcp_connector_presets_includes_all_bundled_ids() -> None:
         "google_calendar",
         "google_maps",
         "tavily",
+        "github",
         "mcp_fetch",
         "mcp_time",
     }.issubset(presets)
@@ -121,6 +122,19 @@ def test_tavily_preset_is_remote_bearer() -> None:
     assert "mcp.tavily.com" in payload["egress_hosts"]
     assert payload["metadata"]["manifest_skill_id"] == "research"
     assert payload["metadata"].get("oauth_pkce") is not True
+
+
+def test_github_preset_is_remote_bearer_pat() -> None:
+    payload = preset_payload("github")
+    assert payload is not None
+    assert payload["display_name"] == "GitHub"
+    assert payload["transport"] == "streamable_http"
+    assert payload["endpoint_url"] == "https://api.githubcopilot.com/mcp/"
+    assert payload["auth_kind"] == "bearer"
+    assert "api.githubcopilot.com" in payload["egress_hosts"]
+    assert payload["metadata"]["manifest_skill_id"] == "github"
+    assert payload["metadata"].get("oauth_pkce") is not True
+    assert "github.com" in str(payload["metadata"].get("docs_url") or "")
 
 
 def _seed_worker(con: duckdb.DuckDBPyConnection, worker_id: str) -> str:

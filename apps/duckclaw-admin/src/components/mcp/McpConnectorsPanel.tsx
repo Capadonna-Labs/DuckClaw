@@ -84,7 +84,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    Promise.all([
+    return Promise.all([
       adminService.listMcpConnectors(),
       adminService.listMcpConnectorPresets(),
       adminService.listTemplates(),
@@ -240,6 +240,13 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
       if (polled.state === 'failed') {
         throw new Error(polled.detail || 'Grant no se aplicó en DB');
       }
+      if (polled.state === 'timeout' || polled.state === 'not_found') {
+        throw new Error(
+          polled.state === 'timeout'
+            ? 'Grant encolado pero no se confirmó (db-writer / lock DuckDB). Revisa PM2 y reintenta.'
+            : 'No se encontró el estado del grant. Refresca la vista o reintenta.'
+        );
+      }
       const connector = connectors.find((c) => c.connector_id === connectorId);
       const workerLabel = workers.find((w) => w.id === workerId)?.name || workerId;
       const presetId = connector?.preset_id?.trim();
@@ -248,11 +255,13 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
         : '';
       const alreadyHad = (grantsByWorker[workerId] || []).includes(connectorId);
       await refreshGrants(workers);
+      // Runtime puede cachear el grafo del worker hasta el próximo chat.
+      await adminService.releaseWorkerGraphCache().catch(() => undefined);
       setGrantNotices((prev) => ({
         ...prev,
         [connectorId]: alreadyHad
-          ? `Grant ya existía para ${workerLabel} (re-aplicar = UPSERT, sin duplicar).`
-          : `Grant aplicado a ${workerLabel}. Verifica en Agentes → ${workerLabel} → Conectores MCP (checkbox Autorizado), o Playground · contador «N MCP».${skillHint}`,
+          ? `Grant ya existía para ${workerLabel} (re-aplicar = UPSERT, sin duplicar). Abre un chat nuevo para cargar tools.`
+          : `Grant aplicado a ${workerLabel}. Tools MCP disponibles en un chat nuevo (no hace falta “Grant” otra vez).${skillHint}`,
       }));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo asignar el worker');
@@ -501,7 +510,7 @@ function ConnectorCard({
   onSaveAuth: () => void;
   onConnectOAuth: () => void;
   onTest: () => void;
-  onGrant: () => void;
+  onGrant: () => Promise<void>;
   onDeactivate: () => void;
 }) {
   const usesOAuth = presetUsesOAuthPkce(preset);
@@ -520,8 +529,13 @@ function ConnectorCard({
   };
 
   const confirmGrant = () => {
-    setGrantConfirmOpen(false);
-    onGrant();
+    void (async () => {
+      try {
+        await onGrant();
+      } finally {
+        setGrantConfirmOpen(false);
+      }
+    })();
   };
 
   return (

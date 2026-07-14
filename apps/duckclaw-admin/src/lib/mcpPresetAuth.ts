@@ -51,6 +51,9 @@ export function presetAuthHint(preset: McpConnectorPreset): string {
     return 'Tras crear el conector, usa «Conectar OAuth» en su tarjeta.';
   }
   if (preset.auth_kind === 'bearer') {
+    if (preset.preset_id === 'github') {
+      return 'Tras crear, pega un GitHub PAT como Bearer (scopes según repos/orgs). Docs: servidor MCP remoto de GitHub.';
+    }
     return 'Tras crear el conector, pega el token Bearer en su tarjeta.';
   }
   return 'No requiere credenciales adicionales.';

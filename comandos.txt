@@ -28,9 +28,14 @@ pnpm dev
 # Bundled: packages/shared/src/duckclaw/seeds/mcp_connector_presets.yaml
 # Override: config/mcp_connector_presets.yaml  o  DUCKCLAW_MCP_PRESETS_PATH=/ruta.yaml
 
-# Tras editar presets (Notion, Calendar, …) → reinicia gateway:
-pm2 restart DuckClaw-API-Gateway
-# o: uv run duckops stack deploy --no-migrate
+# Tras editar presets (Notion, GitHub, Calendar, …) → reinicia gateway:
+pm2 restart DuckClaw-Gateway
+# (nombre histórico: DuckClaw-API-Gateway) o: uv run duckops stack deploy --no-migrate
+
+# GitHub MCP remoto (preset `github`):
+#   URL https://api.githubcopilot.com/mcp/  ·  auth = GitHub PAT como Bearer
+#   Docs: https://docs.github.com/es/copilot/how-tos/provide-context/use-mcp-in-your-ide/set-up-the-github-mcp-server
+#   Tras crear: Guardar token → Probar list_tools → Grant worker → chat nuevo
 
 # Ver plantillas expuestas al Admin:
 curl -s -H "X-Admin-Key: $DUCKCLAW_ADMIN_API_KEY" \

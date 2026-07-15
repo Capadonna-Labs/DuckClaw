@@ -10,8 +10,10 @@ import pytest
 
 from duckclaw.document_toolbox.pack import load_document_toolbox
 from duckclaw.document_toolbox.registry import (
+    AUTHOR_TEXT_SUFFIXES,
     EXTRACT_SUFFIXES,
     INGEST_NATIVE_SUFFIXES,
+    assert_author_text_path,
     ingest_lane_for_suffix,
 )
 
@@ -29,6 +31,16 @@ def test_ingest_lanes() -> None:
     assert ingest_lane_for_suffix(".pdf") == "extract"
     assert ingest_lane_for_suffix(".md") == "ingest_native"
     assert ingest_lane_for_suffix(".xyz") == "unsupported"
+
+
+def test_author_text_allowlist() -> None:
+    assert ".md" in AUTHOR_TEXT_SUFFIXES
+    assert ".py" in AUTHOR_TEXT_SUFFIXES
+    assert_author_text_path("notes/ok.md")
+    with pytest.raises(ValueError, match="binarios"):
+        assert_author_text_path("informe.docx")
+    with pytest.raises(ValueError, match="no permitida"):
+        assert_author_text_path("foto.bmp")
 
 
 def test_corporate_template_seed_exists() -> None:

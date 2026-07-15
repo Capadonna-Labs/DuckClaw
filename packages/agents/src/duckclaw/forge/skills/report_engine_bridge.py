@@ -159,8 +159,8 @@ def list_report_templates(limit: int = 50) -> str:
                 "templates": rows,
                 "count": len(rows),
                 "hint": (
-                    "Sin plantillas: usa register_report_template con el .docx del vault "
-                    "(ej. INFORME MENSUAL.docx en la raíz)."
+                    "Sin plantillas: en Chat pide «registra mi plantilla Word del vault» "
+                    "o usa Informes Word en Admin (nuevo informe)."
                     if not rows
                     else ""
                 ),
@@ -226,18 +226,22 @@ def create_report_instance(
     project_id: str = "",
     instance_id: str = "",
 ) -> str:
-    """Crea un informe en borrador desde una plantilla registrada."""
+    """Crea un borrador desde plantilla. Solo requiere template_id + title.
+
+    No preguntes periodo: identity = instance_id. period_key se ignora (legacy).
+    """
     try:
         tenant_id, actor_email, ctx_project = _session_scope()
         pid = (project_id or ctx_project or "").strip()
         iid = (instance_id or "").strip() or f"rpt_{uuid.uuid4().hex[:10]}"
+        clean_title = (title or "Documento").strip() or "Documento"
         _dispatch_write(
             {
                 "command_type": "create_report_instance",
                 "instance_id": iid,
                 "template_id": (template_id or "").strip(),
-                "title": (title or "Informe").strip(),
-                "period_key": (period_key or "").strip(),
+                "title": clean_title,
+                "period_key": "",
                 "project_id": pid,
             }
         )
@@ -245,8 +249,7 @@ def create_report_instance(
             {
                 "instance_id": iid,
                 "template_id": template_id,
-                "title": title,
-                "period_key": period_key,
+                "title": clean_title,
                 "project_id": pid,
                 "status": "draft",
             },
@@ -281,7 +284,6 @@ def get_report_status(instance_id: str) -> str:
             {
                 "instance_id": instance["instance_id"],
                 "title": instance["title"],
-                "period_key": instance["period_key"],
                 "status": instance["status"],
                 **summary,
             },
@@ -490,7 +492,6 @@ def generate_report_docx_from_markdown(
         create_raw = create_report_instance(
             template_id=resolved_id,
             title=report_title,
-            period_key=period_key,
         )
         created = json.loads(create_raw)
         if created.get("error"):
@@ -520,7 +521,6 @@ def generate_report_docx_from_markdown(
                 "template_id": resolved_id,
                 "section_id": section_id,
                 "title": report_title,
-                "period_key": period_key,
                 "markdown_source": markdown_source,
                 **rendered,
             },
@@ -544,7 +544,7 @@ def generate_report_docx_from_markdown(
 
 def render_report_instance(instance_id: str) -> str:
     """Genera el DOCX del informe desde plantilla + estado actual."""
-    from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
+    from duckclaw.forge.rag.knowledge_paths import knowledge_allowed_roots, knowledge_output_roots
     from duckclaw.report_engine.admin_report_read import (
         actor_can_access_instance,
         get_report_instance,
@@ -569,6 +569,7 @@ def render_report_instance(instance_id: str) -> str:
         if not roots:
             return json.dumps({"error": "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS no configurado"}, ensure_ascii=False)
         out_root = roots[0]
+        allowed = list(dict.fromkeys(knowledge_allowed_roots() + roots))
 
         rendered = render_instance_docx_from_uri(
             template_uri=str(template["template_uri"]),
@@ -577,6 +578,7 @@ def render_report_instance(instance_id: str) -> str:
             instance_id=str(instance["instance_id"]),
             title=str(instance["title"]),
             period_key=str(instance["period_key"]),
+            allowed_roots=allowed,
         )
         _dispatch_write(
             {
@@ -618,8 +620,9 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 create_report_instance,
                 name="create_report_instance",
                 description=(
-                    "Crea borrador de informe desde plantilla registrada. "
-                    "Paso 2: luego patch_report_section por cada sección."
+                    "Crea borrador desde plantilla registrada. Args: template_id + title. "
+                    "NO pidas periodo/mes: la identidad es instance_id. "
+                    "Luego patch_report_section por cada sección faltante."
                 ),
             ),
             StructuredTool.from_function(

@@ -30,7 +30,7 @@ def render_preview_html(
         f"<h1>{html.escape(title or 'Informe')}</h1>",
     ]
     if period_key:
-        parts.append(f"<p class='meta'>Periodo: {html.escape(period_key)}</p>")
+        parts.append(f"<p class='meta'>{html.escape(period_key)}</p>")
 
     for sid in order:
         entry = sections.get(sid) if isinstance(sections.get(sid), dict) else {}

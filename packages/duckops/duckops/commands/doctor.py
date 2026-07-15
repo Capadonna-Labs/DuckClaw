@@ -420,6 +420,51 @@ def cmd_doctor(
             if not _emit("Policies framework", False, str(exc)[:160]):
                 critical_ok = False
 
+    try:
+        from duckclaw.document_toolbox.extract import markitdown_available
+        from duckclaw.document_toolbox.convert import pandoc_available
+        from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
+
+        _emit(
+            "MarkItDown",
+            markitdown_available(),
+            "extract PDF/Office → texto" if markitdown_available() else "pip/uv extra document-toolbox",
+        )
+        pandoc_ok = pandoc_available()
+        _emit(
+            "Pandoc",
+            pandoc_ok,
+            shutil.which("pandoc") or "ausente — brew install pandoc (convert_document)",
+        )
+        out_roots = knowledge_output_roots()
+        if not out_roots:
+            _emit("Knowledge OUTPUT_ROOTS", False, "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS vacío")
+        else:
+            writable = []
+            drive_hint = False
+            for root in out_roots:
+                exists = root.exists()
+                can_write = False
+                if exists and root.is_dir():
+                    try:
+                        probe = root / ".duckclaw_write_probe"
+                        probe.write_text("ok", encoding="utf-8")
+                        probe.unlink(missing_ok=True)
+                        can_write = True
+                    except OSError as exc:
+                        writable.append(f"{root}: no writable ({exc})")
+                        continue
+                label = str(root)
+                if "CloudStorage/GoogleDrive" in label.replace("\\", "/"):
+                    drive_hint = True
+                writable.append(f"{label} ({'rw' if can_write else 'missing'})")
+            detail = "; ".join(writable)
+            if drive_hint:
+                detail += " · Google Drive detectado"
+            _emit("Knowledge OUTPUT_ROOTS", any("rw" in w for w in writable), detail)
+    except Exception as exc:
+        _emit("Document toolbox", False, str(exc)[:160])
+
     admin_key = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
     key_ok = is_admin_key_valid(admin_key)
     _emit(

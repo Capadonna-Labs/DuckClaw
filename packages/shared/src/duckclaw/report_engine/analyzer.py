@@ -7,17 +7,14 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-_JINJA_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z_][\w]*)\s*\}\}")
+# Identifiers and dotted paths: {{ body }}, {{ evidencia2.1 }}
+_JINJA_VAR_RE = re.compile(
+    r"\{\{\s*([a-zA-Z_][\w]*(?:\.[a-zA-Z0-9_][\w]*)*)\s*\}\}"
+)
+_WT_TEXT_RE = re.compile(r"<w:t(?:\s[^>]*)?>([^<]*)</w:t>")
 _OUTLINE_TITLE_RE = re.compile(
     r"^(?:\d+(?:\.\d+)*[\.\)]\s*)?(?:[A-ZÁÉÍÓÚÑ][A-Za-záéíóúñÁÉÍÓÚÑ0-9\s\-–—]{2,})$"
 )
-_DEFAULT_MONTHLY_SECTIONS: list[dict[str, Any]] = [
-    {"id": "resumen_ejecutivo", "label": "Resumen ejecutivo", "required": True},
-    {"id": "kpis", "label": "KPIs", "required": False},
-    {"id": "logros", "label": "Logros", "required": False},
-    {"id": "riesgos", "label": "Riesgos", "required": False},
-    {"id": "proximos_pasos", "label": "Próximos pasos", "required": False},
-]
 
 
 def _read_docx_xml(path: Path) -> str:
@@ -26,15 +23,29 @@ def _read_docx_xml(path: Path) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+def _xml_w_t_plaintext(xml: str) -> str:
+    """Concatena textos de w:t para recuperar Jinja partido entre runs de Word."""
+    return "".join(_WT_TEXT_RE.findall(xml))
+
+
 def _sections_from_jinja(xml: str) -> list[dict[str, Any]]:
+    plaintext = _xml_w_t_plaintext(xml)
+    haystack = f"{plaintext}\n{xml}"
     seen: set[str] = set()
     out: list[dict[str, Any]] = []
-    for match in _JINJA_VAR_RE.finditer(xml):
+    for match in _JINJA_VAR_RE.finditer(haystack):
         var = match.group(1).strip()
         if not var or var in seen:
             continue
         seen.add(var)
-        out.append({"id": var, "label": var.replace("_", " ").title(), "required": False})
+        label = var.replace(".", " · ").replace("_", " ").strip()
+        out.append(
+            {
+                "id": var,
+                "label": label.title() if label.islower() else label,
+                "required": False,
+            }
+        )
     return out
 
 
@@ -88,16 +99,13 @@ def _sections_from_outline_paragraphs(path: Path) -> list[dict[str, Any]]:
     return out
 
 
-def _docx_has_body_text(path: Path) -> bool:
-    try:
-        from docx import Document
-    except ImportError:
-        return path.stat().st_size > 0
-    doc = Document(str(path))
-    return any((p.text or "").strip() for p in doc.paragraphs)
-
-
 def analyze_docx_template(path: str | Path) -> dict[str, Any]:
+    """
+    Analiza una plantilla .docx genérica (cualquier nicho).
+
+    Fail-loud: sin placeholders Jinja ni headings/outline detectables → ValueError
+    con pista accionable. No inventa secciones ajenas al Word del usuario.
+    """
     target = Path(path).expanduser().resolve()
     if not target.is_file():
         raise ValueError(f"Plantilla no encontrada: {target}")
@@ -117,18 +125,8 @@ def analyze_docx_template(path: str | Path) -> dict[str, Any]:
     if outline_sections:
         return {"analyzer_mode": "mixed", "sections": outline_sections}
 
-    if _docx_has_body_text(target):
-        return {
-            "analyzer_mode": "mixed",
-            "sections": list(_DEFAULT_MONTHLY_SECTIONS),
-            "warning": (
-                "Sin placeholders Jinja ni títulos detectables; se usan secciones estándar. "
-                "Para rellenar el Word al renderizar, añade {{ resumen_ejecutivo }}, {{ kpis }}, etc. "
-                "o usa la plantilla corporate_report del repo."
-            ),
-        }
-
     raise ValueError(
-        "No se detectaron secciones. Usa placeholders Jinja {{ nombre_seccion }} "
-        "o títulos con estilo Heading en Word."
+        "No se detectaron secciones en la plantilla. "
+        "Añade huecos Jinja ({{ nombre_seccion }} o {{ grupo.campo }}) "
+        "o títulos con estilo Heading 1/2 en Word, y vuelve a registrar."
     )

@@ -110,7 +110,8 @@ def resolve_effective_system_prompt(
 _REPORT_ENGINE_SKILL_MARKERS = frozenset({"custom_reports", "reports", "report_engine"})
 
 
-def _worker_includes_report_engine_directive(spec: WorkerSpec | None) -> bool:
+def worker_has_report_engine_skill(spec: WorkerSpec | None) -> bool:
+    """True si el worker optó por el atom Report Engine (transversal)."""
     if spec is None:
         return False
     skills = {
@@ -120,7 +121,14 @@ def _worker_includes_report_engine_directive(spec: WorkerSpec | None) -> bool:
     }
     if skills & _REPORT_ENGINE_SKILL_MARKERS:
         return True
+    configs = getattr(spec, "skill_configs", None) or {}
+    if any(key in configs for key in _REPORT_ENGINE_SKILL_MARKERS):
+        return True
     return any("report" in skill for skill in skills)
+
+
+def _worker_includes_report_engine_directive(spec: WorkerSpec | None) -> bool:
+    return worker_has_report_engine_skill(spec)
 
 
 def _append_framework_directive(db: Any, base: str, directive_name: str) -> str:

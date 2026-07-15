@@ -29,17 +29,41 @@ def test_analyze_corporate_seed_template() -> None:
     assert "body" in ids
 
 
-def test_analyze_plain_docx_gets_default_sections(tmp_path: Path) -> None:
+def test_analyze_plain_docx_fails_loud(tmp_path: Path) -> None:
     from docx import Document
+    import pytest
 
     target = tmp_path / "informe_libre.docx"
     doc = Document()
     doc.add_paragraph("Informe mensual de gestión sin placeholders Jinja.")
     doc.save(str(target))
+    with pytest.raises(ValueError, match="No se detectaron secciones"):
+        analyze_docx_template(target)
+
+
+def test_analyze_dotted_jinja_placeholders(tmp_path: Path) -> None:
+    from docx import Document
+
+    target = tmp_path / "dotted.docx"
+    doc = Document()
+    doc.add_paragraph("Campo {{ evidencia2.1 }} y {{ body }}")
+    doc.save(str(target))
     analysis = analyze_docx_template(target)
-    assert analysis["analyzer_mode"] == "mixed"
-    assert len(analysis["sections"]) >= 5
-    assert analysis.get("warning")
+    ids = {s["id"] for s in analysis["sections"]}
+    assert "evidencia2.1" in ids
+    assert "body" in ids
+
+
+def test_build_render_context_nests_dotted_ids() -> None:
+    from duckclaw.report_engine.state import build_render_context, init_state_from_schema, patch_section
+
+    schema = [{"id": "evidencia2.1", "label": "E2.1"}, {"id": "body", "label": "Body"}]
+    state = init_state_from_schema(schema)
+    state = patch_section(state, section_id="evidencia2.1", content="Hecho A", mode="replace")
+    state = patch_section(state, section_id="body", content="Cuerpo", mode="replace")
+    ctx = build_render_context(state)
+    assert ctx["body"] == "Cuerpo"
+    assert ctx["evidencia2"]["1"] == "Hecho A"
 
 
 def test_patch_section_append_and_status() -> None:
@@ -116,6 +140,182 @@ def test_report_engine_migration_and_handlers(tmp_path: Path) -> None:
     state = json.loads(str(row[0]))
     assert "Avance" in state["sections"]["intro"]["content"]
     assert "<!DOCTYPE html>" in str(row[1])
+
+
+def test_soft_delete_report_template_archives_owned_instances(tmp_path: Path) -> None:
+    db = duckdb.connect(str(tmp_path / "hub_tpl_del.duckdb"))
+    run_pending_migrations(db)
+    dispatch_command(
+        db,
+        {
+            "command_type": "upsert_report_template",
+            "template_id": "tpl_del_t",
+            "tenant_id": "default",
+            "actor_email": "a@ex.com",
+            "name": "ToDelete",
+            "template_uri": "/vault/t.docx",
+            "section_schema": [{"id": "body"}],
+            "analyzer_mode": "jinja",
+        },
+    )
+    dispatch_command(
+        db,
+        {
+            "command_type": "create_report_instance",
+            "instance_id": "rpt_owned",
+            "template_id": "tpl_del_t",
+            "tenant_id": "default",
+            "actor_email": "a@ex.com",
+            "title": "Owned",
+            "period_key": "2026-08",
+        },
+    )
+    dispatch_command(
+        db,
+        {
+            "command_type": "soft_delete_report_template",
+            "template_id": "tpl_del_t",
+            "tenant_id": "default",
+            "actor_email": "a@ex.com",
+        },
+    )
+    tpl = db.execute(
+        "SELECT active FROM main.admin_report_templates WHERE template_id = 'tpl_del_t'"
+    ).fetchone()
+    inst = db.execute(
+        "SELECT active, status FROM main.admin_report_instances WHERE instance_id = 'rpt_owned'"
+    ).fetchone()
+    assert tpl is not None and tpl[0] is False
+    assert inst is not None and inst[0] is False and str(inst[1]) == "archived"
+
+
+def test_soft_delete_report_instance_allows_new_create(tmp_path: Path) -> None:
+    db = duckdb.connect(str(tmp_path / "hub_soft_del.duckdb"))
+    run_pending_migrations(db)
+    schema = [{"id": "body", "label": "Body"}]
+    dispatch_command(
+        db,
+        {
+            "command_type": "upsert_report_template",
+            "template_id": "tpl_del",
+            "tenant_id": "default",
+            "actor_email": "a@ex.com",
+            "name": "Del",
+            "template_uri": "/vault/d.docx",
+            "section_schema": schema,
+            "analyzer_mode": "jinja",
+        },
+    )
+    dispatch_command(
+        db,
+        {
+            "command_type": "create_report_instance",
+            "instance_id": "rpt_del",
+            "template_id": "tpl_del",
+            "tenant_id": "default",
+            "actor_email": "a@ex.com",
+            "title": "Borrador a eliminar",
+        },
+    )
+    dispatch_command(
+        db,
+        {
+            "command_type": "soft_delete_report_instance",
+            "instance_id": "rpt_del",
+            "tenant_id": "default",
+            "actor_email": "a@ex.com",
+        },
+    )
+    row = db.execute(
+        "SELECT active, status FROM main.admin_report_instances WHERE instance_id = 'rpt_del'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] is False
+    assert str(row[1]) == "archived"
+    dispatch_command(
+        db,
+        {
+            "command_type": "create_report_instance",
+            "instance_id": "rpt_del_2",
+            "template_id": "tpl_del",
+            "tenant_id": "default",
+            "actor_email": "a@ex.com",
+            "title": "Nuevo borrador",
+        },
+    )
+    alive = db.execute(
+        "SELECT instance_id FROM main.admin_report_instances WHERE instance_id = 'rpt_del_2' AND active = true"
+    ).fetchone()
+    assert alive is not None
+
+
+def test_create_allows_multiple_instances_same_template(tmp_path: Path) -> None:
+    db = duckdb.connect(str(tmp_path / "hub_multi.duckdb"))
+    run_pending_migrations(db)
+    schema = [{"id": "body", "label": "Body"}]
+    dispatch_command(
+        db,
+        {
+            "command_type": "upsert_report_template",
+            "template_id": "tpl_m",
+            "tenant_id": "default",
+            "actor_email": "a@ex.com",
+            "name": "M",
+            "template_uri": "/vault/m.docx",
+            "section_schema": schema,
+            "analyzer_mode": "jinja",
+        },
+    )
+    for iid, title in (("rpt_1", "Uno"), ("rpt_2", "Dos")):
+        dispatch_command(
+            db,
+            {
+                "command_type": "create_report_instance",
+                "instance_id": iid,
+                "template_id": "tpl_m",
+                "tenant_id": "default",
+                "actor_email": "a@ex.com",
+                "title": title,
+            },
+        )
+    n = db.execute(
+        "SELECT count(*) FROM main.admin_report_instances WHERE template_id = 'tpl_m' AND active = true"
+    ).fetchone()
+    assert n is not None and int(n[0]) == 2
+
+
+def test_upsert_report_template_blocks_other_owner(tmp_path: Path) -> None:
+    import pytest
+
+    db = duckdb.connect(str(tmp_path / "hub_owner.duckdb"))
+    run_pending_migrations(db)
+    dispatch_command(
+        db,
+        {
+            "command_type": "upsert_report_template",
+            "template_id": "tpl_own",
+            "tenant_id": "default",
+            "actor_email": "owner@ex.com",
+            "name": "Mine",
+            "template_uri": "/vault/m.docx",
+            "section_schema": [{"id": "body"}],
+            "analyzer_mode": "jinja",
+        },
+    )
+    with pytest.raises(ValueError, match="otro propietario"):
+        dispatch_command(
+            db,
+            {
+                "command_type": "upsert_report_template",
+                "template_id": "tpl_own",
+                "tenant_id": "default",
+                "actor_email": "other@ex.com",
+                "name": "Hijack",
+                "template_uri": "/vault/h.docx",
+                "section_schema": [{"id": "body"}],
+                "analyzer_mode": "jinja",
+            },
+        )
 
 
 def test_preview_html_renders_sections() -> None:

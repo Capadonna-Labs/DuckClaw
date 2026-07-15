@@ -123,6 +123,21 @@ def test_write_output_document_respects_explicit_py_extension(tmp_path, monkeypa
     assert (out_root / "scripts" / "hola.py").read_text(encoding="utf-8") == "print('hola')"
 
 
+def test_write_output_document_rejects_docx(tmp_path, monkeypatch) -> None:
+    from duckclaw.forge.skills.write_output_document_bridge import write_output_document
+
+    out_root = tmp_path / "vault-out"
+    out_root.mkdir()
+    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS", str(out_root))
+    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_AUTO_SYNC", "false")
+
+    raw = write_output_document("informe.docx", "# No soy un docx real")
+    payload = json.loads(raw)
+    assert "error" in payload
+    assert "binarios" in payload["error"].lower() or "docx" in payload["error"].lower()
+    assert not (out_root / "informe.docx").exists()
+
+
 def test_normalize_output_relative_path() -> None:
     from duckclaw.forge.rag.knowledge_paths import normalize_output_relative_path
 

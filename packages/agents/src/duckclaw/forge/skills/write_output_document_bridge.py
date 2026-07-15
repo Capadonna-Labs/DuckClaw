@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
+from duckclaw.document_toolbox.registry import assert_author_text_path
 from duckclaw.forge.rag.knowledge_core import sha256_text
 from duckclaw.forge.rag.knowledge_paths import (
     normalize_output_relative_path,
@@ -22,6 +23,7 @@ def write_output_document(relative_path: str, content: str, output_root: str = "
 
     try:
         rel = normalize_output_relative_path(relative_path)
+        assert_author_text_path(rel)
         target = resolve_knowledge_output_path(relative_path=rel, output_root=output_root)
         target.parent.mkdir(parents=True, exist_ok=True)
         data = text.encode("utf-8")
@@ -61,12 +63,12 @@ def register_write_output_document_tool(tools_list: list[Any]) -> None:
             write_output_document,
             name="write_output_document",
             description=(
-                "Escribe un archivo en una raíz de salida permitida "
-                "(vault Obsidian / DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS). "
-                "Úsalo para borradores .md o artefactos auxiliares. "
-                "Para informes Word con plantilla del vault usa el Report Engine: "
-                "register_report_template → create_report_instance → patch_report_section → render_report_instance. "
-                "No uses pandoc como primera opción para informes corporativos."
+                "Escribe un archivo de texto UTF-8 en DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS "
+                "(.md, .txt, .json, .csv, .yaml, .py, .html, …). "
+                "Prohibido .docx/.pdf/.xlsx y demás binarios: usa convert_document (pandoc) "
+                "o render_docx_template / Report Engine. "
+                "Informes corporativos: register_report_template → create_report_instance → "
+                "patch_report_section → render_report_instance."
             ),
         )
     )

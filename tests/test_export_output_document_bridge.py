@@ -31,6 +31,39 @@ def test_export_output_document_docx(tmp_path, monkeypatch) -> None:
     payload = json.loads(raw)
     assert payload["format"] == "docx"
     assert Path(payload["path"]).suffix == ".docx"
+    assert Path(payload["path"]).parent == out_root.resolve()
+    assert payload["relative_path"] == "informe.docx"
+
+
+def test_convert_document_writes_under_output_not_allowed(tmp_path, monkeypatch) -> None:
+    """Fuente en ALLOWED, entregable siempre en OUTPUT."""
+    allowed = tmp_path / "vault"
+    out_root = tmp_path / "vault-out"
+    allowed.mkdir()
+    out_root.mkdir()
+    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS", str(allowed))
+    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS", str(out_root))
+    monkeypatch.delenv("DUCKCLAW_REPO_ROOT", raising=False)
+
+    md = allowed / "borrador.md"
+    md.write_text("# Borrador\n", encoding="utf-8")
+
+    def fake_run(cmd, **kwargs):
+        out_path = Path(cmd[cmd.index("-o") + 1])
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_bytes(b"PK fake docx")
+        return MagicMock(returncode=0, stderr="", stdout="")
+
+    with patch("duckclaw.document_toolbox.convert.shutil.which", return_value="/usr/bin/pandoc"):
+        with patch("duckclaw.document_toolbox.convert.subprocess.run", side_effect=fake_run):
+            raw = convert_document("borrador.md", output_format="docx")
+
+    payload = json.loads(raw)
+    assert "error" not in payload
+    target = Path(payload["path"])
+    assert target.parent == out_root.resolve()
+    assert target.name == "borrador.docx"
+    assert not (allowed / "borrador.docx").exists()
 
 
 def test_export_output_document_missing_source(tmp_path, monkeypatch) -> None:

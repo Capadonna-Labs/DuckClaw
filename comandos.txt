@@ -18,6 +18,13 @@ uv run duckops doctor --strict
 uv run duckops configure
 uv run duckops down --all
 
+# Document toolbox (ofimática local — no M365):
+brew install pandoc                        # convert_document → docx/pdf/html
+# Opcional PDF: brew install --cask basictex  (o otro motor pdflatex)
+uv sync --extra document-toolbox           # markitdown + docxtpl
+uv run duckops doctor                      # Check MarkItDown / Pandoc / OUTPUT_ROOTS
+# Flujo: write_output_document(.md) → convert_document(..., docx) → archivo en OUTPUT_ROOTS
+
 --------- INTERFAZ GRAFICA ----------
 cd apps/duckclaw-admin
 pnpm install

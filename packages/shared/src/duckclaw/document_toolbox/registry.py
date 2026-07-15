@@ -24,6 +24,49 @@ INGEST_SUFFIXES: frozenset[str] = INGEST_NATIVE_SUFFIXES | EXTRACT_SUFFIXES
 PANDOC_INPUT_SUFFIXES: frozenset[str] = frozenset({".md", ".markdown", ".txt", ".html", ".htm"})
 PANDOC_OUTPUT_FORMATS: frozenset[str] = frozenset({"docx", "pdf", "html"})
 
+# UTF-8 author lane only — never fake office/binary with text.encode.
+AUTHOR_TEXT_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".md",
+        ".markdown",
+        ".txt",
+        ".html",
+        ".htm",
+        ".json",
+        ".csv",
+        ".yaml",
+        ".yml",
+        ".xml",
+        ".py",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".css",
+        ".toml",
+        ".ini",
+        ".log",
+    }
+)
+
+AUTHOR_BINARY_REJECT_SUFFIXES: frozenset[str] = frozenset(
+    {
+        ".pdf",
+        ".docx",
+        ".doc",
+        ".pptx",
+        ".ppt",
+        ".xlsx",
+        ".xls",
+        ".zip",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bin",
+    }
+)
+
 DOCX_TEMPLATE_OUTPUT_SUFFIX = ".docx"
 
 
@@ -48,3 +91,25 @@ def is_extract_suffix(suffix: str) -> bool:
 
 def is_pandoc_input(suffix: str) -> bool:
     return suffix.lower() in PANDOC_INPUT_SUFFIXES
+
+
+def is_author_text_suffix(suffix: str) -> bool:
+    return suffix.lower() in AUTHOR_TEXT_SUFFIXES
+
+
+def assert_author_text_path(relative_path: str) -> None:
+    """Raise ValueError if write_output_document must not write this suffix."""
+    from pathlib import Path
+
+    suf = Path(relative_path).suffix.lower()
+    if suf in AUTHOR_BINARY_REJECT_SUFFIXES:
+        raise ValueError(
+            f"write_output_document no escribe binarios ({suf}). "
+            "Usa convert_document (pandoc) o render_docx_template / Report Engine."
+        )
+    if suf not in AUTHOR_TEXT_SUFFIXES:
+        allowed = ", ".join(sorted(AUTHOR_TEXT_SUFFIXES))
+        raise ValueError(
+            f"Extensión no permitida para autoría UTF-8 ({suf or 'sin extensión'}). "
+            f"Permitidas: {allowed}."
+        )

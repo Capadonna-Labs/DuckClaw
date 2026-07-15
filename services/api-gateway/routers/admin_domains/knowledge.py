@@ -218,12 +218,23 @@ async def get_knowledge_source_indexing_progress(
 
 
 @router.get("/knowledge/browse", dependencies=[Depends(require_admin_key)])
-async def browse_knowledge_folders(path: str = "") -> dict[str, Any]:
+async def browse_knowledge_folders(path: str = "", files: str = "") -> dict[str, Any]:
     from core.heavy_work import run_heavy_work
     from duckclaw.forge.rag.knowledge_paths import browse_knowledge_directories
 
+    suffixes = [
+        part.strip()
+        for part in (files or "").split(",")
+        if part.strip()
+    ]
+
     try:
-        return await run_heavy_work(lambda: browse_knowledge_directories(path))
+        return await run_heavy_work(
+            lambda: browse_knowledge_directories(
+                path,
+                include_suffixes=suffixes or None,
+            )
+        )
     except Exception as exc:
         raise problem(400, str(exc), "knowledge_browse") from exc
 

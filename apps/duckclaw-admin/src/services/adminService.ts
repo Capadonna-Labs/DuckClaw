@@ -195,6 +195,18 @@ export interface ReportInstanceDetail {
   progress: ReportInstanceProgress;
 }
 
+export interface ReportTemplateSummary {
+  template_id: string;
+  tenant_id: string;
+  owner_email: string;
+  name: string;
+  description: string;
+  template_uri: string;
+  section_schema: Array<{ id: string; label?: string; required?: boolean }>;
+  analyzer_mode: string;
+  visibility: string;
+}
+
 export interface SandboxArtifactMeta {
   artifact_id: string;
   filename: string;
@@ -423,7 +435,7 @@ export interface KnowledgeSource {
 export type KnowledgeBrowseEntry = {
   name: string;
   path: string;
-  kind: 'root' | 'directory';
+  kind: 'root' | 'directory' | 'file';
   exists: boolean;
   selectable: boolean;
 };
@@ -433,6 +445,7 @@ export type KnowledgeBrowseResponse = {
   parent_path: string | null;
   roots_mode: boolean;
   entries: KnowledgeBrowseEntry[];
+  include_suffixes?: string[];
 };
 
 export interface KnowledgeSearchResult {
@@ -2015,9 +2028,12 @@ export const adminService = {
       auto_sync_poll_sec: number;
     }>('/knowledge/config'),
 
-  browseKnowledgeFolders: (path = '') => {
-    const qs = path.trim() ? `?path=${encodeURIComponent(path.trim())}` : '';
-    return adminFetch<KnowledgeBrowseResponse>(`/knowledge/browse${qs}`);
+  browseKnowledgeFolders: (path = '', opts?: { files?: string }) => {
+    const qs = new URLSearchParams();
+    if (path.trim()) qs.set('path', path.trim());
+    if (opts?.files?.trim()) qs.set('files', opts.files.trim());
+    const query = qs.toString();
+    return adminFetch<KnowledgeBrowseResponse>(`/knowledge/browse${query ? `?${query}` : ''}`);
   },
 
   getKnowledgeSyncJobStatus: (jobId: string) =>
@@ -2173,8 +2189,66 @@ export const adminService = {
     );
   },
 
+  listReportTemplates: (params?: { limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return adminFetch<{ templates: ReportTemplateSummary[]; count: number }>(
+      `/report-templates${query ? `?${query}` : ''}`
+    );
+  },
+
+  registerReportTemplate: (body: {
+    template_docx_path: string;
+    name?: string;
+    description?: string;
+    visibility?: string;
+    template_id?: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      task_id: string;
+      template_id: string;
+      name: string;
+      section_count: number;
+      sections: Array<{ id: string; label?: string }>;
+      analyzer_mode?: string;
+    }>('/report-templates/register', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  createReportInstance: (body: {
+    template_id: string;
+    title: string;
+    project_id?: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      task_id: string;
+      instance_id: string;
+      template_id: string;
+      title: string;
+      status: string;
+    }>('/report-instances', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   getReportInstance: (instanceId: string) =>
     adminFetch<ReportInstanceDetail>(`/report-instances/${encodeURIComponent(instanceId)}`),
+
+  deleteReportInstance: (instanceId: string) =>
+    adminFetch<{ ok: boolean; task_id: string; instance_id: string; status: string }>(
+      `/report-instances/${encodeURIComponent(instanceId)}`,
+      { method: 'DELETE' }
+    ),
+
+  deleteReportTemplate: (templateId: string) =>
+    adminFetch<{ ok: boolean; task_id: string; template_id: string; status: string }>(
+      `/report-templates/${encodeURIComponent(templateId)}`,
+      { method: 'DELETE' }
+    ),
 
   createManagedWorkspaceDraft: (body: { prompt: string }) =>
     adminFetch<ManagedWorkspaceDraft>('/workspace/orchestrator/draft', {

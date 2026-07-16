@@ -47,6 +47,7 @@ from duckclaw.write_handlers import (  # noqa: F401
     kanban,
     knowledge,
     prompt_policies,
+    productivity,
     raw_sql,
     runtime,
     usage_logs,

@@ -620,6 +620,26 @@ class StrixSandboxManager:
                 ]
             except Exception as exc:
                 _log.warning("sandbox artifact registry failed chat_id=%s run_id=%s: %s", cid, rid, exc)
+            try:
+                from duckclaw.productivity_artifacts import promote_sandbox_run_to_storage
+
+                promoted = promote_sandbox_run_to_storage(
+                    source_files=source_files,
+                    tenant_id=tenant_id or "default",
+                    owner_email=(
+                        (os.environ.get("DUCKCLAW_ACTOR_EMAIL") or "").strip()
+                        or (tenant_id if "@" in (tenant_id or "") else "")
+                        or "system"
+                    ),
+                    run_id=rid,
+                    chat_id=cid,
+                )
+                for row in promoted:
+                    aid = str(row.get("artifact_id") or "").strip()
+                    if aid:
+                        artifact_ids.append(aid)
+            except Exception as exc:
+                _log.warning("productivity storage promote failed run_id=%s: %s", rid, exc)
         return artifacts, registered_run_id, artifact_ids
 
     def _refresh_browser_novnc(self, session_id: str, container: Any) -> None:

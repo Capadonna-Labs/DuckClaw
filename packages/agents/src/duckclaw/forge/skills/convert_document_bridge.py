@@ -33,6 +33,19 @@ def convert_document(
         payload = convert_document_file(source=source, output_format=fmt, target=target)
         payload["relative_path"] = out_rel
         payload["path"] = str(target)
+        try:
+            from duckclaw.productivity_artifacts import register_vault_artifact_from_path
+
+            indexed = register_vault_artifact_from_path(
+                target,
+                source_kind="convert_document",
+                source_ref=out_rel,
+                title=target.name,
+            )
+            if indexed:
+                payload["productivity_artifact_id"] = indexed.get("artifact_id")
+        except Exception as exc:
+            payload["productivity_index"] = {"ok": False, "reason": str(exc)}
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
         payload: dict[str, Any] = {"error": str(exc)}

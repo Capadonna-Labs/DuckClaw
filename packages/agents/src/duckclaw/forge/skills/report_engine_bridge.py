@@ -588,6 +588,19 @@ def render_report_instance(instance_id: str) -> str:
                 "status": "ready",
             }
         )
+        try:
+            from duckclaw.productivity_artifacts import register_vault_artifact_from_path
+
+            register_vault_artifact_from_path(
+                Path(str(rendered["path"])),
+                tenant_id=tenant_id,
+                owner_email=actor_email,
+                source_kind="report_render",
+                source_ref=str(instance["instance_id"]),
+                title=str(instance["title"]),
+            )
+        except Exception:
+            pass
         return json.dumps(rendered, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

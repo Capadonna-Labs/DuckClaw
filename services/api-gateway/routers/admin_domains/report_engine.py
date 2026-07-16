@@ -74,7 +74,7 @@ async def register_report_template_route(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     from duckclaw.forge.rag.knowledge_paths import resolve_readable_document_path
-    from duckclaw.report_engine.analyzer import analyze_docx_template
+    from duckclaw.report_engine.analyzer import analyze_docx_template, normalize_analyzer_mode_for_storage
 
     profile = _actor_profile(actor)
     try:
@@ -82,6 +82,8 @@ async def register_report_template_route(
         analysis = analyze_docx_template(source)
     except ValueError as exc:
         raise problem(400, str(exc), "report_template") from exc
+
+    storage_mode = normalize_analyzer_mode_for_storage(str(analysis.get("analyzer_mode") or "jinja"))
 
     tid = (body.template_id or "").strip() or f"rtpl_{uuid.uuid4().hex[:10]}"
     name = (body.name or "").strip() or source.stem
@@ -95,7 +97,7 @@ async def register_report_template_route(
             "description": (body.description or "").strip(),
             "template_uri": str(source),
             "section_schema": analysis.get("sections") or [],
-            "analyzer_mode": str(analysis.get("analyzer_mode") or "jinja"),
+            "analyzer_mode": storage_mode,
             "visibility": (body.visibility or "private").strip(),
         },
         actor_email=profile["email"],
@@ -107,7 +109,10 @@ async def register_report_template_route(
         "name": name,
         "section_count": len(analysis.get("sections") or []),
         "sections": analysis.get("sections") or [],
+        "tables": analysis.get("tables") or [],
+        "fields_in_tables": analysis.get("fields_in_tables", 0),
         "analyzer_mode": analysis.get("analyzer_mode"),
+        "storage_analyzer_mode": storage_mode,
     }
 
 

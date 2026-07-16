@@ -16,16 +16,64 @@ from duckclaw.forge.rag.knowledge_paths import (
 )
 
 
+def _guard_docx_when_templates(
+    relative_path: str,
+    output_format: str,
+    *,
+    allow_ad_hoc_docx: bool,
+) -> None:
+    from duckclaw.forge.skills.knowledge_tool_context import (
+        get_knowledge_tool_tenant_id,
+        get_session_actor_email,
+    )
+    from duckclaw.forge.skills.report_engine_bridge import _close_hub_db_if_owned, _open_hub_db
+    from duckclaw.report_engine.lane_guard import (
+        assert_docx_uses_report_engine_when_templates_exist,
+    )
+
+    db = None
+    try:
+        db = _open_hub_db()
+        assert_docx_uses_report_engine_when_templates_exist(
+            blocked_tool="convert_document",
+            relative_path=relative_path,
+            output_format=output_format,
+            db=db,
+            tenant_id=get_knowledge_tool_tenant_id(),
+            actor_email=get_session_actor_email(),
+            allow_ad_hoc_docx=allow_ad_hoc_docx,
+            fail_closed_without_db=True,
+        )
+    except ValueError:
+        raise
+    except Exception:
+        assert_docx_uses_report_engine_when_templates_exist(
+            blocked_tool="convert_document",
+            relative_path=relative_path,
+            output_format=output_format,
+            db=None,
+            allow_ad_hoc_docx=allow_ad_hoc_docx,
+            fail_closed_without_db=True,
+        )
+    finally:
+        _close_hub_db_if_owned(db)
+
+
 def convert_document(
     relative_path: str,
     output_format: str = "docx",
     root_hint: str = "",
     output_root: str = "",
+    allow_ad_hoc_docx: bool = False,
 ) -> str:
     """Convierte .md/.html/.txt legibles a DOCX/PDF/HTML bajo OUTPUT_ROOTS (pandoc)."""
     fmt = (output_format or "docx").strip().lower()
     try:
         rel = normalize_output_relative_path(relative_path, require_markdown=True)
+        if fmt == "docx":
+            _guard_docx_when_templates(
+                rel, fmt, allow_ad_hoc_docx=bool(allow_ad_hoc_docx)
+            )
         source = resolve_readable_document_path(relative_path=rel, root_hint=root_hint)
         out_rel = project_convert_output_relative(source=source, output_format=fmt)
         target = resolve_knowledge_output_path(relative_path=out_rel, output_root=output_root)
@@ -60,6 +108,7 @@ def export_output_document(
     relative_path: str,
     output_format: str = "docx",
     output_root: str = "",
+    allow_ad_hoc_docx: bool = False,
 ) -> str:
     """Alias retrocompatible de convert_document."""
     return convert_document(
@@ -67,6 +116,7 @@ def export_output_document(
         output_format=output_format,
         root_hint=output_root,
         output_root=output_root,
+        allow_ad_hoc_docx=allow_ad_hoc_docx,
     )
 
 
@@ -76,10 +126,10 @@ def register_convert_document_tool(tools_list: list[Any]) -> None:
             convert_document,
             name="convert_document",
             description=(
-                "Convierte .md/.html/.txt a DOCX/PDF/HTML vía pandoc (requiere pandoc en el host). "
-                "Siempre escribe el entregable bajo DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS (no al lado "
-                "de la fuente en ALLOWED). Solo conversiones ad hoc sin plantilla Word. "
-                "Informes corporativos: Report Engine (render_report_instance), no pandoc."
+                "Convierte .md/.html/.txt a DOCX/PDF/HTML vía pandoc. "
+                "Si el actor tiene plantillas Report Engine registradas, convert→docx "
+                "está bloqueado (usa render_report_instance). Escape: allow_ad_hoc_docx=true "
+                "solo para conversiones sin plantilla. Transversal a cualquier nicho."
             ),
         )
     )

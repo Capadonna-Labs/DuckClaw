@@ -191,7 +191,9 @@ def get_report_instance(db: Any, *, instance_id: str, tenant_id: str) -> dict[st
         """,
         [instance_id, tenant_id],
     )
-    if not row or not row[12]:
+    if not row:
+        return None
+    if not _is_active_flag(row[12]):
         return None
     return {
         "instance_id": str(row[0]),
@@ -207,6 +209,53 @@ def get_report_instance(db: Any, *, instance_id: str, tenant_id: str) -> dict[st
         "rendered_docx_uri": str(row[10] or ""),
         "conversation_id": str(row[11] or ""),
     }
+
+
+def _is_active_flag(raw: Any) -> bool:
+    if raw is True or raw == 1:
+        return True
+    if raw is False or raw == 0 or raw is None:
+        return False
+    return str(raw).strip().lower() in {"true", "t", "1", "yes"}
+
+
+def diagnose_missing_instance(
+    db: Any,
+    *,
+    instance_id: str,
+    tenant_id: str,
+) -> str:
+    """Explica por qué get_report_instance devolvió None (tenant / archivada / no existe)."""
+    iid = (instance_id or "").strip()
+    tid = (tenant_id or "default").strip() or "default"
+    if not iid:
+        return "instance_id vacío."
+    row = _sql_fetchone(
+        db,
+        """
+        SELECT instance_id, tenant_id, owner_email, active, status
+        FROM main.admin_report_instances
+        WHERE instance_id = ?
+        LIMIT 1
+        """,
+        [iid],
+    )
+    if not row:
+        return (
+            f"Instancia «{iid}» no está en DuckDB. "
+            "El create no persistió (db-writer) o la sesión lee otra base "
+            "(DUCKCLAW_GATEWAY_DB_PATH distinto del worker)."
+        )
+    row_tenant = str(row[1] or "").strip() or "default"
+    active = _is_active_flag(row[3])
+    if row_tenant != tid:
+        return (
+            f"Instancia «{iid}» existe en tenant «{row_tenant}», "
+            f"pero la sesión del agente usa «{tid}»."
+        )
+    if not active:
+        return f"Instancia «{iid}» está archivada (active=false, status={row[4]})."
+    return f"Instancia «{iid}» no visible con tenant «{tid}» (estado inesperado)."
 
 
 def actor_can_access_instance(

@@ -107,11 +107,11 @@ def resolve_effective_system_prompt(
     )
 
 
-_REPORT_ENGINE_SKILL_MARKERS = frozenset({"custom_reports", "reports", "report_engine"})
+_REPORT_ENGINE_SKILL_MARKERS = frozenset({"report_engine", "reports"})
 
 
 def worker_has_report_engine_skill(spec: WorkerSpec | None) -> bool:
-    """True si el worker optó por el atom Report Engine (transversal)."""
+    """True si el worker optó por el atom Report Engine (no dashboards HTML)."""
     if spec is None:
         return False
     skills = {
@@ -122,9 +122,7 @@ def worker_has_report_engine_skill(spec: WorkerSpec | None) -> bool:
     if skills & _REPORT_ENGINE_SKILL_MARKERS:
         return True
     configs = getattr(spec, "skill_configs", None) or {}
-    if any(key in configs for key in _REPORT_ENGINE_SKILL_MARKERS):
-        return True
-    return any("report" in skill for skill in skills)
+    return any(key in configs for key in _REPORT_ENGINE_SKILL_MARKERS)
 
 
 def _worker_includes_report_engine_directive(spec: WorkerSpec | None) -> bool:

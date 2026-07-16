@@ -30,9 +30,19 @@ Sandbox scratch (`output/sandbox/`) **mantiene TTL**. Al registrar un run se **c
 
 ## UI
 
-- Tab **Artefactos** (default): subvistas **Bandeja** | **Explorer vault**
+- Tab **Artefactos** (default): subvistas **Bandeja** | **Vault** | **Entregables**
+- **Entregables** = Report Engine (Word) + Dashboards HTML (no es solo «editor Word»)
 - Storage: botón promover (upload icon) + eliminar
 - Vault Explorer: navegar OUTPUT e **Indexar** archivo
+
+## Qué cubre Entregables hoy vs qué falta
+
+| Ya existe | Falta para que el nombre no mienta |
+|-----------|-------------------------------------|
+| Word corporativo (Report Engine) | Indexar dashboards HTML en la bandeja con lane propia |
+| Dashboards HTML (panel hermano) | PDF / Excel / PPT como lanes de entregable |
+| Storage sandbox + promote vault | Abrir entregable desde Chat con deep-link estable |
+| Índice `admin_productivity_artifacts` | Estado de render fallido visible en Bandeja (no solo en Chat) |
 
 ## Fuera de alcance
 

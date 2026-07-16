@@ -144,7 +144,7 @@ def test_report_engine_directive_appended_only_when_skill_present(tmp_path: Path
         llm_required=base_spec.llm_required,
         temperature=base_spec.temperature,
         topology=base_spec.topology,
-        skills_list=["custom_reports"],
+        skills_list=["report_engine"],
         allowed_tables=base_spec.allowed_tables,
         read_only=base_spec.read_only,
         worker_dir=base_spec.worker_dir,

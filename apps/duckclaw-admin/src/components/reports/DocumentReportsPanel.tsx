@@ -30,6 +30,21 @@ function sectionIcon(sectionStatus: string) {
   return '○';
 }
 
+function hasRenderablePreview(progress: ReportInstanceSummary['progress']): boolean {
+  return progress.complete_count + progress.partial_count > 0;
+}
+
+type OrderedSection = { id: string; label: string; status: string };
+
+function orderedSections(progress: ReportInstanceSummary['progress']): OrderedSection[] {
+  const complete = progress.complete_sections.map((id) => ({
+    id,
+    label: id,
+    status: 'complete',
+  }));
+  return [...progress.missing_sections, ...progress.partial_sections, ...complete];
+}
+
 function buildChatPrompt(instance: ReportInstanceSummary): string {
   return encodeURIComponent(
     `Continúa el documento Word «${instance.title}» (instance_id ${instance.instance_id}). ` +
@@ -61,6 +76,107 @@ function Field({
 
 const inputClass =
   'w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-600 focus:border-sky-500 focus:outline-none focus:ring-1 focus:ring-sky-500';
+
+function sectionStatusClass(status: string): string {
+  if (status === 'complete') return 'text-emerald-400';
+  if (status === 'partial') return 'text-amber-400';
+  return 'text-slate-500';
+}
+
+function SectionsSidebar({
+  sections,
+  renderedDocxUri,
+}: {
+  sections: OrderedSection[];
+  renderedDocxUri: string;
+}) {
+  return (
+    <div className="scrollbar-thin flex w-64 shrink-0 flex-col overflow-y-auto border-l border-slate-800 bg-slate-900 p-4">
+      <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Secciones</h4>
+      <ul className="mt-3 space-y-2">
+        {sections.map((sec) => (
+          <li key={sec.id} className="flex items-start gap-2 text-xs text-slate-300">
+            <span
+              className={`mt-0.5 w-4 shrink-0 text-center ${sectionStatusClass(sec.status)}`}
+            >
+              {sectionIcon(sec.status)}
+            </span>
+            <span>{sec.label}</span>
+          </li>
+        ))}
+      </ul>
+      {renderedDocxUri ? (
+        <p className="mt-4 break-all text-[10px] text-slate-500">DOCX: {renderedDocxUri}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function DraftWorkspace({
+  instance,
+  playgroundHref,
+  sections,
+}: {
+  instance: ReportInstanceSummary;
+  playgroundHref: string;
+  sections: OrderedSection[];
+}) {
+  const pending = instance.progress.missing_count + instance.progress.partial_count;
+
+  return (
+    <div className="scrollbar-thin flex min-w-0 flex-1 flex-col overflow-y-auto bg-slate-900/40 p-6">
+      <div className="mx-auto w-full max-w-2xl space-y-6">
+        <div className="rounded-xl border border-slate-800 bg-slate-950/80 p-5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Borrador · {instance.progress.completion_percent}%
+          </p>
+          <h4 className="mt-2 text-lg font-semibold text-slate-100">
+            {pending > 0
+              ? `${pending} sección${pending === 1 ? '' : 'es'} por rellenar`
+              : 'Listo para generar Word'}
+          </h4>
+          <p className="mt-2 text-sm leading-relaxed text-slate-400">
+            La plantilla «{instance.template_name || instance.template_id}» ya está cargada.
+            Dicta el contenido en Chat; la vista previa HTML aparece cuando haya al menos una
+            sección con texto.
+          </p>
+          <Link
+            href={playgroundHref}
+            className="mt-4 inline-flex rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500"
+          >
+            Completar en Chat →
+          </Link>
+        </div>
+
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Checklist ({sections.length})
+          </h4>
+          <ul className="mt-3 divide-y divide-slate-800 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
+            {sections.map((sec) => (
+              <li
+                key={sec.id}
+                className="flex items-center gap-3 px-4 py-2.5 text-sm text-slate-300"
+              >
+                <span className={`w-4 shrink-0 text-center ${sectionStatusClass(sec.status)}`}>
+                  {sectionIcon(sec.status)}
+                </span>
+                <span className="min-w-0 flex-1 truncate">{sec.label}</span>
+                <span className="shrink-0 text-[10px] uppercase tracking-wide text-slate-600">
+                  {sec.status === 'complete'
+                    ? 'Hecho'
+                    : sec.status === 'partial'
+                      ? 'Parcial'
+                      : 'Pendiente'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function DocumentReportsPanel() {
   const [instances, setInstances] = useState<ReportInstanceSummary[]>([]);
@@ -711,52 +827,29 @@ export function DocumentReportsPanel() {
               <p className="border-b border-amber-900/40 px-4 py-2 text-xs text-amber-200">{error}</p>
             ) : null}
             <div className="flex min-h-0 flex-1">
-              <div className="relative min-w-0 flex-[3] border-r border-slate-800 bg-white">
-                {selected.progress.completion_percent === 0 ? (
-                  <div className="pointer-events-none absolute inset-x-0 top-0 z-10 border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">
-                    Borrador vacío (0%). La plantilla ya está cargada a la derecha; el texto del
-                    informe aparece aquí cuando lo rellenes con «Completar en Chat».
+              {hasRenderablePreview(selected.progress) ? (
+                <>
+                  <div className="relative min-w-0 flex-1 bg-white">
+                    <iframe
+                      key={previewSrc}
+                      src={previewSrc}
+                      title="Vista previa del informe"
+                      className="h-full w-full"
+                      sandbox="allow-same-origin"
+                    />
                   </div>
-                ) : null}
-                <iframe
-                  key={previewSrc}
-                  src={previewSrc}
-                  title="Vista previa del informe"
-                  className="h-full w-full"
-                  sandbox="allow-same-origin"
+                  <SectionsSidebar
+                    sections={orderedSections(selected.progress)}
+                    renderedDocxUri={selected.rendered_docx_uri}
+                  />
+                </>
+              ) : (
+                <DraftWorkspace
+                  instance={selected}
+                  playgroundHref={playgroundHref}
+                  sections={orderedSections(selected.progress)}
                 />
-              </div>
-              <div className="scrollbar-thin flex w-64 shrink-0 flex-col overflow-y-auto bg-slate-900 p-4">
-                <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Secciones
-                </h4>
-                <ul className="mt-3 space-y-2">
-                  {[
-                    ...selected.progress.missing_sections,
-                    ...selected.progress.partial_sections,
-                    ...selected.progress.complete_sections.map((id) => ({
-                      id,
-                      label: id,
-                      status: 'complete',
-                    })),
-                  ].map((sec) => (
-                    <li
-                      key={typeof sec === 'string' ? sec : sec.id}
-                      className="flex items-start gap-2 text-xs text-slate-300"
-                    >
-                      <span className="mt-0.5 w-4 shrink-0 text-center text-slate-500">
-                        {sectionIcon(typeof sec === 'string' ? 'complete' : sec.status)}
-                      </span>
-                      <span>{typeof sec === 'string' ? sec : sec.label}</span>
-                    </li>
-                  ))}
-                </ul>
-                {selected.rendered_docx_uri ? (
-                  <p className="mt-4 break-all text-[10px] text-slate-500">
-                    DOCX: {selected.rendered_docx_uri}
-                  </p>
-                ) : null}
-              </div>
+              )}
             </div>
           </>
         ) : (

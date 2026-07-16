@@ -52,6 +52,19 @@ def write_output_document(relative_path: str, content: str, output_root: str = "
             payload["rag_sync"] = rag_sync
         except Exception as exc:
             payload["rag_sync"] = {"synced": False, "reason": str(exc)}
+        try:
+            from duckclaw.productivity_artifacts import register_vault_artifact_from_path
+
+            indexed = register_vault_artifact_from_path(
+                target,
+                source_kind="write_output",
+                source_ref=rel,
+                title=target.name,
+            )
+            if indexed:
+                payload["productivity_artifact_id"] = indexed.get("artifact_id")
+        except Exception as exc:
+            payload["productivity_index"] = {"ok": False, "reason": str(exc)}
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)

@@ -242,6 +242,36 @@ def _apply_create_report_instance(conn: Any, payload: dict) -> None:
             ],
         )
 
+    # Índice Productividad (lane=report)
+    try:
+        prod_id = f"prep_{instance_id}"
+        existing_prod = conn.execute(
+            "SELECT artifact_id FROM main.admin_productivity_artifacts WHERE artifact_id = ?",
+            [prod_id],
+        ).fetchone()
+        if existing_prod:
+            conn.execute(
+                """
+                UPDATE main.admin_productivity_artifacts
+                SET title = ?, active = true, updated_at = CURRENT_TIMESTAMP
+                WHERE artifact_id = ?
+                """,
+                [title, prod_id],
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO main.admin_productivity_artifacts
+                (artifact_id, tenant_id, owner_email, lane, title, filename, uri,
+                 source_kind, source_ref, mime, byte_size, active)
+                VALUES (?, ?, ?, 'report', ?, '', '', 'report_engine', ?, '', 0, true)
+                """,
+                [prod_id, tenant_id, owner, title, instance_id],
+            )
+    except Exception:
+        # Tabla puede no existir aún en hubs sin migración 2
+        pass
+
 
 def _apply_patch_report_section(conn: Any, payload: dict) -> None:
     instance_id = str(payload.get("instance_id") or "").strip()
@@ -315,6 +345,17 @@ def _apply_soft_delete_report_instance(conn: Any, payload: dict) -> None:
         """,
         [instance_id, tenant_id],
     )
+    try:
+        conn.execute(
+            """
+            UPDATE main.admin_productivity_artifacts
+            SET active = false, updated_at = CURRENT_TIMESTAMP
+            WHERE source_ref = ? AND lane = 'report' AND tenant_id = ?
+            """,
+            [instance_id, tenant_id],
+        )
+    except Exception:
+        pass
 
 
 def _apply_soft_delete_report_template(conn: Any, payload: dict) -> None:

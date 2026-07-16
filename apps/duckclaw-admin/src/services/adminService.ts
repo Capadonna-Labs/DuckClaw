@@ -207,6 +207,20 @@ export interface ReportTemplateSummary {
   visibility: string;
 }
 
+export interface ProductivityArtifact {
+  artifact_id: string;
+  lane: 'storage' | 'vault' | 'report' | string;
+  title: string;
+  filename: string;
+  uri: string;
+  source_kind: string;
+  source_ref: string;
+  mime: string;
+  byte_size: number;
+  updated_at: string;
+  progress_percent?: number;
+}
+
 export interface SandboxArtifactMeta {
   artifact_id: string;
   filename: string;
@@ -2243,6 +2257,61 @@ export const adminService = {
       `/report-instances/${encodeURIComponent(instanceId)}`,
       { method: 'DELETE' }
     ),
+
+  listProductivityArtifacts: (params?: { lane?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.lane) qs.set('lane', params.lane);
+    if (params?.limit) qs.set('limit', String(params.limit));
+    const query = qs.toString();
+    return adminFetch<{ artifacts: ProductivityArtifact[]; count: number }>(
+      `/productivity/artifacts${query ? `?${query}` : ''}`
+    );
+  },
+
+  deleteProductivityArtifact: (artifactId: string) =>
+    adminFetch<{ ok: boolean; task_id: string; artifact_id: string; lane: string }>(
+      `/productivity/artifacts/${encodeURIComponent(artifactId)}`,
+      { method: 'DELETE' }
+    ),
+
+  promoteProductivityArtifactToVault: (
+    artifactId: string,
+    body?: { relative_dir?: string; remove_from_storage?: boolean }
+  ) =>
+    adminFetch<{
+      ok: boolean;
+      source_artifact_id: string;
+      vault_artifact_id: string;
+      vault_uri: string;
+      relative_path: string;
+      filename: string;
+      removed_from_storage: boolean;
+    }>(`/productivity/artifacts/${encodeURIComponent(artifactId)}/promote-to-vault`, {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+    }),
+
+  browseProductivityVault: (path = '', files = '*') => {
+    const qs = new URLSearchParams();
+    if (path.trim()) qs.set('path', path.trim());
+    if (files) qs.set('files', files);
+    const query = qs.toString();
+    return adminFetch<KnowledgeBrowseResponse>(
+      `/productivity/vault/browse${query ? `?${query}` : ''}`
+    );
+  },
+
+  indexProductivityVaultPath: (body: { path: string; title?: string }) =>
+    adminFetch<{
+      ok: boolean;
+      artifact_id: string;
+      lane: string;
+      title: string;
+      uri: string;
+    }>('/productivity/vault/index', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
 
   deleteReportTemplate: (templateId: string) =>
     adminFetch<{ ok: boolean; task_id: string; template_id: string; status: string }>(

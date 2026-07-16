@@ -131,11 +131,18 @@ def browse_knowledge_directories(
     path: str = "",
     *,
     include_suffixes: list[str] | None = None,
+    root_set: str = "allowed",
 ) -> dict[str, Any]:
-    """List selectable folders (and optional files) under configured ingest roots."""
-    allowed = knowledge_allowed_roots()
+    """List selectable folders (and optional files) under ingest or OUTPUT roots."""
+    mode = (root_set or "allowed").strip().lower()
+    if mode == "output":
+        allowed = knowledge_output_roots()
+        empty_msg = "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS no configurado"
+    else:
+        allowed = knowledge_allowed_roots()
+        empty_msg = "DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS no configurado para ingesta local"
     if not allowed:
-        raise ValueError("DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS no configurado para ingesta local")
+        raise ValueError(empty_msg)
 
     suffixes = [
         s.lower() if s.startswith(".") else f".{s.lower()}"
@@ -163,6 +170,7 @@ def browse_knowledge_directories(
             "roots_mode": True,
             "entries": sorted(entries, key=lambda item: str(item["name"]).lower()),
             "include_suffixes": suffixes,
+            "root_set": mode,
         }
 
     target = Path(uri).expanduser().resolve()
@@ -203,7 +211,7 @@ def browse_knowledge_directories(
             continue
         if not suffixes or not child.is_file():
             continue
-        if child.suffix.lower() not in suffixes:
+        if suffixes != ["*"] and child.suffix.lower() not in suffixes:
             continue
         file_entries.append(
             {
@@ -221,6 +229,7 @@ def browse_knowledge_directories(
         "roots_mode": False,
         "entries": dir_entries + file_entries,
         "include_suffixes": suffixes,
+        "root_set": mode,
     }
 
 

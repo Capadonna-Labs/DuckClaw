@@ -8,7 +8,7 @@ import { ProductivityArtifactsPanel } from '@/components/productivity/Productivi
 import KanbanBoardView from '@/components/kanban/KanbanBoardView';
 
 const TABS = [
-  { id: 'artefactos', label: 'Artefactos', hint: 'Bandeja, vault e informes' },
+  { id: 'artefactos', label: 'Artefactos', hint: 'Bandeja, vault y entregables' },
   { id: 'tablero', label: 'Tablero', hint: 'Kanban de tareas y swarm' },
 ] as const;
 
@@ -27,9 +27,9 @@ function ProductividadHubContent() {
 
   useEffect(() => {
     const raw = searchParams.get('tab');
-    // Legacy deep-link /productividad?tab=reportes → artefactos + view=informes
+    // Legacy deep-link /productividad?tab=reportes → artefactos + view=entregables
     if (raw === 'reportes') {
-      router.replace('/productividad?tab=artefactos&view=informes', { scroll: false });
+      router.replace('/productividad?tab=artefactos&view=entregables', { scroll: false });
       setTab('artefactos');
       return;
     }

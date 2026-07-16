@@ -36,6 +36,23 @@ def _open_hub_db() -> Any:
     return DuckClaw(hub_path, read_only=True)
 
 
+def _hub_db_is_owned(db: Any) -> bool:
+    """True solo si abrimos una conexión efímera (no la del worker)."""
+    from duckclaw.forge.skills.report_engine_hub_context import get_report_engine_hub_db
+
+    reuse = get_report_engine_hub_db()
+    return reuse is None or reuse is not db
+
+
+def _close_hub_db_if_owned(db: Any | None) -> None:
+    if db is None or not _hub_db_is_owned(db):
+        return
+    try:
+        db.close()
+    except Exception:
+        pass
+
+
 def _session_scope() -> tuple[str, str, str]:
     from duckclaw.forge.skills.knowledge_tool_context import (
         get_knowledge_tool_project_id,
@@ -160,7 +177,7 @@ def list_report_templates(limit: int = 50) -> str:
                 "count": len(rows),
                 "hint": (
                     "Sin plantillas: en Chat pide «registra mi plantilla Word del vault» "
-                    "o usa Informes Word en Admin (nuevo informe)."
+                    "o usa Entregables en Productividad (nuevo informe)."
                     if not rows
                     else ""
                 ),
@@ -170,11 +187,7 @@ def list_report_templates(limit: int = 50) -> str:
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
     finally:
-        if db is not None:
-            try:
-                db.close()
-            except Exception:
-                pass
+        _close_hub_db_if_owned(db)
 
 
 def register_report_template(
@@ -192,6 +205,9 @@ def register_report_template(
         source = resolve_readable_document_path(relative_path=template_docx_path)
         analysis = analyze_docx_template(source)
         tid = (template_id or "").strip() or f"rtpl_{uuid.uuid4().hex[:10]}"
+        from duckclaw.report_engine.analyzer import normalize_analyzer_mode_for_storage
+
+        storage_mode = normalize_analyzer_mode_for_storage(str(analysis.get("analyzer_mode") or "jinja"))
         _dispatch_write(
             {
                 "command_type": "upsert_report_template",
@@ -200,7 +216,7 @@ def register_report_template(
                 "description": (description or "").strip(),
                 "template_uri": str(source),
                 "section_schema": analysis.get("sections") or [],
-                "analyzer_mode": str(analysis.get("analyzer_mode") or "jinja"),
+                "analyzer_mode": storage_mode,
                 "visibility": (visibility or "private").strip(),
             }
         )
@@ -210,13 +226,76 @@ def register_report_template(
                 "name": name,
                 "section_count": len(analysis.get("sections") or []),
                 "sections": analysis.get("sections") or [],
+                "tables": analysis.get("tables") or [],
+                "fields_in_tables": analysis.get("fields_in_tables", 0),
                 "analyzer_mode": analysis.get("analyzer_mode"),
+                "storage_analyzer_mode": storage_mode,
                 "warning": analysis.get("warning"),
             },
             ensure_ascii=False,
         )
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+
+def _missing_instance_error(instance_id: str) -> str:
+    from duckclaw.report_engine.admin_report_read import diagnose_missing_instance
+
+    tenant_id, _, _ = _session_scope()
+    db = None
+    try:
+        db = _open_hub_db()
+        detail = diagnose_missing_instance(
+            db,
+            instance_id=(instance_id or "").strip(),
+            tenant_id=tenant_id,
+        )
+        return json.dumps(
+            {
+                "error": "Instancia no encontrada",
+                "detail": detail,
+                "instance_id": (instance_id or "").strip(),
+                "tenant_id": tenant_id,
+                "hint": (
+                    "No es caché: o el write no llegó a esta DuckDB, o el tenant de sesión "
+                    "no coincide. Verifica en Productividad → Entregables o "
+                    "get_report_status con el mismo instance_id."
+                ),
+            },
+            ensure_ascii=False,
+        )
+    except Exception as exc:
+        return json.dumps(
+            {
+                "error": "Instancia no encontrada",
+                "instance_id": (instance_id or "").strip(),
+                "tenant_id": tenant_id,
+                "detail": str(exc),
+            },
+            ensure_ascii=False,
+        )
+    finally:
+        _close_hub_db_if_owned(db)
+
+
+def _ensure_instance_readable(instance_id: str) -> None:
+    """Tras create/patch: falla si la sesión no puede leer la fila (DB/tenant)."""
+    from duckclaw.report_engine.admin_report_read import (
+        diagnose_missing_instance,
+        get_report_instance,
+    )
+
+    tenant_id, _, _ = _session_scope()
+    db = None
+    try:
+        db = _open_hub_db()
+        if get_report_instance(db, instance_id=instance_id, tenant_id=tenant_id):
+            return
+        raise RuntimeError(
+            diagnose_missing_instance(db, instance_id=instance_id, tenant_id=tenant_id)
+        )
+    finally:
+        _close_hub_db_if_owned(db)
 
 
 def create_report_instance(
@@ -245,6 +324,7 @@ def create_report_instance(
                 "project_id": pid,
             }
         )
+        _ensure_instance_readable(iid)
         return json.dumps(
             {
                 "instance_id": iid,
@@ -274,7 +354,7 @@ def get_report_status(instance_id: str) -> str:
         db = _open_hub_db()
         instance = get_report_instance(db, instance_id=(instance_id or "").strip(), tenant_id=tenant_id)
         if not instance:
-            return json.dumps({"error": "Instancia no encontrada"}, ensure_ascii=False)
+            return _missing_instance_error(instance_id)
         if not actor_can_access_instance(db, instance=instance, actor_email=actor_email):
             return json.dumps({"error": "Acceso denegado"}, ensure_ascii=False)
         template = get_report_template(db, template_id=str(instance["template_id"]), tenant_id=tenant_id)
@@ -292,11 +372,7 @@ def get_report_status(instance_id: str) -> str:
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
     finally:
-        if db is not None:
-            try:
-                db.close()
-            except Exception:
-                pass
+        _close_hub_db_if_owned(db)
 
 
 def patch_report_section(
@@ -307,6 +383,9 @@ def patch_report_section(
     mark_complete: bool = False,
 ) -> str:
     """Añade o reemplaza contenido en una sección del informe en construcción."""
+    from duckclaw.report_engine.admin_report_read import get_report_instance, get_report_template
+    from duckclaw.report_engine.state import summarize_status
+
     try:
         _dispatch_write(
             {
@@ -318,6 +397,30 @@ def patch_report_section(
                 "mark_complete": bool(mark_complete),
             }
         )
+        tenant_id, _, _ = _session_scope()
+        db = None
+        progress: dict[str, Any] = {}
+        try:
+            db = _open_hub_db()
+            instance = get_report_instance(
+                db, instance_id=(instance_id or "").strip(), tenant_id=tenant_id
+            )
+            if instance:
+                template = get_report_template(
+                    db, template_id=str(instance["template_id"]), tenant_id=tenant_id
+                )
+                schema = (template or {}).get("section_schema") or []
+                progress = summarize_status(instance["state"], schema)
+        finally:
+            _close_hub_db_if_owned(db)
+
+        hint = ""
+        raw_content = content or ""
+        if "|" in raw_content and "\n" in raw_content:
+            hint = (
+                "Detecté posible tabla markdown: en celdas Word se aplanará a texto. "
+                "Preferible un patch por cada {{ campo }} de la plantilla."
+            )
         return json.dumps(
             {
                 "instance_id": instance_id,
@@ -325,15 +428,41 @@ def patch_report_section(
                 "mode": mode,
                 "mark_complete": mark_complete,
                 "status": "updated",
+                "progress": progress,
+                "hint": hint,
             },
             ensure_ascii=False,
         )
     except Exception as exc:
-        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+        msg = str(exc)
+        payload: dict[str, Any] = {"error": msg}
+        if "sección desconocida" in msg.lower() or "Sección desconocida" in msg:
+            try:
+                tenant_id, _, _ = _session_scope()
+                db = _open_hub_db()
+                try:
+                    instance = get_report_instance(
+                        db, instance_id=(instance_id or "").strip(), tenant_id=tenant_id
+                    )
+                    if instance:
+                        template = get_report_template(
+                            db, template_id=str(instance["template_id"]), tenant_id=tenant_id
+                        )
+                        schema = (template or {}).get("section_schema") or []
+                        payload["valid_section_ids"] = [
+                            str(s.get("id") or "")
+                            for s in schema
+                            if isinstance(s, dict) and s.get("id")
+                        ]
+                finally:
+                    _close_hub_db_if_owned(db)
+            except Exception:
+                pass
+        return json.dumps(payload, ensure_ascii=False)
 
 
 def _discover_markdown_relative_path(*, report_title: str) -> str:
-    """Busca el .md del informe en raíces OUTPUT (p. ej. Informes/INFORME*.md)."""
+    """Busca .md en OUTPUT por tokens del título (sin carpetas de nicho hardcodeadas)."""
     import re
 
     from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
@@ -350,8 +479,12 @@ def _discover_markdown_relative_path(*, report_title: str) -> str:
         for tok in re.findall(r"[a-zA-Z0-9áéíóúñ]+", (report_title or "").lower())
         if len(tok) >= 3
     }
-    scored: list[tuple[int, str]] = []
+    if not title_tokens:
+        raise ValueError(
+            "Indica markdown_relative_path (ruta .md bajo OUTPUT) o markdown_content."
+        )
 
+    scored: list[tuple[int, str]] = []
     for root in roots:
         if not root.is_dir():
             continue
@@ -360,23 +493,14 @@ def _discover_markdown_relative_path(*, report_title: str) -> str:
                 continue
             rel = path.relative_to(root).as_posix()
             rel_lower = rel.lower()
-            score = 0
-            if rel_lower.startswith("informes/") or "/informes/" in rel_lower:
-                score += 20
-            elif "informe" in rel_lower:
-                score += 10
-            for tok in title_tokens:
-                if tok in rel_lower:
-                    score += 6
-            if "mensual" in rel_lower and "mensual" in title_tokens:
-                score += 8
+            score = sum(6 for tok in title_tokens if tok in rel_lower)
             if score > 0:
                 scored.append((score, rel))
 
     if not scored:
         raise ValueError(
-            "No hay .md de informe en el vault OUTPUT. "
-            "Indica markdown_relative_path (ej. Informes/INFORME MENSUAL N°4 - JUNIO 2026.md)."
+            "No hay .md en OUTPUT que coincida con el título. "
+            "Pasa markdown_relative_path o markdown_content explícitos."
         )
     scored.sort(key=lambda item: (-item[0], item[1]))
     return scored[0][1]
@@ -417,7 +541,7 @@ def _resolve_registered_template_id(
         try:
             rows = _list(db, tenant_id=tenant_id, actor_email=actor_email, limit=200)
         finally:
-            db.close()
+            _close_hub_db_if_owned(db)
         for row in rows:
             if str(row.get("template_id")) == tid_hint:
                 schema = row.get("section_schema") or []
@@ -431,7 +555,7 @@ def _resolve_registered_template_id(
     try:
         rows = _list(db, tenant_id=tenant_id, actor_email=actor_email, limit=200)
     finally:
-        db.close()
+        _close_hub_db_if_owned(db)
     for row in rows:
         uri = str(row.get("template_uri") or "").lower()
         row_name = str(row.get("name") or "").strip().lower()
@@ -462,7 +586,7 @@ def generate_report_docx_from_markdown(
     template_name: str = "",
     template_id: str = "",
 ) -> str:
-    """Flujo one-shot: plantilla vault + markdown → instancia + render DOCX (Report Engine)."""
+    """One-shot SOLO para plantillas de un solo campo. Multi-campo → patch por sección."""
     try:
         markdown, markdown_source = _read_markdown_for_report(
             markdown_relative_path=markdown_relative_path,
@@ -489,6 +613,23 @@ def generate_report_docx_from_markdown(
             resolved_id = str(reg["template_id"])
             schema = reg.get("sections") or []
 
+        schema_list = schema if isinstance(schema, list) else []
+        if len(schema_list) > 1:
+            ids = [str(s.get("id") or "") for s in schema_list if isinstance(s, dict)]
+            return json.dumps(
+                {
+                    "error": (
+                        "Plantilla multi-campo: generate_report_docx_from_markdown no aplica. "
+                        "Usa create_report_instance + patch_report_section por cada section_id "
+                        "+ render_report_instance."
+                    ),
+                    "template_id": resolved_id,
+                    "section_ids": [i for i in ids if i],
+                    "section_count": len(ids),
+                },
+                ensure_ascii=False,
+            )
+
         create_raw = create_report_instance(
             template_id=resolved_id,
             title=report_title,
@@ -498,7 +639,7 @@ def generate_report_docx_from_markdown(
             return create_raw
         instance_id = str(created["instance_id"])
 
-        section_id = _primary_section_id(schema if isinstance(schema, list) else [])
+        section_id = _primary_section_id(schema_list)
         patch_raw = patch_report_section(
             instance_id=instance_id,
             section_id=section_id,
@@ -531,18 +672,18 @@ def generate_report_docx_from_markdown(
         msg = str(exc).lower()
         if "markdown" in msg or "output_roots" in msg:
             payload["hint"] = (
-                "Pasa markdown_relative_path=Informes/NOMBRE.md o el contenido en markdown_content. "
-                "No uses pandoc ni run_sandbox."
+                "Pasa markdown_relative_path o markdown_content. "
+                "No uses pandoc ni run_sandbox para plantillas."
             )
         if "sección desconocida" in msg:
             payload["hint"] = (
-                "La plantilla no tiene esa sección. Revisa section_schema con list_report_templates "
+                "Revisa section_schema con list_report_templates "
                 "y usa patch_report_section con un section_id válido."
             )
         return json.dumps(payload, ensure_ascii=False)
 
 
-def render_report_instance(instance_id: str) -> str:
+def render_report_instance(instance_id: str, force: bool = False) -> str:
     """Genera el DOCX del informe desde plantilla + estado actual."""
     from duckclaw.forge.rag.knowledge_paths import knowledge_allowed_roots, knowledge_output_roots
     from duckclaw.report_engine.admin_report_read import (
@@ -551,6 +692,10 @@ def render_report_instance(instance_id: str) -> str:
         get_report_template,
     )
     from duckclaw.report_engine.render import render_instance_docx_from_uri
+    from duckclaw.report_engine.render_validate import (
+        assert_ready_to_render,
+        assert_template_is_patchable,
+    )
 
     tenant_id, actor_email, _ = _session_scope()
     db = None
@@ -558,12 +703,20 @@ def render_report_instance(instance_id: str) -> str:
         db = _open_hub_db()
         instance = get_report_instance(db, instance_id=(instance_id or "").strip(), tenant_id=tenant_id)
         if not instance:
-            return json.dumps({"error": "Instancia no encontrada"}, ensure_ascii=False)
+            return _missing_instance_error(instance_id)
         if not actor_can_access_instance(db, instance=instance, actor_email=actor_email):
             return json.dumps({"error": "Acceso denegado"}, ensure_ascii=False)
         template = get_report_template(db, template_id=str(instance["template_id"]), tenant_id=tenant_id)
         if not template:
             return json.dumps({"error": "Plantilla no encontrada"}, ensure_ascii=False)
+
+        assert_template_is_patchable(str(template.get("analyzer_mode") or "jinja"))
+        schema = template.get("section_schema") or []
+        progress = assert_ready_to_render(
+            instance["state"],
+            schema if isinstance(schema, list) else [],
+            force=bool(force),
+        )
 
         roots = knowledge_output_roots()
         if not roots:
@@ -580,12 +733,28 @@ def render_report_instance(instance_id: str) -> str:
             period_key=str(instance["period_key"]),
             allowed_roots=allowed,
         )
+        unresolved = rendered.get("unresolved_placeholders") or []
+        if unresolved and not force:
+            return json.dumps(
+                {
+                    "error": (
+                        "Tras el render quedaron placeholders sin resolver. "
+                        "Revisa el schema / patches o pasa force=true."
+                    ),
+                    "unresolved_placeholders": unresolved,
+                    "path": rendered.get("path"),
+                    "progress": progress,
+                },
+                ensure_ascii=False,
+            )
+
+        status = "ready" if not unresolved else "draft"
         _dispatch_write(
             {
                 "command_type": "update_report_instance_render",
                 "instance_id": instance["instance_id"],
                 "rendered_docx_uri": str(rendered["path"]),
-                "status": "ready",
+                "status": status,
             }
         )
         try:
@@ -601,15 +770,19 @@ def render_report_instance(instance_id: str) -> str:
             )
         except Exception:
             pass
-        return json.dumps(rendered, ensure_ascii=False)
+        return json.dumps(
+            {
+                **rendered,
+                "progress": progress,
+                "forced": bool(force),
+                "status": status,
+            },
+            ensure_ascii=False,
+        )
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
     finally:
-        if db is not None:
-            try:
-                db.close()
-            except Exception:
-                pass
+        _close_hub_db_if_owned(db)
 
 
 def register_report_engine_tools(tools_list: list[Any]) -> None:
@@ -650,27 +823,29 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 patch_report_section,
                 name="patch_report_section",
                 description=(
-                    "Actualiza una sección del informe (mode append|replace). "
-                    "Ej.: agregar notas a section_notes del informe mensual."
+                    "Actualiza UNA sección/celda de la plantilla (mode append|replace). "
+                    "Texto plano por hueco {{ id }} — no pegues tablas markdown ni bloques "
+                    "enteros; rellena cada section_id del schema (p. ej. cuerpo, seccion.1). "
+                    "La plantilla Word conserva tablas y estilos; tú solo llenas huecos."
                 ),
             ),
             StructuredTool.from_function(
                 render_report_instance,
                 name="render_report_instance",
                 description=(
-                    "Genera el Word final (docxtpl) en el vault de salida. "
-                    "Paso final del Report Engine — preferir sobre convert_document/pandoc "
-                    "cuando hay plantilla corporativa registrada."
+                    "Genera el Word final (docxtpl) en OUTPUT/reports/. "
+                    "Falla si faltan secciones required o quedan {{ placeholders }}. "
+                    "force=true exporta borrador incompleto a propósito. "
+                    "Preferir sobre convert_document/pandoc cuando hay plantilla registrada."
                 ),
             ),
             StructuredTool.from_function(
                 generate_report_docx_from_markdown,
                 name="generate_report_docx_from_markdown",
                 description=(
-                    "ÚLTIMO RECURSO — one-pager con una sola sección body. "
-                    "NO usar para INFORME MENSUAL ni informes tabulares con obligaciones. "
-                    "Flujo correcto: patch_report_section por cada campo + render_report_instance. "
-                    "No es pandoc; no convierte md→docx con formato contractual."
+                    "ÚLTIMO RECURSO — solo plantillas de UN campo. "
+                    "Plantillas multi-campo: create + patch por section_id + render. "
+                    "No es pandoc; no sustituye el flujo por sección."
                 ),
             ),
         ]

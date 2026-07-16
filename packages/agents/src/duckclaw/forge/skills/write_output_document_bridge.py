@@ -78,10 +78,10 @@ def register_write_output_document_tool(tools_list: list[Any]) -> None:
             description=(
                 "Escribe un archivo de texto UTF-8 en DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS "
                 "(.md, .txt, .json, .csv, .yaml, .py, .html, …). "
-                "Prohibido .docx/.pdf/.xlsx y demás binarios: usa convert_document (pandoc) "
-                "o render_docx_template / Report Engine. "
-                "Informes corporativos: register_report_template → create_report_instance → "
-                "patch_report_section → render_report_instance."
+                "Prohibido .docx/.pdf/.xlsx. "
+                "Documentos Word por plantilla: Report Engine "
+                "(register_report_template → create → patch → render_report_instance), "
+                "no uses este tool como sustituto del .docx final."
             ),
         )
     )

@@ -62,6 +62,32 @@ Sin cambios de contrato útil: register → create(title) → patch → status �
 
 Baseline: skill `report_engine` en `framework_tool_pack_v1` profile `general`.
 
+### Analyzer v2 — tablas
+
+- Detecta placeholders `{{campo.2}}` y `{{ campo.2 }}` (espacios opcionales).
+- Recorre `doc.tables[]` y anota `table_index`, `row_index`, `col_index`, `in_table` por campo.
+- `analyzer_mode` en análisis: `jinja_tables` cuando hay campos en celdas (persistido como `jinja`).
+- Devuelve `tables[]`, `editable_field_count`, `fields_in_tables`.
+
+### Carril obligatorio (agente) — transversal
+
+- **Criterio único:** el actor tiene ≥1 plantilla Report Engine visible → `convert_document` / `render_docx_template` → `.docx` **bloqueado** (fail-closed si no hay hub).
+- Escape explícito: `allow_ad_hoc_docx=true`.
+- `generate_report_docx_from_markdown`: solo plantillas de **un** campo; multi-campo → error con `section_ids`.
+- `render_report_instance`: exige secciones `required` con contenido; escanea `{{…}}` residuales; `force=true` para borrador.
+- `patch_report_section`: devuelve `progress` + `valid_section_ids` si el id es inválido.
+- Placeholders Jinja nuevos se marcan `required=true`.
+- `write_output_document` libre para texto UTF-8; no es el Word final de plantilla.
+
+### Plantillas con tablas Word
+
+- Cada **celda/hueco** de la plantilla debe tener su propio placeholder Jinja: `{{ seccion.1 }}`, `{{ cuerpo }}`, …
+- El render (docxtpl) **conserva** tablas y estilos; solo rellena los placeholders con texto plano.
+- **Prohibido** en `patch_report_section`: pegar tablas markdown completas en una sola sección — rompe el layout.
+- Saltos de párrafo (`\n\n`) dentro de un placeholder en celda pueden escapar de la tabla; el motor colapsa a `\n` suave.
+- Tablas markdown en el contenido se convierten a filas tabuladas (TSV), no a tabla Word nueva.
+- Para negrita inline use `**texto**` en la sección (RichText); multilínea simple = texto con `\n`.
+
 ## Admin API
 
 - `GET/POST` templates + register

@@ -100,6 +100,9 @@ def _apply_upsert_report_template(conn: Any, payload: dict) -> None:
     if not isinstance(section_schema, list):
         raise ValueError("section_schema debe ser lista")
     analyzer_mode = str(payload.get("analyzer_mode") or "jinja").strip()
+    from duckclaw.report_engine.analyzer import normalize_analyzer_mode_for_storage
+
+    analyzer_mode = normalize_analyzer_mode_for_storage(analyzer_mode)
     visibility = str(payload.get("visibility") or "private").strip()
 
     existing = conn.execute(

@@ -72,9 +72,14 @@ def render_instance_docx_from_uri(
     doc = DocxTemplate(str(staged))
     doc.render(context)
     doc.save(str(target))
+
+    from duckclaw.report_engine.render_validate import find_unresolved_placeholders
+
+    unresolved = find_unresolved_placeholders(target)
     return {
         "path": str(target),
         "relative_path": f"reports/{instance_id}.docx",
         "byte_size": target.stat().st_size,
         "format": "docx",
+        "unresolved_placeholders": unresolved,
     }

@@ -52,6 +52,7 @@ def test_analyze_dotted_jinja_placeholders(tmp_path: Path) -> None:
     ids = {s["id"] for s in analysis["sections"]}
     assert "evidencia2.1" in ids
     assert "body" in ids
+    assert "editable_field_count" in analysis
 
 
 def test_build_render_context_nests_dotted_ids() -> None:
@@ -64,6 +65,58 @@ def test_build_render_context_nests_dotted_ids() -> None:
     ctx = build_render_context(state)
     assert ctx["body"] == "Cuerpo"
     assert ctx["evidencia2"]["1"] == "Hecho A"
+
+
+def test_markdown_table_collapses_for_docx_cells() -> None:
+    from duckclaw.report_engine.docx_content import content_to_docxtpl_value, markdown_tables_to_plain
+
+    md = "| Actividad | Estado |\n|---|---|\n| A | OK |"
+    plain = markdown_tables_to_plain(md)
+    assert "|" not in plain
+    assert "Actividad" in plain and "OK" in plain
+    val = content_to_docxtpl_value(md)
+    assert val != ""
+
+
+def test_render_preserves_word_table(tmp_path: Path) -> None:
+    from docx import Document
+
+    from duckclaw.report_engine.render import render_instance_docx_from_uri
+    from duckclaw.report_engine.state import init_state_from_schema, patch_section
+
+    tpl = tmp_path / "tpl.docx"
+    doc = Document()
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "{{ field_a }}"
+    table.cell(0, 1).text = "Fijo"
+    table.cell(1, 0).text = "{{ field_b }}"
+    table.cell(1, 1).text = "Pie"
+    doc.save(str(tpl))
+
+    schema = [{"id": "field_a", "label": "A"}, {"id": "field_b", "label": "B"}]
+    state = init_state_from_schema(schema)
+    state = patch_section(
+        state,
+        section_id="field_a",
+        content="Línea 1\nLínea 2",
+        mode="replace",
+    )
+    state = patch_section(state, section_id="field_b", content="Valor B", mode="replace")
+
+    out_root = tmp_path / "out"
+    rendered = render_instance_docx_from_uri(
+        template_uri=str(tpl),
+        state_json=__import__("json").dumps(state),
+        output_root=out_root,
+        instance_id="rpt_tbl",
+        title="Test",
+    )
+    result = Document(str(rendered["path"]))
+    assert len(result.tables) == 1
+    cell_text = result.tables[0].cell(0, 0).text
+    assert "Línea 1" in cell_text and "Línea 2" in cell_text
+    assert "Valor B" in result.tables[0].cell(1, 0).text
+    assert "Fijo" in result.tables[0].cell(0, 1).text
 
 
 def test_patch_section_append_and_status() -> None:

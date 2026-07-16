@@ -10,12 +10,14 @@ import { adminService, type ProductivityArtifact } from '@/services/adminService
 import { pollWriteTask } from '@/lib/pollWriteTask';
 import { cn } from '@/lib/utils';
 
-/** Filtro de origen en bandeja — sin «informe»: eso es la vista Editor Word. */
+/** Filtro de origen en bandeja (storage/vault). Lane report se ve en Bandeja con badge. */
 type OriginFilter = 'all' | 'storage' | 'vault';
-type PanelView = 'lista' | 'vault' | 'informes';
+type PanelView = 'lista' | 'vault' | 'entregables';
 
 function parseView(raw: string | null): PanelView {
-  if (raw === 'vault' || raw === 'informes' || raw === 'lista') return raw;
+  if (raw === 'vault' || raw === 'lista') return raw;
+  // Legacy: view=informes
+  if (raw === 'entregables' || raw === 'informes') return 'entregables';
   return 'lista';
 }
 
@@ -26,7 +28,7 @@ function originLabel(origin: OriginFilter): string {
 }
 
 function laneBadge(lane: string): string {
-  if (lane === 'report') return 'Word';
+  if (lane === 'report') return 'Informe';
   if (lane === 'vault') return 'Vault';
   if (lane === 'storage') return 'Storage';
   return lane;
@@ -48,7 +50,7 @@ function formatBytes(n: number): string {
 const VIEW_TABS: { id: PanelView; label: string; hint: string }[] = [
   { id: 'lista', label: 'Bandeja', hint: 'Todo lo generado' },
   { id: 'vault', label: 'Vault', hint: 'Explorar OUTPUT' },
-  { id: 'informes', label: 'Editor Word', hint: 'Plantillas y preview' },
+  { id: 'entregables', label: 'Entregables', hint: 'Word y dashboards' },
 ];
 
 export function ProductivityArtifactsPanel() {
@@ -181,7 +183,7 @@ export function ProductivityArtifactsPanel() {
             setNotice('Archivo indexado. Ábrelo en Bandeja.');
           }}
         />
-      ) : view === 'informes' ? (
+      ) : view === 'entregables' ? (
         <div className="min-h-[calc(100vh-14rem)] overflow-hidden rounded-2xl border border-gov-blue-100 dark:border-dark-border">
           <ReportsPageView />
         </div>
@@ -230,14 +232,14 @@ export function ProductivityArtifactsPanel() {
             <div className="rounded-2xl border border-dashed border-gov-blue-200 px-6 py-10 text-center dark:border-dark-border">
               <p className="font-semibold dark:text-dark-text">Bandeja vacía</p>
               <p className="mt-2 text-sm text-gov-gray-500 dark:text-dark-muted">
-                Genera algo en el Chat, indexa desde Vault, o crea un documento en Editor Word.
+                Genera algo en el Chat, indexa desde Vault, o crea un entregable (Word / dashboard).
               </p>
               <button
                 type="button"
-                onClick={() => selectView('informes')}
+                onClick={() => selectView('entregables')}
                 className="mt-4 text-sm font-bold text-gov-blue-700 dark:text-dark-cyan"
               >
-                Abrir Editor Word →
+                Abrir Entregables →
               </button>
             </div>
           ) : (
@@ -265,10 +267,10 @@ export function ProductivityArtifactsPanel() {
                     {item.lane === 'report' && item.source_ref ? (
                       <button
                         type="button"
-                        onClick={() => selectView('informes')}
+                        onClick={() => selectView('entregables')}
                         className="mt-1 text-xs font-semibold text-gov-blue-700 dark:text-dark-cyan"
                       >
-                        Abrir en Editor Word
+                        Abrir en Entregables
                       </button>
                     ) : null}
                   </div>

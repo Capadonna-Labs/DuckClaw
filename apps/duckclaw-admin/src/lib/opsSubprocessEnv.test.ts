@@ -17,6 +17,7 @@ describe('opsSubprocessEnv', () => {
     const sample = opsSubprocessEnv();
     expect(sample.DUCKCLAW_GATEWAY_URL).toBe('http://127.0.0.1:8000');
     expect(sample.HOME).toBe('/Users/test');
+    expect(sample.PATH?.split(':')).toContain('/opt/homebrew/bin');
     expect(sample.NODE_OPTIONS).toBeUndefined();
     expect(sample.NEXT_RUNTIME).toBeUndefined();
     expect(sample.npm_lifecycle_script).toBeUndefined();

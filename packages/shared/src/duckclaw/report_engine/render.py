@@ -7,7 +7,25 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from duckclaw.report_engine.state import build_render_context
+from duckclaw.report_engine.state import (
+    assign_context_value,
+    build_render_context,
+    image_render_specs,
+)
+
+
+def _lenient_jinja_env() -> Any:
+    """Jinja env que no crashea con huecos faltantes/anidados.
+
+    La plantilla suele tener `{{ grupo.item }}`; si una sección no se rellenó,
+    el `Undefined` por defecto revienta en el acceso a la clave y tumba TODO el
+    render (el usuario ve un fallo y su agente cae a pandoc, perdiendo formato).
+    `ChainableUndefined` deja `{{ a.b.c }}` → '' sin error.
+    """
+    import jinja2
+
+    undefined = getattr(jinja2, "ChainableUndefined", jinja2.Undefined)
+    return jinja2.Environment(undefined=undefined, autoescape=False)
 
 
 def assert_template_uri_readable(template_uri: str, allowed_roots: list[Path]) -> Path:
@@ -29,6 +47,42 @@ def assert_template_uri_readable(template_uri: str, allowed_roots: list[Path]) -
     return template_path
 
 
+def _resolve_image_path(raw_path: str, image_roots: list[Path]) -> Path:
+    """Valida que la imagen exista y viva bajo una raíz permitida (anti path-traversal)."""
+    candidate = Path(raw_path).expanduser().resolve()
+    if not candidate.is_file():
+        raise ValueError(f"Imagen no accesible: {raw_path}")
+    if image_roots:
+        ok = any(
+            candidate == root.resolve() or root.resolve() in candidate.parents
+            for root in image_roots
+        )
+        if not ok:
+            raise ValueError(
+                f"Imagen «{raw_path}» fuera de las raíces permitidas "
+                "(vault inbound / OUTPUT). Reenvía la imagen por el chat."
+            )
+    return candidate
+
+
+def _apply_image_sections(
+    doc: Any,
+    context: dict[str, Any],
+    state: dict[str, Any],
+    image_roots: list[Path],
+) -> None:
+    specs = image_render_specs(state)
+    if not specs:
+        return
+    from docxtpl import InlineImage
+    from docx.shared import Inches
+
+    for spec in specs:
+        resolved = _resolve_image_path(str(spec["path"]), image_roots)
+        inline = InlineImage(doc, str(resolved), width=Inches(float(spec["width_in"])))
+        assign_context_value(context, str(spec["key"]), inline)
+
+
 def render_instance_docx_from_uri(
     *,
     template_uri: str,
@@ -38,6 +92,7 @@ def render_instance_docx_from_uri(
     title: str = "",
     period_key: str = "",
     allowed_roots: list[Path] | None = None,
+    image_roots: list[Path] | None = None,
 ) -> dict[str, Any]:
     if allowed_roots is not None:
         template_path = assert_template_uri_readable(template_uri, allowed_roots)
@@ -52,6 +107,7 @@ def render_instance_docx_from_uri(
 
     context = build_render_context(state)
     context.setdefault("title", title)
+    context.setdefault("titulo", title)
     context.setdefault("subtitle", period_key)
     context.setdefault("period_key", period_key)
     context.setdefault("date", period_key)
@@ -70,7 +126,8 @@ def render_instance_docx_from_uri(
     target = output_root / "reports" / f"{instance_id}.docx"
     target.parent.mkdir(parents=True, exist_ok=True)
     doc = DocxTemplate(str(staged))
-    doc.render(context)
+    _apply_image_sections(doc, context, state, image_roots or [])
+    doc.render(context, jinja_env=_lenient_jinja_env())
     doc.save(str(target))
 
     from duckclaw.report_engine.render_validate import find_unresolved_placeholders

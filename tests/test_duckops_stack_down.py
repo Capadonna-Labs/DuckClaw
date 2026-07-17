@@ -4,12 +4,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from duckops.stack_shutdown import CORE_PM2_NAMES, duckdb_paths_to_unlock
+from duckops.stack_shutdown import CORE_PM2_NAMES, MIGRATE_STOP_PM2_NAMES, duckdb_paths_to_unlock
 
 
 def test_core_pm2_names_include_gateway_and_writer() -> None:
     assert "DuckClaw-Gateway" in CORE_PM2_NAMES
     assert "DuckClaw-DB-Writer" in CORE_PM2_NAMES
+
+
+def test_migrate_stop_includes_heartbeat_and_indexer() -> None:
+    assert "DuckClaw-Heartbeat" in MIGRATE_STOP_PM2_NAMES
+    assert "DuckClaw-Knowledge-Indexer" in MIGRATE_STOP_PM2_NAMES
 
 
 def test_duckdb_paths_includes_private_axis_glob(tmp_path: Path) -> None:

@@ -9,17 +9,13 @@
   "lanes": {
     "ingest_native": [".md", ".markdown", ".txt", ".json", ".csv"],
     "extract_markitdown": [".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".html", ".htm"],
-    "author": ["write_output_document", "render_docx_template"],
-    "convert_pandoc": {
-      "inputs": [".md", ".markdown", ".txt", ".html", ".htm"],
-      "outputs": ["docx", "pdf", "html"]
-    }
+    "author_text": ["write_output_document"],
+    "author_word": ["report_engine", "render_docx_template"]
   },
   "baseline_tools": [
     "extract_document_text",
     "write_output_document",
     "render_docx_template",
-    "convert_document",
     "list_report_templates",
     "register_report_template",
     "create_report_instance",

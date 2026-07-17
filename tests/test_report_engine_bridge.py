@@ -67,6 +67,42 @@ def test_register_report_template_surfaces_db_writer_failure(monkeypatch: pytest
     assert "ACL denegado" in payload["error"]
 
 
+def test_dispatch_write_polls_even_when_env_poll_is_zero(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Con DUCKCLAW_WRITE_POLL_SEC=0 el gateway es fire-and-forget; Report Engine no."""
+    from duckclaw.forge.skills.report_engine_bridge import _dispatch_write
+
+    waited: list[float] = []
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.report_engine_bridge._session_scope",
+        lambda: ("default", "user@example.com", ""),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.report_engine_bridge._hub_db_path",
+        lambda: "/tmp/hub.duckdb",
+    )
+    monkeypatch.setattr(
+        "duckclaw.db_write_queue.enqueue_or_apply_duckdb_write_sync",
+        lambda **_: "task-xyz",
+    )
+    monkeypatch.setattr(
+        "duckclaw.spawn_profile.spawn_inline_writes_enabled",
+        lambda: False,
+    )
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.write_poll_timeout_sec",
+        lambda: 0.0,
+    )
+
+    def _wait(task_id: str, timeout_sec: float = 0):
+        waited.append(timeout_sec)
+        return MagicMock(status="success", detail="")
+
+    monkeypatch.setattr("duckclaw.db_write_fire_and_forget.wait_write_task", _wait)
+    _dispatch_write({"command_type": "create_report_instance", "instance_id": "rpt_x"})
+    assert waited and waited[0] >= 30.0
+
+
 def test_framework_pack_includes_report_engine_guidance() -> None:
     from duckclaw.framework_policy_pack import get_framework_policy_content
 
@@ -75,7 +111,8 @@ def test_framework_pack_includes_report_engine_guidance() -> None:
     assert "REPORT ENGINE" in content
     assert "render_report_instance" in content
     assert "patch_report_section" in content
-    assert "convert_document" in content or "pandoc" in content.lower()
+    assert "extract_document_text" in content
+    assert "convert_document" not in content
 
     default = get_framework_policy_content("system_prompt", "default")
     assert default

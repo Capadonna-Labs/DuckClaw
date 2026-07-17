@@ -24,9 +24,10 @@ def test_load_framework_tool_pack_has_baseline() -> None:
     assert "inspect_schema" in baseline
     assert "search_project_knowledge" in baseline
     assert "write_output_document" in baseline
-    assert "convert_document" in baseline
+    assert "convert_document" not in baseline
     assert "extract_document_text" in baseline
     assert "render_docx_template" in baseline
+    assert "report_engine" in baseline
 
 
 def test_ensure_baseline_skills_merges_without_duplicates() -> None:

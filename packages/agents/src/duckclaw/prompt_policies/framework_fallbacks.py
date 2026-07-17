@@ -32,7 +32,11 @@ def _airbag_policy_keys() -> frozenset[tuple[str, str]]:
 def is_framework_policy_key(policy_type: str, policy_name: str) -> bool:
     normalized_type = (policy_type or "").strip().lower()
     name = (policy_name or "").strip()
-    return (normalized_type, name) in _airbag_policy_keys()
+    key = (normalized_type, name)
+    if key in _airbag_policy_keys():
+        return True
+    # Pack keys (p. ej. directive/report_engine) también son capa 0.
+    return key in framework_policy_keys()
 
 
 def framework_fallback_content(policy_type: str, policy_name: str) -> str | None:

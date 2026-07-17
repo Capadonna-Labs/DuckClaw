@@ -64,7 +64,8 @@ def test_build_render_context_nests_dotted_ids() -> None:
     state = patch_section(state, section_id="body", content="Cuerpo", mode="replace")
     ctx = build_render_context(state)
     assert ctx["body"] == "Cuerpo"
-    assert ctx["evidencia2"]["1"] == "Hecho A"
+    # Jinja `{{ evidencia2.1 }}` resuelve el segmento como int; la clave es 1, no '1'.
+    assert ctx["evidencia2"][1] == "Hecho A"
 
 
 def test_markdown_table_collapses_for_docx_cells() -> None:
@@ -117,6 +118,82 @@ def test_render_preserves_word_table(tmp_path: Path) -> None:
     assert "Línea 1" in cell_text and "Línea 2" in cell_text
     assert "Valor B" in result.tables[0].cell(1, 0).text
     assert "Fijo" in result.tables[0].cell(0, 1).text
+
+
+def test_render_survives_unfilled_nested_placeholder(tmp_path: Path) -> None:
+    """Huecos anidados sin rellenar no deben crashear el render (ChainableUndefined)."""
+    import json as _json
+
+    from docx import Document
+
+    from duckclaw.report_engine.render import render_instance_docx_from_uri
+    from duckclaw.report_engine.state import init_state_from_schema, patch_section
+
+    tpl = tmp_path / "tpl.docx"
+    doc = Document()
+    doc.add_paragraph("{{ grupo1.item1 }}")
+    doc.add_paragraph("{{ grupo2.item1 }}")  # nunca se rellena
+    doc.save(str(tpl))
+
+    schema = [{"id": "grupo1.item1", "label": "G1"}, {"id": "grupo2.item1", "label": "G2"}]
+    state = init_state_from_schema(schema)
+    state = patch_section(state, section_id="grupo1.item1", content="Relleno G1", mode="replace")
+
+    rendered = render_instance_docx_from_uri(
+        template_uri=str(tpl),
+        state_json=_json.dumps(state),
+        output_root=tmp_path / "out",
+        instance_id="rpt_nested",
+        title="Test",
+    )
+    result = Document(str(rendered["path"]))
+    body = "\n".join(p.text for p in result.paragraphs)
+    assert "Relleno G1" in body
+    # El hueco no rellenado quedó vacío, sin '{{' ni excepción.
+    assert "{{" not in body
+
+
+def test_render_numeric_dotted_placeholder_fills_cell(tmp_path: Path) -> None:
+    """{{ ejecucion1.1 }} exige clave int 1 en el contexto (bug Jinja str vs int)."""
+    import json as _json
+
+    from docx import Document
+    from jinja2 import Environment, ChainableUndefined
+
+    from duckclaw.report_engine.render import render_instance_docx_from_uri
+    from duckclaw.report_engine.state import build_render_context, init_state_from_schema, patch_section
+
+    state = init_state_from_schema([{"id": "ejecucion1.1", "label": "1.1"}])
+    state = patch_section(
+        state,
+        section_id="ejecucion1.1",
+        content="Tabla PostgreSQL preferencias dashboard",
+        mode="replace",
+    )
+    ctx = build_render_context(state)
+    assert ctx["ejecucion1"][1] == "Tabla PostgreSQL preferencias dashboard"
+    assert (
+        Environment(undefined=ChainableUndefined)
+        .from_string("{{ ejecucion1.1 }}")
+        .render(ctx)
+        == "Tabla PostgreSQL preferencias dashboard"
+    )
+
+    tpl = tmp_path / "tpl.docx"
+    doc = Document()
+    table = doc.add_table(rows=1, cols=1)
+    table.cell(0, 0).text = "{{ ejecucion1.1 }}"
+    doc.save(str(tpl))
+
+    rendered = render_instance_docx_from_uri(
+        template_uri=str(tpl),
+        state_json=_json.dumps(state),
+        output_root=tmp_path / "out",
+        instance_id="rpt_num",
+        title="Test",
+    )
+    result = Document(str(rendered["path"]))
+    assert "PostgreSQL" in result.tables[0].cell(0, 0).text
 
 
 def test_patch_section_append_and_status() -> None:

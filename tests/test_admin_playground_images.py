@@ -125,7 +125,7 @@ def test_playground_chat_with_images_mock_vlm(
 ) -> None:
     from core import vlm_ingest as vlm
 
-    async def _fake_enrich(message: str, images):
+    async def _fake_enrich(message: str, images, **_kwargs):
         return f"{message}\nContexto visual adjunto: mock summary"
 
     monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fake_enrich)

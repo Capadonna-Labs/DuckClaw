@@ -177,6 +177,7 @@ async def ingest_playground_message_with_images(
         return await enrich_message_with_admin_images(
             msg,
             [img.model_dump() for img in images],
+            tenant_id=eff_tenant,
         )
     except ValueError as exc:
         raise problem(400, str(exc), "images") from exc

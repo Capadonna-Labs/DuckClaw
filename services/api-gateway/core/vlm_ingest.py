@@ -1426,12 +1426,52 @@ def format_vlm_enrichment_block(out: dict[str, Any], *, user_caption: str) -> st
     ).strip()
 
 
+def _persist_admin_images_for_tenant(
+    decoded: list[tuple[str, bytes]],
+    tenant_id: str,
+) -> list[str]:
+    """Guarda bytes en el vault inbound del tenant y devuelve rutas absolutas.
+
+    Sin esto, la imagen solo se describe (VLM) y sus bytes se pierden: el Report
+    Engine no tendría un path que insertar como InlineImage.
+    """
+    tid = (tenant_id or "").strip()
+    if not tid:
+        return []
+    from core.comfyui_inbound import save_inbound_bytes_for_tenant
+
+    paths: list[str] = []
+    for mime, raw in decoded:
+        try:
+            saved = save_inbound_bytes_for_tenant(raw, tid, mime_type=mime or "image/jpeg")
+            paths.append(str(saved))
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("No se pudo persistir imagen adjunta (tenant=%s): %s", tid, exc)
+    return paths
+
+
+def format_attached_image_paths_block(paths: list[str]) -> str:
+    """Bloque legible por el agente con las rutas para patch_report_image."""
+    if not paths:
+        return ""
+    listing = "; ".join(paths)
+    return (
+        "[IMAGENES_ADJUNTAS] Rutas guardadas en el vault (usa patch_report_image "
+        f"con estas rutas para insertarlas en un documento): {listing}"
+    )
+
+
 async def enrich_message_with_admin_images(
     message: str,
     images: list[dict[str, Any]] | None,
+    *,
+    tenant_id: str = "",
 ) -> str:
     """
     Decodifica imágenes admin, ejecuta VLM y concatena bloques al mensaje del playground.
+
+    Si ``tenant_id`` está presente, además persiste los bytes en el vault inbound e
+    inyecta las rutas para que el Report Engine pueda insertarlas (patch_report_image).
     """
     if not images:
         return (message or "").strip()
@@ -1460,6 +1500,11 @@ async def enrich_message_with_admin_images(
     else:
         out = await run_vlm_on_images_batch(items=decoded, caption=caption)
         blocks = [format_vlm_enrichment_block(out, user_caption=base)]
+
+    saved_paths = _persist_admin_images_for_tenant(decoded, tenant_id)
+    path_block = format_attached_image_paths_block(saved_paths)
+    if path_block:
+        blocks.append(path_block)
 
     parts = [p for p in [base, *blocks] if p]
     return "\n\n".join(parts).strip()

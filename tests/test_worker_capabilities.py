@@ -61,8 +61,11 @@ def test_worker_capabilities_gaps_skip_report_engine_homonym() -> None:
             "list_report_templates",
             "register_report_template",
             "create_report_instance",
+            "list_report_instances",
+            "create_blank_document",
             "get_report_status",
             "patch_report_section",
+            "patch_report_image",
             "render_report_instance",
             "generate_report_docx_from_markdown",
         ],
@@ -72,6 +75,7 @@ def test_worker_capabilities_gaps_skip_report_engine_homonym() -> None:
         optional={},
     )
     assert not any("sin tool homónima" in g and "report_engine" in g for g in gaps)
+    assert not any("sin tools de Report Engine" in g for g in gaps)
     assert not any("get_current_time" in g and "no registrada" in g for g in gaps)
 
 

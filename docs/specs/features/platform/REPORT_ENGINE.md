@@ -89,6 +89,35 @@ Baseline: skill `report_engine` en `framework_tool_pack_v1` profile `general`.
 - Tablas markdown en el contenido se convierten a filas tabuladas (TSV), no a tabla Word nueva.
 - Para negrita inline use `**texto**` en la sección (RichText); multilínea simple = texto con `\n`.
 
+### Continuidad de conversación (reanudar vs crear)
+
+Problema: sin memoria de instancia, el agente creaba un `.docx` nuevo por cada mensaje.
+
+- `create_report_instance` persiste `conversation_id` (= `chat_id` de la sesión, vía `set_session_chat_id`).
+- `list_report_instances(limit)` lista instancias activas del actor/proyecto con `conversation_id`, `progress` y una `resume_suggestion` (prioriza la de esta conversación; si no, la más reciente).
+- **Política (directive `report_engine`):** ANTES de crear, el agente llama `list_report_instances`; si hay borrador de la conversación, **reanuda** con ese `instance_id` (patch/render). Crea uno nuevo solo si el usuario lo pide explícitamente.
+
+### Documento desde cero (sin plantilla del usuario) — texto + imágenes
+
+Para «arma un documento con este texto y estas imágenes» sin que el usuario suba plantilla:
+
+- `create_blank_document(title)` genera on-demand (python-docx, **sin binario en git**) un `.docx` en blanco bajo `OUTPUT_ROOTS/templates/blank_document.docx`, lo registra como plantilla del usuario (`template_id` determinista por `tenant+owner`, idempotente) y crea la instancia.
+- Schema (`blank_template.BLANK_SECTION_SCHEMA`): huecos de texto (`intro`, `texto_1..3`, `cierre`) e imagen (`imagen_1..3`, `kind=image`). Ninguno `required`; con `ChainableUndefined` los huecos sin usar quedan vacíos.
+- El título del documento se auto-inyecta en `{{ titulo }}` (context.setdefault).
+
+### Secciones de imagen (`kind=image`)
+
+- `state.init_state_from_schema` propaga `kind` y `width_in` (default 5.5") a la sección.
+- `build_render_context` **excluye** secciones de imagen (necesitan el objeto `DocxTemplate`); `image_render_specs(state)` las expone aparte.
+- El render construye `InlineImage(doc, path, width=Inches(width_in))` y valida que el path esté bajo raíces permitidas (**vault inbound del tenant + OUTPUT**) — anti path-traversal.
+- `patch_report_image(instance_id, section_id, image_path)`: coloca la imagen (por su ruta) en una sección `kind=image`; rechaza secciones de texto.
+
+### Imágenes adjuntas en el chat (playground)
+
+- Al adjuntar imágenes, el gateway ya corre VLM (descripción). Además ahora **persiste los bytes** en `db/private/{tenant}/inbound/` e inyecta un bloque `[IMAGENES_ADJUNTAS]` con las rutas absolutas.
+- **Sin API key adicional** para insertar imágenes (es I/O local). El VLM (descripción) usa MLX local por defecto; Gemini/OpenAI son opt-in.
+- El agente usa esas rutas en `patch_report_image` para incrustarlas en el Word.
+
 ## Admin API
 
 - `GET/POST` templates + register

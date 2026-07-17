@@ -68,6 +68,93 @@ def test_build_render_context_nests_dotted_ids() -> None:
     assert ctx["evidencia2"][1] == "Hecho A"
 
 
+def test_init_state_marks_image_kind_and_width() -> None:
+    from duckclaw.report_engine.state import init_state_from_schema
+
+    schema = [
+        {"id": "intro", "label": "Intro", "kind": "text"},
+        {"id": "imagen_1", "label": "Imagen 1", "kind": "image", "width_in": 4.0},
+    ]
+    state = init_state_from_schema(schema)
+    assert state["sections"]["intro"]["kind"] == "text"
+    assert "width_in" not in state["sections"]["intro"]
+    assert state["sections"]["imagen_1"]["kind"] == "image"
+    assert state["sections"]["imagen_1"]["width_in"] == 4.0
+
+
+def test_image_sections_excluded_from_text_context() -> None:
+    from duckclaw.report_engine.state import (
+        build_render_context,
+        image_render_specs,
+        init_state_from_schema,
+        patch_section,
+    )
+
+    schema = [
+        {"id": "intro", "label": "Intro", "kind": "text"},
+        {"id": "imagen_1", "label": "Imagen 1", "kind": "image"},
+    ]
+    state = init_state_from_schema(schema)
+    state = patch_section(state, section_id="intro", content="Hola", mode="replace")
+    state = patch_section(state, section_id="imagen_1", content="/vault/a.png", mode="replace")
+    ctx = build_render_context(state)
+    assert ctx["intro"] == "Hola"
+    assert "imagen_1" not in ctx  # se resuelve como InlineImage en el render, no como texto
+    specs = image_render_specs(state)
+    assert specs == [{"key": "imagen_1", "path": "/vault/a.png", "width_in": 5.5}]
+
+
+def test_blank_template_schema_has_text_and_image_slots() -> None:
+    from duckclaw.report_engine.blank_template import BLANK_SECTION_SCHEMA
+
+    kinds = {s["id"]: s.get("kind") for s in BLANK_SECTION_SCHEMA}
+    assert kinds.get("intro") == "text"
+    assert kinds.get("imagen_1") == "image"
+    assert any(v == "image" for v in kinds.values())
+    assert any(v == "text" for v in kinds.values())
+
+
+def test_render_blank_document_with_image(tmp_path: Path) -> None:
+    import pytest
+
+    pytest.importorskip("docx")
+    pytest.importorskip("docxtpl")
+    from PIL import Image
+
+    from duckclaw.report_engine.blank_template import (
+        BLANK_SECTION_SCHEMA,
+        ensure_blank_template_seed,
+    )
+    from duckclaw.report_engine.render import render_instance_docx_from_uri
+    from duckclaw.report_engine.state import init_state_from_schema, patch_section
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    template = ensure_blank_template_seed(output_root)
+    assert template.is_file()
+
+    img_dir = tmp_path / "inbound"
+    img_dir.mkdir()
+    img_path = img_dir / "pic.png"
+    Image.new("RGB", (8, 8), (10, 20, 30)).save(img_path)
+
+    state = init_state_from_schema(BLANK_SECTION_SCHEMA)
+    state = patch_section(state, section_id="intro", content="Texto de prueba", mode="replace")
+    state = patch_section(state, section_id="imagen_1", content=str(img_path), mode="replace")
+
+    rendered = render_instance_docx_from_uri(
+        template_uri=str(template),
+        state_json=json.dumps(state),
+        output_root=output_root,
+        instance_id="rpt_blank_test",
+        title="Doc en blanco",
+        allowed_roots=[output_root],
+        image_roots=[img_dir, output_root],
+    )
+    assert Path(rendered["path"]).is_file()
+    assert rendered["byte_size"] > 0
+
+
 def test_markdown_table_collapses_for_docx_cells() -> None:
     from duckclaw.report_engine.docx_content import content_to_docxtpl_value, markdown_tables_to_plain
 

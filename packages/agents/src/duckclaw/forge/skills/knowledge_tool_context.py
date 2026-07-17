@@ -52,6 +52,10 @@ def set_session_chat_id(chat_id: str) -> None:
     _session_chat_id.set((chat_id or "").strip())
 
 
+def get_session_chat_id() -> str:
+    return (_session_chat_id.get() or "").strip()
+
+
 def get_session_actor_email() -> str:
     actor = (_session_actor_email.get() or "").strip()
     if actor:

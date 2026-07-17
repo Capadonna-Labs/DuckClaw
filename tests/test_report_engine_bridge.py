@@ -165,7 +165,7 @@ def test_generate_report_docx_from_markdown_happy_path(monkeypatch: pytest.Monke
     monkeypatch.setattr(
         "duckclaw.forge.skills.report_engine_bridge.render_report_instance",
         lambda iid: json.dumps(
-            {"path": "/out/reports/rpt_abc.docx", "relative_path": "reports/rpt_abc.docx", "format": "docx"}
+            {"path": "/out/Informe_N_4_rpt_abc.docx", "relative_path": "Informe_N_4_rpt_abc.docx", "format": "docx"}
         ),
     )
 
@@ -177,5 +177,5 @@ def test_generate_report_docx_from_markdown_happy_path(monkeypatch: pytest.Monke
     )
     payload = json.loads(raw)
     assert payload["instance_id"] == "rpt_abc"
-    assert payload["relative_path"] == "reports/rpt_abc.docx"
+    assert payload["relative_path"] == "Informe_N_4_rpt_abc.docx"
     assert calls == ["resumen_ejecutivo"]

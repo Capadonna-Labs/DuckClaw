@@ -1454,11 +1454,72 @@ def format_attached_image_paths_block(paths: list[str]) -> str:
     """Bloque legible por el agente con las rutas para patch_report_image."""
     if not paths:
         return ""
-    listing = "; ".join(paths)
+    # Mapeo sugerido a huecos de create_blank_document (imagen_1..3).
+    lines = [
+        f"imagen_{idx} → {path}"
+        for idx, path in enumerate(paths[:_ADMIN_MAX_IMAGES], start=1)
+    ]
+    listing = "\n".join(lines)
     return (
-        "[IMAGENES_ADJUNTAS] Rutas guardadas en el vault (usa patch_report_image "
-        f"con estas rutas para insertarlas en un documento): {listing}"
+        "[IMAGENES_ADJUNTAS] Archivos guardados en el vault (NO hace falta VLM). "
+        "Para un documento en blanco: create_blank_document → patch_report_image "
+        "con section_id=imagen_N y la ruta correspondiente → render_report_instance.\n"
+        f"{listing}"
     )
+
+
+# Intención de *visión* (analizar). Adjunto documental NO dispara VLM.
+_VISION_INTENT_RE = re.compile(
+    r"(?is)\b("
+    r"analiz[aeo]|describ[ae]|interpret[ae]|explica|explicame|"
+    r"qu[eé]\s+ves|qu[eé]\s+hay|qu[eé]\s+dice|lee\s+(la\s+)?imagen|"
+    r"ocr|extrae\s+(el\s+)?texto|transcribe|resume\s+(la\s+)?imagen|"
+    r"identifica|reconoce|compar(a|e)\s+(estas\s+)?imagen|"
+    r"visual\s+context|what\s+do\s+you\s+see|describe\s+(this|the)\s+image|"
+    r"analyze\s+(this|the)\s+image|read\s+(this|the)\s+image"
+    r")\b"
+)
+_DOCUMENT_ATTACHMENT_RE = re.compile(
+    r"(?is)\b("
+    r"documento|informe|word|docx|plantilla|blank|en\s+blanco|"
+    r"pon(la|lo|las)?|peg(a|ala|alo)|insert(a|ar)|adjunta|adjunto|"
+    r"usa\s+(esta|la)\s+imagen|mete|incluy[ea]|coloca"
+    r")\b"
+)
+
+
+def should_run_vlm_for_caption(message: str) -> bool:
+    """VLM es opt-in por intención de visión; adjuntar ≠ analizar.
+
+    - Con intención visual explícita → True.
+    - Con intención documental/adjunto (documento, ponla, Word…) → False.
+    - Caption vacío o neutro con imagen → False (solo persistir rutas).
+    """
+    text = (message or "").strip()
+    if not text:
+        return False
+    if _DOCUMENT_ATTACHMENT_RE.search(text) and not _VISION_INTENT_RE.search(text):
+        return False
+    return bool(_VISION_INTENT_RE.search(text))
+
+
+def decode_admin_images_payload(
+    images: list[dict[str, Any]] | None,
+) -> list[tuple[str, bytes]]:
+    if not images:
+        return []
+    if len(images) > _ADMIN_MAX_IMAGES:
+        raise ValueError(f"máximo {_ADMIN_MAX_IMAGES} imágenes por mensaje")
+    decoded: list[tuple[str, bytes]] = []
+    for img in images:
+        if not isinstance(img, dict):
+            raise ValueError("imagen inválida")
+        mime = str(img.get("mime_type") or img.get("mime") or "").strip().lower()
+        b64 = str(img.get("data_base64") or img.get("base64") or "")
+        raw = decode_admin_image_b64(b64)
+        mt = _validate_image_bytes(mime, raw)
+        decoded.append((mt, raw))
+    return decoded
 
 
 async def enrich_message_with_admin_images(
@@ -1466,45 +1527,58 @@ async def enrich_message_with_admin_images(
     images: list[dict[str, Any]] | None,
     *,
     tenant_id: str = "",
+    force_vlm: bool | None = None,
 ) -> str:
     """
-    Decodifica imágenes admin, ejecuta VLM y concatena bloques al mensaje del playground.
+    Carril 1 (siempre): decodifica + persiste bytes → [IMAGENES_ADJUNTAS].
+    Carril 2 (opt-in): VLM solo si la caption pide análisis visual.
 
-    Si ``tenant_id`` está presente, además persiste los bytes en el vault inbound e
-    inyecta las rutas para que el Report Engine pueda insertarlas (patch_report_image).
+    ``force_vlm``: None = auto por intención; True/False fuerza el carril.
     """
     if not images:
         return (message or "").strip()
-    if len(images) > _ADMIN_MAX_IMAGES:
-        raise ValueError(f"máximo {_ADMIN_MAX_IMAGES} imágenes por mensaje")
 
-    decoded: list[tuple[str, bytes]] = []
-    for img in images:
-        if not isinstance(img, dict):
-            raise ValueError("imagen inválida")
-        mime = str(img.get("mime_type") or img.get("mime") or "").strip().lower()
-        b64 = str(img.get("data_base64") or img.get("base64") or "")
-        decoded.append((mime, decode_admin_image_b64(b64)))
-
+    decoded = decode_admin_images_payload(images)
     base = (message or "").strip()
-    caption = base or "Analiza esta imagen."
+    run_vlm = should_run_vlm_for_caption(base) if force_vlm is None else bool(force_vlm)
 
-    if len(decoded) == 1:
-        mt, raw = decoded[0]
-        out = await run_vlm_on_image_bytes(
-            image_bytes=raw,
-            mime_type=mt,
-            caption=caption,
-        )
-        blocks = [format_vlm_enrichment_block(out, user_caption=base)]
-    else:
-        out = await run_vlm_on_images_batch(items=decoded, caption=caption)
-        blocks = [format_vlm_enrichment_block(out, user_caption=base)]
-
+    # Persistencia PRIMERO: si VLM se cancela/falla, el documento aún tiene paths.
     saved_paths = _persist_admin_images_for_tenant(decoded, tenant_id)
+    blocks: list[str] = []
+
+    if run_vlm:
+        caption = base or "Analiza esta imagen."
+        try:
+            if len(decoded) == 1:
+                mt, raw = decoded[0]
+                out = await run_vlm_on_image_bytes(
+                    image_bytes=raw,
+                    mime_type=mt,
+                    caption=caption,
+                )
+            else:
+                out = await run_vlm_on_images_batch(items=decoded, caption=caption)
+            blocks.append(format_vlm_enrichment_block(out, user_caption=base))
+        except VlmIngestAllFailed:
+            # Carril documental intacto: paths ya persistidos.
+            blocks.append(
+                "[Nota: visión (VLM) no disponible; las imágenes quedaron guardadas "
+                "y el agente puede usarlas sin descripción visual.]"
+            )
+        except Exception as exc:  # noqa: BLE001
+            _log.warning("VLM falló tras persistir adjuntos: %s", vlm_exception_for_log(exc))
+            blocks.append(
+                "[Nota: visión (VLM) falló; las imágenes quedaron guardadas "
+                "y el agente puede usarlas sin descripción visual.]"
+            )
+
     path_block = format_attached_image_paths_block(saved_paths)
     if path_block:
         blocks.append(path_block)
+    elif tenant_id and decoded:
+        blocks.append(
+            "[IMAGENES_ADJUNTAS] No se pudieron guardar las rutas (revisa vault del tenant)."
+        )
 
     parts = [p for p in [base, *blocks] if p]
     return "\n\n".join(parts).strip()

@@ -130,8 +130,10 @@ def test_render_blank_document_with_image(tmp_path: Path) -> None:
 
     output_root = tmp_path / "output"
     output_root.mkdir()
-    template = ensure_blank_template_seed(output_root)
+    template_root = tmp_path / "private" / "report_engine"
+    template = ensure_blank_template_seed(template_root)
     assert template.is_file()
+    assert not (output_root / "templates").exists()
 
     img_dir = tmp_path / "inbound"
     img_dir.mkdir()
@@ -148,10 +150,12 @@ def test_render_blank_document_with_image(tmp_path: Path) -> None:
         output_root=output_root,
         instance_id="rpt_blank_test",
         title="Doc en blanco",
-        allowed_roots=[output_root],
+        allowed_roots=[template_root, output_root],
         image_roots=[img_dir, output_root],
     )
     assert Path(rendered["path"]).is_file()
+    assert Path(rendered["path"]).parent == output_root
+    assert rendered["relative_path"] == "Doc_en_blanco_rpt_blank_test.docx"
     assert rendered["byte_size"] > 0
 
 

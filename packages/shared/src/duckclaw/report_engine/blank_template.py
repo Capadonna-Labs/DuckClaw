@@ -1,8 +1,8 @@
 """Plantilla en blanco (texto + imágenes) para documentos desde cero.
 
-No se versiona un .docx binario: se genera on-demand con python-docx bajo una
-raíz permitida (OUTPUT). El schema marca las secciones de imagen con kind=image
-para que el render las inserte como InlineImage (no como texto).
+No se versiona un .docx binario: se genera on-demand con python-docx bajo el
+vault privado del tenant, no bajo OUTPUT/Drive. El schema marca las secciones
+de imagen con kind=image para que el render las inserte como InlineImage.
 """
 
 from __future__ import annotations
@@ -54,9 +54,9 @@ def generate_blank_template_docx(target: Path) -> Path:
     return target
 
 
-def ensure_blank_template_seed(output_root: Path) -> Path:
-    """Devuelve la ruta del .docx en blanco bajo OUTPUT, generándolo si falta."""
-    target = output_root / "templates" / f"{BLANK_TEMPLATE_STEM}.docx"
+def ensure_blank_template_seed(template_root: Path) -> Path:
+    """Devuelve la ruta del .docx en blanco privado, generándolo si falta."""
+    target = template_root / "templates" / f"{BLANK_TEMPLATE_STEM}.docx"
     if target.is_file() and target.stat().st_size > 0:
         return target
     return generate_blank_template_docx(target)

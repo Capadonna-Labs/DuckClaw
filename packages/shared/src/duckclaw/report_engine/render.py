@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
+import tempfile
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +86,20 @@ def _apply_image_sections(
         assign_context_value(context, str(spec["key"]), inline)
 
 
+def _safe_docx_filename(*, title: str, instance_id: str) -> str:
+    """Nombre humano y estable: título normalizado + instance_id para evitar choques."""
+    raw = (title or "").strip()
+    ascii_title = (
+        unicodedata.normalize("NFKD", raw).encode("ascii", "ignore").decode("ascii")
+    )
+    slug = re.sub(r"[^a-zA-Z0-9._-]+", "_", ascii_title).strip("._-")
+    slug = re.sub(r"_+", "_", slug)[:72].strip("._-")
+    iid = re.sub(r"[^a-zA-Z0-9_-]+", "", (instance_id or "").strip())
+    if slug and iid:
+        return f"{slug}_{iid}.docx"
+    return f"{iid or 'documento'}.docx"
+
+
 def render_instance_docx_from_uri(
     *,
     template_uri: str,
@@ -112,30 +129,27 @@ def render_instance_docx_from_uri(
     context.setdefault("period_key", period_key)
     context.setdefault("date", period_key)
 
-    output_root.mkdir(parents=True, exist_ok=True)
-    staging = output_root / ".report_templates"
-    staging.mkdir(parents=True, exist_ok=True)
-    staged = staging / f"{instance_id}_tpl.docx"
-    shutil.copy2(template_path, staged)
-
     try:
         from docxtpl import DocxTemplate
     except ImportError as exc:
         raise ValueError("docxtpl no instalado (uv sync o duckops up)") from exc
 
-    target = output_root / "reports" / f"{instance_id}.docx"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    doc = DocxTemplate(str(staged))
-    _apply_image_sections(doc, context, state, image_roots or [])
-    doc.render(context, jinja_env=_lenient_jinja_env())
-    doc.save(str(target))
+    output_root.mkdir(parents=True, exist_ok=True)
+    target = output_root / _safe_docx_filename(title=title, instance_id=instance_id)
+    with tempfile.TemporaryDirectory(prefix="duckclaw_report_tpl_") as tmp:
+        staged = Path(tmp) / f"{instance_id}_tpl.docx"
+        shutil.copy2(template_path, staged)
+        doc = DocxTemplate(str(staged))
+        _apply_image_sections(doc, context, state, image_roots or [])
+        doc.render(context, jinja_env=_lenient_jinja_env())
+        doc.save(str(target))
 
     from duckclaw.report_engine.render_validate import find_unresolved_placeholders
 
     unresolved = find_unresolved_placeholders(target)
     return {
         "path": str(target),
-        "relative_path": f"reports/{instance_id}.docx",
+        "relative_path": target.name,
         "byte_size": target.stat().st_size,
         "format": "docx",
         "unresolved_placeholders": unresolved,

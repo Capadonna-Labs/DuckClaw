@@ -94,6 +94,26 @@ presets:
         - https://www.googleapis.com/auth/calendar.events.readonly
         - https://www.googleapis.com/auth/calendar.events
 
+  google_gmail:
+    display_name: Google Gmail
+    transport: streamable_http
+    endpoint_url: https://gmailmcp.googleapis.com/mcp/v1
+    auth_kind: bearer
+    read_only: false
+    egress_hosts: [gmailmcp.googleapis.com, gmail.googleapis.com, oauth2.googleapis.com, accounts.google.com]
+    metadata:
+      oauth_pkce: true
+      oauth_provider: google_workspace
+      manifest_skill_id: google_gmail
+      admin_label: HTTP remoto · OAuth PKCE (Gmail)
+      docs_url: https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server
+      # Doc oficial Gmail MCP + compose para create_draft; REST fallback si MCP tools/call niega.
+      google_oauth_scopes:
+        - openid
+        - https://www.googleapis.com/auth/gmail.readonly
+        - https://www.googleapis.com/auth/gmail.compose
+        - https://www.googleapis.com/auth/gmail.modify
+
   google_maps:
     display_name: Google Maps
     transport: streamable_http

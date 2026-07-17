@@ -105,6 +105,7 @@ def test_list_mcp_connector_presets_includes_all_bundled_ids() -> None:
         "notion",
         "google_workspace",
         "google_calendar",
+        "google_gmail",
         "google_maps",
         "tavily",
         "github",

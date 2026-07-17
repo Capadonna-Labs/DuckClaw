@@ -5,7 +5,7 @@
     "scope": "framework",
     "locale": "es"
   },
-  "baseline_skills": [
+    "baseline_skills": [
     "get_current_time",
     "read_sql",
     "inspect_schema",
@@ -15,7 +15,8 @@
     "write_output_document",
     "convert_document",
     "extract_document_text",
-    "render_docx_template"
+    "render_docx_template",
+    "report_engine"
   ],
   "optional_skills": {
     "research": {

@@ -89,6 +89,10 @@ tests/deprecated/
 /db/
 packages/agents/train/conversation_traces/
 dump.rdb
+# Productividad — artefactos locales del agente (no versionar contenido)
+storage/artifacts/**
+!storage/artifacts/.gitkeep
+
 # Local generated output
 output/
 

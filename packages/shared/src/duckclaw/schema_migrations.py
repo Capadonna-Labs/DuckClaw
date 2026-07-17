@@ -1485,6 +1485,37 @@ def _build_baseline_ddl() -> list[str]:
 _M001_BASELINE = _build_baseline_ddl()
 
 
+_M002_PRODUCTIVITY_ARTIFACTS = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_productivity_artifacts (
+        artifact_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL,
+        owner_email VARCHAR NOT NULL,
+        lane VARCHAR NOT NULL
+            CHECK (lane IN ('storage', 'vault', 'report')),
+        title VARCHAR NOT NULL,
+        filename VARCHAR DEFAULT '',
+        uri TEXT DEFAULT '',
+        source_kind VARCHAR DEFAULT '',
+        source_ref VARCHAR DEFAULT '',
+        mime VARCHAR DEFAULT '',
+        byte_size BIGINT DEFAULT 0,
+        active BOOLEAN DEFAULT true,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_productivity_artifacts_tenant
+        ON main.admin_productivity_artifacts (tenant_id, owner_email, active, updated_at)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_productivity_artifacts_lane
+        ON main.admin_productivity_artifacts (tenant_id, lane, active)
+    """,
+]
+
+
 def _migration_001_baseline_hooks(db: Any) -> None:
     """Seed/backfill hooks that previously ran at numbered migration versions."""
     for hook in (
@@ -1508,4 +1539,5 @@ _MIGRATION_HOOKS = {
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
+    (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),
 ]

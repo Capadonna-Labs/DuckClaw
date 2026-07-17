@@ -115,10 +115,41 @@ def summarize_status(
     }
 
 
-def build_render_context(state: dict[str, Any]) -> dict[str, str]:
+def _assign_nested(root: dict[str, Any], parts: list[str], value: Any) -> None:
+    """Asigna value en árbol Jinja (evidencia2.1 → {evidencia2: {1: value}})."""
+    if not parts:
+        return
+    cursor: dict[str, Any] = root
+    for part in parts[:-1]:
+        existing = cursor.get(part)
+        if not isinstance(existing, dict):
+            existing = {}
+            cursor[part] = existing
+        cursor = existing
+    cursor[parts[-1]] = value
+
+
+from duckclaw.report_engine.docx_content import content_to_docxtpl_value
+
+
+def build_render_context(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Contexto docxtpl/Jinja a partir del estado de secciones.
+
+    - IDs planos → claves top-level string.
+    - IDs dotted (a.b.c) → anidados para {{ a.b.c }}.
+    - Valores → RichText cuando hay saltos de línea o markdown inline (preserva celdas).
+    """
     sections = state.get("sections") if isinstance(state.get("sections"), dict) else {}
-    ctx: dict[str, str] = {}
+    ctx: dict[str, Any] = {}
     for sid, entry in sections.items():
-        if isinstance(entry, dict):
-            ctx[str(sid)] = str(entry.get("content") or "")
+        if not isinstance(entry, dict):
+            continue
+        content = str(entry.get("content") or "")
+        value = content_to_docxtpl_value(content)
+        key = str(sid)
+        if "." in key:
+            _assign_nested(ctx, key.split("."), value)
+        else:
+            ctx[key] = value
     return ctx

@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
+from duckclaw.document_toolbox.registry import assert_author_text_path
 from duckclaw.forge.rag.knowledge_core import sha256_text
 from duckclaw.forge.rag.knowledge_paths import (
     normalize_output_relative_path,
@@ -22,6 +23,7 @@ def write_output_document(relative_path: str, content: str, output_root: str = "
 
     try:
         rel = normalize_output_relative_path(relative_path)
+        assert_author_text_path(rel)
         target = resolve_knowledge_output_path(relative_path=rel, output_root=output_root)
         target.parent.mkdir(parents=True, exist_ok=True)
         data = text.encode("utf-8")
@@ -50,6 +52,19 @@ def write_output_document(relative_path: str, content: str, output_root: str = "
             payload["rag_sync"] = rag_sync
         except Exception as exc:
             payload["rag_sync"] = {"synced": False, "reason": str(exc)}
+        try:
+            from duckclaw.productivity_artifacts import register_vault_artifact_from_path
+
+            indexed = register_vault_artifact_from_path(
+                target,
+                source_kind="write_output",
+                source_ref=rel,
+                title=target.name,
+            )
+            if indexed:
+                payload["productivity_artifact_id"] = indexed.get("artifact_id")
+        except Exception as exc:
+            payload["productivity_index"] = {"ok": False, "reason": str(exc)}
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
@@ -61,12 +76,12 @@ def register_write_output_document_tool(tools_list: list[Any]) -> None:
             write_output_document,
             name="write_output_document",
             description=(
-                "Escribe un archivo en una raíz de salida permitida "
-                "(vault Obsidian / DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS). "
-                "Úsalo para borradores .md o artefactos auxiliares. "
-                "Para informes Word con plantilla del vault usa el Report Engine: "
-                "register_report_template → create_report_instance → patch_report_section → render_report_instance. "
-                "No uses pandoc como primera opción para informes corporativos."
+                "Escribe un archivo de texto UTF-8 en DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS "
+                "(.md, .txt, .json, .csv, .yaml, .py, .html, …). "
+                "Prohibido .docx/.pdf/.xlsx. "
+                "Documentos Word por plantilla: Report Engine "
+                "(register_report_template → create → patch → render_report_instance), "
+                "no uses este tool como sustituto del .docx final."
             ),
         )
     )

@@ -70,15 +70,16 @@ def test_register_report_template_surfaces_db_writer_failure(monkeypatch: pytest
 def test_framework_pack_includes_report_engine_guidance() -> None:
     from duckclaw.framework_policy_pack import get_framework_policy_content
 
-    content = get_framework_policy_content("system_prompt", "default")
+    content = get_framework_policy_content("directive", "report_engine")
     assert content
     assert "REPORT ENGINE" in content
     assert "render_report_instance" in content
-    assert "DOCUMENT LANES" in content
-    assert "MarkItDown" in content
     assert "patch_report_section" in content
-    assert "render_docx_template" in content
-    assert "pandoc" in content.lower()
+    assert "convert_document" in content or "pandoc" in content.lower()
+
+    default = get_framework_policy_content("system_prompt", "default")
+    assert default
+    assert "write_output_document" in default
 
 
 def test_generate_report_docx_discovers_markdown(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

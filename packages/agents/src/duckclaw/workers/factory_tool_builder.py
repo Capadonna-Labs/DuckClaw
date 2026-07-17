@@ -241,16 +241,18 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
 
     register_update_system_prompt_tools(tools, db)
     from duckclaw.forge.skills.report_engine_bridge import register_report_engine_tools
+    from duckclaw.prompt_policies.system_prompt import worker_has_report_engine_skill
 
-    register_report_engine_tools(tools)
-    from duckclaw.forge.skills.custom_reports_bridge import register_custom_reports_skill
-
-    register_custom_reports_skill(tools, db, spec)
     skills_list = [
         str(skill).strip().lower().replace("-", "_")
         for skill in (getattr(spec, "skills_list", None) or [])
     ]
     skill_configs = getattr(spec, "skill_configs", None) or {}
+    if worker_has_report_engine_skill(spec):
+        register_report_engine_tools(tools)
+    from duckclaw.forge.skills.custom_reports_bridge import register_custom_reports_skill
+
+    register_custom_reports_skill(tools, db, spec)
     if "github" in skills_list or "github" in skill_configs:
         from duckclaw.github.mcp_bridge import register_github_skill
 

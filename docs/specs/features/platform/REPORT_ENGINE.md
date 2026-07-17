@@ -54,7 +54,7 @@ No hay soft-unique por periodo. Pueden coexistir N instancias activas de la mism
 
 - Upsert plantilla: solo owner.
 - Crear instancia: plantilla visible (`owner` o `visibility=tenant`).
-- Render: re-valida `template_uri`; escribe en `OUTPUT_ROOTS/reports/{instance_id}.docx`.
+- Render: re-valida `template_uri`; escribe el `.docx` final directo en `OUTPUT_ROOTS/` con nombre humano estable (`{titulo_normalizado}_{instance_id}.docx`).
 
 ## Analyzer / Tools
 
@@ -101,7 +101,7 @@ Problema: sin memoria de instancia, el agente creaba un `.docx` nuevo por cada m
 
 Para «arma un documento con este texto y estas imágenes» sin que el usuario suba plantilla:
 
-- `create_blank_document(title)` genera on-demand (python-docx, **sin binario en git**) un `.docx` en blanco bajo `OUTPUT_ROOTS/templates/blank_document.docx`, lo registra como plantilla del usuario (`template_id` determinista por `tenant+owner`, idempotente) y crea la instancia.
+- `create_blank_document(title)` genera on-demand (python-docx, **sin binario en git**) un `.docx` en blanco bajo el vault privado del tenant, no en Drive/OUTPUT; lo registra como plantilla del usuario (`template_id` determinista por `tenant+owner`, idempotente) y crea la instancia.
 - Schema (`blank_template.BLANK_SECTION_SCHEMA`): huecos de texto (`intro`, `texto_1..3`, `cierre`) e imagen (`imagen_1..3`, `kind=image`). Ninguno `required`; con `ChainableUndefined` los huecos sin usar quedan vacíos.
 - El título del documento se auto-inyecta en `{{ titulo }}` (context.setdefault).
 
@@ -114,9 +114,11 @@ Para «arma un documento con este texto y estas imágenes» sin que el usuario s
 
 ### Imágenes adjuntas en el chat (playground)
 
-- Al adjuntar imágenes, el gateway ya corre VLM (descripción). Además ahora **persiste los bytes** en `db/private/{tenant}/inbound/` e inyecta un bloque `[IMAGENES_ADJUNTAS]` con las rutas absolutas.
-- **Sin API key adicional** para insertar imágenes (es I/O local). El VLM (descripción) usa MLX local por defecto; Gemini/OpenAI son opt-in.
-- El agente usa esas rutas en `patch_report_image` para incrustarlas en el Word.
+- **Carril attachment (siempre):** decode + persist en `db/private/{tenant}/inbound/` + bloque `[IMAGENES_ADJUNTAS]` con mapeo `imagen_N → path`.
+- **Carril VLM (opt-in por intención):** solo si el caption pide análisis visual (analiza/describe/OCR/qué ves…). «Ponla en el documento» **no** dispara VLM.
+- Si VLM falla o se cancela, las rutas ya persistidas siguen disponibles.
+- **Sin API key** para insertar imágenes. VLM local (MLX) o cloud es opcional y separada.
+- Atajo: `create_blank_document(title, image_paths="ruta1;ruta2", intro="...")` coloca imágenes e intro y luego `render_report_instance`.
 
 ## Admin API
 

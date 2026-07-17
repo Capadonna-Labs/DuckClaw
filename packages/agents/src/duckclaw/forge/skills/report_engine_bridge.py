@@ -86,6 +86,16 @@ def _image_roots_for_tenant(tenant_id: str, *, output_roots: list[Path]) -> list
     return list(dict.fromkeys(roots))
 
 
+def _tenant_report_template_root(tenant_id: str) -> Path | None:
+    """Storage privado para plantillas framework; no debe aparecer en Drive/OUTPUT."""
+    from duckclaw.vaults import user_vault_dir
+
+    try:
+        return user_vault_dir(tenant_id).resolve() / "report_engine"
+    except Exception:
+        return None
+
+
 def _apply_report_command_inline(db: Any, body: dict[str, Any]) -> None:
     from duckclaw.write_command_handlers import dispatch_command
 
@@ -423,13 +433,18 @@ def _blank_template_id(tenant_id: str, actor_email: str) -> str:
     return f"rtpl_blank_{digest}"
 
 
-def create_blank_document(title: str, instance_id: str = "") -> str:
+def create_blank_document(
+    title: str,
+    instance_id: str = "",
+    image_paths: str = "",
+    intro: str = "",
+) -> str:
     """Crea un documento Word desde CERO (sin plantilla previa): texto + imágenes.
 
     Usa una plantilla en blanco reutilizable con huecos de texto (intro, texto_1..3,
-    cierre) e imagen (imagen_1..3). Rellena el texto con patch_report_section y las
-    imágenes con patch_report_image, luego render_report_instance. Para 'partir de
-    cero con lo que te envío' — no requiere que el usuario suba una plantilla.
+    cierre) e imagen (imagen_1..3). Pasa image_paths (rutas de [IMAGENES_ADJUNTAS],
+    separadas por ; o salto de línea) para colocarlas de una vez. Opcional: intro.
+    Luego puedes patch_report_section más texto y render_report_instance.
     """
     from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
     from duckclaw.report_engine.blank_template import (
@@ -445,7 +460,13 @@ def create_blank_document(title: str, instance_id: str = "") -> str:
                 {"error": "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS no configurado"},
                 ensure_ascii=False,
             )
-        seed_path = ensure_blank_template_seed(roots[0])
+        template_root = _tenant_report_template_root(tenant_id)
+        if template_root is None:
+            return json.dumps(
+                {"error": "No se pudo resolver el vault privado del tenant"},
+                ensure_ascii=False,
+            )
+        seed_path = ensure_blank_template_seed(template_root)
         tid = _blank_template_id(tenant_id, actor_email)
         _dispatch_write(
             {
@@ -467,6 +488,7 @@ def create_blank_document(title: str, instance_id: str = "") -> str:
         created = json.loads(create_raw)
         if created.get("error"):
             return create_raw
+        iid = str(created.get("instance_id") or "")
         created["template_id"] = tid
         created["text_sections"] = [
             s["id"] for s in BLANK_SECTION_SCHEMA if s.get("kind") != "image"
@@ -474,14 +496,60 @@ def create_blank_document(title: str, instance_id: str = "") -> str:
         created["image_sections"] = [
             s["id"] for s in BLANK_SECTION_SCHEMA if s.get("kind") == "image"
         ]
+
+        intro_text = (intro or "").strip()
+        if intro_text and iid:
+            patch_report_section(
+                instance_id=iid,
+                section_id="intro",
+                content=intro_text,
+                mode="replace",
+                mark_complete=True,
+            )
+            created["intro_patched"] = True
+
+        paths = _parse_image_paths_arg(image_paths)
+        image_slots = [
+            s["id"] for s in BLANK_SECTION_SCHEMA if s.get("kind") == "image"
+        ]
+        placed: list[dict[str, str]] = []
+        for slot, path in zip(image_slots, paths):
+            patch_raw = patch_report_image(
+                instance_id=iid, section_id=slot, image_path=path
+            )
+            patched = json.loads(patch_raw)
+            if patched.get("error"):
+                created["image_patch_error"] = patched
+                break
+            placed.append({"section_id": slot, "image_path": path})
+        if placed:
+            created["images_placed"] = placed
         created["hint"] = (
-            "Rellena texto con patch_report_section (intro, texto_1..3, cierre) e "
-            "imágenes con patch_report_image (imagen_1..3, usando el path que llegó "
-            "por el chat). Luego render_report_instance."
+            "Si faltan textos: patch_report_section (texto_1..3, cierre). "
+            "Si faltan imágenes: patch_report_image. Luego render_report_instance."
         )
         return json.dumps(created, ensure_ascii=False)
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+
+def _parse_image_paths_arg(raw: str) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, list):
+                return [str(p).strip() for p in parsed if str(p).strip()]
+        except Exception:
+            pass
+    parts: list[str] = []
+    for chunk in text.replace(";", "\n").replace(",", "\n").splitlines():
+        cleaned = chunk.strip().strip("'\"")
+        if cleaned:
+            parts.append(cleaned)
+    return parts
 
 
 def patch_report_image(
@@ -931,7 +999,9 @@ def render_report_instance(instance_id: str, force: bool = False) -> str:
         if not roots:
             return json.dumps({"error": "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS no configurado"}, ensure_ascii=False)
         out_root = roots[0]
-        allowed = list(dict.fromkeys(knowledge_allowed_roots() + roots))
+        private_template_root = _tenant_report_template_root(tenant_id)
+        private_roots = [private_template_root] if private_template_root is not None else []
+        allowed = list(dict.fromkeys(knowledge_allowed_roots() + roots + private_roots))
         image_roots = _image_roots_for_tenant(tenant_id, output_roots=roots)
 
         rendered = render_instance_docx_from_uri(
@@ -1038,8 +1108,8 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 description=(
                     "Crea un Word desde CERO (sin plantilla previa): huecos de texto e "
                     "imagen. Úsalo cuando el usuario quiere 'un documento con este texto y "
-                    "estas imágenes' y no hay plantilla registrada. Devuelve text_sections "
-                    "e image_sections para rellenar."
+                    "estas imágenes'. Pasa image_paths con las rutas de [IMAGENES_ADJUNTAS] "
+                    "(separadas por ; ) e intro opcional. Luego render_report_instance."
                 ),
             ),
             StructuredTool.from_function(
@@ -1073,7 +1143,7 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 render_report_instance,
                 name="render_report_instance",
                 description=(
-                    "Genera el Word final (docxtpl) en OUTPUT/reports/. "
+                    "Genera el Word final (docxtpl) como .docx directo en OUTPUT. "
                     "Falla si faltan secciones required o quedan {{ placeholders }}. "
                     "force=true exporta borrador incompleto a propósito. "
                     "Preferir sobre convert_document/pandoc cuando hay plantilla registrada."

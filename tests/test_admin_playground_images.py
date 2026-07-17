@@ -27,6 +27,17 @@ def test_decode_admin_image_b64() -> None:
     assert len(decode_admin_image_b64(data_url)) > 0
 
 
+def test_should_run_vlm_for_caption_separates_document_vs_vision() -> None:
+    from core.vlm_ingest import should_run_vlm_for_caption
+
+    assert should_run_vlm_for_caption("") is False
+    assert should_run_vlm_for_caption("pon esta imagen en un documento en blanco") is False
+    assert should_run_vlm_for_caption("crea un Word con esta foto") is False
+    assert should_run_vlm_for_caption("¿Qué ves en la imagen?") is True
+    assert should_run_vlm_for_caption("analiza esta captura") is True
+    assert should_run_vlm_for_caption("describe la imagen y luego ponla en el informe") is True
+
+
 def test_decode_rejects_invalid_b64() -> None:
     from core.vlm_ingest import decode_admin_image_b64
 
@@ -37,7 +48,10 @@ def test_decode_rejects_invalid_b64() -> None:
 def test_enrich_message_with_admin_images_mock(monkeypatch: pytest.MonkeyPatch) -> None:
     from core import vlm_ingest as vlm
 
+    called = {"vlm": 0}
+
     async def _fake_single(**_kwargs):
+        called["vlm"] += 1
         return {
             "vlm_summary": "cuadro rojo",
             "image_hash": "abc",
@@ -45,17 +59,76 @@ def test_enrich_message_with_admin_images_mock(monkeypatch: pytest.MonkeyPatch) 
         }
 
     monkeypatch.setattr(vlm, "run_vlm_on_image_bytes", _fake_single)
+    monkeypatch.setattr(vlm, "_persist_admin_images_for_tenant", lambda *_a, **_k: ["/tmp/a.png"])
 
     async def _run():
         return await vlm.enrich_message_with_admin_images(
             "¿Qué ves?",
             [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+            tenant_id="default",
         )
 
     out = asyncio.run(_run())
+    assert called["vlm"] == 1
     assert "¿Qué ves?" in out
     assert "Contexto visual adjunto" in out
     assert "cuadro rojo" in out
+    assert "IMAGENES_ADJUNTAS" in out
+
+
+def test_enrich_attachment_only_skips_vlm(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core import vlm_ingest as vlm
+
+    async def _boom(**_kwargs):
+        raise AssertionError("VLM no debe correr para adjunto documental")
+
+    monkeypatch.setattr(vlm, "run_vlm_on_image_bytes", _boom)
+    monkeypatch.setattr(vlm, "run_vlm_on_images_batch", _boom)
+    monkeypatch.setattr(
+        vlm,
+        "_persist_admin_images_for_tenant",
+        lambda *_a, **_k: ["/vault/inbound/a.png"],
+    )
+
+    async def _run():
+        return await vlm.enrich_message_with_admin_images(
+            "ponla en un documento en blanco con este texto",
+            [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+            tenant_id="default",
+        )
+
+    out = asyncio.run(_run())
+    assert "Contexto visual adjunto" not in out
+    assert "IMAGENES_ADJUNTAS" in out
+    assert "/vault/inbound/a.png" in out
+    assert "imagen_1" in out
+
+
+def test_enrich_vlm_failure_still_returns_paths(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core import vlm_ingest as vlm
+
+    async def _fail(**_kwargs):
+        raise vlm.VlmIngestAllFailed(RuntimeError("mlx down"))
+
+    monkeypatch.setattr(vlm, "run_vlm_on_image_bytes", _fail)
+    monkeypatch.setattr(
+        vlm,
+        "_persist_admin_images_for_tenant",
+        lambda *_a, **_k: ["/vault/inbound/b.png"],
+    )
+
+    async def _run():
+        return await vlm.enrich_message_with_admin_images(
+            "analiza esta imagen",
+            [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+            tenant_id="default",
+            force_vlm=True,
+        )
+
+    out = asyncio.run(_run())
+    assert "VLM" in out or "visión" in out
+    assert "IMAGENES_ADJUNTAS" in out
+    assert "/vault/inbound/b.png" in out
 
 
 def test_playground_chat_requires_message_or_images(admin_client: TestClient) -> None:
@@ -220,10 +293,17 @@ def test_playground_vlm_all_failed_degrades_instead_of_502(
 ) -> None:
     from core import vlm_ingest as vlm
 
-    async def _raise_all_failed(*_a, **_k):
+    async def _raise_all_failed(**_k):
         raise vlm.VlmIngestAllFailed(RuntimeError("mlx down"))
 
-    monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _raise_all_failed)
+    # Degrada dentro de enrich: VLM falla, paths siguen.
+    monkeypatch.setattr(vlm, "run_vlm_on_image_bytes", _raise_all_failed)
+    monkeypatch.setattr(vlm, "run_vlm_on_images_batch", _raise_all_failed)
+    monkeypatch.setattr(
+        vlm,
+        "_persist_admin_images_for_tenant",
+        lambda *_a, **_k: ["/vault/inbound/degraded.png"],
+    )
 
     import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
@@ -231,8 +311,9 @@ def test_playground_vlm_all_failed_degrades_instead_of_502(
 
     seen: dict[str, str] = {}
 
-    async def _fake_invoke(prepared, *_a, **_k):
-        seen["message"] = prepared.msg
+    async def _fake_invoke(chat, *_a, **_k):
+        # invoke_chat recibe ChatRequest (message=...), no PlaygroundPreparedChat.
+        seen["message"] = str(getattr(chat, "message", "") or "")
         return {"response": "ok", "assigned_worker_id": "default"}
 
     monkeypatch.setattr(
@@ -254,4 +335,7 @@ def test_playground_vlm_all_failed_degrades_instead_of_502(
         },
     )
     assert r.status_code == 200, r.text
-    assert "VLM" in seen.get("message", "") or "visión" in seen.get("message", "")
+    msg = seen.get("message", "")
+    assert "VLM" in msg or "visión" in msg
+    assert "IMAGENES_ADJUNTAS" in msg
+    assert "/vault/inbound/degraded.png" in msg

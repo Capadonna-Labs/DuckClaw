@@ -174,6 +174,7 @@ async def ingest_playground_message_with_images(
         except Exception as exc:
             raise problem(502, "Error preparando imagen para edición", str(exc)) from exc
     try:
+        # Attachment ingest siempre; VLM solo si la caption pide análisis visual.
         return await enrich_message_with_admin_images(
             msg,
             [img.model_dump() for img in images],
@@ -182,15 +183,7 @@ async def ingest_playground_message_with_images(
     except ValueError as exc:
         raise problem(400, str(exc), "images") from exc
     except Exception as exc:
-        from core.vlm_ingest import VlmIngestAllFailed
-
-        if isinstance(exc, VlmIngestAllFailed):
-            base = (msg or "").strip() or "Analiza esta imagen."
-            return (
-                f"{base}\n\n"
-                "[Nota: visión (VLM) no disponible; el agente continúa sin contexto visual adjunto.]"
-            ).strip()
-        raise problem(502, "Error procesando imagen (VLM)", str(exc)) from exc
+        raise problem(502, "Error procesando imagen adjunta", str(exc)) from exc
 
 
 @dataclass

@@ -1,67 +1,104 @@
-# Report Engine v1 — informes por plantilla (transversal)
+# Report Engine v1 — documentos por plantilla (transversal)
 
 ## Objetivo
 
-Motor DB-first para que **cualquier usuario N** construya informes Office a partir de **su** plantilla Word, con secciones dinámicas, estado persistente y tools de agente. Complementa `document_toolbox` (primitivas) y no reemplaza `custom_reports` (HTML dashboards).
+Motor DB-first para que **cualquier persona N** construya documentos Office a partir de **sus** plantillas (Word hoy; Excel/PPT v2). El nicho vive en la plantilla y en el prompt, **no** en campos de producto tipo «periodo mensual».
+
+Complementa `document_toolbox` (extract/author/convert) y no reemplaza `custom_reports` (dashboards HTML).
+
+## Modelo mental (flujo canónico)
+
+```
+Plantilla (.docx + schema)  →  Instancia (draft)  →  Secciones (patch)  →  Render (docx)
+```
+
+| Paso | Qué pide el usuario / UI | Qué hace el sistema |
+|------|--------------------------|---------------------|
+| 1. Plantilla | Elegir .docx del vault o plantilla ya registrada | Analyzer → `section_schema` |
+| 2. Nombre | Solo **título** del documento | `create_report_instance` → `instance_id` |
+| 3. Secciones | Contenido (chat o tools) | `patch_report_section` |
+| 4. Render | «Genera el Word» | `render_report_instance` → `OUTPUT_ROOTS/reports/{id}.docx` |
+
+**Identidad:** `instance_id` (UUID corto). No hay identidad de negocio obligatoria aparte.
+
+**Prohibido en create (producto):** pedir periodo, mes, campaña, edición, etc. Si el usuario quiere «marzo 2026» en el documento, va en el **título** o en una **sección** de la plantilla (`{{periodo}}`, etc.), no en un campo transversal del motor.
+
+## Superficies
+
+| Superficie | Uso |
+|------------|-----|
+| **Chat (NL)** | «Rellena / exporta con mi plantilla» — tools; sin jerga de tools |
+| **Admin → Informes Word** | Lista instancias, wizard (plantilla + título), preview, Completar en Chat |
+| **Tools** | skill `report_engine` |
 
 ## Entidades
 
 ### `admin_report_templates`
 - `template_id`, `tenant_id`, `owner_email`
-- `name`, `template_uri` (`.docx` en vault)
-- `section_schema_json` — `[{ "id", "label", "required" }]`
+- `name`, `template_uri`
+- `section_schema_json` — `[{ "id", "label", "required" }]` (ids dotted `a.b`)
 - `analyzer_mode`: `jinja` | `headings` | `mixed`
 - `visibility`: `private` | `tenant`
 
 ### `admin_report_instances`
-- `instance_id`, `template_id`, `tenant_id`, `owner_email`
-- `project_id` (opcional, alinea RAG)
-- `title`, `period_key` (ej. `2026-06`, `Q1-2026`)
-- `state_json` — `{ "section_id": { "status", "content", "updated_at" } }`
-- `status`: `draft` | `ready` | `archived`
-- `preview_html`, `rendered_docx_uri`, `conversation_id`
+- `instance_id` — **PK de producto**
+- `template_id`, `tenant_id`, `owner_email`, `project_id` (opc.)
+- `title` — nombre humano
+- `state_json` — secciones
+- `preview_html`, `rendered_docx_uri`, `status`
+- `period_key` — **columna legacy ignorada**; no se expone en create UI; tools no deben pedirla; siempre `''` en flux nuevo
 
-## Autorización
+No hay soft-unique por periodo. Pueden coexistir N instancias activas de la misma plantilla.
 
-- **Plantilla:** owner o `visibility=tenant` (mismo `tenant_id`)
-- **Instancia:** `owner_email` o miembro del `project_id`
-- Escrituras vía `command_type` + db-writer (ACID)
+## Auth
 
-## Tools (baseline documentos / perfil reports)
+- Upsert plantilla: solo owner.
+- Crear instancia: plantilla visible (`owner` o `visibility=tenant`).
+- Render: re-valida `template_uri`; escribe en `OUTPUT_ROOTS/reports/{instance_id}.docx`.
 
-| Tool | Acción |
-|------|--------|
-| `list_report_templates` | Plantillas visibles para el tenant/actor |
-| `register_report_template` | Analiza `.docx` en vault y registra plantilla |
-| `create_report_instance` | Nueva instancia desde plantilla |
-| `get_report_status` | Secciones, faltantes, % completo |
-| `patch_report_section` | Añadir/reemplazar contenido de una sección |
-| `render_report_instance` | Genera DOCX (+ preview HTML) |
+## Analyzer / Tools
 
-## Flujo agente (cualquier N)
+Sin cambios de contrato útil: register → create(title) → patch → status → render.
 
-1. Usuario sube plantilla Word al vault (Jinja `{{ seccion_x }}` o títulos Heading 1).
-2. `register_report_template("plantillas/informe.docx", "Informe mensual")`
-3. `create_report_instance(template_id, title, period_key, project_id)`
-4. Usuario: «agrega esto a obligaciones_1» → `patch_report_section(instance_id, "obligaciones_1", content, mode=append)`
-5. `get_report_status` → «faltan: conclusiones, anexos»
-6. `render_report_instance` → DOCX en vault; `convert_document` → PDF si hace falta
+Baseline: skill `report_engine` en `framework_tool_pack_v1` profile `general`.
 
-## Ofimática (carriles)
+### Analyzer v2 — tablas
 
-| Formato | Ingress (MarkItDown) | Authoría | Entrega |
-|---------|---------------------|----------|---------|
-| Word `.docx` | `extract_document_text` | `render_docx_template`, report engine | `convert_document` |
-| Excel `.xlsx` | `extract_document_text` | v2: `openpyxl` lane | v2 |
-| PowerPoint `.pptx` | `extract_document_text` | v2: `python-pptx` lane | v2 |
-| PDF | extract + convert | — | `convert_document` |
+- Detecta placeholders `{{campo.2}}` y `{{ campo.2 }}` (espacios opcionales).
+- Recorre `doc.tables[]` y anota `table_index`, `row_index`, `col_index`, `in_table` por campo.
+- `analyzer_mode` en análisis: `jinja_tables` cuando hay campos en celdas (persistido como `jinja`).
+- Devuelve `tables[]`, `editable_field_count`, `fields_in_tables`.
 
-## Relación con `custom_reports`
+### Carril obligatorio (agente) — transversal
 
-- `custom_reports`: HTML vivo, dashboards, chat-id legacy.
-- Report Engine: estado estructurado + Word. Preview HTML de instancia puede publicarse a iframe en fase 2.
+- **Criterio único:** el actor tiene ≥1 plantilla Report Engine visible → `convert_document` / `render_docx_template` → `.docx` **bloqueado** (fail-closed si no hay hub).
+- Escape explícito: `allow_ad_hoc_docx=true`.
+- `generate_report_docx_from_markdown`: solo plantillas de **un** campo; multi-campo → error con `section_ids`.
+- `render_report_instance`: exige secciones `required` con contenido; escanea `{{…}}` residuales; `force=true` para borrador.
+- `patch_report_section`: devuelve `progress` + `valid_section_ids` si el id es inválido.
+- Placeholders Jinja nuevos se marcan `required=true`.
+- `write_output_document` libre para texto UTF-8; no es el Word final de plantilla.
 
-## Dependencias
+### Plantillas con tablas Word
 
-- `uv sync --extra document-toolbox`
-- `pandoc` en host para PDF
+- Cada **celda/hueco** de la plantilla debe tener su propio placeholder Jinja: `{{ seccion.1 }}`, `{{ cuerpo }}`, …
+- El render (docxtpl) **conserva** tablas y estilos; solo rellena los placeholders con texto plano.
+- **Prohibido** en `patch_report_section`: pegar tablas markdown completas en una sola sección — rompe el layout.
+- Saltos de párrafo (`\n\n`) dentro de un placeholder en celda pueden escapar de la tabla; el motor colapsa a `\n` suave.
+- Tablas markdown en el contenido se convierten a filas tabuladas (TSV), no a tabla Word nueva.
+- Para negrita inline use `**texto**` en la sección (RichText); multilínea simple = texto con `\n`.
+
+## Admin API
+
+- `GET/POST` templates + register
+- `POST /report-instances` body: `{ template_id, title, project_id? }` — **sin** `period_key` en contrato de producto
+- `GET` instances / preview
+- `DELETE` instance | template (soft)
+
+## Criterios de aceptación
+
+- Create Admin: solo plantilla + título.
+- Chat policy: no preguntar periodo; crear instancia con título derivado del pedido del usuario.
+- Dos usuarios no se pisan plantillas.
+- Analizer sin markers → fail-loud.
+- `period_key` no aparece en labels UI de create.

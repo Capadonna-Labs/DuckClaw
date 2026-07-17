@@ -56,6 +56,7 @@ export function KnowledgeFolderBrowser({
 
   const openEntry = (entry: KnowledgeBrowseEntry) => {
     if (!entry.exists || !entry.selectable) return;
+    if (entry.kind === 'file') return;
     void load(entry.path);
   };
 
@@ -122,13 +123,15 @@ export function KnowledgeFolderBrowser({
           </p>
         ) : null}
         {!loading && !error && payload ? (
-          payload.entries.length === 0 ? (
+          payload.entries.filter((e) => e.kind !== 'file').length === 0 ? (
             <p className="px-2 py-6 text-sm text-gov-gray-500 dark:text-dark-muted">
               No hay subcarpetas aquí. Usa «Usar …» arriba si esta carpeta contiene documentos.
             </p>
           ) : (
             <ul className="space-y-1">
-              {payload.entries.map((entry) => (
+              {payload.entries
+                .filter((e) => e.kind !== 'file')
+                .map((entry) => (
                 <li key={entry.path}>
                   <div className="flex items-center gap-1 rounded-xl px-1 py-1 hover:bg-white/80 dark:hover:bg-dark-surface">
                     <button
@@ -149,7 +152,7 @@ export function KnowledgeFolderBrowser({
                         <ChevronRight size={14} className="shrink-0 text-gov-gray-400" />
                       )}
                     </button>
-                    {entry.exists && entry.selectable ? (
+                    {entry.exists && entry.selectable && entry.kind !== 'file' ? (
                       <button
                         type="button"
                         onClick={() => onSelect(entry.path)}

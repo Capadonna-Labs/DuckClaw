@@ -10,6 +10,25 @@ from typing import Any
 from duckclaw.report_engine.state import build_render_context
 
 
+def assert_template_uri_readable(template_uri: str, allowed_roots: list[Path]) -> Path:
+    """Re-valida que la plantilla sigue bajo raíces permitidas (ALLOWED ∪ OUTPUT)."""
+    template_path = Path(template_uri).expanduser().resolve()
+    if not template_path.is_file():
+        raise ValueError(f"Plantilla no accesible: {template_uri}")
+    if not allowed_roots:
+        raise ValueError("No hay raíces de conocimiento configuradas para leer la plantilla")
+    ok = any(
+        template_path == root.resolve() or root.resolve() in template_path.parents
+        for root in allowed_roots
+    )
+    if not ok:
+        raise ValueError(
+            "template_uri fuera de DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS / OUTPUT_ROOTS. "
+            "Vuelve a registrar la plantilla desde una ruta permitida."
+        )
+    return template_path
+
+
 def render_instance_docx_from_uri(
     *,
     template_uri: str,
@@ -18,10 +37,14 @@ def render_instance_docx_from_uri(
     instance_id: str,
     title: str = "",
     period_key: str = "",
+    allowed_roots: list[Path] | None = None,
 ) -> dict[str, Any]:
-    template_path = Path(template_uri).expanduser().resolve()
-    if not template_path.is_file():
-        raise ValueError(f"Plantilla no accesible: {template_uri}")
+    if allowed_roots is not None:
+        template_path = assert_template_uri_readable(template_uri, allowed_roots)
+    else:
+        template_path = Path(template_uri).expanduser().resolve()
+        if not template_path.is_file():
+            raise ValueError(f"Plantilla no accesible: {template_uri}")
 
     state = json.loads(state_json or "{}")
     if not isinstance(state, dict):
@@ -49,9 +72,14 @@ def render_instance_docx_from_uri(
     doc = DocxTemplate(str(staged))
     doc.render(context)
     doc.save(str(target))
+
+    from duckclaw.report_engine.render_validate import find_unresolved_placeholders
+
+    unresolved = find_unresolved_placeholders(target)
     return {
         "path": str(target),
         "relative_path": f"reports/{instance_id}.docx",
         "byte_size": target.stat().st_size,
         "format": "docx",
+        "unresolved_placeholders": unresolved,
     }

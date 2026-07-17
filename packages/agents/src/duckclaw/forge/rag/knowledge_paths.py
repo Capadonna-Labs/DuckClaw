@@ -127,11 +127,28 @@ def _is_allowed_root(target: Path, allowed: list[Path]) -> bool:
     return any(resolved == root.expanduser().resolve() for root in allowed)
 
 
-def browse_knowledge_directories(path: str = "") -> dict[str, Any]:
-    """List selectable folders under configured ingest roots (admin folder picker)."""
-    allowed = knowledge_allowed_roots()
+def browse_knowledge_directories(
+    path: str = "",
+    *,
+    include_suffixes: list[str] | None = None,
+    root_set: str = "allowed",
+) -> dict[str, Any]:
+    """List selectable folders (and optional files) under ingest or OUTPUT roots."""
+    mode = (root_set or "allowed").strip().lower()
+    if mode == "output":
+        allowed = knowledge_output_roots()
+        empty_msg = "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS no configurado"
+    else:
+        allowed = knowledge_allowed_roots()
+        empty_msg = "DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS no configurado para ingesta local"
     if not allowed:
-        raise ValueError("DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS no configurado para ingesta local")
+        raise ValueError(empty_msg)
+
+    suffixes = [
+        s.lower() if s.startswith(".") else f".{s.lower()}"
+        for s in (include_suffixes or [])
+        if str(s).strip()
+    ]
 
     uri = normalize_source_uri(path)
     if not uri:
@@ -152,6 +169,8 @@ def browse_knowledge_directories(path: str = "") -> dict[str, Any]:
             "parent_path": None,
             "roots_mode": True,
             "entries": sorted(entries, key=lambda item: str(item["name"]).lower()),
+            "include_suffixes": suffixes,
+            "root_set": mode,
         }
 
     target = Path(uri).expanduser().resolve()
@@ -168,7 +187,8 @@ def browse_knowledge_directories(path: str = "") -> dict[str, Any]:
         parent = target.parent.resolve()
         parent_path = str(parent) if path_under_any_root(parent, allowed) else ""
 
-    entries = []
+    dir_entries: list[dict[str, Any]] = []
+    file_entries: list[dict[str, Any]] = []
     try:
         children = sorted(target.iterdir(), key=lambda item: item.name.lower())
     except PermissionError as exc:
@@ -177,14 +197,27 @@ def browse_knowledge_directories(path: str = "") -> dict[str, Any]:
     for child in children:
         if child.name.startswith("."):
             continue
-        if not child.is_dir():
-            continue
         resolved_child = child.resolve()
-        entries.append(
+        if child.is_dir():
+            dir_entries.append(
+                {
+                    "name": child.name,
+                    "path": str(resolved_child),
+                    "kind": "directory",
+                    "exists": True,
+                    "selectable": True,
+                }
+            )
+            continue
+        if not suffixes or not child.is_file():
+            continue
+        if suffixes != ["*"] and child.suffix.lower() not in suffixes:
+            continue
+        file_entries.append(
             {
                 "name": child.name,
                 "path": str(resolved_child),
-                "kind": "directory",
+                "kind": "file",
                 "exists": True,
                 "selectable": True,
             }
@@ -194,7 +227,9 @@ def browse_knowledge_directories(path: str = "") -> dict[str, Any]:
         "path": str(target),
         "parent_path": parent_path,
         "roots_mode": False,
-        "entries": entries,
+        "entries": dir_entries + file_entries,
+        "include_suffixes": suffixes,
+        "root_set": mode,
     }
 
 
@@ -229,7 +264,7 @@ def resolve_knowledge_output_path(*, relative_path: str, output_root: str = "") 
 
 def resolve_readable_document_path(*, relative_path: str, root_hint: str = "") -> Path:
     """Resolve a file under ALLOWED or OUTPUT roots for agent read/extract."""
-    cleaned = (relative_path or "").replace("\\", "/").strip().lstrip("/")
+    cleaned = (relative_path or "").replace("\\", "/").strip().strip("'\"")
     if not cleaned:
         raise ValueError("relative_path vacío")
 
@@ -239,6 +274,14 @@ def resolve_readable_document_path(*, relative_path: str, root_hint: str = "") -
     if not roots:
         raise ValueError("No hay raíces de conocimiento configuradas")
 
+    absolute = Path(cleaned).expanduser()
+    if absolute.is_absolute():
+        resolved = absolute.resolve()
+        if resolved.is_file() and path_under_any_root(resolved, roots):
+            return resolved
+        raise ValueError(f"Ruta absoluta fuera de raíces permitidas o inexistente: {cleaned}")
+
+    cleaned = cleaned.lstrip("/")
     if root_hint.strip():
         bases = [Path(root_hint).expanduser().resolve()]
         if not path_under_any_root(bases[0], roots):
@@ -256,3 +299,22 @@ def resolve_readable_document_path(*, relative_path: str, root_hint: str = "") -
             return candidate
 
     raise ValueError(f"No existe el archivo legible: {cleaned}")
+
+
+def project_convert_output_relative(*, source: Path, output_format: str) -> str:
+    """Map a readable source file to a relative path under OUTPUT_ROOTS for convert."""
+    fmt = (output_format or "docx").strip().lower().lstrip(".")
+    if not fmt:
+        raise ValueError("output_format vacío")
+    resolved = source.expanduser().resolve()
+    out_roots = knowledge_output_roots()
+    allowed = knowledge_allowed_roots()
+
+    for root in list(dict.fromkeys(out_roots + allowed)):
+        try:
+            rel = resolved.relative_to(root.expanduser().resolve())
+        except ValueError:
+            continue
+        return str(Path(rel).with_suffix(f".{fmt}")).replace("\\", "/")
+
+    return f"{resolved.stem}.{fmt}"

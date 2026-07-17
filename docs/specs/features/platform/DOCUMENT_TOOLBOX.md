@@ -15,12 +15,23 @@ Un solo módulo (`duckclaw.document_toolbox`) para toda la plataforma: ingesta, 
 
 **Regla:** MarkItDown **nunca** genera PDF/Word. Solo extrae texto. Pandoc **nunca** ingesta binarios.
 
+### Autoría UTF-8 (`write_output_document`)
+
+- Solo sufijos en `AUTHOR_TEXT_SUFFIXES` (`.md`, `.txt`, `.json`, `.csv`, `.yaml`, `.py`, `.html`, …).
+- Rechaza binarios ofimáticos (`.docx`, `.pdf`, `.xlsx`, …): usar `convert_document` o `render_docx_template` / Report Engine.
+- Nunca escribe bytes “falsos” con `text.encode` bajo extensión de Office.
+
+### Convert siempre a OUTPUT
+
+- `convert_document` lee la fuente bajo ALLOWED u OUTPUT, pero **escribe el entregable solo bajo** `DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS` (p. ej. Drive `.../MacMiniVault/output`).
+- No deja el `.docx`/`.pdf` al lado de una fuente en ALLOWED fuera de OUTPUT.
+
 ## Tools baseline (framework)
 
 - `extract_document_text` — lee binario bajo raíces permitidas → texto
-- `write_output_document` — escribe texto/código en vault de salida
+- `write_output_document` — escribe texto/código UTF-8 en vault de salida (allowlist)
 - `render_docx_template` — rellena plantilla corporativa DOCX (docxtpl)
-- `convert_document` — pandoc: `.md`/`.html`/`.txt` → `docx`/`pdf`/`html`
+- `convert_document` — pandoc: `.md`/`.html`/`.txt` → `docx`/`pdf`/`html` **en OUTPUT_ROOTS**
 - RAG existente: `list/read/search_project_knowledge`, `get_project_context`
 
 ## Plantillas corporativas

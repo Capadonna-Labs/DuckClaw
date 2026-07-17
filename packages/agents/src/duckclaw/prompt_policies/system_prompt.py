@@ -135,7 +135,9 @@ def _append_framework_directive(db: Any, base: str, directive_name: str) -> str:
         return body
     try:
         directive = PromptPolicyResolver(db=db).load("directive", directive_name)
-    except FileNotFoundError:
+    except (FileNotFoundError, RuntimeError):
+        # RuntimeError: tabla/policy ausente (p. ej. probe con DB efímera).
+        # No tumbar el init del grafo ni vaciar tools_runtime.
         return body
     directive = (directive or "").strip()
     if not directive:

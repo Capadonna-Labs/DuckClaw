@@ -221,10 +221,6 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
     from duckclaw.forge.skills.search_project_knowledge_bridge import register_search_project_knowledge_tool
     from duckclaw.forge.skills.extract_document_text_bridge import register_extract_document_text_tool
     from duckclaw.forge.skills.render_docx_template_bridge import register_render_docx_template_tool
-    from duckclaw.forge.skills.convert_document_bridge import (
-        register_convert_document_tool,
-        register_export_output_document_tool,
-    )
     from duckclaw.forge.skills.write_output_document_bridge import register_write_output_document_tool
     from duckclaw.forge.skills.get_project_context_bridge import register_get_project_context_tool
 
@@ -234,8 +230,8 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
     register_extract_document_text_tool(tools)
     register_write_output_document_tool(tools)
     register_render_docx_template_tool(tools)
-    register_convert_document_tool(tools)
-    register_export_output_document_tool(tools)
+    # convert_document (pandoc) NO se registra: outbound serio = Report Engine;
+    # inbound binario→texto = extract_document_text (MarkItDown). Ver DOCUMENT_TOOLBOX.md.
     register_get_project_context_tool(tools)
     from duckclaw.forge.skills.update_worker_system_prompt_bridge import register_update_system_prompt_tools
 

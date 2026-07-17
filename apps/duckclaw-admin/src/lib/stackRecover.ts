@@ -1,8 +1,8 @@
 import { join } from 'path';
-import { spawn } from 'child_process';import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { spawn } from 'child_process';
+import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
 import { buildUvRunArgv } from '@/lib/resolveRepoRuntime';
-import { pm2WaitShellPreamble } from '@/lib/pm2WaitShell';
 import { runStackRestartCoreLocal } from '@/lib/stackRestartCore';
 
 function repoRoot(): string {
@@ -48,25 +48,38 @@ function runArgv(
   });
 }
 
-/** Detiene PM2, aplica migraciones/seeders vía duckclaw-migrate y levanta el stack. */
+const PREPARE_MIGRATE_PY = [
+  'from pathlib import Path',
+  'from duckops.stack_shutdown import prepare_duckdb_for_migrate',
+  'raise SystemExit(prepare_duckdb_for_migrate(Path(".").resolve()))',
+].join('; ');
+
+/**
+ * Detiene PM2 (Gateway/Writer/Indexer/Heartbeat), libera locks DuckDB,
+ * aplica migraciones/seeders y vuelve a levantar el stack.
+ */
 export async function runStackRecoverLocal(): Promise<NormalizedOpsRunResult> {
   const cwd = repoRoot();
   const chunks: string[] = [];
 
-  const stopShell = `${pm2WaitShellPreamble()}
-cd "${cwd}"
-pm2 stop DuckClaw-Gateway 2>/dev/null || true
-pm2 stop DuckClaw-DB-Writer 2>/dev/null || true
-pm2 stop DuckClaw-Knowledge-Indexer 2>/dev/null || true
-pm2 stop DuckClaw-Heartbeat 2>/dev/null || true
-wait_pm2_stopped DuckClaw-Gateway 15 || true
-wait_pm2_stopped DuckClaw-DB-Writer 15 || true
-wait_pm2_stopped DuckClaw-Knowledge-Indexer 15 || true
-wait_pm2_stopped DuckClaw-Heartbeat 15 || true
-echo "PM2_STOP_OK"
-`;
-  const stop = await runArgv(cwd, ['bash', '-lc', stopShell], 60_000);
-  chunks.push('── Detener Gateway + DB-Writer (liberar DuckDB) ──\n', stop.stdout, stop.stderr);
+  const prepareArgv = buildUvRunArgv(['python', '-c', PREPARE_MIGRATE_PY]);
+  const prepare = await runArgv(cwd, prepareArgv, 90_000);
+  chunks.push(
+    '── Detener stack + liberar locks DuckDB (antes de migrate) ──\n',
+    prepare.stdout,
+    prepare.stderr
+  );
+  if (prepare.exit_code !== 0) {
+    return normalizeOpsResult({
+      op_id: 'restart_stack',
+      exit_code: prepare.exit_code,
+      stdout: chunks.join('\n'),
+      stderr:
+        'No se pudo liberar el lock de DuckDB. Revisa PIDs arriba o ejecuta: uv run duckops down --all --no-admin',
+      executed_via: 'local',
+      ok: false,
+    });
+  }
 
   const migrateArgv = buildUvRunArgv(['duckclaw-migrate']);
   const migrate = await runArgv(cwd, migrateArgv, 180_000);

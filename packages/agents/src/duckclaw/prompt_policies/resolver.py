@@ -103,6 +103,15 @@ class PromptPolicyResolver:
             )
             row = self._first_row(result)
         except Exception as exc:
+            # Tabla ausente / DB efímera: dejar que capa 0 (airbag) resuelva si aplica.
+            if is_framework_policy_key(policy_type, policy_name):
+                _log.warning(
+                    "prompt_policy_registry unavailable for framework key %s/%s: %s",
+                    policy_type,
+                    policy_name,
+                    exc,
+                )
+                return ""
             raise RuntimeError(
                 "main.prompt_policy_registry is unavailable; run schema migration 16 "
                 f"before resolving prompt policy {policy_type}/{policy_name}"

@@ -14,10 +14,14 @@ const ALLOWED_KEYS = new Set(PM2_NODE_DEV_ENV_FILTER.allowed_keys);
 
 function augmentPathForOps(pathValue: string | undefined): string {
   const home = process.env.HOME?.trim() || '/root';
+  // Homebrew primero: en Mac Mini `pm2` vive en /opt/homebrew/bin; sin eso
+  // «Reiniciar sistema» hace `pm2 stop … || true` en silencio y migrate choca
+  // con el lock del Gateway.
   const prefixes = [
+    '/opt/homebrew/bin',
+    '/usr/local/bin',
     `${home}/.local/bin`,
     '/root/.local/bin',
-    '/usr/local/bin',
   ].filter((p, i, arr) => arr.indexOf(p) === i);
   const base = (pathValue || '').trim();
   if (!base) return prefixes.join(':');

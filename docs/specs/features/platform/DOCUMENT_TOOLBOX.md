@@ -2,54 +2,55 @@
 
 ## Objetivo
 
-Un solo módulo (`duckclaw.document_toolbox`) para toda la plataforma: ingesta, extracción, autoría y conversión de documentos, sin mezclar responsabilidades.
+Un solo módulo (`duckclaw.document_toolbox`) para toda la plataforma: **ingesta/extracción** (máquina lee) y **autoría Word seria** (humano recibe), sin un tercer carril de conversión genérica (pandoc).
 
 ## Carriles (lanes)
 
 | Carril | Motor | Uso |
 |--------|-------|-----|
 | **ingest_native** | lectura directa UTF-8 | `.md`, `.txt`, `.json`, `.csv` en sync/RAG |
-| **extract** | **MarkItDown** | PDF/Office/HTML → **texto plano** (ingesta + tool `extract_document_text`) |
-| **author** | `write_output_document`, `render_docx_template` | Crear artefactos en OUTPUT vault |
-| **convert** | **pandoc** | Entregar formatos finales (`docx`, `pdf`, `html`) desde fuentes de texto |
+| **extract** | **MarkItDown** | PDF/Office/HTML → **texto plano / md** (ingesta + tool `extract_document_text`) |
+| **author_text** | `write_output_document` | Notas/código UTF-8 en OUTPUT vault — **no** es entregable Word |
+| **author_word** | **Report Engine** (`docxtpl`) + `render_docx_template` (plantilla built-in) | Word fiel a plantilla del usuario N |
 
-**Regla:** MarkItDown **nunca** genera PDF/Word. Solo extrae texto. Pandoc **nunca** ingesta binarios.
+**Regla:** MarkItDown **nunca** genera PDF/Word. Solo extrae texto para la IA.  
+**Regla:** El Word serio **nunca** se reconstruye desde markdown. Sale de plantilla + placeholders `{{…}}`.
+
+### Sin pandoc (producto)
+
+`convert_document` / pandoc **no** están en baseline ni se registran en el runtime del worker.  
+Código legacy puede existir en el repo; no forma parte del path feliz multi-tenant.
+
+Si un tenant necesita PDF, v2: export desde el `.docx` del Report Engine (LibreOffice headless u otro), no markdown→pandoc.
 
 ### Autoría UTF-8 (`write_output_document`)
 
 - Solo sufijos en `AUTHOR_TEXT_SUFFIXES` (`.md`, `.txt`, `.json`, `.csv`, `.yaml`, `.py`, `.html`, …).
-- Rechaza binarios ofimáticos (`.docx`, `.pdf`, `.xlsx`, …): usar `convert_document` o `render_docx_template` / Report Engine.
-- Nunca escribe bytes “falsos” con `text.encode` bajo extensión de Office.
-
-### Convert siempre a OUTPUT
-
-- `convert_document` lee la fuente bajo ALLOWED u OUTPUT, pero **escribe el entregable solo bajo** `DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS` (p. ej. Drive `.../MacMiniVault/output`).
-- No deja el `.docx`/`.pdf` al lado de una fuente en ALLOWED fuera de OUTPUT.
+- Rechaza binarios ofimáticos (`.docx`, `.pdf`, `.xlsx`, …): usar Report Engine / `render_docx_template`.
 
 ## Tools baseline (framework)
 
-- `extract_document_text` — lee binario bajo raíces permitidas → texto
-- `write_output_document` — escribe texto/código UTF-8 en vault de salida (allowlist)
-- `render_docx_template` — rellena plantilla corporativa DOCX (docxtpl)
-- `convert_document` — pandoc: `.md`/`.html`/`.txt` → `docx`/`pdf`/`html` **en OUTPUT_ROOTS**
-- RAG existente: `list/read/search_project_knowledge`, `get_project_context`
+- `extract_document_text` — binario bajo raíces permitidas → texto (MarkItDown)
+- `write_output_document` — texto UTF-8 en vault de salida
+- `render_docx_template` — plantilla built-in docxtpl (sin plantilla de usuario)
+- Report Engine: `list/register/create/patch/status/render_report_*`
+- RAG: `list/read/search_project_knowledge`, `get_project_context`
 
 ## Plantillas corporativas
 
 - Seed: `packages/shared/src/duckclaw/seeds/document_templates/`
 - Manifiesto en `document_toolbox_v1.json`
 - Plantilla built-in: `corporate_report` (título, subtítulo, autor, cuerpo, tenant)
+- Plantillas de usuario N: vault → `register_report_template` (Report Engine)
 
 ## Variables de entorno
 
 - `DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS` — lectura/ingesta
 - `DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS` — escritura agente
-- Dependencias opcionales: `uv sync --extra document-toolbox` (markitdown, docxtpl, python-docx)
-- Host: `pandoc` (+ motor PDF) para conversión
+- Dependencias: `uv sync --extra document-toolbox` (markitdown, docxtpl, python-docx)
 
-## Flujos típicos
+## Flujos típicos (N usuarios)
 
-1. **Ingesta fiable:** PDF en vault → sync usa MarkItDown → chunks RAG
-2. **Lectura adhoc:** `extract_document_text("contrato.pdf")` sin esperar índice
-3. **Informe corporativo:** `render_docx_template("corporate_report", {...}, "informes/q1.docx")`
-4. **Entrega PDF:** `write_output_document` o plantilla DOCX → `convert_document(..., "pdf")`
+1. **IA lee un PDF/Word ajeno:** `extract_document_text` / sync MarkItDown → RAG
+2. **Humano recibe informe serio:** register plantilla → create → patch por `{{campo}}` (incl. celdas de tabla) → `render_report_instance`
+3. **Notas internas:** `write_output_document` (markdown); no sustituye el Word final

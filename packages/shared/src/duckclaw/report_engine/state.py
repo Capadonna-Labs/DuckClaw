@@ -16,6 +16,15 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat()
 
 
+_KIND_TEXT = "text"
+_KIND_IMAGE = "image"
+_DEFAULT_IMAGE_WIDTH_IN = 5.5
+
+
+def _normalize_kind(raw: Any) -> str:
+    return _KIND_IMAGE if str(raw or "").strip().lower() == _KIND_IMAGE else _KIND_TEXT
+
+
 def init_state_from_schema(section_schema: list[dict[str, Any]]) -> dict[str, Any]:
     sections: dict[str, Any] = {}
     for raw in section_schema:
@@ -24,13 +33,20 @@ def init_state_from_schema(section_schema: list[dict[str, Any]]) -> dict[str, An
         sid = str(raw.get("id") or "").strip()
         if not sid:
             continue
-        sections[sid] = {
+        entry = {
             "status": _SECTION_EMPTY,
             "content": "",
             "label": str(raw.get("label") or sid),
             "required": bool(raw.get("required", False)),
+            "kind": _normalize_kind(raw.get("kind")),
             "updated_at": "",
         }
+        if entry["kind"] == _KIND_IMAGE:
+            try:
+                entry["width_in"] = float(raw.get("width_in") or _DEFAULT_IMAGE_WIDTH_IN)
+            except (TypeError, ValueError):
+                entry["width_in"] = _DEFAULT_IMAGE_WIDTH_IN
+        sections[sid] = entry
     return {"sections": sections}
 
 
@@ -115,18 +131,32 @@ def summarize_status(
     }
 
 
+def _path_key(part: str) -> str | int:
+    """Jinja `{{ a.1 }}` resuelve el segmento como int, no como str '1'."""
+    text = (part or "").strip()
+    if text.isdigit():
+        return int(text)
+    return text
+
+
 def _assign_nested(root: dict[str, Any], parts: list[str], value: Any) -> None:
-    """Asigna value en árbol Jinja (evidencia2.1 → {evidencia2: {1: value}})."""
+    """Asigna value en árbol Jinja (ejecucion1.1 → {ejecucion1: {1: value}}).
+
+    Importante: segmentos numéricos van como ``int``. En Jinja2,
+    ``{{ ejecucion1.1 }}`` hace getitem con ``1`` (int); con clave ``'1'`` (str)
+    el hueco queda vacío y el usuario ve la celda en blanco.
+    """
     if not parts:
         return
     cursor: dict[str, Any] = root
     for part in parts[:-1]:
-        existing = cursor.get(part)
+        key = _path_key(part)
+        existing = cursor.get(key)
         if not isinstance(existing, dict):
             existing = {}
-            cursor[part] = existing
+            cursor[key] = existing
         cursor = existing
-    cursor[parts[-1]] = value
+    cursor[_path_key(parts[-1])] = value
 
 
 from duckclaw.report_engine.docx_content import content_to_docxtpl_value
@@ -137,13 +167,17 @@ def build_render_context(state: dict[str, Any]) -> dict[str, Any]:
     Contexto docxtpl/Jinja a partir del estado de secciones.
 
     - IDs planos → claves top-level string.
-    - IDs dotted (a.b.c) → anidados para {{ a.b.c }}.
+    - IDs dotted (a.b.c) → anidados para {{ a.b.c }} (segmentos numéricos = int).
     - Valores → RichText cuando hay saltos de línea o markdown inline (preserva celdas).
     """
     sections = state.get("sections") if isinstance(state.get("sections"), dict) else {}
     ctx: dict[str, Any] = {}
     for sid, entry in sections.items():
         if not isinstance(entry, dict):
+            continue
+        # Las secciones de imagen necesitan el objeto DocxTemplate (InlineImage);
+        # se resuelven aparte en render.py, no aquí.
+        if _normalize_kind(entry.get("kind")) == _KIND_IMAGE:
             continue
         content = str(entry.get("content") or "")
         value = content_to_docxtpl_value(content)
@@ -153,3 +187,31 @@ def build_render_context(state: dict[str, Any]) -> dict[str, Any]:
         else:
             ctx[key] = value
     return ctx
+
+
+def image_render_specs(state: dict[str, Any]) -> list[dict[str, Any]]:
+    """Secciones kind=image con path → [{key, path, width_in}] para InlineImage."""
+    sections = state.get("sections") if isinstance(state.get("sections"), dict) else {}
+    specs: list[dict[str, Any]] = []
+    for sid, entry in sections.items():
+        if not isinstance(entry, dict):
+            continue
+        if _normalize_kind(entry.get("kind")) != _KIND_IMAGE:
+            continue
+        path = str(entry.get("content") or "").strip()
+        if not path:
+            continue
+        try:
+            width_in = float(entry.get("width_in") or _DEFAULT_IMAGE_WIDTH_IN)
+        except (TypeError, ValueError):
+            width_in = _DEFAULT_IMAGE_WIDTH_IN
+        specs.append({"key": str(sid), "path": path, "width_in": width_in})
+    return specs
+
+
+def assign_context_value(ctx: dict[str, Any], key: str, value: Any) -> None:
+    """Asigna value respetando claves dotted anidadas (comparte lógica con el render)."""
+    if "." in key:
+        _assign_nested(ctx, key.split("."), value)
+    else:
+        ctx[key] = value

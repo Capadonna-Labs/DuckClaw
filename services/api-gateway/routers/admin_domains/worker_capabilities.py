@@ -84,6 +84,27 @@ def _load_worker_spec(
     return wid, spec, manifest_data, tenant_id
 
 
+# Skills que registran un conjunto de tools (no una tool homónima).
+_REPORT_ENGINE_TOOLS: frozenset[str] = frozenset(
+    {
+        "list_report_templates",
+        "register_report_template",
+        "create_report_instance",
+        "list_report_instances",
+        "create_blank_document",
+        "get_report_status",
+        "patch_report_section",
+        "patch_report_image",
+        "render_report_instance",
+        "generate_report_docx_from_markdown",
+    }
+)
+_SKILL_RUNTIME_TOOLS: dict[str, frozenset[str]] = {
+    "report_engine": _REPORT_ENGINE_TOOLS,
+    "reports": _REPORT_ENGINE_TOOLS,
+}
+
+
 def _runtime_tools_for_worker(
     worker_id: str,
     *,
@@ -91,6 +112,7 @@ def _runtime_tools_for_worker(
 ) -> tuple[list[str], bool]:
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
+    from duckclaw.gateway_db import get_gateway_db_path
     from duckclaw.workers.factory_graph_setup import initialize_worker_graph_context
 
     class _BindableFakeLLM(FakeListChatModel):
@@ -98,23 +120,29 @@ def _runtime_tools_for_worker(
             return self
 
     fake_llm = _BindableFakeLLM(responses=["ok"])
+    gateway_path = (get_gateway_db_path() or "").strip() or ":memory:"
     try:
         with open_gateway_db(read_only=True) as db:
+            # Probe debe usar el hub real (+ reuse). Con :memory: el resolve de
+            # directive/report_engine tumba el init y tools_runtime queda [].
             ctx = initialize_worker_graph_context(
                 worker_id,
-                ":memory:",
+                gateway_path,
                 fake_llm,
                 db=db,
+                reuse_db=db,
                 tenant_id=tenant_id,
                 llm_provider="none_llm",
+                open_vault_read_only=True,
             )
     except Exception:
         try:
             ctx = initialize_worker_graph_context(
                 worker_id,
-                ":memory:",
+                gateway_path,
                 fake_llm,
                 llm_provider="none_llm",
+                open_vault_read_only=True,
             )
         except Exception:
             return [], False
@@ -195,6 +223,15 @@ def _compute_gaps(
             continue
         if normalized in {"time_context"}:
             continue
+        bundle = _SKILL_RUNTIME_TOOLS.get(normalized)
+        if bundle is not None:
+            missing_bundle = sorted(bundle - runtime_set)
+            if missing_bundle:
+                gaps.append(
+                    f"skill '{normalized}' sin tools de Report Engine en runtime: "
+                    + ", ".join(missing_bundle)
+                )
+            continue
         if normalized == "get_current_time" and "get_current_time" not in runtime_set:
             gaps.append("skill get_current_time efectiva pero tool get_current_time no registrada")
             continue
@@ -212,6 +249,9 @@ def _compute_gaps(
             ):
                 continue
             continue
+        if normalized in (pack.get("baseline_skills") or []):
+            # Baseline ya se chequea vía always_registered / bundle arriba.
+            continue
         gaps.append(f"skill '{normalized}' sin tool homónima en runtime")
 
     return gaps, integration_gaps
@@ -222,9 +262,26 @@ def build_worker_capabilities_payload(
     *,
     actor: str = "admin-ui",
 ) -> dict[str, Any]:
-    wid, _spec, manifest_data, tenant_id = _load_worker_spec(worker_id, actor=actor)
+    wid, spec, manifest_data, tenant_id = _load_worker_spec(worker_id, actor=actor)
     skills_declared = _declared_skills(manifest_data)
-    skills_effective = ensure_baseline_skills(skills_declared, manifest=manifest_data)
+    # Catálogo DB / load_manifest ya aplicó baseline; el YAML en disco puede ir vacío.
+    from_spec = [
+        str(s).strip().lower().replace("-", "_")
+        for s in (getattr(spec, "skills_list", None) or [])
+        if str(s).strip()
+    ]
+    if from_spec:
+        skills_effective = from_spec
+        if not skills_declared:
+            pack = load_framework_tool_pack()
+            baseline = {
+                str(s).strip().lower().replace("-", "_")
+                for s in (pack.get("baseline_skills") or [])
+                if str(s).strip()
+            }
+            skills_declared = [s for s in from_spec if s not in baseline]
+    else:
+        skills_effective = ensure_baseline_skills(skills_declared, manifest=manifest_data)
     framework_baseline = should_apply_framework_baseline(manifest_data)
 
     tools_runtime, sandbox_registered = _runtime_tools_for_worker(wid, tenant_id=tenant_id)

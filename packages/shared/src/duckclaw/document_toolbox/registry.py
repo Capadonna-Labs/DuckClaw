@@ -107,7 +107,7 @@ def assert_author_text_path(relative_path: str) -> None:
             f"write_output_document no escribe binarios ({suf}). "
             "Documentos Word por plantilla: Report Engine "
             "(register_report_template → patch → render_report_instance). "
-            "Sin plantilla: convert_document (pandoc) o render_docx_template built-in."
+            "Sin plantilla de usuario: render_docx_template (built-in)."
         )
     if suf not in AUTHOR_TEXT_SUFFIXES:
         allowed = ", ".join(sorted(AUTHOR_TEXT_SUFFIXES))

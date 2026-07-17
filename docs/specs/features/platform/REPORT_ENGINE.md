@@ -71,8 +71,9 @@ Baseline: skill `report_engine` en `framework_tool_pack_v1` profile `general`.
 
 ### Carril obligatorio (agente) — transversal
 
-- **Criterio único:** el actor tiene ≥1 plantilla Report Engine visible → `convert_document` / `render_docx_template` → `.docx` **bloqueado** (fail-closed si no hay hub).
-- Escape explícito: `allow_ad_hoc_docx=true`.
+- **Inbound:** MarkItDown / `extract_document_text` (binario → texto). No genera Word.
+- **Outbound serio:** Report Engine únicamente. No hay carril pandoc/`convert_document` en baseline.
+- **Criterio:** plantilla(s) visible(s) → Word = `render_report_instance`.
 - `generate_report_docx_from_markdown`: solo plantillas de **un** campo; multi-campo → error con `section_ids`.
 - `render_report_instance`: exige secciones `required` con contenido; escanea `{{…}}` residuales; `force=true` para borrador.
 - `patch_report_section`: devuelve `progress` + `valid_section_ids` si el id es inválido.

@@ -18,6 +18,15 @@ CORE_PM2_NAMES: tuple[str, ...] = (
     "DuckClaw-DB-Writer",
 )
 
+# Procesos que suelen abrir el hub/vault (RW o RO) y bloquean duckclaw-migrate.
+MIGRATE_STOP_PM2_NAMES: tuple[str, ...] = (
+    "DuckClaw-Gateway",
+    "duckclaw-gateway",
+    "DuckClaw-DB-Writer",
+    "DuckClaw-Knowledge-Indexer",
+    "DuckClaw-Heartbeat",
+)
+
 # Perfil spawn / servicios opcionales del monorepo.
 OPTIONAL_PM2_PREFIXES: tuple[str, ...] = (
     "DuckClaw-",
@@ -206,6 +215,91 @@ def release_duckdb_locks(
     if total == 0:
         print_fn("Sin locks DuckDB activos.")
     return total
+
+
+def remaining_duckdb_lock_holders(repo: Path) -> list[tuple[Path, list[int]]]:
+    """Lista (path, pids) que aún tienen abierto un .duckdb del hub/vault."""
+    out: list[tuple[Path, list[int]]] = []
+    for path in duckdb_paths_to_unlock(repo):
+        pids = _pids_holding_path(path)
+        if pids:
+            out.append((path, pids))
+    return out
+
+
+def stop_pm2_for_migrate(*, print_fn: PrintFn = _default_print) -> list[str]:
+    """pm2 stop de Gateway/Writer/Indexer/Heartbeat; delete si siguen online."""
+    stopped: list[str] = []
+    for name in MIGRATE_STOP_PM2_NAMES:
+        status = "missing"
+        pid = 0
+        for item in _pm2_processes():
+            if str(item.get("name") or "") != name:
+                continue
+            env = item.get("pm2_env") if isinstance(item.get("pm2_env"), dict) else {}
+            status = str(env.get("status") or "unknown")
+            try:
+                pid = int(item.get("pid") or 0)
+            except (TypeError, ValueError):
+                pid = 0
+            break
+        if status == "missing":
+            continue
+        if status == "stopped":
+            print_fn(f"PM2 {name}: ya detenido")
+            stopped.append(name)
+            continue
+        proc = _run(["pm2", "stop", name])
+        if proc.returncode == 0:
+            print_fn(f"PM2 stop {name}")
+            stopped.append(name)
+        else:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            print_fn(f"PM2 stop {name} falló: {detail or proc.returncode}")
+        # Esperar a que deje de estar online; si no, delete (libera el PID real).
+        deadline = time.monotonic() + 12.0
+        while time.monotonic() < deadline:
+            cur = "missing"
+            for item in _pm2_processes():
+                if str(item.get("name") or "") != name:
+                    continue
+                env = item.get("pm2_env") if isinstance(item.get("pm2_env"), dict) else {}
+                cur = str(env.get("status") or "unknown")
+                break
+            if cur in ("stopped", "errored", "missing"):
+                break
+            time.sleep(0.4)
+        else:
+            print_fn(f"PM2 {name} sigue activo tras stop → delete")
+            _run(["pm2", "delete", name])
+            if pid > 0:
+                kill_processes([pid], sig=signal.SIGTERM, print_fn=print_fn, reason=f"{name} orphan")
+    return stopped
+
+
+def prepare_duckdb_for_migrate(
+    repo: Path | None = None,
+    *,
+    print_fn: PrintFn = _default_print,
+) -> int:
+    """Detiene procesos PM2 que bloquean DuckDB y mata survivors vía lsof.
+
+    Returns:
+        0 si no quedan holders; 1 si aún hay lock (migrate no debe continuar).
+    """
+    root = (repo or repo_root()).resolve()
+    print_fn("==> Preparar DuckDB para migrate (stop PM2 + liberar locks)…")
+    stop_pm2_for_migrate(print_fn=print_fn)
+    time.sleep(0.5)
+    release_duckdb_locks(root, print_fn=print_fn)
+    remaining = remaining_duckdb_lock_holders(root)
+    if remaining:
+        for path, pids in remaining:
+            print_fn(f"ERROR: lock residual en {path} → PIDs {pids}")
+        print_fn("Abortando migrate: libera esos PIDs manualmente o reintenta.")
+        return 1
+    print_fn("DUCKDB_UNLOCKED_OK")
+    return 0
 
 
 def kill_admin_dev_server(

@@ -174,12 +174,27 @@ def run_uv_sync(*, repo_root: Path, print_fn: PrintFn) -> bool:
     return True
 
 
-def run_pm2_stop_stack(*, print_fn: PrintFn) -> bool:
+def run_pm2_stop_stack(*, print_fn: PrintFn, repo_root: Path | None = None) -> bool:
     print_fn("==> Deteniendo stack PM2 (liberar DuckDB antes de migrate)…")
-    proc = subprocess.run(["bash", "-lc", pm2_stop_stack_shell()], check=False)
-    if proc.returncode != 0:
-        print_fn("WARN: pm2 stop incompleto; migrate puede fallar si hay lock en vault")
-    return True
+    root = Path(repo_root or Path.cwd()).resolve()
+    # No importar duckops desde shared (evita ciclo). Misma lógica que el BFF admin.
+    prepare_py = (
+        "from pathlib import Path; "
+        "from duckops.stack_shutdown import prepare_duckdb_for_migrate; "
+        "raise SystemExit(prepare_duckdb_for_migrate(Path('.').resolve()))"
+    )
+    proc = subprocess.run(
+        ["uv", "run", "python", "-c", prepare_py],
+        cwd=str(root),
+        check=False,
+    )
+    if proc.returncode == 0:
+        return True
+    print_fn(
+        "ERROR: no se liberó DuckDB (Gateway/Heartbeat u otro proceso aún tiene el archivo). "
+        "Prueba: uv run duckops down --prepare-migrate"
+    )
+    return False
 
 
 def run_migrate(*, repo_root: Path, print_fn: PrintFn) -> bool:
@@ -216,7 +231,9 @@ def run_stack_deploy(
         return 1
 
     if migrate:
-        run_pm2_stop_stack(print_fn=print_fn)
+        if not run_pm2_stop_stack(print_fn=print_fn, repo_root=root):
+            print_fn("ERROR: no se liberó el lock de DuckDB; abortando migrate")
+            return 1
         if not run_migrate(repo_root=root, print_fn=print_fn):
             return 1
 

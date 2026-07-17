@@ -67,6 +67,25 @@ def _session_scope() -> tuple[str, str, str]:
     )
 
 
+def _session_conversation_id() -> str:
+    from duckclaw.forge.skills.knowledge_tool_context import get_session_chat_id
+
+    return get_session_chat_id()
+
+
+def _image_roots_for_tenant(tenant_id: str, *, output_roots: list[Path]) -> list[Path]:
+    """Raíces donde el render puede leer imágenes: vault del tenant + OUTPUT."""
+    from duckclaw.vaults import user_vault_dir
+
+    roots: list[Path] = []
+    try:
+        roots.append(user_vault_dir(tenant_id).resolve())
+    except Exception:
+        pass
+    roots.extend(output_roots)
+    return list(dict.fromkeys(roots))
+
+
 def _apply_report_command_inline(db: Any, body: dict[str, Any]) -> None:
     from duckclaw.write_command_handlers import dispatch_command
 
@@ -140,9 +159,12 @@ def _dispatch_write(payload: dict[str, Any]) -> None:
         )
         if spawn_inline_writes_enabled():
             return
+        # DUCKCLAW_WRITE_POLL_SEC=0 es fire-and-forget para chat/gateway.
+        # Report Engine hace read-after-write (_ensure_instance_readable): sin poll
+        # el create "falla" aunque el db-writer persista segundos después.
         poll_sec = write_poll_timeout_sec()
         if poll_sec <= 0:
-            return
+            poll_sec = 30.0
         status = wait_write_task(task_id, timeout_sec=poll_sec)
         if status is None:
             raise RuntimeError(
@@ -322,6 +344,7 @@ def create_report_instance(
                 "title": clean_title,
                 "period_key": "",
                 "project_id": pid,
+                "conversation_id": _session_conversation_id(),
             }
         )
         _ensure_instance_readable(iid)
@@ -337,6 +360,192 @@ def create_report_instance(
         )
     except Exception as exc:
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+
+def list_report_instances(limit: int = 20) -> str:
+    """Lista documentos (instancias) en curso del usuario para reanudar en vez de crear.
+
+    Úsalo ANTES de create: si ya hay un borrador de esta conversación, reanúdalo
+    (patch + render con el mismo instance_id). Crea uno nuevo solo si el usuario
+    pide explícitamente otro documento.
+    """
+    from duckclaw.report_engine.admin_report_read import (
+        list_report_instances as _list_instances,
+    )
+
+    tenant_id, actor_email, project_id = _session_scope()
+    conversation_id = _session_conversation_id()
+    db = None
+    try:
+        db = _open_hub_db()
+        rows = _list_instances(
+            db,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            project_id=project_id,
+            limit=max(1, min(int(limit or 20), 50)),
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+    finally:
+        _close_hub_db_if_owned(db)
+
+    items = [
+        {
+            "instance_id": r.get("instance_id"),
+            "title": r.get("title"),
+            "template_id": r.get("template_id"),
+            "template_name": r.get("template_name"),
+            "status": r.get("status"),
+            "progress": (r.get("progress") or {}).get("completion_percent"),
+            "updated_at": r.get("updated_at"),
+            "same_conversation": bool(
+                conversation_id and str(r.get("conversation_id") or "") == conversation_id
+            ),
+        }
+        for r in rows
+    ]
+    # Sugerencia de reanudación: primero de esta conversación, si no el más reciente.
+    resume = next((i["instance_id"] for i in items if i["same_conversation"]), None)
+    if resume is None and items:
+        resume = items[0]["instance_id"]
+    return json.dumps(
+        {"instances": items, "resume_suggestion": resume, "count": len(items)},
+        ensure_ascii=False,
+    )
+
+
+def _blank_template_id(tenant_id: str, actor_email: str) -> str:
+    import hashlib
+
+    seed = f"{(tenant_id or 'default').strip().lower()}:{(actor_email or 'system').strip().lower()}"
+    digest = hashlib.sha1(seed.encode("utf-8")).hexdigest()[:10]
+    return f"rtpl_blank_{digest}"
+
+
+def create_blank_document(title: str, instance_id: str = "") -> str:
+    """Crea un documento Word desde CERO (sin plantilla previa): texto + imágenes.
+
+    Usa una plantilla en blanco reutilizable con huecos de texto (intro, texto_1..3,
+    cierre) e imagen (imagen_1..3). Rellena el texto con patch_report_section y las
+    imágenes con patch_report_image, luego render_report_instance. Para 'partir de
+    cero con lo que te envío' — no requiere que el usuario suba una plantilla.
+    """
+    from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
+    from duckclaw.report_engine.blank_template import (
+        BLANK_SECTION_SCHEMA,
+        ensure_blank_template_seed,
+    )
+
+    try:
+        tenant_id, actor_email, _ = _session_scope()
+        roots = knowledge_output_roots()
+        if not roots:
+            return json.dumps(
+                {"error": "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS no configurado"},
+                ensure_ascii=False,
+            )
+        seed_path = ensure_blank_template_seed(roots[0])
+        tid = _blank_template_id(tenant_id, actor_email)
+        _dispatch_write(
+            {
+                "command_type": "upsert_report_template",
+                "template_id": tid,
+                "name": "Documento en blanco",
+                "description": "Plantilla framework: texto + imágenes desde cero.",
+                "template_uri": str(seed_path),
+                "section_schema": BLANK_SECTION_SCHEMA,
+                "analyzer_mode": "jinja",
+                "visibility": "private",
+            }
+        )
+        create_raw = create_report_instance(
+            template_id=tid,
+            title=(title or "Documento").strip() or "Documento",
+            instance_id=instance_id,
+        )
+        created = json.loads(create_raw)
+        if created.get("error"):
+            return create_raw
+        created["template_id"] = tid
+        created["text_sections"] = [
+            s["id"] for s in BLANK_SECTION_SCHEMA if s.get("kind") != "image"
+        ]
+        created["image_sections"] = [
+            s["id"] for s in BLANK_SECTION_SCHEMA if s.get("kind") == "image"
+        ]
+        created["hint"] = (
+            "Rellena texto con patch_report_section (intro, texto_1..3, cierre) e "
+            "imágenes con patch_report_image (imagen_1..3, usando el path que llegó "
+            "por el chat). Luego render_report_instance."
+        )
+        return json.dumps(created, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+
+def patch_report_image(
+    instance_id: str,
+    section_id: str,
+    image_path: str,
+) -> str:
+    """Coloca una imagen (por su path del vault/chat) en una sección kind=image.
+
+    image_path: ruta absoluta que llegó por el chat (adjunto) o relativa bajo OUTPUT.
+    La imagen se inserta como InlineImage en el render, conservando el layout Word.
+    """
+    from duckclaw.report_engine.admin_report_read import (
+        actor_can_access_instance,
+        get_report_instance,
+    )
+
+    path = (image_path or "").strip()
+    if not path:
+        return json.dumps({"error": "image_path vacío"}, ensure_ascii=False)
+
+    tenant_id, actor_email, _ = _session_scope()
+    db = None
+    try:
+        db = _open_hub_db()
+        instance = get_report_instance(
+            db, instance_id=(instance_id or "").strip(), tenant_id=tenant_id
+        )
+        if not instance:
+            return _missing_instance_error(instance_id)
+        if not actor_can_access_instance(db, instance=instance, actor_email=actor_email):
+            return json.dumps({"error": "Acceso denegado"}, ensure_ascii=False)
+        entry = (instance["state"].get("sections") or {}).get((section_id or "").strip())
+        if not isinstance(entry, dict):
+            valid = [
+                sid
+                for sid, e in (instance["state"].get("sections") or {}).items()
+                if isinstance(e, dict) and str(e.get("kind") or "") == "image"
+            ]
+            return json.dumps(
+                {"error": f"Sección desconocida: {section_id}", "image_sections": valid},
+                ensure_ascii=False,
+            )
+        if str(entry.get("kind") or "") != "image":
+            return json.dumps(
+                {
+                    "error": (
+                        f"La sección «{section_id}» es de texto; usa patch_report_section. "
+                        "patch_report_image solo aplica a secciones kind=image."
+                    )
+                },
+                ensure_ascii=False,
+            )
+    finally:
+        _close_hub_db_if_owned(db)
+
+    # El path se guarda como content (replace); el render lo convierte en InlineImage.
+    return patch_report_section(
+        instance_id=instance_id,
+        section_id=section_id,
+        content=path,
+        mode="replace",
+        mark_complete=True,
+    )
 
 
 def get_report_status(instance_id: str) -> str:
@@ -723,6 +932,7 @@ def render_report_instance(instance_id: str, force: bool = False) -> str:
             return json.dumps({"error": "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS no configurado"}, ensure_ascii=False)
         out_root = roots[0]
         allowed = list(dict.fromkeys(knowledge_allowed_roots() + roots))
+        image_roots = _image_roots_for_tenant(tenant_id, output_roots=roots)
 
         rendered = render_instance_docx_from_uri(
             template_uri=str(template["template_uri"]),
@@ -732,6 +942,7 @@ def render_report_instance(instance_id: str, force: bool = False) -> str:
             title=str(instance["title"]),
             period_key=str(instance["period_key"]),
             allowed_roots=allowed,
+            image_roots=image_roots,
         )
         unresolved = rendered.get("unresolved_placeholders") or []
         if unresolved and not force:
@@ -803,12 +1014,41 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 ),
             ),
             StructuredTool.from_function(
+                list_report_instances,
+                name="list_report_instances",
+                description=(
+                    "Lista documentos en curso del usuario (para reanudar en vez de crear). "
+                    "ÚSALO ANTES de create/create_blank: si hay un borrador de esta "
+                    "conversación (resume_suggestion), reanúdalo con ese instance_id. "
+                    "Crea uno nuevo solo si el usuario pide explícitamente otro documento."
+                ),
+            ),
+            StructuredTool.from_function(
                 create_report_instance,
                 name="create_report_instance",
                 description=(
                     "Crea borrador desde plantilla registrada. Args: template_id + title. "
                     "NO pidas periodo/mes: la identidad es instance_id. "
                     "Luego patch_report_section por cada sección faltante."
+                ),
+            ),
+            StructuredTool.from_function(
+                create_blank_document,
+                name="create_blank_document",
+                description=(
+                    "Crea un Word desde CERO (sin plantilla previa): huecos de texto e "
+                    "imagen. Úsalo cuando el usuario quiere 'un documento con este texto y "
+                    "estas imágenes' y no hay plantilla registrada. Devuelve text_sections "
+                    "e image_sections para rellenar."
+                ),
+            ),
+            StructuredTool.from_function(
+                patch_report_image,
+                name="patch_report_image",
+                description=(
+                    "Coloca una imagen adjunta (por su path del chat/vault) en una sección "
+                    "kind=image (p. ej. imagen_1). Se inserta como InlineImage en el render, "
+                    "conservando el layout. Para texto usa patch_report_section."
                 ),
             ),
             StructuredTool.from_function(

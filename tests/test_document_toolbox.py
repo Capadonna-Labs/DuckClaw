@@ -24,7 +24,8 @@ def test_load_document_toolbox_pack() -> None:
     tools = pack["baseline_tools"]
     assert "extract_document_text" in tools
     assert "render_docx_template" in tools
-    assert "convert_document" in tools
+    assert "convert_document" not in tools
+    assert "render_report_instance" in tools
 
 
 def test_ingest_lanes() -> None:

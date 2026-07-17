@@ -99,11 +99,26 @@ async def _call_connector_tool(
         from duckclaw.forge.skills.mcp_http_util import mcp_http_call_tool
 
         url = str(connector.get("endpoint_url") or "").strip()
+        headers = _http_headers(db, connector)
+        from duckclaw.forge.skills.google_calendar_rest import (
+            call_google_calendar_rest,
+            uses_google_calendar_rest_fallback,
+        )
+        from duckclaw.forge.skills.google_gmail_rest import (
+            call_google_gmail_rest,
+            uses_google_gmail_rest_fallback,
+        )
+
+        if uses_google_calendar_rest_fallback(connector):
+            return await call_google_calendar_rest(tool_name, arguments, headers=headers)
+        if uses_google_gmail_rest_fallback(connector):
+            return await call_google_gmail_rest(tool_name, arguments, headers=headers)
+
         return await mcp_http_call_tool(
             url,
             tool_name,
             arguments,
-            headers=_http_headers(db, connector),
+            headers=headers,
         )
     raise ValueError(f"unsupported transport: {transport}")
 

@@ -80,7 +80,7 @@ debug_sft.log
 # DuckOps migrate backups (local pre-migrate snapshots)
 .duckops/migrate-backups/
 
-# Tests deprecados (quant-trader, CFD, MOC, IBKR): locales; requieren .env/broker
+# Deprecated local tests (require .env/broker)
 tests/deprecated/
 
 .cusorignore
@@ -96,15 +96,15 @@ storage/artifacts/**
 # Local generated output
 output/
 
-# Leila Store extraction bundle (local only; not part of duckclaw monorepo)
+# External local bundles (not part of duckclaw monorepo)
 /Leila/
 
-# Local staging patches (product templates belong in Capadonna-Driller)
+# Local staging patches
 _quant_reports_fix/
 _auto_publish_fix/
 _reports_fix_staging/
 _reports_staging/
 debug-*.log
 
-# VPS-only deploy patches, probes, host-specific ops (never commit)
+# VPS-only: deploy patches, probes, host-specific ops (never commit)
 _vps_local/

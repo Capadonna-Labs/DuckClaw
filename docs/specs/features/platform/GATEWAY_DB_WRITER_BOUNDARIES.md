@@ -77,10 +77,11 @@ db-writer publica `detail` en Redis para `sync_catalog_prompts` y `restore_frame
 
 ```http
 POST /api/v1/admin/gateway/release-worker-cache
-→ { entries_before, entries_after, rss_mb_before, rss_mb_after, worker_graph_cache }
+→ { entries_before, entries_after, rss_mb_before, rss_mb_after, worker_graph_cache, worker_capabilities_catalog_cache, capabilities_catalog_entries_before, capabilities_catalog_entries_after }
 ```
 
-- Solo vacía caché LangGraph + `gc.collect()` en el proceso HTTP actual.
+- Vacía caché LangGraph + catálogo in-process de `GET .../workers/{id}/capabilities` + `gc.collect()` en el proceso HTTP actual.
 - **No** reinicia PM2 ni DB-Writer.
-- UI: botón en tarjeta «Caché workers» con modal de confirmación (coste: cold start en próximo chat).
+- UI: botón en tarjeta «Caché workers» con modal de confirmación (coste: cold start en próximo chat / capabilities).
 - Misma rutina que fly commands (`duckclaw.ops.gateway_resource_release`).
+- Spec catálogo capabilities: `WORKER_CAPABILITIES_CATALOG_CACHE.md`.

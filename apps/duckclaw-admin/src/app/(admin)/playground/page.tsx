@@ -68,7 +68,6 @@ export default function PlaygroundPage() {
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [sandboxToggling, setSandboxToggling] = useState(false);
-  const [sandboxRefreshKey, setSandboxRefreshKey] = useState(0);
 
   const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
   const {
@@ -334,7 +333,7 @@ export default function PlaygroundPage() {
       if (!conv.sessionId || !workerId.trim()) {
         throw new Error('Sesión o worker no listos para sandbox');
       }
-      setSandboxToggling(true);
+        setSandboxToggling(true);
       try {
         await adminService.playgroundChat({
           worker_id: workerId.trim(),
@@ -343,7 +342,6 @@ export default function PlaygroundPage() {
           tenant_id: config?.effective_tenant_id,
           vault_db_path: activeVaultPath || undefined,
         });
-        setSandboxRefreshKey((value) => value + 1);
       } finally {
         setSandboxToggling(false);
       }
@@ -406,7 +404,6 @@ export default function PlaygroundPage() {
       <PlaygroundRunSettingsPanel
         config={config}
         workerId={workerId}
-        capabilitiesRefreshKey={sandboxRefreshKey}
         activeVaultPath={activeVaultPath}
         activeVaultScope={activeVaultScope}
         workerLabel={

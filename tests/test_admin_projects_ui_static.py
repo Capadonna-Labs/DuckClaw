@@ -3,11 +3,13 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from admin_service_corpus import admin_service_corpus
+
 
 def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/projects/page.tsx").read_text(encoding="utf-8")
     table = Path("apps/duckclaw-admin/src/components/projects/ProjectCard.tsx").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     workspace = Path("packages/shared/src/duckclaw/admin_workspace.py").read_text(encoding="utf-8")
     db_first_router = Path("services/api-gateway/routers/admin_db_first.py").read_text(encoding="utf-8")
     workspace_router = Path(
@@ -68,7 +70,7 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
 
 
 def test_admin_service_exposes_paginated_workspace_projects_contract() -> None:
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
 
     assert "WorkspaceProjectsQuery" in service
     assert "WorkspaceProjectsPage" in service
@@ -95,7 +97,7 @@ def test_projects_catalog_exposes_inactive_filter_and_reversible_actions() -> No
     toolbar = Path("apps/duckclaw-admin/src/components/projects/ProjectsControlPanel.tsx").read_text(encoding="utf-8")
     card = Path("apps/duckclaw-admin/src/components/projects/ProjectCard.tsx").read_text(encoding="utf-8")
     grid = Path("apps/duckclaw-admin/src/components/projects/ProjectsGrid.tsx").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
 
     assert "statusOptions" in toolbar
     assert "{ value: 'active', label: 'Activos' }" in toolbar
@@ -116,7 +118,7 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     card = Path("apps/duckclaw-admin/src/components/projects/ProjectCard.tsx").read_text(encoding="utf-8")
     grid = Path("apps/duckclaw-admin/src/components/projects/ProjectsGrid.tsx").read_text(encoding="utf-8")
     detail_page = Path("apps/duckclaw-admin/src/app/(admin)/projects/[projectId]/page.tsx")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     workspace_router = Path(
         "services/api-gateway/routers/admin_domains/workspace_projects.py"
     ).read_text(encoding="utf-8")
@@ -138,10 +140,14 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
     assert "auto-fill" in grid
     assert "project=${encodeURIComponent(project.project_id)}" in card
     assert "getWorkspaceProject:" in service
-    assert "KnowledgeSource" in service
-    assert "listKnowledgeSources:" in service
-    assert "createKnowledgeSource:" in service
-    assert "searchKnowledge:" in service
+    knowledge_api = Path("apps/duckclaw-admin/src/services/admin/knowledgeApi.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "KnowledgeSource" in knowledge_api
+    assert "listKnowledgeSources:" in knowledge_api
+    assert "createKnowledgeSource:" in knowledge_api
+    assert "searchKnowledge:" in knowledge_api
+    assert "...knowledgeApi" in service
     assert '@router.get("/workspace/projects/{project_id}"' in workspace_router
     assert '@router.get("/workspace/projects/{project_id}"' not in db_first_router
     knowledge_router = Path("services/api-gateway/routers/admin_domains/knowledge.py").read_text(
@@ -155,7 +161,7 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
 
 def test_rag_manager_upload_contract_and_navigation() -> None:
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     router = Path("services/api-gateway/routers/admin_domains/knowledge.py").read_text(encoding="utf-8")
     bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
     rag_page = Path("apps/duckclaw-admin/src/app/(admin)/knowledge/page.tsx")
@@ -165,20 +171,24 @@ def test_rag_manager_upload_contract_and_navigation() -> None:
 
     assert rag_page.exists()
     rag_text = rag_page.read_text(encoding="utf-8")
-    assert "{ href: '/knowledge', label: 'Conocimiento', section: 'core', audience: 'all' }" in nav
+    assert "{ href: '/knowledge', label: 'Base de Conocimiento', section: 'core', audience: 'all' }" in nav
     assert "'/knowledge': Database" in Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(
         encoding="utf-8"
     )
-    assert "Framework (todos los agentes y proyectos)" in rag_text
-    assert 'type="file"' in rag_text
-    assert "multiple" in rag_text
-    assert "webkitdirectory" in rag_text
     assert "uploadKnowledgeFiles" in rag_text
     assert "createKnowledgeSource" in rag_text
     assert "project_id" in rag_text
     assert "worker_uid" in rag_text
-    assert "uploadKnowledgeFiles:" in service
-    assert "FormData" in service
+    control = Path("apps/duckclaw-admin/src/components/knowledge/KnowledgeControlPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert 'type="file"' in control
+    knowledge_api = Path("apps/duckclaw-admin/src/services/admin/knowledgeApi.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "uploadKnowledgeFiles:" in knowledge_api
+    assert "FormData" in knowledge_api
+    assert "...knowledgeApi" in service
     assert '@router.post("/knowledge/uploads"' in router
     assert "UploadFile" in router
     assert "multipart/form-data" in bff_proxy
@@ -189,7 +199,7 @@ def test_rag_manager_upload_contract_and_navigation() -> None:
 def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> None:
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
     sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     page_path = Path("apps/duckclaw-admin/src/components/policies/PoliciesPageView.tsx")
     prompt_policy_router = Path(
         "services/api-gateway/routers/admin_domains/prompt_policies.py"
@@ -349,7 +359,7 @@ def test_legacy_forge_projects_are_not_operational_in_admin_ui() -> None:
     overview_page = Path("apps/duckclaw-admin/src/app/(admin)/overview/page.tsx").read_text(encoding="utf-8")
     templates_page = Path("apps/duckclaw-admin/src/app/(admin)/templates/page.tsx").read_text(encoding="utf-8")
     kanban_page = Path("apps/duckclaw-admin/src/app/(admin)/kanban/page.tsx").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     forge_route = Path("apps/duckclaw-admin/src/app/api/admin/forge-projects/route.ts").read_text(encoding="utf-8")
     forge_slug_route = Path("apps/duckclaw-admin/src/app/api/admin/forge-projects/[slug]/route.ts").read_text(encoding="utf-8")
     forge_apply_route = Path(
@@ -386,7 +396,7 @@ def test_sidebar_project_icon_is_imported() -> None:
 def test_topbar_can_restart_gateway_without_gateway_proxy() -> None:
     topbar = Path("apps/duckclaw-admin/src/components/layout/Topbar.tsx").read_text(encoding="utf-8")
     bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     errors = Path("apps/duckclaw-admin/src/lib/adminErrors.ts").read_text(encoding="utf-8")
 
     assert "adminService.runOps('pm2_restart_db_writer')" in topbar

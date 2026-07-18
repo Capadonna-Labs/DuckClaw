@@ -48,16 +48,17 @@ async def list_productivity_artifacts(
     limit: int = 100,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    profile = _actor_profile(actor)
-    tid = profile["tenant_id"]
-    email = profile["email"]
+    from core.admin_identity import open_gateway_db
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+
     cap = max(1, min(int(limit), 200))
     lane_f = (lane or "").strip().lower()
-
     items: list[dict[str, Any]] = []
-    from core.admin_identity import open_gateway_db
 
     with open_gateway_db(read_only=True) as db:
+        profile = ensure_profile_for_user(db, email=actor)
+        tid = str(profile["tenant_id"])
+        email = str(profile["email"])
         try:
             params: list[Any] = [tid, email]
             lane_clause = ""
@@ -102,14 +103,14 @@ async def list_productivity_artifacts(
             # Migración aún no aplicada
             items = []
 
-        # Informes activos sin fila en índice (legacy)
+        # Informes activos sin fila en índice (legacy) — lean: sin preview_html
         if lane_f in ("", "report"):
             known_refs = {i["source_ref"] for i in items if i["lane"] == "report"}
             try:
                 from duckclaw.report_engine.admin_report_read import list_report_instances
 
                 reports = list_report_instances(
-                    db, tenant_id=tid, actor_email=email, limit=cap
+                    db, tenant_id=tid, actor_email=email, limit=cap, lean=True
                 )
                 for r in reports:
                     iid = str(r.get("instance_id") or "")

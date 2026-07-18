@@ -95,6 +95,7 @@ Problema: sin memoria de instancia, el agente creaba un `.docx` nuevo por cada m
 
 - `create_report_instance` persiste `conversation_id` (= `chat_id` de la sesión, vía `set_session_chat_id`).
 - `list_report_instances(limit)` lista instancias activas del actor/proyecto con `conversation_id`, `progress` y una `resume_suggestion` (prioriza la de esta conversación; si no, la más reciente).
+- `list_report_instances(..., lean=True)` omite `preview_html` (usado por `GET /productivity/artifacts`).
 - **Política (directive `report_engine`):** ANTES de crear, el agente llama `list_report_instances`; si hay borrador de la conversación, **reanuda** con ese `instance_id` (patch/render). Crea uno nuevo solo si el usuario lo pide explícitamente.
 
 ### Documento desde cero (sin plantilla del usuario) — texto + imágenes

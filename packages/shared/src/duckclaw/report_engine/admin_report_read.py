@@ -112,7 +112,12 @@ def list_report_instances(
     actor_email: str,
     project_id: str = "",
     limit: int = 50,
+    lean: bool = False,
 ) -> list[dict[str, Any]]:
+    """Lista instancias de informe.
+
+    ``lean=True`` omite ``preview_html`` (payload grande) — para bandeja productividad.
+    """
     actor = (actor_email or "system").strip().lower()
     tid = (tenant_id or "default").strip() or "default"
     pid = (project_id or "").strip()
@@ -122,11 +127,12 @@ def list_report_instances(
         project_clause = " AND i.project_id = ?"
         params.append(pid)
     params.append(max(1, min(int(limit), 200)))
+    preview_col = "'' AS preview_html" if lean else "i.preview_html"
     rows = _sql_fetchall(
         db,
         f"""
         SELECT i.instance_id, i.template_id, i.title, i.period_key, i.project_id,
-               i.status, i.state_json, i.preview_html, i.rendered_docx_uri,
+               i.status, i.state_json, {preview_col}, i.rendered_docx_uri,
                i.conversation_id, i.updated_at,
                t.name AS template_name, t.section_schema_json
         FROM main.admin_report_instances i
@@ -160,22 +166,24 @@ def list_report_instances(
         schema = _parse_json(row[12], [])
         state = _parse_json(row[6], {"sections": {}})
         summary = summarize_status(state, schema)
-        out.append(
-            {
-                "instance_id": str(row[0]),
-                "template_id": str(row[1]),
-                "title": str(row[2]),
-                "period_key": str(row[3] or ""),
-                "project_id": str(row[4] or ""),
-                "status": str(row[5] or "draft"),
-                "preview_html": str(row[7] or ""),
-                "rendered_docx_uri": str(row[8] or ""),
-                "conversation_id": str(row[9] or ""),
-                "updated_at": str(row[10] or ""),
-                "template_name": str(row[11] or ""),
-                "progress": summary,
-            }
-        )
+        item: dict[str, Any] = {
+            "instance_id": str(row[0]),
+            "template_id": str(row[1]),
+            "title": str(row[2]),
+            "period_key": str(row[3] or ""),
+            "project_id": str(row[4] or ""),
+            "status": str(row[5] or "draft"),
+            "rendered_docx_uri": str(row[8] or ""),
+            "conversation_id": str(row[9] or ""),
+            "updated_at": str(row[10] or ""),
+            "template_name": str(row[11] or ""),
+            "progress": summary,
+        }
+        if not lean:
+            item["preview_html"] = str(row[7] or "")
+        else:
+            item["preview_html"] = ""
+        out.append(item)
     return out
 
 

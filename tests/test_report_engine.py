@@ -114,6 +114,107 @@ def test_blank_template_schema_has_text_and_image_slots() -> None:
     assert any(v == "text" for v in kinds.values())
 
 
+def test_fit_inline_image_inches_caps_tall_portrait(tmp_path: Path) -> None:
+    from PIL import Image
+
+    from duckclaw.report_engine.render import fit_inline_image_inches
+
+    img = tmp_path / "tall.png"
+    Image.new("RGB", (900, 1600), (1, 2, 3)).save(img)
+    width, height = fit_inline_image_inches(img, 5.5)
+    assert height is not None
+    assert height <= 7.0 + 1e-6
+    assert width < 5.5
+    assert abs(width / height - 900 / 1600) < 0.01
+
+
+def test_render_tall_image_fits_page_height(tmp_path: Path) -> None:
+    import zipfile
+
+    import pytest
+
+    pytest.importorskip("docx")
+    pytest.importorskip("docxtpl")
+    from PIL import Image
+
+    from duckclaw.report_engine.blank_template import (
+        BLANK_SECTION_SCHEMA,
+        ensure_blank_template_seed,
+    )
+    from duckclaw.report_engine.render import render_instance_docx_from_uri
+    from duckclaw.report_engine.state import init_state_from_schema, patch_section
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    template_root = tmp_path / "private" / "report_engine"
+    template = ensure_blank_template_seed(template_root)
+
+    img_dir = tmp_path / "inbound"
+    img_dir.mkdir()
+    img_path = img_dir / "tall.png"
+    Image.new("RGB", (900, 1600), (40, 50, 60)).save(img_path)
+
+    state = init_state_from_schema(BLANK_SECTION_SCHEMA)
+    state = patch_section(state, section_id="titulo", content="Titulo OK", mode="replace")
+    state = patch_section(state, section_id="intro", content="Intro", mode="replace")
+    state = patch_section(state, section_id="imagen_1", content=str(img_path), mode="replace")
+
+    rendered = render_instance_docx_from_uri(
+        template_uri=str(template),
+        state_json=json.dumps(state),
+        output_root=output_root,
+        instance_id="rpt_tall",
+        title="Doc alto",
+        allowed_roots=[template_root, output_root],
+        image_roots=[img_dir, output_root],
+    )
+    assert rendered.get("images_embedded", 0) >= 1
+    with zipfile.ZipFile(rendered["path"]) as zf:
+        xml = zf.read("word/document.xml").decode("utf-8")
+    # 7" = 7 * 914400 = 6400800 EMUs
+    import re
+
+    extents = re.findall(r'wp:extent[^>]*cy="(\d+)"', xml)
+    assert extents, "falta extent de la imagen"
+    assert int(extents[0]) <= 6400800 + 1000
+    assert "Titulo OK" in xml
+
+
+def test_render_injects_title_when_titulo_section_empty(tmp_path: Path) -> None:
+    import pytest
+
+    pytest.importorskip("docx")
+    pytest.importorskip("docxtpl")
+
+    from duckclaw.report_engine.blank_template import (
+        BLANK_SECTION_SCHEMA,
+        ensure_blank_template_seed,
+    )
+    from duckclaw.report_engine.render import render_instance_docx_from_uri
+    from duckclaw.report_engine.state import init_state_from_schema, patch_section
+
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    template = ensure_blank_template_seed(tmp_path / "private" / "report_engine")
+    state = init_state_from_schema(BLANK_SECTION_SCHEMA)
+    state = patch_section(state, section_id="intro", content="Solo intro", mode="replace")
+
+    rendered = render_instance_docx_from_uri(
+        template_uri=str(template),
+        state_json=json.dumps(state),
+        output_root=output_root,
+        instance_id="rpt_title_fallback",
+        title="Titulo desde instancia",
+        allowed_roots=[tmp_path],
+        image_roots=[tmp_path],
+    )
+    from docx import Document
+
+    doc = Document(rendered["path"])
+    texts = [p.text for p in doc.paragraphs]
+    assert any("Titulo desde instancia" in t for t in texts)
+
+
 def test_render_blank_document_with_image(tmp_path: Path) -> None:
     import pytest
 
@@ -157,6 +258,7 @@ def test_render_blank_document_with_image(tmp_path: Path) -> None:
     assert Path(rendered["path"]).parent == output_root
     assert rendered["relative_path"] == "Doc_en_blanco_rpt_blank_test.docx"
     assert rendered["byte_size"] > 0
+    assert rendered.get("images_embedded", 0) >= 1
 
 
 def test_markdown_table_collapses_for_docx_cells() -> None:
@@ -543,3 +645,24 @@ def test_preview_html_renders_sections() -> None:
     state = init_state_from_schema([{"id": "a", "label": "Sección A"}])
     html = render_preview_html(title="T", period_key="2026-06", state=state, section_schema=[{"id": "a"}])
     assert "Sección A" in html
+
+
+def test_preview_html_renders_image_as_data_uri(tmp_path: Path) -> None:
+    from PIL import Image
+
+    img = tmp_path / "shot.png"
+    Image.new("RGB", (12, 12), (0, 200, 0)).save(img)
+    schema = [
+        {"id": "intro", "label": "Intro", "kind": "text"},
+        {"id": "imagen_1", "label": "Imagen 1", "kind": "image"},
+    ]
+    state = init_state_from_schema(schema)
+    state = patch_section(state, section_id="intro", content="Hola", mode="replace")
+    state = patch_section(
+        state, section_id="imagen_1", content=str(img), mode="replace", mark_complete=True
+    )
+    html = render_preview_html(title="Doc", period_key="", state=state, section_schema=schema)
+    assert "data:image/png;base64," in html
+    assert str(img) not in html
+    assert "shot.png" in html
+    assert "<img " in html

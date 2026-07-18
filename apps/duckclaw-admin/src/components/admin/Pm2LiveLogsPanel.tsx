@@ -340,7 +340,7 @@ export function Pm2LiveLogsViewport({ className = '' }: { className?: string }) 
         <AnsiLogText text={logText} />
       ) : (
         <span className="text-gov-gray-500 dark:text-slate-500">
-          {streaming ? 'Esperando líneas…' : 'Activa Stream en Herramientas.'}
+          {streaming ? 'Esperando líneas…' : 'Pulsa el botón de stream para empezar.'}
         </span>
       )}
     </div>

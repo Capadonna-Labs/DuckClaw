@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { OverviewMetrics } from '@/types/admin';
 import { HomeChecklist } from '@/components/admin/HomeChecklist';
+import { OverviewLogsTerminal } from '@/components/admin/OverviewLogsTerminal';
 import { StackHealthCards } from '@/components/admin/StackHealthCards';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
@@ -50,6 +51,8 @@ export default function OverviewPage() {
       {error && <GatewayErrorBanner message={error} />}
 
       <StackHealthCards />
+
+      {isAdmin && <OverviewLogsTerminal />}
 
       <HomeChecklist />
 

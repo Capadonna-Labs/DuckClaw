@@ -16,7 +16,7 @@ router = APIRouter(tags=["admin-gateway-resources"])
 async def release_worker_cache(
     x_actor: str | None = Header(None, alias="X-Duckclaw-Actor"),
 ) -> dict[str, Any]:
-    """Vacía caché LangGraph en el proceso Gateway (no reinicia PM2)."""
+    """Vacía caché LangGraph + catálogo capabilities en el proceso Gateway (no reinicia PM2)."""
     from duckclaw.ops.gateway_resource_release import release_worker_graph_cache
 
     actor = actor_from_header(x_actor)

@@ -111,6 +111,12 @@ export interface GatewayHealthMetrics {
     max_entries?: number;
     ttl_sec?: number;
   };
+  worker_capabilities_catalog_cache?: {
+    enabled?: boolean;
+    entries?: number;
+    max_entries?: number;
+    ttl_sec?: number;
+  };
   knowledge_sync_queue_depth?: number | null;
   db_write_queue_depth?: number | null;
   pm2_processes?: Pm2ProcessHealth[];
@@ -124,6 +130,9 @@ export interface ReleaseWorkerCacheResult {
   rss_mb_before: number | null;
   rss_mb_after: number | null;
   worker_graph_cache?: GatewayHealthMetrics['worker_graph_cache'];
+  worker_capabilities_catalog_cache?: GatewayHealthMetrics['worker_capabilities_catalog_cache'];
+  capabilities_catalog_entries_before?: number;
+  capabilities_catalog_entries_after?: number;
 }
 
 export interface AdminHealth {

@@ -19,6 +19,18 @@ from duckclaw.admin_worker_catalog import (
 )
 
 
+def _bump_worker_capabilities_catalog_cache(worker_id: str) -> None:
+    """Invalidación explícita post-write (catálogo → Gateway in-process cache)."""
+    try:
+        from duckclaw.ops.worker_capabilities_catalog_cache import (
+            invalidate_worker_capabilities_catalog,
+        )
+
+        invalidate_worker_capabilities_catalog(worker_id)
+    except Exception:
+        pass
+
+
 def _resolve_worker_uid(conn: Any, worker_id: str, tenant_id: str) -> str | None:
     row = conn.execute(
         "SELECT worker_uid FROM main.admin_worker_catalog "
@@ -177,6 +189,8 @@ def _apply_upsert_worker(conn: Any, payload: dict) -> None:
                 [cid, existing_uid, system_prompt],
             )
 
+    _bump_worker_capabilities_catalog_cache(worker_id)
+
 
 def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
     actor = str(payload.get("actor_email") or "system").strip().lower() or "system"
@@ -308,6 +322,7 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
             worker_uid=worker_uid,
         )
         _sync_mcp_grants()
+        _bump_worker_capabilities_catalog_cache(worker_id)
         return
     conn.execute(
         "INSERT INTO main.admin_user_agents "
@@ -330,6 +345,7 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
         worker_uid=worker_uid,
     )
     _sync_mcp_grants()
+    _bump_worker_capabilities_catalog_cache(worker_id)
 
 
 def _catalog_skill_name(raw: Any) -> str:
@@ -466,6 +482,9 @@ def _apply_update_catalog_worker_file(conn: Any, payload: dict) -> None:
         content=str(payload.get("content") or ""),
         actor_email=actor,
     )
+    file_path = str(payload.get("file_path") or "").strip().lower()
+    if "manifest" in file_path or file_path.endswith(".yaml") or file_path.endswith(".yml"):
+        _bump_worker_capabilities_catalog_cache(worker_id)
 
 
 def _apply_deactivate_catalog_worker(conn: Any, payload: dict) -> None:

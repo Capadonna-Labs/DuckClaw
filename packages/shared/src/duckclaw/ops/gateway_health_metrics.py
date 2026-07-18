@@ -42,6 +42,17 @@ def _worker_graph_cache_stats() -> dict[str, Any]:
         return {"enabled": False, "entries": 0}
 
 
+def _worker_capabilities_catalog_cache_stats() -> dict[str, Any]:
+    try:
+        from duckclaw.ops.worker_capabilities_catalog_cache import (
+            worker_capabilities_catalog_cache_stats,
+        )
+
+        return worker_capabilities_catalog_cache_stats()
+    except Exception:
+        return {"enabled": False, "entries": 0}
+
+
 def _knowledge_queue_depth() -> int | None:
     try:
         from duckclaw.knowledge_sync_queue import knowledge_sync_queue_depth
@@ -90,6 +101,7 @@ def collect_gateway_health_metrics() -> dict[str, Any]:
         pass
 
     cache = _worker_graph_cache_stats()
+    caps_cache = _worker_capabilities_catalog_cache_stats()
     pm2_processes = _cached_pm2_stack_health()
 
     embed_batch_size: int | None = None
@@ -104,6 +116,7 @@ def collect_gateway_health_metrics() -> dict[str, Any]:
         "process_role": role,
         "rss_mb": _process_rss_mb(),
         "worker_graph_cache": cache,
+        "worker_capabilities_catalog_cache": caps_cache,
         "knowledge_sync_queue_depth": _knowledge_queue_depth(),
         "knowledge_embed_batch_size": embed_batch_size,
         "db_write_queue_depth": _db_write_queue_depth(),

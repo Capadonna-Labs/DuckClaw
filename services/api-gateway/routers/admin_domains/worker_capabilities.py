@@ -462,7 +462,19 @@ async def get_worker_capabilities(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     """Skills declaradas vs efectivas y tools registradas en runtime para un worker."""
-    return build_worker_capabilities_payload(worker_id, actor=actor)
+    from duckclaw.ops.worker_capabilities_catalog_cache import (
+        capabilities_catalog_cache_key,
+        get_cached_worker_capabilities,
+        remember_worker_capabilities,
+    )
+
+    cache_key = capabilities_catalog_cache_key(worker_id, actor=actor)
+    cached = get_cached_worker_capabilities(cache_key)
+    if cached is not None:
+        return cached
+    payload = build_worker_capabilities_payload(worker_id, actor=actor)
+    remember_worker_capabilities(cache_key, payload)
+    return payload
 
 
 @router.get("/{worker_id}/mcp-grants", dependencies=[Depends(require_admin_key)])

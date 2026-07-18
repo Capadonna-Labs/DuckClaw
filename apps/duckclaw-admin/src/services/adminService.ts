@@ -1704,16 +1704,19 @@ export const adminService = {
     if (params.workerId) q.set('worker_id', params.workerId);
     if (params.tenantId) q.set('tenant_id', params.tenantId);
     if (params.vaultDbPath) q.set('vault_db_path', params.vaultDbPath);
-    return adminFetch<{
-      chat_id: string;
-      worker_id: string;
-      sandbox_enabled: boolean;
-      sandbox_network_enabled: string | null;
-      yaml_network_default: string;
-      effective_network: string;
-      network_toggle_available: boolean;
-      browser_sandbox: boolean;
-    }>(`/sandbox/chat-policy?${q.toString()}`);
+    const path = `/sandbox/chat-policy?${q.toString()}`;
+    return coalesceAdminGet(`GET:${path}`, () =>
+      adminFetch<{
+        chat_id: string;
+        worker_id: string;
+        sandbox_enabled: boolean;
+        sandbox_network_enabled: string | null;
+        yaml_network_default: string;
+        effective_network: string;
+        network_toggle_available: boolean;
+        browser_sandbox: boolean;
+      }>(path)
+    );
   },
 
   setSandboxNetwork: (body: {

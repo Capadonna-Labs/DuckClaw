@@ -29,8 +29,6 @@ import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
 import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
 import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
-import { SessionDatabaseChip } from '@/components/playground/SessionDatabaseChip';
-import { PlaygroundSandboxChip } from '@/components/playground/PlaygroundSandboxChip';
 import { PlaygroundRagProjectWarning } from '@/components/playground/PlaygroundRagProjectWarning';
 import { PlaygroundRunSettingsPanel } from '@/components/playground/PlaygroundRunSettingsPanel';
 import {
@@ -333,7 +331,9 @@ export default function PlaygroundPage() {
   const activeVaultScope = chat.vaultPath ? 'chat' : config?.vault?.scope;
   const handleSandboxToggle = useCallback(
     async (command: '/sandbox on' | '/sandbox off') => {
-      if (!conv.sessionId || !workerId.trim()) return;
+      if (!conv.sessionId || !workerId.trim()) {
+        throw new Error('Sesión o worker no listos para sandbox');
+      }
       setSandboxToggling(true);
       try {
         await adminService.playgroundChat({
@@ -365,20 +365,6 @@ export default function PlaygroundPage() {
               <span className="truncate">{activeProject?.name || projectId}</span>
             </span>
           ) : null}
-          <SessionDatabaseChip
-            path={activeVaultPath}
-            scope={activeVaultScope}
-            onConfigure={() => setSettingsModal('vault')}
-          />
-          <PlaygroundSandboxChip
-            chatId={conv.sessionId}
-            workerId={workerId}
-            tenantId={config?.effective_tenant_id}
-            vaultDbPath={activeVaultPath || undefined}
-            toggling={sandboxToggling}
-            refreshKey={sandboxRefreshKey}
-            onToggleCommand={handleSandboxToggle}
-          />
           <PlaygroundRagProjectWarning
             projectId={projectId}
             knowledgeScope={knowledgeScope}
@@ -389,16 +375,10 @@ export default function PlaygroundPage() {
       ) : null,
     [
       activeProject?.name,
-      activeVaultPath,
-      activeVaultScope,
-      config?.effective_tenant_id,
       conv.sessionId,
-      handleSandboxToggle,
       indexedKnowledgeSources,
       knowledgeScope,
       projectId,
-      sandboxRefreshKey,
-      sandboxToggling,
       workerId,
     ]
   );
@@ -443,6 +423,8 @@ export default function PlaygroundPage() {
         onLogsToggle={handleLogsToggle}
         logsControls={logsPanelOpen ? <Pm2LiveLogsControls variant="studio" /> : null}
         logsViewport={logsPanelOpen ? <Pm2LiveLogsViewport /> : null}
+        onSandboxToggle={handleSandboxToggle}
+        sandboxToggling={sandboxToggling}
         onOpen={setSettingsModal}
       />
     </Pm2LiveLogsProvider>

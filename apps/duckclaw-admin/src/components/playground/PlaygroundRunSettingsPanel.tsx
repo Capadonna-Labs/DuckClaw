@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import {
+  Box,
   Brain,
   ChevronDown,
   ChevronRight,
@@ -49,17 +50,11 @@ export type PlaygroundRunSettingsPanelProps = {
   onLogsToggle: () => void;
   logsControls?: React.ReactNode;
   logsViewport?: React.ReactNode;
+  /** Activa/desactiva sandbox de sesión (sin poll de policy en el footer). */
+  onSandboxToggle?: (command: '/sandbox on' | '/sandbox off') => void | Promise<void>;
+  sandboxToggling?: boolean;
   onOpen: (modal: SettingsModalKey) => void;
 };
-
-const PREVIEW_MAX = 160;
-
-function truncatePreview(text: string, max = PREVIEW_MAX): string {
-  const t = (text || '').trim();
-  if (!t) return '';
-  if (t.length <= max) return t;
-  return `${t.slice(0, max - 1)}…`;
-}
 
 function basenamePath(path: string): string {
   const p = (path || '').trim();
@@ -78,17 +73,20 @@ export function PlaygroundRunSettingsPanel({
   workerLabel,
   projectLabel,
   knowledgeScopeLabel,
-  systemPreview,
   systemReady,
   invalidWorkers,
   logsPanelOpen,
   onLogsToggle,
   logsControls,
   logsViewport,
+  onSandboxToggle,
+  sandboxToggling = false,
   onOpen,
 }: PlaygroundRunSettingsPanelProps) {
   const [contextOpen, setContextOpen] = useState(true);
   const [toolsOpen, setToolsOpen] = useState(true);
+  /** Estado local: no leemos chat-policy en cada render (menos hits a la BD). */
+  const [sandboxOn, setSandboxOn] = useState(false);
 
   const model = config?.llm?.model || '—';
   const provider = config?.llm?.provider || 'Proveedor LLM';
@@ -144,21 +142,13 @@ export function PlaygroundRunSettingsPanel({
           <button
             type="button"
             onClick={() => onOpen('instructions')}
-            className="w-full min-h-[5.5rem] rounded-xl border border-gov-gray-200/90 bg-white p-3 text-left transition-colors hover:border-gov-blue-200 dark:border-dark-border dark:bg-[#1e1f20] dark:hover:border-gov-blue-800"
+            className="w-full rounded-xl border border-gov-gray-200/90 bg-white p-3 text-left transition-colors hover:border-gov-blue-200 dark:border-dark-border dark:bg-[#1e1f20] dark:hover:border-gov-blue-800"
           >
             <p className="text-[10px] font-black uppercase tracking-wider text-gov-gray-400 dark:text-dark-muted">
               System instructions
             </p>
-            <p
-              className={`mt-1.5 text-xs leading-relaxed whitespace-pre-wrap break-words ${
-                systemReady
-                  ? 'text-gov-gray-700 dark:text-dark-text'
-                  : 'text-gov-gray-400 dark:text-dark-muted'
-              }`}
-            >
-              {systemReady
-                ? truncatePreview(systemPreview)
-                : 'Opcional: tono y comportamiento del agente para este worker.'}
+            <p className="mt-1.5 text-xs leading-relaxed text-gov-gray-500 dark:text-dark-muted">
+              Optional tone and style instructions for the model.
             </p>
             <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gov-blue-700 dark:text-dark-cyan">
               <FileText size={11} aria-hidden />
@@ -205,6 +195,33 @@ export function PlaygroundRunSettingsPanel({
           onToggle={() => setToolsOpen((v) => !v)}
         >
           <PlaygroundWorkerCapabilitiesPanel workerId={workerId} refreshKey={capabilitiesRefreshKey} />
+          {onSandboxToggle ? (
+            <StudioToggleRow
+              label="Sandbox"
+              hint={
+                sandboxToggling
+                  ? 'Aplicando…'
+                  : sandboxOn
+                    ? 'Código en contenedor activo · o /sandbox off'
+                    : 'Código en contenedor · o /sandbox on en el chat'
+              }
+              checked={sandboxOn}
+              disabled={sandboxToggling}
+              onChange={() => {
+                const next = !sandboxOn;
+                const cmd = next ? '/sandbox on' : '/sandbox off';
+                void (async () => {
+                  try {
+                    await onSandboxToggle(cmd);
+                    setSandboxOn(next);
+                  } catch {
+                    /* estado local solo si el comando llegó al gateway */
+                  }
+                })();
+              }}
+              icon={<Box size={14} aria-hidden />}
+            />
+          ) : null}
           <StudioToggleRow
             label="Logs PM2"
             hint={logsPanelOpen ? 'Consola abajo' : 'Mostrar consola de logs'}
@@ -318,12 +335,14 @@ function StudioToggleRow({
   checked,
   onChange,
   icon,
+  disabled = false,
 }: {
   label: string;
   hint: string;
   checked: boolean;
   onChange: () => void;
   icon?: React.ReactNode;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-lg px-2 py-2">
@@ -340,8 +359,9 @@ function StudioToggleRow({
         type="button"
         role="switch"
         aria-checked={checked}
+        disabled={disabled}
         onClick={onChange}
-        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+        className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
           checked ? 'bg-gov-blue-600 dark:bg-gov-blue-500' : 'bg-gov-gray-300 dark:bg-dark-border'
         }`}
       >

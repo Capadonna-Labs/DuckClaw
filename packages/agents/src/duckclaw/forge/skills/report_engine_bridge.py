@@ -497,6 +497,16 @@ def create_blank_document(
             s["id"] for s in BLANK_SECTION_SCHEMA if s.get("kind") == "image"
         ]
 
+        title_text = (title or "Documento").strip() or "Documento"
+        if iid:
+            patch_report_section(
+                instance_id=iid,
+                section_id="titulo",
+                content=title_text,
+                mode="replace",
+                mark_complete=True,
+            )
+
         intro_text = (intro or "").strip()
         if intro_text and iid:
             patch_report_section(
@@ -534,6 +544,9 @@ def create_blank_document(
 
 
 def _parse_image_paths_arg(raw: str) -> list[str]:
+    """Acepta JSON list, rutas separadas, o líneas tipo ``imagen_1 → /path.png``."""
+    import re
+
     text = (raw or "").strip()
     if not text:
         return []
@@ -544,12 +557,56 @@ def _parse_image_paths_arg(raw: str) -> list[str]:
                 return [str(p).strip() for p in parsed if str(p).strip()]
         except Exception:
             pass
+
     parts: list[str] = []
-    for chunk in text.replace(";", "\n").replace(",", "\n").splitlines():
+    path_re = re.compile(
+        r"(/[^\s;]+?\.(?:png|jpe?g|webp|gif)|"
+        r"[A-Za-z]:\\[^\s;]+?\.(?:png|jpe?g|webp|gif))",
+        re.IGNORECASE,
+    )
+    for chunk in text.replace(";", "\n").splitlines():
         cleaned = chunk.strip().strip("'\"")
-        if cleaned:
+        if not cleaned:
+            continue
+        # «imagen_1 → /vault/.../a.png»
+        if "→" in cleaned or "->" in cleaned:
+            cleaned = cleaned.replace("→", "->").split("->", 1)[-1].strip().strip("'\"")
+        match = path_re.search(cleaned)
+        if match:
+            parts.append(match.group(0))
+            continue
+        if cleaned.startswith("/") or (len(cleaned) > 2 and cleaned[1] == ":"):
             parts.append(cleaned)
-    return parts
+    # Dedup preserve order
+    seen: set[str] = set()
+    out: list[str] = []
+    for p in parts:
+        if p not in seen:
+            seen.add(p)
+            out.append(p)
+    return out
+
+
+def _resolve_patchable_image_path(raw_path: str, *, tenant_id: str) -> str:
+    """Valida que el archivo existe y está bajo vault del tenant u OUTPUT."""
+    from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
+
+    path = (raw_path or "").strip().strip("'\"")
+    if not path:
+        raise ValueError("image_path vacío")
+    candidate = Path(path).expanduser().resolve()
+    if not candidate.is_file():
+        raise ValueError(f"Imagen no accesible: {path}")
+    roots = _image_roots_for_tenant(tenant_id, output_roots=knowledge_output_roots())
+    ok = any(
+        candidate == root.resolve() or root.resolve() in candidate.parents for root in roots
+    )
+    if not ok:
+        raise ValueError(
+            f"Imagen «{path}» fuera del vault/inbound del tenant u OUTPUT. "
+            "Reenvía la imagen por el chat."
+        )
+    return str(candidate)
 
 
 def patch_report_image(
@@ -567,11 +624,12 @@ def patch_report_image(
         get_report_instance,
     )
 
-    path = (image_path or "").strip()
-    if not path:
-        return json.dumps({"error": "image_path vacío"}, ensure_ascii=False)
-
     tenant_id, actor_email, _ = _session_scope()
+    try:
+        path = _resolve_patchable_image_path(image_path, tenant_id=tenant_id)
+    except ValueError as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
     db = None
     try:
         db = _open_hub_db()
@@ -590,7 +648,14 @@ def patch_report_image(
                 if isinstance(e, dict) and str(e.get("kind") or "") == "image"
             ]
             return json.dumps(
-                {"error": f"Sección desconocida: {section_id}", "image_sections": valid},
+                {
+                    "error": f"Sección desconocida: {section_id}",
+                    "image_sections": valid,
+                    "hint": (
+                        "Solo plantillas con kind=image (p. ej. create_blank_document). "
+                        "El informe mensual corporativo no tiene huecos de imagen."
+                    ),
+                },
                 ensure_ascii=False,
             )
         if str(entry.get("kind") or "") != "image":
@@ -598,7 +663,8 @@ def patch_report_image(
                 {
                     "error": (
                         f"La sección «{section_id}» es de texto; usa patch_report_section. "
-                        "patch_report_image solo aplica a secciones kind=image."
+                        "patch_report_image solo aplica a secciones kind=image "
+                        "(create_blank_document → imagen_1..3)."
                     )
                 },
                 ensure_ascii=False,

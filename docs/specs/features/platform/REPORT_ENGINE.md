@@ -103,13 +103,15 @@ Para «arma un documento con este texto y estas imágenes» sin que el usuario s
 
 - `create_blank_document(title)` genera on-demand (python-docx, **sin binario en git**) un `.docx` en blanco bajo el vault privado del tenant, no en Drive/OUTPUT; lo registra como plantilla del usuario (`template_id` determinista por `tenant+owner`, idempotente) y crea la instancia.
 - Schema (`blank_template.BLANK_SECTION_SCHEMA`): huecos de texto (`intro`, `texto_1..3`, `cierre`) e imagen (`imagen_1..3`, `kind=image`). Ninguno `required`; con `ChainableUndefined` los huecos sin usar quedan vacíos.
-- El título del documento se auto-inyecta en `{{ titulo }}` (context.setdefault).
+- El título del documento se inyecta en `{{ titulo }}`: si la sección está vacía, el render usa el `title` de la instancia (no `setdefault`, que no pisa `""`).
+- `create_blank_document` también hace `patch` de `titulo` al crear.
 
 ### Secciones de imagen (`kind=image`)
 
 - `state.init_state_from_schema` propaga `kind` y `width_in` (default 5.5") a la sección.
 - `build_render_context` **excluye** secciones de imagen (necesitan el objeto `DocxTemplate`); `image_render_specs(state)` las expone aparte.
-- El render construye `InlineImage(doc, path, width=Inches(width_in))` y valida que el path esté bajo raíces permitidas (**vault inbound del tenant + OUTPUT**) — anti path-traversal.
+- El render construye `InlineImage` y **ajusta** width/height para que quepan en página (máx. ~6" × 7"): capturas verticales a `width_in=5.5` salían ~9.8" de alto y Google Docs las oculta (hueco en blanco con el PNG sí embebido en `word/media/`).
+- Valida que el path esté bajo raíces permitidas (**vault inbound del tenant + OUTPUT**) — anti path-traversal.
 - `patch_report_image(instance_id, section_id, image_path)`: coloca la imagen (por su ruta) en una sección `kind=image`; rechaza secciones de texto.
 
 ### Imágenes adjuntas en el chat (playground)
@@ -118,7 +120,9 @@ Para «arma un documento con este texto y estas imágenes» sin que el usuario s
 - **Carril VLM (opt-in por intención):** solo si el caption pide análisis visual (analiza/describe/OCR/qué ves…). «Ponla en el documento» **no** dispara VLM.
 - Si VLM falla o se cancela, las rutas ya persistidas siguen disponibles.
 - **Sin API key** para insertar imágenes. VLM local (MLX) o cloud es opcional y separada.
+- **Preview Admin:** secciones `kind=image` se muestran como `<img>` (data-URI), no como ruta de disco. El path crudo confundía (“no inyectó”).
 - Atajo: `create_blank_document(title, image_paths="ruta1;ruta2", intro="...")` coloca imágenes e intro y luego `render_report_instance`.
+- `render_report_instance` reporta `images_embedded` (conteo de `word/media/*`) para verificar inyección.
 
 ## Admin API
 

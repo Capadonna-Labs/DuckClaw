@@ -79,6 +79,36 @@ def test_worker_capabilities_gaps_skip_report_engine_homonym() -> None:
     assert not any("get_current_time" in g and "no registrada" in g for g in gaps)
 
 
+def test_worker_capabilities_gaps_sandbox_alias_and_mcp_github() -> None:
+    from routers.admin_domains.worker_capabilities import _compute_gaps
+
+    gaps, integration = _compute_gaps(
+        skills_effective=[
+            "execute_sandbox_script",
+            "github",
+            "notion",
+            "propose_code_change",
+            "convert_document",
+            "openweather",
+            "research",
+        ],
+        tools_runtime=["run_sandbox", "mcp__github__get_me", "read_sql"],
+        sandbox_registered=True,
+        docker_ok=True,
+        manifest_data={"framework_baseline": False},
+        optional={"tavily": False},
+        db=None,
+    )
+    assert not any("execute_sandbox_script" in g for g in gaps)
+    assert not any("github" in g and "sin tool" in g for g in gaps)
+    assert not any("convert_document" in g for g in gaps)
+    assert not any("propose_code_change" in g for g in gaps)
+    assert not any("notion" in g for g in gaps)
+    assert not any("falta API key" in g for g in gaps)
+    # openweather/research siguen en integration_gaps para el editor de plantilla
+    assert isinstance(integration, list)
+
+
 def test_worker_capabilities_not_found(admin_client: TestClient) -> None:
     response = admin_client.get(
         "/api/v1/admin/workers/does-not-exist-xyz/capabilities",

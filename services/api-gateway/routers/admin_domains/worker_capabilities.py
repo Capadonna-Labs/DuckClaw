@@ -104,6 +104,67 @@ _SKILL_RUNTIME_TOOLS: dict[str, frozenset[str]] = {
     "reports": _REPORT_ENGINE_TOOLS,
 }
 
+# Alias skill → cualquier tool de este set satisface (p. ej. sandbox).
+_SKILL_SATISFIED_BY_TOOLS: dict[str, frozenset[str]] = {
+    "execute_sandbox_script": frozenset({"run_sandbox", "execute_sandbox_script"}),
+    "run_sandbox": frozenset({"run_sandbox", "execute_sandbox_script"}),
+    "openweather": frozenset({"openweather_current_city", "openweather"}),
+}
+
+# Skill → prefijos de tools MCP en runtime (mcp__{id}__).
+# Solo connectors admin (mcp_connector_bridge / github). google_trends/reddit
+# usan bridges propios, no estos prefijos.
+_SKILL_MCP_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
+    "github": ("mcp__github__", "mcp__mcp_github__"),
+    "notion": ("mcp__notion__", "mcp__mcp_notion__"),
+    "tavily": ("mcp__tavily__", "mcp__mcp_tavily__"),
+    "research": ("mcp__tavily__", "mcp__mcp_tavily__"),
+}
+
+# Catálogo UI sin registrar en runtime (no son fallos de MCP).
+_CATALOG_STUB_SKILLS: frozenset[str] = frozenset(
+    {"propose_code_change", "approve_code_change"}
+)
+
+# Skills opcionales: sin key/MCP no es error — no alertar en ámbar.
+_OPTIONAL_EXTRAS_SILENT: frozenset[str] = frozenset(
+    {
+        "research",
+        "openweather",
+        "google_trends",
+        "reddit",
+        "notion",
+        "github",
+        "comfyui",
+        "higgsfield",
+        "fal",
+        "tavily",
+        "tailscale",
+    }
+)
+
+# Skills declarables pero retiradas a propósito del bind.
+_RETIRED_SKILLS: frozenset[str] = frozenset({"convert_document"})
+
+
+def _mcp_prefixes_present(runtime_set: set[str]) -> set[str]:
+    found: set[str] = set()
+    for name in runtime_set:
+        if not name.startswith("mcp__"):
+            continue
+        parts = name.split("__")
+        if len(parts) >= 3:
+            found.add(parts[1])
+    return found
+
+
+def _skill_has_mcp_tools(skill: str, runtime_set: set[str]) -> bool:
+    prefixes = _SKILL_MCP_TOOL_PREFIXES.get(skill)
+    if not prefixes:
+        # Convención: skill X → mcp__X__ o mcp__mcp_X__
+        prefixes = (f"mcp__{skill}__", f"mcp__mcp_{skill}__")
+    return any(any(t.startswith(p) for t in runtime_set) for p in prefixes)
+
 
 def _runtime_tools_for_worker(
     worker_id: str,
@@ -187,7 +248,7 @@ def _compute_gaps(
     tenant_id: str = "default",
     actor_email: str = "",
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    from duckclaw.integration_gaps import build_integration_secret_gaps, integration_gap_messages
+    from duckclaw.integration_gaps import build_integration_secret_gaps
 
     gaps: list[str] = []
     integration_gaps: list[dict[str, Any]] = []
@@ -202,7 +263,8 @@ def _compute_gaps(
         tenant_id=tenant_id,
         actor_email=actor_email,
     )
-    gaps.extend(integration_gap_messages(integration_gaps))
+    # Keys opcionales viven en integration_gaps (para editor de plantilla).
+    # No se duplican en gaps ámbar: «sin key» ≠ fallo del runtime.
 
     if manifest_data.get("browser_sandbox") and "run_browser_sandbox" not in runtime_set:
         gaps.append("browser_sandbox en manifest pero run_browser_sandbox no está registrado")
@@ -220,6 +282,9 @@ def _compute_gaps(
     for skill in skills_effective:
         normalized = skill.strip().lower().replace("-", "_")
         if normalized in runtime_set:
+            continue
+        alias_tools = _SKILL_SATISFIED_BY_TOOLS.get(normalized)
+        if alias_tools and alias_tools & runtime_set:
             continue
         if normalized in {"time_context"}:
             continue
@@ -251,6 +316,28 @@ def _compute_gaps(
             continue
         if normalized in (pack.get("baseline_skills") or []):
             # Baseline ya se chequea vía always_registered / bundle arriba.
+            continue
+        # API key faltante ya explicada en integration_gaps: no duplicar como «homónima».
+        if any(
+            row.get("skill") == normalized and not row.get("configured", True)
+            for row in integration_gaps
+        ):
+            continue
+        if normalized in _CATALOG_STUB_SKILLS:
+            # Catálogo UI sin implementación: no ensuciar el panel.
+            continue
+        if normalized in _RETIRED_SKILLS:
+            continue
+        if normalized in _OPTIONAL_EXTRAS_SILENT:
+            # Opt-in: sin MCP/key no es advertencia.
+            continue
+        if normalized in _SKILL_MCP_TOOL_PREFIXES:
+            if _skill_has_mcp_tools(normalized, runtime_set):
+                continue
+            gaps.append(
+                f"skill '{normalized}' sin tools MCP en runtime "
+                "(connector falló, sin grant, o credenciales)"
+            )
             continue
         gaps.append(f"skill '{normalized}' sin tool homónima en runtime")
 

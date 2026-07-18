@@ -103,6 +103,7 @@ async def admin_sandbox_chat_policy(
     chat_id: str = Query(..., min_length=1, max_length=128),
     worker_id: str | None = Query(None, max_length=64),
     tenant_id: str | None = Query(None, max_length=64),
+    vault_db_path: str | None = Query(None, max_length=1024),
 ) -> dict[str, Any]:
     """Estado sandbox + red efectiva para un chat del admin playground."""
     from routers import admin as admin_router
@@ -114,16 +115,20 @@ async def admin_sandbox_chat_policy(
     wid = admin_router._pick_playground_worker(team_ctx, worker_id)
 
     try:
-        vault_path = admin_router._playground_vault_db_path(team_ctx, wid)
+        default_vault = admin_router._playground_vault_db_path(team_ctx, wid)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
 
-    return _sandbox_chat_policy_payload(
+    override = (vault_db_path or "").strip()
+    vault_path = override or default_vault
+
+    policy = _sandbox_chat_policy_payload(
         chat_id=chat_id.strip(),
         worker_id=wid,
         vault_path=vault_path,
         tenant_id=str(team_ctx.get("tenant_id") or "default"),
     )
+    return policy
 
 
 @router.post("/network", dependencies=[Depends(require_admin_key)])

@@ -374,6 +374,7 @@ export default function PlaygroundPage() {
             chatId={conv.sessionId}
             workerId={workerId}
             tenantId={config?.effective_tenant_id}
+            vaultDbPath={activeVaultPath || undefined}
             toggling={sandboxToggling}
             refreshKey={sandboxRefreshKey}
             onToggleCommand={handleSandboxToggle}
@@ -442,11 +443,6 @@ export default function PlaygroundPage() {
         onLogsToggle={handleLogsToggle}
         logsControls={logsPanelOpen ? <Pm2LiveLogsControls variant="studio" /> : null}
         logsViewport={logsPanelOpen ? <Pm2LiveLogsViewport /> : null}
-        sandboxHref={
-          conv.sessionId
-            ? `/sandbox?tab=files&chat=${encodeURIComponent(conv.sessionId)}`
-            : '/sandbox'
-        }
         onOpen={setSettingsModal}
       />
     </Pm2LiveLogsProvider>

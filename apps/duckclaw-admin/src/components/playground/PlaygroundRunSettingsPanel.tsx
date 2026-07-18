@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useState } from 'react';
 import {
   Brain,
@@ -8,8 +7,6 @@ import {
   ChevronRight,
   Cpu,
   FileText,
-  FolderOpen,
-  MessageSquareText,
   Terminal,
 } from 'lucide-react';
 
@@ -52,7 +49,6 @@ export type PlaygroundRunSettingsPanelProps = {
   onLogsToggle: () => void;
   logsControls?: React.ReactNode;
   logsViewport?: React.ReactNode;
-  sandboxHref?: string;
   onOpen: (modal: SettingsModalKey) => void;
 };
 
@@ -89,7 +85,6 @@ export function PlaygroundRunSettingsPanel({
   onLogsToggle,
   logsControls,
   logsViewport,
-  sandboxHref = '/sandbox',
   onOpen,
 }: PlaygroundRunSettingsPanelProps) {
   const [contextOpen, setContextOpen] = useState(true);
@@ -151,8 +146,11 @@ export function PlaygroundRunSettingsPanel({
             onClick={() => onOpen('instructions')}
             className="w-full min-h-[5.5rem] rounded-xl border border-gov-gray-200/90 bg-white p-3 text-left transition-colors hover:border-gov-blue-200 dark:border-dark-border dark:bg-[#1e1f20] dark:hover:border-gov-blue-800"
           >
+            <p className="text-[10px] font-black uppercase tracking-wider text-gov-gray-400 dark:text-dark-muted">
+              System instructions
+            </p>
             <p
-              className={`text-xs leading-relaxed whitespace-pre-wrap break-words ${
+              className={`mt-1.5 text-xs leading-relaxed whitespace-pre-wrap break-words ${
                 systemReady
                   ? 'text-gov-gray-700 dark:text-dark-text'
                   : 'text-gov-gray-400 dark:text-dark-muted'
@@ -164,7 +162,7 @@ export function PlaygroundRunSettingsPanel({
             </p>
             <span className="mt-2 inline-flex items-center gap-1 text-[10px] font-semibold text-gov-blue-700 dark:text-dark-cyan">
               <FileText size={11} aria-hidden />
-              {systemReady ? 'Editar instrucciones' : 'Configurar prompt'}
+              {systemReady ? 'Editar' : 'Configurar'}
             </span>
           </button>
         </div>
@@ -215,18 +213,6 @@ export function PlaygroundRunSettingsPanel({
             icon={<Terminal size={14} aria-hidden />}
           />
           {logsPanelOpen && logsControls ? logsControls : null}
-          <StudioLinkRow
-            label="Sandbox"
-            hint="Archivos, config y navegador"
-            href={sandboxHref}
-            icon={<FolderOpen size={14} aria-hidden />}
-          />
-          <StudioLinkRow
-            label="Comandos"
-            hint="/model · /vault · /workers"
-            onClick={() => onOpen('commands')}
-            icon={<MessageSquareText size={14} aria-hidden />}
-          />
         </StudioCollapsible>
 
         {invalidWorkers.length > 0 && (
@@ -366,53 +352,6 @@ function StudioToggleRow({
         />
       </button>
     </div>
-  );
-}
-
-function StudioLinkRow({
-  label,
-  hint,
-  onClick,
-  href,
-  icon,
-}: {
-  label: string;
-  hint: string;
-  onClick?: () => void;
-  href?: string;
-  icon?: React.ReactNode;
-}) {
-  const inner = (
-    <>
-      <div className="flex min-w-0 items-start gap-2">
-        {icon ? (
-          <span className="mt-0.5 text-gov-gray-400 dark:text-dark-muted">{icon}</span>
-        ) : null}
-        <div className="min-w-0">
-          <p className="text-xs font-medium text-gov-gray-800 dark:text-dark-text">{label}</p>
-          <p className="text-[10px] text-gov-gray-500 dark:text-dark-muted">{hint}</p>
-        </div>
-      </div>
-      <ChevronRight
-        size={14}
-        className="shrink-0 text-gov-gray-300 group-hover:text-gov-blue-600 dark:text-dark-muted"
-        aria-hidden
-      />
-    </>
-  );
-  const className =
-    'group flex w-full items-center justify-between gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-gov-gray-50 dark:hover:bg-dark-bg/80';
-  if (href) {
-    return (
-      <Link href={href} className={className}>
-        {inner}
-      </Link>
-    );
-  }
-  return (
-    <button type="button" onClick={onClick} className={className}>
-      {inner}
-    </button>
   );
 }
 

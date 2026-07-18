@@ -11,6 +11,8 @@ type PlaygroundSandboxChipProps = {
   chatId: string;
   workerId: string;
   tenantId?: string;
+  /** Misma bóveda que usa el chat al persistir /sandbox on|off. */
+  vaultDbPath?: string;
   refreshKey?: number;
   onToggleCommand?: (command: '/sandbox on' | '/sandbox off') => void | Promise<void>;
   toggling?: boolean;
@@ -21,6 +23,7 @@ export function PlaygroundSandboxChip({
   chatId,
   workerId,
   tenantId,
+  vaultDbPath,
   onToggleCommand,
   toggling = false,
   refreshKey = 0,
@@ -40,6 +43,7 @@ export function PlaygroundSandboxChip({
         chatId: chatId.trim(),
         workerId: workerId.trim(),
         tenantId,
+        vaultDbPath: vaultDbPath?.trim() || undefined,
       });
       setPolicy(pol);
     } catch {
@@ -47,7 +51,7 @@ export function PlaygroundSandboxChip({
     } finally {
       setLoading(false);
     }
-  }, [chatId, workerId, tenantId, refreshKey]);
+  }, [chatId, workerId, tenantId, vaultDbPath, refreshKey]);
 
   useEffect(() => {
     void load();

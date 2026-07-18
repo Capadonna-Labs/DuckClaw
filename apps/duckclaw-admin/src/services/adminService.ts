@@ -1676,11 +1676,17 @@ export const adminService = {
       }[];
     }>('/sandbox/sessions'),
 
-  getSandboxChatPolicy: (params: { chatId: string; workerId?: string; tenantId?: string }) => {
+  getSandboxChatPolicy: (params: {
+    chatId: string;
+    workerId?: string;
+    tenantId?: string;
+    vaultDbPath?: string;
+  }) => {
     const q = new URLSearchParams();
     q.set('chat_id', params.chatId);
     if (params.workerId) q.set('worker_id', params.workerId);
     if (params.tenantId) q.set('tenant_id', params.tenantId);
+    if (params.vaultDbPath) q.set('vault_db_path', params.vaultDbPath);
     return adminFetch<{
       chat_id: string;
       worker_id: string;

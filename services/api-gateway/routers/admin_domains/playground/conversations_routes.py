@@ -38,7 +38,10 @@ async def admin_list_conversations(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
-    from core.admin_conversations import list_conversations_merged
+    from core.admin_conversations import (
+        enrich_conversations_worker_display_names,
+        list_conversations_merged,
+    )
 
     tid = gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
     redis_client = getattr(request.app.state, "redis", None)
@@ -52,6 +55,7 @@ async def admin_list_conversations(
         limit=limit,
         offset=offset,
     )
+    items = enrich_conversations_worker_display_names(items, tenant_id=tid)
     return {
         "tenant_id": tid,
         "conversations": [m.model_dump() for m in items],

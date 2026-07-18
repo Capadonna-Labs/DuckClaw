@@ -35,6 +35,8 @@ class AdminConversationMeta(BaseModel):
     actor: str = ""
     section: str = "other"
     last_worker_id: str = ""
+    # Enriquecido en listado (no se persiste en Redis).
+    last_worker_display_name: str = ""
     workers: list[str] = Field(default_factory=list)
     last_message_preview: str = ""
     message_count: int = 0
@@ -536,3 +538,53 @@ async def reindex_admin_conversations(
     except Exception as exc:
         _log.warning("admin_conversations: reindex %s: %s", tid, exc)
     return {"indexed": indexed, "scanned": scanned}
+
+
+def enrich_conversations_worker_display_names(
+    items: list[AdminConversationMeta],
+    *,
+    tenant_id: str,
+) -> list[AdminConversationMeta]:
+    """Resuelve ``last_worker_display_name`` desde el catálogo DB (batch)."""
+    if not items:
+        return items
+    worker_ids = sorted(
+        {
+            (m.last_worker_id or "").strip()
+            for m in items
+            if (m.last_worker_id or "").strip()
+        }
+    )
+    if not worker_ids:
+        return items
+
+    labels: dict[str, str] = {}
+    tid = (tenant_id or "default").strip() or "default"
+    try:
+        from core.admin_identity import open_gateway_db
+        from duckclaw.admin_worker_catalog import get_worker_by_tenant_worker_id
+
+        with open_gateway_db(read_only=True) as db:
+            for wid in worker_ids:
+                row = get_worker_by_tenant_worker_id(db, tenant_id=tid, worker_id=wid)
+                if not row and tid != "default":
+                    row = get_worker_by_tenant_worker_id(db, tenant_id="default", worker_id=wid)
+                name = str((row or {}).get("display_name") or "").strip()
+                if name and name.lower() != wid.lower():
+                    labels[wid] = name
+    except Exception as exc:
+        _log.warning("admin_conversations: enrich display names: %s", exc)
+        return items
+
+    if not labels:
+        return items
+
+    enriched: list[AdminConversationMeta] = []
+    for meta in items:
+        wid = (meta.last_worker_id or "").strip()
+        label = labels.get(wid, "")
+        if label and meta.last_worker_display_name != label:
+            enriched.append(meta.model_copy(update={"last_worker_display_name": label}))
+        else:
+            enriched.append(meta)
+    return enriched

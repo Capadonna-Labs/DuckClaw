@@ -620,6 +620,8 @@ export interface AdminConversation {
   actor: string;
   section: string;
   last_worker_id: string;
+  /** Nombre visible del catálogo (enrich en listado; no siempre presente). */
+  last_worker_display_name?: string;
   preferred_worker_id?: string;
   workers: string[];
   last_message_preview: string;
@@ -638,6 +640,19 @@ export type PlaygroundVaultInfo = {
 
 function sessionHeaders(method = 'GET'): HeadersInit {
   return mutationHeaders(method);
+}
+
+/** Coalesce concurrent identical GETs (React Strict Mode / doble mount). */
+const inflightAdminGets = new Map<string, Promise<unknown>>();
+
+function coalesceAdminGet<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const existing = inflightAdminGets.get(key);
+  if (existing) return existing as Promise<T>;
+  const pending = run().finally(() => {
+    inflightAdminGets.delete(key);
+  });
+  inflightAdminGets.set(key, pending);
+  return pending;
 }
 
 async function adminFetchOptional<T>(path: string, init?: RequestInit): Promise<T | null> {
@@ -1306,13 +1321,16 @@ export const adminService = {
     if (params?.limit != null) q.set('limit', String(params.limit));
     if (params?.offset != null) q.set('offset', String(params.offset));
     const qs = q.toString();
-    return adminFetch<{
-      tenant_id: string;
-      conversations: AdminConversation[];
-      total: number;
-      limit: number;
-      offset: number;
-    }>(`/conversations${qs ? `?${qs}` : ''}`);
+    const path = `/conversations${qs ? `?${qs}` : ''}`;
+    return coalesceAdminGet(`GET:${path}`, () =>
+      adminFetch<{
+        tenant_id: string;
+        conversations: AdminConversation[];
+        total: number;
+        limit: number;
+        offset: number;
+      }>(path)
+    );
   },
 
   createConversation: (body: { title?: string; section?: string; worker_id?: string }, tenantId?: string) => {
@@ -1327,9 +1345,8 @@ export const adminService = {
     const q = new URLSearchParams();
     if (tenantId) q.set('tenant_id', tenantId);
     const qs = q.toString();
-    return adminFetch<AdminConversation>(
-      `/conversations/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`
-    );
+    const path = `/conversations/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`;
+    return coalesceAdminGet(`GET:${path}`, () => adminFetch<AdminConversation>(path));
   },
 
   patchConversation: (sessionId: string, title: string, tenantId?: string) => {
@@ -1829,7 +1846,9 @@ export const adminService = {
     if (params?.tenant_id) q.set('tenant_id', params.tenant_id);
     if (params?.chat_id) q.set('chat_id', params.chat_id);
     const qs = q.toString();
-    return adminFetch<{
+    const path = `/playground/config${qs ? `?${qs}` : ''}`;
+    return coalesceAdminGet(`GET:${path}`, () =>
+      adminFetch<{
       llm: { provider: string; model: string; base_url: string; scope?: string };
       llm_gap?: {
         provider: string;
@@ -1900,7 +1919,8 @@ export const adminService = {
         transport: string;
       };
       note: string;
-    }>(`/playground/config${qs ? `?${qs}` : ''}`);
+    }>(path)
+    );
   },
 
   setPlaygroundWorker: (body: {
@@ -2035,9 +2055,10 @@ export const adminService = {
     const qs = new URLSearchParams();
     if (params.project_id) qs.set('project_id', params.project_id);
     if (params.worker_uid) qs.set('worker_uid', params.worker_uid);
-    return adminFetch<{ sources: KnowledgeSource[] }>(`/knowledge/sources${qs.toString() ? `?${qs}` : ''}`).then(
-      (r) => r.sources
-    );
+    const path = `/knowledge/sources${qs.toString() ? `?${qs}` : ''}`;
+    return coalesceAdminGet(`GET:${path}`, () =>
+      adminFetch<{ sources: KnowledgeSource[] }>(path)
+    ).then((r) => r.sources);
   },
 
   getKnowledgeConfig: () =>

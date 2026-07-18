@@ -7,9 +7,10 @@ import { readActiveConversationId, writeActiveConversationId } from '@/lib/conve
 export function useActiveConversation(
   tenantId: string | undefined,
   section: string,
-  options?: { defaultWorkerId?: string }
+  options?: { defaultWorkerId?: string; enabled?: boolean }
 ) {
   const defaultWorkerId = (options?.defaultWorkerId || '').trim();
+  const bootstrapEnabled = options?.enabled !== false;
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [conversationTitle, setConversationTitle] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
@@ -59,6 +60,10 @@ export function useActiveConversation(
   }, [tenantId, selectConversation, bumpRefresh]);
 
   useEffect(() => {
+    if (!bootstrapEnabled) {
+      setBootstrapping(false);
+      return;
+    }
     if (tenantId === undefined) {
       setBootstrapping(true);
       return;
@@ -92,9 +97,9 @@ export function useActiveConversation(
           return;
         }
         const created = await adminService.createConversation(
-      { section, worker_id: defaultWorkerId || undefined },
-      tid
-    );
+          { section, worker_id: defaultWorkerId || undefined },
+          tid
+        );
         if (cancelled) return;
         selectConversation(created.session_id, created.title);
       } catch {
@@ -108,7 +113,7 @@ export function useActiveConversation(
     return () => {
       cancelled = true;
     };
-  }, [tenantId, section, selectConversation]);
+  }, [bootstrapEnabled, tenantId, section, selectConversation, defaultWorkerId]);
 
   return {
     sessionId,

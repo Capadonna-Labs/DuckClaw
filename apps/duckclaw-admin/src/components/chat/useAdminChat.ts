@@ -463,7 +463,7 @@ export function useAdminChat({
   }, []);
 
   const reloadHistory = useCallback((opts?: { force?: boolean }) => {
-    if (!enabled || !chatId) return;
+    if (!enabled || !chatId || config === null) return;
     const force = Boolean(opts?.force);
     if (!force && loadingRef.current) return;
     setHistoryLoading(true);
@@ -499,7 +499,7 @@ export function useAdminChat({
       })
       .catch(() => undefined)
       .finally(() => setHistoryLoading(false));
-  }, [chatId, clearLoopHistoryReload, enabled, historyTenantId, initialWorker, workerId]);
+  }, [chatId, clearLoopHistoryReload, config, enabled, historyTenantId, initialWorker, workerId]);
 
   const loopPollingActive = useMemo(
     () => loopSchedulePolling || conversationIndicatesLoopScheduling(messages),
@@ -507,7 +507,7 @@ export function useAdminChat({
   );
 
   useVisibilityAwareInterval(() => {
-    if (!enabled || !chatId || loadingRef.current) return;
+    if (!enabled || !chatId || loadingRef.current || config === null) return;
     reloadHistory({ force: true });
   }, loopPollingActive && enabled ? 12_000 : null);
 
@@ -530,25 +530,27 @@ export function useAdminChat({
   }, [chatId, clearLoopHistoryReload, reloadHistory]);
 
   useEffect(() => {
-    if (!enabled || !chatId) {
-      setHistoryLoading(false);
+    if (!enabled || !chatId || config === null) {
+      if (!enabled || !chatId) setHistoryLoading(false);
       return;
     }
     if (loadingRef.current) return;
 
     setHistoryLoading(true);
     let cancelled = false;
+    // Worker al disparar el efecto. NO incluir workerId en deps: setWorkerId tras el
+    // GET re-disparaba getConversation en bucle (FloatingAdminChat + playground).
+    const workerAtLoad = workerId || initialWorker || '';
     adminService
       .getConversation(chatId, historyTenantId)
       .then((data) => {
         if (cancelled || loadingRef.current) return;
         const fromServer = historyToChatMessages(data.messages, historyTenantId);
-        const activeWorker = workerId || initialWorker || '';
-        const storedEphemeral = readEphemeralHeartbeats(chatId, activeWorker);
+        const storedEphemeral = readEphemeralHeartbeats(chatId, workerAtLoad);
         setMessages((prev) => {
           const liveEphemeral = filterEphemeralForWorker(
             collectEphemeralMessages(prev),
-            activeWorker
+            workerAtLoad
           );
           let ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
           const hasLoopResult = conversationHasLoopResult(fromServer);
@@ -583,12 +585,11 @@ export function useAdminChat({
       })
       .catch(() => {
         if (!cancelled && !loadingRef.current) {
-          const activeWorker = workerId || initialWorker || '';
-          const stored = readEphemeralHeartbeats(chatId, activeWorker);
+          const stored = readEphemeralHeartbeats(chatId, workerAtLoad);
           setMessages((prev) => {
             const live = filterEphemeralForWorker(
               collectEphemeralMessages(prev),
-              activeWorker
+              workerAtLoad
             );
             const merged = mergeEphemeralHeartbeats(stored, live);
             return merged.length ? merged : [];
@@ -602,7 +603,8 @@ export function useAdminChat({
       cancelled = true;
       setHistoryLoading(false);
     };
-  }, [chatId, enabled, historyTenantId, workerId, initialWorker, setWorkerId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- workerId fuera a propósito
+  }, [chatId, enabled, historyTenantId, initialWorker, pinnedWorker, setWorkerId, config]);
 
   useEffect(() => {
     if (!chatId) return;

@@ -190,7 +190,10 @@ export function ConversationInbox({
                   active={active}
                   updatedAt={c.updated_at}
                   section={c.section}
-                  worker={c.last_worker_id}
+                  worker={
+                    (c.last_worker_display_name || '').trim() ||
+                    c.last_worker_id
+                  }
                 />
               </button>
             </li>

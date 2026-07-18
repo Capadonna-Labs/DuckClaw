@@ -8,12 +8,15 @@ import { adminService, type WorkerCapabilities } from '@/services/adminService';
 type PlaygroundWorkerCapabilitiesPanelProps = {
   workerId: string;
   refreshKey?: number;
+  /** Si false, no llama al gateway (lazy hasta abrir Herramientas). */
+  enabled?: boolean;
 };
 
 /** Solo avisos de runtime rotos + atajo al editor de herramientas. Sin ruido de skills/MCP opcionales. */
 export function PlaygroundWorkerCapabilitiesPanel({
   workerId,
   refreshKey,
+  enabled = true,
 }: PlaygroundWorkerCapabilitiesPanelProps) {
   const [payload, setPayload] = useState<WorkerCapabilities | null>(null);
   const [loading, setLoading] = useState(false);
@@ -21,7 +24,8 @@ export function PlaygroundWorkerCapabilitiesPanel({
 
   const load = useCallback(async () => {
     const id = workerId.trim();
-    if (!id) {
+    if (!id || !enabled) {
+      if (!enabled) return;
       setPayload(null);
       return;
     }
@@ -36,13 +40,14 @@ export function PlaygroundWorkerCapabilitiesPanel({
     } finally {
       setLoading(false);
     }
-  }, [workerId]);
+  }, [workerId, enabled]);
 
   useEffect(() => {
+    if (!enabled) return;
     void load();
-  }, [load, refreshKey]);
+  }, [load, refreshKey, enabled]);
 
-  if (!workerId.trim()) {
+  if (!workerId.trim() || !enabled) {
     return null;
   }
 

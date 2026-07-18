@@ -28,7 +28,7 @@ import { ChatSlmSelector } from '@/components/chat/ChatSlmSelector';
 import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
 import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
-import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
+import { workerOptionId, workerOptionIds, workerOptionLabel, resolveWorkerDisplayName } from '@/lib/workerOptions';
 import { PlaygroundRagProjectWarning } from '@/components/playground/PlaygroundRagProjectWarning';
 import { PlaygroundRunSettingsPanel } from '@/components/playground/PlaygroundRunSettingsPanel';
 import {
@@ -422,6 +422,8 @@ export default function PlaygroundPage() {
         logsViewport={logsPanelOpen ? <Pm2LiveLogsViewport /> : null}
         onSandboxToggle={handleSandboxToggle}
         sandboxToggling={sandboxToggling}
+        chatId={conv.sessionId || ''}
+        tenantId={config?.effective_tenant_id}
         onOpen={setSettingsModal}
       />
     </Pm2LiveLogsProvider>
@@ -572,7 +574,13 @@ export default function PlaygroundPage() {
       />
 
       {isHistoryView ? (
-        <PlaygroundHistoryView tenantId={config?.effective_tenant_id} onSelectConversation={(id) => { void conv.selectConversationById(id).then(() => setShowHistory(false)); }} />
+        <PlaygroundHistoryView
+          tenantId={config?.effective_tenant_id}
+          workers={config?.workers}
+          onSelectConversation={(id) => {
+            void conv.selectConversationById(id).then(() => setShowHistory(false));
+          }}
+        />
       ) : (
         <>
       <div className="relative flex flex-1 flex-col min-w-0 min-h-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
@@ -747,7 +755,26 @@ function uniqueConversationsBySession(conversations: AdminConversation[]): Admin
   });
 }
 
-function PlaygroundHistoryView({ tenantId, onSelectConversation }: { tenantId?: string; onSelectConversation?: (id: string) => void }) {
+function historyWorkerLabel(
+  conversation: AdminConversation,
+  workers?: NonNullable<PlaygroundConfig>['workers']
+): string {
+  const fromApi = (conversation.last_worker_display_name || '').trim();
+  if (fromApi) return fromApi;
+  const fromConfig = resolveWorkerDisplayName(workers, conversation.last_worker_id);
+  if (fromConfig) return fromConfig;
+  return conversation.last_worker_id?.trim() || 'sin worker';
+}
+
+function PlaygroundHistoryView({
+  tenantId,
+  workers,
+  onSelectConversation,
+}: {
+  tenantId?: string;
+  workers?: NonNullable<PlaygroundConfig>['workers'];
+  onSelectConversation?: (id: string) => void;
+}) {
   const [conversations, setConversations] = useState<AdminConversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -876,7 +903,7 @@ function PlaygroundHistoryView({ tenantId, onSelectConversation }: { tenantId?: 
                       </p>
                     </div>
                     <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-400 mt-2">
-                      {conversation.last_worker_id || 'sin worker'} · {conversation.message_count} mensajes
+                      {historyWorkerLabel(conversation, workers)} · {conversation.message_count} mensajes
                     </p>
                   </button>
                   <div className="flex shrink-0 flex-col items-center justify-between gap-1.5 py-0.5">

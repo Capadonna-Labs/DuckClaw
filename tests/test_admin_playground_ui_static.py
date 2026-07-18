@@ -222,10 +222,16 @@ def test_playground_run_settings_shows_worker_composition() -> None:
     assert "PlaygroundWorkerCapabilitiesPanel" in panel
     assert "workerId={workerId}" in page
     assert "capabilitiesRefreshKey={sandboxRefreshKey}" not in page
+    assert "enabled={toolsOpen}" in panel
+    assert "toolsOpen, setToolsOpen] = useState(false)" in panel
+    assert "getSandboxChatPolicy" in panel
+    assert "historyWorkerLabel" in page
     assert "getWorkerCapabilities" in composition
     assert "Editar herramientas del agente" in composition
     assert "onSandboxToggle" in page
     assert 'label="Sandbox"' in panel
+    assert "last_worker_display_name" in page or "resolveWorkerDisplayName" in page
+
 
 def test_playground_config_panel_uses_compact_cards_and_modals() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")

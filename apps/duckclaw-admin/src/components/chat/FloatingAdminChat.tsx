@@ -32,6 +32,8 @@ export function FloatingAdminChat() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { chatDrawerOpen: open, setChatDrawerOpen: setOpen } = useLayoutUiStore();
+  const onPlayground =
+    pathname === '/playground' || (pathname?.startsWith('/playground/') ?? false);
   const [tenantId, setTenantId] = useState<string | undefined>();
   const projectId = useMemo(() => {
     const fromUrl = (searchParams.get('project') || '').trim();
@@ -44,13 +46,17 @@ export function FloatingAdminChat() {
   const section = useMemo(() => sectionFromPath(pathname), [pathname]);
   const sectionTitle = titleForAdminPath(pathname);
   const pathWorker = useMemo(() => workerFromPath(pathname), [pathname]);
-  const conv = useActiveConversation(tenantId, section);
+  const conv = useActiveConversation(tenantId, section, {
+    defaultWorkerId: pathWorker,
+    enabled: !onPlayground,
+  });
   const { createConversation, selectConversation } = conv;
   const chat = useAdminChat({
     chatId: conv.sessionId ?? '',
     initialWorker: pathWorker,
     projectId,
-    enabled: Boolean(conv.sessionId),
+    // Solo activo con drawer abierto y fuera del playground (evita poll global).
+    enabled: !onPlayground && Boolean(conv.sessionId) && open,
     onConversationActivity: conv.bumpRefresh,
   });
   const { workerId, loading, messages, historyLoading, scrollToBottom, config } = chat;
@@ -81,13 +87,14 @@ export function FloatingAdminChat() {
   }, [open, conv.sessionId, historyLoading, messages.length, scrollToBottom]);
 
   useEffect(() => {
+    if (onPlayground) return;
     adminService
       .getPlaygroundConfig()
       .then((c) => setTenantId(c.effective_tenant_id))
       .catch(() => undefined);
-  }, []);
+  }, [onPlayground]);
 
-  if (pathname === '/playground' || pathname.startsWith('/playground/')) {
+  if (onPlayground) {
     return null;
   }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Box,
   Brain,
@@ -13,6 +13,7 @@ import {
 
 import { PlaygroundWorkerCapabilitiesPanel } from '@/components/playground/PlaygroundWorkerCapabilitiesPanel';
 import { LlmSecretsBanner } from '@/components/integrations/LlmSecretsBanner';
+import { adminService } from '@/services/adminService';
 
 type PlaygroundConfig = {
   llm?: { provider?: string; model?: string };
@@ -53,6 +54,8 @@ export type PlaygroundRunSettingsPanelProps = {
   /** Activa/desactiva sandbox de sesión (sin poll de policy en el footer). */
   onSandboxToggle?: (command: '/sandbox on' | '/sandbox off') => void | Promise<void>;
   sandboxToggling?: boolean;
+  chatId?: string;
+  tenantId?: string;
   onOpen: (modal: SettingsModalKey) => void;
 };
 
@@ -81,12 +84,50 @@ export function PlaygroundRunSettingsPanel({
   logsViewport,
   onSandboxToggle,
   sandboxToggling = false,
+  chatId = '',
+  tenantId,
   onOpen,
 }: PlaygroundRunSettingsPanelProps) {
   const [contextOpen, setContextOpen] = useState(true);
-  const [toolsOpen, setToolsOpen] = useState(true);
-  /** Estado local: no leemos chat-policy en cada render (menos hits a la BD). */
+  /** Cerrado por defecto: capabilities no se piden hasta expandir (lazy). */
+  const [toolsOpen, setToolsOpen] = useState(false);
+  /** Estado local + sync one-shot al abrir sesión (sin poll). */
   const [sandboxOn, setSandboxOn] = useState(false);
+  const [sandboxSyncedFor, setSandboxSyncedFor] = useState('');
+
+  useEffect(() => {
+    const sid = chatId.trim();
+    const wid = workerId.trim();
+    if (!sid || !wid || !onSandboxToggle) return;
+    const key = `${sid}:${wid}:${activeVaultPath || ''}`;
+    if (sandboxSyncedFor === key) return;
+    let cancelled = false;
+    void adminService
+      .getSandboxChatPolicy({
+        chatId: sid,
+        workerId: wid,
+        tenantId,
+        vaultDbPath: activeVaultPath || undefined,
+      })
+      .then((pol) => {
+        if (cancelled) return;
+        setSandboxOn(Boolean(pol.sandbox_enabled));
+        setSandboxSyncedFor(key);
+      })
+      .catch(() => {
+        if (!cancelled) setSandboxSyncedFor(key);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeVaultPath,
+    chatId,
+    onSandboxToggle,
+    sandboxSyncedFor,
+    tenantId,
+    workerId,
+  ]);
 
   const model = config?.llm?.model || '—';
   const provider = config?.llm?.provider || 'Proveedor LLM';
@@ -194,7 +235,11 @@ export function PlaygroundRunSettingsPanel({
           open={toolsOpen}
           onToggle={() => setToolsOpen((v) => !v)}
         >
-          <PlaygroundWorkerCapabilitiesPanel workerId={workerId} refreshKey={capabilitiesRefreshKey} />
+          <PlaygroundWorkerCapabilitiesPanel
+            workerId={workerId}
+            refreshKey={capabilitiesRefreshKey}
+            enabled={toolsOpen}
+          />
           {onSandboxToggle ? (
             <StudioToggleRow
               label="Sandbox"

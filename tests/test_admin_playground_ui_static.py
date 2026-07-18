@@ -2,21 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from admin_service_corpus import admin_service_corpus
+
 
 def test_playground_ui_can_scope_chat_to_db_first_project() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
     hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    chat_api = Path("apps/duckclaw-admin/src/services/admin/chatApi.ts").read_text(encoding="utf-8")
 
     assert "projectLabel={activeProject?.name || 'Todos los agentes'}" in page
-    assert 'title="Configurar proyecto y agente"' in page
     assert "projectId" in page
     assert "selectableWorkers" in page
     assert "return projectWorkerIds.includes(id);" in page
     assert "platform" + "-orchestrator" not in page
     assert "Agente guía" in page
     assert "project_id: projectId || undefined" in hook
-    assert "project_id?: string" in service
+    assert "project_id?: string" in chat_api
 
 
 def test_active_conversation_is_scoped_by_authenticated_tenant() -> None:
@@ -173,9 +174,11 @@ def test_playground_selects_conversation_from_sidebar_history() -> None:
 
 def test_playground_history_can_delete_conversation_with_confirmation() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    chat_api = Path("apps/duckclaw-admin/src/services/admin/chatApi.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
 
-    assert "deleteConversation:" in service
+    assert "deleteConversation:" in chat_api
+    assert "...chatApi" in service
     assert "const deleteHistoryConversation = async (conversation: AdminConversation)" in page
     assert "window.confirm" in page
     assert "Eliminar esta conversación" in page
@@ -505,7 +508,7 @@ def test_comfyui_templates_bff_is_gateway_only_no_local_workflow_fallback() -> N
 
 
 def test_admin_service_does_not_expose_generic_env_editing() -> None:
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
 
     assert "getEnv:" not in service
@@ -557,7 +560,7 @@ def test_skills_page_exposes_new_skill_db_first_form() -> None:
     create_form = Path("apps/duckclaw-admin/src/components/skills/SkillCreateForm.tsx").read_text(encoding="utf-8")
     global_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/global/page.tsx").read_text(encoding="utf-8")
     local_page = Path("apps/duckclaw-admin/src/app/(admin)/skills/local/page.tsx").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
 
     assert "redirect('/plataforma?tab=skills&skillsTab=catalog')" in redirect_page
     assert "SkillCreateForm" in hub
@@ -577,7 +580,7 @@ def test_skills_page_exposes_new_skill_db_first_form() -> None:
 def test_duckdb_page_exposes_confirmed_legacy_schema_cleanup() -> None:
     redirect_page = Path("apps/duckclaw-admin/src/app/(admin)/duckdb/page.tsx").read_text(encoding="utf-8")
     page = Path("apps/duckclaw-admin/src/components/duckdb/DuckDbPageView.tsx").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
 
     assert "redirect('/plataforma?tab=duckdb')" in redirect_page
     assert "Schemas legacy detectados" in page

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from admin_service_corpus import admin_service_corpus
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES_PAGE = ROOT / "apps/duckclaw-admin/src/app/(admin)/templates/page.tsx"
@@ -13,12 +15,11 @@ WORKER_ROLE_TEMPLATES = ROOT / "apps/duckclaw-admin/src/lib/workerRoleTemplates.
 WORKER_COMPOSITION_PRESETS = ROOT / "apps/duckclaw-admin/src/lib/workerCompositionPresets.ts"
 POLICIES_PAGE = ROOT / "apps/duckclaw-admin/src/app/(admin)/policies/page.tsx"
 POLICIES_VIEW = ROOT / "apps/duckclaw-admin/src/components/policies/PoliciesPageView.tsx"
-ADMIN_SERVICE = ROOT / "apps/duckclaw-admin/src/services/adminService.ts"
 
 
 def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() -> None:
     page = TEMPLATES_PAGE.read_text(encoding="utf-8")
-    service = ADMIN_SERVICE.read_text(encoding="utf-8")
+    service = admin_service_corpus()
 
     assert "importTemplatesToCatalog" in service
     assert "/templates/import" in service
@@ -36,7 +37,7 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
 
 def test_workers_ui_lists_active_catalog_workers_only() -> None:
     page = TEMPLATES_PAGE.read_text(encoding="utf-8")
-    service = ADMIN_SERVICE.read_text(encoding="utf-8")
+    service = admin_service_corpus()
 
     assert "showInactive" not in page
     assert "Mostrar inactivos" not in page
@@ -46,7 +47,7 @@ def test_workers_ui_lists_active_catalog_workers_only() -> None:
 
 def test_workers_ui_separates_deactivate_from_hard_delete() -> None:
     page = TEMPLATES_PAGE.read_text(encoding="utf-8")
-    service = ADMIN_SERVICE.read_text(encoding="utf-8")
+    service = admin_service_corpus()
 
     assert "pendingDeactivate" in page
     assert "pendingHardDelete" in page

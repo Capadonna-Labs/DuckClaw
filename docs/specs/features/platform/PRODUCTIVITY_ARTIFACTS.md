@@ -23,6 +23,8 @@ Sandbox scratch (`output/sandbox/`) **mantiene TTL**. Al registrar un run se **c
 ## API
 
 - `GET /productivity/artifacts` — lista unificada
+  - Merge legacy de informes activos vía `list_report_instances(..., lean=True)`: **sin** `preview_html` (solo metadatos + `progress` para %).
+  - El HTML de preview se carga bajo demanda en Entregables (`GET` instancia / panel), no en la bandeja.
 - `DELETE /productivity/artifacts/{id}` — soft-delete (+ unlink si storage)
 - `POST /productivity/artifacts/{id}/promote-to-vault` — copia storage → OUTPUT (`Productividad/`)
 - `GET /productivity/vault/browse` — Finder de OUTPUT_ROOTS

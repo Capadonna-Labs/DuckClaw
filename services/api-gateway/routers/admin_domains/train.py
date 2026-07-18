@@ -35,34 +35,64 @@ def _trace_lake_root(lake: str) -> Path:
 
 
 def _scan_jsonl_lake(root: Path, *, limit: int = 30) -> list[dict[str, Any]]:
+    """Lista traces.jsonl por mtime. No cuenta líneas (I/O caro en lakes grandes)."""
     if not root.is_dir():
         return []
-    rows: list[tuple[str, float, dict[str, Any]]] = []
+    rows: list[tuple[float, dict[str, Any]]] = []
     for path in root.rglob("traces.jsonl"):
         if not path.is_file():
             continue
         try:
             stat = path.stat()
             rel = path.relative_to(root).as_posix()
-            line_count = 0
-            with path.open(encoding="utf-8", errors="replace") as fh:
-                for line_count, _ in enumerate(fh, start=1):
-                    pass
+            # Archivos chicos: conteo exacto barato. Lakes grandes: estimación por tamaño.
+            if stat.st_size <= 256_000:
+                line_count = 0
+                with path.open(encoding="utf-8", errors="replace") as fh:
+                    for line_count, _ in enumerate(fh, start=1):
+                        pass
+                approx = False
+            else:
+                line_count = max(1, int(stat.st_size // 120))
+                approx = True
             rows.append(
                 (
-                    rel,
-                    stat.st_mtime,
+                    float(stat.st_mtime),
                     {
                         "relative_path": rel,
-                        "size_bytes": stat.st_size,
+                        "size_bytes": int(stat.st_size),
                         "line_count": line_count,
+                        "line_count_approx": approx,
                     },
                 )
             )
         except OSError:
             continue
-    rows.sort(key=lambda item: item[1], reverse=True)
-    return [item[2] for item in rows[:limit]]
+    rows.sort(key=lambda item: item[0], reverse=True)
+    return [item[1] for item in rows[:limit]]
+
+
+def _read_jsonl_tail_lines(path: Path, *, limit: int) -> tuple[list[str], int]:
+    """Lee las últimas ``limit`` líneas no vacías sin cargar el archivo entero en RAM.
+
+    Cuenta total con un pase de líneas; el contenido retenido es solo la cola.
+    Para archivos enormes el count sigue siendo O(n) pero no duplica el buffer.
+    """
+    if not path.is_file():
+        raise _problem(404, "Archivo no encontrado", str(path))
+    keep = max(1, min(limit, 50))
+    from collections import deque
+
+    buf: deque[str] = deque(maxlen=keep)
+    total = 0
+    with path.open(encoding="utf-8", errors="replace") as fh:
+        for line in fh:
+            stripped = line.strip()
+            if not stripped:
+                continue
+            total += 1
+            buf.append(stripped)
+    return list(buf), total
 
 
 def _message_text(content: Any) -> str:
@@ -117,14 +147,7 @@ def _preview_from_record(record: dict[str, Any]) -> dict[str, str]:
 def _read_trace_samples(path: Path, *, limit: int) -> tuple[list[dict[str, Any]], int]:
     if not path.is_file():
         raise _problem(404, "Archivo no encontrado", str(path))
-    lines: list[str] = []
-    with path.open(encoding="utf-8", errors="replace") as fh:
-        for line in fh:
-            stripped = line.strip()
-            if stripped:
-                lines.append(stripped)
-    total = len(lines)
-    tail = lines[-max(1, min(limit, 50)) :]
+    tail, total = _read_jsonl_tail_lines(path, limit=limit)
     samples: list[dict[str, Any]] = []
     for raw in tail:
         try:
@@ -149,54 +172,59 @@ def _read_trace_samples(path: Path, *, limit: int) -> tuple[list[dict[str, Any]]
 
 @router.get("/status", dependencies=[Depends(require_admin_key)])
 async def train_status() -> dict[str, Any]:
+    from core.heavy_work import run_heavy_work
     from duckclaw.graphs.conversation_traces import get_conversation_traces_dir
 
     conv_root = get_conversation_traces_dir()
-    conv_recent = _scan_jsonl_lake(conv_root)
-    gemma_recent = _scan_jsonl_lake(_GEMMA4_DIR)
-    trace_format = (os.environ.get("DUCKCLAW_CONVERSATION_TRACES_FORMAT") or "sft").strip().lower()
-    save_traces = (os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES") or "true").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
-    )
-    return {
-        "trace_format": "grpo" if trace_format == "grpo" else "sft",
-        "paths": {
-            "conversation_traces": str(conv_root),
-            "gemma4": str(_GEMMA4_DIR),
-        },
-        "files": {
+
+    def _build() -> dict[str, Any]:
+        conv_recent = _scan_jsonl_lake(conv_root)
+        gemma_recent = _scan_jsonl_lake(_GEMMA4_DIR)
+        trace_format = (os.environ.get("DUCKCLAW_CONVERSATION_TRACES_FORMAT") or "sft").strip().lower()
+        save_traces = (os.environ.get("DUCKCLAW_SAVE_CONVERSATION_TRACES") or "true").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
+        return {
+            "trace_format": "grpo" if trace_format == "grpo" else "sft",
+            "paths": {
+                "conversation_traces": str(conv_root),
+                "gemma4": str(_GEMMA4_DIR),
+            },
+            "files": {
+                "conversation_traces": {
+                    "exists": conv_root.is_dir(),
+                    "path": str(conv_root),
+                },
+                "gemma4": {
+                    "exists": _GEMMA4_DIR.is_dir(),
+                    "path": str(_GEMMA4_DIR),
+                },
+            },
             "conversation_traces": {
-                "exists": conv_root.is_dir(),
-                "path": str(conv_root),
+                "file_count": len(conv_recent),
+                "recent": conv_recent,
+                "save_enabled": save_traces,
             },
-            "gemma4": {
-                "exists": _GEMMA4_DIR.is_dir(),
-                "path": str(_GEMMA4_DIR),
+            "gemma4_sanitized": {
+                "file_count": len(gemma_recent),
+                "recent": gemma_recent,
             },
-        },
-        "conversation_traces": {
-            "file_count": len(conv_recent),
-            "recent": conv_recent,
-            "save_enabled": save_traces,
-        },
-        "gemma4_sanitized": {
-            "file_count": len(gemma_recent),
-            "recent": gemma_recent,
-        },
-        "pipeline": {
-            "sft": [
-                "collect (trazas JSONL)",
-                "sanitize_traces_for_gemma.py",
-                "materialize_sft_data_dir_from_gemma4_sanitized.py",
-                "mlx LoRA train",
-            ],
-            "grpo": ["classify_traces", "grpo train"],
-        },
-        "docs": ["docs/COMANDOS.md#train--trazas-sft-cli-sin-admin-train"],
-    }
+            "pipeline": {
+                "sft": [
+                    "collect (trazas JSONL)",
+                    "sanitize_traces_for_gemma.py",
+                    "materialize_sft_data_dir_from_gemma4_sanitized.py",
+                    "mlx LoRA train",
+                ],
+                "grpo": ["classify_traces", "grpo train"],
+            },
+            "docs": ["docs/COMANDOS.md#train--trazas-sft-cli-sin-admin-train"],
+        }
+
+    return await run_heavy_work(_build)
 
 
 @router.get("/traces/sample", dependencies=[Depends(require_admin_key)])
@@ -205,6 +233,8 @@ async def train_trace_sample(
     relative_path: str = Query(...),
     limit: int = Query(5, ge=1, le=50),
 ) -> dict[str, Any]:
+    from core.heavy_work import run_heavy_work
+
     root = _trace_lake_root((lake or "").strip())
     rel = (relative_path or "").strip().replace("\\", "/").lstrip("/")
     if not rel or ".." in rel.split("/"):
@@ -214,10 +244,14 @@ async def train_trace_sample(
         target.relative_to(root.resolve())
     except ValueError as exc:
         raise _problem(400, "Ruta fuera del lake", relative_path) from exc
-    samples, total = _read_trace_samples(target, limit=limit)
-    return {
-        "lake": lake,
-        "relative_path": rel,
-        "total_lines_estimate": total,
-        "samples": samples,
-    }
+
+    def _sample() -> dict[str, Any]:
+        samples, total = _read_trace_samples(target, limit=limit)
+        return {
+            "lake": lake,
+            "relative_path": rel,
+            "total_lines_estimate": total,
+            "samples": samples,
+        }
+
+    return await run_heavy_work(_sample)

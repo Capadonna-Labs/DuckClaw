@@ -249,9 +249,11 @@ export function DocumentReportsPanel() {
     [templates, selectedTemplateId]
   );
 
-  const previewSrc = selected
-    ? `/api/admin/report-instances/${encodeURIComponent(selected.instance_id)}/preview?_t=${Date.now()}`
-    : '';
+  const previewSrc = useMemo(() => {
+    if (!selected) return '';
+    const bust = selected.updated_at || selected.instance_id;
+    return `/api/admin/report-instances/${encodeURIComponent(selected.instance_id)}/preview?v=${encodeURIComponent(bust)}`;
+  }, [selected]);
 
   const playgroundHref = selected
     ? `/playground?project=${encodeURIComponent(selected.project_id || '')}&q=${buildChatPrompt(selected)}`
@@ -831,7 +833,7 @@ export function DocumentReportsPanel() {
                 <>
                   <div className="relative min-w-0 flex-1 bg-white">
                     <iframe
-                      key={previewSrc}
+                      key={selected.instance_id}
                       src={previewSrc}
                       title="Vista previa del informe"
                       className="h-full w-full"

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from admin_service_corpus import admin_service_corpus
+
 
 def test_mcp_unified_view_has_connectors_server_and_reference_tabs() -> None:
     tabs = Path("apps/duckclaw-admin/src/components/mcp/mcpPageTabs.ts").read_text(encoding="utf-8")
@@ -12,7 +14,7 @@ def test_mcp_unified_view_has_connectors_server_and_reference_tabs() -> None:
     config = Path("apps/duckclaw-admin/src/components/mcp/McpConfigurationPanel.tsx").read_text(
         encoding="utf-8"
     )
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     status_route = Path("apps/duckclaw-admin/src/app/api/admin/mcp-status/route.ts").read_text(
         encoding="utf-8"
     )

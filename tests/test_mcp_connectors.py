@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from admin_service_corpus import admin_service_corpus
+
 
 def test_mcp_connectors_routes_live_in_domain_module() -> None:
     admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
@@ -19,7 +21,7 @@ def test_mcp_hub_links_connectors_page() -> None:
     hub = Path("apps/duckclaw-admin/src/app/(admin)/mcp/page.tsx").read_text(encoding="utf-8")
     unified = Path("apps/duckclaw-admin/src/components/mcp/McpUnifiedView.tsx").read_text(encoding="utf-8")
     panel = Path("apps/duckclaw-admin/src/components/mcp/McpConnectorsPanel.tsx").read_text(encoding="utf-8")
-    service = Path("apps/duckclaw-admin/src/services/adminService.ts").read_text(encoding="utf-8")
+    service = admin_service_corpus()
     callback = Path(
         "apps/duckclaw-admin/src/app/api/admin/mcp/connectors/oauth/callback/route.ts"
     ).read_text(encoding="utf-8")
@@ -33,4 +35,6 @@ def test_mcp_hub_links_connectors_page() -> None:
     assert "startMcpConnectorOAuth" in service
     assert "Conectar OAuth" in panel
     assert "presetUsesOAuthPkce" in panel
-    assert "oauth/complete" in callback
+    assert "handleMcpOAuthCallback" in callback
+    oauth_lib = Path("apps/duckclaw-admin/src/lib/mcpOAuthCallback.ts").read_text(encoding="utf-8")
+    assert "oauth/complete" in oauth_lib

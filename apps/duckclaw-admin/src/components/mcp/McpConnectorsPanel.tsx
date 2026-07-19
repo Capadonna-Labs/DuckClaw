@@ -302,12 +302,15 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
             Nuevo desde plantilla
           </h2>
           <p className="mt-1 text-sm text-gov-gray-500 dark:text-dark-muted">
-            El catálogo de plantillas viene de{' '}
-            <span className="font-mono text-xs">mcp_connector_presets.yaml</span>. Tras crear,
-            autoriza OAuth/Bearer y otorga acceso a workers aquí mismo.
+            Elige el servicio (agrupado por tipo). OAuth y Bearer se configuran al crear; luego otorga
+            acceso a workers en la lista de abajo.
           </p>
           <div className="mt-4">
-            <McpNewConnectorSection canWrite={canWrite} onCreated={load} />
+            <McpNewConnectorSection
+              canWrite={canWrite}
+              existingConnectors={connectors}
+              onCreated={load}
+            />
           </div>
         </section>
       ) : null}

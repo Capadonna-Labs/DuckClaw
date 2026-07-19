@@ -3,19 +3,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { adminService, type AdminConversation } from '@/services/adminService';
+import { adminService } from '@/services/adminService';
 import {
   ArrowLeft,
   FolderOpen,
   Settings2,
-  Bot,
   ChevronRight,
-  Copy,
   PanelRightClose,
   PanelRightOpen,
   Terminal,
-  Trash2,
-  Pencil,
   X,
 } from 'lucide-react';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
@@ -28,7 +24,7 @@ import { ChatSlmSelector } from '@/components/chat/ChatSlmSelector';
 import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
 import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
-import { workerOptionId, workerOptionIds, workerOptionLabel, resolveWorkerDisplayName } from '@/lib/workerOptions';
+import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
 import { PlaygroundRagProjectWarning } from '@/components/playground/PlaygroundRagProjectWarning';
 import { PlaygroundRunSettingsPanel } from '@/components/playground/PlaygroundRunSettingsPanel';
 import {
@@ -37,18 +33,24 @@ import {
   Pm2LiveLogsViewport,
 } from '@/components/admin/Pm2LiveLogsPanel';
 import { writeLastProjectId } from '@/lib/floatingChatProject';
-import { KnowledgeScopeControl } from '@/components/playground/KnowledgeScopeControl';
 import {
   defaultKnowledgeScope,
   knowledgeScopeLabel,
   normalizeKnowledgeScope,
   type KnowledgeScope,
 } from '@/lib/knowledgeScope';
-import type { FlyCommandEntry } from '@/types/admin';
 
-const FREQUENT_CHAT_COMMANDS = new Set(['/team', '/vault', '/model', '/workers']);
-type PlaygroundConfig = Awaited<ReturnType<typeof adminService.getPlaygroundConfig>>;
-type PlaygroundSettingsModal = 'commands' | 'vault' | 'model' | 'instructions' | 'routing' | null;
+import { PlaygroundHistoryView } from '@/components/playground/PlaygroundHistoryView';
+import {
+  ChatCommandsPanel,
+  ProjectAgentControls,
+  SettingValue,
+  SettingsModal,
+} from '@/components/playground/PlaygroundSettingsParts';
+import type {
+  PlaygroundConfig,
+  PlaygroundSettingsModal,
+} from '@/components/playground/playgroundTypes';
 
 export default function PlaygroundPage() {
   const router = useRouter();
@@ -730,467 +732,6 @@ export default function PlaygroundPage() {
       {settingsDialog}
         </>
       )}
-    </div>
-  );
-}
-function formatConversationTime(iso: string): string {
-  if (!iso) return '';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso.slice(0, 16);
-  const mins = Math.floor((Date.now() - t) / 60000);
-  if (mins < 1) return 'ahora';
-  if (mins < 60) return `hace ${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `hace ${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `hace ${days}d`;
-  return new Date(t).toLocaleDateString();
-}
-function uniqueConversationsBySession(conversations: AdminConversation[]): AdminConversation[] {
-  const seen = new Set<string>();
-  return conversations.filter((conversation) => {
-    if (seen.has(conversation.session_id)) return false;
-    seen.add(conversation.session_id);
-    return true;
-  });
-}
-
-function historyWorkerLabel(
-  conversation: AdminConversation,
-  workers?: NonNullable<PlaygroundConfig>['workers']
-): string {
-  const fromApi = (conversation.last_worker_display_name || '').trim();
-  if (fromApi) return fromApi;
-  const fromConfig = resolveWorkerDisplayName(workers, conversation.last_worker_id);
-  if (fromConfig) return fromConfig;
-  return conversation.last_worker_id?.trim() || 'sin worker';
-}
-
-function PlaygroundHistoryView({
-  tenantId,
-  workers,
-  onSelectConversation,
-}: {
-  tenantId?: string;
-  workers?: NonNullable<PlaygroundConfig>['workers'];
-  onSelectConversation?: (id: string) => void;
-}) {
-  const [conversations, setConversations] = useState<AdminConversation[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
-  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
-  const uniqueConversations = useMemo(
-    () => uniqueConversationsBySession(conversations),
-    [conversations]
-  );
-
-  useEffect(() => {
-    if (!tenantId?.trim()) return;
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    // admin-conv-* indexa section="" (filtrar section=playground ocultaba hilos reales del tenant).
-    adminService.listConversations({ tenant_id: tenantId, limit: 80 })
-      .then((res) => {
-        if (!cancelled) setConversations(res.conversations ?? []);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'No se pudo cargar el historial');
-          setConversations([]);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [tenantId]);
-
-  const renameHistoryConversation = async (sessionId: string, title: string) => {
-    setError(null);
-    const meta = await adminService.patchConversation(sessionId, title, tenantId);
-    setConversations((prev) =>
-      prev.map((item) =>
-        item.session_id === sessionId ? { ...item, title: meta.title || title } : item
-      )
-    );
-  };
-
-  const deleteHistoryConversation = async (conversation: AdminConversation) => {
-    const title = conversation.title || conversation.session_id;
-    const confirmed = window.confirm(
-      `Eliminar esta conversación?\n\n"${title}"\n\nSe borrará del historial y no aparecerá en la bandeja.`
-    );
-    if (!confirmed) return;
-    setError(null);
-    setDeletingSessionId(conversation.session_id);
-    try {
-      await adminService.deleteConversation(conversation.session_id, tenantId);
-      setConversations((prev) => prev.filter((item) => item.session_id !== conversation.session_id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'No se pudo eliminar la conversación');
-    } finally {
-      setDeletingSessionId(null);
-    }
-  };
-
-  return (
-    <section className="flex-1 min-w-0 min-h-[calc(100vh-8rem)] lg:min-h-0 lg:h-full bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
-      <header className="flex flex-wrap items-center justify-between gap-3 p-4 border-b dark:border-dark-border">
-        <div>
-          <h1 className="text-xl font-black dark:text-dark-text flex items-center gap-2">
-            <Bot size={22} /> Historial
-          </h1>
-          <p className="text-xs text-gov-gray-500 mt-0.5">
-            Conversaciones recientes del Playground
-          </p>
-        </div>
-        <Link
-          href="/playground?new=1"
-          className="text-xs font-bold rounded-xl bg-gov-blue-700 text-white px-3 py-2 hover:bg-gov-blue-800"
-        >
-          Nueva conversación
-        </Link>
-      </header>
-      <div className="scrollbar-thin h-full min-h-0 overflow-y-auto p-4">
-        {!tenantId?.trim() && (
-          <p className="text-sm text-gov-gray-400 text-center py-10">Cargando perfil…</p>
-        )}
-        {tenantId?.trim() && loading && (
-          <p className="text-sm text-gov-gray-400 text-center py-10">Cargando historial…</p>
-        )}
-        {tenantId?.trim() && error && <p className="text-sm text-red-600 text-center py-10">{error}</p>}
-        {tenantId?.trim() && !loading && !error && uniqueConversations.length === 0 && (
-          <div className="rounded-3xl border border-dashed dark:border-dark-border p-10 text-center">
-            <p className="font-bold dark:text-dark-text">Sin conversaciones</p>
-            <p className="text-sm text-gov-gray-500 mt-1">Crea una conversación para verla aquí.</p>
-          </div>
-        )}
-        {tenantId?.trim() && !loading && !error && uniqueConversations.length > 0 && (
-          <ul className="grid gap-2">
-            {uniqueConversations.map((conversation) => {
-              const isRenaming = renamingSessionId === conversation.session_id;
-              return (
-              <li key={conversation.session_id}>
-                <div className="flex items-stretch gap-2 rounded-2xl border dark:border-dark-border p-3 hover:border-gov-blue-300 hover:bg-gov-blue-50/50 dark:hover:bg-dark-bg transition-colors">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!isRenaming) onSelectConversation?.(conversation.session_id);
-                    }}
-                    className="min-w-0 flex-1 text-left"
-                  >
-                    <div className="min-w-0">
-                      <EditableConversationTitle
-                        value={conversation.title || conversation.session_id}
-                        onSave={async (title) => {
-                          await renameHistoryConversation(conversation.session_id, title);
-                          setRenamingSessionId(null);
-                        }}
-                        variant="history"
-                        hideEditIcon
-                        editing={isRenaming}
-                        onEditingChange={(next) =>
-                          setRenamingSessionId(next ? conversation.session_id : null)
-                        }
-                      />
-                      <p className="text-xs text-gov-gray-500 mt-1 line-clamp-2">
-                        {conversation.last_message_preview || 'Sin mensajes todavía'}
-                      </p>
-                    </div>
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-400 mt-2">
-                      {historyWorkerLabel(conversation, workers)} · {conversation.message_count} mensajes
-                    </p>
-                  </button>
-                  <div className="flex shrink-0 flex-col items-center justify-between gap-1.5 py-0.5">
-                    <span className="text-[10px] font-black uppercase tracking-wide text-gov-gray-400 whitespace-nowrap">
-                      {formatConversationTime(conversation.updated_at)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setRenamingSessionId(conversation.session_id)}
-                      className="rounded-xl border border-gov-gray-200 bg-white px-3 py-2 text-xs font-bold text-gov-gray-600 hover:border-gov-blue-300 hover:text-gov-blue-700 dark:border-dark-border dark:bg-dark-surface dark:text-dark-muted dark:hover:text-dark-cyan"
-                      aria-label={`Renombrar conversación ${conversation.title || conversation.session_id}`}
-                      title="Renombrar conversación"
-                    >
-                      <Pencil size={15} aria-hidden />
-                      <span className="sr-only">Renombrar</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void deleteHistoryConversation(conversation)}
-                      disabled={deletingSessionId === conversation.session_id}
-                      className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-bold text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
-                      aria-label={`Eliminar conversación ${conversation.title || conversation.session_id}`}
-                    >
-                      <Trash2 size={15} aria-hidden />
-                      <span className="sr-only">Eliminar</span>
-                    </button>
-                  </div>
-                </div>
-              </li>
-            );
-            })}
-          </ul>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function SettingsModal({
-  title,
-  description,
-  onClose,
-  size = 'default',
-  children,
-}: {
-  title: string;
-  description: string;
-  onClose: () => void;
-  size?: 'default' | 'wide';
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-gov-blue-950/40 p-3 backdrop-blur-sm sm:items-center">
-      <button
-        type="button"
-        className="absolute inset-0"
-        aria-label="Cerrar modal"
-        onClick={onClose}
-      />
-      <section
-        className={`relative z-10 flex max-h-[min(760px,92dvh)] w-full flex-col overflow-hidden rounded-[2rem] border border-gov-blue-100 bg-white shadow-2xl dark:border-dark-border dark:bg-dark-surface ${
-          size === 'wide' ? 'max-w-lg' : 'max-w-md'
-        }`}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <header className="flex items-start justify-between gap-3 border-b border-gov-gray-100 p-4 dark:border-dark-border">
-          <div className="min-w-0">
-            <h3 className="text-base font-black dark:text-dark-text">{title}</h3>
-            <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">{description}</p>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-full p-2 text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
-            aria-label="Cerrar"
-          >
-            <X size={18} />
-          </button>
-        </header>
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4">{children}</div>
-      </section>
-    </div>
-  );
-}
-
-function SettingValue({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-2xl bg-gov-gray-50 px-4 py-3 dark:bg-dark-bg">
-      <p className="text-[11px] font-bold uppercase tracking-wide text-gov-gray-500">{label}</p>
-      <p className="mt-1 truncate text-base font-semibold dark:text-dark-text" title={value}>
-        {value}
-      </p>
-    </div>
-  );
-}
-
-function ProjectAgentControls({
-  config,
-  projectId,
-  knowledgeScope,
-  activeProject,
-  projectWorkerIds,
-  selectableWorkers,
-  workerId,
-  onProjectChange,
-  onWorkerChange,
-  onKnowledgeScopeChange,
-}: {
-  config: PlaygroundConfig | null;
-  projectId: string;
-  knowledgeScope: KnowledgeScope;
-  activeProject?: NonNullable<PlaygroundConfig['projects']>[number];
-  projectWorkerIds: string[];
-  selectableWorkers: NonNullable<PlaygroundConfig['workers']>;
-  workerId: string;
-  onProjectChange: (projectId: string) => void;
-  onWorkerChange: (workerId: string) => void;
-  onKnowledgeScopeChange: (scope: KnowledgeScope) => void;
-}) {
-  return (
-    <div className="space-y-5">
-      {(config?.projects?.length ?? 0) > 0 && (
-        <label className="block space-y-1.5">
-          <span className="text-xs font-bold text-gov-gray-500">Proyecto</span>
-          <select
-            value={projectId}
-            onChange={(e) => onProjectChange(e.target.value)}
-            className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
-          >
-            <option value="">Todos los agentes</option>
-            {(config?.projects ?? []).map((p) => (
-              <option key={p.project_id} value={p.project_id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
-      <label className="block space-y-1.5">
-        <span className="text-xs font-bold text-gov-gray-500">
-          {activeProject ? 'Agente guía' : 'Agente'}
-        </span>
-        <select
-          value={workerId}
-          onChange={(e) => onWorkerChange(e.target.value)}
-          className="w-full rounded-xl border px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
-        >
-          {selectableWorkers.map((w) => {
-            const id = workerOptionId(w);
-            const label = workerOptionLabel(w);
-            return (
-              <option key={id} value={id}>
-                {label}
-              </option>
-            );
-          })}
-        </select>
-      </label>
-
-      <KnowledgeScopeControl
-        value={knowledgeScope}
-        projectId={projectId}
-        onChange={onKnowledgeScopeChange}
-      />
-
-      <p className="rounded-2xl border border-gov-blue-100 bg-gov-blue-50/70 p-3 text-xs text-gov-blue-800 dark:border-dark-border dark:bg-dark-bg dark:text-dark-cyan">
-        {activeProject
-          ? projectWorkerIds.length > 0
-            ? `Proyecto ${activeProject.name}: solo agentes asignados.`
-            : `Proyecto ${activeProject.name}: sin agentes asignados, se muestran todos.`
-          : 'Sin filtro de proyecto.'}
-      </p>
-
-      {workerId && (
-        <Link
-          href={`/templates/${workerId}`}
-          className="inline-flex items-center gap-1 text-xs font-bold text-gov-blue-700 dark:text-dark-cyan"
-        >
-          Editar agente <ChevronRight size={12} />
-        </Link>
-      )}
-    </div>
-  );
-}
-
-function ChatCommandsPanel() {
-  const [showAll, setShowAll] = useState(false);
-  const [commands, setCommands] = useState<FlyCommandEntry[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    adminService
-      .listFlyCommands()
-      .then((res) => {
-        if (!cancelled) setCommands(res.commands ?? []);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'No se pudieron cargar los comandos');
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const frequentCommands = commands.filter((command) =>
-    FREQUENT_CHAT_COMMANDS.has(command.cmd.trim().split(/\s+/)[0] ?? '')
-  );
-  const defaultCommands = frequentCommands.length > 0 ? frequentCommands : commands.slice(0, 4);
-  const visibleCommands = showAll ? commands : defaultCommands;
-  const canExpand = commands.length > defaultCommands.length;
-
-  const copyCommand = async (cmd: string) => {
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setCopied(cmd);
-      window.setTimeout(() => setCopied(null), 1500);
-    } catch {
-      /* clipboard unavailable */
-    }
-  };
-
-  return (
-    <div className="space-y-3">
-          <p className="text-xs text-gov-gray-500 flex items-center gap-2">
-            <Terminal size={14} />
-            Comandos del chat para usar dentro del Playground.
-          </p>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[10px] font-black uppercase tracking-wide text-gov-gray-500">
-              Comandos frecuentes
-            </p>
-            {canExpand && (
-              <button
-                type="button"
-                onClick={() => setShowAll((value) => !value)}
-                className="text-xs font-bold text-gov-blue-700 dark:text-dark-cyan"
-              >
-                {showAll ? 'Ver frecuentes' : 'Ver todos'}
-              </button>
-            )}
-          </div>
-
-          {error && (
-            <p className="text-xs text-amber-800 dark:text-amber-200 bg-amber-50 dark:bg-amber-950/40 rounded-xl p-3">
-              {error}
-            </p>
-          )}
-
-          <div className="space-y-2">
-            {visibleCommands.map((command) => (
-              <button
-                key={command.cmd}
-                type="button"
-                onClick={() => void copyCommand(command.cmd)}
-                className="w-full text-left rounded-2xl border dark:border-dark-border p-3 hover:border-gov-blue-400 hover:bg-gov-blue-50/50 dark:hover:bg-dark-bg transition-colors"
-              >
-                <span className="flex items-start justify-between gap-2">
-                  <span className="min-w-0">
-                    <span className="block font-mono text-xs font-black text-gov-blue-700 dark:text-dark-cyan truncate">
-                      {command.cmd}
-                    </span>
-                    <span className="block text-xs text-gov-gray-500 mt-1">
-                      {command.description}
-                    </span>
-                  </span>
-                  <Copy size={14} className="text-gov-gray-400 shrink-0 mt-0.5" />
-                </span>
-                {copied === command.cmd && (
-                  <span className="block text-[10px] font-bold text-emerald-700 dark:text-emerald-400 mt-2">
-                    Copiado
-                  </span>
-                )}
-              </button>
-            ))}
-            {!error && visibleCommands.length === 0 && (
-              <p className="text-xs text-gov-gray-500 rounded-xl border border-dashed dark:border-dark-border p-3">
-                Sin comandos disponibles por ahora.
-              </p>
-            )}
-          </div>
     </div>
   );
 }

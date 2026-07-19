@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from playground_ui_corpus import playground_ui_corpus
+
 from admin_service_corpus import admin_service_corpus
 
 
@@ -263,7 +265,7 @@ def test_template_editor_explains_db_context_storage() -> None:
 
 
 def test_playground_project_selection_forces_project_worker() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
     project_rag = Path(
         "services/api-gateway/routers/admin_domains/playground/project_rag_context.py"
     ).read_text(encoding="utf-8")

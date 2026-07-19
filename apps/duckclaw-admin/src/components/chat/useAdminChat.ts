@@ -11,8 +11,6 @@ import {
 } from '@/lib/chatMessageImages';
 import { useChatImageAttachments } from '@/components/chat/useChatImageAttachments';
 import { useChatScrollAnchor } from '@/components/chat/useChatScrollAnchor';
-import { requestNotificationPermission } from '@/lib/chatNotifications';
-import { artifactPreviewApiPath } from '@/lib/artifactPreview';
 import {
   clearEphemeralHeartbeats,
   clearLegacyEphemeralHeartbeats,
@@ -28,19 +26,36 @@ import {
   writeStoredVaultPath,
 } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
-import { accumulateUsageTokens } from '@/lib/formatTokenCount';
 import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 import { mutationHeaders } from '@/lib/csrfClient';
 import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
-import { playTtsAudio, primeAudioPlayback, type TtsAudioFormat } from '@/lib/playTtsAudio';
+import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
+import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
+
 import {
-  finalizeRunningToolHeartbeats,
-  createToolInvocationId,
-  findRunningToolHeartbeatIndex,
-  mapSseToolPhase,
-  parseToolNameFromHeartbeatText,
-  toolHeartbeatDisplayText,
-} from '@/lib/toolHeartbeat';
+  collectEphemeralMessages,
+  conversationHasLoopResult,
+  conversationIndicatesLoopScheduling,
+  isLoopProgressHeartbeat,
+  mergeHistoryWithEphemeral,
+  readStoredChatTokens,
+  readStoredWorker,
+  revokeMessageImagePreviews,
+  stripThinkingStatusHeartbeats,
+  workerStorageKey,
+} from './adminChatPure';
+import { runAdminChatTurn } from './runAdminChatTurn';
+
+
+export {
+  hasToolHeartbeatInCurrentTurn,
+  shouldSkipEmptyStreamingAssistant,
+  isThinkingStatusHeartbeat,
+  stripThinkingStatusHeartbeats,
+  conversationHasLoopResult,
+  isLoopProgressHeartbeat,
+  conversationIndicatesLoopScheduling,
+} from './adminChatPure';
 
 export type UseAdminChatOptions = {
   chatId: string;
@@ -58,188 +73,6 @@ export type UseAdminChatOptions = {
     artifact_ids?: string[];
   }) => void;
 };
-
-function artifactImagePreview(
-  tenantId: string,
-  artifactId: string
-): ChatImagePreview[] {
-  const tid = (tenantId || 'default').trim() || 'default';
-  const aid = artifactId.trim();
-  return [
-    {
-      url: artifactPreviewApiPath(tid, aid),
-      name: `${aid}.png`,
-      artifactId: aid,
-      tenantId: tid,
-    },
-  ];
-}
-
-/** Heartbeats/plan/tool no están en Redis; conservarlos si recargamos historial en vivo. */
-function mergeHistoryWithEphemeral(server: ChatMsg[], ephemeral: ChatMsg[]): ChatMsg[] {
-  if (!ephemeral.length) return server;
-  return [...server, ...ephemeral];
-}
-
-function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
-  return messages.filter((m) => m.role === 'heartbeat');
-}
-
-/** True si hay heartbeat de herramienta en el turno actual (entre último user y assistant streaming). */
-export function hasToolHeartbeatInCurrentTurn(messages: ChatMsg[]): boolean {
-  const streamIdx = messages.findIndex(
-    (x, i) => x.role === 'assistant' && x.streaming && i === messages.length - 1
-  );
-  const end = streamIdx >= 0 ? streamIdx : messages.length;
-  for (let i = end - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role === 'user') break;
-    if (m.role === 'heartbeat' && m.heartbeatKind === 'tool') return true;
-  }
-  return false;
-}
-
-/** No renderizar burbuja assistant vacía mientras hay tool heartbeats (ThinkingBubble solo sin tools). */
-export function shouldSkipEmptyStreamingAssistant(
-  message: ChatMsg,
-  messages: ChatMsg[]
-): boolean {
-  if (message.role !== 'assistant' || !message.streaming) return false;
-  if ((message.text || '').trim()) return false;
-  if (message.imagePreviews?.length) return false;
-  return hasToolHeartbeatInCurrentTurn(messages);
-}
-
-export function isThinkingStatusHeartbeat(m: ChatMsg | undefined): boolean {
-  return (
-    m?.role === 'heartbeat' &&
-    m.heartbeatKind === 'status' &&
-    /^Pensando/i.test((m.text || '').trim())
-  );
-}
-
-/** Remove stale "Pensando…" status heartbeats from persisted chat history. */
-export function stripThinkingStatusHeartbeats(messages: ChatMsg[]): ChatMsg[] {
-  return messages.filter((m) => !isThinkingStatusHeartbeat(m));
-}
-
-/** Server history includes loop system user turn plus assistant reply. */
-export function conversationHasLoopResult(messages: ChatMsg[]): boolean {
-  return (
-    messages.some(
-      (m) =>
-        m.role === 'user' &&
-        ((m.text || '').includes('[Ciclo loop]') ||
-          (m.text || '').includes('[Ciclo meditate]'))
-    ) && messages.some((m) => m.role === 'assistant')
-  );
-}
-
-export function isLoopProgressHeartbeat(text: string): boolean {
-  const t = text || '';
-  return (
-    t.includes('[loop]') ||
-    t.includes('[meditate]') ||
-    t.includes('[loop] active_mode_started') ||
-    t.includes('[loop] self_tick_dispatched') ||
-    t.includes('[meditate] active_mode_started') ||
-    t.includes('[meditate] self_tick_dispatched')
-  );
-}
-
-/** True si el hilo indica /loop activo (footer o status reciente). */
-export function conversationIndicatesLoopScheduling(messages: ChatMsg[]): boolean {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== 'assistant') continue;
-    const t = (m.text || '').toLowerCase();
-    if (t.includes('modo /loop:** inactivo') || t.includes('modo /loop: inactivo')) {
-      return false;
-    }
-    if (t.includes('modo /loop activo') || t.includes('próximo ciclo /loop')) {
-      return true;
-    }
-    if (t.includes('/loop off') || t.includes('detenido')) {
-      return false;
-    }
-  }
-  return false;
-}
-
-function workerStorageKey(chatId: string): string {
-  return `duckclaw-admin-worker-${chatId}`;
-}
-
-function revokeMessageImagePreviews(messages: ChatMsg[]): void {
-  for (const m of messages) {
-    if (!m.imagePreviews?.length) continue;
-    for (const img of m.imagePreviews) {
-      if (!img.url.startsWith('blob:')) continue;
-      try {
-        URL.revokeObjectURL(img.url);
-      } catch {
-        /* ignore */
-      }
-    }
-  }
-}
-
-function readStoredWorker(chatId: string): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return sessionStorage.getItem(workerStorageKey(chatId));
-  } catch {
-    return null;
-  }
-}
-
-function chatTokenStorageKey(chatId: string): string {
-  return `duckclaw.chat_tokens.${chatId}`;
-}
-
-function readStoredChatTokens(chatId: string): number {
-  if (!chatId || typeof window === 'undefined') return 0;
-  try {
-    const raw = sessionStorage.getItem(chatTokenStorageKey(chatId));
-    const n = raw ? Number.parseInt(raw, 10) : 0;
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function writeStoredChatTokens(chatId: string, total: number): void {
-  if (!chatId || typeof window === 'undefined') return;
-  try {
-    sessionStorage.setItem(chatTokenStorageKey(chatId), String(Math.max(0, Math.floor(total))));
-  } catch {
-    /* ignore quota */
-  }
-}
-
-function applyContextEstimatedTokens(
-  chatId: string,
-  setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
-  contextEstimated?: number | null
-): void {
-  if (contextEstimated == null || !Number.isFinite(contextEstimated) || contextEstimated < 0) return;
-  const next = Math.floor(contextEstimated);
-  setSessionTokenTotal(next);
-  writeStoredChatTokens(chatId, next);
-}
-
-function applySessionTokenDelta(
-  chatId: string,
-  setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
-  usage?: Record<string, number> | null
-): void {
-  if (!usage) return;
-  setSessionTokenTotal((prev) => {
-    const next = accumulateUsageTokens(prev, usage);
-    if (next !== prev) writeStoredChatTokens(chatId, next);
-    return next;
-  });
-}
 
 export type AdminChatController = ReturnType<typeof useAdminChat>;
 
@@ -350,7 +183,7 @@ export function useAdminChat({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
-  const loopHistoryReloadRef = useRef<ReturnType<typeof window.setTimeout>[]>([]);
+  const loopHistoryReloadRef = useRef<number[]>([]);
   const [loopSchedulePolling, setLoopSchedulePolling] = useState(false);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -630,415 +463,35 @@ export function useAdminChat({
       payloadImages: { mime_type: string; data_base64: string }[] = [],
       userPreviewImages: ChatImagePreview[] = []
     ) => {
-    if (!text && payloadImages.length === 0) return;
-    void requestNotificationPermission();
-    abortControllerRef.current?.abort();
-    const abortController = new AbortController();
-    abortControllerRef.current = abortController;
-
-    const userPreviews =
-      userPreviewImages.length > 0
-        ? userPreviewImages
-        : payloadImages.length > 0
-          ? userPreviewsFromPayload(payloadImages)
-          : undefined;
-    const userLabel = text;
-    let loopFollowUp = /^\/(loop|meditate)\b/i.test(text.trim());
-
-    setLoading(true);
-    thinkingStartedAt.current = Date.now();
-    setThinkingIdentity({ workerId, swarmSlot: 1 });
-    setThinking(true);
-    setError(null);
-    setMessages((m) => [
-      ...m,
-      {
-        role: 'user',
-        text: userLabel,
-        imagePreviews: userPreviews?.length ? userPreviews : undefined,
-      },
-      { role: 'assistant', text: '', streaming: true },
-    ]);
-
-    const appendAssistant = (chunk: string) => {
-      if (chunk) setThinking(false);
-      setMessages((m) => {
-        if (m.length === 0) return m;
-        const next = [...m];
-        const last = next[next.length - 1];
-        if (last?.role !== 'assistant') return m;
-        next[next.length - 1] = { ...last, text: last.text + chunk, streaming: true };
-        return next;
+      await runAdminChatTurn({
+        text,
+        payloadImages,
+        userPreviewImages,
+        chatId,
+        workerId,
+        projectId,
+        knowledgeScope,
+        vaultPath,
+        voiceResponseMode,
+        effectiveTenantId: config?.effective_tenant_id,
+        telegramUserId: config?.telegram_user_id,
+        abortControllerRef,
+        thinkingStartedAt,
+        setLoading,
+        setThinking,
+        setThinkingIdentity,
+        setError,
+        setMessages,
+        setSessionTokenTotal,
+        setContextTokensEstimated,
+        setLoopSchedulePolling,
+        finalizeCancelledGeneration,
+        clearLoopHistoryReload,
+        scheduleLoopHistoryReload,
+        onConversationActivity,
+        onSandboxArtifacts,
       });
-    };
-
-    const attachArtifactToStreamingAssistant = (
-      artifactId: string,
-      tenantId: string
-    ) => {
-      const previews = artifactImagePreview(tenantId, artifactId);
-      setThinking(false);
-      setMessages((m) => {
-        const idx = m.findIndex(
-          (x, i) => x.role === 'assistant' && x.streaming && i === m.length - 1
-        );
-        if (idx < 0) return m;
-        const next = [...m];
-        next[idx] = { ...next[idx], imagePreviews: previews };
-        return next;
-      });
-    };
-
-    const appendHeartbeat = (payload: {
-      text: string;
-      kind?: 'plan' | 'tool' | 'status' | 'visual' | 'loop_tick';
-      worker_id?: string;
-      swarm_slot?: number;
-      artifact_id?: string;
-      artifact_tenant_id?: string;
-      sandbox_run_id?: string;
-      artifact_ids?: string[];
-      tool_name?: string;
-      tool_phase?: 'start' | 'done' | 'error';
-      elapsed_ms?: number;
-    }) => {
-      const kind = payload.kind ?? 'status';
-      if (
-        kind === 'visual' &&
-        (payload.sandbox_run_id?.trim() || (payload.artifact_ids?.length ?? 0) > 0)
-      ) {
-        onSandboxArtifacts?.({
-          sandbox_run_id: payload.sandbox_run_id,
-          artifact_ids: payload.artifact_ids,
-        });
-      }
-      const hbWorker = (payload.worker_id || workerId || '').trim();
-      const hbSlot =
-        payload.swarm_slot != null && Number.isFinite(payload.swarm_slot)
-          ? Math.max(1, Math.floor(payload.swarm_slot))
-          : 1;
-      if (hbWorker || hbSlot > 1) {
-        setThinkingIdentity((prev) => ({
-          workerId: hbWorker || prev.workerId || workerId,
-          swarmSlot: hbSlot,
-        }));
-      }
-      const aid = (payload.artifact_id || '').trim();
-      if (aid) {
-        const tid =
-          (payload.artifact_tenant_id || config?.effective_tenant_id || 'default').trim() ||
-          'default';
-        void attachArtifactToStreamingAssistant(aid, tid);
-      }
-      const toolName =
-        (payload.tool_name || '').trim() ||
-        parseToolNameFromHeartbeatText(payload.text) ||
-        undefined;
-      let effectiveKind = kind;
-      if (effectiveKind === 'tool' && !toolName) {
-        // Heartbeat legacy (p. ej. noVNC) sin tool_name: no crear bloque "Usando: tool".
-        effectiveKind = 'status';
-      }
-      const uiPhase = mapSseToolPhase(payload.tool_phase);
-      const isToolHb = effectiveKind === 'tool' && Boolean(toolName);
-      if (kind === 'tool') {
-        setThinking(false);
-      }
-      setMessages((m) => {
-        const streamingIdx = m.findIndex(
-          (x, i) => x.role === 'assistant' && x.streaming && i === m.length - 1
-        );
-        const insertAt = streamingIdx >= 0 ? streamingIdx : m.length;
-        const elapsedMs =
-          payload.tool_phase === 'done' || payload.tool_phase === 'error'
-            ? payload.elapsed_ms
-            : undefined;
-
-        if (isToolHb && toolName) {
-          const isStart = payload.tool_phase === 'start' || uiPhase === 'running';
-          const runningIdx = findRunningToolHeartbeatIndex(m, toolName, insertAt);
-          const running = runningIdx >= 0 ? m[runningIdx] : null;
-
-          if (isStart) {
-            if (running) {
-              const merged: ChatMsg = {
-                ...running,
-                text: toolHeartbeatDisplayText(toolName, 'running', undefined),
-                toolPhase: 'running',
-                workerId: hbWorker || running.workerId,
-                swarmSlot: hbSlot,
-              };
-              const next = [...m];
-              next[runningIdx] = merged;
-              return next;
-            }
-            const startedAt = Date.now();
-            const merged: ChatMsg = {
-              role: 'heartbeat',
-              text: toolHeartbeatDisplayText(toolName, 'running', undefined),
-              heartbeatKind: 'tool',
-              workerId: hbWorker || undefined,
-              swarmSlot: hbSlot,
-              toolName,
-              toolInvocationId: createToolInvocationId(toolName),
-              toolPhase: 'running',
-              toolStartedAt: startedAt,
-            };
-            const next = [...m];
-            next.splice(insertAt, 0, merged);
-            return next;
-          }
-
-          const targetIdx = runningIdx;
-          const existing = targetIdx >= 0 ? m[targetIdx] : null;
-          const startedAt = existing?.toolStartedAt ?? Date.now();
-          const merged: ChatMsg = {
-            role: 'heartbeat',
-            text: toolHeartbeatDisplayText(toolName, uiPhase, elapsedMs),
-            heartbeatKind: 'tool',
-            workerId: hbWorker || existing?.workerId,
-            swarmSlot: hbSlot,
-            toolName,
-            toolInvocationId: existing?.toolInvocationId ?? createToolInvocationId(toolName),
-            toolPhase: uiPhase ?? 'done',
-            toolStartedAt: startedAt,
-            toolElapsedMs:
-              elapsedMs != null && Number.isFinite(elapsedMs) ? elapsedMs : undefined,
-          };
-          if (targetIdx >= 0) {
-            const next = [...m];
-            next[targetIdx] = merged;
-            return next;
-          }
-          const next = [...m];
-          next.splice(insertAt, 0, merged);
-          return next;
-        }
-
-        const hb: ChatMsg = {
-          role: 'heartbeat',
-          text: payload.text,
-          heartbeatKind: effectiveKind,
-          workerId: hbWorker || undefined,
-          swarmSlot: hbSlot,
-        };
-        if (streamingIdx >= 0) {
-          const next = [...m];
-          next.splice(streamingIdx, 0, hb);
-          return next;
-        }
-        return [...m, hb];
-      });
-      if (
-        (effectiveKind === 'status' || payload.kind === 'loop_tick') &&
-        (isLoopProgressHeartbeat(payload.text) || payload.kind === 'loop_tick')
-      ) {
-        setLoopSchedulePolling(true);
-        scheduleLoopHistoryReload();
-      }
-    };
-
-    primeAudioPlayback();
-    try {
-      let assignedSuffix = '';
-      let elapsedFooter = '';
-      let authoritativeResponse = '';
-      const streamAudioRef: {
-        current: {
-          audioBase64?: string;
-          audioFormat?: TtsAudioFormat;
-          audioUnavailable?: boolean;
-        } | null;
-      } = { current: null };
-      const streamVisual: {
-        figure_base64?: string;
-        fly_charts_b64?: string[];
-        fly_chart_artifact_ids?: string[];
-        fly_chart_names?: string[];
-        artifact_id?: string;
-        artifact_tenant_id?: string;
-      } = {};
-      await adminService.playgroundChatStream(
-        {
-          worker_id: workerId,
-          project_id: projectId || undefined,
-          knowledge_scope: knowledgeScope || undefined,
-          message: text,
-          chat_id: chatId,
-          tenant_id: config?.effective_tenant_id ?? 'default',
-          telegram_user_id: config?.telegram_user_id,
-          vault_db_path: vaultPath || undefined,
-          images: payloadImages.length ? payloadImages : undefined,
-          voice_response: voiceResponseMode,
-        },
-        {
-          onToken: appendAssistant,
-          onHeartbeat: appendHeartbeat,
-          onAudio: (payload) => {
-            streamAudioRef.current = {
-              audioBase64: payload.audio_base64,
-              audioFormat: payload.audio_format,
-              audioUnavailable: Boolean(payload.audio_unavailable),
-            };
-          },
-          onDone: (meta) => {
-            if (
-              meta.context_estimated_tokens != null &&
-              Number.isFinite(meta.context_estimated_tokens)
-            ) {
-              applyContextEstimatedTokens(chatId, setSessionTokenTotal, meta.context_estimated_tokens);
-              setContextTokensEstimated(true);
-            } else {
-              applySessionTokenDelta(chatId, setSessionTokenTotal, meta.usage_tokens);
-            }
-            if ((meta.response || '').trim()) {
-              authoritativeResponse = meta.response.trim();
-            }
-            if (
-              authoritativeResponse.includes('Ciclo loop iniciado') ||
-              authoritativeResponse.includes('Ciclo meditate iniciado') ||
-              authoritativeResponse.includes('Modo /loop activo') ||
-              authoritativeResponse.includes('Modo /meditate activo')
-            ) {
-              loopFollowUp = true;
-              setLoopSchedulePolling(true);
-            }
-            const respLower = authoritativeResponse.toLowerCase();
-            if (
-              respLower.includes('modo /loop') &&
-              (respLower.includes('inactivo') || respLower.includes('detenido'))
-            ) {
-              setLoopSchedulePolling(false);
-              clearLoopHistoryReload();
-            }
-            if (meta.assigned_worker_id && meta.assigned_worker_id !== workerId) {
-              assignedSuffix = ` (worker: ${meta.assigned_worker_id})`;
-            }
-            if (meta.elapsed_ms != null && Number.isFinite(meta.elapsed_ms)) {
-              elapsedFooter = `\n\nTiempo: ${(meta.elapsed_ms / 1000).toFixed(2)}s`;
-            }
-            if (
-              meta.figure_base64 ||
-              meta.fly_charts_b64?.length ||
-              meta.fly_chart_artifact_ids?.length ||
-              meta.artifact_id
-            ) {
-              streamVisual.figure_base64 = meta.figure_base64;
-              streamVisual.fly_charts_b64 = meta.fly_charts_b64;
-              streamVisual.fly_chart_artifact_ids = meta.fly_chart_artifact_ids;
-              streamVisual.fly_chart_names = meta.fly_chart_names;
-              streamVisual.artifact_id = meta.artifact_id;
-              streamVisual.artifact_tenant_id = meta.artifact_tenant_id;
-            }
-          },
-        },
-        { signal: abortController.signal }
-      );
-      if (abortController.signal.aborted) {
-        finalizeCancelledGeneration();
-        return;
-      }
-      const capturedStreamAudio = streamAudioRef.current;
-      const tenantForArtifact =
-        (streamVisual.artifact_tenant_id || config?.effective_tenant_id || 'default').trim() ||
-        'default';
-      let assistantPreviews: ChatMsg['imagePreviews'] | undefined;
-      const chartNamesFromStream = (streamVisual.fly_chart_names ?? []).filter((n) => n?.trim());
-      const defaultChartNames = ['metrics-overview.png', 'participation-pie.png'];
-      const chartNameAt = (index: number) =>
-        chartNamesFromStream[index] ?? defaultChartNames[index] ?? `chart-${index + 1}.png`;
-      const artifactIdsFromFly = (streamVisual.fly_chart_artifact_ids ?? []).filter((id) =>
-        id?.trim()
-      );
-      const chartsFromFly = (streamVisual.fly_charts_b64 ?? []).filter((b) => b?.trim());
-      if (artifactIdsFromFly.length > 0) {
-        assistantPreviews = artifactIdsFromFly.flatMap((aid, i) =>
-          artifactImagePreview(tenantForArtifact, aid).map((p) => ({
-            ...p,
-            name: chartNameAt(i),
-          }))
-        );
-      } else if (chartsFromFly.length > 0) {
-        assistantPreviews = chartsFromFly.map((b64, i) => {
-          const raw = b64.trim();
-          const src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`;
-          return { url: src, name: chartNameAt(i) };
-        });
-      } else if (streamVisual.figure_base64?.trim()) {
-        const raw = streamVisual.figure_base64.trim();
-        const src = raw.startsWith('data:') ? raw : `data:image/png;base64,${raw}`;
-        assistantPreviews = [{ url: src, name: 'imagen-generada.png' }];
-      } else if (streamVisual.artifact_id) {
-        assistantPreviews = artifactImagePreview(tenantForArtifact, streamVisual.artifact_id);
-      }
-      setMessages((m) => {
-        if (m.length === 0) return m;
-        const next = [...m];
-        const last = next[next.length - 1];
-        if (last?.role === 'assistant') {
-          const streamed = (last.text || '').trim();
-          const base =
-            authoritativeResponse.length > streamed.length
-              ? authoritativeResponse
-              : streamed || '(sin respuesta)';
-          next[next.length - 1] = {
-            role: 'assistant',
-            text: base + assignedSuffix + elapsedFooter,
-            streaming: false,
-            imagePreviews: assistantPreviews ?? last.imagePreviews,
-            audioBase64: capturedStreamAudio?.audioBase64,
-            audioFormat: capturedStreamAudio?.audioFormat,
-            audioUnavailable: capturedStreamAudio?.audioUnavailable,
-          };
-        }
-        return finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next));
-      });
-      if (capturedStreamAudio?.audioBase64) {
-        const playResult = await playTtsAudio(capturedStreamAudio.audioBase64, {
-          format: capturedStreamAudio.audioFormat,
-          source: 'chat-sse',
-        });
-        if (!playResult.ok) {
-          setMessages((m) => {
-            if (m.length === 0) return m;
-            const next = [...m];
-            const last = next[next.length - 1];
-            if (last?.role === 'assistant') {
-              next[next.length - 1] = {
-                ...last,
-                audioPlayError: playResult.reason,
-              };
-            }
-            return next;
-          });
-        }
-      }
-    } catch (e) {
-      if (abortController.signal.aborted) {
-        finalizeCancelledGeneration();
-        return;
-      }
-      const msg = e instanceof Error ? e.message : 'Error';
-      setMessages((m) => {
-        const trimmed =
-          m.length > 0 && m[m.length - 1]?.role === 'assistant' && m[m.length - 1]?.streaming
-            ? m.slice(0, -1)
-            : m;
-        return stripThinkingStatusHeartbeats([...trimmed, { role: 'error', text: msg }]);
-      });
-      setError(msg);
-    } finally {
-      if (abortControllerRef.current === abortController) {
-        abortControllerRef.current = null;
-      }
-      setLoading(false);
-      setThinking(false);
-      if (loopFollowUp && !abortController.signal.aborted) {
-        scheduleLoopHistoryReload();
-      }
-      onConversationActivity?.();
-    }
-  },
+    },
     [
       chatId,
       config?.effective_tenant_id,
@@ -1051,12 +504,11 @@ export function useAdminChat({
       projectId,
       knowledgeScope,
       vaultPath,
-      imageAttachments,
       voiceResponseMode,
-      reloadHistory,
       scheduleLoopHistoryReload,
     ]
   );
+
 
   const send = useCallback(async () => {
     const text = input.trim();

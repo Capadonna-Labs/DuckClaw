@@ -8,14 +8,17 @@ def test_session_db_path_helpers_exist() -> None:
 
 
 def test_playground_shows_session_database_chip() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    """Chip de BD de sesión: componente + helpers; wiring UI puede vivir en Run Settings."""
     chip = Path("apps/duckclaw-admin/src/components/playground/SessionDatabaseChip.tsx").read_text(
         encoding="utf-8"
     )
-    assert "SessionDatabaseChip" in page
-    assert 'title="Base de datos de esta sesión"' in page
+    panel = Path(
+        "apps/duckclaw-admin/src/components/playground/PlaygroundRunSettingsPanel.tsx"
+    ).read_text(encoding="utf-8")
+    assert "export function SessionDatabaseChip" in chip
     assert "sessionDbScopeLabel" in chip
     assert "BD sin resolver" in chip
+    assert 'label="DuckDB"' in panel or "activeVaultPath" in panel
 
 
 def test_knowledge_page_status_badges_and_scope_layout() -> None:

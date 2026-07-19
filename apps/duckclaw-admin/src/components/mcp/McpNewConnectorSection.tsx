@@ -1,68 +1,76 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Loader2, Plug } from 'lucide-react';
+import { CheckCircle2, KeyRound, Loader2, LogIn, Plug } from 'lucide-react';
 import ConfirmModal from '@/components/admin/ConfirmModal';
 import {
   adminService,
   type McpConnectorPreset,
+  type McpConnectorSummary,
 } from '@/services/adminService';
 import { pollWriteTask } from '@/lib/pollWriteTask';
 import {
+  existingPresetIdsFromConnectors,
+  groupMcpPresetsForSelect,
   presetAdminLabel,
   presetAuthHint,
   presetAuthKindLabel,
   presetConnectorId,
-  presetEgressSummary,
-  presetTransportLabel,
+  presetUsesOAuthPkce,
 } from '@/lib/mcpPresetAuth';
+import { SearchableGroupedSelect } from '@/components/shared/SearchableGroupedSelect';
 
 type McpNewConnectorSectionProps = {
   canWrite: boolean;
+  /** Conectores ya materializados: se marcan en el selector. */
+  existingConnectors?: Pick<McpConnectorSummary, 'preset_id' | 'connector_id'>[];
   onCreated?: () => void | Promise<void>;
 };
 
-function PresetHint({ preset }: { preset: McpConnectorPreset }) {
-  const authHint = presetAuthHint(preset);
-
-  return (
-    <div className="mt-4 rounded-2xl border border-dashed border-gov-gray-200 bg-gov-gray-50 p-4 text-sm dark:border-dark-border dark:bg-dark-bg">
-      <p className="text-xs font-bold uppercase tracking-wide text-gov-gray-500 dark:text-dark-muted">
-        Vista previa (aún no creado)
-      </p>
-      <p className="mt-2 font-mono text-xs text-gov-gray-500 dark:text-dark-muted">
-        Identificador:{' '}
-        <span className="font-bold text-gov-gray-800 dark:text-dark-text">
-          {presetConnectorId(preset)}
-        </span>
-      </p>
-      <dl className="mt-3 grid gap-2 sm:grid-cols-2">
-        <div>
-          <dt className="text-xs font-bold uppercase text-gov-gray-500">Transporte</dt>
-          <dd>{presetTransportLabel(preset)}</dd>
-        </div>
-        <div>
-          <dt className="text-xs font-bold uppercase text-gov-gray-500">Autenticación</dt>
-          <dd>{presetAuthKindLabel(preset)}</dd>
-        </div>
-        <div className="sm:col-span-2">
-          <dt className="text-xs font-bold uppercase text-gov-gray-500">Red</dt>
-          <dd>{presetEgressSummary(preset)}</dd>
-        </div>
-      </dl>
-      <p className="mt-2 text-xs text-gov-gray-600 dark:text-dark-muted">{authHint}</p>
-    </div>
-  );
+function oauthRedirectUri(): string {
+  return `${window.location.origin}/api/admin/mcp/connectors/oauth/callback`;
 }
 
-export function McpNewConnectorSection({ canWrite, onCreated }: McpNewConnectorSectionProps) {
+export function McpNewConnectorSection({
+  canWrite,
+  existingConnectors = [],
+  onCreated,
+}: McpNewConnectorSectionProps) {
   const [presets, setPresets] = useState<McpConnectorPreset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState('');
+  const [bearerToken, setBearerToken] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const existingPresetIds = useMemo(
+    () => existingPresetIdsFromConnectors(existingConnectors),
+    [existingConnectors]
+  );
+
+  const presetGroups = useMemo(() => groupMcpPresetsForSelect(presets), [presets]);
+
+  const selectGroups = useMemo(
+    () =>
+      presetGroups.map((group) => ({
+        id: group.id,
+        label: group.label,
+        options: group.presets.map((preset) => {
+          const created = existingPresetIds.has(preset.preset_id);
+          return {
+            value: preset.preset_id,
+            label: created
+              ? `${presetAdminLabel(preset)} (ya creado)`
+              : presetAdminLabel(preset),
+            meta: presetAuthKindLabel(preset),
+            disabled: created,
+          };
+        }),
+      })),
+    [presetGroups, existingPresetIds]
+  );
 
   const loadPresets = useCallback(() => {
     setLoading(true);
@@ -71,11 +79,18 @@ export function McpNewConnectorSection({ canWrite, onCreated }: McpNewConnectorS
       .listMcpConnectorPresets()
       .then((presetRows) => {
         setPresets(presetRows);
-        setSelectedPreset((prev) => prev || presetRows[0]?.preset_id || '');
+        setSelectedPreset((prev) => {
+          if (prev && presetRows.some((p) => p.preset_id === prev)) return prev;
+          const groups = groupMcpPresetsForSelect(presetRows);
+          const firstAvailable = groups
+            .flatMap((g) => g.presets)
+            .find((p) => !existingPresetIdsFromConnectors(existingConnectors).has(p.preset_id));
+          return firstAvailable?.preset_id || presetRows[0]?.preset_id || '';
+        });
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'No se pudieron cargar plantillas'))
       .finally(() => setLoading(false));
-  }, []);
+  }, [existingConnectors]);
 
   useEffect(() => {
     loadPresets();
@@ -87,36 +102,77 @@ export function McpNewConnectorSection({ canWrite, onCreated }: McpNewConnectorS
   );
 
   const selected = selectedPreset ? presetById[selectedPreset] : undefined;
+  const alreadyCreated = Boolean(selectedPreset && existingPresetIds.has(selectedPreset));
   const previewId = selected ? presetConnectorId(selected) : selectedPreset ? `mcp_${selectedPreset}` : '';
   const previewName = selected ? presetAdminLabel(selected) : selectedPreset;
+  const needsOAuth = selected ? presetUsesOAuthPkce(selected) : false;
+  const needsBearer = Boolean(selected && !needsOAuth && selected.auth_kind === 'bearer');
+
+  const primaryLabel = alreadyCreated
+    ? 'Ya creado'
+    : needsOAuth
+      ? 'Crear y conectar OAuth'
+      : needsBearer
+        ? 'Crear y guardar token'
+        : 'Crear conector';
+
+  const materializeConnector = async (): Promise<string> => {
+    const result = await adminService.createMcpConnector({ preset_id: selectedPreset });
+    if (result.task_id) {
+      const polled = await pollWriteTask(result.task_id);
+      if (polled.state === 'failed') {
+        throw new Error(polled.detail || 'La creación no se aplicó en DB');
+      }
+      if (polled.state === 'timeout' || polled.state === 'not_found') {
+        throw new Error(
+          polled.state === 'timeout'
+            ? 'Creación encolada pero no confirmada (db-writer / lock DuckDB). Reintenta.'
+            : 'No se confirmó la creación. Refresca la lista o reintenta.'
+        );
+      }
+    }
+    return (
+      result.connector?.connector_id ||
+      (selected ? presetConnectorId(selected) : `mcp_${selectedPreset}`)
+    );
+  };
 
   const createFromPreset = async () => {
-    if (!selectedPreset || busy) return;
+    if (!selectedPreset || busy || alreadyCreated) return;
+    if (needsBearer && !bearerToken.trim()) {
+      setError('Pega el token Bearer antes de crear el conector.');
+      setConfirmOpen(false);
+      return;
+    }
+
     setBusy(true);
     setError(null);
     setSuccess(null);
     try {
-      const result = await adminService.createMcpConnector({ preset_id: selectedPreset });
-      if (result.task_id) {
-        const polled = await pollWriteTask(result.task_id);
-        if (polled.state === 'failed') {
-          throw new Error(polled.detail || 'La creación no se aplicó en DB');
-        }
-        if (polled.state === 'timeout' || polled.state === 'not_found') {
-          throw new Error(
-            polled.state === 'timeout'
-              ? 'Creación encolada pero no confirmada (db-writer / lock DuckDB). Reintenta.'
-              : 'No se confirmó la creación. Refresca la lista o reintenta.'
-          );
-        }
+      const connectorId = await materializeConnector();
+
+      if (needsBearer) {
+        await adminService.setMcpConnectorAuth(connectorId, bearerToken.trim());
+        setBearerToken('');
+        setSuccess(`Conector «${previewName || connectorId}» creado y autenticado con Bearer.`);
+        await onCreated?.();
+        return;
       }
-      const id =
-        result.connector?.connector_id ||
-        (selected ? presetConnectorId(selected) : `mcp_${selectedPreset}`);
-      const name = result.connector?.display_name || previewName || id;
-      setSuccess(
-        `Conector «${name}» creado (${id}). Aparece en la lista abajo — continúa con OAuth/Bearer y Grant worker.`
-      );
+
+      if (needsOAuth) {
+        const isGoogleWorkspace =
+          selected?.metadata?.oauth_provider === 'google_workspace' ||
+          selectedPreset.startsWith('google_');
+        await onCreated?.();
+        const oauth = await adminService.startMcpConnectorOAuth(
+          connectorId,
+          isGoogleWorkspace ? '' : oauthRedirectUri()
+        );
+        window.location.href = oauth.authorization_url;
+        return;
+      }
+
+      setSuccess(`Conector «${previewName || connectorId}» creado (${connectorId}).`);
       await onCreated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo crear el conector');
@@ -138,17 +194,20 @@ export function McpNewConnectorSection({ canWrite, onCreated }: McpNewConnectorS
     <>
       <ConfirmModal
         isOpen={confirmOpen}
-        title="Crear conector MCP"
-        description="Se materializará una instancia en DuckDB desde la plantilla elegida. Luego hay que autorizar y dar grant a workers."
-        confirmLabel="Sí, crear"
+        title={primaryLabel}
+        description={
+          needsOAuth
+            ? 'Se crea el conector y se abre el flujo OAuth del proveedor.'
+            : needsBearer
+              ? 'Se crea el conector y se guarda el token Bearer como secreto.'
+              : 'Se materializa una instancia en DuckDB desde la plantilla elegida.'
+        }
+        confirmLabel={needsOAuth ? 'Sí, crear y conectar' : 'Sí, crear'}
         isLoading={busy}
         details={[
-          { label: 'Plantilla', value: previewName || selectedPreset },
+          { label: 'MCP', value: previewName || selectedPreset },
           { label: 'ID', value: previewId || '—' },
-          {
-            label: 'Auth',
-            value: selected ? presetAuthKindLabel(selected) : '—',
-          },
+          { label: 'Auth', value: selected ? presetAuthKindLabel(selected) : '—' },
         ]}
         onConfirm={() => void createFromPreset()}
         onCancel={() => {
@@ -169,38 +228,80 @@ export function McpNewConnectorSection({ canWrite, onCreated }: McpNewConnectorS
           </div>
         </div>
       ) : null}
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-xs font-bold uppercase tracking-wide text-gov-gray-500">
-          Plantilla MCP
-          <select
-            value={selectedPreset}
-            onChange={(e) => {
-              setSelectedPreset(e.target.value);
-              setSuccess(null);
+
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="flex min-w-[280px] flex-1 flex-col gap-1 text-xs font-bold uppercase tracking-wide text-gov-gray-500">
+            MCP
+            <SearchableGroupedSelect
+              value={selectedPreset}
+              groups={selectGroups}
+              onChange={(next) => {
+                setSelectedPreset(next);
+                setBearerToken('');
+                setSuccess(null);
+                setError(null);
+              }}
+              placeholder="Buscar o elegir MCP…"
+              searchPlaceholder="Buscar por nombre, auth, host…"
+              emptyLabel="Ningún MCP coincide con la búsqueda"
+              aria-label="Elegir plantilla MCP"
+              className="font-normal normal-case"
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setConfirmOpen(true);
             }}
-            className="min-w-[220px] rounded-xl border border-gov-gray-200 bg-white px-3 py-2 text-sm font-normal normal-case dark:border-dark-border dark:bg-dark-bg"
+            disabled={
+              !selectedPreset ||
+              busy ||
+              alreadyCreated ||
+              (needsBearer && !bearerToken.trim())
+            }
+            className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
           >
-            {presets.map((preset) => (
-              <option key={preset.preset_id} value={preset.preset_id}>
-                {presetAdminLabel(preset)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button
-          type="button"
-          onClick={() => {
-            setError(null);
-            setConfirmOpen(true);
-          }}
-          disabled={!selectedPreset || busy}
-          className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
-        >
-          {busy ? <Loader2 size={16} className="animate-spin" /> : <Plug size={16} />}
-          Crear conector
-        </button>
+            {busy ? (
+              <Loader2 size={16} className="animate-spin" />
+            ) : needsOAuth && !alreadyCreated ? (
+              <LogIn size={16} />
+            ) : needsBearer && !alreadyCreated ? (
+              <KeyRound size={16} />
+            ) : (
+              <Plug size={16} />
+            )}
+            {primaryLabel}
+          </button>
+        </div>
+
+        {selected ? (
+          <p className="text-xs text-gov-gray-600 dark:text-dark-muted">
+            {alreadyCreated
+              ? 'Este MCP ya está en la lista de abajo. Configura auth o grants allí.'
+              : needsOAuth
+                ? 'Al confirmar se crea el conector y se abre OAuth del proveedor.'
+                : needsBearer
+                  ? 'Pega el token y confirma: se crea el conector y se guarda el secreto.'
+                  : presetAuthHint(selected)}
+          </p>
+        ) : null}
+
+        {needsBearer && !alreadyCreated ? (
+          <label className="flex max-w-xl flex-col gap-1 text-xs font-bold uppercase tracking-wide text-gov-gray-500">
+            Token Bearer
+            <input
+              type="password"
+              autoComplete="off"
+              value={bearerToken}
+              onChange={(e) => setBearerToken(e.target.value)}
+              placeholder="pega el token aquí"
+              className="rounded-xl border border-gov-gray-200 bg-white px-3 py-2 text-sm font-normal normal-case dark:border-dark-border dark:bg-dark-bg"
+            />
+          </label>
+        ) : null}
       </div>
-      {selected ? <PresetHint preset={selected} /> : null}
     </>
   );
 }

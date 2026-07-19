@@ -41,3 +41,23 @@ def test_mcp_legacy_routes_redirect_to_unified_tabs() -> None:
     config = Path("apps/duckclaw-admin/src/app/(admin)/mcp/config/page.tsx").read_text(encoding="utf-8")
     assert "redirect('/mcp?tab=catalog')" in catalog
     assert "redirect('/mcp?tab=config')" in config
+
+
+def test_mcp_new_connector_selector_groups_by_product() -> None:
+    section = Path(
+        "apps/duckclaw-admin/src/components/mcp/McpNewConnectorSection.tsx"
+    ).read_text(encoding="utf-8")
+    auth = Path("apps/duckclaw-admin/src/lib/mcpPresetAuth.ts").read_text(encoding="utf-8")
+    combobox = Path(
+        "apps/duckclaw-admin/src/components/shared/SearchableGroupedSelect.tsx"
+    ).read_text(encoding="utf-8")
+    assert "SearchableGroupedSelect" in section
+    assert "groupMcpPresetsForSelect" in section
+    assert "existingConnectors" in section
+    assert "(ya creado)" in section
+    assert "filterMcpPresets" in auth
+    assert "max-h-72" in combobox or 'data-virtualized="true"' in combobox or "data-virtualized" in combobox
+    assert "VIEWPORT_H" in combobox or "virtualizado" in combobox or "translateY" in combobox
+    assert "Buscar" in combobox or "searchPlaceholder" in combobox
+    assert "preset.metadata?.admin_label" not in auth
+    assert "preset.display_name" in auth

@@ -111,6 +111,7 @@ export default function PlaygroundPage() {
     knowledgeScope,
     enabled: Boolean(conv.sessionId),
     onConversationActivity: conv.bumpRefresh,
+    onConversationNotFound: conv.recoverMissingConversation,
     onSandboxArtifacts: (payload) => {
       const chat = conv.sessionId ?? '';
       const run = payload.sandbox_run_id?.trim() ?? '';
@@ -242,7 +243,8 @@ export default function PlaygroundPage() {
     if (workerId && chat.workerId !== workerId) {
       chat.setWorkerId(workerId);
     }
-  }, [workerId, chat]);
+    // chat entero cambia cada render; solo sincronizar por workerIds.
+  }, [workerId, chat.workerId, chat.setWorkerId]);
 
   const syncProjectWorkerSelection = useCallback(
     (nextWorker: string) => {
@@ -646,7 +648,7 @@ export default function PlaygroundPage() {
         ) : (
           <>
             <AdminChatPanel
-            key={`${conv.sessionId}-${workerId}`}
+            key={conv.sessionId}
             chatId={conv.sessionId}
             chat={chat}
             initialWorker={workerId}

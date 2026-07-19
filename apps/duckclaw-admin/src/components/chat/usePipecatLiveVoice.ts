@@ -122,9 +122,10 @@ export function usePipecatLiveVoice({
 
   const endCall = useCallback(async () => {
     clearTimer();
-    setStatus((prev) => (prev === 'idle' ? 'idle' : 'disconnecting'));
     const client = clientRef.current;
+    const hadLiveSession = client != null;
     clientRef.current = null;
+    setStatus((prev) => (prev === 'idle' ? 'idle' : 'disconnecting'));
     if (client) {
       try {
         await client.disconnect();
@@ -140,7 +141,8 @@ export function usePipecatLiveVoice({
     setBotSubtitle('');
     setError(null);
     setStatus('idle');
-    onDisconnectedRef.current?.();
+    // Solo notificar si había sesión: el cleanup de effect no debe disparar reloadHistory.
+    if (hadLiveSession) onDisconnectedRef.current?.();
   }, [clearTimer]);
 
   const startCall = useCallback(

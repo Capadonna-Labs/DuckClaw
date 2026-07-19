@@ -58,6 +58,7 @@ export function FloatingAdminChat() {
     // Solo activo con drawer abierto y fuera del playground (evita poll global).
     enabled: !onPlayground && Boolean(conv.sessionId) && open,
     onConversationActivity: conv.bumpRefresh,
+    onConversationNotFound: conv.recoverMissingConversation,
   });
   const { workerId, loading, messages, historyLoading, scrollToBottom, config } = chat;
   const activeWorkerLabel = resolveWorkerDisplayName(config?.workers, workerId) || 'Agente';

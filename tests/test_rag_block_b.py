@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 from unittest.mock import patch
+from pathlib import Path
+
+from playground_ui_corpus import playground_ui_corpus
 
 
 def test_knowledge_upload_defaults_compute_embeddings_true() -> None:
@@ -19,28 +22,22 @@ def test_normalize_uploaded_pdf_uses_markitdown() -> None:
         "duckclaw.document_toolbox.extract._convert_path",
         return_value="# Doc\n\nConverted PDF text.",
     ):
-        rel, text, mime = normalize_uploaded_document("docs/report.pdf", b"%PDF-fake")
-
-    assert rel == "docs/report.pdf"
+        text, mime = normalize_uploaded_document(b"%PDF-1.4", "report.pdf")
     assert "Converted PDF" in text
     assert mime == "text/markdown"
 
 
 def test_playground_rag_project_warning_component() -> None:
-    from pathlib import Path
-
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
     warn = Path("apps/duckclaw-admin/src/components/playground/PlaygroundRagProjectWarning.tsx").read_text(
         encoding="utf-8"
     )
     assert "PlaygroundRagProjectWarning" in page
     assert "indexedKnowledgeSources" in page
-    assert "Sin proyecto RAG" in warn
+    assert "RAG requiere proyecto" in warn
 
 
 def test_knowledge_page_semantic_search_toggle() -> None:
-    from pathlib import Path
-
     page = Path("apps/duckclaw-admin/src/app/(admin)/knowledge/page.tsx").read_text(encoding="utf-8")
     panel = Path("apps/duckclaw-admin/src/components/knowledge/KnowledgeControlPanel.tsx").read_text(
         encoding="utf-8"

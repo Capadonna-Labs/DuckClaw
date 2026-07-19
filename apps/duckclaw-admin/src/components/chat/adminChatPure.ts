@@ -1,0 +1,185 @@
+import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
+import { artifactPreviewApiPath } from '@/lib/artifactPreview';
+import { accumulateUsageTokens } from '@/lib/formatTokenCount';
+
+export function artifactImagePreview(
+  tenantId: string,
+  artifactId: string
+): ChatImagePreview[] {
+  const tid = (tenantId || 'default').trim() || 'default';
+  const aid = artifactId.trim();
+  return [
+    {
+      url: artifactPreviewApiPath(tid, aid),
+      name: `${aid}.png`,
+      artifactId: aid,
+      tenantId: tid,
+    },
+  ];
+}
+
+/** Heartbeats/plan/tool no están en Redis; conservarlos si recargamos historial en vivo. */
+export function mergeHistoryWithEphemeral(server: ChatMsg[], ephemeral: ChatMsg[]): ChatMsg[] {
+  if (!ephemeral.length) return server;
+  return [...server, ...ephemeral];
+}
+
+export function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
+  return messages.filter((m) => m.role === 'heartbeat');
+}
+
+/** True si hay heartbeat de herramienta en el turno actual (entre último user y assistant streaming). */
+export function hasToolHeartbeatInCurrentTurn(messages: ChatMsg[]): boolean {
+  const streamIdx = messages.findIndex(
+    (x, i) => x.role === 'assistant' && x.streaming && i === messages.length - 1
+  );
+  const end = streamIdx >= 0 ? streamIdx : messages.length;
+  for (let i = end - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === 'user') break;
+    if (m.role === 'heartbeat' && m.heartbeatKind === 'tool') return true;
+  }
+  return false;
+}
+
+/** No renderizar burbuja assistant vacía mientras hay tool heartbeats (ThinkingBubble solo sin tools). */
+export function shouldSkipEmptyStreamingAssistant(
+  message: ChatMsg,
+  messages: ChatMsg[]
+): boolean {
+  if (message.role !== 'assistant' || !message.streaming) return false;
+  if ((message.text || '').trim()) return false;
+  if (message.imagePreviews?.length) return false;
+  return hasToolHeartbeatInCurrentTurn(messages);
+}
+
+export function isThinkingStatusHeartbeat(m: ChatMsg | undefined): boolean {
+  return (
+    m?.role === 'heartbeat' &&
+    m.heartbeatKind === 'status' &&
+    /^Pensando/i.test((m.text || '').trim())
+  );
+}
+
+/** Remove stale "Pensando…" status heartbeats from persisted chat history. */
+export function stripThinkingStatusHeartbeats(messages: ChatMsg[]): ChatMsg[] {
+  return messages.filter((m) => !isThinkingStatusHeartbeat(m));
+}
+
+/** Server history includes loop system user turn plus assistant reply. */
+export function conversationHasLoopResult(messages: ChatMsg[]): boolean {
+  return (
+    messages.some(
+      (m) =>
+        m.role === 'user' &&
+        ((m.text || '').includes('[Ciclo loop]') ||
+          (m.text || '').includes('[Ciclo meditate]'))
+    ) && messages.some((m) => m.role === 'assistant')
+  );
+}
+
+export function isLoopProgressHeartbeat(text: string): boolean {
+  const t = text || '';
+  return (
+    t.includes('[loop]') ||
+    t.includes('[meditate]') ||
+    t.includes('[loop] active_mode_started') ||
+    t.includes('[loop] self_tick_dispatched') ||
+    t.includes('[meditate] active_mode_started') ||
+    t.includes('[meditate] self_tick_dispatched')
+  );
+}
+
+/** True si el hilo indica /loop activo (footer o status reciente). */
+export function conversationIndicatesLoopScheduling(messages: ChatMsg[]): boolean {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const t = (m.text || '').toLowerCase();
+    if (t.includes('modo /loop:** inactivo') || t.includes('modo /loop: inactivo')) {
+      return false;
+    }
+    if (t.includes('modo /loop activo') || t.includes('próximo ciclo /loop')) {
+      return true;
+    }
+    if (t.includes('/loop off') || t.includes('detenido')) {
+      return false;
+    }
+  }
+  return false;
+}
+
+export function workerStorageKey(chatId: string): string {
+  return `duckclaw-admin-worker-${chatId}`;
+}
+
+export function revokeMessageImagePreviews(messages: ChatMsg[]): void {
+  for (const m of messages) {
+    if (!m.imagePreviews?.length) continue;
+    for (const img of m.imagePreviews) {
+      if (!img.url.startsWith('blob:')) continue;
+      try {
+        URL.revokeObjectURL(img.url);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+}
+
+export function readStoredWorker(chatId: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return sessionStorage.getItem(workerStorageKey(chatId));
+  } catch {
+    return null;
+  }
+}
+
+export function chatTokenStorageKey(chatId: string): string {
+  return `duckclaw.chat_tokens.${chatId}`;
+}
+
+export function readStoredChatTokens(chatId: string): number {
+  if (!chatId || typeof window === 'undefined') return 0;
+  try {
+    const raw = sessionStorage.getItem(chatTokenStorageKey(chatId));
+    const n = raw ? Number.parseInt(raw, 10) : 0;
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function writeStoredChatTokens(chatId: string, total: number): void {
+  if (!chatId || typeof window === 'undefined') return;
+  try {
+    sessionStorage.setItem(chatTokenStorageKey(chatId), String(Math.max(0, Math.floor(total))));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+export function applyContextEstimatedTokens(
+  chatId: string,
+  setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
+  contextEstimated?: number | null
+): void {
+  if (contextEstimated == null || !Number.isFinite(contextEstimated) || contextEstimated < 0) return;
+  const next = Math.floor(contextEstimated);
+  setSessionTokenTotal(next);
+  writeStoredChatTokens(chatId, next);
+}
+
+export function applySessionTokenDelta(
+  chatId: string,
+  setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
+  usage?: Record<string, number> | null
+): void {
+  if (!usage) return;
+  setSessionTokenTotal((prev) => {
+    const next = accumulateUsageTokens(prev, usage);
+    if (next !== prev) writeStoredChatTokens(chatId, next);
+    return next;
+  });
+}

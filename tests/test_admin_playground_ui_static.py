@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from admin_service_corpus import admin_service_corpus
+from playground_ui_corpus import admin_chat_corpus, playground_ui_corpus
 
 
 def test_playground_ui_can_scope_chat_to_db_first_project() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
-    hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
+    hook = admin_chat_corpus()
     chat_api = Path("apps/duckclaw-admin/src/services/admin/chatApi.ts").read_text(encoding="utf-8")
 
     assert "projectLabel={activeProject?.name || 'Todos los agentes'}" in page
@@ -35,7 +36,7 @@ def test_active_conversation_is_scoped_by_authenticated_tenant() -> None:
 def test_admin_chat_status_text_uses_plain_labels_without_emoji() -> None:
     heartbeat = Path("apps/duckclaw-admin/src/lib/toolHeartbeat.ts").read_text(encoding="utf-8")
     chat = Path("apps/duckclaw-admin/src/components/chat/ChatBubble.tsx").read_text(encoding="utf-8")
-    hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(encoding="utf-8")
+    hook = admin_chat_corpus()
 
     assert "const base = `Usando: ${name}`" in heartbeat
     assert "`Usando: ${toolName}`" in chat
@@ -146,7 +147,7 @@ def test_user_logout_lives_in_sidebar_footer() -> None:
 
 
 def test_playground_new_query_creates_new_conversation() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
     hook = Path("apps/duckclaw-admin/src/components/chat/useActiveConversation.ts").read_text(encoding="utf-8")
 
     assert "const createConversation = useCallback" in hook
@@ -157,7 +158,7 @@ def test_playground_new_query_creates_new_conversation() -> None:
 
 
 def test_playground_selects_conversation_from_sidebar_history() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
     hook = Path("apps/duckclaw-admin/src/components/chat/useActiveConversation.ts").read_text(encoding="utf-8")
 
     assert "ConversationInbox" not in page
@@ -173,7 +174,7 @@ def test_playground_selects_conversation_from_sidebar_history() -> None:
 
 
 def test_playground_history_can_delete_conversation_with_confirmation() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
     chat_api = Path("apps/duckclaw-admin/src/services/admin/chatApi.ts").read_text(encoding="utf-8")
     service = admin_service_corpus()
 
@@ -189,7 +190,7 @@ def test_playground_history_can_delete_conversation_with_confirmation() -> None:
 
 
 def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
 
     assert "const activeVaultPath = chat.vaultPath || config?.vault?.effective_path || ''" in page
     assert "projectWorkerIds.length > 0" in page
@@ -214,7 +215,7 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
 
 
 def test_playground_run_settings_shows_worker_composition() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
     panel = Path("apps/duckclaw-admin/src/components/playground/PlaygroundRunSettingsPanel.tsx").read_text(
         encoding="utf-8"
     )
@@ -237,7 +238,7 @@ def test_playground_run_settings_shows_worker_composition() -> None:
 
 
 def test_playground_config_panel_uses_compact_cards_and_modals() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
     toggle = Path("apps/duckclaw-admin/src/components/layout/PanelToggleButton.tsx").read_text(
         encoding="utf-8"
     )
@@ -273,9 +274,7 @@ def test_playground_config_panel_uses_compact_cards_and_modals() -> None:
 
 def test_fly_commands_live_in_playground_not_overview() -> None:
     overview = Path("apps/duckclaw-admin/src/app/(admin)/overview/page.tsx").read_text(encoding="utf-8")
-    playground = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(
-        encoding="utf-8"
-    )
+    playground = playground_ui_corpus()
     commands_page = Path("apps/duckclaw-admin/src/app/(admin)/commands/page.tsx").read_text(
         encoding="utf-8"
     )
@@ -340,9 +339,7 @@ def test_admin_chat_composer_has_voice_note_button() -> None:
     hook = Path("apps/duckclaw-admin/src/components/chat/useVoiceNoteRecorder.ts").read_text(
         encoding="utf-8"
     )
-    chat_hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(
-        encoding="utf-8"
-    )
+    chat_hook = admin_chat_corpus()
     bubble = Path("apps/duckclaw-admin/src/components/chat/ChatBubble.tsx").read_text(
         encoding="utf-8"
     )
@@ -373,9 +370,7 @@ def test_admin_chat_has_live_voice_menu_item() -> None:
     bar = Path("apps/duckclaw-admin/src/components/chat/LiveVoiceBar.tsx").read_text(
         encoding="utf-8"
     )
-    chat_hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(
-        encoding="utf-8"
-    )
+    chat_hook = admin_chat_corpus()
     llm_settings = Path(
         "services/api-gateway/routers/admin_domains/playground/llm_settings.py"
     ).read_text(encoding="utf-8")
@@ -397,9 +392,7 @@ def test_admin_chat_has_live_voice_menu_item() -> None:
 
 
 def test_admin_chat_voice_response_defaults_off_and_gates_tts_toggle() -> None:
-    hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(
-        encoding="utf-8"
-    )
+    hook = admin_chat_corpus()
     menu = Path("apps/duckclaw-admin/src/components/chat/MediaAttachMenu.tsx").read_text(
         encoding="utf-8"
     )
@@ -479,7 +472,7 @@ def test_projects_page_only_renders_db_first_projects() -> None:
 
 
 def test_playground_initial_worker_query_wins_over_server_selection() -> None:
-    page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
+    page = playground_ui_corpus()
     load_config_body = page.split("const loadConfig = useCallback", 1)[1].split("useEffect(() => {", 1)[0]
 
     assert load_config_body.index("initialWorker && ids.includes(initialWorker)") < load_config_body.index(

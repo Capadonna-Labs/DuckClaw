@@ -3,19 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import {
-  CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
-  KeyRound,
-  Loader2,
-  LogIn,
-  RefreshCw,
-  Search,
-  TestTube2,
-  Trash2,
-  UserPlus,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import type { TemplateSummary } from '@/types/admin';
 import {
   adminService,
@@ -24,15 +12,16 @@ import {
   type McpConnectorTestResult,
 } from '@/services/adminService';
 import { pollWriteTask } from '@/lib/pollWriteTask';
-import ConfirmModal from '@/components/admin/ConfirmModal';
 import EmptyState from '@/components/shared/EmptyState';
+import { ConnectorDetailDrawer } from '@/components/mcp/ConnectorDetailDrawer';
+import { ConnectorListRow } from '@/components/mcp/ConnectorListRow';
 import { McpNewConnectorSection } from '@/components/mcp/McpNewConnectorSection';
 import {
   filterMcpConnectors,
   looksLikeAutofillEmail,
   MCP_CONNECTORS_PAGE_SIZE,
 } from '@/lib/mcpConnectorsList';
-import { presetUsesOAuthPkce } from '@/lib/mcpPresetAuth';
+import type { McpConnectorPrimaryKind } from '@/lib/mcpConnectorPrimaryAction';
 import { paginateItems } from '@/lib/pagination';
 
 type McpConnectorsPanelProps = {
@@ -57,6 +46,8 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   const [testResults, setTestResults] = useState<Record<string, McpConnectorTestResult>>({});
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
+  const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(null);
+  const [drawerFocusBearer, setDrawerFocusBearer] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const autofillClearedRef = useRef(false);
 
@@ -180,9 +171,42 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     if (page !== paginated.currentPage) setPage(paginated.currentPage);
   }, [page, paginated.currentPage]);
 
+  useEffect(() => {
+    if (!selectedConnectorId) return;
+    if (!connectors.some((row) => row.connector_id === selectedConnectorId)) {
+      setSelectedConnectorId(null);
+      setDrawerFocusBearer(false);
+    }
+  }, [connectors, selectedConnectorId]);
+
   const visibleStart =
     paginated.totalItems === 0 ? 0 : (paginated.currentPage - 1) * MCP_CONNECTORS_PAGE_SIZE + 1;
   const visibleEnd = Math.min(paginated.currentPage * MCP_CONNECTORS_PAGE_SIZE, paginated.totalItems);
+
+  const selectedConnector =
+    connectors.find((row) => row.connector_id === selectedConnectorId) || null;
+
+  const openDetail = (connectorId: string, opts?: { focusBearer?: boolean }) => {
+    setSelectedConnectorId(connectorId);
+    setDrawerFocusBearer(Boolean(opts?.focusBearer));
+  };
+
+  const closeDetail = () => {
+    setSelectedConnectorId(null);
+    setDrawerFocusBearer(false);
+  };
+
+  const handleRowPrimary = (connectorId: string, kind: McpConnectorPrimaryKind) => {
+    if (kind === 'connect_oauth') {
+      void connectOAuth(connectorId);
+      return;
+    }
+    if (kind === 'configure_bearer') {
+      openDetail(connectorId, { focusBearer: true });
+      return;
+    }
+    openDetail(connectorId);
+  };
 
   const saveAuth = async (connectorId: string) => {
     const token = (authTokens[connectorId] || '').trim();
@@ -374,43 +398,28 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
               <EmptyState variant="filtered" />
             ) : (
               <>
-                {paginated.items.map((connector) => {
-                  const selectedWorkerId =
-                    grantWorkerByConnector[connector.connector_id] || workers[0]?.id || '';
-                  const grantedWorkerLabels = workers
-                    .filter((w) => (grantsByWorker[w.id] || []).includes(connector.connector_id))
-                    .map((w) => w.name || w.id);
-                  const selectedAlreadyGranted = (grantsByWorker[selectedWorkerId] || []).includes(
-                    connector.connector_id
-                  );
-                  return (
-                  <ConnectorCard
-                    key={connector.connector_id}
-                    connector={connector}
-                    preset={connector.preset_id ? presetById[connector.preset_id] : undefined}
-                    canWrite={canWrite}
-                    workers={workers}
-                    busyId={busyId}
-                    authToken={authTokens[connector.connector_id] || ''}
-                    grantWorkerId={selectedWorkerId}
-                    grantNotice={grantNotices[connector.connector_id]}
-                    grantedWorkerLabels={grantedWorkerLabels}
-                    selectedWorkerAlreadyGranted={selectedAlreadyGranted}
-                    testResult={testResults[connector.connector_id]}
-                    onAuthTokenChange={(value) =>
-                      setAuthTokens((prev) => ({ ...prev, [connector.connector_id]: value }))
-                    }
-                    onGrantWorkerChange={(value) =>
-                      setGrantWorkerByConnector((prev) => ({ ...prev, [connector.connector_id]: value }))
-                    }
-                    onSaveAuth={() => saveAuth(connector.connector_id)}
-                    onConnectOAuth={() => connectOAuth(connector.connector_id)}
-                    onTest={() => runTest(connector.connector_id)}
-                    onGrant={() => grantWorker(connector.connector_id)}
-                    onDeactivate={() => deactivate(connector.connector_id)}
-                  />
-                  );
-                })}
+                <ul
+                  className="overflow-hidden rounded-2xl border border-gov-gray-100 bg-white shadow-sm dark:border-dark-border dark:bg-dark-surface"
+                  data-mcp-connector-list="true"
+                >
+                  {paginated.items.map((connector) => {
+                    const grantedWorkerLabels = workers
+                      .filter((w) => (grantsByWorker[w.id] || []).includes(connector.connector_id))
+                      .map((w) => w.name || w.id);
+                    return (
+                      <ConnectorListRow
+                        key={connector.connector_id}
+                        connector={connector}
+                        preset={connector.preset_id ? presetById[connector.preset_id] : undefined}
+                        canWrite={canWrite}
+                        grantedWorkerLabels={grantedWorkerLabels}
+                        busyId={busyId}
+                        onOpenDetail={() => openDetail(connector.connector_id)}
+                        onPrimary={(kind) => handleRowPrimary(connector.connector_id, kind)}
+                      />
+                    );
+                  })}
+                </ul>
 
                 {paginated.totalPages > 1 && (
                   <ConnectorPaginationControls
@@ -424,6 +433,54 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
           </>
         )}
       </section>
+
+      {selectedConnector ? (
+        <ConnectorDetailDrawer
+          open={Boolean(selectedConnectorId)}
+          connector={selectedConnector}
+          preset={
+            selectedConnector.preset_id ? presetById[selectedConnector.preset_id] : undefined
+          }
+          canWrite={canWrite}
+          workers={workers}
+          busyId={busyId}
+          authToken={authTokens[selectedConnector.connector_id] || ''}
+          grantWorkerId={
+            grantWorkerByConnector[selectedConnector.connector_id] || workers[0]?.id || ''
+          }
+          grantNotice={grantNotices[selectedConnector.connector_id]}
+          grantedWorkerLabels={workers
+            .filter((w) =>
+              (grantsByWorker[w.id] || []).includes(selectedConnector.connector_id)
+            )
+            .map((w) => w.name || w.id)}
+          selectedWorkerAlreadyGranted={(
+            grantsByWorker[
+              grantWorkerByConnector[selectedConnector.connector_id] || workers[0]?.id || ''
+            ] || []
+          ).includes(selectedConnector.connector_id)}
+          testResult={testResults[selectedConnector.connector_id]}
+          focusBearer={drawerFocusBearer}
+          onClose={closeDetail}
+          onAuthTokenChange={(value) =>
+            setAuthTokens((prev) => ({
+              ...prev,
+              [selectedConnector.connector_id]: value,
+            }))
+          }
+          onGrantWorkerChange={(value) =>
+            setGrantWorkerByConnector((prev) => ({
+              ...prev,
+              [selectedConnector.connector_id]: value,
+            }))
+          }
+          onSaveAuth={() => saveAuth(selectedConnector.connector_id)}
+          onConnectOAuth={() => connectOAuth(selectedConnector.connector_id)}
+          onTest={() => runTest(selectedConnector.connector_id)}
+          onGrant={() => grantWorker(selectedConnector.connector_id)}
+          onDeactivate={() => deactivate(selectedConnector.connector_id)}
+        />
+      ) : null}
 
       <div className="flex items-center gap-3">
         <button
@@ -474,288 +531,5 @@ function ConnectorPaginationControls({
         <ChevronRight size={14} />
       </button>
     </div>
-  );
-}
-
-function ConnectorCard({
-  connector,
-  preset,
-  canWrite,
-  workers,
-  busyId,
-  authToken,
-  grantWorkerId,
-  grantNotice,
-  grantedWorkerLabels,
-  selectedWorkerAlreadyGranted,
-  testResult,
-  onAuthTokenChange,
-  onGrantWorkerChange,
-  onSaveAuth,
-  onConnectOAuth,
-  onTest,
-  onGrant,
-  onDeactivate,
-}: {
-  connector: McpConnectorSummary;
-  preset?: McpConnectorPreset;
-  canWrite: boolean;
-  workers: TemplateSummary[];
-  busyId: string | null;
-  authToken: string;
-  grantWorkerId: string;
-  grantNotice?: string;
-  grantedWorkerLabels: string[];
-  selectedWorkerAlreadyGranted: boolean;
-  testResult?: McpConnectorTestResult;
-  onAuthTokenChange: (value: string) => void;
-  onGrantWorkerChange: (value: string) => void;
-  onSaveAuth: () => void;
-  onConnectOAuth: () => void;
-  onTest: () => void;
-  onGrant: () => Promise<void>;
-  onDeactivate: () => void;
-}) {
-  const usesOAuth = presetUsesOAuthPkce(preset);
-  const needsBearer = connector.auth_kind === 'bearer' && !usesOAuth;
-  const needsAuth = needsBearer || usesOAuth;
-  const authReady = !needsAuth || connector.has_auth;
-  const showAuthBadge = needsAuth;
-  const [grantConfirmOpen, setGrantConfirmOpen] = useState(false);
-
-  const selectedWorker = workers.find((w) => w.id === grantWorkerId);
-  const workerLabel = (selectedWorker?.name || selectedWorker?.id || grantWorkerId).trim();
-
-  const openGrantConfirm = () => {
-    if (!grantWorkerId || busyId === `grant:${connector.connector_id}`) return;
-    setGrantConfirmOpen(true);
-  };
-
-  const confirmGrant = () => {
-    void (async () => {
-      try {
-        await onGrant();
-      } finally {
-        setGrantConfirmOpen(false);
-      }
-    })();
-  };
-
-  return (
-    <article className="rounded-3xl border border-gov-gray-100 bg-white p-5 shadow-sm dark:border-dark-border dark:bg-dark-surface">
-      <ConfirmModal
-        isOpen={grantConfirmOpen}
-        title={
-          selectedWorkerAlreadyGranted
-            ? 'Reaplicar grant (idempotente)'
-            : 'Otorgar conector al agente'
-        }
-        description={
-          selectedWorkerAlreadyGranted
-            ? 'Este worker ya tiene grant activo. Confirmar solo reafirma el mismo acceso (UPSERT); no duplica permisos.'
-            : 'El worker podrá invocar las tools MCP de este conector en Playground y runtime.'
-        }
-        confirmLabel={selectedWorkerAlreadyGranted ? 'Reaplicar grant' : 'Sí, dar grant'}
-        isLoading={busyId === `grant:${connector.connector_id}`}
-        details={[
-          { label: 'Conector', value: connector.display_name || connector.connector_id },
-          { label: 'ID', value: connector.connector_id },
-          { label: 'Worker', value: workerLabel },
-          {
-            label: 'Estado',
-            value: selectedWorkerAlreadyGranted ? 'Ya autorizado' : 'Sin grant',
-          },
-        ]}
-        onConfirm={confirmGrant}
-        onCancel={() => setGrantConfirmOpen(false)}
-      />
-
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h3 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">
-            {connector.display_name}
-          </h3>
-          <p className="mt-1 font-mono text-xs text-gov-gray-500">{connector.connector_id}</p>
-          <p className="mt-2 text-sm text-gov-gray-600 dark:text-dark-muted">
-            {connector.transport}
-            {connector.endpoint_url ? ` · ${connector.endpoint_url}` : ''}
-            {connector.preset_id ? ` · preset ${connector.preset_id}` : ''}
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2 text-xs font-bold">
-          <span
-            className={
-              connector.enabled
-                ? 'rounded-full bg-green-100 px-2 py-1 text-green-800 dark:bg-green-950/40 dark:text-green-300'
-                : 'rounded-full bg-gov-gray-100 px-2 py-1 text-gov-gray-600'
-            }
-          >
-            {connector.enabled ? 'habilitado' : 'deshabilitado'}
-          </span>
-          {showAuthBadge && (
-            <span
-              className={
-                connector.has_auth
-                  ? 'rounded-full bg-green-100 px-2 py-1 text-green-800 dark:bg-green-950/40 dark:text-green-300'
-                  : 'rounded-full bg-amber-100 px-2 py-1 text-amber-800'
-              }
-            >
-              {connector.has_auth ? 'auth OK' : usesOAuth ? 'falta OAuth' : 'falta Bearer'}
-            </span>
-          )}
-          {grantedWorkerLabels.length > 0 ? (
-            <span className="rounded-full bg-gov-blue-100 px-2 py-1 text-gov-blue-900 dark:bg-gov-blue-950/40 dark:text-gov-blue-200">
-              grant: {grantedWorkerLabels.join(', ')}
-            </span>
-          ) : (
-            <span className="rounded-full bg-amber-100 px-2 py-1 text-amber-800">sin grants</span>
-          )}
-        </div>
-      </div>
-
-      {canWrite && usesOAuth && (
-        <div className="mt-4 rounded-2xl border border-gov-gray-100 p-4 dark:border-dark-border">
-          <div className="flex items-center gap-2 text-sm font-bold">
-            <LogIn size={16} /> Conectar OAuth (PKCE)
-          </div>
-          <p className="mt-2 text-xs text-gov-gray-600 dark:text-dark-muted">
-            Inicia sesión con el proveedor del conector. La sesión queda en el servidor para los workers con la
-            skill <code className="font-mono">{connector.preset_id || connector.connector_id}</code>.
-          </p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onConnectOAuth}
-              disabled={busyId === `oauth:${connector.connector_id}`}
-              className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
-            >
-              {busyId === `oauth:${connector.connector_id}` ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <LogIn size={14} />
-              )}
-              {connector.has_auth ? 'Reconectar OAuth' : 'Conectar OAuth'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {canWrite && needsBearer && (
-        <div className="mt-4 rounded-2xl border border-gov-gray-100 p-4 dark:border-dark-border">
-          <div className="flex items-center gap-2 text-sm font-bold">
-            <KeyRound size={16} /> Token Bearer
-          </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <input
-              type="password"
-              value={authToken}
-              onChange={(e) => onAuthTokenChange(e.target.value)}
-              placeholder="Bearer token…"
-              className="min-w-[280px] flex-1 rounded-xl border border-gov-gray-200 px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
-            />
-            <button
-              type="button"
-              onClick={onSaveAuth}
-              disabled={!authToken.trim() || busyId === connector.connector_id}
-              className="rounded-xl border px-4 py-2 text-sm font-bold disabled:opacity-50"
-            >
-              Guardar token
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-4 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onTest}
-          disabled={!authReady || busyId === `test:${connector.connector_id}`}
-          className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-bold disabled:opacity-50"
-        >
-          {busyId === `test:${connector.connector_id}` ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <TestTube2 size={14} />
-          )}
-          Probar list_tools
-        </button>
-
-        {canWrite && (
-          <>
-            <select
-              value={grantWorkerId}
-              onChange={(e) => onGrantWorkerChange(e.target.value)}
-              className="rounded-xl border border-gov-gray-200 px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
-            >
-              {workers.map((worker) => (
-                <option key={worker.id} value={worker.id}>
-                  {worker.name || worker.id}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              onClick={openGrantConfirm}
-              disabled={!grantWorkerId || busyId === `grant:${connector.connector_id}`}
-              className={`inline-flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-bold text-white disabled:opacity-50 ${
-                selectedWorkerAlreadyGranted
-                  ? 'bg-gov-gray-600 dark:bg-dark-muted dark:text-dark-bg'
-                  : 'bg-gov-blue-700 dark:bg-dark-cyan dark:text-dark-bg'
-              }`}
-            >
-              {busyId === `grant:${connector.connector_id}` ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : selectedWorkerAlreadyGranted ? (
-                <CheckCircle2 size={14} />
-              ) : (
-                <UserPlus size={14} />
-              )}
-              {selectedWorkerAlreadyGranted ? 'Ya otorgado · reaplicar' : 'Grant worker'}
-            </button>
-            <button
-              type="button"
-              onClick={onDeactivate}
-              disabled={busyId === `deactivate:${connector.connector_id}`}
-              className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-3 py-2 text-sm font-bold text-red-700 disabled:opacity-50"
-            >
-              <Trash2 size={14} /> Desactivar
-            </button>
-          </>
-        )}
-      </div>
-
-      {grantNotice && (
-        <div className="mt-4 rounded-2xl border border-green-200 bg-green-50 p-4 text-sm text-green-900 dark:border-green-900/50 dark:bg-green-950/20 dark:text-green-200">
-          <div className="flex items-center gap-2 font-bold">
-            <CheckCircle2 size={16} />
-            {grantNotice}
-          </div>
-        </div>
-      )}
-
-      {testResult && (
-        <div
-          className={`mt-4 rounded-2xl p-4 text-sm ${
-            testResult.ok
-              ? 'border border-green-200 bg-green-50 text-green-900 dark:border-green-900/50 dark:bg-green-950/20 dark:text-green-200'
-              : 'border border-red-200 bg-red-50 text-red-800 dark:border-red-900/50 dark:bg-red-950/20 dark:text-red-200'
-          }`}
-        >
-          <div className="flex items-center gap-2 font-bold">
-            {testResult.ok ? <CheckCircle2 size={16} /> : <TestTube2 size={16} />}
-            {testResult.ok
-              ? `${testResult.tool_count} tools detectadas`
-              : testResult.error || 'Test falló'}
-          </div>
-          {testResult.tools.length > 0 && (
-            <ul className="scrollbar-thin mt-2 max-h-40 space-y-1 overflow-y-auto font-mono text-xs">
-              {testResult.tools.map((tool) => (
-                <li key={tool.name}>{tool.name}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-    </article>
   );
 }

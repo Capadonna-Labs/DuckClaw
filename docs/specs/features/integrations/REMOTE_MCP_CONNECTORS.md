@@ -74,6 +74,18 @@ Prefix: `/api/v1/admin/mcp/connectors`
 3. Conector deshabilitado → tools no aparecen.
 4. Secret nunca en GET list (solo `has_auth: true`).
 
+## Admin UI — inventario de conectores (N cards)
+
+Patrones: **Progressive Disclosure** + **Table Filter** (`docs/architecture/UIUX-PATTERNS.md`). Objetivo: escanear salud de N conectores sin formularios inline de ~300px.
+
+| Capa | Contenido |
+|------|-----------|
+| Lista densa | Nombre, `connector_id`, chips (`habilitado` / auth / grants), URL truncada |
+| CTA primaria en fila | OAuth faltante → **Conectar OAuth** (sin drawer). Bearer faltante → **Configurar**. Auth OK sin grants → **Dar grant** (abre drawer). Resto → **Detalle** |
+| Drawer lateral | Auth (OAuth/Bearer), grants, `list_tools`, desactivar |
+
+Click en la fila abre el drawer. ConfirmModal sigue para grant. No meter OAuth PKCE solo detrás de modal: el salto de contexto ya es el redirect.
+
 ## Guía clic a clic (operativa)
 
 ### 0. Desplegar cambios
@@ -88,10 +100,10 @@ Prefix: `/api/v1/admin/mcp/connectors`
 
 ### 1. Prueba local sin token (recomendado primero)
 
-1. En **Nuevo conector**, elige preset **MCP Time (local stdio)**.
-2. Clic **Crear conector** → aparece `mcp_mcp_time`.
-3. Clic **Probar list_tools** → debe listar tools de hora (requiere `npx` en el host del gateway).
-4. En el desplegable de workers, elige un worker de prueba → **Grant worker**.
+1. En **Nuevo desde plantilla**, elige preset **MCP Time (local stdio)**.
+2. Clic **Crear conector** → aparece en la lista densa (`mcp_mcp_time`).
+3. Abre **Detalle** (o la fila) → **Probar list_tools** → debe listar tools de hora (requiere `npx` en el host del gateway).
+4. En el drawer, elige un worker de prueba → **Grant worker**.
 5. **Playground** → selecciona ese worker → pregunta: *«¿Qué hora es en UTC?»*.
 6. Verifica en logs que aparece una tool `mcp__mcp_mcp_time__…`.
 

@@ -28,6 +28,15 @@ def test_mcp_unified_view_has_connectors_server_and_reference_tabs() -> None:
     assert "Referencia oficial MCP" in view
     assert "McpNewConnectorSection" in connectors
     assert "Nuevo desde plantilla" in connectors
+    assert "ConnectorListRow" in connectors
+    assert "ConnectorDetailDrawer" in connectors
+    assert "data-mcp-connector-list" in connectors
+    assert "AdminSideDrawer" in Path(
+        "apps/duckclaw-admin/src/components/shared/AdminSideDrawer.tsx"
+    ).read_text(encoding="utf-8")
+    assert "resolveMcpConnectorPrimaryAction" in Path(
+        "apps/duckclaw-admin/src/lib/mcpConnectorPrimaryAction.ts"
+    ).read_text(encoding="utf-8")
     assert "McpNewConnectorSection" not in config
     assert "patchRuntimeSettings" in view
     assert "mcp.port" in config or "mcpPort" in config

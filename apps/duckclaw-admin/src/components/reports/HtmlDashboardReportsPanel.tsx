@@ -32,6 +32,7 @@ export function HtmlDashboardReportsPanel() {
       conv.bumpRefresh();
       onReportActivityRef.current();
     },
+    onConversationNotFound: conv.recoverMissingConversation,
   });
   const { vaultPath: chatVaultPath } = chat;
 

@@ -4,9 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import {
-  historyToChatMessages,
   payloadImagesFromPreviews,
-  preserveImagePreviewsFromPrevious,
   userPreviewsFromPayload,
 } from '@/lib/chatMessageImages';
 import { useChatImageAttachments } from '@/components/chat/useChatImageAttachments';
@@ -14,10 +12,6 @@ import { useChatScrollAnchor } from '@/components/chat/useChatScrollAnchor';
 import {
   clearEphemeralHeartbeats,
   clearLegacyEphemeralHeartbeats,
-  filterEphemeralForWorker,
-  mergeEphemeralHeartbeats,
-  readEphemeralHeartbeats,
-  writeEphemeralHeartbeats,
 } from '@/lib/chatEphemeralStorage';
 import { workerMatches } from '@/lib/workerOptions';
 import {
@@ -26,18 +20,12 @@ import {
   writeStoredVaultPath,
 } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
-import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 import { mutationHeaders } from '@/lib/csrfClient';
 import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 
 import {
-  collectEphemeralMessages,
-  conversationHasLoopResult,
-  conversationIndicatesLoopScheduling,
-  isLoopProgressHeartbeat,
-  mergeHistoryWithEphemeral,
   readStoredChatTokens,
   readStoredWorker,
   revokeMessageImagePreviews,
@@ -45,6 +33,7 @@ import {
   workerStorageKey,
 } from './adminChatPure';
 import { runAdminChatTurn } from './runAdminChatTurn';
+import { useAdminChatHistory } from './useAdminChatHistory';
 
 
 export {
@@ -72,6 +61,8 @@ export type UseAdminChatOptions = {
     sandbox_run_id?: string;
     artifact_ids?: string[];
   }) => void;
+  /** GET historial 404: limpiar sessionId activo y re-bootstrap. */
+  onConversationNotFound?: () => void;
 };
 
 export type AdminChatController = ReturnType<typeof useAdminChat>;
@@ -85,6 +76,7 @@ export function useAdminChat({
   enabled = true,
   onConversationActivity,
   onSandboxArtifacts,
+  onConversationNotFound,
 }: UseAdminChatOptions) {
   const pinnedWorker = (lockWorker || '').trim();
   const [config, setConfig] = useState<Awaited<ReturnType<typeof adminService.getPlaygroundConfig>> | null>(
@@ -183,7 +175,6 @@ export function useAdminChat({
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const loadingRef = useRef(false);
-  const loopHistoryReloadRef = useRef<number[]>([]);
   const [loopSchedulePolling, setLoopSchedulePolling] = useState(false);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -288,161 +279,24 @@ export function useAdminChat({
     setWorkerId(pinnedWorker || initialWorker || readStoredWorker(chatId) || '');
   }, [chatId, initialWorker, pinnedWorker, setWorkerId]);
 
-  const historyTenantId = (config?.effective_tenant_id || 'default').trim() || 'default';
-
-  const clearLoopHistoryReload = useCallback(() => {
-    loopHistoryReloadRef.current.forEach((id) => window.clearTimeout(id));
-    loopHistoryReloadRef.current = [];
-  }, []);
-
-  const reloadHistory = useCallback((opts?: { force?: boolean }) => {
-    if (!enabled || !chatId || config === null) return;
-    const force = Boolean(opts?.force);
-    if (!force && loadingRef.current) return;
-    setHistoryLoading(true);
-    adminService
-      .getConversation(chatId, historyTenantId)
-      .then((data) => {
-        if (!force && loadingRef.current) return;
-        const fromServer = historyToChatMessages(data.messages, historyTenantId);
-        const hasLoopResult = conversationHasLoopResult(fromServer);
-        if (hasLoopResult) {
-          clearLoopHistoryReload();
-        }
-        const activeWorker = workerId || initialWorker || '';
-        const storedEphemeral = readEphemeralHeartbeats(chatId, activeWorker);
-        setMessages((prev) => {
-          const liveEphemeral = filterEphemeralForWorker(
-            collectEphemeralMessages(prev),
-            activeWorker
-          );
-          let ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
-          if (hasLoopResult) {
-            ephemeral = ephemeral.filter(
-              (m) =>
-                !(
-                  m.role === 'heartbeat' &&
-                  isLoopProgressHeartbeat(m.text || '')
-                )
-            );
-          }
-          const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
-          return mergeHistoryWithEphemeral(withImages, ephemeral);
-        });
-      })
-      .catch(() => undefined)
-      .finally(() => setHistoryLoading(false));
-  }, [chatId, clearLoopHistoryReload, config, enabled, historyTenantId, initialWorker, workerId]);
-
-  const loopPollingActive = useMemo(
-    () => loopSchedulePolling || conversationIndicatesLoopScheduling(messages),
-    [loopSchedulePolling, messages]
-  );
-
-  useVisibilityAwareInterval(() => {
-    if (!enabled || !chatId || loadingRef.current || config === null) return;
-    reloadHistory({ force: true });
-  }, loopPollingActive && enabled ? 12_000 : null);
-
-  useEffect(() => {
-    return () => {
-      loopHistoryReloadRef.current.forEach((id) => window.clearTimeout(id));
-      loopHistoryReloadRef.current = [];
-    };
-  }, []);
-
-  const scheduleLoopHistoryReload = useCallback(() => {
-    clearLoopHistoryReload();
-    reloadHistory({ force: true });
-    const delays = [2_000, 4_000, 6_000, 10_000, 15_000, 20_000, 30_000, 45_000, 60_000, 90_000, 120_000];
-    loopHistoryReloadRef.current = delays.map((ms) =>
-      window.setTimeout(() => {
-        reloadHistory({ force: true });
-      }, ms)
-    );
-  }, [chatId, clearLoopHistoryReload, reloadHistory]);
-
-  useEffect(() => {
-    if (!enabled || !chatId || config === null) {
-      if (!enabled || !chatId) setHistoryLoading(false);
-      return;
-    }
-    if (loadingRef.current) return;
-
-    setHistoryLoading(true);
-    let cancelled = false;
-    // Worker al disparar el efecto. NO incluir workerId en deps: setWorkerId tras el
-    // GET re-disparaba getConversation en bucle (FloatingAdminChat + playground).
-    const workerAtLoad = workerId || initialWorker || '';
-    adminService
-      .getConversation(chatId, historyTenantId)
-      .then((data) => {
-        if (cancelled || loadingRef.current) return;
-        const fromServer = historyToChatMessages(data.messages, historyTenantId);
-        const storedEphemeral = readEphemeralHeartbeats(chatId, workerAtLoad);
-        setMessages((prev) => {
-          const liveEphemeral = filterEphemeralForWorker(
-            collectEphemeralMessages(prev),
-            workerAtLoad
-          );
-          let ephemeral = mergeEphemeralHeartbeats(storedEphemeral, liveEphemeral);
-          const hasLoopResult = conversationHasLoopResult(fromServer);
-          if (hasLoopResult) {
-            ephemeral = ephemeral.filter(
-              (m) =>
-                !(
-                  m.role === 'heartbeat' &&
-                  isLoopProgressHeartbeat(m.text || '')
-                )
-            );
-          }
-          const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
-          const merged = mergeHistoryWithEphemeral(withImages, ephemeral);
-          return merged;
-        });
-        const convWorker = (
-          data.preferred_worker_id ||
-          data.last_worker_id ||
-          ''
-        ).trim();
-        if (pinnedWorker && workersInclude(config?.workers, pinnedWorker)) {
-          setWorkerId(pinnedWorker);
-        } else if (convWorker && workersInclude(config?.workers, convWorker)) {
-          setWorkerId(convWorker);
-        }
-        const convVault = (data.vault_db_path || '').trim();
-        if (convVault) {
-          setVaultPathState(convVault);
-          writeStoredVaultPath(chatId, convVault);
-        }
-      })
-      .catch(() => {
-        if (!cancelled && !loadingRef.current) {
-          const stored = readEphemeralHeartbeats(chatId, workerAtLoad);
-          setMessages((prev) => {
-            const live = filterEphemeralForWorker(
-              collectEphemeralMessages(prev),
-              workerAtLoad
-            );
-            const merged = mergeEphemeralHeartbeats(stored, live);
-            return merged.length ? merged : [];
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setHistoryLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      setHistoryLoading(false);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- workerId fuera a propósito
-  }, [chatId, enabled, historyTenantId, initialWorker, pinnedWorker, setWorkerId, config]);
-
-  useEffect(() => {
-    if (!chatId) return;
-    writeEphemeralHeartbeats(chatId, workerId, messages);
-  }, [chatId, workerId, messages]);
+  const { reloadHistory, scheduleLoopHistoryReload, clearLoopHistoryReload } = useAdminChatHistory({
+    enabled,
+    chatId,
+    config,
+    workerId,
+    initialWorker,
+    pinnedWorker,
+    messages,
+    loopSchedulePolling,
+    loadingRef,
+    setMessages,
+    // Pasar el useCallback estable: un wrapper inline re-dispara el effect de
+    // getConversation en bucle (deps [setWorkerId] + setHistoryLoading).
+    setWorkerId,
+    setVaultPathState,
+    setHistoryLoading,
+    onConversationNotFound,
+  });
 
   const scrollContentKey = useMemo(() => {
     const tail = messages

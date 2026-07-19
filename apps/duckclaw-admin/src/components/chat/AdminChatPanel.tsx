@@ -5,29 +5,22 @@ import Link from 'next/link';
 import {
   Bot,
   Brain,
-  ChevronDown,
   ChevronRight,
   Cpu,
   MessageSquarePlus,
-  Send,
   Settings2,
-  X,
 } from 'lucide-react';
-import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
-import { LiveVoiceBar } from '@/components/chat/LiveVoiceBar';
 import { usePipecatLiveVoice } from '@/components/chat/usePipecatLiveVoice';
 import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
 import type { ConversationManagePanelProps } from '@/components/chat/ConversationManagePanel';
 import { useAuthStore } from '@/store/authStore';
-import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import {
-  hasToolHeartbeatInCurrentTurn,
-  isThinkingStatusHeartbeat,
-  shouldSkipEmptyStreamingAssistant,
   useAdminChat,
   type AdminChatController,
 } from '@/components/chat/useAdminChat';
+import { AdminChatMessageList } from '@/components/chat/AdminChatMessageList';
+import { AdminChatComposeFooter } from '@/components/chat/AdminChatComposeFooter';
 import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
 import { ChatSlmSelector } from '@/components/chat/ChatSlmSelector';
 import { ConversationQuickPicker } from '@/components/chat/ConversationQuickPicker';
@@ -188,7 +181,7 @@ export function AdminChatPanel({
   const canSend = usuario?.rol === 'admin';
   const canSubmit =
     canSend &&
-    workerId &&
+    Boolean(workerId) &&
     !loading &&
     !liveVoice.isActive &&
     (input.trim().length > 0 || imageAttachments.hasImages);
@@ -495,302 +488,52 @@ export function AdminChatPanel({
         </p>
       )}
 
-      <div className="relative flex-1 min-h-0 min-w-0 flex flex-col w-full">
-        <div
-          ref={scrollRef}
-          onScroll={onScroll}
-          className={`scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-h-0 w-full ${
-            isCompact ? '' : 'min-h-[320px]'
-          }`}
-        >
-        {messages.length === 0 && (
-          <p className="text-sm text-gov-gray-400 text-center py-8">
-            {emptyHint ??
-              (workerId
-                ? `Escribe un mensaje para hablar con ${workerDisplayName}`
-                : 'Escribe un mensaje para hablar con …')}
-          </p>
-        )}
-        {messages.map((m, i) => {
-          const next = messages[i + 1];
-          if (
-            isThinkingStatusHeartbeat(m) &&
-            next?.role === 'assistant' &&
-            next.streaming &&
-            !next.text &&
-            thinking
-          ) {
-            return null;
-          }
-          const isEmptyStreaming =
-            m.role === 'assistant' && m.streaming && !m.text && thinking && i === messages.length - 1;
-          if (isEmptyStreaming && !hasToolHeartbeatInCurrentTurn(messages)) {
-            return (
-              <ThinkingBubble
-                key={`${i}-thinking`}
-                startedAt={thinkingStartedAt.current}
-                identityLabel={labelForWorkerId(thinkingIdentity.workerId || workerId)}
-              />
-            );
-          }
-          if (shouldSkipEmptyStreamingAssistant(m, messages)) {
-            return null;
-          }
-          const prevUserIdx =
-            m.role === 'assistant' && !m.streaming
-              ? (() => {
-                  for (let j = i - 1; j >= 0; j--) {
-                    if (messages[j]?.role === 'user') return j;
-                  }
-                  return -1;
-                })()
-              : -1;
-          return (
-            <ChatBubble
-              key={
-                m.toolInvocationId
-                  ? `${i}-${m.role}-${m.toolInvocationId}`
-                  : `${i}-${m.role}`
-              }
-              message={m}
-              identityLabel={labelForWorkerId(m.workerId || workerId)}
-              activeWorkerId={workerId}
-              canRetry={
-                !loading &&
-                ((m.role === 'user' &&
-                  (Boolean(m.text?.trim()) || Boolean(m.imagePreviews?.length))) ||
-                  (m.role === 'assistant' && prevUserIdx >= 0))
-              }
-              onRetry={
-                m.role === 'user'
-                  ? () => void retryFromMessage(i)
-                  : m.role === 'assistant' && prevUserIdx >= 0
-                    ? () => void retryFromMessage(prevUserIdx)
-                    : undefined
-              }
-              canEdit={!loading && m.role === 'user' && Boolean(m.text?.trim())}
-              onEdit={m.role === 'user' ? () => editFromMessage(i) : undefined}
-            />
-          );
-        })}
-        </div>
-        {showScrollButton && (
-          <button
-            type="button"
-            onClick={() => scrollToBottom('smooth')}
-            className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface max-lg:bottom-16"
-            aria-label="Ir al final de la conversación"
-            title="Ir abajo"
-          >
-            <ChevronDown size={20} aria-hidden />
-          </button>
-        )}
-      </div>
+      <AdminChatMessageList
+        messages={messages}
+        emptyHint={emptyHint}
+        workerId={workerId}
+        workerDisplayName={workerDisplayName}
+        thinking={thinking}
+        thinkingStartedAt={thinkingStartedAt}
+        thinkingIdentity={thinkingIdentity}
+        labelForWorkerId={labelForWorkerId}
+        loading={loading}
+        isCompact={isCompact}
+        scrollRef={scrollRef}
+        showScrollButton={showScrollButton}
+        onScroll={onScroll}
+        scrollToBottom={scrollToBottom}
+        retryFromMessage={retryFromMessage}
+        editFromMessage={editFromMessage}
+      />
 
-      <footer
-        className={`p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shrink-0 relative z-20 ${
-          isStudioCompose
-            ? 'bg-white dark:bg-dark-surface border-t dark:border-dark-border'
-            : 'border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50'
-        }`}
-      >
-        <LiveVoiceBar
-          status={liveVoice.status}
-          speakingPhase={liveVoice.speakingPhase}
-          workerLabel={workerDisplayName}
-          elapsedLabel={liveVoice.elapsedLabel}
-          userSubtitle={liveVoice.userSubtitle}
-          botSubtitle={liveVoice.botSubtitle}
-          error={liveVoice.error}
-          onHangUp={() => void liveVoice.endCall()}
-        />
-        <input
-          ref={imageAttachments.fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          multiple
-          className="hidden"
-          onChange={(e) => void imageAttachments.onPickFiles(e.target.files)}
-        />
-
-        {isStudioCompose ? (
-          <div className="rounded-2xl border border-gov-gray-200 bg-gov-gray-50/80 dark:border-dark-border dark:bg-dark-bg/60 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow">
-            {imageAttachments.pendingImages.length > 0 && (
-              <div className="flex flex-wrap gap-2 px-3 pt-3">
-                {imageAttachments.pendingImages.map((img) => (
-                  <div className="relative" key={img.id}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={img.previewUrl}
-                      alt={img.name}
-                      className="h-14 w-14 object-cover rounded-lg border dark:border-dark-border"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => imageAttachments.removeImage(img.id)}
-                      className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-600 text-white"
-                      aria-label="Quitar imagen"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onPaste={onTextareaPaste}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-              rows={2}
-              placeholder="Escribe un mensaje…"
-              className="w-full min-h-[3rem] max-h-40 resize-none bg-transparent px-4 pt-3 pb-1 text-sm text-gov-gray-900 placeholder:text-gov-gray-400 focus:outline-none dark:text-dark-text dark:placeholder:text-dark-muted"
-              disabled={!canSend || liveVoice.isActive}
-            />
-            <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-0.5">
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">{composeChips}</div>
-              <div className="flex shrink-0 items-center gap-0.5">
-                <MediaAttachMenu
-                  variant="minimal"
-                  canSend={canSend && Boolean(workerId)}
-                  loading={loading}
-                  voiceRecording={voice.recording}
-                  voiceBusy={voice.busy}
-                  voiceResponseMode={voiceResponseMode}
-                  voiceResponseAvailable={voiceResponseAvailable}
-                  liveVoiceAvailable={liveVoiceAvailable}
-                  liveVoiceActive={liveVoice.isActive}
-                  imageCount={imageAttachments.pendingImages.length}
-                  onPickImage={() => imageAttachments.fileInputRef.current?.click()}
-                  onPaste={() => void pasteFromClipboard()}
-                  onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
-                  onVoiceNoteClick={() => void handleVoiceClick()}
-                  onLiveVoiceClick={() => void handleLiveVoiceClick()}
-                />
-                {loading ? (
-                  <button
-                    type="button"
-                    onClick={cancelGeneration}
-                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-red-200 text-red-700 dark:border-red-900/60 dark:text-red-400"
-                    aria-label="Cancelar"
-                    title="Cancelar"
-                  >
-                    <X size={16} aria-hidden />
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => void send()}
-                    disabled={!canSubmit}
-                    className="flex h-9 min-w-[2.25rem] items-center justify-center gap-1 rounded-full bg-gov-blue-700 px-3 text-white disabled:opacity-40 hover:bg-gov-blue-800 dark:bg-gov-blue-600"
-                    aria-label="Enviar"
-                    title="Enviar"
-                  >
-                    <Send size={16} aria-hidden />
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        ) : (
-          <>
-            {composeChips ? (
-              <div className="mb-2 flex flex-wrap items-center gap-1.5">{composeChips}</div>
-            ) : null}
-            {imageAttachments.pendingImages.length > 0 && (
-              <div className="flex flex-wrap gap-2 mb-2">
-                {imageAttachments.pendingImages.map((img) => (
-                  <div className="relative" key={img.id}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={img.previewUrl}
-                      alt={img.name}
-                      className="h-14 w-14 object-cover rounded-lg border dark:border-dark-border"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => imageAttachments.removeImage(img.id)}
-                      className="absolute -top-1 -right-1 p-0.5 rounded-full bg-red-600 text-white"
-                      aria-label="Quitar imagen"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2">
-              <MediaAttachMenu
-                canSend={canSend && Boolean(workerId)}
-                loading={loading}
-                voiceRecording={voice.recording}
-                voiceBusy={voice.busy}
-                voiceResponseMode={voiceResponseMode}
-                voiceResponseAvailable={voiceResponseAvailable}
-                liveVoiceAvailable={liveVoiceAvailable}
-                liveVoiceActive={liveVoice.isActive}
-                imageCount={imageAttachments.pendingImages.length}
-                onPickImage={() => imageAttachments.fileInputRef.current?.click()}
-                onPaste={() => void pasteFromClipboard()}
-                onToggleVoiceResponse={() => setVoiceResponseMode((v) => !v)}
-                onVoiceNoteClick={() => void handleVoiceClick()}
-                onLiveVoiceClick={() => void handleLiveVoiceClick()}
-              />
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onPaste={onTextareaPaste}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-                rows={isCompact ? 1 : 2}
-                placeholder="Mensaje…"
-                className="flex-1 px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none"
-                disabled={!canSend || liveVoice.isActive}
-              />
-              {loading ? (
-                <button
-                  type="button"
-                  onClick={cancelGeneration}
-                  className="px-3 py-2 border-2 border-red-200 dark:border-red-900/60 text-red-700 dark:text-red-400 bg-white dark:bg-dark-surface rounded-xl font-bold text-xs flex items-center gap-1 shrink-0"
-                  aria-label="Cancelar"
-                >
-                  <X size={16} aria-hidden /> Cancelar
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => void send()}
-                  disabled={!canSubmit}
-                  className="px-3 py-2 bg-gov-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1 disabled:opacity-50 shrink-0"
-                >
-                  <Send size={16} aria-hidden /> Enviar
-                </button>
-              )}
-            </div>
-          </>
-        )}
-        {voice.recording ? (
-          <p className="text-xs text-red-600 mt-1.5">Grabando… pulsa el cuadrado para enviar la nota de voz.</p>
-        ) : loading && voice.busy ? (
-          <p className="text-xs text-gov-gray-500 mt-1.5">Transcribiendo nota de voz y generando respuesta…</p>
-        ) : null}
-        {(imageAttachments.attachError || error || voice.error || liveVoice.error) && (
-          <p className="text-xs text-red-600 mt-1.5">
-            {imageAttachments.attachError || error || voice.error || liveVoice.error}
-          </p>
-        )}
-      </footer>
+      <AdminChatComposeFooter
+        isStudioCompose={isStudioCompose}
+        isCompact={isCompact}
+        composeChips={composeChips}
+        input={input}
+        setInput={setInput}
+        inputRef={inputRef}
+        canSend={canSend}
+        canSubmit={canSubmit}
+        loading={loading}
+        workerId={workerId}
+        workerDisplayName={workerDisplayName}
+        error={error}
+        voiceResponseMode={voiceResponseMode}
+        voiceResponseAvailable={voiceResponseAvailable}
+        liveVoiceAvailable={liveVoiceAvailable}
+        setVoiceResponseMode={setVoiceResponseMode}
+        imageAttachments={imageAttachments}
+        send={send}
+        cancelGeneration={cancelGeneration}
+        onTextareaPaste={onTextareaPaste}
+        pasteFromClipboard={pasteFromClipboard}
+        handleVoiceClick={handleVoiceClick}
+        handleLiveVoiceClick={handleLiveVoiceClick}
+        voice={voice}
+        liveVoice={liveVoice}
+      />
     </section>
   );
 }

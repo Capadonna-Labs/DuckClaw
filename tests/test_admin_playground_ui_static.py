@@ -345,14 +345,13 @@ def test_admin_chat_composer_has_voice_note_button() -> None:
     )
 
     assert "useVoiceNoteRecorder" in panel
-    assert "sendVoiceNote" in panel
-    assert "MediaAttachMenu" in panel
-    assert "onVoiceNoteClick" in panel
+    assert "sendVoiceNote" in chat_hook
+    assert "MediaAttachMenu" in chat_hook
+    assert "onVoiceNoteClick" in chat_hook
     assert "Enviar nota de voz" in media_menu
     assert "Nota de voz" in media_menu
     assert "<Mic size={16}" in media_menu
     assert "MediaRecorder" in hook
-    assert "sendVoiceNote" in chat_hook
     assert "voiceNote" in bubble
     assert "Escuchar respuesta" in bubble
 
@@ -381,7 +380,8 @@ def test_admin_chat_has_live_voice_menu_item() -> None:
     assert "Voz en vivo" in media_menu
     assert "Nota de voz" in media_menu
     assert "usePipecatLiveVoice" in panel
-    assert "LiveVoiceBar" in panel
+    assert "LiveVoiceBar" in chat_hook
+    assert "AdminChatComposeFooter" in panel
     assert "liveVoiceAvailable" in chat_hook
     assert "realtime_voice" in chat_hook
     assert "SmallWebRTCTransport" in hook
@@ -406,7 +406,8 @@ def test_admin_chat_voice_response_defaults_off_and_gates_tts_toggle() -> None:
     assert "voice_response: voiceResponseMode" in hook
     assert "voiceResponseAvailable" in menu
     assert "Sensory TTS no disponible" in menu
-    assert "voiceResponseAvailable={voiceResponseAvailable}" in panel
+    assert "voiceResponseAvailable={voiceResponseAvailable}" in hook
+    assert "AdminChatComposeFooter" in panel
 
 
 def test_admin_pages_avoid_internal_jargon_copy() -> None:

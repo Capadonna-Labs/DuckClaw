@@ -7,13 +7,22 @@ export function sessionHeaders(method = 'GET'): HeadersInit {
 
 /** Coalesce concurrent identical GETs (React Strict Mode / doble mount). */
 const inflightAdminGets = new Map<string, Promise<unknown>>();
+/** Evita ráfagas secuenciales del mismo GET (bucle de effects). */
+const recentAdminGets = new Map<string, { at: number; value: Promise<unknown> }>();
+const ADMIN_GET_THROTTLE_MS = 2_000;
 
 export function coalesceAdminGet<T>(key: string, run: () => Promise<T>): Promise<T> {
   const existing = inflightAdminGets.get(key);
   if (existing) return existing as Promise<T>;
+  const recent = recentAdminGets.get(key);
+  if (recent && Date.now() - recent.at < ADMIN_GET_THROTTLE_MS) {
+    return recent.value as Promise<T>;
+  }
   const pending = run().finally(() => {
     inflightAdminGets.delete(key);
   });
+  // Marcar ya: si el effect reentra en <2s no vuelve a pegarle a la red.
+  recentAdminGets.set(key, { at: Date.now(), value: pending });
   inflightAdminGets.set(key, pending);
   return pending;
 }

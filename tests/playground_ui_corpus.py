@@ -27,5 +27,9 @@ def admin_chat_corpus() -> str:
         _ADMIN / "components/chat/useAdminChat.ts",
         _ADMIN / "components/chat/adminChatPure.ts",
         _ADMIN / "components/chat/runAdminChatTurn.ts",
+        _ADMIN / "components/chat/useAdminChatHistory.ts",
+        _ADMIN / "components/chat/AdminChatPanel.tsx",
+        _ADMIN / "components/chat/AdminChatMessageList.tsx",
+        _ADMIN / "components/chat/AdminChatComposeFooter.tsx",
     ]
     return "\n".join(p.read_text(encoding="utf-8") for p in paths if p.exists())

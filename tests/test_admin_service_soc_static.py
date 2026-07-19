@@ -58,6 +58,36 @@ def test_admin_chat_turn_lives_outside_hook() -> None:
     assert len(hook.splitlines()) < 800
 
 
+def test_admin_chat_history_lives_outside_hook() -> None:
+    history = Path("apps/duckclaw-admin/src/components/chat/useAdminChatHistory.ts").read_text(
+        encoding="utf-8"
+    )
+    hook = Path("apps/duckclaw-admin/src/components/chat/useAdminChat.ts").read_text(encoding="utf-8")
+    assert "export function useAdminChatHistory" in history
+    assert "reloadHistory" in history
+    assert "scheduleLoopHistoryReload" in history
+    assert "from './useAdminChatHistory'" in hook
+    assert "writeEphemeralHeartbeats" not in hook
+    assert "setWorkerId: (next) => setWorkerId(next)" not in hook
+    assert "configRef.current" in history
+    assert "setWorkerIdRef.current" in history
+    assert "loadedKeyRef" in history
+    assert len(hook.splitlines()) < 600
+
+
+def test_admin_chat_panel_delegates_list_and_compose() -> None:
+    panel = Path("apps/duckclaw-admin/src/components/chat/AdminChatPanel.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "AdminChatMessageList" in panel
+    assert "AdminChatComposeFooter" in panel
+    assert "function AdminChatMessageList" not in panel
+    assert "function AdminChatComposeFooter" not in panel
+    assert "<ChatBubble" not in panel
+    assert "<MediaAttachMenu" not in panel
+    assert len(panel.splitlines()) < 600
+
+
 def test_playground_page_delegates_history_and_settings() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
     assert "PlaygroundHistoryView" in page

@@ -15,8 +15,17 @@ export function useActiveConversation(
   const [conversationTitle, setConversationTitle] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const [bootstrapping, setBootstrapping] = useState(true);
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
 
   const bumpRefresh = useCallback(() => setRefreshToken((t) => t + 1), []);
+
+  const recoverMissingConversation = useCallback(() => {
+    const tid = tenantId || 'default';
+    writeActiveConversationId(null, tid);
+    setSessionId(null);
+    setConversationTitle(null);
+    setBootstrapNonce((n) => n + 1);
+  }, [tenantId]);
 
   const syncConversationTitle = useCallback((title: string) => {
     setConversationTitle(title);
@@ -113,7 +122,7 @@ export function useActiveConversation(
     return () => {
       cancelled = true;
     };
-  }, [bootstrapEnabled, tenantId, section, selectConversation, defaultWorkerId]);
+  }, [bootstrapEnabled, tenantId, section, selectConversation, defaultWorkerId, bootstrapNonce]);
 
   return {
     sessionId,
@@ -126,5 +135,6 @@ export function useActiveConversation(
     refreshToken,
     bumpRefresh,
     bootstrapping,
+    recoverMissingConversation,
   };
 }

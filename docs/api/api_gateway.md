@@ -24,4 +24,3 @@ Implementación: `services/api-gateway/main.py`.
 - [Multi Vault](../architecture/MULTI_VAULT_SYSTEM.md)
 - [Singleton Writer](../architecture/singleton_writer.md)
 - [Getting started](../GETTING_STARTED.md)
-- Telegram: [`../operations/TELEGRAM.md`](../operations/TELEGRAM.md)

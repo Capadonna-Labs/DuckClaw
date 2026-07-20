@@ -3,7 +3,7 @@
 Activa Tailscale + Funnel al puerto del gateway y re-registra webhooks de Telegram.
 
 Uso (desde raíz del repo):
-  uv run python scripts/start_telegram_ingress.py
+  uv run duckops ingress telegram-start
 """
 
 from __future__ import annotations

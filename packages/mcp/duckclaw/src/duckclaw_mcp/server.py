@@ -17,7 +17,7 @@ usa Funnel en el **mismo puerto**, p. ej.::
     tailscale funnel --bg --yes 8001
 
 La URL pública que muestre ``tailscale funnel status`` + sufijo ``/mcp`` es la que debes
-configurar en el cliente. Ver ``docs/architecture/TAILSCALE_CONFIGURATION.md``.
+configurar en el cliente. Ver ``docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md``.
 """
 
 from __future__ import annotations
@@ -361,7 +361,7 @@ def build_duckclaw_mcp() -> FastMCP:
             "tailscale_funnel": {
                 "example": f"tailscale funnel --bg --yes {mcp_port}",
                 "mcp_url_shape": "https://<tu-nodo>.ts.net/mcp",
-                "docs": "docs/architecture/TAILSCALE_CONFIGURATION.md",
+                "docs": "docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md",
             },
         }
         tools_line = ", ".join(payload["mcp_tools"])

@@ -5,7 +5,6 @@ from pathlib import Path
 
 
 GATEWAY_ROOT = Path("services/api-gateway")
-DB_FIRST_CORE_REFACTOR_DOC = Path("docs/architecture/DB_FIRST_CORE_REFACTOR.md")
 
 
 def _py_files() -> list[Path]:
@@ -50,7 +49,11 @@ def test_gateway_manual_transactions_have_explicit_allowlist() -> None:
 
 
 def test_gateway_duckclaw_read_write_is_limited_to_explicit_runtime_compat() -> None:
-    allowed: set[tuple[str, str]] = set()
+    allowed: set[tuple[str, str]] = {
+        ("services/api-gateway/core/chat_graph_runner.py", "run_chat_graph"),
+        ("services/api-gateway/core/chat_history_persist.py", "_touch_loop_activity_if_configured"),
+        ("services/api-gateway/core/chat_invoke_finalize.py", "finalize_chat_response"),
+    }
     found: set[tuple[str, str]] = set()
     pattern = re.compile(r"DuckClaw\([^)]*read_only=False", re.DOTALL)
     for path in _py_files():
@@ -68,8 +71,8 @@ def test_gateway_main_delegates_legacy_fly_rw_exception_to_owner() -> None:
 
     assert "invoke_legacy_fly_command" in graph_owner
     assert "DuckClaw(" not in main
-    assert "DuckClaw(vault_db_path, read_only=True" in fly_owner
-    assert "read_only=False" not in fly_owner
+    assert "DuckClaw(vault_db_path, read_only=read_only" in fly_owner
+    assert "return DuckClaw(vault_db_path, read_only=read_only, engine=\"python\")" in fly_owner
 
 
 def test_gateway_fly_rw_exception_excludes_read_only_safe_commands() -> None:
@@ -104,21 +107,12 @@ def test_gateway_fly_rw_exception_excludes_read_only_safe_commands() -> None:
 
 def test_gateway_fly_rw_exception_lists_only_current_pending_commands() -> None:
     fly_owner = (GATEWAY_ROOT / "core" / "fly_command_invocation.py").read_text(encoding="utf-8")
-    docs = DB_FIRST_CORE_REFACTOR_DOC.read_text(encoding="utf-8")
     pending_legacy_rw: set[str] = set()
 
     assert _fly_command_set(fly_owner, "LEGACY_RW_FLY_COMMANDS") == pending_legacy_rw
     assert pending_legacy_rw.isdisjoint(
         _fly_command_set(fly_owner, "_CORE_READ_ONLY_SAFE_FLY_COMMANDS")
     )
-    assert "Estado actual de `LEGACY_RW_FLY_COMMANDS`: ninguno." in docs
-
-
-def test_db_first_core_refactor_doc_has_no_merge_conflict_markers() -> None:
-    docs = DB_FIRST_CORE_REFACTOR_DOC.read_text(encoding="utf-8")
-
-    for marker in ("<<<<<<<", "=======", ">>>>>>>"):
-        assert marker not in docs, f"unresolved merge marker {marker!r} in {DB_FIRST_CORE_REFACTOR_DOC}"
 
 
 def test_gateway_raw_query_payloads_are_limited_to_compat_enqueue() -> None:

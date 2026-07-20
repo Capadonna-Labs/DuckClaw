@@ -1,6 +1,6 @@
 # System overview
 
-High-level view of how **ingress**, **agent compute**, **queues**, and **durable state** fit together. Canonical narrative and ASCII detail remain in the repository under **`docs/core/`** (for example `docs/core/00_Flujo de Vida del Dato (Wizard).md` and `docs/core/01_System_Infrastructure.md`). See the [Docs index](../README.md) for how published docs relate to those paths.
+Ingress → API Gateway → agent compute (read-only) → Redis queues → singleton DB-Writer → DuckDB vaults.
 
 ## Architecture diagram (Mermaid)
 
@@ -8,11 +8,11 @@ High-level view of how **ingress**, **agent compute**, **queues**, and **durable
 flowchart TB
   subgraph Ingress["Ingress"]
     TG[Telegram / webhooks]
-    HTTP[HTTP clients · Angular · API Gateway direct]
+    HTTP[HTTP clients · Admin · API]
   end
 
   subgraph Gateway["API Gateway — services/api-gateway"]
-    API[FastAPI · chat · db/write · fly · VLM · health]
+    API[FastAPI · chat · db/write · fly · health]
   end
 
   subgraph Compute["Agent compute — read-only vaults"]
@@ -21,13 +21,12 @@ flowchart TB
   end
 
   subgraph Sidecars["Optional processes"]
-    HB[services/heartbeat — proactive ticks]
-    PM2[PM2 jobs — HRP weekly · MOC pipeline · …]
+    HB[services/heartbeat]
   end
 
   subgraph Async["Redis"]
     QW[(duckdb write queue)]
-    DD[(dedup · caches · state_delta queues)]
+    DD[(dedup · caches · state_delta)]
   end
 
   subgraph Writer["Singleton writer"]
@@ -35,38 +34,38 @@ flowchart TB
   end
 
   subgraph Data["Durable state"]
-    VAULT[(DuckDB vaults — per-tenant / user)]
+    VAULT[(DuckDB vaults)]
   end
 
   TG --> API
   HTTP --> API
   HB --> API
-  PM2 -->|"enqueue SQL / alerts"| QW
-  PM2 -->|"read-only jobs"| VAULT
 
   API --> MGR
   MGR --> WRK
-  WRK -->|"read_sql · inspect_schema — read_only"| VAULT
+  WRK -->|"read_only"| VAULT
 
   API -->|"POST /api/v1/db/write"| QW
-  WRK -->|"StateDelta / finance enqueue"| DD
+  WRK --> DD
   DD --> QW
 
   QW --> DW
-  DW -->|"ACID mutations"| VAULT
+  DW -->|"ACID"| VAULT
 ```
 
-## Invariants (short)
+## Invariants
 
 | Concern | Rule |
 |--------|------|
-| Who writes DuckDB? | **Only** `services/db-writer` (singleton path). Gateway and workers use **read-only** opens for vault paths in normal operation. |
-| How do agents persist? | Enqueues to Redis; DB-Writer applies in a transaction. |
-| Where is truth? | Product/architecture detail: **`docs/architecture/`**; this page is an overview for MkDocs readers. |
+| Who writes DuckDB? | Only `services/db-writer`. Gateway/workers: `read_only=True`. |
+| How do agents persist? | Typed commands → Redis → DB-Writer transaction. |
+| Hub canónico | `db/private/default/duckclaw.duckdb` |
 
-## Related docs
+## Related
 
-- [Singleton Writer](singleton_writer.md) — queue contract and mutation path.
-- [Tri-Cameral Memory](tri_cameral_memory.md) — SQL / PGQ / VSS roles.
-- [Strix Sandbox](strix_sandbox.md) — isolated execution boundary.
-- [Docs index](../README.md) — curated links into `docs/`.
+- [Singleton Writer](singleton_writer.md)
+- [Gateway ↔ DB-Writer](GATEWAY_DB_WRITER_BOUNDARIES.md)
+- [Process boundaries](GATEWAY_PROCESS_BOUNDARIES.md)
+- [DB-Writer contract](../api/DB_WRITER_CONTRACT.md)
+- [Tri-Cameral Memory](tri_cameral_memory.md)
+- [Docs index](../README.md)

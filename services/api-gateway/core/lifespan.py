@@ -57,8 +57,8 @@ def _warn_if_loopback_gateway_port_steals_telegram_funnel() -> None:
     if "discord_mcp" in low or "-m discord_mcp.main" in low:
         _log.error(
             "Conflicto Telegram/Funnel: hay LISTEN en %s relacionado con discord_mcp; "
-            "las peticiones a %s no llegarán a este gateway. Ejecuta "
-            "`bash scripts/telegram/stop_discord_mcp_port_8000.sh` o arranca MCP con HOST=127.0.0.1 "
+            "las peticiones a %s no llegarán a este gateway. Libera el puerto 8000 "
+            "(mata el proceso discord_mcp) o arranca MCP con HOST=127.0.0.1 "
             "PORT=8010. lsof (recorte): %s",
             loopback,
             loopback,
@@ -148,7 +148,7 @@ async def lifespan(app: FastAPI):
     app.state.goals_ticker_task = None
     app.state.knowledge_auto_sync_task = None
     _normalize_local_artifacts_to_db()
-    # DDL en runtime desactivado: ejecutar duckclaw-migrate / bootstrap_dbs antes de PM2.
+    # DDL en runtime desactivado: ejecutar duckclaw-migrate / duckops db bootstrap antes de PM2.
     app.state.telegram_mcp = None
 
     async def _start_telegram_mcp() -> None:

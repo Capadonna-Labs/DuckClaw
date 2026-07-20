@@ -1,7 +1,7 @@
 """
 ShadowInferenceRouter — comparación post Hot-Swap para detectar deriva semántica.
 
-Spec: docs/architecture/DB_FIRST_CORE_REFACTOR.md
+Spec: docs/architecture/system_overview.md
 
 Comportamiento:
   - 48h tras Hot-Swap: enrutar al modelo nuevo + inferencia en background al anterior

@@ -2,14 +2,7 @@
 
 Consola web de operación para DuckClaw: agentes (catálogo DB-first), playground, runtime DuckDB, skills/MCP, Telegram y observabilidad. Construida con **Next.js 14** (App Router) y **pnpm**.
 
-| Documento | Contenido |
-|-----------|-----------|
-| [docs/README.md](docs/README.md) | Índice de toda la documentación |
-| [docs/architecture.md](docs/architecture.md) | BFF, seguridad, fuentes de verdad |
-| [docs/environment.md](docs/environment.md) | Variables de entorno |
-| [docs/development.md](docs/development.md) | Desarrollo, build, pruebas |
-| [docs/voice-realtime.md](docs/voice-realtime.md) | Voz en vivo (Pipecat / playground) |
-| [UIUX patterns](../../docs/architecture/UIUX-PATTERNS.md) | Patrones UI del monorepo |
+Arquitectura monorepo: [`docs/architecture/`](../../docs/architecture/) · Arranque: [`docs/GETTING_STARTED.md`](../../docs/GETTING_STARTED.md).
 
 ---
 

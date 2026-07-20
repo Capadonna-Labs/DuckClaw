@@ -127,7 +127,7 @@ def _run_bot() -> None:
                 self._handle_setup(message, text, chat_id)
                 return
 
-            # On-the-Fly CLI (docs/core/04_Cognitive_Agent_Logic.md)
+            # On-the-Fly CLI (docs/architecture/system_overview.md)
             from duckclaw.graphs.on_the_fly_commands import handle_command
             # tenant_id (por defecto) porque TelegramBot no define multi-tenant en este módulo.
             # request identity para whitelist del comando /team.

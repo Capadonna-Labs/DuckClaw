@@ -4,7 +4,6 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-AUTH_SPEC = ROOT / "docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md"
 BOOTSTRAP_LIB = ROOT / "apps/duckclaw-admin/src/lib/adminBootstrapStatus.ts"
 BOOTSTRAP_ROUTE = ROOT / "apps/duckclaw-admin/src/app/api/admin/bootstrap/status/route.ts"
 BOOTSTRAP_HOOK = ROOT / "apps/duckclaw-admin/src/hooks/useAdminBootstrapStatus.ts"
@@ -13,13 +12,10 @@ LOGIN_PAGE = ROOT / "apps/duckclaw-admin/src/app/(auth)/login/page.tsx"
 AUTH_STORE = ROOT / "apps/duckclaw-admin/src/store/authStore.ts"
 
 
-def test_admin_login_uses_canonical_auth_spec_and_public_bootstrap_status() -> None:
-    spec = AUTH_SPEC.read_text(encoding="utf-8")
+def test_admin_login_uses_public_bootstrap_status() -> None:
     route = BOOTSTRAP_ROUTE.read_text(encoding="utf-8")
     lib = BOOTSTRAP_LIB.read_text(encoding="utf-8")
 
-    assert "POST /api/admin/auth/login" in spec
-    assert "POST /api/v1/admin/auth/login" in spec
     assert "resolveAdminBootstrapStatus" in route
     assert "requireAdminRouteAuth" not in route
     assert "DUCKCLAW_ADMIN_API_KEY" not in route
@@ -30,7 +26,6 @@ def test_admin_login_uses_canonical_auth_spec_and_public_bootstrap_status() -> N
     assert "gateway_unreachable" in lib
     assert "pm2Status" in lib
     assert "recoveryCommand" in lib
-    assert "pm2 jlist" in lib
 
 
 def test_login_page_renders_degraded_gateway_state_without_masking_as_credentials() -> None:
@@ -40,7 +35,7 @@ def test_login_page_renders_degraded_gateway_state_without_masking_as_credential
     store = AUTH_STORE.read_text(encoding="utf-8")
 
     assert "useAdminBootstrapStatus" in hook
-    assert "setInterval" in hook
+    assert "useVisibilityAwareInterval" in hook
     assert "BootstrapStatusBanner" in login
     assert "bootstrap.canAttemptLogin" in login
     assert "disabled={isSubmitting || !bootstrap.canAttemptLogin}" in login

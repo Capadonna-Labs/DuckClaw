@@ -290,10 +290,6 @@ HOMEOSTASIS_GOALS_ALIGNMENT = (
 HOMEOSTASIS_CANONICAL_ROOT = (
     REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "homeostasis"
 )
-HOMEOSTASIS_OPERATION_DOCS = (
-    REPO_ROOT / "docs" / "operations" / "Homeostasis-Heartbeat.md",
-    REPO_ROOT / "docs" / "operations" / "Meditate-Homeostasis.md",
-)
 MEDITATE_HARNESS_SOURCE_TABLE_FILES = (
     REPO_ROOT / "harness_core" / "states" / "meditate_state.py",
     REPO_ROOT / "harness_core" / "skills" / "emit_correction_delta.py",
@@ -302,10 +298,8 @@ LEGACY_SINGLETON_WRITER = (
     FORGE_ROOT / "homeostasis" / "singleton_writer.py"
 )
 DOCS_SINGLETON_WRITER_SCAN_ROOTS = (
-    REPO_ROOT / "docs" / "core",
     REPO_ROOT / "docs" / "architecture",
     REPO_ROOT / "docs" / "api",
-    REPO_ROOT / "docs" / "operations",
 )
 LEGACY_SINGLETON_WRITER_DOC_PATTERNS = (
     "duckclaw.forge.homeostasis.singleton_writer",
@@ -326,21 +320,6 @@ HOMEOSTASIS_VERTICAL_MARKERS_RE = re.compile(
     r"|trading_session_[a-z0-9_]+"
     r"|trade[_ -]?signal"
     r"|tickers?"
-    r"|pnl"
-    r")(?![a-z0-9])"
-)
-HOMEOSTASIS_DOC_VERTICAL_MARKERS_RE = re.compile(
-    r"(?i)(?<![a-z0-9])("
-    r"quant(?:[_-]?(?:trader|core|trading|market|cfd|hrp|moc|auto|state))?"
-    r"|finanz(?:as)?"
-    r"|finance(?:_worker|_ledger)?"
-    r"|ibkr"
-    r"|trader"
-    r"|broker"
-    r"|drawdown"
-    r"|trading[_ -]?session"
-    r"|trading_session_[a-z0-9_]+"
-    r"|trade[_ -]?signal"
     r"|pnl"
     r")(?![a-z0-9])"
 )
@@ -669,16 +648,6 @@ def test_meditate_harness_uses_transversal_stale_task_source_table() -> None:
         text = path.read_text(encoding="utf-8", errors="ignore")
         if "quant_core.trade_signals" in text:
             offenders.append(f"{_rel(path)}: quant_core.trade_signals")
-
-    assert offenders == []
-
-
-def test_homeostasis_operation_docs_use_generic_metrics() -> None:
-    offenders: list[str] = []
-    for path in HOMEOSTASIS_OPERATION_DOCS:
-        text = path.read_text(encoding="utf-8", errors="ignore")
-        for match in HOMEOSTASIS_DOC_VERTICAL_MARKERS_RE.finditer(text):
-            offenders.append(f"{_rel(path)}:{match.start()}: {match.group(0)}")
 
     assert offenders == []
 

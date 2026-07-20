@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # spawn-install.sh — Instalador de producción desatendido y genérico para DuckClaw
-# Spec: docs/architecture/infra-bootstrap.md
+# Spec: docs/GETTING_STARTED.md
 set -euo pipefail
 
 export DEBIAN_FRONTEND=noninteractive

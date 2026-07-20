@@ -2,7 +2,7 @@
 """
 Webhook entrante de Telegram (Bot API Update) → mismo pipeline que /api/v1/agent/.../chat.
 
-Contrato principal (recomendado): POST ``/api/v1/telegram/webhook`` — ver ``docs/operations/TELEGRAM.md``.
+Contrato principal (recomendado): POST ``/api/v1/telegram/webhook`` — ver ``docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md``.
 
 **Multiplex por path:** si ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` está en formato compacto
 (``bot:token:/api/v1/telegram/...`` separado por comas), se registran ``POST`` dinámicos por ruta
@@ -1491,7 +1491,7 @@ def build_telegram_inbound_webhook_router(
             _log.error(
                 "telegram path multiplex: POST a /api/v1/telegram/webhook ignorado (usar URL por path). "
                 "Los bots siguen usando la URL genérica en Telegram. Registra webhook por path: "
-                "`python scripts/register_webhooks.py` con DUCKCLAW_PUBLIC_URL. "
+                "`uv run duckops ingress telegram-register-webhooks` con DUCKCLAW_PUBLIC_URL. "
                 "Rutas configuradas: %s. update_id=%s",
                 ", ".join(b.webhook_path for b in _compact_path_bindings),
                 _upd,

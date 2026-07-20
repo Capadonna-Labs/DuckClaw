@@ -1,4 +1,4 @@
-# docs/core/03_Skills_and_Tooling_Framework.md
+# docs/architecture/system_overview.md
 
 """Strix Sandbox: entorno de ejecución libre aislado con Docker.
 
@@ -293,7 +293,7 @@ def _inject_sandbox_python_header(code: str) -> str:
 class StrixSandboxManager:
     """Gestiona el ciclo de vida de contenedores Docker para ejecución aislada.
 
-    Strix sandbox lifecycle (docs/core/03_Skills_and_Tooling_Framework.md)
+    Strix sandbox lifecycle (docs/architecture/system_overview.md)
     - network_mode=none (Zero exfiltration)
     - --cap-drop=ALL
     - mem_limit=768m (default DuckClaw; Python + Playwright headroom)

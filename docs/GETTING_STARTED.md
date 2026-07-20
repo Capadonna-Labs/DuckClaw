@@ -1,6 +1,6 @@
 # Empezar con DuckClaw
 
-Entrada mínima para un dev nuevo. Arquitectura: [`architecture/system_overview.md`](architecture/system_overview.md) y [`architecture/DB_FIRST_CORE_REFACTOR.md`](architecture/DB_FIRST_CORE_REFACTOR.md).
+Entrada mínima para un dev nuevo. Arquitectura: [`architecture/system_overview.md`](architecture/system_overview.md).
 
 ## Requisitos automáticos (macOS / Linux)
 
@@ -95,9 +95,9 @@ uv run duckops smoke
 ## Siguiente lectura
 
 1. [`docs/README.md`](README.md) — mapa de documentación
-2. [`architecture/DB_FIRST_CORE_REFACTOR.md`](architecture/DB_FIRST_CORE_REFACTOR.md) — arquitectura DB-first
-3. [`architecture/system_overview.md`](architecture/system_overview.md) — componentes
-4. `comandos.txt` (local, no versionado) o `uv run duckops --help` — operación diaria
+2. [`architecture/system_overview.md`](architecture/system_overview.md) — componentes
+3. [`architecture/GATEWAY_DB_WRITER_BOUNDARIES.md`](architecture/GATEWAY_DB_WRITER_BOUNDARIES.md) — quién escribe
+4. `uv run duckops --help` — operación diaria
 
 ## Comandos útiles
 

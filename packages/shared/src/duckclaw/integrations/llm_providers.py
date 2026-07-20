@@ -1411,23 +1411,42 @@ def build_llm(
         return build_openrouter_llm(m, url, db=db, tenant_id=tenant_id, actor_email=actor_email)
 
     if p == "ollama":
+        ollama_base = (url or "http://127.0.0.1:11434").strip().rstrip("/")
+        # ChatOllama espera host sin /v1; ChatOpenAI espera .../v1
+        ollama_host = ollama_base[:-3] if ollama_base.endswith("/v1") else ollama_base
+        ollama_openai = ollama_host if ollama_host.endswith("/v1") else f"{ollama_host}/v1"
         try:
             from langchain_community.chat_models import ChatOllama
+
             return ChatOllama(
                 model=m or "llama3.2",
-                base_url=url or "http://localhost:11434",
+                base_url=ollama_host,
                 temperature=0,
             )
         except Exception:
             try:
                 from langchain_ollama import ChatOllama
+
                 return ChatOllama(
                     model=m or "llama3.2",
-                    base_url=url or "http://localhost:11434",
+                    base_url=ollama_host,
                     temperature=0,
                 )
             except Exception:
-                raise RuntimeError("Ollama requiere langchain-community o langchain-ollama.")
+                try:
+                    from langchain_openai import ChatOpenAI
+
+                    return ChatOpenAI(
+                        model=m or "llama3.2",
+                        temperature=0,
+                        base_url=ollama_openai,
+                        api_key=os.environ.get("OPENAI_API_KEY", "ollama"),
+                    )
+                except Exception as exc:
+                    raise RuntimeError(
+                        "Ollama requiere langchain-openai (API /v1) "
+                        "o langchain-community / langchain-ollama."
+                    ) from exc
 
     if p in ("mlx", "iotcorelabs"):
         try:
@@ -1475,14 +1494,20 @@ def build_llm(
 
 def build_llm_fallback_from_env() -> Optional[Any]:
     """
-    Segundo LLM opcional para el grafo del worker: ``DUCKCLAW_LLM_FALLBACK_PROVIDER`` (+ MODEL, BASE_URL).
+    Segundo LLM opcional para el grafo del worker.
+
+    Orden: ``DUCKCLAW_LLM_FALLBACK_*`` → si vacío, ``DUCKCLAW_LOCAL_LLM_*``.
     No usa ``prefer_env_provider``: la tripleta es explícita. Devuelve None si no está configurado.
     """
     p = (os.environ.get("DUCKCLAW_LLM_FALLBACK_PROVIDER") or "").strip().lower()
-    if not p or p in ("none", "none_llm"):
-        return None
     m = (os.environ.get("DUCKCLAW_LLM_FALLBACK_MODEL") or "").strip()
     u = (os.environ.get("DUCKCLAW_LLM_FALLBACK_BASE_URL") or "").strip()
+    if not p or p in ("none", "none_llm"):
+        p = (os.environ.get("DUCKCLAW_LOCAL_LLM_PROVIDER") or "").strip().lower()
+        m = (os.environ.get("DUCKCLAW_LOCAL_LLM_MODEL") or "").strip()
+        u = (os.environ.get("DUCKCLAW_LOCAL_LLM_BASE_URL") or "").strip()
+    if not p or p in ("none", "none_llm"):
+        return None
     return build_llm(p, m, u, prefer_env_provider=False)
 
 

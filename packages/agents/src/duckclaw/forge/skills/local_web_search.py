@@ -254,7 +254,29 @@ def local_web_search_tool(config: dict[str, Any] | None = None) -> Any | None:
             )
             return format_search_results(rows, backend=backend)
         except Exception as exc:
-            return format_search_results([], backend=backend, error=str(exc))
+            err = str(exc)
+            offline_hint = (
+                " Sin red (o backend caído): no hay búsqueda web. "
+                "Usa search_project_knowledge / list_project_knowledge / "
+                "read_project_knowledge sobre la bóveda local, o semantic_memory."
+            )
+            low = err.lower()
+            if any(
+                x in low
+                for x in (
+                    "nodename",
+                    "name or service not known",
+                    "failed to resolve",
+                    "connection refused",
+                    "network is unreachable",
+                    "timed out",
+                    "timeout",
+                    "temporary failure",
+                    "offline",
+                )
+            ):
+                return format_search_results([], backend=backend, error=err + offline_hint)
+            return format_search_results([], backend=backend, error=err)
 
     desc = (
         f"Busca en internet sin Tavily ({backend}). "

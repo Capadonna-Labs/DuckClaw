@@ -39,8 +39,8 @@ _OPS_ALLOWLIST: dict[str, list[str]] = {
     "pm2_start_edge_streamlit": ["pm2", "start", "config/ecosystem.edge-devices.config.cjs", "--update-env"],
     "pm2_restart_edge_streamlit": ["pm2", "restart", "Edge-Streamlit", "--update-env"],
     "pm2_logs_edge_streamlit": ["pm2", "logs", "Edge-Streamlit", "--lines", "40", "--nostream"],
-    "doctor": ["uv", "run", "python", "scripts/doctor.py"],
-    "bootstrap_dbs": ["uv", "run", "python", "scripts/bootstrap_dbs.py"],
+    "doctor": ["uv", "run", "duckops", "doctor"],
+    "bootstrap_dbs": ["uv", "run", "duckops", "db", "bootstrap"],
 }
 
 
@@ -121,8 +121,8 @@ async def list_ops_commands() -> dict[str, Any]:
         "pm2_start_edge_streamlit": "Iniciar dashboard Edge (Streamlit :8501)",
         "pm2_restart_edge_streamlit": "Reiniciar dashboard Edge (Streamlit)",
         "pm2_logs_edge_streamlit": "Últimas líneas log Edge Streamlit",
-        "doctor": "Diagnóstico local (doctor.py)",
-        "bootstrap_dbs": "Bootstrap DuckDB (tablas agent_config, etc.)",
+        "doctor": "Diagnóstico local (duckops doctor)",
+        "bootstrap_dbs": "Bootstrap DuckDB (uv run duckops db bootstrap)",
     }
     return {
         "commands": [

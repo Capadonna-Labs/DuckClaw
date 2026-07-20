@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Re-aplica Tailscale Serve :8443 → Next.js admin (detecta puerto activo)."""
 
 from __future__ import annotations
@@ -8,13 +7,12 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from duckops.paths import repo_root
 
 
 def _load_repo_dotenv() -> None:
-    env_path = REPO_ROOT / ".env"
+    env_path = repo_root() / ".env"
     if not env_path.is_file():
         return
     try:
@@ -52,8 +50,7 @@ def detect_admin_port() -> int:
             )
         return port
 
-    candidates = [3001, 3000, 3002]
-    for port in candidates:
+    for port in (3001, 3000, 3002):
         url = f"http://127.0.0.1:{port}/login"
         try:
             req = urllib.request.Request(url, method="GET")
@@ -67,15 +64,17 @@ def detect_admin_port() -> int:
 
 def restore_admin_serve() -> int:
     port = detect_admin_port()
-    script = REPO_ROOT / "scripts" / "tailscale_serve_admin.sh"
-    if not script.is_file():
-        print(f"error: no existe {script}", file=sys.stderr)
-        return 1
-    env = {**os.environ, "DUCKCLAW_ADMIN_PORT": str(port)}
+    root = repo_root()
     proc = subprocess.run(
-        ["bash", str(script)],
-        cwd=REPO_ROOT,
-        env=env,
+        [
+            "tailscale",
+            "serve",
+            "--bg",
+            "--https=8443",
+            f"http://127.0.0.1:{port}",
+        ],
+        cwd=root,
+        env={**os.environ, "DUCKCLAW_ADMIN_PORT": str(port)},
         text=True,
     )
     print(f"ADMIN_SERVE_PORT={port}")

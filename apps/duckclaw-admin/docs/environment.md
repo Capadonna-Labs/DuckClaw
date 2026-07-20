@@ -17,7 +17,7 @@ El **API Gateway** y el **db-writer** leen este archivo.
 | `GITHUB_TOKEN` | Para skill `github` en manifest | PAT para GitHub MCP (`duckclaw.github.mcp_bridge`) |
 | `GITHUB_TOOLSETS` | No | Toolsets del servidor MCP (default en código) |
 
-**GitHub MCP:** además del token, el proceso **PM2 del gateway** necesita `docker` en PATH y permiso sobre `docker.sock` (usuario en grupo `docker`). Diagnóstico: `uv run python scripts/doctor.py` (check 9).
+**GitHub MCP:** además del token, el proceso **PM2 del gateway** necesita `docker` en PATH y permiso sobre `docker.sock` (usuario en grupo `docker`). Diagnóstico: `uv run duckops doctor` (check 9).
 
 Ejemplo mínimo para admin:
 

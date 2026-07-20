@@ -21,7 +21,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from duckops.paths import repo_root
+
+REPO_ROOT = repo_root()
 
 
 def _load_dotenv_if_present() -> None:

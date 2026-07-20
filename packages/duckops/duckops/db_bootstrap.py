@@ -13,7 +13,9 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+from duckops.paths import repo_root
+
+_REPO_ROOT = repo_root()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 

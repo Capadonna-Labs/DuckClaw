@@ -15,6 +15,6 @@
     "stack:up": "uv run duckops stack up",
     "stack:status": "uv run duckops stack status",
     "dev:local": "pnpm stack:up && pnpm admin:dev",
-    "crm:bootstrap-db": "uv run python scripts/bootstrap_dbs.py"
+    "crm:bootstrap-db": "uv run duckops db bootstrap"
   }
 }

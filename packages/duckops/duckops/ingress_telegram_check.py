@@ -18,7 +18,9 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from duckops.paths import repo_root
+
+REPO_ROOT = repo_root()
 _DEBUG_LOG = REPO_ROOT / ".cursor" / "debug-77cb49.log"
 
 

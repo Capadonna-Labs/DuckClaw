@@ -4,8 +4,8 @@ Consulta ``main.authorized_users`` en una DuckDB (depuración del flujo /team).
 
 Ejemplos::
 
-  uv run python scripts/check_authorized_users.py --db db/private/USER/duckclaw.duckdb
-  uv run python scripts/check_authorized_users.py --tenant default
+  uv run duckops db authorized-users --db db/private/USER/duckclaw.duckdb
+  uv run duckops db authorized-users --tenant default
 
 Si omites ``--db``, se usa ``get_gateway_db_path()`` (requiere ``DUCKCLAW_REPO_ROOT`` / env multiplex).
 """
@@ -17,6 +17,8 @@ import json
 import os
 import sys
 from pathlib import Path
+
+from duckops.paths import repo_root
 
 
 def main() -> int:
@@ -33,7 +35,7 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    repo = Path(__file__).resolve().parent.parent
+    repo = repo_root()
     if "DUCKCLAW_REPO_ROOT" not in os.environ:
         os.environ.setdefault("DUCKCLAW_REPO_ROOT", str(repo))
 

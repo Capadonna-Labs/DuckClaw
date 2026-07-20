@@ -72,7 +72,7 @@ Documento detallado del ciclo de vida de los datos: API Gateway, DB Writer, cola
 
 **Arranque:** `duckops serve --pm2 --gateway` o `uvicorn main:app --app-dir services/api-gateway`
 
-**Política solo lectura (runtime):** El API Gateway y el grafo (`graph_server`) abren DuckDB con `read_only=True`. El único proceso que debe abrir conexiones de escritura a bóvedas en producción es `services/db-writer/main.py` (más scripts de mantenimiento). Antes de arrancar PM2, ejecutar `python scripts/bootstrap_dbs.py` para DDL idempotente (`authorized_users`, plantillas de workers, extensiones). El registry multi-bóveda (`ensure_registry` / `system.duckdb`) lo inicializa ese mismo script vía `ensure_registry()`.
+**Política solo lectura (runtime):** El API Gateway y el grafo (`graph_server`) abren DuckDB con `read_only=True`. El único proceso que debe abrir conexiones de escritura a bóvedas en producción es `services/db-writer/main.py` (más scripts de mantenimiento). Antes de arrancar PM2, ejecutar `uv run duckops db bootstrap` para DDL idempotente (`authorized_users`, plantillas de workers, extensiones). El registry multi-bóveda (`ensure_registry` / `system.duckdb`) lo inicializa ese mismo script vía `ensure_registry()`.
 
 **Confirmación de escrituras:** Tras ejecutar SQL desde la cola `duckdb_write_queue`, el DB Writer publica `task_status:<task_id>` en Redis (TTL ~60s) para que `admin_sql` pueda hacer polling breve (~3s).
 
@@ -153,7 +153,7 @@ O como PM2: `DuckClaw-DB-Writer`.
 | `packages/agents/src/duckclaw/workers/loader.py`      | `run_schema(db, spec)` — crea schema, `agent_beliefs`, ejecuta `schema.sql`. |
 | `packages/agents/src/duckclaw/forge/templates/<worker_id>/schema.sql` | DDL de tablas del template (ej. `default/schema.sql`).          |
 | `scripts/duckclaw_setup_wizard.py`                   | Wizard CLI: crea `db/<nombre>.duckdb` si no existe; gestiona PM2 (Gateway, DB Writer). |
-| `scripts/bootstrap_dbs.py`                   | DDL idempotente hub + registry multi-bóveda.                                  |
+| `uv run duckops db bootstrap`                | DDL idempotente hub + registry multi-bóveda.                                  |
 
 
 **Flujo de creación:**

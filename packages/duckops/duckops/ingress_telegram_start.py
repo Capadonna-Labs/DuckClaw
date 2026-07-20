@@ -14,7 +14,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from duckops.paths import repo_root
+
+REPO_ROOT = repo_root()
 
 
 def _load_dotenv() -> None:
@@ -102,12 +104,12 @@ def main() -> int:
 
     print("── Restaurar admin Serve (:8443) tras funnel ──")
     code, out, err = _run(
-        ["uv", "run", "python", "scripts/restore_tailscale_admin_serve.py"],
+        ["uv", "run", "duckops", "ingress", "restore-admin-serve"],
         timeout=45,
     )
     print(out, err, sep="\n")
     if code != 0:
-        print("warn: no se pudo restaurar Serve :8443; ejecuta restore_tailscale_admin_serve.py", file=sys.stderr)
+        print("warn: no se pudo restaurar Serve :8443; ejecuta uv run duckops ingress restore-admin-serve", file=sys.stderr)
 
     code, out, err = _run(["tailscale", "funnel", "status"], timeout=15)
     chunks.extend([out, err])
@@ -115,7 +117,7 @@ def main() -> int:
 
     print("── register_webhooks ──")
     code, out, err = _run(
-        ["uv", "run", "python", "scripts/register_webhooks.py"],
+        ["uv", "run", "duckops", "ingress", "telegram-register-webhooks"],
         timeout=90,
     )
     print(out, err, sep="\n")
@@ -124,7 +126,7 @@ def main() -> int:
 
     print("── check_telegram_ingress ──")
     code, out, err = _run(
-        ["uv", "run", "python", "scripts/check_telegram_ingress.py"],
+        ["uv", "run", "duckops", "ingress", "telegram-check"],
         timeout=45,
     )
     print(out, err, sep="\n")

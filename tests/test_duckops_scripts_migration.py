@@ -22,6 +22,8 @@ def test_duckops_exposes_script_replacement_commands() -> None:
         ["db", "bootstrap", "--dry-run"],
         ["db", "check-locks", "--dry-run"],
         ["db", "authorized-users", "--dry-run"],
+        ["db", "fresh-dev", "--dry-run"],
+        ["db", "migrate-legacy-axis", "--dry-run"],
         ["deploy", "spawn-install", "--dry-run"],
     )
     for command in commands:
@@ -35,7 +37,11 @@ def test_one_off_scripts_removed_from_active_scripts() -> None:
         "scripts/crm_origin_check.py",
         "scripts/openweather_city.py",
         "scripts/experimental/remap_weights.py",
-        "scripts/experimental/duckops scripts migration",
+        "scripts/fresh_dev_platform.sh",
+        "scripts/migrate_legacy_axis_vault.sh",
+        "scripts/doctor.py",
+        "scripts/bootstrap_dbs.py",
+        "scripts/migrations/003_admin_user_workspaces.py",
     )
     for path in removed:
         assert not Path(path).exists()

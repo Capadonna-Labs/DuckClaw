@@ -7,7 +7,7 @@ Evolucionar el sistema de persistencia para permitir que un único usuario gesti
 
 ## 2. Modelo de Metadatos (System Registry)
 
-Para gestionar la relación Usuario-Bóvedas, la base de datos `system.duckdb` debe incorporar un registro de propiedad. Cada **ámbito (`scope_id`)** representa un tenant/gateway lógico (p. ej. gateway A con tenant `default` vs gateway B con tenant `Trabajo`), de modo que el mismo `user_id` de Telegram puede tener **distinta bóveda activa** por gateway sin compartir el puntero `is_active`.
+Para gestionar la relación Usuario-Bóvedas, el **registry** (`system.duckdb` vía `duckclaw.vaults`; no es la bóveda de sesión — esa es `db/private/default/duckclaw.duckdb`) incorpora un registro de propiedad. Cada **ámbito (`scope_id`)** representa un tenant/gateway lógico (p. ej. gateway A con tenant `default` vs gateway B con tenant `Trabajo`), de modo que el mismo `user_id` de Telegram puede tener **distinta bóveda activa** por gateway sin compartir el puntero `is_active`.
 
 ```sql
 -- Tabla de registro de bóvedas (PK compuesta con scope)

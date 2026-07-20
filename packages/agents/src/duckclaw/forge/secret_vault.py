@@ -1,7 +1,7 @@
 """
 SecretVaultManager — inyección de secretos en runtime, borrado seguro post-uso.
 
-Spec: docs/architecture/DB_FIRST_CORE_REFACTOR.md
+Spec: docs/architecture/system_overview.md
 
 Uso futuro:
   - Integrar SOPS o HashiCorp Vault

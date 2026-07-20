@@ -142,7 +142,7 @@ def provision_tailscale_funnel_bg(
                 "Cualquier bot de Telegram cuyo getWebhookInfo use la misma URL base "
                 "empezará a entregar updates al gateway de ese puerto (no es un fallo de .env). "
                 "Para varios bots: otro hostname/túnel por gateway, proxy con virtual hosts, "
-                "o multiplexación (docs/operations/TELEGRAM.md)."
+                "o multiplexación (docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md)."
             )
         existing = public_base_url_from_funnel_status(
             prior, expected_local_port=port

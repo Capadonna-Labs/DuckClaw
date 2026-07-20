@@ -1,7 +1,7 @@
 """
 Research Bridge — búsqueda local (SearXNG/DDG) + Tavily opcional + Browser-Use.
 
-Spec: docs/core/03_Skills_and_Tooling_Framework.md
+Spec: docs/architecture/system_overview.md
 Local-first: ``web_search`` no requiere TAVILY_API_KEY.
 Opcional cloud: pip install tavily-python  (o uv sync --extra tavily)
 Browser: pip install browser-use playwright  (o uv sync --extra browser)

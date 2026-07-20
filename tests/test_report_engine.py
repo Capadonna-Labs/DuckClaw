@@ -22,7 +22,7 @@ def test_analyze_corporate_seed_template() -> None:
     if not path.is_file():
         import pytest
 
-        pytest.skip("corporate_report.docx seed missing — run scripts/seed_corporate_docx_template.py")
+        pytest.skip("corporate_report.docx seed missing under packages/shared/src/duckclaw/seeds/document_templates/")
     analysis = analyze_docx_template(path)
     ids = {s["id"] for s in analysis["sections"]}
     assert "title" in ids

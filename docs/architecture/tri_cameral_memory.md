@@ -1,30 +1,24 @@
 # Tri-Cameral Memory
 
-DuckClaw models memory in three complementary layers:
+DuckClaw models memory in three layers:
 
-- **SQL**: deterministic financial/accounting state and operational records.
-- **PGQ**: graph-like relationships for multi-hop entity context.
-- **VSS**: semantic recall for context injection and retrieval-augmented interactions.
+- **SQL**: deterministic operational / ledger state.
+- **PGQ**: graph-like relationships for multi-hop context.
+- **VSS**: semantic recall (RAG / context injection).
 
-## Design Goals
+## Design goals
 
-- Preserve deterministic writes for ledger-critical tasks.
-- Support relationship traversal without overloading transactional tables.
-- Enable fast semantic recall over contextual artifacts.
+- Deterministic writes for ledger-critical tasks.
+- Relationship traversal without overloading transactional tables.
+- Fast semantic recall over contextual artifacts.
 
-## Operational Notes
+## Notes
 
 - Tenant/user vault resolution keeps private and shared scopes separated.
-- Semantic context ingestion is asynchronous and queue-backed.
+- Semantic ingestion is asynchronous and queue-backed.
 - Worker prompts should treat SQL as hard truth for balances/totals.
 
-## Related docs
+## Related
 
-- Published hub: [Docs index](../README.md)
-- Telegram semantic injection: [Context Injection Telegram](../operations/TELEGRAM.md)
-- Repo canonical (read in Git): `docs/core/02_Analytical_Memory_Architecture.md` — analytical memory architecture.
-
-## Related docs
-
-- [Skills and Tooling Framework](../core/03_Skills_and_Tooling_Framework.md) — how workers use memory and tools
-- [Operations hub](../operations/index.md)
+- [Multi-vault](MULTI_VAULT_SYSTEM.md)
+- [Docs index](../README.md)

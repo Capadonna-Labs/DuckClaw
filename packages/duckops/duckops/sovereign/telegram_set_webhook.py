@@ -87,7 +87,8 @@ def register_compact_telegram_webhooks_if_configured(
 ) -> bool:
     """
     Si ``DUCKCLAW_PUBLIC_URL`` y ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` (formato compacto) están
-    definidos, registra un ``setWebhook`` por bot (mismo comportamiento que ``scripts/register_webhooks.py``).
+    definidos, registra un ``setWebhook`` por bot (mismo comportamiento que
+    ``uv run duckops ingress telegram-register-webhooks``).
 
     Returns:
         True si aplica multiplex compacto (se intentó ``setWebhook`` por ruta y **no** debe

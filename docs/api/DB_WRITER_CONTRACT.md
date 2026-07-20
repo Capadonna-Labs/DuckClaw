@@ -5,7 +5,7 @@ Contrato canónico del singleton writer (`services/db-writer/`). Gateway, agente
 ## Singleton Writer
 
 - Un único proceso activo por despliegue: PM2 `DuckClaw-DB-Writer` o `python services/db-writer/main.py`.
-- Excepción documentada: perfil Spawn con `DUCKCLAW_SPAWN_PROFILE=1` y escrituras inline (`spawn_inline_writes_enabled()`), sin cola Redis. Ver [`infra-bootstrap.md`](../architecture/infra-bootstrap.md).
+- Excepción documentada: perfil Spawn con `DUCKCLAW_SPAWN_PROFILE=1` y escrituras inline (`spawn_inline_writes_enabled()`), sin cola Redis.
 - Todo el resto del stack (gateway, workers, fly commands) opera `read_only=True` y delega mutaciones vía Redis o comandos tipados.
 
 ## Cinco Colas Redis
@@ -107,4 +107,4 @@ Contadores incrementales (`INCRBY`), sin TTL por defecto:
 - Implementación: `services/db-writer/main.py`, `services/db-writer/db_writer_ops.py`
 - Cola shared: `packages/shared/src/duckclaw/db_write_queue.py`
 - Arquitectura: [`../architecture/singleton_writer.md`](../architecture/singleton_writer.md)
-- DB-first: [`../architecture/DB_FIRST_CORE_REFACTOR.md`](../architecture/DB_FIRST_CORE_REFACTOR.md)
+- Límites: [`../architecture/GATEWAY_DB_WRITER_BOUNDARIES.md`](../architecture/GATEWAY_DB_WRITER_BOUNDARIES.md)

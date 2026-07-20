@@ -1,4 +1,4 @@
-"""Tests: síntesis NL de respuesta al usuario (docs/operations/TELEGRAM.md)."""
+"""Tests: síntesis NL de respuesta al usuario (docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md)."""
 
 from __future__ import annotations
 

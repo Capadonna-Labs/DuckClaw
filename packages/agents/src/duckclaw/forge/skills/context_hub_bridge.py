@@ -1,7 +1,7 @@
 """
 ContextHub Bridge — Ground Truth de APIs externas vía CLI Context Hub.
 
-Spec: docs/core/04_Cognitive_Agent_Logic.md (sección ContextHubBridge)
+Spec: docs/architecture/system_overview.md (sección ContextHubBridge)
 Requiere: binario/CLI `chub` disponible en PATH y, opcionalmente,
           CONTEXT_HUB_API_KEY / CONTEXT_HUB_BASE_URL en entorno.
 """

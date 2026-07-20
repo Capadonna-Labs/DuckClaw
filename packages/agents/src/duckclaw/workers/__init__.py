@@ -1,7 +1,7 @@
 """
 Virtual Worker Factory — Plug & Play agent templates.
 
-See docs/core/03_Skills_and_Tooling_Framework.md
+See docs/architecture/system_overview.md
 """
 
 from duckclaw.workers.discovery import list_workers

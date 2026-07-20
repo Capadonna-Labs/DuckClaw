@@ -1,6 +1,6 @@
 """Registro en memoria: token noVNC → puerto host, TTL y limpieza del sandbox browser.
 
-docs/core/03_Skills_and_Tooling_Framework.md
+docs/architecture/system_overview.md
 """
 
 from __future__ import annotations

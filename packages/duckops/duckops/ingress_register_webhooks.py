@@ -6,7 +6,7 @@ Usa ``DUCKCLAW_PUBLIC_URL`` + ``webhook_path`` de cada entrada y el token embebi
 
 Ejecución desde la raíz del repo::
 
-    python scripts/register_webhooks.py
+    uv run duckops ingress telegram-register-webhooks
 
 Requisitos: ``.env`` en la raíz con ``DUCKCLAW_PUBLIC_URL``, ``DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES`` compacto.
 Opcional: ``TELEGRAM_WEBHOOK_SECRET`` → ``secret_token`` en el body (mismo valor para todos los bots).

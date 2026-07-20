@@ -1,7 +1,7 @@
 """
 Síntesis LLM de la respuesta visible al usuario (Telegram): evita JSON/SQL/código crudo.
 
-Spec: docs/operations/TELEGRAM.md
+Spec: docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md
 Fachada: owners en ``user_reply_nl_*`` del mismo paquete.
 """
 

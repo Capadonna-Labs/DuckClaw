@@ -8,7 +8,7 @@ Core genérico LangGraph/LangChain — sin verticales hardcodeadas en Python. Mu
 
 ## Arquitectura DB-first (canonical)
 
-**Fuente de verdad:** [`docs/architecture/DB_FIRST_CORE_REFACTOR.md`](docs/architecture/DB_FIRST_CORE_REFACTOR.md)
+**Fuente de verdad:** [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md) · límites: [`GATEWAY_DB_WRITER_BOUNDARIES.md`](docs/architecture/GATEWAY_DB_WRITER_BOUNDARIES.md)
 
 ### Una bóveda, un schema
 
@@ -100,7 +100,7 @@ Contrato cola/ledger: [`DB_WRITER_CONTRACT.md`](docs/api/DB_WRITER_CONTRACT.md)
 | **Políticas** | `prompt_policy_registry`, `worker_prompt_bindings`, `worker_runtime_policies` |
 | **Proyectos** | `admin_projects`, `admin_project_agents`, members |
 | **Runtime** | `admin_runtime_settings` (tenant, chat, gateway, LLM, secrets) |
-| **RAG** | `admin_knowledge_sources`, documents, chunks — ver `docs/architecture/DB_FIRST_CORE_REFACTOR.md` + tri-cameral |
+| **RAG** | `admin_knowledge_sources`, documents, chunks — ver `docs/architecture/tri_cameral_memory.md` |
 | **Memoria semántica** | `main.semantic_memory` (context injection / VLM — distinto del RAG admin) |
 | **Homeostasis** | `main.homeostasis_targets`, `main.meditate_runs` |
 | **MCP** | `admin_mcp_connectors`, `admin_worker_mcp_grants` |
@@ -151,7 +151,7 @@ pnpm dev:local       # gateway + db-writer + admin
 
 Stack PM2: `uv run duckops stack deploy` (Gateway, DB-Writer, Knowledge-Indexer, Heartbeat).
 
-Admin: [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md) · Patrones: [`docs/architecture/UIUX-PATTERNS.md`](docs/architecture/UIUX-PATTERNS.md)
+Admin: [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md)
 
 ---
 
@@ -209,10 +209,9 @@ Guardrails: `test_forge_legacy_cleanup.py` · `test_db_first_guardrails_static.p
 
 | Qué | Dónde |
 |-----|--------|
-| **Arquitectura DB-first** | [`DB_FIRST_CORE_REFACTOR.md`](docs/architecture/DB_FIRST_CORE_REFACTOR.md) |
 | Índice docs | [`docs/README.md`](docs/README.md) |
+| Overview / límites | [`docs/architecture/`](docs/architecture/) |
 | Contratos API / writer | [`docs/api/`](docs/api/) |
-| Patrones UI admin | [`UIUX-PATTERNS.md`](docs/architecture/UIUX-PATTERNS.md) |
 
 ---
 

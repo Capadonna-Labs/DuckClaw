@@ -1,6 +1,6 @@
 """Productividad: storage local durable + índice de artefactos del agente.
 
-spec: docs/core/03_Skills_and_Tooling_Framework.md
+spec: docs/architecture/system_overview.md
 """
 from __future__ import annotations
 

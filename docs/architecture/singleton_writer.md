@@ -1,33 +1,26 @@
 # Singleton Writer Contract
 
-DuckClaw enforces a single mutation path: **`services/db-writer`** is the only component allowed to write DuckDB state.
+**`services/db-writer`** is the only component allowed to write DuckDB state.
 
-## Why It Exists
+## Why
 
-- Guarantees ACID transaction boundaries for all state deltas.
-- Reduces race conditions across concurrent chat/tool executions.
-- Centralizes idempotency, retries, and audit status updates.
+- ACID transaction boundaries for all state deltas.
+- No race conditions across concurrent chat/tool executions.
+- Centralized idempotency, retries, and audit status.
 
-## Write Flow
+## Write flow
 
-1. Gateway/agents generate a validated state delta or SQL write intent.
-2. Intent is enqueued in Redis.
-3. `db-writer` consumes the queue, runs transactional writes, and publishes task status.
+1. Gateway/agents enqueue a validated write intent (typed command or compat SQL).
+2. Redis holds the queue.
+3. `db-writer` consumes, runs transactional writes, publishes task status.
 
-## Scope Boundaries
+## Boundaries
 
 - Gateway and workers are read-oriented by default.
-- Write permissions are not distributed to template workers.
-- Any new mutation path must remain compatible with the singleton contract.
+- Any new mutation path must go through the singleton writer.
 
-## Related docs
+## Related
 
-- Core infra: [`../core/01_System_Infrastructure.md`](../core/01_System_Infrastructure.md)
-- DB-first: [`DB_FIRST_CORE_REFACTOR.md`](DB_FIRST_CORE_REFACTOR.md)
-- Contrato cola/ledger: [`../api/DB_WRITER_CONTRACT.md`](../api/DB_WRITER_CONTRACT.md)
-
-## Related operations
-
-- [Operations hub](../operations/index.md)
-- [Getting started](../GETTING_STARTED.md) — Redis queues, DB-Writer PM2
-- [DB Writer API (HTTP + Python)](../api/db_writer.md)
+- [`../api/DB_WRITER_CONTRACT.md`](../api/DB_WRITER_CONTRACT.md)
+- [`GATEWAY_DB_WRITER_BOUNDARIES.md`](GATEWAY_DB_WRITER_BOUNDARIES.md)
+- [`../GETTING_STARTED.md`](../GETTING_STARTED.md)

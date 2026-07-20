@@ -1,11 +1,12 @@
-# Dia cero DuckClaw Windows — .\duckops-up.ps1
+# Día cero DuckClaw Windows — scripts/bootstrap/up.ps1
+# Wrapper raíz: .\duckops-up.ps1
 param(
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$DuckOpsArgs
 )
 
 $ErrorActionPreference = "Stop"
-$RepoRoot = $PSScriptRoot
+$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "../..")).Path
 Set-Location $RepoRoot
 
 function Write-Step([int]$Current, [int]$Total, [string]$Message) {
@@ -66,7 +67,7 @@ function Install-Uv {
             $env:Path = "$(Split-Path $fallback -Parent);$env:Path"
             return $fallback
         }
-        throw "uv no encontrado tras instalar. Cierra PowerShell, abre una nueva y ejecuta .\install.cmd"
+        throw "uv no encontrado tras instalar. Cierra PowerShell, abre una nueva y ejecuta .\install.cmd o .\duckops-up.ps1"
     }
     return $found
 }

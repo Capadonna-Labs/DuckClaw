@@ -1,13 +1,13 @@
 {
   "name": "duckclaw-repo-root",
   "private": true,
-  "description": "Monorepo DuckClaw. Admin UI: pnpm en apps/duckclaw-admin (admin:*).",
+  "description": "Monorepo DuckClaw. Admin UI: pnpm en apps/duckclaw-admin (admin:*). Locks: uv.lock (Python), apps/duckclaw-admin/pnpm-lock.yaml (admin).",
   "scripts": {
     "kanban": "npx -y vibe-kanban --port 3333",
     "dev:admin": "pnpm --dir apps/duckclaw-admin dev",
     "admin:dev": "pnpm --dir apps/duckclaw-admin dev",
     "admin:dev:tailscale": "pnpm --dir apps/duckclaw-admin dev:tailscale",
-    "admin:serve-tailscale": "bash scripts/tailscale_serve_admin.sh",
+    "admin:serve-tailscale": "uv run duckops ingress serve-admin",
     "admin:build": "pnpm --dir apps/duckclaw-admin build",
     "admin:start": "pnpm --dir apps/duckclaw-admin start",
     "admin:lint": "pnpm --dir apps/duckclaw-admin lint",

@@ -12,11 +12,7 @@ function repoRoot(): string {
 export async function runTelegramIngressStartLocal(): Promise<NormalizedOpsRunResult> {
   const cwd = repoRoot();
   return new Promise((resolve, reject) => {
-    const proc = spawn(
-      'uv',
-      ['run', 'python', 'scripts/start_telegram_ingress.py'],
-      { cwd, env: process.env }
-    );
+    const proc = spawn('uv', ['run', 'duckops', 'ingress', 'telegram-start'], { cwd, env: process.env });
     let stdout = '';
     let stderr = '';
     proc.stdout?.on('data', (d) => {

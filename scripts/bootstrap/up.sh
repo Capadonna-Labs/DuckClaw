@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Día cero DuckClaw — instala uv si falta y ejecuta duckops up.
-# Uso: ./duckops-up.sh [flags de duckops up]
+# Wrapper raíz: ./duckops-up.sh
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${REPO_ROOT}"
 
 log() { echo "🦆 $*"; }

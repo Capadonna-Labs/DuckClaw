@@ -30,17 +30,6 @@ def test_duckops_exposes_script_replacement_commands() -> None:
         assert "dry-run" in result.output.lower()
 
 
-def test_shell_wrappers_delegate_to_duckops() -> None:
-    wrappers = {
-        "scripts/tailscale_serve_admin.sh": "duckops ingress serve-admin",
-        "scripts/prefetch_mcp_reddit.sh": "duckops mcp prefetch reddit",
-        "scripts/start_comfyui.sh": "duckops comfyui start",
-    }
-    for path, expected in wrappers.items():
-        text = Path(path).read_text(encoding="utf-8")
-        assert expected in text
-
-
 def test_one_off_scripts_removed_from_active_scripts() -> None:
     removed = (
         "scripts/crm_origin_check.py",

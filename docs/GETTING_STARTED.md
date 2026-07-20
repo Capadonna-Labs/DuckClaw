@@ -21,7 +21,7 @@ Soportado: **macOS** (Homebrew), **Linux** (apt) y **Windows** (winget). WSL2 ta
 git clone <repo> duckclaw && cd duckclaw
 
 # Windows: doble clic en install.cmd
-# macOS/Linux: ./duckops-up.sh
+# macOS/Linux/WSL: bash scripts/bootstrap/up.sh  (o uv run duckops up)
 ```
 
 Si ya tienes `uv`:

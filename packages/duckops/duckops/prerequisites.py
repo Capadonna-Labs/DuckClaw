@@ -866,7 +866,7 @@ def format_prerequisite_hint() -> str:
 def _remediation_hint(tool_name: str) -> str:
     system = platform.system()
     hints: dict[str, str] = {
-        "uv": "winget install astral-sh.uv  o  ejecuta install.cmd / ./duckops-up.sh de nuevo",
+        "uv": "winget install astral-sh.uv  o  ejecuta ./install.cmd / bash scripts/bootstrap/up.sh de nuevo",
         "Redis": redis_start_hint(),
         "Node.js": (
             "winget install OpenJS.NodeJS.LTS  y  cierra y reabre la terminal (o install.cmd otra vez)"

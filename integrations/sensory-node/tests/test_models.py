@@ -41,7 +41,6 @@ def test_sensory_voice_defaults_do_not_embed_vertical_voice_ids():
         repo / "integrations/sensory-node/scripts/test_live_synthesize.sh",
         repo / "integrations/sensory-node/voices/manifest.json",
         repo / "integrations/sensory-node/voices/README.md",
-        repo / "scripts/deployment/regen_voices_mac.py",
     ]
 
     for path in checked_paths:

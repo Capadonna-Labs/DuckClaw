@@ -672,10 +672,9 @@ def test_canonical_homeostasis_package_does_not_depend_on_forge_homeostasis() ->
 
 
 def test_core_runtime_uses_db_write_queue_for_singleton_writer_imports() -> None:
+    assert not LEGACY_SINGLETON_WRITER.exists()
     offenders: list[str] = []
     for path in _runtime_python_files():
-        if path.resolve() == LEGACY_SINGLETON_WRITER.resolve():
-            continue
         tree = _parse_python(path)
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):

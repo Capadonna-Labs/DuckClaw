@@ -16,7 +16,7 @@ def cmd_init(
     ctx: typer.Context,
     tenant_id: str = typer.Argument(
         default="default",
-        help="Ignóralo salvo que uses --classic (asistente antiguo).",
+        help="Reservado (compat).",
         hidden=True,
     ),
     repo: Path | None = typer.Option(
@@ -35,11 +35,6 @@ def cmd_init(
         "--manual",
         help="Wizard completo en CLI (Telegram, Tailscale). Por defecto: rápido + consola admin.",
     ),
-    classic: bool = typer.Option(
-        False,
-        "--classic",
-        help="Wizard legacy (Rich, scripts/duckclaw_setup_wizard.py) en lugar del Sovereign v2.0.",
-    ),
     bootstrap: bool = typer.Option(
         True,
         "--bootstrap/--no-bootstrap",
@@ -49,11 +44,6 @@ def cmd_init(
         True,
         "--yes/--no-yes",
         help="Instalar paquetes del sistema (brew/apt) si faltan. Usa --no-yes para solo comprobar.",
-    ),
-    use_wizard: bool = typer.Option(
-        True,
-        "--wizard/--no-wizard",
-        help="Con --classic: ejecutar wizard interactivo; --no-wizard solo muestra la ruta del script.",
     ),
 ) -> None:
     """[Deprecado] Usa ``duckops up`` o ``duckops configure``."""
@@ -70,8 +60,6 @@ def cmd_init(
         repo=repo,
         chat=chat,
         manual=manual,
-        classic=classic,
         bootstrap=bootstrap,
         yes=yes,
-        use_wizard=use_wizard,
     )

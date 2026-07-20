@@ -1,7 +1,7 @@
 """
 Homeostasis Bridge — registra el skill HomeostasisManager en workers con homeostasis_config.
 
-Spec: specs/Estandar_de_Agentes_Homeostaticos_(Active_Inference_Framework).md
+Spec: docs/operations/Homeostasis-Heartbeat.md
 """
 
 from __future__ import annotations

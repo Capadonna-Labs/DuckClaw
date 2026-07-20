@@ -1,7 +1,7 @@
 """
 Tests para el pipeline Singleton Writer Bridge (API Gateway → Redis → DB Writer → DuckDB).
 
-Spec: specs/FLUJO_VIDA_DATO_PIPELINE.md, specs/04_Singleton_Writer_Pipeline.md
+Spec: docs/core/00_Flujo de Vida del Dato (Wizard).md, docs/architecture/singleton_writer.md
 
 Flujo: services/api-gateway/main.py → Redis duckdb_write_queue → services/db-writer → DuckDB
 

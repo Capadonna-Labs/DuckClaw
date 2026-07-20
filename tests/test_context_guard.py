@@ -1,4 +1,4 @@
-"""Tests for Context-Guard (FactChecker + SelfCorrection). Spec: specs/RAG_Fact_Checker_Context_Guard.md"""
+"""Tests for Context-Guard (FactChecker + SelfCorrection). Spec: docs/architecture/tri_cameral_memory.md"""
 
 from unittest.mock import MagicMock
 

@@ -1,6 +1,6 @@
 """Registro efímero de artefactos del Strix sandbox (scratch, TTL, sin RAG).
 
-spec: docs/specs/features/platform/SANDBOX_ARTIFACTS_VIEWER.md
+spec: docs/core/03_Skills_and_Tooling_Framework.md
 """
 
 from __future__ import annotations

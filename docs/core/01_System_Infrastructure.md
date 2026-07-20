@@ -121,4 +121,4 @@ Pipeline unificado: tests → despliegue Mac Mini y VPS.
 
 ---
 
-*Consolidado desde: API_Gateway_(FastAPI), Tailscale_Mesh, CI/CD, Monorepo_Architecture_Mapping, Inferencia_Elastica, Auditoria_Arquitectura_y_Mejoras_Prioridad_Alta.*
+*Infraestructura del sistema — ver `docs/architecture/system_overview.md` y `docs/architecture/TAILSCALE_CONFIGURATION.md`.*

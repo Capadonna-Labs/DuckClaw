@@ -32,7 +32,7 @@ google-trends = [
     "google-trends-mcp>=1.0.2; python_full_version >= '3.10'",
 ]
 # rag-docs / document-toolbox: deps en duckclaw-shared base
-# SFT/LoRA con MLX (Gemma 4 necesita mlx-lm >= 0.31.2 — ver specs/features/platform/SFT_DATASET_FORMAT.md)
+# SFT/LoRA con MLX (Gemma 4 necesita mlx-lm >= 0.31.2 — ver packages/agents/train/)
 train = [
     "mlx-lm>=0.31.2",
 ]

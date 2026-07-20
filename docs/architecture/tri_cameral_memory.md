@@ -18,11 +18,11 @@ DuckClaw models memory in three complementary layers:
 - Semantic context ingestion is asynchronous and queue-backed.
 - Worker prompts should treat SQL as hard truth for balances/totals.
 
-## Related specs
+## Related docs
 
-- Published hub: [Specs index](../specs/index.md)
-- Telegram semantic injection: [Context Injection Telegram](../specs/context_injection_telegram.md)
-- Repo canonical (read in Git): `specs/core/02_Analytical_Memory_Architecture.md` — analytical memory architecture.
+- Published hub: [Docs index](../README.md)
+- Telegram semantic injection: [Context Injection Telegram](../operations/TELEGRAM.md)
+- Repo canonical (read in Git): `docs/core/02_Analytical_Memory_Architecture.md` — analytical memory architecture.
 
 ## Related docs
 

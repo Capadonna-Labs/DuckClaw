@@ -1,7 +1,7 @@
 """
 Admin console auth: Redis sessions, rate limiting, cookies.
 
-Spec: specs/features/platform/ADMIN_CONSOLE_AUTH.md
+Spec: docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md
 """
 
 from __future__ import annotations

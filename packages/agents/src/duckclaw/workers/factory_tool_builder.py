@@ -241,7 +241,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
 
     register_export_docx_to_pdf_tool(tools)
     # Outbound serio = Report Engine (.docx); PDF = LibreOffice sobre ese Word (export_docx_to_pdf).
-    # Inbound binario→texto = extract_document_text (MarkItDown). Ver DOCUMENT_TOOLBOX.md.
+    # Inbound binario→texto = extract_document_text (MarkItDown). Ver docs/core/03_Skills_and_Tooling_Framework.md.
     register_get_project_context_tool(tools)
     from duckclaw.forge.skills.update_worker_system_prompt_bridge import register_update_system_prompt_tools
 

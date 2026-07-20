@@ -46,7 +46,7 @@ def test_one_off_scripts_removed_from_active_scripts() -> None:
         "scripts/crm_origin_check.py",
         "scripts/openweather_city.py",
         "scripts/experimental/remap_weights.py",
-        "scripts/experimental/LOCAL_EXPERIMENTAL_SCRIPTS.md",
+        "scripts/experimental/duckops scripts migration",
     )
     for path in removed:
         assert not Path(path).exists()

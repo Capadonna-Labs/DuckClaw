@@ -5,7 +5,7 @@ Cuando ``DUCKCLAW_SPAWN_PROFILE`` está activo y no hay escape hatch
 ``DUCKCLAW_SPAWN_USE_DB_WRITER=1``, el gateway/graph deben abrir el hub DuckDB
 en lectura-escritura y aplicar mutaciones en proceso (sin colas Redis huérfanas).
 
-Spec: specs/features/platform/SPAWN_GENERIC_DEPLOY.md
+Spec: docs/architecture/infra-bootstrap.md
 """
 
 from __future__ import annotations

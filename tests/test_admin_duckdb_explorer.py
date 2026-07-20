@@ -1,4 +1,4 @@
-"""Tests admin DuckDB explorer (tabular, PGQ, vector). Spec: ADMIN_DUCKDB_EXPLORER.md."""
+"""Tests admin DuckDB explorer (tabular, PGQ, vector). Spec: admin DuckDB explorer."""
 from __future__ import annotations
 
 from pathlib import Path

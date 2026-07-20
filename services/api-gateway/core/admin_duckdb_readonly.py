@@ -1,4 +1,4 @@
-"""DuckDB read-only helpers for admin explorer (tabular, PGQ, vector). Spec: ADMIN_DUCKDB_EXPLORER.md."""
+"""DuckDB read-only helpers for admin explorer (tabular, PGQ, vector). Owner: admin DuckDB explorer (tabular/PGQ/vector)."""
 
 from __future__ import annotations
 

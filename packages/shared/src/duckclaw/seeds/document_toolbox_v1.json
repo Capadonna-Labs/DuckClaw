@@ -4,7 +4,7 @@
     "seed": "document_toolbox_v1",
     "scope": "framework",
     "locale": "es",
-    "spec": "docs/specs/features/platform/DOCUMENT_TOOLBOX.md"
+    "spec": "docs/core/03_Skills_and_Tooling_Framework.md"
   },
   "lanes": {
     "ingest_native": [".md", ".markdown", ".txt", ".json", ".csv"],

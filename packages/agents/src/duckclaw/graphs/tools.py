@@ -49,7 +49,7 @@ def read_sql(db: Any, query: str) -> str:
     try:
         raw = db.query(q)
         # Cuando hay muchas filas, serializar como markdown compacto para el LLM
-        # (spec Pipeline_de_Datos_Zero-Copy_con_PyArrow.md — LLMContextSerializer)
+        # LLMContextSerializer / zero-copy path
         try:
             from duckclaw.data.arrow_bridge import LLMContextSerializer, arrow_available  # noqa: PLC0415
             if arrow_available():

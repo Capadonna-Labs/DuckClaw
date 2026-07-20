@@ -84,4 +84,4 @@ POST /api/v1/admin/gateway/release-worker-cache
 - **No** reinicia PM2 ni DB-Writer.
 - UI: botón en tarjeta «Caché workers» con modal de confirmación (coste: cold start en próximo chat / capabilities).
 - Misma rutina que fly commands (`duckclaw.ops.gateway_resource_release`).
-- Spec catálogo capabilities: `WORKER_CAPABILITIES_CATALOG_CACHE.md`.
+- Catálogo capabilities: ver `GATEWAY_DB_WRITER_BOUNDARIES.md` y código `worker_capabilities_catalog_cache.py`.

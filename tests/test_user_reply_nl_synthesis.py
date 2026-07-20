@@ -1,4 +1,4 @@
-"""Tests: síntesis NL de respuesta al usuario (worker-telegram-natural-language-egress)."""
+"""Tests: síntesis NL de respuesta al usuario (docs/operations/TELEGRAM.md)."""
 
 from __future__ import annotations
 

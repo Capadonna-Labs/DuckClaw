@@ -5,7 +5,7 @@ Lee especificaciones YAML y produce grafos compilados listos para usar.
 Delega a build_general_graph, build_entry_router_graph
 y a la lógica de WorkerFactory para workers.
 
-Spec: Agent Forge Refactor
+Docs: docs/core/03_Skills_and_Tooling_Framework.md
 """
 
 from __future__ import annotations

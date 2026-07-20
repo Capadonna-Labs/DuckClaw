@@ -1,7 +1,7 @@
 """
 KnowledgeLoader — pipeline de ingesta de catálogo a DuckDB con embeddings.
 
-Spec: specs/DuckDB_Native_RAG_Vector_Search.md
+Spec: docs/architecture/tri_cameral_memory.md
 
 Uso:
   python -m duckclaw.forge.rag.knowledge_loader /path/to/catalogo.csv

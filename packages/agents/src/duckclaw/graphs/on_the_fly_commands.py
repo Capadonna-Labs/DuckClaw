@@ -1,7 +1,7 @@
 """
 On-the-Fly CLI: fachada de compatibilidad y cableado graph-local.
 
-Spec: specs/interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md
+Spec: docs/core/04_Cognitive_Agent_Logic.md
 DB-first: docs/architecture/DB_FIRST_CORE_REFACTOR.md
 
 La lógica de comandos vive en ``duckclaw.commands.*`` (dispatch en

@@ -1,4 +1,4 @@
-"""DuckClaw Sovereign Wizard v2.0 — state machine TUI (spec: DuckClaw Sovereign Wizard v2.0)."""
+"""DuckClaw Sovereign Wizard v2.0 — state machine TUI (docs/GETTING_STARTED.md)."""
 
 from __future__ import annotations
 

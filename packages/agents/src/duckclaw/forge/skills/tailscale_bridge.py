@@ -1,7 +1,7 @@
 """
 Tailscale Bridge — conectividad y descubrimiento en la red Mesh.
 
-Spec: specs/Arquitectura_de_Red_Distribuida_(Tailscale_Mesh).md
+Spec: docs/architecture/TAILSCALE_CONFIGURATION.md
 Requiere: tailscale instalado en el sistema (curl -fsSL https://tailscale.com/install.sh | sh)
 """
 

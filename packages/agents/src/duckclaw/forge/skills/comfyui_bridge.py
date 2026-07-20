@@ -1,9 +1,7 @@
 """
 ComfyUI Bridge — generación visual vía API REST + WebSocket.
 
-Specs:
-- specs/features/platform/COMFYUI_VISUAL_BRIDGE.md (txt2img)
-- specs/features/platform/COMFYUI_IMAGE_EDIT.md (img2img)
+txt2img + img2img vía API REST/WebSocket de ComfyUI.
 Requiere: COMFYUI_API_URL (default http://127.0.0.1:8188 si no se define en .env).
 """
 

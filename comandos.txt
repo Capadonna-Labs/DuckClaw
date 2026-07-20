@@ -6,15 +6,21 @@ install.cmd                                # Windows — doble clic
 cmd /c install.cmd                         # Windows PowerShell alternativa
 ./duckops-up.sh                            # macOS / Linux / WSL
 
-# Stack backend (cualquier host — uv sync + migrate + PM2 recycle + /health):
+# Deploy completo y limpio del framework (UN comando):
+#   uv sync + migrate + PM2 recycle + espejo vault + estado Kiwix
 cd <raíz-del-repo>
-uv run duckops stack deploy
-uv run duckops stack deploy --no-migrate   # solo reinicio PM2, sin migrar
+uv run duckops stack deploy --full
+
+# Variantes:
+uv run duckops stack deploy                # sync + migrate + PM2 (sin mirror)
+uv run duckops stack deploy --no-migrate   # solo reinicio PM2
 uv run duckops stack deploy --no-sync      # omitir uv sync (deploy rápido)
 
 # Utilidades:
 uv run duckops up                          # wizard / arranque interactivo
 uv run duckops doctor --strict
+uv run duckops knowledge status            # vault mirror + ZIMs
+uv run duckops knowledge mirror            # solo re-sync GDrive → local
 uv run duckops configure
 uv run duckops down --all
 
@@ -23,6 +29,10 @@ uv run duckops down --all
 brew install --cask libreoffice            # export_docx_to_pdf (Word → PDF)
 uv run duckops doctor                      # Check MarkItDown / LibreOffice / OUTPUT_ROOTS
 # Flujo: Report Engine → .docx en OUTPUT → export_docx_to_pdf → .pdf al lado
+
+# Offline encyclopedia (Kiwix) — no lo instala stack deploy:
+# Binarios: ~/DuckClawOffline/bin (kiwix-search) · ZIM: ~/DuckClawOffline/zim
+# Env: DUCKCLAW_KIWIX_ZIM_DIR, DUCKCLAW_KIWIX_BIN_DIR, DUCKCLAW_VAULT_*_DIR
 
 --------- INTERFAZ GRAFICA ----------
 cd apps/duckclaw-admin

@@ -1,5 +1,8 @@
 .DS_Store
 
+# Dev-only local cheat sheet (no publicar)
+comandos.txt
+
 # Python cache/build artifacts
 __pycache__/
 *.py[cod]

@@ -87,15 +87,14 @@ def test_playground_config_uses_actor_profile_not_spoofed_query(
     assert data["authorized"] is True
 
 
-def test_admin_user_workspace_migration_is_idempotent(gateway_db: Path) -> None:
-    import importlib
-
-    migration = importlib.import_module("scripts.migrations.003_admin_user_workspaces")
+def test_admin_user_workspace_schema_is_idempotent(gateway_db: Path) -> None:
+    from duckclaw.schema_migrations import run_pending_migrations
 
     con = duckdb.connect(str(gateway_db))
     try:
-        migration.apply_migration(con)
-        migration.apply_migration(con)
+        adapter = _Adapter(con)
+        run_pending_migrations(adapter)
+        run_pending_migrations(adapter)
         tables = {
             row[0]
             for row in con.execute(

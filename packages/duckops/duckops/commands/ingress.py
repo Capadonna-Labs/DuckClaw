@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import os
 import subprocess
 import sys
@@ -9,25 +10,38 @@ from pathlib import Path
 
 import typer
 
+from duckops.paths import repo_root
+
 app = typer.Typer()
 
-
-def _repo_root() -> Path:
-    return Path(__file__).resolve().parent.parent.parent.parent.parent
+_MODULE_BY_SCRIPT: dict[str, str] = {
+    "restore_tailscale_admin_serve.py": "duckops.ingress_restore_admin",
+    "check_telegram_ingress.py": "duckops.ingress_telegram_check",
+    "register_webhooks.py": "duckops.ingress_register_webhooks",
+    "start_telegram_ingress.py": "duckops.ingress_telegram_start",
+}
 
 
 def _run(argv: list[str], *, dry_run: bool, env: dict[str, str] | None = None) -> None:
     if dry_run:
         typer.echo("dry-run: " + " ".join(argv))
         return
-    proc = subprocess.run(argv, cwd=_repo_root(), env=env, text=True, check=False)
+    proc = subprocess.run(argv, cwd=repo_root(), env=env, text=True, check=False)
     raise typer.Exit(proc.returncode)
 
 
 def _python_script(script_name: str, args: list[str], *, dry_run: bool) -> None:
-    script = _repo_root() / "scripts" / script_name
-    argv = [sys.executable, str(script), *args]
-    _run(argv, dry_run=dry_run)
+    module_name = _MODULE_BY_SCRIPT[script_name]
+    if dry_run:
+        typer.echo(f"dry-run: {module_name} {' '.join(args)}")
+        return
+    mod = importlib.import_module(module_name)
+    old_argv = sys.argv
+    sys.argv = [script_name, *args]
+    try:
+        raise typer.Exit(int(mod.main()))
+    finally:
+        sys.argv = old_argv
 
 
 @app.command("serve-admin")

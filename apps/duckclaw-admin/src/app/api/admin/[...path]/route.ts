@@ -74,11 +74,11 @@ const OPS_COMMANDS_FALLBACK = {
       label: 'Últimas líneas log ComfyUI',
       argv: ['pm2', 'logs', 'ComfyUI', '--lines', '40', '--nostream'],
     },
-    { id: 'doctor', label: 'Diagnóstico local (doctor.py)', argv: ['uv', 'run', 'python', 'scripts/doctor.py'] },
+    { id: 'doctor', label: 'Diagnóstico local (duckops doctor)', argv: ['uv', 'run', 'duckops', 'doctor'] },
     {
       id: 'bootstrap_dbs',
       label: 'Bootstrap DuckDB',
-      argv: ['uv', 'run', 'python', 'scripts/bootstrap_dbs.py'],
+      argv: ['uv', 'run', 'duckops', 'db', 'bootstrap'],
     },
   ],
   _fallback: true,

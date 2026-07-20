@@ -31,7 +31,7 @@ Define cómo los agentes interactúan con el entorno: investigación autónoma, 
 - **`allowed_repos`** en manifest restringen convenciones de seguridad donde aplique (políticas de negocio); el servidor MCP recibe igualmente el alcance efectivo del PAT.
 - **HITL**: acciones destructivas (`delete_branch`, `merge_pr`, etc.) pueden seguir gated con `/approve` en Telegram donde el bridge lo aplique.
 
-**Referencias operadores**: comprueba imagen local con `docker image inspect ghcr.io/github/github-mcp-server` o `docker pull ghcr.io/github/github-mcp-server`. Diagnóstico agregado: `uv run python scripts/doctor.py` (check GitHub MCP).
+**Referencias operadores**: comprueba imagen local con `docker image inspect ghcr.io/github/github-mcp-server` o `docker pull ghcr.io/github/github-mcp-server`. Diagnóstico agregado: `uv run duckops doctor` (check GitHub MCP).
 
 ### Context Hub (Ground Truth de APIs)
 

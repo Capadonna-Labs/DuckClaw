@@ -128,7 +128,7 @@ uv sync
 log "Inicializando base de datos núcleo..."
 export DUCKDB_PATH="${DUCKDB_PATH:-${DB_DEFAULT}}"
 export DUCKCLAW_DB_PATH="${DUCKCLAW_DB_PATH:-${DUCKDB_PATH}}"
-uv run python scripts/bootstrap_dbs.py --core-only --only "${DUCKDB_PATH}"
+uv run duckops db bootstrap --core-only --only "${DUCKDB_PATH}"
 
 # --- Admin UI ---
 log "Instalando y compilando Admin UI (Next.js)..."

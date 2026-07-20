@@ -124,7 +124,7 @@ Hito 1 y 2 del corte infra — resumen en este documento (§ Hito 1).
 ### War Room
 
 - `services/api-gateway/core/war_rooms.py` fue removido.
-- `schema_migrations.py` y `scripts/bootstrap_dbs.py` ya no deben registrar ni crear `war_room_core`, `wr_members` ni `wr_audit_log`.
+- `schema_migrations.py` y `uv run duckops db bootstrap` ya no deben registrar ni crear `war_room_core`, `wr_members` ni `wr_audit_log`.
 - `duckclaw.commands.team_access` no exporta comandos War Room. War Room solo puede volver como extension vertical externa o como configuracion DB-first creada por el usuario.
 
 ### Package Reorg Y Training
@@ -163,7 +163,7 @@ Hito 1 y 2 del corte infra — resumen en este documento (§ Hito 1).
 - **Estado:** completado. Docs operativas: [`docs/architecture/infra-bootstrap.md`](../../../architecture/infra-bootstrap.md).
 - Owner unico de settings gateway: `duckclaw.gateway.settings` (`GatewaySettings`, `DUCKCLAW_DEV_MODE`); re-export en `services/api-gateway/core/config.py`.
 - `verify_schema_integrity()` y `migrate_gateway_database()` en `duckclaw.schema_migrations`; conexiones read-only usan `create_table=False` para no mutar en checks RO.
-- CLIs: entry points `duckclaw-migrate` y `duckclaw-healthcheck` en `duckclaw-shared`; shims `scripts/migrate.py` y `scripts/healthcheck.py`.
+- CLIs: entry points `duckclaw-migrate` y `duckclaw-healthcheck` en `duckclaw-shared` (sin shims en `scripts/`).
 - Lifespan gateway (`services/api-gateway/main.py`): fail-fast prod (secretos + Redis + schema); sin `redis.config_set` ni `docker` administrativo en arranque; Telegram MCP en background task.
 - Tests focales: `tests/test_schema_integrity.py`, `tests/test_gateway_startup_readiness.py`, `tests/test_gateway_lifespan_no_privilege.py`, `tests/test_infra_cli.py`.
 - **Diferido:** wheel unificado mega-package (Fase A3); `duckclaw-shared` importable desde repos externos es suficiente por ahora.

@@ -760,7 +760,7 @@ def test_backend_and_tooling_do_not_define_domain_specific_db_path_env_keys() ->
 
 
 def test_cleanup_default_tenant_tool_does_not_name_demo_tables() -> None:
-    cleanup_path = REPO_ROOT / "scripts" / "cleanup_default_duckdb_tenant_schemas.py"
+    cleanup_path = REPO_ROOT / "packages" / "duckops" / "duckops" / "db_cleanup_tenant.py"
     text = cleanup_path.read_text(encoding="utf-8")
 
     offenders = sorted(name for name in REMOVED_TENANT_DEMO_TABLE_NAMES if name in text)
@@ -769,7 +769,7 @@ def test_cleanup_default_tenant_tool_does_not_name_demo_tables() -> None:
 
 
 def test_cleanup_default_tenant_tool_does_not_hardcode_domain_schemas() -> None:
-    cleanup_path = REPO_ROOT / "scripts" / "cleanup_default_duckdb_tenant_schemas.py"
+    cleanup_path = REPO_ROOT / "packages" / "duckops" / "duckops" / "db_cleanup_tenant.py"
     text = cleanup_path.read_text(encoding="utf-8")
 
     offenders = sorted(marker for marker in REMOVED_TENANT_DOMAIN_SCHEMA_MARKERS if marker in text)
@@ -802,7 +802,7 @@ def test_shared_schema_migrations_do_not_register_war_room_core() -> None:
 
 
 def test_generic_bootstrap_does_not_create_war_room_core() -> None:
-    bootstrap_path = REPO_ROOT / "scripts" / "bootstrap_dbs.py"
+    bootstrap_path = REPO_ROOT / "packages" / "duckops" / "duckops" / "db_bootstrap.py"
     text = bootstrap_path.read_text(encoding="utf-8")
     removed_markers = (
         "war_room_core",

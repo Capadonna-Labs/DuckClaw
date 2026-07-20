@@ -6,9 +6,9 @@ Conserva tablas core en ``main``: agent_config, authorized_users, task_audit_log
 user_shared_db_access.
 
 Uso:
-  python scripts/cleanup_default_duckdb_tenant_schemas.py --inspect
-  python scripts/cleanup_default_duckdb_tenant_schemas.py --path db/private/1726618406/default.duckdb --apply
-  python scripts/cleanup_default_duckdb_tenant_schemas.py --all-defaults --apply
+  uv run duckops db cleanup-default-tenant-schemas --inspect
+  uv run duckops db cleanup-default-tenant-schemas --path db/private/1726618406/default.duckdb --apply
+  uv run duckops db cleanup-default-tenant-schemas --all-defaults --apply
 """
 
 from __future__ import annotations
@@ -18,7 +18,9 @@ import sys
 from collections.abc import Collection
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
+from duckops.paths import repo_root
+
+_REPO_ROOT = repo_root()
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 

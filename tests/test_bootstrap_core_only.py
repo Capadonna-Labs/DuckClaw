@@ -13,7 +13,7 @@ def test_bootstrap_core_schema_creates_tables_no_domain_schemas(tmp_path: Path, 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("DUCKDB_PATH", str(db_path))
 
-    from scripts.bootstrap_dbs import bootstrap_core_file
+    from duckops.db_bootstrap import bootstrap_core_file
 
     bootstrap_core_file(db_path)
 
@@ -58,12 +58,14 @@ def test_bootstrap_dbs_core_only_cli(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("DUCKDB_PATH", db_rel)
 
     import subprocess
-    import sys
 
     r = subprocess.run(
         [
-            sys.executable,
-            str(repo / "scripts" / "bootstrap_dbs.py"),
+            "uv",
+            "run",
+            "duckops",
+            "db",
+            "bootstrap",
             "--core-only",
             "--only",
             db_rel,
@@ -87,7 +89,7 @@ def test_bootstrap_dbs_core_only_cli(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_bootstrap_default_templates_root_prefers_seed() -> None:
-    from scripts.bootstrap_dbs import _default_templates_root
+    from duckops.db_bootstrap import _default_templates_root
 
     root = _default_templates_root()
     assert root is not None

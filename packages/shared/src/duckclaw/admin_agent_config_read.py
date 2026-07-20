@@ -14,7 +14,7 @@ from typing import Any
 
 _AGENT_CONFIG_MISSING_WARNING = (
     "La tabla agent_config no existe en esta bóveda. "
-    "Ejecuta: uv run python scripts/bootstrap_dbs.py"
+    "Ejecuta: uv run duckops db bootstrap"
 )
 
 

@@ -966,12 +966,10 @@ def test_resource_events_record_cross_cutting_audit_without_owning_permissions(g
     assert "secret" not in events[0]["payload_redacted_json"]
 
 
-def test_workspace_catalog_migration_and_bootstrap_are_idempotent(gateway_db: Path) -> None:
-    import importlib
-
+def test_workspace_catalog_schema_and_bootstrap_are_idempotent(gateway_db: Path) -> None:
     from duckclaw.bootstrap_core import bootstrap_core_schema
+    from duckclaw.schema_migrations import run_pending_migrations
 
-    migration = importlib.import_module("scripts.migrations.004_admin_workspace_catalog")
     expected_tables = {
         "admin_worker_catalog",
         "admin_worker_versions",
@@ -991,9 +989,10 @@ def test_workspace_catalog_migration_and_bootstrap_are_idempotent(gateway_db: Pa
 
     con = duckdb.connect(str(gateway_db))
     try:
-        migration.apply_migration(con)
-        migration.apply_migration(con)
-        bootstrap_core_schema(_Adapter(con), seed_admin=False)
+        adapter = _Adapter(con)
+        run_pending_migrations(adapter)
+        run_pending_migrations(adapter)
+        bootstrap_core_schema(adapter, seed_admin=False)
         tables = {
             row[0]
             for row in con.execute(

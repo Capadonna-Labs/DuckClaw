@@ -151,7 +151,7 @@ def test_template_import_script_apply_import_uses_db_path_and_templates_root(
 
     templates_root = tmp_path / "templates"
     _write_template(templates_root, "BI-Analyst", display_name="BI Analyst")
-    script = importlib.import_module("scripts.import_templates_to_catalog")
+    script = importlib.import_module("duckops.import_templates_cli")
 
     result = script.apply_import(
         db_path=str(gateway_db),
@@ -173,7 +173,7 @@ def test_template_import_script_apply_import_uses_db_path_and_templates_root(
 def test_template_import_module_and_script_do_not_hardcode_axis() -> None:
     import inspect
 
-    import scripts.import_templates_to_catalog as cli
+    import duckops.import_templates_cli as cli
     from duckclaw import admin_template_import
 
     module_source = inspect.getsource(admin_template_import)

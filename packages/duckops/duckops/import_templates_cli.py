@@ -9,8 +9,11 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
+from duckops.paths import repo_root
+
+
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[1]
+    return repo_root()
 
 
 def _ensure_shared_src() -> None:

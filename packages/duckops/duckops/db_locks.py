@@ -11,9 +11,12 @@ import sys
 from pathlib import Path
 
 
+from duckops.paths import repo_root
+
+
 def _repo_root() -> Path:
     raw = (os.environ.get("DUCKCLAW_REPO_ROOT") or "").strip()
-    return Path(raw) if raw else Path(__file__).resolve().parent.parent
+    return Path(raw) if raw else repo_root()
 
 
 def _pm2_pids() -> set[int]:

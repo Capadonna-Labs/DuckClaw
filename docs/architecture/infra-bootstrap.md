@@ -17,7 +17,7 @@ Fail-fast gateway startup, schema integrity verification, and operator CLIs. Pro
 ```bash
 # 1. Migrate gateway hub (idempotent)
 uv run duckclaw-migrate
-# or: uv run python scripts/migrate.py
+# or: uv run duckclaw-migrate
 
 # 2. Ensure Redis is up
 uv run duckclaw-healthcheck

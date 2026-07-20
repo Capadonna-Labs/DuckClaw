@@ -98,10 +98,10 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
     label: 'Últimas líneas log Edge Streamlit',
     argv: ['pm2', 'logs', 'Edge-Streamlit', '--lines', '40', '--nostream'],
   },
-  doctor: { label: 'Diagnóstico local (doctor.py)', argv: ['uv', 'run', 'python', 'scripts/doctor.py'] },
+  doctor: { label: 'Diagnóstico local (duckops doctor)', argv: ['uv', 'run', 'duckops', 'doctor'] },
   bootstrap_dbs: {
     label: 'Bootstrap DuckDB',
-    argv: ['uv', 'run', 'python', 'scripts/bootstrap_dbs.py'],
+    argv: ['uv', 'run', 'duckops', 'db', 'bootstrap'],
   },
 };
 

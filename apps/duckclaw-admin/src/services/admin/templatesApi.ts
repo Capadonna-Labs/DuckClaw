@@ -174,20 +174,6 @@ export const templatesApi = {
       method: 'POST',
       body: JSON.stringify({ id, source_template: sourceTemplate ?? 'industries/business_standard' }),
     }),
-  createProject: (body: {
-    id: string;
-    source_template: string;
-    name: string;
-    description: string;
-    skills: string[];
-    topology: string;
-    system_prompt: string;
-    soul?: string;
-  }) =>
-    adminFetch<{ ok: boolean; id: string; path: string }>('/projects', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
   createUserAgent: (body: {
     worker_id: string;
     display_name: string;

@@ -23,7 +23,6 @@ from routers.admin_domains.env_config import env_file as _env_file
 from routers.admin_domains.env_config import router as env_config_router
 from routers.admin_domains.fly_commands_catalog import router as fly_commands_catalog_router
 from routers.admin_domains.gateway_resources import router as gateway_resources_router
-from routers.admin_domains.forge_projects import router as forge_projects_router
 from routers.admin_domains.hitl_admin import router as hitl_admin_router
 from routers.admin_domains.integration_catalog import router as integration_catalog_router
 from routers.admin_domains.kanban import router as kanban_router
@@ -42,7 +41,6 @@ from routers.admin_domains.playground_chat import (
     _playground_vault_db_path,
 )
 from routers.admin_domains.playground_chat import router as playground_chat_router
-from routers.admin_domains.project_bootstrap_routes import router as project_bootstrap_router
 from routers.admin_domains.prompt_policies import router as prompt_policies_router
 from routers.admin_domains.report_engine import router as report_engine_router
 from routers.admin_domains.productivity import router as productivity_router
@@ -91,7 +89,6 @@ router.include_router(catalog_skills_router)
 router.include_router(duckdb_explorer_router)
 router.include_router(env_config_router)
 router.include_router(fly_commands_catalog_router)
-router.include_router(forge_projects_router)
 router.include_router(gateway_resources_router)
 router.include_router(integration_catalog_router)
 router.include_router(hitl_admin_router)
@@ -102,7 +99,6 @@ router.include_router(knowledge_router)
 router.include_router(ops_router)
 router.include_router(overview_router)
 router.include_router(playground_chat_router)
-router.include_router(project_bootstrap_router)
 router.include_router(prompt_policies_router)
 router.include_router(report_engine_router)
 router.include_router(productivity_router)

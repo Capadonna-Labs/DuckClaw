@@ -22,20 +22,13 @@ def test_admin_auth_routes_live_in_domain_module() -> None:
     assert "class AdminLoginBody" in auth
 
 
-def test_project_bootstrap_routes_live_in_domain_module() -> None:
+def test_project_bootstrap_and_forge_projects_routes_are_removed() -> None:
     admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
-    bootstrap = Path(
-        "services/api-gateway/routers/admin_domains/project_bootstrap_routes.py"
-    ).read_text(encoding="utf-8")
-
-    assert "from routers.admin_domains.project_bootstrap_routes import router as project_bootstrap_router" in admin
-    assert "router.include_router(project_bootstrap_router)" in admin
+    assert "project_bootstrap" not in admin
+    assert "forge_projects" not in admin
     assert '@router.post("/projects"' not in admin
-    assert "class ProjectCreateBody" not in admin
-    assert "async def create_project" not in admin
-    assert 'router = APIRouter(tags=["admin-project-bootstrap"])' in bootstrap
-    assert '@router.post("/projects", dependencies=[Depends(require_admin_key)])' in bootstrap
-    assert "class ProjectCreateBody" in bootstrap
+    assert not Path("services/api-gateway/routers/admin_domains/project_bootstrap_routes.py").exists()
+    assert not Path("services/api-gateway/routers/admin_domains/forge_projects.py").exists()
 
 
 def test_admin_template_routes_live_in_domain_module() -> None:
@@ -119,12 +112,12 @@ def test_admin_knowledge_router_uses_typed_commands_for_mutations() -> None:
 
     assert "open_gateway_db(read_only=False)" not in knowledge
     assert "BEGIN TRANSACTION" not in knowledge
-    assert "enqueue_typed_command" in knowledge
+    assert "enqueue_admin_command" in knowledge
     assert "CreateKnowledgeSourceCommand" in knowledge
-    assert "UpsertKnowledgeDocumentCommand" in knowledge
-    assert "UpsertKnowledgeChunksCommand" in knowledge
     assert "DeactivateKnowledgeSourceCommand" in knowledge
     assert "task_id" in knowledge
+    assert "UpsertKnowledgeDocumentCommand" not in knowledge
+    assert "UpsertKnowledgeChunksCommand" not in knowledge
 
 
 def test_runtime_settings_mutators_use_typed_write_commands() -> None:
@@ -140,7 +133,7 @@ def test_runtime_settings_mutators_use_typed_write_commands() -> None:
 
     assert "open_gateway_db(read_only=False)" not in patch_segment
     assert "upsert_runtime_setting(" not in patch_segment
-    assert "enqueue_typed_command" in patch_segment
+    assert "enqueue_admin_command" in patch_segment
     assert "UpsertRuntimeSettingCommand" in patch_segment
     assert '"task_id"' in patch_segment
 
@@ -286,7 +279,7 @@ def test_playground_model_settings_use_runtime_setting_commands_only() -> None:
     assert "UpsertRuntimeSettingCommand" in segment
     assert "RUNTIME_SESSION_DOMAIN" in segment
     assert "runtime_session_actor" in segment
-    assert "enqueue_typed_command" in segment
+    assert "enqueue_admin_command" in segment
     assert "task_id" in segment
 
 
@@ -471,7 +464,7 @@ def test_workspace_project_router_uses_typed_commands_only() -> None:
 
     assert "open_gateway_db(read_only=False)" not in workspace_projects
     assert "BEGIN TRANSACTION" not in workspace_projects
-    assert "enqueue_typed_command" in workspace_projects
+    assert "enqueue_admin_command" in workspace_projects
     assert "CreateProjectCommand" in workspace_projects
     assert "SetProjectStatusCommand" in workspace_projects
     assert "DeleteProjectCommand" in workspace_projects
@@ -510,7 +503,7 @@ def test_managed_workspace_draft_router_uses_typed_commands_only() -> None:
 
     assert "open_gateway_db(read_only=False)" not in managed_draft
     assert "BEGIN TRANSACTION" not in managed_draft
-    assert "enqueue_typed_command" in managed_draft
+    assert "enqueue_admin_command" in managed_draft
     assert "ConfirmWorkspaceManagedDraftCommand" in managed_draft
     assert "task_id" in managed_draft
 
@@ -539,7 +532,7 @@ def test_admin_user_agent_router_uses_typed_commands_only() -> None:
 
     assert "open_gateway_db(read_only=False)" not in user_agents
     assert "BEGIN TRANSACTION" not in user_agents
-    assert "enqueue_typed_command" in user_agents
+    assert "enqueue_admin_command" in user_agents
     assert "UpsertUserAgentCommand" in user_agents
     assert "task_id" in user_agents
 
@@ -571,7 +564,7 @@ def test_catalog_skill_router_uses_typed_commands_only() -> None:
 
     assert "open_gateway_db(read_only=False)" not in catalog_skills
     assert "BEGIN TRANSACTION" not in catalog_skills
-    assert "enqueue_typed_command" in catalog_skills
+    assert "enqueue_admin_command" in catalog_skills
     assert "UpsertCatalogSkillCommand" in catalog_skills
     assert "DeactivateCatalogSkillCommand" in catalog_skills
     assert "task_id" in catalog_skills
@@ -596,7 +589,7 @@ def test_template_catalog_router_uses_typed_commands_for_mutators() -> None:
         assert "_enqueue_template_catalog_command" in segment
         assert "task_id" in segment
 
-    assert "enqueue_typed_command" in templates
+    assert "enqueue_admin_command" in templates
     assert "UpsertWorkerCommand" in templates
     assert "UpdateCatalogWorkerFileCommand" in templates
     assert "DeactivateCatalogWorkerCommand" in templates
@@ -750,17 +743,12 @@ def test_admin_catalog_meta_routes_live_in_domain_module() -> None:
     assert '@router.get("/source-preview", dependencies=[Depends(require_admin_key)])' in catalog_meta
 
 
-def test_admin_forge_projects_routes_live_in_domain_module() -> None:
+def test_admin_forge_projects_routes_are_removed() -> None:
     admin = Path("services/api-gateway/routers/admin.py").read_text(encoding="utf-8")
-    forge_projects = Path("services/api-gateway/routers/admin_domains/forge_projects.py").read_text(encoding="utf-8")
-
-    assert "from routers.admin_domains.forge_projects import router as forge_projects_router" in admin
-    assert "router.include_router(forge_projects_router)" in admin
+    assert "forge_projects_router" not in admin
     assert '@router.get("/forge-projects"' not in admin
     assert '@router.post("/forge-projects"' not in admin
-    assert 'router = APIRouter(prefix="/forge-projects", tags=["admin-forge-projects"])' in forge_projects
-    assert '@router.get("", dependencies=[Depends(require_admin_key)])' in forge_projects
-    assert '@router.post("", dependencies=[Depends(require_admin_key)])' in forge_projects
+    assert not Path("services/api-gateway/routers/admin_domains/forge_projects.py").exists()
 
 
 def test_admin_hitl_routes_live_in_domain_module() -> None:

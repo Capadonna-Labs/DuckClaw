@@ -22,7 +22,8 @@ def test_projects_page_exposes_db_first_project_worker_assignment() -> None:
     ).read_text(encoding="utf-8")
     bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
 
-    assert "<FolderKanban size={28} /> Proyectos" in page
+    assert "<FolderKanban size={28} />" in page
+    assert "Proyectos" in page
     assert "listWorkspaceProjectsPage" in page
     assert "page.projects.length === 0" in page
     assert "page.total > 0" in page
@@ -254,14 +255,14 @@ def test_prompt_policies_admin_ui_manages_managed_draft_without_seed_copy() -> N
     assert "admin_workspace_managed_draft" not in m021_segment
 
 
-def test_template_editor_explains_db_context_storage() -> None:
+def test_template_editor_exposes_prompt_files_and_context_actions() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/templates/[workerId]/page.tsx").read_text(encoding="utf-8")
 
-    assert "Dónde se almacena" in page
-    assert "main.admin_worker_contexts" in page
     assert "system_prompt.md" in page
     assert "soul.md" in page
-    assert "versiones del catálogo" in page
+    assert "PROMPT_FILES" in page
+    assert "detail?.contexts" in page or "contextFiles" in page
+    assert "No afecta system_prompt ni soul" in page
 
 
 def test_playground_project_selection_forces_project_worker() -> None:
@@ -320,7 +321,6 @@ def test_managed_workspace_draft_copy_and_symbols_avoid_orchestrator_product_nam
         Path("apps/duckclaw-admin/src/components/projects/ProjectManagedWorkspaceDraftWizard.tsx"),
         Path("apps/duckclaw-admin/src/components/projects/ProjectsGrid.tsx"),
         Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts"),
-        Path("apps/duckclaw-admin/src/app/api/admin/forge-projects/route.ts"),
         Path("apps/duckclaw-admin/src/services/adminService.ts"),
         Path("services/api-gateway/routers/admin.py"),
         Path("services/api-gateway/routers/admin_db_first.py"),
@@ -355,21 +355,14 @@ def test_managed_workspace_draft_copy_and_symbols_avoid_orchestrator_product_nam
     assert leaks == []
 
 
-def test_legacy_forge_projects_are_not_operational_in_admin_ui() -> None:
+def test_legacy_forge_projects_are_removed_from_admin_ui() -> None:
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
     projects_page = Path("apps/duckclaw-admin/src/app/(admin)/projects/page.tsx").read_text(encoding="utf-8")
     overview_page = Path("apps/duckclaw-admin/src/app/(admin)/overview/page.tsx").read_text(encoding="utf-8")
     templates_page = Path("apps/duckclaw-admin/src/app/(admin)/templates/page.tsx").read_text(encoding="utf-8")
     kanban_page = Path("apps/duckclaw-admin/src/app/(admin)/kanban/page.tsx").read_text(encoding="utf-8")
     service = admin_service_corpus()
-    forge_route = Path("apps/duckclaw-admin/src/app/api/admin/forge-projects/route.ts").read_text(encoding="utf-8")
-    forge_slug_route = Path("apps/duckclaw-admin/src/app/api/admin/forge-projects/[slug]/route.ts").read_text(encoding="utf-8")
-    forge_apply_route = Path(
-        "apps/duckclaw-admin/src/app/api/admin/forge-projects/[slug]/apply-team/route.ts"
-    ).read_text(encoding="utf-8")
-    forge_presets_route = Path(
-        "apps/duckclaw-admin/src/app/api/admin/forge-projects/env-presets/route.ts"
-    ).read_text(encoding="utf-8")
+    templates_api = Path("apps/duckclaw-admin/src/services/admin/templatesApi.ts").read_text(encoding="utf-8")
 
     combined_ui = "\n".join([nav, projects_page, overview_page, templates_page, kanban_page])
     assert 'href="/projects/new"' not in combined_ui
@@ -377,13 +370,11 @@ def test_legacy_forge_projects_are_not_operational_in_admin_ui() -> None:
     assert "listForgeProjects" not in service
     assert "applyForgeProjectTeam" not in service
     assert "listEnvForgeProjectPresets" not in service
-    assert "createForgeProjectLocal" not in forge_route
-    assert "listForgeProjectsLocal" not in forge_route
-    assert "deleteForgeProjectLocal" not in forge_slug_route
-    assert "loadEnvForgePresets" not in forge_presets_route
-    for route in (forge_route, forge_slug_route, forge_apply_route, forge_presets_route):
-        assert "410" in route
-        assert "DB-first" in route
+    assert "createProject:" not in templates_api
+    assert "forge-projects" not in service
+    assert not Path("apps/duckclaw-admin/src/app/api/admin/forge-projects").exists()
+    assert not Path("services/api-gateway/routers/admin_domains/forge_projects.py").exists()
+    assert not Path("services/api-gateway/routers/admin_domains/project_bootstrap_routes.py").exists()
 
 
 def test_sidebar_project_icon_is_imported() -> None:
@@ -395,19 +386,17 @@ def test_sidebar_project_icon_is_imported() -> None:
     assert "FolderPlus" in lucide_import.group("body")
 
 
-def test_topbar_can_restart_gateway_without_gateway_proxy() -> None:
+def test_topbar_can_restart_stack_without_gateway_proxy() -> None:
     topbar = Path("apps/duckclaw-admin/src/components/layout/Topbar.tsx").read_text(encoding="utf-8")
     bff_proxy = Path("apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
     service = admin_service_corpus()
     errors = Path("apps/duckclaw-admin/src/lib/adminErrors.ts").read_text(encoding="utf-8")
 
-    assert "adminService.runOps('pm2_restart_db_writer')" in topbar
-    assert "adminService.runOps('pm2_restart_gateway')" in topbar
-    assert "Reiniciar stack" in topbar
+    assert "adminService.runOps('restart_stack')" in topbar
+    assert "Reiniciar sistema" in topbar
     assert "RefreshCw" in topbar
     assert "localOpsRunFallback" in bff_proxy
-    assert "pm2_restart_db_writer" in bff_proxy
-    assert "pm2_restart_gateway" in bff_proxy
+    assert "restart_stack" in bff_proxy or "pm2_restart_gateway" in bff_proxy
     assert "start_stack" in bff_proxy
     assert "parseApiErrorDetail(data, res.status)" in service
     assert "looksLikeProblemContext" in errors

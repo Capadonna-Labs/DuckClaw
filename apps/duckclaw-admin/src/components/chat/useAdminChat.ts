@@ -240,14 +240,20 @@ export function useAdminChat({
         }
         setError(null);
         setWorkerId((prev) => {
-          if (pinnedWorker && workersInclude(c.workers, pinnedWorker)) return pinnedWorker;
-          if (prev && workersInclude(c.workers, prev)) return prev;
-          if (initialWorker && workersInclude(c.workers, initialWorker)) return initialWorker;
+          if (pinnedWorker && (workersInclude(c.workers, pinnedWorker) || pinnedWorker === 'default')) {
+            return pinnedWorker;
+          }
+          if (prev && (workersInclude(c.workers, prev) || prev === 'default')) return prev;
+          if (initialWorker && (workersInclude(c.workers, initialWorker) || initialWorker === 'default')) {
+            return initialWorker;
+          }
           const stored = readStoredWorker(chatId);
-          if (stored && workersInclude(c.workers, stored)) return stored;
+          if (stored && (workersInclude(c.workers, stored) || stored === 'default')) return stored;
+          const selected = String(c.selected_worker_id || '').trim();
+          if (selected) return selected;
           if (workersInclude(c.workers, 'default')) return 'default';
           const ids = workerOptionIds(c.workers);
-          return ids[0] ?? '';
+          return ids[0] ?? 'default';
         });
         const vault = c.vault;
         const override = (vault?.override_path || '').trim();
@@ -276,7 +282,12 @@ export function useAdminChat({
       setWorkerId('');
       return;
     }
-    setWorkerId(pinnedWorker || initialWorker || readStoredWorker(chatId) || '');
+    const preferred = pinnedWorker || initialWorker || readStoredWorker(chatId) || '';
+    if (preferred) {
+      setWorkerId(preferred);
+      return;
+    }
+    // Sin preferencia explícita: no vaciar. loadConfig / historial eligen default|primer worker.
   }, [chatId, initialWorker, pinnedWorker, setWorkerId]);
 
   const { reloadHistory, scheduleLoopHistoryReload, clearLoopHistoryReload } = useAdminChatHistory({

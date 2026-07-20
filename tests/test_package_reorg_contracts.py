@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+import pytest
+
 
 def test_shared_layer_flat_modules_expose_public_contracts() -> None:
     modules = {
@@ -56,12 +58,13 @@ def test_agents_runtime_and_manager_facades_expose_public_contracts() -> None:
 
 def test_manager_graph_implementation_is_owned_by_manager_package() -> None:
     manager_graph = importlib.import_module("duckclaw.manager.graph")
-    legacy_graph = importlib.import_module("duckclaw.graphs.manager_graph")
     builder = importlib.import_module("duckclaw.manager.manager_graph_builder")
 
     assert manager_graph.build_manager_graph is builder.build_manager_graph
     assert builder.build_manager_graph.__module__ == "duckclaw.manager.manager_graph_builder"
-    assert legacy_graph.build_manager_graph is manager_graph.build_manager_graph
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("duckclaw.graphs.manager_graph")
+    assert not Path("packages/agents/src/duckclaw/graphs/manager_graph.py").exists()
 
 
 def test_tests_do_not_import_task_classification_from_legacy_manager_graph() -> None:
@@ -83,7 +86,12 @@ def test_tests_do_not_import_task_classification_from_legacy_manager_graph() -> 
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if not isinstance(node, ast.ImportFrom) or node.module != "duckclaw.graphs.manager_graph":
+            if not isinstance(node, ast.ImportFrom):
+                continue
+            if node.module not in {"duckclaw.graphs.manager_graph", "duckclaw.manager.graph"}:
+                continue
+            if node.module == "duckclaw.graphs.manager_graph":
+                offenders.append(f"{path}:{node.lineno}: legacy manager_graph import")
                 continue
             for alias in node.names:
                 if alias.name in banned:

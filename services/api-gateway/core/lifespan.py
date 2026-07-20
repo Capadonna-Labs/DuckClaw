@@ -187,7 +187,7 @@ async def lifespan(app: FastAPI):
             if not reddit_mcp_using_prefetch():
                 _log.warning(
                     "Reddit MCP: sin prefetch local (npx puede tardar 2–5 min). "
-                    "Ejecuta: bash scripts/prefetch_mcp_reddit.sh"
+                    "Ejecuta: uv run duckops mcp prefetch reddit"
                 )
             else:
                 _log.info("Reddit MCP: usando cache local (.mcp-cache/reddit)")

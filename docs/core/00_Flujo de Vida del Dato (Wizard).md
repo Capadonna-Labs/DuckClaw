@@ -153,7 +153,7 @@ O como PM2: `DuckClaw-DB-Writer`.
 | `packages/agents/src/duckclaw/workers/loader.py`      | `run_schema(db, spec)` — crea schema, `agent_beliefs`, ejecuta `schema.sql`. |
 | `packages/agents/src/duckclaw/forge/templates/<worker_id>/schema.sql` | DDL de tablas del template (ej. `default/schema.sql`).          |
 | `scripts/duckclaw_setup_wizard.py`                   | Wizard CLI: crea `db/<nombre>.duckdb` si no existe; gestiona PM2 (Gateway, DB Writer). |
-| `scripts/recreate_gateway_db.py`      | Recrea la DB del Gateway con el schema del hub.                                  |
+| `scripts/bootstrap_dbs.py`                   | DDL idempotente hub + registry multi-bóveda.                                  |
 
 
 **Flujo de creación:**

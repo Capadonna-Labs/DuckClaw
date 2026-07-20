@@ -119,7 +119,7 @@ Rutas bajo `/api/v1/admin` → `services/api-gateway/routers/admin_domains/*` (u
 
 ```bash
 # macOS / Linux — prereqs + migrate + PM2 + admin
-./duckops-up.sh
+bash scripts/bootstrap/up.sh
 # o
 uv run duckops up
 ```

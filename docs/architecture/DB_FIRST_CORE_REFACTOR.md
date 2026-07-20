@@ -496,7 +496,7 @@ Estos residuos existen en el repo actual y no deben confundirse con patrones a c
 - `services/db-writer/quant_state_delta_handler.py` y `services/db-writer/models/quant_state_delta.py`: **removidos del core** en Hito 1.
 - `services/api-gateway/routers/admin.py`: agregador/compat (~115 lineas) con reexports historicos; auth login en `admin_domains/auth.py`; bootstrap filesystem `POST /projects` en `admin_domains/project_bootstrap_routes.py`; impls de templates en `admin_domains/template_lifecycle.py`; HITL admin en `admin_domains/hitl_admin.py` (`duckclaw.hitl.*`, sin capadonna).
 - `services/api-gateway/routers/admin_domains/access_management.py`: los mutadores admin de access management delegan en comandos tipados/DB-writer y el modulo salio de la allowlist de conexiones DuckDB read-write directas.
-- `scripts/deployment/patch_tts_production_env.py`, `scripts/deployment/test_sensory_tts.py`, `scripts/deployment/test_tts_duration_remote.py` e `integrations/sensory-node/scripts/check_tts_amplitude.py`: smoke/debug/patch scripts de TTS aun nombran voces legacy. No deben copiarse como defaults; el siguiente corte Sensory debe moverlos a ids genericos o resolver voz desde `DUCKCLAW_TTS_VOICE_MAP`/manifest.
+- Scripts de smoke/debug TTS en `integrations/sensory-node/scripts/` no deben copiarse como defaults de voz; resolver voz desde `DUCKCLAW_TTS_VOICE_MAP`/manifest.
 - `packages/duckops/duckops/sovereign/materialize.py`: contiene comentarios/operaciones con nombres legacy; no es runtime manager core.
 
 Las allowlists vivas estan declaradas en `tests/test_forge_legacy_cleanup.py`. Si un futuro subagente agrega una excepcion, debe agregar tambien una razon explicita y preferiblemente una tarea de follow-up para retirarla.

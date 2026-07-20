@@ -73,7 +73,7 @@ export async function runStackStartLocal(): Promise<NormalizedOpsRunResult> {
 
   const lockCheck = await runArgv(
     cwd,
-    buildUvRunArgv(['python', 'scripts/check_duckdb_lock_holders.py']),
+    buildUvRunArgv(['duckops', 'db', 'check-locks']),
     30_000
   );
   let blocking: Array<{ pid: number; db: string; kind: string; command: string }> = [];
@@ -147,7 +147,7 @@ pm2 list
 
   const serve = await runArgv(
     cwd,
-    buildUvRunArgv(['python', 'scripts/restore_tailscale_admin_serve.py']),
+    buildUvRunArgv(['duckops', 'ingress', 'restore-admin-serve']),
     60_000
   );
   chunks.push(
@@ -158,7 +158,7 @@ pm2 list
 
   if (serve.exit_code !== 0) {
     chunks.push(
-      '\nwarn: no se pudo re-aplicar Tailscale Serve :8443; ejecuta scripts/tailscale_serve_admin.sh\n'
+      '\nwarn: no se pudo re-aplicar Tailscale Serve :8443; ejecuta `uv run duckops ingress serve-admin`\n'
     );
   }
 

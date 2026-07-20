@@ -3,6 +3,13 @@
 # Dev-only local cheat sheet (no publicar)
 comandos.txt
 
+# Python (uv / pyenv — debe vivir junto a pyproject.toml)
+.python-version
+
+# Node accidental en raíz (admin usa pnpm en apps/duckclaw-admin/)
+package-lock.json
+skills-lock.json
+
 # Python cache/build artifacts
 __pycache__/
 *.py[cod]
@@ -67,7 +74,7 @@ site/
 # DuckDB extension cache (pytest)
 .pytest_duckdb/
 
-# MCP npm prefetch (scripts/prefetch_mcp_reddit.sh)
+# MCP npm prefetch (duckops mcp prefetch reddit → .mcp-cache/reddit)
 .mcp-cache/
 
 # Runtime / debug logs

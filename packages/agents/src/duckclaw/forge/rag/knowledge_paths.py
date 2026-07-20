@@ -24,13 +24,40 @@ def _parse_env_roots(env_key: str, *, include_repo_root: bool = False) -> list[P
 
 
 def knowledge_allowed_roots() -> list[Path]:
-    """Roots permitted for folder ingest (read). Includes repo root when configured."""
-    return _parse_env_roots("DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS", include_repo_root=True)
+    """Roots permitted for folder ingest (read). Includes repo root when configured.
+
+    Si ``DUCKCLAW_VAULT_MIRROR_DIR`` está definido, se antepone (preferencia offline local).
+    """
+    roots = _parse_env_roots("DUCKCLAW_KNOWLEDGE_ALLOWED_ROOTS", include_repo_root=True)
+    try:
+        from duckclaw.vault_mirror import vault_mirror_dir
+
+        mirror = vault_mirror_dir()
+    except Exception:
+        mirror = None
+    if mirror is not None:
+        mirror_resolved = mirror.expanduser().resolve()
+        roots = [r for r in roots if r != mirror_resolved]
+        roots.insert(0, mirror_resolved)
+    return roots
 
 
 def knowledge_output_roots() -> list[Path]:
-    """Roots permitted for agent markdown output. Falls back to ingest roots."""
+    """Roots permitted for agent markdown output. Falls back to ingest roots.
+
+    Antepone ``{VAULT_MIRROR}/output`` cuando hay espejo local.
+    """
     output = _parse_env_roots("DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS", include_repo_root=False)
+    try:
+        from duckclaw.vault_mirror import vault_mirror_dir
+
+        mirror = vault_mirror_dir()
+    except Exception:
+        mirror = None
+    if mirror is not None:
+        mirror_out = (mirror / "output").expanduser().resolve()
+        output = [r for r in output if r != mirror_out]
+        output.insert(0, mirror_out)
     if output:
         return output
     return knowledge_allowed_roots()

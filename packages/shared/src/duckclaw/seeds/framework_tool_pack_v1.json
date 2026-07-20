@@ -24,6 +24,7 @@
       "default_config": {
         "local_search_enabled": true,
         "tavily_enabled": true,
+        "kiwix_enabled": true,
         "search_depth": "basic",
         "max_results": 5,
         "include_answer": true

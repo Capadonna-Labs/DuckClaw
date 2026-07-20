@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -220,12 +222,22 @@ def run_stack_deploy(
     port: int = 8000,
     wait_health: bool = True,
     health_timeout: float = 45.0,
+    full: bool = False,
+    mirror_vault: bool | None = None,
 ) -> int:
-    """uv sync (optional), migrate (optional), recycle PM2 stack with clean env, verify health."""
+    """
+    uv sync → migrate → recycle PM2 → /health.
+
+    ``full=True`` (deploy limpio del framework): además espeja la bóveda local
+    y reporta estado Kiwix/offline. Fallos de mirror no abortan el stack
+    (Drive puede estar offline).
+    """
     root = Path(repo_root).resolve()
     if not (root / ".env").is_file():
         print_fn(f"ERROR: falta .env en {root}")
         return 1
+
+    do_mirror = bool(full) if mirror_vault is None else bool(mirror_vault)
 
     if sync_deps and not run_uv_sync(repo_root=root, print_fn=print_fn):
         return 1
@@ -257,5 +269,71 @@ def run_stack_deploy(
     print_fn(f"  Knowledge-Indexer: {_pm2_status(INDEXER_NAME)}")
     print_fn(f"  Heartbeat: {_pm2_status(HEARTBEAT_NAME)}")
     print_fn(f"  DB-Writer: {_pm2_status(DB_WRITER_NAME)}")
-    print_fn("  Admin: cd apps/duckclaw-admin && pnpm dev")
+
+    if do_mirror or full:
+        _run_framework_offline_post_deploy(print_fn=print_fn, mirror=do_mirror)
+
+    if not full:
+        print_fn("  Admin: cd apps/duckclaw-admin && pnpm dev")
+        print_fn("  Tip: uv run duckops stack deploy --full  (mirror vault + Kiwix status)")
     return 0
+
+
+def _run_framework_offline_post_deploy(*, print_fn: PrintFn, mirror: bool) -> None:
+    """Espejo de bóveda + estado Kiwix tras un deploy completo."""
+    if mirror:
+        print_fn("==> Espejo bóveda (GDrive → storage local)…")
+        try:
+            from duckclaw.vault_mirror import run_vault_mirror
+
+            result = run_vault_mirror(delete=False, dry_run=False)
+            if result.ok:
+                print_fn(f"✓ Vault mirror: {result.detail}")
+                if result.bytes_hint:
+                    print_fn(f"  {result.bytes_hint}")
+            else:
+                print_fn(f"WARN vault mirror: {result.detail}")
+        except Exception as exc:
+            print_fn(f"WARN vault mirror: {exc}")
+
+    print_fn("==> Estado offline (Kiwix / vault)…")
+    try:
+        from duckclaw.vault_mirror import (
+            kiwix_zim_dir,
+            list_zim_files,
+            vault_mirror_dir,
+            vault_source_dir,
+        )
+
+        src = vault_source_dir()
+        mir = vault_mirror_dir()
+        zim_dir = kiwix_zim_dir()
+        zims = list_zim_files(zim_dir)
+        cli = bool(shutil.which("kiwix-search"))
+        if not cli:
+            for candidate in (
+                Path.home() / ".local" / "bin" / "kiwix-search",
+                Path((os.environ.get("DUCKCLAW_KIWIX_BIN_DIR") or "").strip() or "/nonexistent")
+                / "kiwix-search",
+                Path("/Users/workstation/DuckClawOffline/bin/kiwix-search"),
+            ):
+                if candidate.is_file():
+                    cli = True
+                    break
+        print_fn(
+            f"  VAULT_SOURCE: {'ok' if src and src.is_dir() else 'missing'} · "
+            f"MIRROR: {'ok' if mir and mir.is_dir() else 'missing'}"
+        )
+        print_fn(
+            f"  KIWIX: zim={len(zims)} · "
+            f"kiwix-search={'sí' if cli else 'no'} · "
+            f"dir={zim_dir or '(no configurado)'}"
+        )
+        if zims:
+            for z in zims[:5]:
+                print_fn(f"    - {z.name}")
+    except Exception as exc:
+        print_fn(f"WARN offline status: {exc}")
+
+    print_fn("  Admin: cd apps/duckclaw-admin && pnpm dev")
+    print_fn("✓ Framework deploy completo")

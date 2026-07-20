@@ -299,6 +299,10 @@ def register_research_skill(
         if local_tool:
             tools_list.append(local_tool)
 
+        from duckclaw.forge.skills.kiwix_bridge import register_kiwix_into_research
+
+        register_kiwix_into_research(tools_list, research_config)
+
         tavily_tool = _tavily_search_tool(research_config, db=db, tenant_id=tenant_id)
         if tavily_tool:
             tools_list.append(tavily_tool)

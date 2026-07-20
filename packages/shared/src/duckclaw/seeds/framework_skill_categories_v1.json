@@ -23,7 +23,7 @@
       "description": "Búsqueda web, tendencias y fuentes externas.",
       "sort_order": 20,
       "skills": [
-        { "id": "research", "hint": "Búsqueda web local (SearXNG/DDG); Tavily opcional si hay TAVILY_API_KEY" },
+        { "id": "research", "hint": "web_search local + Kiwix offline (ZIMs) + Tavily opcional" },
         { "id": "google_trends", "hint": "Google Trends" },
         { "id": "reddit", "hint": "Posts y comentarios de Reddit" },
         { "id": "openweather", "hint": "Clima vía OpenWeather" }

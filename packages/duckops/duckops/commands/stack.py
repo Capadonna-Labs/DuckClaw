@@ -201,12 +201,17 @@ def up(
 def stack_deploy(
     sync_deps: bool = typer.Option(True, "--sync/--no-sync", help="Ejecuta uv sync antes del deploy."),
     migrate: bool = typer.Option(True, "--migrate/--no-migrate", help="Ejecuta duckclaw-migrate antes del PM2 recycle."),
+    full: bool = typer.Option(
+        False,
+        "--full/--no-full",
+        help="Deploy limpio del framework: + espejo vault + estado Kiwix/offline.",
+    ),
     host: str = typer.Option("127.0.0.1", "--host", help="Host local del Gateway."),
     port: int = typer.Option(8000, "--port", help="Puerto local del Gateway."),
     wait: bool = typer.Option(True, "--wait/--no-wait", help="Espera /health OK tras el deploy."),
     timeout_seconds: float = typer.Option(45.0, "--timeout", help="Timeout de /health."),
 ) -> None:
-    """uv sync + migrate + recicla PM2 (env limpio) + DB-Writer, Knowledge-Indexer y Gateway."""
+    """uv sync + migrate + PM2. Con --full: también mirror vault + status offline."""
     from duckclaw.ops.stack_deploy import run_stack_deploy
 
     code = run_stack_deploy(
@@ -218,6 +223,7 @@ def stack_deploy(
         port=port,
         wait_health=wait,
         health_timeout=timeout_seconds,
+        full=full,
     )
     raise typer.Exit(code)
 

@@ -469,6 +469,44 @@ def cmd_doctor(
     except Exception as exc:
         _emit("Document toolbox", False, str(exc)[:160])
 
+    try:
+        from duckclaw.vault_mirror import (
+            kiwix_zim_dir,
+            list_zim_files,
+            vault_mirror_dir,
+            vault_source_dir,
+        )
+        import shutil as _shutil
+
+        src = vault_source_dir()
+        mirror = vault_mirror_dir()
+        if src or mirror:
+            src_ok = bool(src and src.is_dir())
+            mir_ok = bool(mirror and mirror.is_dir())
+            _emit(
+                "Vault mirror",
+                mir_ok,
+                (
+                    f"source={'ok' if src_ok else 'missing'} · "
+                    f"mirror={'ok ' + str(mirror) if mir_ok else 'missing'} · "
+                    "sync: duckops knowledge mirror"
+                ),
+            )
+        zim_root = kiwix_zim_dir()
+        if zim_root is not None:
+            zims = list_zim_files(zim_root)
+            cli = bool(_shutil.which("kiwix-search"))
+            _emit(
+                "Kiwix offline",
+                cli and bool(zims),
+                (
+                    f"dir={zim_root} · zim={len(zims)} · "
+                    f"kiwix-search={'sí' if cli else 'no (brew install kiwix-tools)'}"
+                ),
+            )
+    except Exception as exc:
+        _emit("Offline knowledge", False, str(exc)[:160])
+
     admin_key = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
     key_ok = is_admin_key_valid(admin_key)
     _emit(

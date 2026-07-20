@@ -76,6 +76,12 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         keyword_context={"duckclaw_db": "db"},
     ),
     SkillToolRegistrar(
+        skill_name="fal",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.fal_bridge:register_fal_skill",
+        keyword_context={"duckclaw_db": "db"},
+    ),
+    SkillToolRegistrar(
         skill_name="higgsfield",
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.higgsfield_bridge:register_higgsfield_skill",

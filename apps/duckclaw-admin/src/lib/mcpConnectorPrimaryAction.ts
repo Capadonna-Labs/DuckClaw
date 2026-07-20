@@ -1,5 +1,10 @@
-import type { McpConnectorPreset, McpConnectorSummary } from '@/services/adminService';
+import type {
+  McpConnectorPreset,
+  McpConnectorSummary,
+  McpConnectorTestResult,
+} from '@/services/adminService';
 import { presetUsesOAuthPkce } from '@/lib/mcpPresetAuth';
+import { interpretMcpTestFailure } from '@/lib/mcpConnectorHealth';
 
 export type McpConnectorPrimaryKind =
   | 'connect_oauth'
@@ -34,21 +39,40 @@ export function mcpConnectorAuthFlags(
  */
 export function resolveMcpConnectorPrimaryAction(
   connector: McpConnectorSummary,
-  opts: { preset?: McpConnectorPreset; grantCount: number; canWrite: boolean }
+  opts: {
+    preset?: McpConnectorPreset;
+    grantCount: number;
+    canWrite: boolean;
+    testResult?: McpConnectorTestResult;
+  }
 ): McpConnectorPrimaryAction {
   const { usesOAuth, needsBearer, authReady } = mcpConnectorAuthFlags(
     connector,
     opts.preset
   );
 
-  if (opts.canWrite && usesOAuth && !connector.has_auth) {
-    return { kind: 'connect_oauth', label: 'Conectar OAuth' };
+  const authTestFailed =
+    opts.testResult &&
+    !opts.testResult.ok &&
+    interpretMcpTestFailure(opts.testResult.error || '').isAuthFailure;
+
+  if (opts.canWrite && usesOAuth && (!connector.has_auth || authTestFailed)) {
+    return {
+      kind: 'connect_oauth',
+      label: connector.has_auth || authTestFailed ? 'Reconectar OAuth' : 'Conectar OAuth',
+    };
   }
-  if (opts.canWrite && needsBearer && !connector.has_auth) {
-    return { kind: 'configure_bearer', label: 'Configurar token' };
+  if (opts.canWrite && needsBearer && (!connector.has_auth || authTestFailed)) {
+    return {
+      kind: 'configure_bearer',
+      label: connector.has_auth ? 'Actualizar token' : 'Configurar token',
+    };
   }
   if (opts.canWrite && authReady && opts.grantCount === 0) {
     return { kind: 'grant', label: 'Dar grant' };
+  }
+  if (opts.canWrite && authReady && !opts.testResult) {
+    return { kind: 'open_detail', label: 'Probar' };
   }
   return { kind: 'open_detail', label: 'Detalle' };
 }

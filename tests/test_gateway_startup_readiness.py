@@ -63,3 +63,26 @@ def test_gateway_settings_dev_mode_skips_secrets() -> None:
 
     settings = GatewaySettings(DUCKCLAW_DEV_MODE=True, DUCKCLAW_ADMIN_API_KEY="")
     settings.require_production_secrets()
+
+
+def test_gateway_settings_local_llm_requires_base_url(monkeypatch) -> None:
+    from duckclaw.gateway.settings import GatewaySettings, reset_gateway_settings_cache
+
+    reset_gateway_settings_cache()
+    monkeypatch.delenv("DUCKCLAW_DEV_MODE", raising=False)
+    settings = GatewaySettings(
+        DUCKCLAW_DEV_MODE=False,
+        DUCKCLAW_ADMIN_API_KEY="admin-ok",
+        DUCKCLAW_LLM_PROVIDER="mlx",
+        DUCKCLAW_LLM_BASE_URL="",
+    )
+    with pytest.raises(RuntimeError, match="DUCKCLAW_LLM_BASE_URL"):
+        settings.require_production_secrets()
+
+    settings_ok = GatewaySettings(
+        DUCKCLAW_DEV_MODE=False,
+        DUCKCLAW_ADMIN_API_KEY="admin-ok",
+        DUCKCLAW_LLM_PROVIDER="mlx",
+        DUCKCLAW_LLM_BASE_URL="http://127.0.0.1:8080/v1",
+    )
+    settings_ok.require_production_secrets()

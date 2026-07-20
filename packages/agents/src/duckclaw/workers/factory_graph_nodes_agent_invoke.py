@@ -55,7 +55,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
         llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_reddit_post_on,
         llm_force_reddit_post_off, llm_force_reddit_search_on, llm_force_reddit_search_off,
         llm_force_reddit_fallback_on, llm_force_reddit_fallback_off, has_read_sql, has_tavily,
-        has_generate_visual, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
+        has_generate_visual, primary_visual_tool, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
         _incoming_has_reddit_share_path, _incoming_has_reddit_url, _incoming_looks_like_reddit_post_url,
         _is_latest_game_query, _is_schema_query, _patch_ai_reddit_share_tool_calls,
         _reddit_share_slug_from_incoming, _reddit_tool_message_no_data,
@@ -108,7 +108,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
         elif force_schema:
             forced_name = "inspect_schema"
         elif force_visual:
-            forced_name = "generate_visual_asset"
+            forced_name = primary_visual_tool or "generate_visual_asset"
         elif force_tavily:
             forced_name = "tavily_search"
         elif force_reddit:
@@ -139,9 +139,9 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             _msg_list = [
                 SystemMessage(
                     content=(
-                        "La imagen ya fue generada con generate_visual_asset en este turno. "
+                        "La imagen ya fue generada con una tool visual en este turno. "
                         "Responde al usuario con la ruta/artefacto; NO vuelvas a llamar "
-                        "generate_visual_asset ni edit_visual_asset."
+                        "generate_visual_asset, generate_flux_image ni edit_visual_asset."
                     )
                 )
             ] + _msg_list

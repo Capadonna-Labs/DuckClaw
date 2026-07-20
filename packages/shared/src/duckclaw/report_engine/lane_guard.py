@@ -36,8 +36,9 @@ def build_report_engine_required_error(*, blocked_tool: str, relative_path: str 
         f"{blocked_tool} bloqueado{target}: este usuario tiene plantilla(s) Word "
         f"registradas. El entregable .docx debe salir del Report Engine "
         f"({_REPORT_ENGINE_FLOW}). "
-        "No uses pandoc ni escribas un Word paralelo. "
-        "Si necesitas una conversión ad hoc sin plantilla, pasa allow_ad_hoc_docx=true."
+        "No uses convertidores genéricos ni escribas un Word paralelo. "
+        "Si necesitas una conversión ad hoc sin plantilla, pasa allow_ad_hoc_docx=true. "
+        "PDF: export_docx_to_pdf sobre el .docx del Report Engine."
     )
 
 

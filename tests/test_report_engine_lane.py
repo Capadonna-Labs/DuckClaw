@@ -17,7 +17,7 @@ from duckclaw.write_command_handlers import dispatch_command
 
 def test_lane_guard_allows_docx_without_templates() -> None:
     assert_docx_uses_report_engine_when_templates_exist(
-        blocked_tool="convert_document",
+        blocked_tool="ad_hoc_docx",
         relative_path="output/notas.md",
         output_format="docx",
         db=None,
@@ -27,9 +27,9 @@ def test_lane_guard_allows_docx_without_templates() -> None:
 def test_lane_guard_allows_any_filename_without_templates(tmp_path: Path) -> None:
     db = duckdb.connect(str(tmp_path / "empty.duckdb"))
     run_pending_migrations(db)
-    # Sin plantillas: pandoc libre (cualquier nombre, cualquier nicho)
+    # Sin plantillas: Word ad hoc permitido (cualquier nombre)
     assert_docx_uses_report_engine_when_templates_exist(
-        blocked_tool="convert_document",
+        blocked_tool="ad_hoc_docx",
         relative_path="output/INFORME_MENSUAL_N3.md",
         output_format="docx",
         db=db,
@@ -55,9 +55,9 @@ def test_lane_guard_blocks_docx_when_template_registered(tmp_path: Path) -> None
         },
     )
     assert actor_has_report_templates(db, tenant_id="default", actor_email="a@ex.com")
-    with pytest.raises(ValueError, match="convert_document bloqueado"):
+    with pytest.raises(ValueError, match="ad_hoc_docx bloqueado"):
         assert_docx_uses_report_engine_when_templates_exist(
-            blocked_tool="convert_document",
+            blocked_tool="ad_hoc_docx",
             relative_path="output/cualquier_borrador.md",
             output_format="docx",
             db=db,
@@ -83,7 +83,7 @@ def test_lane_guard_escape_ad_hoc_docx(tmp_path: Path) -> None:
         },
     )
     assert_docx_uses_report_engine_when_templates_exist(
-        blocked_tool="convert_document",
+        blocked_tool="ad_hoc_docx",
         relative_path="output/carta.md",
         output_format="docx",
         db=db,

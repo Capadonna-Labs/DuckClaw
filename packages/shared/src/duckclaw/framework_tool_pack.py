@@ -52,8 +52,14 @@ def _env_present(names: list[str]) -> bool:
 
 
 def optional_skill_configs(manifest: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]:
-    """Return optional skill configs to merge when env prerequisites are met."""
+    """Return optional skill configs to merge when env prerequisites are met.
+
+    Optional skills only apply to the ``general`` tool profile (not minimal/rag_only).
+    """
     if manifest and manifest.get("baseline") is False:
+        return {}
+    profile = str((manifest or {}).get("tool_profile") or "general").strip().lower()
+    if profile not in {"", "general"}:
         return {}
     pack = load_framework_tool_pack()
     optional = pack.get("optional_skills") or {}

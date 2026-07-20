@@ -422,19 +422,23 @@ def cmd_doctor(
 
     try:
         from duckclaw.document_toolbox.extract import markitdown_available
-        from duckclaw.document_toolbox.convert import pandoc_available
+        from duckclaw.document_toolbox.export_pdf import libreoffice_available, libreoffice_binary
         from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
 
         _emit(
             "MarkItDown",
             markitdown_available(),
-            "extract PDF/Office → texto" if markitdown_available() else "pip/uv extra document-toolbox",
+            "extract PDF/Office → texto"
+            if markitdown_available()
+            else "falta markitdown (uv sync — deps en duckclaw-shared)",
         )
-        pandoc_ok = pandoc_available()
+        lo_ok = libreoffice_available()
         _emit(
-            "Pandoc",
-            pandoc_ok,
-            shutil.which("pandoc") or "ausente — brew install pandoc (convert_document)",
+            "LibreOffice (Word→PDF)",
+            lo_ok,
+            libreoffice_binary()
+            if lo_ok
+            else "ausente — brew install --cask libreoffice (export_docx_to_pdf)",
         )
         out_roots = knowledge_output_roots()
         if not out_roots:

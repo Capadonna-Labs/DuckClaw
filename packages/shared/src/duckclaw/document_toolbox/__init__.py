@@ -1,6 +1,6 @@
-"""DuckClaw document toolbox — transversal ingest, extract, author, convert."""
+"""DuckClaw document toolbox — transversal ingest, extract, author, Word→PDF."""
 
-from duckclaw.document_toolbox.convert import convert_document_file, pandoc_available
+from duckclaw.document_toolbox.export_pdf import export_docx_to_pdf_file, libreoffice_available
 from duckclaw.document_toolbox.extract import (
     convert_bytes_to_text,
     convert_file_path_to_text,
@@ -14,8 +14,6 @@ from duckclaw.document_toolbox.registry import (
     EXTRACT_SUFFIXES,
     INGEST_NATIVE_SUFFIXES,
     INGEST_SUFFIXES,
-    PANDOC_INPUT_SUFFIXES,
-    PANDOC_OUTPUT_FORMATS,
     assert_author_text_path,
     is_author_text_suffix,
 )
@@ -31,19 +29,17 @@ __all__ = [
     "EXTRACT_SUFFIXES",
     "INGEST_NATIVE_SUFFIXES",
     "INGEST_SUFFIXES",
-    "PANDOC_INPUT_SUFFIXES",
-    "PANDOC_OUTPUT_FORMATS",
     "assert_author_text_path",
     "baseline_document_tools",
-    "convert_document_file",
     "convert_bytes_to_text",
     "convert_file_path_to_text",
     "docxtpl_available",
+    "export_docx_to_pdf_file",
     "extract_document_text_from_path",
     "is_author_text_suffix",
+    "libreoffice_available",
     "list_document_templates",
     "load_document_toolbox",
     "markitdown_available",
-    "pandoc_available",
     "render_docx_template",
 ]

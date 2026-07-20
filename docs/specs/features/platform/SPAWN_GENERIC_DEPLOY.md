@@ -19,13 +19,18 @@ Spawn (o el operador) escribe en la raíz del monorepo:
 
 | Variable | Obligatoria | Descripción |
 |----------|-------------|-------------|
-| `OPENROUTER_API_KEY` | Sí | LLM vía OpenRouter |
 | `DUCKCLAW_ADMIN_API_KEY` | Sí | Clave compartida gateway ↔ admin BFF |
 | `DUCKDB_PATH` | Sí | Hub DuckDB, p. ej. `db/private/default/duckclaw.duckdb` |
 | `DUCKCLAW_DB_PATH` | Alias | Misma ruta que `DUCKDB_PATH` (compat wizard/scripts) |
 | `REDIS_URL` | Sí | p. ej. `redis://127.0.0.1:6379/0` (redis-server vía systemd) |
-| `DUCKCLAW_SPAWN_PROFILE` | No | `1` activa checks opcionales en `doctor.py` |
+| `DUCKCLAW_SPAWN_PROFILE` | Sí (instalador) | `1` activa escrituras inline + local-first LLM |
+| `DUCKCLAW_LLM_PROVIDER` | Condicional | Local: `mlx` / `ollama` / `local`. Cloud: `openrouter`, `deepseek`, etc. |
+| `DUCKCLAW_LLM_BASE_URL` | Condicional | **Obligatoria** si el proveedor es local (p. ej. `http://127.0.0.1:8080/v1`) |
+| `OPENROUTER_API_KEY` | Condicional | Solo si `DUCKCLAW_LLM_PROVIDER=openrouter` (u `or`) |
 | `DUCKCLAW_REPO_ROOT` | No | Ruta absoluta al clone (PM2 / scripts) |
+| `DUCKCLAW_SEARXNG_URL` | No | Research soberano vía SearXNG; sin ella `web_search` usa DuckDuckGo HTML |
+
+**LLM local-first (spawn):** si hay `DUCKCLAW_SPAWN_PROFILE=1`, falta clave cloud y existe `DUCKCLAW_LLM_BASE_URL`, el bootstrap degrada a `mlx`/`ollama` automáticamente (`apply_spawn_local_first_llm`). OpenRouter **no** es obligatorio.
 
 **No** definir en perfil spawn: rutas DuckDB por agente, multiplex Telegram, etc.
 

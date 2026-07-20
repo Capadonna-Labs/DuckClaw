@@ -17,6 +17,7 @@ from duckclaw.utils.logger import format_chat_log_identity, set_log_context
 from duckclaw.workers.db_intent_policy import incoming_is_table_content_query as _incoming_is_table_content_query
 from duckclaw.workers.factory_agent_node_helpers import (
     _identity_fields,
+    _is_visual_generation_tool,
     _last_human_message_index,
     _raise_if_chat_cancelled_from_state,
     _visual_asset_calls_since_last_human,
@@ -56,7 +57,7 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
         llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_reddit_post_on,
         llm_force_reddit_post_off, llm_force_reddit_search_on, llm_force_reddit_search_off,
         llm_force_reddit_fallback_on, llm_force_reddit_fallback_off, has_read_sql, has_tavily,
-        has_generate_visual, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
+        has_generate_visual, primary_visual_tool, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
         _incoming_has_reddit_share_path, _incoming_has_reddit_url, _incoming_looks_like_reddit_post_url,
         _is_latest_game_query, _is_schema_query, _patch_ai_reddit_share_tool_calls,
         _reddit_share_slug_from_incoming, _reddit_tool_message_no_data,
@@ -242,7 +243,7 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                 _visual_tool_already_ok = bool(
                     already_has_tool_result
                     and isinstance(last_msg, ToolMessage)
-                    and (last_msg.name or "") == "generate_visual_asset"
+                    and _is_visual_generation_tool(last_msg.name or "")
                     and '"ok":true' in str(last_msg.content or "").replace(" ", "")
                 )
                 force_visual = bool(
@@ -263,7 +264,7 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                 _visual_tool_failed = bool(
                     already_has_tool_result
                     and isinstance(last_msg, ToolMessage)
-                    and (last_msg.name or "") == "generate_visual_asset"
+                    and _is_visual_generation_tool(last_msg.name or "")
                     and '"ok":false' in str(last_msg.content or "").replace(" ", "")
                 )
                 if _visual_tool_failed:

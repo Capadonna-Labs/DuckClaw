@@ -22,6 +22,10 @@ import {
   MCP_CONNECTORS_PAGE_SIZE,
 } from '@/lib/mcpConnectorsList';
 import type { McpConnectorPrimaryKind } from '@/lib/mcpConnectorPrimaryAction';
+import {
+  filterMcpConnectorsByStatus,
+  type McpConnectorStatusFilter,
+} from '@/lib/mcpConnectorHealth';
 import { paginateItems } from '@/lib/pagination';
 
 type McpConnectorsPanelProps = {
@@ -44,6 +48,8 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   /** worker_id → connector_ids con grant activo */
   const [grantsByWorker, setGrantsByWorker] = useState<Record<string, string[]>>({});
   const [testResults, setTestResults] = useState<Record<string, McpConnectorTestResult>>({});
+  const [connectorNotices, setConnectorNotices] = useState<Record<string, string>>({});
+  const [statusFilter, setStatusFilter] = useState<McpConnectorStatusFilter>('all');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
   const [selectedConnectorId, setSelectedConnectorId] = useState<string | null>(null);
@@ -143,7 +149,9 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
       );
       window.location.href = result.authorization_url;
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'No se pudo iniciar OAuth');
+      const message = e instanceof Error ? e.message : 'No se pudo iniciar OAuth';
+      setConnectorNotices((prev) => ({ ...prev, [connectorId]: message }));
+      setError(message);
       setBusyId(null);
     }
   };
@@ -153,10 +161,40 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     [presets]
   );
 
-  const filteredConnectors = useMemo(
-    () => filterMcpConnectors(connectors, query),
-    [connectors, query]
-  );
+  const filteredConnectors = useMemo(() => {
+    const byQuery = filterMcpConnectors(connectors, query);
+    return filterMcpConnectorsByStatus(byQuery, {
+      status: statusFilter,
+      grantsByWorker,
+      testResults,
+      presetById,
+    });
+  }, [connectors, query, statusFilter, grantsByWorker, testResults, presetById]);
+
+  const statusCounts = useMemo(() => {
+    const base = filterMcpConnectors(connectors, query);
+    return {
+      all: base.length,
+      needs_auth: filterMcpConnectorsByStatus(base, {
+        status: 'needs_auth',
+        grantsByWorker,
+        testResults,
+        presetById,
+      }).length,
+      no_grants: filterMcpConnectorsByStatus(base, {
+        status: 'no_grants',
+        grantsByWorker,
+        testResults,
+        presetById,
+      }).length,
+      test_failed: filterMcpConnectorsByStatus(base, {
+        status: 'test_failed',
+        grantsByWorker,
+        testResults,
+        presetById,
+      }).length,
+    };
+  }, [connectors, query, grantsByWorker, testResults, presetById]);
 
   const paginated = useMemo(
     () => paginateItems(filteredConnectors, page, MCP_CONNECTORS_PAGE_SIZE),
@@ -165,7 +203,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
 
   useEffect(() => {
     setPage(1);
-  }, [query]);
+  }, [query, statusFilter]);
 
   useEffect(() => {
     if (page !== paginated.currentPage) setPage(paginated.currentPage);
@@ -294,6 +332,36 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     }
   };
 
+  const revokeGrant = async (connectorId: string) => {
+    const workerId = grantWorkerByConnector[connectorId] || workers[0]?.id;
+    if (!workerId || busyId) return;
+    setBusyId(`revoke:${connectorId}`);
+    setError(null);
+    setGrantNotices((prev) => {
+      const next = { ...prev };
+      delete next[connectorId];
+      return next;
+    });
+    try {
+      const result = await adminService.revokeMcpConnectorGrant(connectorId, workerId);
+      const polled = await pollWriteTask(result.task_id);
+      if (polled.state === 'failed') {
+        throw new Error(polled.detail || 'Revoke no se aplicó en DB');
+      }
+      const workerLabel = workers.find((w) => w.id === workerId)?.name || workerId;
+      await refreshGrants(workers);
+      await adminService.releaseWorkerGraphCache().catch(() => undefined);
+      setGrantNotices((prev) => ({
+        ...prev,
+        [connectorId]: `Grant revocado para ${workerLabel}. Abre un chat nuevo para reflejar el cambio.`,
+      }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo revocar el grant');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const deactivate = async (connectorId: string) => {
     if (busyId || !window.confirm(`¿Desactivar conector ${connectorId}?`)) return;
     setBusyId(`deactivate:${connectorId}`);
@@ -394,6 +462,31 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
               </p>
             </div>
 
+            <div className="flex flex-wrap gap-2">
+              {(
+                [
+                  ['all', 'Todos'],
+                  ['needs_auth', 'Falta auth'],
+                  ['no_grants', 'Sin grants'],
+                  ['test_failed', 'Test falló'],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setStatusFilter(id)}
+                  className={`rounded-full px-3 py-1 text-xs font-bold ${
+                    statusFilter === id
+                      ? 'bg-gov-blue-700 text-white dark:bg-dark-cyan dark:text-dark-bg'
+                      : 'border border-gov-gray-200 text-gov-gray-700 dark:border-dark-border dark:text-dark-muted'
+                  }`}
+                >
+                  {label}
+                  <span className="ml-1 opacity-70">({statusCounts[id]})</span>
+                </button>
+              ))}
+            </div>
+
             {filteredConnectors.length === 0 ? (
               <EmptyState variant="filtered" />
             ) : (
@@ -414,6 +507,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
                         canWrite={canWrite}
                         grantedWorkerLabels={grantedWorkerLabels}
                         busyId={busyId}
+                        testResult={testResults[connector.connector_id]}
                         onOpenDetail={() => openDetail(connector.connector_id)}
                         onPrimary={(kind) => handleRowPrimary(connector.connector_id, kind)}
                       />
@@ -449,6 +543,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
             grantWorkerByConnector[selectedConnector.connector_id] || workers[0]?.id || ''
           }
           grantNotice={grantNotices[selectedConnector.connector_id]}
+          connectorNotice={connectorNotices[selectedConnector.connector_id]}
           grantedWorkerLabels={workers
             .filter((w) =>
               (grantsByWorker[w.id] || []).includes(selectedConnector.connector_id)
@@ -478,6 +573,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
           onConnectOAuth={() => connectOAuth(selectedConnector.connector_id)}
           onTest={() => runTest(selectedConnector.connector_id)}
           onGrant={() => grantWorker(selectedConnector.connector_id)}
+          onRevoke={() => revokeGrant(selectedConnector.connector_id)}
           onDeactivate={() => deactivate(selectedConnector.connector_id)}
         />
       ) : null}

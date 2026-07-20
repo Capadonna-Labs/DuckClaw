@@ -15,12 +15,14 @@
     "write_output_document",
     "extract_document_text",
     "render_docx_template",
+    "export_docx_to_pdf",
     "report_engine"
   ],
   "optional_skills": {
     "research": {
-      "env_any": ["TAVILY_API_KEY"],
+      "env_any": [],
       "default_config": {
+        "local_search_enabled": true,
         "tavily_enabled": true,
         "search_depth": "basic",
         "max_results": 5,
@@ -58,7 +60,8 @@
       "search_project_knowledge",
       "write_output_document",
       "extract_document_text",
-      "render_docx_template"
+      "render_docx_template",
+      "export_docx_to_pdf"
     ],
     "sandbox": ["run_sandbox"],
     "sandbox_opt_in": ["run_browser_sandbox", "get_browser_session_url"],

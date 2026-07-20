@@ -39,7 +39,7 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
         llm_force_generate_visual_on, llm_force_generate_visual_off, llm_force_reddit_post_on,
         llm_force_reddit_post_off, llm_force_reddit_search_on, llm_force_reddit_search_off,
         llm_force_reddit_fallback_on, llm_force_reddit_fallback_off, has_read_sql, has_tavily,
-        has_generate_visual, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
+        has_generate_visual, primary_visual_tool, has_reddit_tools, has_run_sandbox, _bind_tools, _count_tool_messages_named, _first_reddit_url_in_text,
         _incoming_has_reddit_share_path, _incoming_has_reddit_url, _incoming_looks_like_reddit_post_url,
         _is_latest_game_query, _is_schema_query, _patch_ai_reddit_share_tool_calls,
         _reddit_share_slug_from_incoming, _reddit_tool_message_no_data,
@@ -186,22 +186,31 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
                     and not _visual_tool_already_ok
                 ):
                     _vis_prompt = (incoming or "").strip()[:1200]
+                    _vis_tool = primary_visual_tool or "generate_visual_asset"
                     _forced_tid = f"call_generate_visual_{int(time.time() * 1000)}"
+                    if _vis_tool == "generate_flux_image":
+                        _vis_args: dict[str, Any] = {
+                            "prompt": _vis_prompt,
+                            "aspect_ratio": "1:1",
+                        }
+                    else:
+                        _vis_args = {
+                            "prompt": _vis_prompt,
+                            "negative_prompt": "",
+                            "aspect_ratio": "1:1",
+                        }
                     _forced_tc = [
                         {
-                            "name": "generate_visual_asset",
-                            "args": {
-                                "prompt": _vis_prompt,
-                                "negative_prompt": "",
-                                "aspect_ratio": "1:1",
-                            },
+                            "name": _vis_tool,
+                            "args": _vis_args,
                             "id": _forced_tid,
                             "type": "tool_call",
                         }
                     ]
                     _log.info(
-                        "[%s] runtime policy visual → generate_visual_asset prompt=%r",
+                        "[%s] runtime policy visual → %s prompt=%r",
                         _wl,
+                        _vis_tool,
                         _vis_prompt[:120],
                     )
                     _forced_resp = AIMessage(content="", tool_calls=_forced_tc)

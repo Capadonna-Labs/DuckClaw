@@ -99,15 +99,23 @@ def _latest_human_index_with_vlm_visual_markers(messages: list[Any]) -> Optional
     return None
 
 
+def _visual_generation_tool_names() -> frozenset[str]:
+    return frozenset({"generate_visual_asset", "generate_flux_image"})
+
+
+def _is_visual_generation_tool(name: str | None) -> bool:
+    return str(name or "") in _visual_generation_tool_names()
+
+
 def _visual_asset_calls_since_last_human(messages: list[Any]) -> int:
-    """Cuántas veces se invocó generate_visual_asset desde el último HumanMessage."""
+    """Cuántas veces se invocó una tool de generación visual desde el último HumanMessage."""
     from langchain_core.messages import HumanMessage, ToolMessage
 
     count = 0
     for msg in reversed(messages or []):
         if isinstance(msg, HumanMessage):
             break
-        if isinstance(msg, ToolMessage) and (getattr(msg, "name", "") or "") == "generate_visual_asset":
+        if isinstance(msg, ToolMessage) and _is_visual_generation_tool(getattr(msg, "name", "")):
             count += 1
     return count
 

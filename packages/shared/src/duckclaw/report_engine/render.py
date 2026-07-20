@@ -22,7 +22,7 @@ def _lenient_jinja_env() -> Any:
 
     La plantilla suele tener `{{ grupo.item }}`; si una sección no se rellenó,
     el `Undefined` por defecto revienta en el acceso a la clave y tumba TODO el
-    render (el usuario ve un fallo y su agente cae a pandoc, perdiendo formato).
+    render (el usuario ve un fallo y pierde el layout de la plantilla).
     `ChainableUndefined` deja `{{ a.b.c }}` → '' sin error.
     """
     import jinja2

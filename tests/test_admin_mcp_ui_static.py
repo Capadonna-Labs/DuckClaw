@@ -37,6 +37,15 @@ def test_mcp_unified_view_has_connectors_server_and_reference_tabs() -> None:
     assert "resolveMcpConnectorPrimaryAction" in Path(
         "apps/duckclaw-admin/src/lib/mcpConnectorPrimaryAction.ts"
     ).read_text(encoding="utf-8")
+    assert "mcpConnectorHealth" in connectors or "McpConnectorStatusFilter" in Path(
+        "apps/duckclaw-admin/src/lib/mcpConnectorHealth.ts"
+    ).read_text(encoding="utf-8")
+    assert "onRevoke" in Path(
+        "apps/duckclaw-admin/src/components/mcp/ConnectorDetailDrawer.tsx"
+    ).read_text(encoding="utf-8")
+    assert "mcpConnectorRowHint" in Path(
+        "apps/duckclaw-admin/src/components/mcp/ConnectorListRow.tsx"
+    ).read_text(encoding="utf-8")
     assert "McpNewConnectorSection" not in config
     assert "patchRuntimeSettings" in view
     assert "mcp.port" in config or "mcpPort" in config

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from duckclaw.framework_tool_pack import (
@@ -27,6 +25,7 @@ def test_load_framework_tool_pack_has_baseline() -> None:
     assert "convert_document" not in baseline
     assert "extract_document_text" in baseline
     assert "render_docx_template" in baseline
+    assert "export_docx_to_pdf" in pack["framework_tools"]["always_registered"]
     assert "report_engine" in baseline
 
 
@@ -56,18 +55,22 @@ def test_minimal_profile() -> None:
     assert merged == minimal
 
 
-def test_optional_research_when_tavily_key(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_optional_research_always_on_general(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Research es local-first: entra al pack general sin TAVILY_API_KEY."""
+    monkeypatch.delenv("TAVILY_API_KEY", raising=False)
+    skills = ensure_baseline_skills([], manifest={"tool_profile": "general"})
+    assert "research" in skills
+    configs = ensure_baseline_skill_configs({}, skills=skills, manifest={"tool_profile": "general"})
+    assert configs["research"]["local_search_enabled"] is True
+    assert configs["research"]["tavily_enabled"] is True
+
+
+def test_optional_research_config_when_tavily_key(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TAVILY_API_KEY", "tvly-test")
     skills = ensure_baseline_skills([], manifest={"tool_profile": "general"})
     assert "research" in skills
     configs = ensure_baseline_skill_configs({}, skills=skills, manifest={"tool_profile": "general"})
     assert configs["research"]["tavily_enabled"] is True
-
-
-def test_optional_research_without_key() -> None:
-    os.environ.pop("TAVILY_API_KEY", None)
-    skills = ensure_baseline_skills([], manifest={"tool_profile": "general"})
-    assert "research" not in skills
 
 
 def test_ensure_baseline_worker_files_writes_policy(tmp_path) -> None:

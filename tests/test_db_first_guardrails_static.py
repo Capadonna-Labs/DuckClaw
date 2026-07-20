@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 GATEWAY_ROOT = Path("services/api-gateway")
-DB_FIRST_CORE_REFACTOR_DOC = Path("docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md")
+DB_FIRST_CORE_REFACTOR_DOC = Path("docs/architecture/DB_FIRST_CORE_REFACTOR.md")
 
 
 def _py_files() -> list[Path]:

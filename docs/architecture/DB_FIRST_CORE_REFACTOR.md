@@ -27,7 +27,7 @@ Si un futuro corte necesita comportamiento especifico de una vertical, debe mode
 - El indice vectorial y otros artefactos derivados son reconstruibles. La verdad operacional vive en tablas y comandos idempotentes.
 - El gateway y los agentes deben operar en read-only salvo allowlists explicitamente justificadas. Las mutaciones deben pasar por DB-writer o por comandos tipados autorizados.
 - Markdown runtime no se reintroduce como politica cargada por agentes. Markdown sigue permitido para specs y docs de ingenieria como este archivo.
-- **Excepcion documentada (capa 0 — framework airbag):** solo las tres policies listadas en `FRAMEWORK_PROMPT_POLICY_REQUIREMENTS` (`capability/generic_worker`, `capability/default_fallback`, `system_prompt/default`) tienen fallback en codigo cuando falta fila activa en DuckDB. Fuente: `framework_policy_pack_v1.json` + `framework_fallbacks.py`. Directivas opcionales (p. ej. `directive/report_engine`) se siembran con el pack pero no son requisito de health. Todo lo demas (workers, directives custom, manager_task custom) sigue DB-first estricto; si falta, error claro o health en admin — no inventar en Python. Spec: [`FRAMEWORK_POLICY_PACK.md`](FRAMEWORK_POLICY_PACK.md).
+- **Excepcion documentada (capa 0 — framework airbag):** solo las tres policies listadas en `FRAMEWORK_PROMPT_POLICY_REQUIREMENTS` (`capability/generic_worker`, `capability/default_fallback`, `system_prompt/default`) tienen fallback en codigo cuando falta fila activa en DuckDB. Fuente: `framework_policy_pack_v1.json` + `framework_fallbacks.py`. Directivas opcionales (p. ej. `directive/report_engine`) se siembran con el pack pero no son requisito de health. Todo lo demas (workers, directives custom, manager_task custom) sigue DB-first estricto; si falta, error claro o health en admin — no inventar en Python.
 - El manager es un orquestador generico. Routing, fast plans y clasificacion de tareas se basan en capacidades/policies, no en nombres de dominios.
 - Los wrappers legacy pueden mantenerse solo como compatibilidad temporal si delegan en el owner nuevo y tienen tests que protejan la direccion del cambio.
 
@@ -60,7 +60,7 @@ Hito 1 y 2 del corte infra — resumen en este documento (§ Hito 1).
 
 ### Comandos Y DB-Writer
 
-- Contrato singleton writer (colas, ledger, DLQ, métricas): [`DB_WRITER_CONTRACT.md`](DB_WRITER_CONTRACT.md).
+- Contrato singleton writer (colas, ledger, DLQ, métricas): [`../api/DB_WRITER_CONTRACT.md`](../api/DB_WRITER_CONTRACT.md).
 - `duckclaw.commands.chat_state` extrae estado chat-scoped antes mezclado en `on_the_fly_commands.py`, incluyendo los fly commands `/forget` y `/context on|off` (`execute_forget`, `execute_context_toggle`). Tambien expone `set_chat_state_via_typed_command` para escribir claves `agent_config` con `UpsertAgentConfigEntriesCommand` cuando el handle esta en read-only, y `forget_chat_state_via_typed_command` para borrar historial `/forget` mediante `ForgetChatStateCommand`. `on_the_fly_commands.py` queda como fachada de compatibilidad y dispatcher.
 - `duckclaw.commands.team_templates` extrae equipo de chat/tenant y mantiene compatibilidad con imports legacy.
 - `duckclaw.commands.team_access` extrae whitelist generica de Telegram Guard y usa comandos tipados para mutaciones de usuarios autorizados y shared grants.
@@ -504,7 +504,7 @@ Las allowlists vivas estan declaradas en `tests/test_forge_legacy_cleanup.py`. S
 ## Instrucciones Para Subagentes
 
 1. No buscar ni depender de `SDD_INDEX.md`. Este documento es la fuente de contexto para el refactor DB-first/core cleanup.
-2. Leer tambien las specs puntuales relacionadas antes de tocar codigo, por ejemplo `docs/specs/features/platform/RAG_TRANSVERSAL_DB_FIRST.md`, `ADMIN_RUNTIME_SETTINGS.md`, `ADMIN_PROJECT_DETAIL_AND_PLAYGROUND_FIXES.md`, `ADMIN_IDENTITY_RBAC_ERD.md` o la spec del area tocada.
+2. Leer tambien la doc relacionada en `docs/architecture/` y `docs/api/` (p. ej. `ADMIN_IDENTITY_RBAC_ERD.md`, límites gateway/writer, contrato DB-Writer) antes de tocar codigo.
 3. Trabajar en TDD RED/GREEN para cambios de comportamiento. Primero agrega o ajusta el test guardrail/contrato, verifica que falla por la razon esperada, luego implementa.
 4. No agregar defaults de dominio en Python. Si necesitas comportamiento configurable, usa DB-first: capabilities, prompt policies, runtime settings, worker catalog, grants o comandos tipados.
 5. No mover verticales al core con otro nombre. Si una funcion contiene conocimiento de Quant, Finance/IBKR, PQRSD, Leila, War Room o Job Hunter, debe vivir como extension vertical o estar alimentada por DB.

@@ -1,6 +1,6 @@
 # Empezar con DuckClaw
 
-Entrada mínima para un dev nuevo. Detalle normativo: [`docs/specs/features/platform/PLUG_AND_PLAY_ONBOARDING.md`](specs/features/platform/PLUG_AND_PLAY_ONBOARDING.md).
+Entrada mínima para un dev nuevo. Arquitectura: [`architecture/system_overview.md`](architecture/system_overview.md) y [`architecture/DB_FIRST_CORE_REFACTOR.md`](architecture/DB_FIRST_CORE_REFACTOR.md).
 
 ## Requisitos automáticos (macOS / Linux)
 
@@ -63,11 +63,9 @@ Si el hub quedó sin seed (DB antigua o restore manual), restaura el pack del re
 - **Admin:** `POST /prompt-policies/restore-framework` (consola → Prompt policies)
 - **CLI:** `uv run duckops doctor` — filas «Policies framework» y «Policies airbag»
 
-Spec: [`docs/specs/features/platform/FRAMEWORK_POLICY_PACK.md`](specs/features/platform/FRAMEWORK_POLICY_PACK.md).
-
 ### DB-Writer singleton
 
-Solo el proceso **DB-Writer** (`PM2 DuckClaw-DB-Writer`) abre DuckDB en escritura. Gateway, agentes y admin encolan mutaciones tipadas vía Redis; el resto opera `read_only=True`. Contrato: [`docs/specs/features/platform/DB_WRITER_CONTRACT.md`](specs/features/platform/DB_WRITER_CONTRACT.md).
+Solo el proceso **DB-Writer** (`PM2 DuckClaw-DB-Writer`) abre DuckDB en escritura. Gateway, agentes y admin encolan mutaciones tipadas vía Redis; el resto opera `read_only=True`. Contrato: [`api/DB_WRITER_CONTRACT.md`](api/DB_WRITER_CONTRACT.md).
 
 `uv run duckops doctor` incluye la fila **DB-Writer** (PM2 online, cola Redis, métrica `db_writer:metric:processed`).
 
@@ -97,8 +95,9 @@ uv run duckops smoke
 ## Siguiente lectura
 
 1. [`docs/README.md`](README.md) — mapa de documentación
-2. [`docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`](specs/features/platform/DB_FIRST_CORE_REFACTOR.md) — arquitectura
-3. [`docs/COMANDOS.md`](COMANDOS.md) — operación diaria
+2. [`architecture/DB_FIRST_CORE_REFACTOR.md`](architecture/DB_FIRST_CORE_REFACTOR.md) — arquitectura DB-first
+3. [`architecture/system_overview.md`](architecture/system_overview.md) — componentes
+4. `comandos.txt` (local, no versionado) o `uv run duckops --help` — operación diaria
 
 ## Comandos útiles
 

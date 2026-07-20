@@ -1,6 +1,6 @@
-# Telegram Gateway — spec mínima
+# Telegram Gateway
 
-Entrada general: [`docs/README.md`](../../../README.md). Operación: [`docs/COMANDOS.md`](../../../COMANDOS.md) (sección TELEGRAM).
+Entrada general: [`docs/README.md`](../README.md). Arranque: [`docs/GETTING_STARTED.md`](../GETTING_STARTED.md).
 
 **Dueños de código**
 
@@ -11,7 +11,7 @@ Entrada general: [`docs/README.md`](../../../README.md). Operación: [`docs/COMA
 | Auth whitelist | `services/api-gateway/core/chat_auth.py` |
 | Salida Bot API / MCP | `services/api-gateway/core/telegram_delivery.py`, `packages/mcp/telegram/` |
 
-Spec relacionada (consola): [`ADMIN_ACCESS_MANAGEMENT.md`](../platform/ADMIN_ACCESS_MANAGEMENT.md) — `authorized_users`, grants compartidos.
+Identidad / grants admin: [`../architecture/ADMIN_IDENTITY_RBAC_ERD.md`](../architecture/ADMIN_IDENTITY_RBAC_ERD.md).
 
 ---
 

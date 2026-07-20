@@ -1,6 +1,6 @@
 # Documentación — DuckClaw Admin
 
-Guías operativas de esta app. La **normativa** del producto está en el monorepo: [`specs/features/platform/DUCKCLAW_ADMIN_UI.md`](../../../specs/features/platform/DUCKCLAW_ADMIN_UI.md).
+Guías operativas de esta app. Arquitectura del monorepo: [`docs/architecture/`](../../../docs/architecture/) · patrones UI: [`UIUX-PATTERNS.md`](../../../docs/architecture/UIUX-PATTERNS.md).
 
 Punto de entrada rápido: [`../README.md`](../README.md).
 
@@ -15,7 +15,7 @@ Punto de entrada rápido: [`../README.md`](../README.md).
 
 ## Enlaces del monorepo
 
-- Runbook PM2: [`docs/COMANDOS.md`](../../../docs/COMANDOS.md) (sección Admin UI)
+- Arranque: [`docs/GETTING_STARTED.md`](../../../docs/GETTING_STARTED.md)
 - Gateway admin router: [`services/api-gateway/routers/admin.py`](../../../services/api-gateway/routers/admin.py)
 - Catálogo workers (runtime): [`packages/shared/src/duckclaw/catalog_worker.py`](../../../packages/shared/src/duckclaw/catalog_worker.py)
 - Catálogo skills (UI picker): [`packages/shared/src/duckclaw/skill_catalog.py`](../../../packages/shared/src/duckclaw/skill_catalog.py)

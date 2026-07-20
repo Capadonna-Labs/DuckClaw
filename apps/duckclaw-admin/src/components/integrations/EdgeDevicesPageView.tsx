@@ -158,7 +158,7 @@ export default function EdgeDevicesPageView({ embedded = false }: EmbeddedViewPr
                   <ExternalLink size={12} />
                 </a>
                 {' · '}
-                Docs: integrations/edge-devices/EDGE_DEVICES_STREAMLIT.md
+                Código: integrations/edge-devices/
               </p>
             </div>
           </section>

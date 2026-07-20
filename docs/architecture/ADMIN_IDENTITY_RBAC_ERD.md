@@ -8,9 +8,10 @@ Definir cómo DuckClaw Admin autentica usuarios, dónde se persisten roles/permi
 
 Relacionado:
 
-- `specs/features/platform/ADMIN_CONSOLE_AUTH.md`
-- `specs/features/platform/ADMIN_ACCESS_MANAGEMENT.md`
-- `specs/features/platform/ADMIN_USER_AGENT_WORKSPACES.md`
+- Docs relacionados (históricos; comportamiento canónico en código + esta ERD):
+  - Auth crypto / sesión: `services/api-gateway/core/admin_auth.py`, `packages/shared/.../admin_auth_crypto.py`
+  - Access management: `packages/shared/.../admin_console_users.py`
+  - User agent workspaces: `packages/shared/.../admin_user_agents.py`
 
 ## Conceptos
 

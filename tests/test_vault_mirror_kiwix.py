@@ -75,3 +75,29 @@ def test_kiwix_tool_registers_with_dir(
     assert tool.name == "kiwix_search"
     out = tool.invoke({"query": "test"})
     assert "No hay archivos .zim" in out or "library.kiwix.org" in out
+
+
+def test_html_to_text_strips_tags() -> None:
+    from duckclaw.forge.skills.kiwix_bridge import _html_to_text
+
+    out = _html_to_text("<html><body><h1>Hola</h1><p>Mundo &amp; paz</p></body></html>")
+    assert "Hola" in out
+    assert "Mundo & paz" in out
+    assert "<" not in out
+
+
+def test_register_kiwix_tools_includes_read_when_libzim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from duckclaw.forge.skills import kiwix_bridge
+
+    zim_dir = tmp_path / "zim"
+    zim_dir.mkdir()
+    monkeypatch.setenv("DUCKCLAW_KIWIX_ZIM_DIR", str(zim_dir))
+    monkeypatch.setattr(kiwix_bridge, "kiwix_cli_available", lambda: True)
+    monkeypatch.setattr(kiwix_bridge, "libzim_available", lambda: True)
+    tools: list = []
+    kiwix_bridge.register_kiwix_tools(tools, {"kiwix_enabled": True})
+    names = [getattr(t, "name", "") for t in tools]
+    assert "kiwix_search" in names
+    assert "kiwix_read" in names

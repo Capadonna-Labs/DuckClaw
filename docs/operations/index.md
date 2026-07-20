@@ -1,28 +1,18 @@
 # Operaciones
 
-Runbooks en español/inglés mixto. **Normativa:** [`../specs/`](../specs/) (bajo `docs/specs/`, no en la raíz del repo).
+Runbooks de operación del stack. Arquitectura y contratos: [`../architecture/`](../architecture/) · [`../api/`](../api/).
 
-## Acceso rápido
+## Índice
 
-| Necesidad | Documento |
-|-----------|-----------|
-| Wizard + topología | [`README.md`](../README.md) (quick start) · [`COMANDOS.md`](../COMANDOS.md) |
-| PM2, Redis, Telegram, variables | [COMANDOS](../COMANDOS.md) |
-| Conflictos puerto / DuckDB / PM2 | [COMANDOS](../COMANDOS.md) · `uv run python scripts/doctor.py` |
-| Sandbox Strix | [Skills & sandbox Strix](../core/03_Skills_and_Tooling_Framework.md) (§ Sandbox de ejecución) |
-| Heartbeat | [Homeostasis Heartbeat](Homeostasis-Heartbeat.md) |
-| Meditate / Harness Core | [Meditate Homeostasis](Meditate-Homeostasis.md) |
-| Multi-vault `/vault` | [Multi Vault System](Multi-Vault-System.md) |
-| Train / trazas SFT | `packages/agents/train/` · `uv run duckops train` |
+| Tema | Doc |
+|------|-----|
+| Wizard + topología | [`../GETTING_STARTED.md`](../GETTING_STARTED.md) · [`../README.md`](../README.md) |
+| Diagnóstico | `uv run duckops doctor` |
+| Multi-vault | [`../architecture/MULTI_VAULT_SYSTEM.md`](../architecture/MULTI_VAULT_SYSTEM.md) |
+| Telegram | [`TELEGRAM.md`](TELEGRAM.md) |
+| Heartbeat / loop / meditate | [`Homeostasis-Heartbeat.md`](Homeostasis-Heartbeat.md) · [`Loop-Homeostasis.md`](Loop-Homeostasis.md) · [`Meditate-Homeostasis.md`](Meditate-Homeostasis.md) |
 
-## Principios
+## Antes de cambiar comportamiento
 
-- Solo **db-writer** escribe DuckDB en producción.
-- Cambios de comportamiento: leer `docs/specs/` primero.
-- Usar `uv run` desde la raíz del monorepo.
-
-## Arquitectura y API
-
-- [DB-first Core Refactor](../specs/features/platform/DB_FIRST_CORE_REFACTOR.md) · [Singleton Writer](../architecture/singleton_writer.md) · [Tri-cameral](../architecture/tri_cameral_memory.md)
-- [API Gateway](../api/api_gateway.md) · [DB Writer](../api/db_writer.md)
-- [Specs plataforma (índice)](../specs/features/platform/README.md)
+- Límites gateway/writer: [`../architecture/GATEWAY_PROCESS_BOUNDARIES.md`](../architecture/GATEWAY_PROCESS_BOUNDARIES.md)
+- DB-first: [`../architecture/DB_FIRST_CORE_REFACTOR.md`](../architecture/DB_FIRST_CORE_REFACTOR.md) · [Singleton Writer](../architecture/singleton_writer.md) · [Tri-cameral](../architecture/tri_cameral_memory.md)

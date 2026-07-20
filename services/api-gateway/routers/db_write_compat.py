@@ -6,10 +6,9 @@ handled exclusively by the singleton ``db-writer`` process
 (``duckclaw.write_handlers``).
 
 Canonical contract (queues, ledger, idempotency, at-most-once semantics):
-``docs/specs/features/platform/DB_WRITER_CONTRACT.md``.
+``docs/api/DB_WRITER_CONTRACT.md``.
 
-Removal is blocked until zero production imports of this router remain; see
-``PLUG_AND_PLAY_ONBOARDING.md`` roadmap P4.
+Removal is blocked until zero production imports of this router remain.
 """
 
 from __future__ import annotations

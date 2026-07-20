@@ -53,7 +53,7 @@ Navegación de pantallas: `src/config/adminNav.ts` (grupos Trabajo · Estudio ·
 
 ## Autenticación
 
-Ver spec canónica: [`specs/features/platform/ADMIN_CONSOLE_AUTH.md`](../../../specs/features/platform/ADMIN_CONSOLE_AUTH.md).
+Ver auth/RBAC: [`docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md`](../../../docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md).
 
 | Capa | Mecanismo |
 |------|-----------|
@@ -144,7 +144,7 @@ Prefijo: `/api/v1/admin`. Errores estilo RFC 7807: `{ "type", "title", "status",
 
 **Retirado:** `/api/v1/admin/train/*` y pestaña `/train` — usar `uv run duckops train`.
 
-Detalle completo: [spec DUCKCLAW_ADMIN_UI.md](../../../specs/features/platform/DUCKCLAW_ADMIN_UI.md).
+Detalle: [architecture.md](architecture.md) · patrones [`UIUX-PATTERNS.md`](../../../docs/architecture/UIUX-PATTERNS.md).
 
 ## Workers protegidos
 

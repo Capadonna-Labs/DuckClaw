@@ -1,6 +1,6 @@
 # Arquitectura de Bóvedas Privadas Múltiples (Multi-Vault System)
 
-> **Diseño (esta spec)** · **Runbook operativo:** [`docs/operations/Multi-Vault-System.md`](../../../docs/operations/Multi-Vault-System.md).
+> **Diseño (esta doc)** · **Operación:** `uv run duckops doctor` + [`../GETTING_STARTED.md`](../GETTING_STARTED.md).
 
 ## 1. Objetivo Arquitectónico
 Evolucionar el sistema de persistencia para permitir que un único usuario gestione múltiples bases de datos privadas independientes (ej. "Proyecto Alpha", "Archivo Personal", "Proyectos Secretos"). El sistema debe permitir la creación, listado y conmutación en caliente (Hot-Swapping) de estas bóvedas, garantizando que el agente siempre trabaje sobre el contexto de datos correcto mediante el alias dinámico `private` en DuckDB.

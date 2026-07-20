@@ -3,7 +3,7 @@
 Read paths must not run DDL. Table creation belongs to ``bootstrap_core`` and
 typed write handlers (``write_handlers.runtime._ensure_agent_config_table``).
 
-Spec: docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md
+Spec: docs/architecture/DB_FIRST_CORE_REFACTOR.md
 """
 
 from __future__ import annotations

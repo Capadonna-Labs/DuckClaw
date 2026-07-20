@@ -2,7 +2,7 @@
 On-the-Fly CLI: fachada de compatibilidad y cableado graph-local.
 
 Spec: specs/interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md
-DB-first: docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md
+DB-first: docs/architecture/DB_FIRST_CORE_REFACTOR.md
 
 La lógica de comandos vive en ``duckclaw.commands.*`` (dispatch en
 ``fly_dispatch``). Este módulo reexporta símbolos legacy y registra

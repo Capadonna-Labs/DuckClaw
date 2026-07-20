@@ -2,13 +2,13 @@
 
 Plataforma multi-agente **DB-first**: DuckDB es el *control plane* (workers, políticas, proyectos, runtime, RAG, conectores MCP). El **API Gateway** y los **agentes** leen en `read_only=True`; las mutaciones van por **comandos tipados** → cola Redis → **DB-Writer** (singleton ACID).
 
-Core genérico LangGraph/LangChain — sin verticales hardcodeadas en Python. Multi-tenant · Windows / Linux / macOS · Spec-driven (`docs/specs/`).
+Core genérico LangGraph/LangChain — sin verticales hardcodeadas en Python. Multi-tenant · Windows / Linux / macOS · Docs de arquitectura en `docs/architecture/`.
 
 ---
 
 ## Arquitectura DB-first (canonical)
 
-**Fuente de verdad:** [`docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`](docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md)
+**Fuente de verdad:** [`docs/architecture/DB_FIRST_CORE_REFACTOR.md`](docs/architecture/DB_FIRST_CORE_REFACTOR.md)
 
 ### Una bóveda, un schema
 
@@ -75,7 +75,7 @@ flowchart TB
 | **DuckClaw-Heartbeat** | Ticks proactivos / homeostasis | ❌ encola deltas |
 | **duckclaw-admin** | Next.js BFF → gateway (secretos solo server-side) | ❌ |
 
-Specs de límites: [`GATEWAY_PROCESS_BOUNDARIES.md`](docs/specs/features/platform/GATEWAY_PROCESS_BOUNDARIES.md) · [`GATEWAY_DB_WRITER_BOUNDARIES.md`](docs/specs/features/platform/GATEWAY_DB_WRITER_BOUNDARIES.md)
+Límites de proceso: [`GATEWAY_PROCESS_BOUNDARIES.md`](docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md) · [`GATEWAY_DB_WRITER_BOUNDARIES.md`](docs/architecture/GATEWAY_DB_WRITER_BOUNDARIES.md)
 
 ### Reglas que no negociar
 
@@ -89,7 +89,7 @@ Specs de límites: [`GATEWAY_PROCESS_BOUNDARIES.md`](docs/specs/features/platfor
 | **Airbag framework** | 4 policies con fallback en código (`FRAMEWORK_POLICY_PACK`); el resto exige fila en DB. |
 | **RAG carpetas** | Gateway **solo encola**; ingest pesado en `DuckClaw-Knowledge-Indexer` + progreso Redis `duckclaw:knowledge_sync_status:{job_id}`. |
 
-Contrato cola/ledger: [`DB_WRITER_CONTRACT.md`](docs/specs/features/platform/DB_WRITER_CONTRACT.md)
+Contrato cola/ledger: [`DB_WRITER_CONTRACT.md`](docs/api/DB_WRITER_CONTRACT.md)
 
 ### Control plane en el hub
 
@@ -100,14 +100,14 @@ Contrato cola/ledger: [`DB_WRITER_CONTRACT.md`](docs/specs/features/platform/DB_
 | **Políticas** | `prompt_policy_registry`, `worker_prompt_bindings`, `worker_runtime_policies` |
 | **Proyectos** | `admin_projects`, `admin_project_agents`, members |
 | **Runtime** | `admin_runtime_settings` (tenant, chat, gateway, LLM, secrets) |
-| **RAG** | `admin_knowledge_sources`, documents, chunks — [`RAG_TRANSVERSAL_DB_FIRST.md`](docs/specs/features/platform/RAG_TRANSVERSAL_DB_FIRST.md) |
+| **RAG** | `admin_knowledge_sources`, documents, chunks — ver `docs/architecture/DB_FIRST_CORE_REFACTOR.md` + tri-cameral |
 | **Memoria semántica** | `main.semantic_memory` (context injection / VLM — distinto del RAG admin) |
 | **Homeostasis** | `main.homeostasis_targets`, `main.meditate_runs` |
 | **MCP** | `admin_mcp_connectors`, `admin_worker_mcp_grants` |
 | **Kanban / informes** | `admin_kanban_*`, `admin_report_*` |
 | **HITL** | `code_decisions`, `agent_uncertainty_log` |
 
-Bóvedas por usuario/tenant (Memoria Triple SQL+PGQ+VSS): [`MULTI_VAULT_SYSTEM.md`](docs/specs/features/platform/MULTI_VAULT_SYSTEM.md) — opcional; el hub canónico basta para admin + playground.
+Bóvedas por usuario/tenant (Memoria Triple SQL+PGQ+VSS): [`MULTI_VAULT_SYSTEM.md`](docs/architecture/MULTI_VAULT_SYSTEM.md) — opcional; el hub canónico basta para admin + playground.
 
 ### Admin API
 
@@ -137,7 +137,7 @@ DUCKCLAW_ADMIN_PASSWORD=...
 
 Diagnóstico: `uv run duckops doctor` · Migraciones: `uv run duckclaw-migrate` · Fresh vault: `bash scripts/fresh_dev_platform.sh`
 
-Guía: [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) · Comandos: [`docs/COMANDOS.md`](docs/COMANDOS.md)
+Guía: [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md) · CLI: `uv run duckops --help`
 
 ---
 
@@ -151,7 +151,7 @@ pnpm dev:local       # gateway + db-writer + admin
 
 Stack PM2: `uv run duckops stack deploy` (Gateway, DB-Writer, Knowledge-Indexer, Heartbeat).
 
-Spec UI: [`docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md`](docs/specs/features/platform/DUCKCLAW_ADMIN_UI.md) · Patrones: [`UIUX-PATTERNS.md`](UIUX-PATTERNS.md)
+Admin: [`apps/duckclaw-admin/README.md`](apps/duckclaw-admin/README.md) · Patrones: [`docs/architecture/UIUX-PATTERNS.md`](docs/architecture/UIUX-PATTERNS.md)
 
 ---
 
@@ -171,7 +171,7 @@ duckclaw/
 │   └── heartbeat/         # ticks proactivos
 ├── apps/duckclaw-admin/   # Next.js BFF
 ├── harness_core/          # Python Meditate/homeostasis (tablas en main.*)
-├── docs/specs/            # SDD — leer antes de tocar packages/ o services/
+├── docs/architecture/     # arquitectura, DuckDB, límites de servicios
 └── tests/                 # guardrails DB-first
 ```
 
@@ -209,11 +209,10 @@ Guardrails: `test_forge_legacy_cleanup.py` · `test_db_first_guardrails_static.p
 
 | Qué | Dónde |
 |-----|--------|
-| **Arquitectura DB-first** | [`DB_FIRST_CORE_REFACTOR.md`](docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md) |
-| Handoff agentes / estado sesión | [`docs/HANDOFF_AGENT_CONTEXT.md`](docs/HANDOFF_AGENT_CONTEXT.md) |
+| **Arquitectura DB-first** | [`DB_FIRST_CORE_REFACTOR.md`](docs/architecture/DB_FIRST_CORE_REFACTOR.md) |
 | Índice docs | [`docs/README.md`](docs/README.md) |
-| Specs plataforma | [`docs/specs/features/platform/README.md`](docs/specs/features/platform/README.md) |
-| Patrones UI admin | [`UIUX-PATTERNS.md`](UIUX-PATTERNS.md) |
+| Contratos API / writer | [`docs/api/`](docs/api/) |
+| Patrones UI admin | [`UIUX-PATTERNS.md`](docs/architecture/UIUX-PATTERNS.md) |
 
 ---
 

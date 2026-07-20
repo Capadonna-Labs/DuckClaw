@@ -221,7 +221,7 @@ async def train_status() -> dict[str, Any]:
                 ],
                 "grpo": ["classify_traces", "grpo train"],
             },
-            "docs": ["docs/COMANDOS.md#train--trazas-sft-cli-sin-admin-train"],
+            "docs": ["docs/GETTING_STARTED.md", "docs/architecture/system_overview.md"],
         }
 
     return await run_heavy_work(_build)

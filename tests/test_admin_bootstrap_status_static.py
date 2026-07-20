@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-AUTH_SPEC = ROOT / "docs/specs/features/platform/ADMIN_IDENTITY_RBAC_ERD.md"
+AUTH_SPEC = ROOT / "docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md"
 BOOTSTRAP_LIB = ROOT / "apps/duckclaw-admin/src/lib/adminBootstrapStatus.ts"
 BOOTSTRAP_ROUTE = ROOT / "apps/duckclaw-admin/src/app/api/admin/bootstrap/status/route.ts"
 BOOTSTRAP_HOOK = ROOT / "apps/duckclaw-admin/src/hooks/useAdminBootstrapStatus.ts"

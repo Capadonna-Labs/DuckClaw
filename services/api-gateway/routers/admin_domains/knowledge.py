@@ -1,7 +1,7 @@
 """RAG / knowledge admin routes (sources, uploads, search).
 
 Gateway is enqueue-only for indexing mutations. DuckClaw-Knowledge-Indexer consumes Redis jobs.
-Spec: docs/specs/features/platform/GATEWAY_PROCESS_BOUNDARIES.md
+Spec: docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md
 """
 
 from __future__ import annotations

@@ -55,4 +55,4 @@ Forbidden in lifespan: `redis.config_set` deploy paths, `docker`, administrative
 
 `duckclaw-shared` exposes entry points and is importable from external repos (Capadonna-Driller) without monorepo editable paths. Unified mega-wheel (Fase A3) remains deferred.
 
-See also: [`INFRA_BOOTSTRAP_VERTICAL_PURGE_SDD.md`](../specs/features/platform/INFRA_BOOTSTRAP_VERTICAL_PURGE_SDD.md), [`DB_FIRST_CORE_REFACTOR.md`](../specs/features/platform/DB_FIRST_CORE_REFACTOR.md).
+See also: [`DB_FIRST_CORE_REFACTOR.md`](DB_FIRST_CORE_REFACTOR.md).

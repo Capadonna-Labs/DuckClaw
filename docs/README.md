@@ -1,51 +1,29 @@
-# Documentación DuckClaw — empieza aquí
+# Documentación DuckClaw
 
-Mapa canónico de `docs/`. Las **specs normativas** viven bajo **`docs/specs/`** (no existe `specs/` en la raíz del repo).
+Mapa de `docs/` — solo arquitectura, framework, DuckDB y servicios.
 
----
+## Lectura recomendada
 
-## Lectura recomendada (nuevo dev)
+1. [`GETTING_STARTED.md`](GETTING_STARTED.md) — arranque local (`duckops up` / `stack deploy`)
+2. [`architecture/system_overview.md`](architecture/system_overview.md) — componentes
+3. [`architecture/DB_FIRST_CORE_REFACTOR.md`](architecture/DB_FIRST_CORE_REFACTOR.md) — DB-first, qué es core
+4. [`architecture/tri_cameral_memory.md`](architecture/tri_cameral_memory.md) — SQL + PGQ + VSS
+5. [`api/DB_WRITER_CONTRACT.md`](api/DB_WRITER_CONTRACT.md) + [`api/db_writer.md`](api/db_writer.md) — escrituras DuckDB
+6. [`api/api_gateway.md`](api/api_gateway.md) — gateway HTTP
+7. [`core/`](core/) — infra, skills, agentes, flujo de datos
+8. [`operations/`](operations/) — heartbeat, loop, Telegram, multi-vault (ver también `architecture/MULTI_VAULT_SYSTEM.md`)
 
-1. **[`GETTING_STARTED.md`](GETTING_STARTED.md)** — **`uv run duckops up`** (plug-and-play) o paso a paso con `bootstrap` / `init`.
-2. **[`README.md`](../README.md)** — layout del monorepo, `duckops serve --gateway`.
-3. **[`docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`](specs/features/platform/DB_FIRST_CORE_REFACTOR.md)** — **fuente de verdad de arquitectura** (DB-first, qué es core, qué está limpio, roadmap).
-4. **[`docs/architecture/system_overview.md`](architecture/system_overview.md)** — diagrama y componentes.
-5. **[`docs/COMANDOS.md`](COMANDOS.md)** — PM2, Redis, Telegram, variables, cheat sheet operativo.
-6. **[`docs/specs/features/platform/README.md`](specs/features/platform/README.md)** — índice de specs canónicas de plataforma.
-7. **Tu feature** — spec concreta de la tabla anterior + runbook en [`docs/operations/`](operations/) si aplica.
+## Mapa
 
----
+| Carpeta | Contenido |
+|---------|-----------|
+| [`architecture/`](architecture/) | Visión del sistema, límites gateway/writer, memoria, vaults, Tailscale, UI patterns admin |
+| [`core/`](core/) | Capas del framework (skills, sandbox, memoria analítica, lógica agéntica) |
+| [`api/`](api/) | Contratos gateway y db-writer |
+| [`operations/`](operations/) | Runbooks de operación (homeostasis, Telegram) |
 
-## Mapa: specs vs operations
+## Notas
 
-| Carpeta | Rol | Cuándo leer |
-|---------|-----|-------------|
-| [`docs/specs/`](specs/) | **Normativa (SDD)** — leer antes de implementar | Cambias comportamiento del producto o contratos API |
-| [`docs/operations/`](operations/) | **Runbooks** — cómo operar en prod/dev | Despliegue, heartbeat, multi-vault, observabilidad |
-| [`docs/architecture/`](architecture/) | Narrativa técnica estable | Singleton writer, memoria tri-cameral, Tailscale, infra-bootstrap |
-| [`docs/core/`](core/) | Capas del sistema (skills, memoria, agentes) | Profundizar en tooling y sandbox |
-| [`docs/api/`](api/) | Contratos HTTP gateway / db-writer | Integrar clientes o BFF |
-| [`apps/duckclaw-admin/docs/`](../../apps/duckclaw-admin/docs/) | Docs de la consola admin (BFF, manifest, MCP) | Frontend admin, picker herramientas, playground |
-
----
-
-## Notas que evitan confusiones
-
-### `harness_core/` es core activo
-
-El directorio [`harness_core/`](../harness_core/) en la raíz **no es legacy**. Es el runtime de **Loop** (homeostasis de infraestructura): grafos, políticas y skills del termostato. Comando fly `/loop`, runbook [`docs/operations/Loop-Homeostasis.md`](operations/Loop-Homeostasis.md).
-
-### Train: sin API admin `/train`
-
-Las rutas **`/api/v1/admin/train/*`** y la pestaña **`/train`** del admin **fueron retiradas** (404). Usar CLI `uv run duckops train` y [`packages/agents/train/`](../packages/agents/train/).
-
----
-
-## Enlaces rápidos
-
-- Índice plataforma: [`docs/specs/features/platform/README.md`](specs/features/platform/README.md)
-- Admin UI (spec): [`DUCKCLAW_ADMIN_UI.md`](specs/features/platform/DUCKCLAW_ADMIN_UI.md)
-- Admin UI (guía operativa): [`apps/duckclaw-admin/README.md`](../apps/duckclaw-admin/README.md)
-- Telegram: [`docs/specs/features/telegram-gateway/TELEGRAM.md`](specs/features/telegram-gateway/TELEGRAM.md)
-- MCP conectores remotos: [`docs/specs/features/integrations/REMOTE_MCP_CONNECTORS.md`](specs/features/integrations/REMOTE_MCP_CONNECTORS.md)
-- Tests de guardrail docs: `tests/test_db_first_guardrails_static.py`, `tests/test_forge_legacy_cleanup.py`
+- **`harness_core/`** (raíz del repo) es runtime activo de `/loop` (homeostasis), no legacy.
+- Train: CLI `uv run duckops train` — no hay API admin `/train`.
+- Consola admin: [`apps/duckclaw-admin/README.md`](../apps/duckclaw-admin/README.md) y [`apps/duckclaw-admin/docs/`](../apps/duckclaw-admin/docs/).

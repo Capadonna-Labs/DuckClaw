@@ -53,6 +53,7 @@ def test_one_off_scripts_removed_from_active_scripts() -> None:
         "scripts/migrations/003_admin_user_workspaces.py",
         "scripts/migrations/004_admin_workspace_catalog.py",
         "scripts/telegram/stop_discord_mcp_port_8000.sh",
+        "scripts/duckclaw_setup_wizard.py",
         "packages/shared/scripts/sync_telegram_duckdb.sh",
         "packages/shared/scripts/install_duckclaw.sh",
         "docs/core",

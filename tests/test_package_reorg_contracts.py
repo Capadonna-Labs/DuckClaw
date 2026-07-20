@@ -91,54 +91,23 @@ def test_tests_do_not_import_task_classification_from_legacy_manager_graph() -> 
     assert offenders == [], f"Use duckclaw.manager.task_classification: {offenders}"
 
 
-def test_homeostasis_goals_alignment_implementation_is_owned_by_homeostasis_package() -> None:
-    legacy_goals_alignment = importlib.import_module("duckclaw.forge.homeostasis.goals_alignment")
+def test_forge_homeostasis_shims_are_removed() -> None:
+    import pytest
 
-    assert (
-        legacy_goals_alignment.assess_goals_alignment.__module__
-        == "duckclaw.homeostasis.goals_alignment"
-    )
-    canonical_goals_alignment = importlib.import_module(
-        legacy_goals_alignment.assess_goals_alignment.__module__
-    )
-    assert legacy_goals_alignment.assess_goals_alignment is canonical_goals_alignment.assess_goals_alignment
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("duckclaw.forge.homeostasis")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("duckclaw.forge.homeostasis.singleton_writer")
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("duckclaw.api")
 
+    assert not Path("packages/agents/src/duckclaw/forge/homeostasis").exists()
+    assert not Path("packages/agents/src/duckclaw/api").exists()
 
-def test_homeostasis_runtime_implementations_are_owned_by_homeostasis_package() -> None:
-    canonical_surprise = importlib.import_module("duckclaw.homeostasis.surprise")
-    canonical_beliefs = importlib.import_module("duckclaw.homeostasis.belief_registry")
-    canonical_manager = importlib.import_module("duckclaw.homeostasis.manager")
-
-    legacy_surprise = importlib.import_module("duckclaw.forge.homeostasis.surprise")
-    legacy_beliefs = importlib.import_module("duckclaw.forge.homeostasis.belief_registry")
-    legacy_manager = importlib.import_module("duckclaw.forge.homeostasis.manager")
-
-    assert canonical_surprise.compute_surprise.__module__ == "duckclaw.homeostasis.surprise"
-    assert legacy_surprise.compute_surprise is canonical_surprise.compute_surprise
-    assert legacy_surprise.SurpriseResult is canonical_surprise.SurpriseResult
-
-    assert canonical_beliefs.BeliefRegistry.__module__ == "duckclaw.homeostasis.belief_registry"
-    assert legacy_beliefs.BeliefRegistry is canonical_beliefs.BeliefRegistry
-    assert legacy_beliefs.load_beliefs_from_config is canonical_beliefs.load_beliefs_from_config
-
-    assert canonical_manager.HomeostasisManager.__module__ == "duckclaw.homeostasis.manager"
-    assert legacy_manager.HomeostasisManager is canonical_manager.HomeostasisManager
-
-
-def test_singleton_writer_implementation_is_owned_by_shared_db_write_queue() -> None:
-    canonical_writer = importlib.import_module("duckclaw.db_write_queue")
-    legacy_writer = importlib.import_module("duckclaw.forge.homeostasis.singleton_writer")
-
-    for attr in (
-        "enqueue_write",
-        "execute_write_direct",
-        "WriteQueueBridge",
-        "run_consumer",
-    ):
-        legacy_symbol = getattr(legacy_writer, attr)
-        canonical_symbol = getattr(canonical_writer, attr)
-        assert legacy_symbol is canonical_symbol
-        assert legacy_symbol.__module__ == "duckclaw.db_write_queue"
+    canonical = importlib.import_module("duckclaw.homeostasis.manager")
+    assert hasattr(canonical, "HomeostasisManager")
+    writer = importlib.import_module("duckclaw.db_write_queue")
+    assert hasattr(writer, "enqueue_write")
 
 
 def test_training_layout_has_separate_prompt_script_and_dataset_roots() -> None:

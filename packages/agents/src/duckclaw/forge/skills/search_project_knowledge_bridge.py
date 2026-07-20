@@ -126,8 +126,10 @@ def register_search_project_knowledge_tool(tools_list: list[Any]) -> None:
             search_project_knowledge,
             name="search_project_knowledge",
             description=(
-                "Busca fragmentos en la base de conocimiento RAG del alcance activo "
-                "(plataforma, proyecto o ambos). No uses read_sql para esas tablas."
+                "Busca fragmentos en la base de conocimiento RAG del proyecto/bóveda "
+                "(documentos indexados del usuario). "
+                "NO uses esta tool para Wikipedia u 'enciclopedia offline': usa kiwix_search. "
+                "No uses read_sql para tablas de knowledge."
             ),
         )
     )

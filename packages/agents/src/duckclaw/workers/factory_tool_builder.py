@@ -227,6 +227,15 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
     register_search_project_knowledge_tool(tools)
     register_list_project_knowledge_tool(tools)
     register_read_project_knowledge_tool(tools)
+    # Enciclopedia Wikipedia offline (ZIM): baseline, no depende del skill research
+    try:
+        from duckclaw.forge.skills.kiwix_bridge import kiwix_search_tool
+
+        _kiwix = kiwix_search_tool({"kiwix_enabled": True, "max_results": 8})
+        if _kiwix is not None:
+            tools.append(_kiwix)
+    except Exception:
+        pass
     register_extract_document_text_tool(tools)
     register_write_output_document_tool(tools)
     register_render_docx_template_tool(tools)

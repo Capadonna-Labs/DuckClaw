@@ -144,8 +144,9 @@ def kiwix_search_tool(config: Optional[dict] = None) -> Any | None:
         _search,
         name="kiwix_search",
         description=(
-            "Busca en la enciclopedia offline local (Kiwix/ZIM). "
-            "Úsala sin red o para hechos de referencia. "
+            "Enciclopedia offline (Wikipedia en archivos ZIM/Kiwix). "
+            "Úsala cuando pidan enciclopedia offline, Wikipedia, hechos generales de ciudades "
+            "(p. ej. Medellín, Bogotá), países o conceptos — SIN red y SIN RAG de la bóveda. "
             f"ZIMs: {zim_names}. Parámetros: query, zim opcional."
         ),
         args_schema=KiwixSearchInput,

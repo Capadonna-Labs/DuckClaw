@@ -15,7 +15,7 @@ import {
   writeEphemeralHeartbeats,
 } from '@/lib/chatEphemeralStorage';
 import { writeStoredVaultPath } from '@/lib/conversationVaultStorage';
-import { workersInclude } from '@/lib/workerOptions';
+import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
 import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 
 import {
@@ -230,6 +230,13 @@ export function useAdminChatHistory({
           setWorkerIdRef.current(pinned);
         } else if (convWorker && workersInclude(workers, convWorker)) {
           setWorkerIdRef.current(convWorker);
+        } else if (!workerIdRef.current) {
+          if (workersInclude(workers, 'default')) {
+            setWorkerIdRef.current('default');
+          } else {
+            const ids = workerOptionIds(workers);
+            if (ids[0]) setWorkerIdRef.current(ids[0]);
+          }
         }
         const convVault = (data.vault_db_path || '').trim();
         if (convVault) {

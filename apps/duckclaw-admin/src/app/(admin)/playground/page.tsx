@@ -71,7 +71,9 @@ export default function PlaygroundPage() {
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [sandboxToggling, setSandboxToggling] = useState(false);
 
-  const conv = useActiveConversation(config?.effective_tenant_id, 'playground');
+  const conv = useActiveConversation(config?.effective_tenant_id, 'playground', {
+    defaultWorkerId: workerId || 'default',
+  });
   const {
     bootstrapping: conversationBootstrapping,
     createConversation,
@@ -191,13 +193,16 @@ export default function PlaygroundPage() {
         }
         const fromServer = (c.selected_worker_id || '').trim();
         const ids = workerOptionIds(c.workers);
-        let nextWorker = ids[0] ?? '';
-        if (initialWorker && ids.includes(initialWorker)) {
+        let nextWorker = 'default';
+        if (initialWorker && (ids.includes(initialWorker) || initialWorker === 'default')) {
           nextWorker = initialWorker;
-        } else if (fromServer && ids.includes(fromServer)) {
+        } else if (fromServer) {
+          // Confiar en el gateway aunque el catálogo aún no liste ese id.
           nextWorker = fromServer;
         } else if (ids.includes('default')) {
           nextWorker = 'default';
+        } else if (ids[0]) {
+          nextWorker = ids[0];
         }
         setWorkerId(nextWorker);
       })
@@ -451,7 +456,23 @@ export default function PlaygroundPage() {
             workerId={workerId}
             onProjectChange={(nextProjectId) => {
               setProjectId(nextProjectId);
-              setWorkerId('');
+              const nextProject = (config?.projects ?? []).find(
+                (project) => project.project_id === nextProjectId
+              );
+              const nextProjectWorkers =
+                nextProject?.agents.map((agent) => agent.worker_id).filter(Boolean) ?? [];
+              if (nextProjectWorkers.length > 0) {
+                const keepCurrent =
+                  workerId.trim() && nextProjectWorkers.includes(workerId.trim());
+                selectWorker(keepCurrent ? workerId : nextProjectWorkers[0]!);
+                return;
+              }
+              // Sin agentes en el proyecto: no vaciar — loadConfig / lista global mantiene default.
+              if (!workerId.trim()) {
+                const ids = workerOptionIds(config?.workers);
+                const fallback = ids.includes('default') ? 'default' : ids[0] ?? '';
+                if (fallback) selectWorker(fallback);
+              }
             }}
             onWorkerChange={selectWorker}
             onKnowledgeScopeChange={(scope) => void persistKnowledgeScope(scope)}

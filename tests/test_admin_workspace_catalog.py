@@ -1247,7 +1247,7 @@ def test_gateway_rejects_default_template_deactivation_explicitly(gateway_admin_
     assert response.json()["detail"]["title"] == "Plantilla protegida"
 
 
-def test_gateway_forge_projects_are_retired(gateway_admin_client) -> None:
+def test_gateway_forge_projects_routes_are_gone(gateway_admin_client) -> None:
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
 
     listed = gateway_admin_client.get("/api/v1/admin/forge-projects", headers=headers)
@@ -1260,10 +1260,16 @@ def test_gateway_forge_projects_are_retired(gateway_admin_client) -> None:
         "/api/v1/admin/forge-projects/legacy/apply-team",
         headers=headers,
     )
+    bootstrap = gateway_admin_client.post(
+        "/api/v1/admin/projects",
+        headers=headers,
+        json={"id": "legacy-fs", "source_template": "default"},
+    )
 
-    assert listed.status_code == 410
-    assert created.status_code == 410
-    assert applied.status_code == 410
+    assert listed.status_code == 404
+    assert created.status_code == 404
+    assert applied.status_code == 404
+    assert bootstrap.status_code == 404
 
 
 def test_gateway_filesystem_template_actions_are_retired(gateway_admin_client) -> None:

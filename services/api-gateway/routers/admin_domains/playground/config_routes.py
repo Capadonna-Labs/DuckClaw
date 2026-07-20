@@ -88,6 +88,9 @@ async def playground_config(
         if not team_ctx.get("whitelist_role"):
             team_ctx["whitelist_role"] = "admin-console"
     workers_list = merge_playground_catalog_and_team_workers(workers_list, team_ctx)
+    if not any(str(item.get("id") or "").strip() == "default" for item in workers_list):
+        # default siempre permitido (worker_allowed_for_actor); el catálogo DB puede estar vacío.
+        workers_list = [{"id": "default", "label": "default"}, *workers_list]
     workers_payload = {"workers": workers_list, "workers_invalid": [], "team_hint_extra": ""}
     eff_chat = (chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
     eff_tenant = str(profile.get("tenant_id") or "").strip() or gateway_effective_tenant_id("default")

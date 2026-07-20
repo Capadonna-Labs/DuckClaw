@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -56,7 +57,7 @@ def _seed_worker_fast_plan_capability(con, worker_id: str, policy: dict[str, obj
 
 
 def test_manager_graph_delegates_capability_fast_plan_to_manager_module() -> None:
-    from duckclaw.graphs import manager_graph
+    from duckclaw.manager import graph as manager_graph
     from duckclaw.manager import fast_plans
 
     assert manager_graph._try_capability_fast_plan is fast_plans._try_capability_fast_plan
@@ -71,7 +72,7 @@ def test_manager_graph_fast_plan_branch_has_no_legacy_visual_locals() -> None:
 
 
 def test_manager_graph_delegates_fast_replies_to_manager_module() -> None:
-    from duckclaw.graphs import manager_graph
+    from duckclaw.manager import graph as manager_graph
     from duckclaw.manager import fast_replies
 
     assert manager_graph._manager_greeting_fast_path_ok is fast_replies._manager_greeting_fast_path_ok
@@ -123,7 +124,7 @@ def test_capabilities_fast_reply_formats_tenant_id_placeholder() -> None:
 def test_manager_graph_capabilities_shortcut_uses_prompt_policy_resolver_db_first(monkeypatch) -> None:
     import duckdb
 
-    from duckclaw.graphs.manager_graph import build_manager_graph
+    from duckclaw.manager.graph import build_manager_graph
     from duckclaw.schema_migrations import run_pending_migrations
 
     con = duckdb.connect(":memory:")
@@ -158,7 +159,7 @@ def test_manager_graph_capabilities_shortcut_uses_prompt_policy_resolver_db_firs
 def test_manager_invokes_worker_builder_without_session_kwargs(monkeypatch) -> None:
     import duckdb
 
-    from duckclaw.graphs.manager_graph import build_manager_graph
+    from duckclaw.manager.graph import build_manager_graph
     from duckclaw.schema_migrations import run_pending_migrations
 
     con = duckdb.connect(":memory:")
@@ -248,7 +249,10 @@ def test_manager_invokes_worker_builder_without_session_kwargs(monkeypatch) -> N
         "duckclaw.manager.graph.release_subagent_slot",
         lambda *args, **kwargs: None,
     )
-    monkeypatch.setattr("duckclaw.manager.manager_worker_cache._worker_graph_cache", {})
+    monkeypatch.setattr(
+        "duckclaw.manager.manager_worker_cache._worker_graph_cache",
+        OrderedDict(),
+    )
 
     graph = build_manager_graph(con)
     out = graph.invoke(

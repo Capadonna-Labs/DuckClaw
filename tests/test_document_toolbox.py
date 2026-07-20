@@ -53,25 +53,34 @@ def test_corporate_template_seed_exists() -> None:
     assert path.stat().st_size > 100
 
 
-@patch("duckclaw.document_toolbox.convert.subprocess.run")
-def test_convert_document_file_docx(mock_run: MagicMock, tmp_path: Path) -> None:
-    from duckclaw.document_toolbox.convert import convert_document_file
+@patch("duckclaw.document_toolbox.export_pdf.subprocess.run")
+def test_export_docx_to_pdf_file(mock_run: MagicMock, tmp_path: Path) -> None:
+    from duckclaw.document_toolbox.export_pdf import export_docx_to_pdf_file
 
-    mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
-    src = tmp_path / "informe.md"
-    src.write_text("# Hola", encoding="utf-8")
-    out = tmp_path / "informe.docx"
+    src = tmp_path / "informe.docx"
+    src.write_bytes(b"PK\x03\x04fake")
 
     def fake_run(cmd, **kwargs):
-        out.write_bytes(b"PK")
+        outdir = Path(cmd[cmd.index("--outdir") + 1])
+        (outdir / "informe.pdf").write_bytes(b"%PDF-1.4")
         return MagicMock(returncode=0, stderr="", stdout="")
 
     mock_run.side_effect = fake_run
-    with patch("duckclaw.document_toolbox.convert.shutil.which", return_value="/usr/bin/pandoc"):
-        payload = convert_document_file(source=src, output_format="docx", target=out)
+    with patch(
+        "duckclaw.document_toolbox.export_pdf.libreoffice_binary",
+        return_value="/usr/bin/soffice",
+    ):
+        payload = export_docx_to_pdf_file(source=src)
 
-    assert payload["format"] == "docx"
-    assert out.is_file()
+    assert payload["format"] == "pdf"
+    assert Path(payload["path"]).is_file()
+    assert payload["engine"] == "libreoffice"
+
+
+def test_baseline_includes_export_pdf() -> None:
+    pack = load_document_toolbox()
+    assert "export_docx_to_pdf" in pack["baseline_tools"]
+    assert "list_report_instances" in pack["baseline_tools"]
 
 
 def test_extract_native_md_without_markitdown(tmp_path: Path) -> None:

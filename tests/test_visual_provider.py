@@ -1,4 +1,4 @@
-"""Tests visual_provider resolution."""
+"""Tests visual_provider resolution (local-first)."""
 
 from __future__ import annotations
 
@@ -27,13 +27,15 @@ class _CfgDb:
 def test_default_local_when_only_comfy_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COMFYUI_API_URL", "http://127.0.0.1:8188")
     monkeypatch.delenv("FAL_KEY", raising=False)
+    monkeypatch.delenv("FAL_API_KEY", raising=False)
     assert default_visual_provider() == "local"
 
 
-def test_default_fal_when_both_env_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_local_when_both_comfy_and_fal(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Soberania: Comfy local gana aunque haya FAL_KEY."""
     monkeypatch.setenv("COMFYUI_API_URL", "http://127.0.0.1:8188")
     monkeypatch.setenv("FAL_KEY", "test-key")
-    assert default_visual_provider() == "fal"
+    assert default_visual_provider() == "local"
 
 
 def test_default_fal_when_only_fal_key(monkeypatch: pytest.MonkeyPatch) -> None:

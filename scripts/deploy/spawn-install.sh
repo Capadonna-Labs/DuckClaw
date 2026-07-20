@@ -69,10 +69,32 @@ export PATH="${HOME}/.local/bin:${PATH}"
 # --- .env raíz (Spawn debe haber inyectado secretos; completar defaults) ---
 ENV_FILE="${REPO_ROOT}/.env"
 DB_DEFAULT="${DUCKDB_PATH:-${DUCKCLAW_DB_PATH:-db/private/default/duckclaw.duckdb}}"
+
+# LLM local-first: si hay OPENROUTER_API_KEY y no hay provider explícito → openrouter;
+# si no → mlx + BASE_URL local (OpenRouter opcional).
+_spawn_llm_provider="${DUCKCLAW_LLM_PROVIDER:-}"
+_spawn_llm_base="${DUCKCLAW_LLM_BASE_URL:-}"
+if [[ -z "${_spawn_llm_provider}" ]]; then
+  if [[ -n "${OPENROUTER_API_KEY:-}" ]]; then
+    _spawn_llm_provider="openrouter"
+    _spawn_llm_base="${_spawn_llm_base:-https://openrouter.ai/api/v1}"
+  else
+    _spawn_llm_provider="mlx"
+    _spawn_llm_base="${_spawn_llm_base:-http://127.0.0.1:8080/v1}"
+  fi
+fi
+if [[ -z "${_spawn_llm_base}" ]]; then
+  if [[ "${_spawn_llm_provider}" == "openrouter" || "${_spawn_llm_provider}" == "or" ]]; then
+    _spawn_llm_base="https://openrouter.ai/api/v1"
+  else
+    _spawn_llm_base="http://127.0.0.1:8080/v1"
+  fi
+fi
+
 if [[ ! -f "${ENV_FILE}" ]]; then
-  log "Creando .env desde plantilla spawn..."
+  log "Creando .env desde plantilla spawn (LLM local-first)..."
   cat >"${ENV_FILE}" <<EOF
-# Generado por spawn-install.sh — perfil genérico
+# Generado por spawn-install.sh — perfil genérico (LLM local-first)
 OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
 DUCKCLAW_ADMIN_API_KEY=${DUCKCLAW_ADMIN_API_KEY:-change-me-spawn-install}
 DUCKDB_PATH=${DB_DEFAULT}
@@ -80,8 +102,8 @@ DUCKCLAW_DB_PATH=${DB_DEFAULT}
 REDIS_URL=${REDIS_URL:-redis://127.0.0.1:6379/0}
 DUCKCLAW_REPO_ROOT=${REPO_ROOT}
 DUCKCLAW_SPAWN_PROFILE=1
-DUCKCLAW_LLM_PROVIDER=openrouter
-DUCKCLAW_LLM_BASE_URL=https://openrouter.ai/api/v1
+DUCKCLAW_LLM_PROVIDER=${_spawn_llm_provider}
+DUCKCLAW_LLM_BASE_URL=${_spawn_llm_base}
 EOF
 else
   grep -q '^DUCKCLAW_SPAWN_PROFILE=' "${ENV_FILE}" 2>/dev/null || echo 'DUCKCLAW_SPAWN_PROFILE=1' >>"${ENV_FILE}"
@@ -89,6 +111,8 @@ else
   grep -q '^DUCKDB_PATH=' "${ENV_FILE}" 2>/dev/null || echo "DUCKDB_PATH=${DB_DEFAULT}" >>"${ENV_FILE}"
   grep -q '^DUCKCLAW_DB_PATH=' "${ENV_FILE}" 2>/dev/null || echo "DUCKCLAW_DB_PATH=${DB_DEFAULT}" >>"${ENV_FILE}"
   grep -q '^DUCKCLAW_REPO_ROOT=' "${ENV_FILE}" 2>/dev/null || echo "DUCKCLAW_REPO_ROOT=${REPO_ROOT}" >>"${ENV_FILE}"
+  grep -q '^DUCKCLAW_LLM_PROVIDER=' "${ENV_FILE}" 2>/dev/null || echo "DUCKCLAW_LLM_PROVIDER=${_spawn_llm_provider}" >>"${ENV_FILE}"
+  grep -q '^DUCKCLAW_LLM_BASE_URL=' "${ENV_FILE}" 2>/dev/null || echo "DUCKCLAW_LLM_BASE_URL=${_spawn_llm_base}" >>"${ENV_FILE}"
 fi
 set -a
 # shellcheck source=/dev/null

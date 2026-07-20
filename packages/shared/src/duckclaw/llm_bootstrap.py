@@ -1,4 +1,8 @@
-"""LLM bootstrap — DB-first API keys + platform triplet (provider/model/base_url)."""
+"""LLM bootstrap — DB-first API keys + platform triplet (provider/model/base_url).
+
+Spawn / soberanía: si el perfil spawn no tiene clave cloud pero sí
+``DUCKCLAW_LLM_BASE_URL``, se fuerza un proveedor local (mlx/ollama).
+"""
 
 from __future__ import annotations
 
@@ -53,6 +57,14 @@ def is_local_llm_provider(provider: str) -> bool:
     return normalize_llm_provider(provider) in _LOCAL_LLM_PROVIDERS
 
 
+def infer_local_llm_provider(base_url: str) -> str:
+    """Heurística: puerto Ollama → ollama; resto → mlx."""
+    url = (base_url or "").lower()
+    if "11434" in url or "ollama" in url:
+        return "ollama"
+    return "mlx"
+
+
 def _env_first(keys: tuple[str, ...]) -> str:
     for key in keys:
         val = (os.environ.get(key) or "").strip()
@@ -102,6 +114,47 @@ def llm_api_key_configured(
     return bool(resolve_llm_api_key(p, db=db, tenant_id=tenant_id, actor_email=actor_email))
 
 
+def apply_spawn_local_first_llm(
+    provider: str,
+    model: str,
+    base_url: str,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> tuple[str, str, str]:
+    """
+    Perfil spawn: OpenRouter/cloud sin clave + BASE_URL local → proveedor local.
+
+    No cambia nada fuera de ``DUCKCLAW_SPAWN_PROFILE``.
+    """
+    try:
+        from duckclaw.spawn_profile import is_spawn_profile
+    except Exception:
+        return provider, model, base_url
+
+    if not is_spawn_profile():
+        return provider, model, base_url
+
+    p = normalize_llm_provider(provider)
+    url = (base_url or os.environ.get("DUCKCLAW_LLM_BASE_URL") or "").strip()
+
+    if is_local_llm_provider(p):
+        return p, model, url or base_url
+
+    cloud_ok = llm_api_key_configured(
+        p, db=db, tenant_id=tenant_id, actor_email=actor_email, base_url=base_url
+    )
+    if cloud_ok:
+        return p, model, base_url
+
+    if url:
+        local_p = infer_local_llm_provider(url)
+        return local_p, model, url
+
+    return p, model, base_url
+
+
 def resolve_platform_llm_triplet(
     *,
     repo_root: Path | None = None,
@@ -144,6 +197,14 @@ def resolve_platform_llm_triplet(
                 else:
                     base_url = str(row["value"]).strip()
 
+    provider, model, base_url = apply_spawn_local_first_llm(
+        provider,
+        model,
+        base_url,
+        db=db,
+        tenant_id=tenant_id,
+        actor_email=actor_email,
+    )
     return {"provider": provider, "model": model, "base_url": base_url}
 
 

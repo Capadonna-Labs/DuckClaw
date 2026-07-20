@@ -4,7 +4,7 @@
 
 Motor DB-first para que **cualquier persona N** construya documentos Office a partir de **sus** plantillas (Word hoy; Excel/PPT v2). El nicho vive en la plantilla y en el prompt, **no** en campos de producto tipo «periodo mensual».
 
-Complementa `document_toolbox` (extract/author/convert) y no reemplaza `custom_reports` (dashboards HTML).
+Complementa `document_toolbox` (extract/author/Word→PDF) y no reemplaza `custom_reports` (dashboards HTML).
 
 ## Modelo mental (flujo canónico)
 
@@ -72,7 +72,7 @@ Baseline: skill `report_engine` en `framework_tool_pack_v1` profile `general`.
 ### Carril obligatorio (agente) — transversal
 
 - **Inbound:** MarkItDown / `extract_document_text` (binario → texto). No genera Word.
-- **Outbound serio:** Report Engine únicamente. No hay carril pandoc/`convert_document` en baseline.
+- **Outbound serio:** Report Engine únicamente. PDF = `export_docx_to_pdf` sobre el `.docx` renderizado (LibreOffice).
 - **Criterio:** plantilla(s) visible(s) → Word = `render_report_instance`.
 - `generate_report_docx_from_markdown`: solo plantillas de **un** campo; multi-campo → error con `section_ids`.
 - `render_report_instance`: exige secciones `required` con contenido; escanea `{{…}}` residuales; `force=true` para borrador.

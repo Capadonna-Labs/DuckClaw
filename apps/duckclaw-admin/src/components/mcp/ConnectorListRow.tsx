@@ -2,12 +2,17 @@
 
 import type { ReactNode } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { McpConnectorPreset, McpConnectorSummary } from '@/services/adminService';
+import type {
+  McpConnectorPreset,
+  McpConnectorSummary,
+  McpConnectorTestResult,
+} from '@/services/adminService';
 import {
   mcpConnectorAuthFlags,
   resolveMcpConnectorPrimaryAction,
   type McpConnectorPrimaryKind,
 } from '@/lib/mcpConnectorPrimaryAction';
+import { mcpConnectorRowHint } from '@/lib/mcpConnectorHealth';
 
 type Props = {
   connector: McpConnectorSummary;
@@ -15,6 +20,7 @@ type Props = {
   canWrite: boolean;
   grantedWorkerLabels: string[];
   busyId: string | null;
+  testResult?: McpConnectorTestResult;
   onOpenDetail: () => void;
   onPrimary: (kind: McpConnectorPrimaryKind) => void;
 };
@@ -23,7 +29,7 @@ function StatusChip({
   tone,
   children,
 }: {
-  tone: 'ok' | 'warn' | 'muted';
+  tone: 'ok' | 'warn' | 'muted' | 'error';
   children: ReactNode;
 }) {
   const className =
@@ -31,7 +37,9 @@ function StatusChip({
       ? 'bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-300'
       : tone === 'warn'
         ? 'bg-amber-100 text-amber-800'
-        : 'bg-gov-gray-100 text-gov-gray-600 dark:bg-dark-bg dark:text-dark-muted';
+        : tone === 'error'
+          ? 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-300'
+          : 'bg-gov-gray-100 text-gov-gray-600 dark:bg-dark-bg dark:text-dark-muted';
   return (
     <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${className}`}>
       {children}
@@ -45,17 +53,27 @@ export function ConnectorListRow({
   canWrite,
   grantedWorkerLabels,
   busyId,
+  testResult,
   onOpenDetail,
   onPrimary,
 }: Props) {
-  const { usesOAuth, needsAuth, authReady } = mcpConnectorAuthFlags(connector, preset);
+  const { usesOAuth, needsAuth } = mcpConnectorAuthFlags(connector, preset);
   const primary = resolveMcpConnectorPrimaryAction(connector, {
     preset,
     grantCount: grantedWorkerLabels.length,
     canWrite,
+    testResult,
+  });
+  const rowHint = mcpConnectorRowHint({
+    connector,
+    preset,
+    grantCount: grantedWorkerLabels.length,
+    testResult,
   });
   const oauthBusy = busyId === `oauth:${connector.connector_id}`;
   const endpoint = connector.endpoint_url || connector.transport;
+  const hintTone =
+    testResult && !testResult.ok ? 'error' : testResult?.ok ? 'ok' : 'muted';
 
   return (
     <li>
@@ -90,16 +108,34 @@ export function ConnectorListRow({
                 ? `grant: ${grantedWorkerLabels.join(', ')}`
                 : 'sin grants'}
             </StatusChip>
+            {testResult ? (
+              <StatusChip tone={testResult.ok ? 'ok' : 'error'}>
+                {testResult.ok ? `${testResult.tool_count} tools` : 'test falló'}
+              </StatusChip>
+            ) : null}
           </div>
           <p className="mt-0.5 truncate font-mono text-[11px] text-gov-gray-500 dark:text-dark-muted">
             {connector.connector_id}
             {endpoint ? ` · ${endpoint}` : ''}
             {connector.preset_id ? ` · ${connector.preset_id}` : ''}
           </p>
+          {rowHint ? (
+            <p
+              className={`mt-1 truncate text-xs ${
+                hintTone === 'error'
+                  ? 'text-red-700 dark:text-red-300'
+                  : hintTone === 'ok'
+                    ? 'text-green-800 dark:text-green-300'
+                    : 'text-gov-gray-500 dark:text-dark-muted'
+              }`}
+            >
+              {rowHint}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {!authReady && canWrite && primary.kind === 'connect_oauth' ? (
+          {canWrite && primary.kind === 'connect_oauth' ? (
             <button
               type="button"
               onClick={(event) => {

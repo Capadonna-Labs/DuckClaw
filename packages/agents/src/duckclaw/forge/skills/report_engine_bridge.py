@@ -1016,7 +1016,7 @@ def generate_report_docx_from_markdown(
         if "markdown" in msg or "output_roots" in msg:
             payload["hint"] = (
                 "Pasa markdown_relative_path o markdown_content. "
-                "No uses pandoc ni run_sandbox para plantillas."
+                "No uses run_sandbox para fabricar Word; usa Report Engine."
             )
         if "sección desconocida" in msg:
             payload["hint"] = (
@@ -1212,7 +1212,7 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                     "Genera el Word final (docxtpl) como .docx directo en OUTPUT. "
                     "Falla si faltan secciones required o quedan {{ placeholders }}. "
                     "force=true exporta borrador incompleto a propósito. "
-                    "Preferir sobre convert_document/pandoc cuando hay plantilla registrada."
+                    "Preferir el flujo plantilla→patch→render; no inventes Word fuera del motor."
                 ),
             ),
             StructuredTool.from_function(
@@ -1221,7 +1221,7 @@ def register_report_engine_tools(tools_list: list[Any]) -> None:
                 description=(
                     "ÚLTIMO RECURSO — solo plantillas de UN campo. "
                     "Plantillas multi-campo: create + patch por section_id + render. "
-                    "No es pandoc; no sustituye el flujo por sección."
+                    "No sustituye el flujo por sección. PDF: export_docx_to_pdf tras el render."
                 ),
             ),
         ]

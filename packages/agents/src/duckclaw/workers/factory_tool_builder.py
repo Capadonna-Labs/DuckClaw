@@ -230,8 +230,11 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
     register_extract_document_text_tool(tools)
     register_write_output_document_tool(tools)
     register_render_docx_template_tool(tools)
-    # convert_document (pandoc) NO se registra: outbound serio = Report Engine;
-    # inbound binario→texto = extract_document_text (MarkItDown). Ver DOCUMENT_TOOLBOX.md.
+    from duckclaw.forge.skills.export_docx_to_pdf_bridge import register_export_docx_to_pdf_tool
+
+    register_export_docx_to_pdf_tool(tools)
+    # Outbound serio = Report Engine (.docx); PDF = LibreOffice sobre ese Word (export_docx_to_pdf).
+    # Inbound binario→texto = extract_document_text (MarkItDown). Ver DOCUMENT_TOOLBOX.md.
     register_get_project_context_tool(tools)
     from duckclaw.forge.skills.update_worker_system_prompt_bridge import register_update_system_prompt_tools
 

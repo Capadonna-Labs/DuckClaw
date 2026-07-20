@@ -82,7 +82,9 @@ Patrones: **Progressive Disclosure** + **Table Filter** (`docs/architecture/UIUX
 |------|-----------|
 | Lista densa | Nombre, `connector_id`, chips (`habilitado` / auth / grants), URL truncada |
 | CTA primaria en fila | OAuth faltante → **Conectar OAuth** (sin drawer). Bearer faltante → **Configurar**. Auth OK sin grants → **Dar grant** (abre drawer). Resto → **Detalle** |
-| Drawer lateral | Auth (OAuth/Bearer), grants, `list_tools`, desactivar |
+| Drawer lateral | Auth (OAuth/Bearer), grants, **revoke grant**, `list_tools`, desactivar |
+| Filtros rápidos | Todos · Falta auth · Sin grants · Test falló |
+| Fila | Hint accionable (`N tools OK`, `401 → reconectar`, `falta grant`) |
 
 Click en la fila abre el drawer. ConfirmModal sigue para grant. No meter OAuth PKCE solo detrás de modal: el salto de contexto ya es el redirect.
 

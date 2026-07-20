@@ -1,9 +1,10 @@
 """
-Research Bridge — Tavily search + Browser-Use navigation.
+Research Bridge — búsqueda local (SearXNG/DDG) + Tavily opcional + Browser-Use.
 
 Spec: specs/Pipeline_de_Investigación_y_Navegacion_Autonoma_(Tavily+Browser-Use).md
-Requiere: pip install tavily-python  (o uv sync --extra tavily)
-          pip install browser-use playwright  (o uv sync --extra browser)
+Local-first: ``web_search`` no requiere TAVILY_API_KEY.
+Opcional cloud: pip install tavily-python  (o uv sync --extra tavily)
+Browser: pip install browser-use playwright  (o uv sync --extra browser)
 """
 
 from __future__ import annotations
@@ -286,19 +287,30 @@ def register_research_skill(
     tenant_id: str = "default",
 ) -> None:
     """
-    Registra las herramientas de investigación (Tavily, browser-use) en la lista.
+    Registra tools de investigación: ``web_search`` local, Tavily opcional, browser-use.
     Llamar desde build_worker_graph cuando el manifest tiene skills.research.
     """
     if not research_config:
         return
     try:
+        from duckclaw.forge.skills.local_web_search import local_web_search_tool
+
+        local_tool = local_web_search_tool(research_config)
+        if local_tool:
+            tools_list.append(local_tool)
+
         tavily_tool = _tavily_search_tool(research_config, db=db, tenant_id=tenant_id)
         if tavily_tool:
             tools_list.append(tavily_tool)
-        elif research_config.get("tavily_enabled", True):
+        elif research_config.get("tavily_enabled", True) and not local_tool:
             _log.warning(
-                "research: tavily_enabled pero tavily_search no registrada "
-                "(¿tavily-python instalado y API key Tavily en Integraciones o TAVILY_API_KEY?)."
+                "research: sin web_search ni tavily_search "
+                "(¿local_search_enabled=false y falta Tavily?)."
+            )
+        elif research_config.get("tavily_enabled", True):
+            _log.info(
+                "research: tavily_search omitida (sin clave/paquete); "
+                "web_search local disponible."
             )
         browser_tool = _browser_navigate_tool(research_config, llm=llm)
         if browser_tool:

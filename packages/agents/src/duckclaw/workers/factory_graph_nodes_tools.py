@@ -314,7 +314,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                                             pass
                             except (json.JSONDecodeError, TypeError):
                                 pass
-                        if name in ("generate_visual_asset", "edit_visual_asset"):
+                        if name in ("generate_visual_asset", "generate_flux_image", "edit_visual_asset"):
                             try:
                                 payload = json.loads(content)
                                 if isinstance(payload, dict) and payload.get("ok"):

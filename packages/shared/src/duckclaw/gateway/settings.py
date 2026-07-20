@@ -41,6 +41,10 @@ class GatewaySettings(BaseSettings):
         default="",
         validation_alias=AliasChoices("DUCKCLAW_LLM_PROVIDER", "LLM_PROVIDER"),
     )
+    DUCKCLAW_LLM_BASE_URL: str = Field(
+        default="",
+        validation_alias=AliasChoices("DUCKCLAW_LLM_BASE_URL", "LLM_BASE_URL"),
+    )
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
@@ -76,6 +80,10 @@ class GatewaySettings(BaseSettings):
         provider = (self.DUCKCLAW_LLM_PROVIDER or "").strip().lower()
         if provider in ("openrouter", "or") and not (self.OPENROUTER_API_KEY or "").strip():
             missing.append("OPENROUTER_API_KEY")
+        if provider in ("mlx", "ollama", "local", "iotcorelabs") and not (
+            self.DUCKCLAW_LLM_BASE_URL or ""
+        ).strip():
+            missing.append("DUCKCLAW_LLM_BASE_URL")
         if missing:
             raise RuntimeError(
                 "Gateway startup blocked: missing required env "

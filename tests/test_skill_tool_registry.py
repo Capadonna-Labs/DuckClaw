@@ -79,6 +79,7 @@ def test_post_llm_registry_passes_declared_context(monkeypatch) -> None:
         openweather={},
         tailscale={"enabled": True},
         comfyui={},
+        fal={"enabled": True},
     )
 
     registry.register_post_llm_skill_tools([], spec, db=db, llm=llm)
@@ -86,11 +87,11 @@ def test_post_llm_registry_passes_declared_context(monkeypatch) -> None:
     by_path = {path: (args, kwargs) for path, args, kwargs in calls}
     assert by_path["duckclaw.forge.skills.research_bridge:register_research_skill"] == (
         (),
-        {"llm": llm},
+        {"llm": llm, "db": db, "tenant_id": "default"},
     )
     assert by_path["duckclaw.forge.skills.openweather_bridge:register_openweather_skill"] == (
         (research_config,),
-        {},
+        {"db": db, "tenant_id": "default"},
     )
     assert by_path["duckclaw.forge.skills.tailscale_bridge:register_tailscale_skill"] == (
         (),
@@ -100,3 +101,17 @@ def test_post_llm_registry_passes_declared_context(monkeypatch) -> None:
         (),
         {"duckclaw_db": db},
     )
+    assert by_path["duckclaw.forge.skills.fal_bridge:register_fal_skill"] == (
+        (),
+        {"duckclaw_db": db},
+    )
+
+
+def test_fal_is_in_skill_tool_registry() -> None:
+    from duckclaw.workers.skill_tool_registry import DEFAULT_SKILL_TOOL_REGISTRY
+
+    names = {item.skill_name for item in DEFAULT_SKILL_TOOL_REGISTRY}
+    assert "fal" in names
+    fal = next(item for item in DEFAULT_SKILL_TOOL_REGISTRY if item.skill_name == "fal")
+    assert fal.registrar_path.endswith("fal_bridge:register_fal_skill")
+    assert fal.phase == "post_llm"

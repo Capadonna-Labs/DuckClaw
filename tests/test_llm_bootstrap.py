@@ -83,3 +83,39 @@ def test_llm_api_key_configured_mlx_needs_base_url(monkeypatch: pytest.MonkeyPat
     monkeypatch.delenv("DUCKCLAW_LLM_BASE_URL", raising=False)
     assert llm_api_key_configured("mlx", base_url="") is False
     assert llm_api_key_configured("mlx", base_url="http://127.0.0.1:8080/v1") is True
+
+
+def test_spawn_local_first_demotes_openrouter_without_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw.llm_bootstrap import apply_spawn_local_first_llm, resolve_platform_llm_triplet
+
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("DUCKCLAW_LLM_PROVIDER", "openrouter")
+    monkeypatch.setenv("DUCKCLAW_LLM_BASE_URL", "http://127.0.0.1:8080/v1")
+    p, _m, url = apply_spawn_local_first_llm(
+        "openrouter", "", "http://127.0.0.1:8080/v1"
+    )
+    assert p == "mlx"
+    assert "8080" in url
+    triplet = resolve_platform_llm_triplet()
+    assert triplet["provider"] == "mlx"
+
+
+def test_spawn_keeps_openrouter_when_key_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw.llm_bootstrap import apply_spawn_local_first_llm
+
+    monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test")
+    p, _m, _u = apply_spawn_local_first_llm(
+        "openrouter", "model", "https://openrouter.ai/api/v1"
+    )
+    assert p == "openrouter"
+
+
+def test_infer_ollama_from_base_url() -> None:
+    from duckclaw.llm_bootstrap import infer_local_llm_provider
+
+    assert infer_local_llm_provider("http://127.0.0.1:11434/v1") == "ollama"
+    assert infer_local_llm_provider("http://127.0.0.1:8080/v1") == "mlx"

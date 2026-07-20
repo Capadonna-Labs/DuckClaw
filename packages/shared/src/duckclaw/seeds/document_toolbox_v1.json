@@ -10,18 +10,24 @@
     "ingest_native": [".md", ".markdown", ".txt", ".json", ".csv"],
     "extract_markitdown": [".pdf", ".docx", ".doc", ".pptx", ".ppt", ".xlsx", ".xls", ".html", ".htm"],
     "author_text": ["write_output_document"],
-    "author_word": ["report_engine", "render_docx_template"]
+    "author_word": ["report_engine", "render_docx_template"],
+    "export_pdf": ["export_docx_to_pdf"]
   },
   "baseline_tools": [
     "extract_document_text",
     "write_output_document",
     "render_docx_template",
+    "export_docx_to_pdf",
     "list_report_templates",
     "register_report_template",
+    "list_report_instances",
     "create_report_instance",
+    "create_blank_document",
     "patch_report_section",
+    "patch_report_image",
     "get_report_status",
-    "render_report_instance"
+    "render_report_instance",
+    "generate_report_docx_from_markdown"
   ],
   "templates": [
     {

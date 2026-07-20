@@ -62,6 +62,7 @@ AGENT_BINDING_NAMES: tuple[str, ...] = (
     "has_read_sql",
     "has_tavily",
     "has_generate_visual",
+    "primary_visual_tool",
     "has_reddit_tools",
     "has_run_sandbox",
     "_bind_tools",
@@ -125,6 +126,7 @@ AGENT_CTX_UNPACK = textwrap.dedent(
     has_read_sql = b.get("has_read_sql", False)
     has_tavily = b.get("has_tavily", False)
     has_generate_visual = b.get("has_generate_visual", False)
+    primary_visual_tool = b.get("primary_visual_tool") or "generate_visual_asset"
     has_reddit_tools = b.get("has_reddit_tools", False)
     has_run_sandbox = b.get("has_run_sandbox", False)
     from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default as _bind_tools

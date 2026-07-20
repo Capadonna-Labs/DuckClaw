@@ -62,9 +62,38 @@ describe('resolveMcpConnectorPrimaryAction', () => {
   it('abre detalle cuando todo OK', () => {
     const action = resolveMcpConnectorPrimaryAction(
       connector({ auth_kind: 'bearer', has_auth: true }),
-      { grantCount: 1, canWrite: true }
+      { grantCount: 1, canWrite: true, testResult: { ok: true, connector_id: 'mcp_x', transport: '', tool_count: 2, tools: [] } }
     );
     expect(action.kind).toBe('open_detail');
+  });
+
+  it('sugiere reconectar tras 401', () => {
+    const action = resolveMcpConnectorPrimaryAction(
+      connector({ auth_kind: 'oauth', has_auth: true, preset_id: 'notion' }),
+      {
+        preset: oauthPreset(),
+        grantCount: 1,
+        canWrite: true,
+        testResult: {
+          ok: false,
+          connector_id: 'mcp_x',
+          transport: '',
+          tool_count: 0,
+          tools: [],
+          error: 'HTTP 401',
+        },
+      }
+    );
+    expect(action.kind).toBe('connect_oauth');
+    expect(action.label).toBe('Reconectar OAuth');
+  });
+
+  it('sugiere probar cuando auth lista sin test', () => {
+    const action = resolveMcpConnectorPrimaryAction(
+      connector({ auth_kind: 'none' }),
+      { grantCount: 1, canWrite: true }
+    );
+    expect(action.label).toBe('Probar');
   });
 
   it('sin write solo detalle', () => {

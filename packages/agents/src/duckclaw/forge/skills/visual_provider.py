@@ -1,6 +1,6 @@
-"""Resolucion de proveedor visual por chat (Fal.ai cloud vs ComfyUI local).
+"""Resolucion de proveedor visual por chat (ComfyUI local vs Fal.ai / Higgsfield).
 
-Prioridad por defecto: Fal.ai si FAL_KEY esta configurada; ComfyUI local como fallback.
+Prioridad por defecto (soberania): ComfyUI local si COMFYUI_API_URL; luego Fal; luego Higgsfield.
 """
 
 from __future__ import annotations
@@ -31,12 +31,13 @@ def _higgsfield_available() -> bool:
 
 
 def default_visual_provider() -> VisualProvider:
+    """Local-first: ComfyUI when configured, else cloud fallbacks."""
+    if _comfy_available():
+        return "local"
     if _fal_available():
         return "fal"
     if _higgsfield_available():
         return "higgsfield"
-    if _comfy_available():
-        return "local"
     return "local"
 
 

@@ -128,11 +128,29 @@ def execute_sensors(db: Any) -> str:
         pass
     tav_key = bool(integration_api_key_configured("tavily", db=db))
     tav_ready = bool(_tavily_available(db=db))
-    blocks.append("🔎 Tavily (research)")
+    blocks.append("🔎 Research (web)")
+    try:
+        from duckclaw.forge.skills.local_web_search import local_search_backend, searxng_base_url
+
+        backend = local_search_backend()
+        local_hint = (
+            f"SearXNG ({searxng_base_url()})"
+            if backend == "searxng"
+            else "DuckDuckGo HTML (sin API key)"
+        )
+        blocks.append(_sensor_line_bullet("✅", f"Local · {local_hint}"))
+    except Exception as exc:
+        blocks.append(_sensor_line_bullet("⚠️", f"Local · error — {str(exc)[:80]}"))
+    blocks.append("🔎 Tavily (opcional)")
     if tav_ready and tav_pkg and tav_key:
         blocks.append(_sensor_line_bullet("✅", "Listo · paquete · clave · bridge"))
     elif not tav_pkg and not tav_key:
-        blocks.append(_sensor_line_bullet("⚠️", "Sin paquete tavily ni clave (Integraciones o TAVILY_API_KEY)"))
+        blocks.append(
+            _sensor_line_bullet(
+                "ℹ️",
+                "Sin Tavily — OK si usas web_search local (Integraciones o TAVILY_API_KEY para cloud)",
+            )
+        )
     else:
         blocks.append(
             _sensor_line_bullet(

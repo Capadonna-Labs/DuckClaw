@@ -68,16 +68,24 @@ def build_agent_llm_bind(ctx: WorkerGraphContext) -> None:
         _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_tavily) if has_tavily else None
     )
 
-    has_generate_visual = "generate_visual_asset" in tools_by_name
-    tool_choice_generate_visual = _tool_choice_function("generate_visual_asset")
+    # Local Comfy (`generate_visual_asset`) or Fal Flux (`generate_flux_image`).
+    primary_visual_tool = (
+        "generate_visual_asset"
+        if "generate_visual_asset" in tools_by_name
+        else ("generate_flux_image" if "generate_flux_image" in tools_by_name else None)
+    )
+    has_generate_visual = primary_visual_tool is not None
+    tool_choice_generate_visual = (
+        _tool_choice_function(primary_visual_tool) if primary_visual_tool else None
+    )
     llm_force_generate_visual_on = (
         _bind_tools(llm, _tools_for_llm_bind, tool_choice=tool_choice_generate_visual)
-        if has_generate_visual
+        if primary_visual_tool
         else None
     )
     llm_force_generate_visual_off = (
         _bind_tools(llm, _tools_sandbox_off_bind, tool_choice=tool_choice_generate_visual)
-        if "generate_visual_asset" in tools_by_name_sandbox_off
+        if primary_visual_tool and primary_visual_tool in tools_by_name_sandbox_off
         else None
     )
 
@@ -143,6 +151,7 @@ def build_agent_llm_bind(ctx: WorkerGraphContext) -> None:
         "has_read_sql": has_read_sql,
         "has_tavily": has_tavily,
         "has_generate_visual": has_generate_visual,
+        "primary_visual_tool": primary_visual_tool,
         "has_reddit_tools": has_reddit_tools,
         "has_run_sandbox": has_run_sandbox,
     }

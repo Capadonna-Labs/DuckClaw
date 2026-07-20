@@ -1,7 +1,7 @@
 """
 Observabilidad 2.0: logging estructurado con contextvars (tenant, worker, chat_id).
 
-Spec: specs/features/platform/OBSERVABILITY_STRUCTURED_LOGGING.md
+Spec: docs/architecture/system_overview.md
 """
 
 from __future__ import annotations

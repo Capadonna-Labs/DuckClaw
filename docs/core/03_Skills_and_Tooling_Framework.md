@@ -72,8 +72,8 @@ Enrutamiento: en `telegram_bot` (o equivalente), parsear comandos que empiezan p
 - **Sensory node (Mac mini, Tailscale)**: microservicio `integrations/sensory-node` — STT (`mlx-whisper` 4-bit) y TTS (`OmniVoice` + Identity Lock). Endpoints edge: `POST /api/v1/sensory/transcribe`, `POST /api/v1/sensory/synthesize`, `GET /health`. El gateway VPS expone el mismo contrato como proxy (`routers/sensory.py`) cuando `DUCKCLAW_SENSORY_BASE_URL` apunta al Mac. Telegram voz (entrante/saliente) queda para fase posterior.
 - **AudioTranscriber (cliente)**: `services/api-gateway/core/sensory_client.py` + `stt_ingest.py`; salida enriquecida `<audio_transcription>`; sin disco (Habeas Data).
 - **VisionInterpreter**: implementado vía `vlm_ingest` (mlx-vlm); salida `Contexto visual adjunto:` / `[VLM_CONTEXT …]`.
-- **Legacy spec** (pendiente): `POST /api/v1/agent/{worker_id}/media/{thread_id}` multipart + cola ARQ.
+- **Pendiente:** `POST /api/v1/agent/{worker_id}/media/{thread_id}` multipart + cola ARQ.
 
 ---
 
-*Consolidado desde: Pipeline_de_Investigación_y_Navegacion_Autonoma_(Tavily+Browser-Use), Sandbox_de_Ejecucion_Libre_Basado_en_Strix, Integracion_de_GitHub_MCP_en_DuckClaw, interfaz_de_comandos_dinamicos_On-the-Fly_CLI, Subagent Spawning & Context Hub (ContextHubBridge), Pipeline_Ingestion_Multimodal_Voz_Vision.*
+*Skills, sandbox Strix, research y on-the-fly — ver también `docs/core/04_Cognitive_Agent_Logic.md`.*

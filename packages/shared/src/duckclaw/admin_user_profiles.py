@@ -1,6 +1,6 @@
 """Admin console operational profiles: tenant, Telegram and channels per login user.
 
-Spec: specs/features/platform/ADMIN_USER_AGENT_WORKSPACES.md
+Spec: docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md
 """
 
 from __future__ import annotations

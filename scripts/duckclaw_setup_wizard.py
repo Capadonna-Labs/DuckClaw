@@ -2,9 +2,9 @@
 """DuckClaw setup wizard: interactive install with Rich (legacy).
 
 Para el flujo v2.0 (máquina de estados, borrador hasta Review, atajos): ``duckops init``.
-Spec: ``specs/features/platform/SOVEREIGN_WIZARD_V2.md``.
+Spec: ``docs/GETTING_STARTED.md``.
 
-Spec histórica: specs/FLUJO_VIDA_DATO_PIPELINE.md — gestiona DuckClaw-Gateway & DuckClaw-DB-Writer.
+Spec histórica: docs/core/00_Flujo de Vida del Dato (Wizard).md — gestiona DuckClaw-Gateway & DuckClaw-DB-Writer.
 """
 
 from __future__ import annotations
@@ -1473,7 +1473,7 @@ def _ensure_mcp_yaml_telegram_enabled(repo_root: Path) -> None:
 def _ensure_default_mcp_telegram_integration(repo_root: Path, console: Console | None = None) -> None:
     """
     Habilita por defecto el primer integrador MCP (Telegram egress) tras forjar un agente
-    o configurar el API Gateway (spec: Telegram MCP Integration).
+    o configurar el API Gateway (docs/operations/TELEGRAM.md).
     """
     _write_env_file(repo_root, "DUCKCLAW_TELEGRAM_MCP_ENABLED", "1")
     _ensure_mcp_yaml_telegram_enabled(repo_root)

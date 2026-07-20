@@ -93,4 +93,4 @@ Evitar JSON intermedio: DuckDB → Arrow (RecordBatch/Table) → consumo en Pyth
 
 ---
 
-*Consolidado desde: Estructura_Basada_en_Grafos_DuckDB_PGQ_GraphRAG, DuckDB_Native_RAG_Vector_Search, Pipeline_de_Datos_Zero-Copy_con_PyArrow, Estrategia_Persistencia_y_Modelamiento_BD, Sovereign_CRM_Memoria_Bicameral_DuckDB_PGQ, Subagent Spawning (LEARNED_WORKAROUND PGQ).*
+*Memoria analítica: SQL + PGQ + VSS — ver también `docs/architecture/tri_cameral_memory.md`.*

@@ -594,7 +594,7 @@ def resolve_template_vault_path(
 ) -> str | None:
     """
     Resuelve ruta absoluta de bóveda según binding de plantilla y usuario del chat.
-    Ver specs/features/platform/TEMPLATE_VAULT_BINDING.md
+    Ver docs/architecture/MULTI_VAULT_SYSTEM.md
     """
     norm = normalize_vault_binding(binding)
     if not norm:

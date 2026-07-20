@@ -103,7 +103,7 @@ def _run_bot() -> None:
         )
         """
     )
-    # GraphRAG (spec: Estructura_Basada_en_Grafos_DuckDB_PGQ_GraphRAG.md): memory_nodes, memory_edges, duckclaw_kg
+    # GraphRAG (docs/architecture/tri_cameral_memory.md): memory_nodes, memory_edges, duckclaw_kg
     try:
         from duckclaw.graphs.graph_rag import ensure_graph_rag_schema
         ensure_graph_rag_schema(db)
@@ -127,7 +127,7 @@ def _run_bot() -> None:
                 self._handle_setup(message, text, chat_id)
                 return
 
-            # On-the-Fly CLI (spec: interfaz_de_comandos_dinamicos_On-the-Fly_CLI.md)
+            # On-the-Fly CLI (docs/core/04_Cognitive_Agent_Logic.md)
             from duckclaw.graphs.on_the_fly_commands import handle_command
             # tenant_id (por defecto) porque TelegramBot no define multi-tenant en este módulo.
             # request identity para whitelist del comando /team.

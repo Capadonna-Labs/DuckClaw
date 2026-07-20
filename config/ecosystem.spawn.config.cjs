@@ -1,6 +1,6 @@
 /**
  * PM2 — Perfil genérico Spawn (Gateway + Admin UI).
- * Spec: specs/features/platform/SPAWN_GENERIC_DEPLOY.md
+ * Spec: docs/architecture/infra-bootstrap.md
  */
 const path = require("path");
 const root = path.resolve(__dirname, "..");

@@ -3,7 +3,7 @@
 El Gateway suele ejecutarse sin PyTorch ni DUCKCLAW_MLX_EMBEDDINGS_URL; sin esto embed_text=None
 y la VSS “silenciosa”. El fallback permite buscar contenido persisted (READY, PENDING o FAILED).
 
-Spec alineación: docs/specs/features/platform/RAG_TRANSVERSAL_DB_FIRST.md.
+Alineación RAG: docs/architecture/DB_FIRST_CORE_REFACTOR.md + docs/architecture/tri_cameral_memory.md.
 """
 
 from __future__ import annotations

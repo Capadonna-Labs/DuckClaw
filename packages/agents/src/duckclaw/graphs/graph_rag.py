@@ -1,4 +1,4 @@
-# specs/Estructura_Basada_en_Grafos_DuckDB_PGQ_GraphRAG.md
+# docs/architecture/tri_cameral_memory.md
 
 """Memoria estructural basada en grafos (DuckDB PGQ / GraphRAG).
 

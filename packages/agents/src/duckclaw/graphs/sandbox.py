@@ -1,4 +1,4 @@
-# specs/Sandbox_de_Ejecucion_Libre_Basado_en_Strix.md
+# docs/core/03_Skills_and_Tooling_Framework.md
 
 """Strix Sandbox: entorno de ejecución libre aislado con Docker.
 
@@ -293,7 +293,7 @@ def _inject_sandbox_python_header(code: str) -> str:
 class StrixSandboxManager:
     """Gestiona el ciclo de vida de contenedores Docker para ejecución aislada.
 
-    Spec: sección 4 y 6 de Sandbox_de_Ejecucion_Libre_Basado_en_Strix.md
+    Strix sandbox lifecycle (docs/core/03_Skills_and_Tooling_Framework.md)
     - network_mode=none (Zero exfiltration)
     - --cap-drop=ALL
     - mem_limit=768m (default DuckClaw; Python + Playwright headroom)
@@ -468,7 +468,7 @@ class StrixSandboxManager:
     ) -> ExecutionResult:
         """Ejecuta código arbitrario en el sandbox del session_id dado.
 
-        Sección 4 de la spec: Execution + Monitoring + Artifact Retrieval.
+        Execution + Monitoring + Artifact Retrieval.
         """
         data_dir, out_dir = self._session_dirs(session_id)
 
@@ -819,7 +819,7 @@ def data_inject(db: Any, sql: str, session_id: str) -> str:
     """Exporta el resultado de un SELECT al directorio data/ de la sesión del sandbox.
 
     Spec (sección 3): firewall de datos — el sandbox solo ve un Parquet/CSV read-only.
-    Usa SandboxDataChannel (spec Pipeline_de_Datos_Zero-Copy_con_PyArrow.md):
+    Usa SandboxDataChannel (zero-copy / PyArrow path):
       - Parquet (columnar, tipado, ≈5× más compacto) cuando PyArrow está disponible.
       - CSV como fallback automático.
     Devuelve la ruta al archivo generado.
@@ -1350,7 +1350,7 @@ def _browser_sandbox_summary(stdout: str, artifacts: list[str]) -> tuple[str, in
 
 
 class MercenaryResultObject(BaseModel):
-    """Contrato mínimo de /workspace/output/result.json (spec: Caged_Beast_Mercenary)."""
+    """Contrato mínimo de /workspace/output/result.json."""
 
     model_config = ConfigDict(extra="allow")
 

@@ -255,7 +255,7 @@ def build_spec_from_manifest(
             except (TypeError, ValueError):
                 agent_node_max_tool_rounds = None
 
-    # Telegram / egress: síntesis LLM para evitar JSON crudo (default on; spec: worker-telegram-natural-language-egress.md)
+    # Telegram / egress: síntesis LLM para evitar JSON crudo (default on; docs/operations/TELEGRAM.md)
     _enl = data.get("egress_natural_language_synthesis")
     if _enl is None:
         egress_natural_language_synthesis = True

@@ -1,6 +1,6 @@
 """DB-first runtime settings for DuckClaw Admin.
 
-Spec: specs/features/platform/ADMIN_RUNTIME_SETTINGS.md
+Spec: docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md
 """
 
 from __future__ import annotations

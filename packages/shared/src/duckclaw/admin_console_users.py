@@ -1,8 +1,8 @@
 """
 Usuarios de la consola web (duckclaw-admin) en el hub DuckDB del gateway.
 
-Spec: specs/features/platform/ADMIN_ACCESS_MANAGEMENT.md
-Auth crypto: specs/features/platform/ADMIN_CONSOLE_AUTH.md
+Spec: docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md
+Auth crypto: docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md
 """
 
 from __future__ import annotations

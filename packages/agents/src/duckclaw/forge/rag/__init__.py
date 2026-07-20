@@ -1,6 +1,6 @@
 """DuckDB Native RAG — Vector Similarity Search para catálogos.
 
-Spec: specs/DuckDB_Native_RAG_Vector_Search.md
+Spec: docs/architecture/tri_cameral_memory.md
 """
 
 from duckclaw.forge.rag.embeddings import embed_text, get_embedding_model

@@ -94,4 +94,4 @@ Cotizaciones agnósticas al canal de entrega.
 
 ---
 
-*Consolidado desde: Estandar_de_Agentes_Homeostaticos, sistema_de_plantillas_de_agentes_virtual_worker_factory, Protocolo_Escalamiento_Humano_HITL_Handoff, gestion_de_ventana_de_contexto_memory_windowing, Pipeline_de_Evaluacion_y_Validación_de_Modelos_(Model-Guard), Subagent Spawning & Context Hub (Planner, Send, Aggregator, SSE), RAG_Fact_Checker_Context_Guard, Motor_Cotizacion_Omnicanal_QuoteEngine, Migracion_de_Pipeline_de_Entrenamiento_(GRPO_a_SFT_con_MLX).*
+*Lógica agéntica — ver también `docs/operations/Homeostasis-Heartbeat.md` y `docs/architecture/DB_FIRST_CORE_REFACTOR.md`.*

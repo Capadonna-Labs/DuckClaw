@@ -75,4 +75,4 @@ Opcionales: `CHAT_PARALLEL_INVOCATIONS`, `DUCKCLAW_HEARTBEAT_WEBHOOK_URL`, `HEAR
 
 `/team`, `/team --add <id> [admin]`, `/workers`, `/vault`, `/heartbeat on|off`, `/context on|off`.
 
-Ver [`ADMIN_ACCESS_MANAGEMENT.md`](../platform/ADMIN_ACCESS_MANAGEMENT.md) para whitelist y grants de DB compartida.
+Ver [`ADMIN_IDENTITY_RBAC_ERD.md`](../architecture/ADMIN_IDENTITY_RBAC_ERD.md) para whitelist y grants de DB compartida.

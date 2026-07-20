@@ -1,7 +1,7 @@
 """
 Password hashing and login delay for admin console users.
 
-Spec: specs/features/platform/ADMIN_CONSOLE_AUTH.md
+Spec: docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """
 Context-Guard: FactCheckerNode y SelfCorrectionNode para prevención de alucinaciones.
 
-Spec: specs/RAG_Fact_Checker_Context_Guard.md
+Spec: docs/architecture/tri_cameral_memory.md
 
 Próxima fase (retail, salida determinista):
     Añadir un paso de validación **después** del modelo (p. ej. en ``set_reply`` del

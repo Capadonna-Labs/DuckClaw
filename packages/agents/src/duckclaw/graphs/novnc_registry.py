@@ -1,6 +1,6 @@
 """Registro en memoria: token noVNC → puerto host, TTL y limpieza del sandbox browser.
 
-specs/features/platform/STRIX_BROWSER_NOVNC.md
+docs/core/03_Skills_and_Tooling_Framework.md
 """
 
 from __future__ import annotations

@@ -151,7 +151,7 @@ Hito 1 y 2 del corte infra — resumen en este documento (§ Hito 1).
 
 ### Hito 1 — Purge Quant/Finanz/Trading Del Core
 
-- **Estado:** completado. Spec de aceptacion: [`INFRA_BOOTSTRAP_VERTICAL_PURGE_SDD.md`](INFRA_BOOTSTRAP_VERTICAL_PURGE_SDD.md) (seccion Hito 1).
+- **Estado:** completado. Criterio de aceptación: [`infra-bootstrap.md`](infra-bootstrap.md).
 - Eliminados del monorepo: `packages/agents/src/duckclaw/quant/*`, `packages/agents/src/duckclaw/finance/*`, `packages/agents/src/duckclaw/forge/code_decision_service.py`, `packages/agents/src/duckclaw/forge/skills/quant_investor_profile.py`, `services/db-writer/quant_state_delta_handler.py` y `services/db-writer/models/quant_state_delta.py`.
 - Producto vertical (broker, fly commands de trading, quant_state_delta) vive en checkout **Capadonna-Driller** bajo `workers/duckclaw/lib/`. El core ya no incluye `duckclaw.capadonna_plugin`; deltas de producto se ignoran en core via `duckclaw.state_delta_enqueue` (solo enruta tipos transversales). **HITL transversal** vive en `duckclaw.hitl.*` + tablas `main.*`.
 - `on_the_fly_commands.py`: HITL fly commands delegan en `duckclaw.commands.hitl` → `duckclaw.hitl.*`; sin fallback `dispatch_capadonna_fly_command`. Admin `/code/*` y `/uncertainty/resolve` usan los mismos servicios transversales.
@@ -549,5 +549,5 @@ Estado de routers citados en `DB_FIRST_READ_WRITE_ALLOWLIST` / revision manual:
 
 - Genericizar scripts Sensory legacy (`patch_tts_production_env.py`, `test_sensory_tts.py`, `test_tts_duration_remote.py`, `check_tts_amplitude.py`) para resolver voces desde manifest/env administrado, o moverlos fuera del core si siguen siendo smoke scripts de dominio.
 - Extender UI/admin runtime settings para exponer `gateway.default_tenant_id` y otros defaults transversales solo si el admin necesita gestionarlos desde pantalla; el contrato DB-first ya existe.
-- Extender el barrido de residuos laborales y verticales fuera del runtime core separando menciones negativas de specs/tests contra ejemplos runtime.
+- Extender el barrido de residuos laborales y verticales fuera del runtime core separando menciones negativas de tests contra ejemplos runtime.
 - Mantener tests guardrail cerca del contrato. Cada cleanup que cierre un residuo debe retirar o estrechar su allowlist.

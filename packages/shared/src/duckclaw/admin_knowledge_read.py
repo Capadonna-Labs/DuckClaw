@@ -3,7 +3,7 @@
 Owner module for SELECTs against ``main.admin_knowledge_*`` used by the admin
 gateway and other read-only callers. Mutations stay in typed write commands.
 
-Spec: docs/specs/features/platform/RAG_TRANSVERSAL_DB_FIRST.md
+Spec: docs/architecture/DB_FIRST_CORE_REFACTOR.md
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 # Gateway ↔ DB-Writer Boundaries
 
-Complementa `GATEWAY_PROCESS_BOUNDARIES.md` (RAG/Indexer) y `DB_WRITER_CONTRACT.md` (colas SQL).
+Complementa `GATEWAY_PROCESS_BOUNDARIES.md` (RAG/Indexer) y `../api/DB_WRITER_CONTRACT.md` (colas SQL).
 
 ## Principio
 

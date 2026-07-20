@@ -52,7 +52,7 @@ export default function SensoryNodePageView({ embedded = false }: EmbeddedViewPr
                 </li>
               </ul>
               <p className="mt-2 text-xs text-gov-gray-500">
-                Spec: integrations/sensory-node/SPEC.MD
+                Código: integrations/sensory-node/
               </p>
             </section>
 

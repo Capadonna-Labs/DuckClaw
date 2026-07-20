@@ -30,7 +30,7 @@ Tras cambiar la clave: `pm2 restart DuckClaw-Gateway --update-env`.
 
 ### Perfil Spawn (VM genérica)
 
-Instalación day-zero vía [`scripts/deploy/spawn-install.sh`](../../../scripts/deploy/spawn-install.sh). Plantilla raíz: [`config/.env.spawn.example`](../../../config/.env.spawn.example). Spec: [`SPAWN_GENERIC_DEPLOY.md`](../../../specs/features/platform/SPAWN_GENERIC_DEPLOY.md).
+Instalación day-zero vía [`scripts/deploy/spawn-install.sh`](../../../scripts/deploy/spawn-install.sh). Plantilla raíz: [`config/.env.spawn.example`](../../../config/.env.spawn.example).
 
 - `DUCKCLAW_SPAWN_PROFILE=1` — perfil sin multiplex workers ni esquemas de producto vertical.
 - PM2: `config/ecosystem.spawn.config.cjs` (procesos `duckclaw-gateway`, `duckclaw-admin-ui`).
@@ -84,7 +84,7 @@ DUCKCLAW_ADMIN_PORT=3001 uv run python scripts/restore_tailscale_admin_serve.py
 En el iPhone/Android (app Tailscale conectada): `https://<nombre-maquina>.<tailnet>.ts.net:8443/`  
 Ejemplo: `https://mac-mini-de-juan.tailc85db0.ts.net:8443/`
 
-Login: credenciales en hub DuckDB (`DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASSWORD` en `.env` raíz). Ver [`specs/features/platform/ADMIN_CONSOLE_AUTH.md`](../../../specs/features/platform/ADMIN_CONSOLE_AUTH.md).
+Login: credenciales en hub DuckDB (`DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASSWORD` en `.env` raíz). Ver [`docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md`](../../../docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md).
 
 Para apagar el proxy admin: `tailscale serve --https=8443 off`
 

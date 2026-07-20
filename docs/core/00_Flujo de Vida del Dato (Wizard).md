@@ -172,7 +172,7 @@ O como PM2: `DuckClaw-DB-Writer`.
 
 | Ruta | Descripción |
 | ---- | ----------- |
-| `specs/features/telegram-gateway/TELEGRAM.md` | Webhook inbound, multiplex y variables esenciales. |
+| `docs/operations/TELEGRAM.md` | Webhook inbound, multiplex y variables esenciales. |
 
 
 **Flujo Telegram webhook inbound:**
@@ -289,7 +289,7 @@ Todo el tráfico pasa por el microservicio `services/api-gateway`.
 | **Sincronizar VPS**                       | `packages/shared/scripts/sync_telegram_duckdb.sh`                                      |
 | **Tests pipeline**                        | `tests/run_singleton_writer_pipeline.py`                                               |
 
-Owner canónico del contrato singleton writer: `duckclaw.db_write_queue`, según `docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`. La fachada Forge queda solo como compatibilidad externa temporal.
+Owner canónico del contrato singleton writer: `duckclaw.db_write_queue`, según `docs/architecture/DB_FIRST_CORE_REFACTOR.md`. La fachada Forge queda solo como compatibilidad externa temporal.
 
 ---
 
@@ -298,7 +298,7 @@ Owner canónico del contrato singleton writer: `duckclaw.db_write_queue`, según
 El wizard es el punto de entrada para configurar y desplegar todo el pipeline. Hay dos implementaciones:
 
 - **Legacy (Rich):** `duckops init` → `scripts/duckclaw_setup_wizard.py` — flujo secuencial con Rich; persistente en pasos intermedios.
-- **Sovereign v2.0:** `duckops init` — máquina de estados, lenguaje soberano en UI, borrador hasta *Review & Deploy*; spec dedicada `specs/features/platform/SOVEREIGN_WIZARD_V2.md`.
+- **Sovereign v2.0:** `duckops init` — máquina de estados, lenguaje soberano en UI, borrador hasta *Review & Deploy*.
 
 Sustituye scripts `.sh` por un CLI en Python: mantenible, cross-platform (macOS, Linux, Windows) y con control de datos sensibles (Habeas Data).
 

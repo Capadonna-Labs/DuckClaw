@@ -24,6 +24,7 @@ dependencies = [
     "mcp>=1.0.0; python_full_version >= '3.10'",
     "google-trends-mcp>=1.0.2; python_full_version >= '3.10'",
     "matplotlib>=3.8.0",
+    "libzim>=3.11.0",
 ]
 
 [project.optional-dependencies]

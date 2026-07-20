@@ -20,5 +20,5 @@ Implementación: `services/db-writer/`.
 ## Ver también
 
 - [Singleton Writer](../architecture/singleton_writer.md)
-- [COMANDOS](../COMANDOS.md) — PM2 y `uv run python services/db-writer/main.py`
-- Contrato: [Singleton Writer](../architecture/singleton_writer.md)
+- [Contrato DB-Writer](DB_WRITER_CONTRACT.md)
+- [Getting started](../GETTING_STARTED.md) — PM2 y `uv run python services/db-writer/main.py`

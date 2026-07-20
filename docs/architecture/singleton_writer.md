@@ -20,14 +20,14 @@ DuckClaw enforces a single mutation path: **`services/db-writer`** is the only c
 - Write permissions are not distributed to template workers.
 - Any new mutation path must remain compatible with the singleton contract.
 
-## Related specs
+## Related docs
 
-- Published hub: [Specs index](../specs/index.md)
-- Repo canonical (read in Git): `specs/core/01_System_Infrastructure.md` — infrastructure and service boundaries.
-- Purge vertical / DB-first: `docs/specs/features/platform/DB_FIRST_CORE_REFACTOR.md`
+- Core infra: [`../core/01_System_Infrastructure.md`](../core/01_System_Infrastructure.md)
+- DB-first: [`DB_FIRST_CORE_REFACTOR.md`](DB_FIRST_CORE_REFACTOR.md)
+- Contrato cola/ledger: [`../api/DB_WRITER_CONTRACT.md`](../api/DB_WRITER_CONTRACT.md)
 
 ## Related operations
 
 - [Operations hub](../operations/index.md)
-- [Commands (COMANDOS)](../COMANDOS.md) — Redis queues, DB-Writer PM2 / manual run
+- [Getting started](../GETTING_STARTED.md) — Redis queues, DB-Writer PM2
 - [DB Writer API (HTTP + Python)](../api/db_writer.md)

@@ -50,7 +50,7 @@ cd apps/duckclaw-admin && npx tsx src/lib/manifestSkillsEdit.test.ts
 
 ## Roles y permisos en UI
 
-- Sesión: cookie HttpOnly `session` + `csrf_token` (ver [`specs/features/platform/ADMIN_CONSOLE_AUTH.md`](../../../specs/features/platform/ADMIN_CONSOLE_AUTH.md))
+- Sesión: cookie HttpOnly `session` + `csrf_token` (ver [`docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md`](../../../docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md))
 - Store: `src/store/authStore.ts` — hidrata vía `/api/admin/auth/me`
 - BFF deriva el rol desde la sesión en gateway (no confía en headers del cliente)
 - Mutaciones: `adminService` envía `X-CSRF-Token` desde la cookie `csrf_token`

@@ -106,5 +106,5 @@ Contadores incrementales (`INCRBY`), sin TTL por defecto:
 
 - Implementación: `services/db-writer/main.py`, `services/db-writer/db_writer_ops.py`
 - Cola shared: `packages/shared/src/duckclaw/db_write_queue.py`
-- Arquitectura: [`docs/architecture/singleton_writer.md`](../../../architecture/singleton_writer.md)
-- DB-first: [`DB_FIRST_CORE_REFACTOR.md`](DB_FIRST_CORE_REFACTOR.md)
+- Arquitectura: [`../architecture/singleton_writer.md`](../architecture/singleton_writer.md)
+- DB-first: [`../architecture/DB_FIRST_CORE_REFACTOR.md`](../architecture/DB_FIRST_CORE_REFACTOR.md)

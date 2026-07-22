@@ -157,7 +157,7 @@ class PlaygroundChatBody(BaseModel):
         max_length=512,
         description="Override DuckDB por conversación (prioridad sobre manifest del worker).",
     )
-    images: list[PlaygroundImageIn] = Field(default_factory=list, max_length=3)
+    images: list[PlaygroundImageIn] = Field(default_factory=list, max_length=15)
     stream: bool = Field(
         default=False,
         description="Si true, respuesta text/event-stream (tokens SSE + [DONE]).",

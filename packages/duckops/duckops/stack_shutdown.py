@@ -25,6 +25,7 @@ MIGRATE_STOP_PM2_NAMES: tuple[str, ...] = (
     "DuckClaw-DB-Writer",
     "DuckClaw-Knowledge-Indexer",
     "DuckClaw-Heartbeat",
+    "DuckClaw-MCP",
 )
 
 # Perfil spawn / servicios opcionales del monorepo.

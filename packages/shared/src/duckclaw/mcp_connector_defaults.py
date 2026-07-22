@@ -88,7 +88,7 @@ def ensure_default_mcp_connectors(
 
     created: list[str] = []
     for preset_id in default_mcp_connector_preset_ids():
-        connector_id = default_mcp_connector_id(preset_id)
+        connector_id = default_mcp_connector_id(preset_id, tenant_id=tenant_id)
         existed = _connector_exists(db, connector_id=connector_id, tenant_id=tenant_id)
         _apply_upsert_mcp_connector(
             db,
@@ -124,7 +124,7 @@ def sync_worker_mcp_grants_from_manifest(
     revoked: list[str] = []
     skills = manifest_skill_names(manifest)
     for preset_id in default_mcp_connector_preset_ids():
-        connector_id = default_mcp_connector_id(preset_id)
+        connector_id = default_mcp_connector_id(preset_id, tenant_id=tenant_id)
         if not _connector_exists(db, connector_id=connector_id, tenant_id=tenant_id):
             continue
         skill_key = manifest_skill_id_for_preset(preset_id)
@@ -209,11 +209,13 @@ def backfill_default_mcp_connectors_and_grants(db: Any) -> dict[str, Any]:
     if not tenant_ids:
         tenant_ids = ["default"]
 
-    connector_summary = ensure_default_mcp_connectors(
-        db, tenant_id=tenant_ids[0], actor_email="system"
-    )
+    connector_summary: dict[str, Any] = {"created": []}
     grant_summary: list[dict[str, Any]] = []
     for tenant_id in tenant_ids:
+        tenant_connectors = ensure_default_mcp_connectors(
+            db, tenant_id=tenant_id, actor_email="system"
+        )
+        connector_summary["created"].extend(tenant_connectors.get("created") or [])
         worker_rows = _fetchall(
             db.execute(
                 "SELECT worker_uid FROM main.admin_worker_catalog "

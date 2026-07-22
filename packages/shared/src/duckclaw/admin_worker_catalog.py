@@ -635,23 +635,7 @@ def update_catalog_worker_file(
             worker_uid=worker_uid,
             manifest=manifest_snapshot,
         )
-        tenant_id = "default"
-        worker = get_worker_by_uid(db, worker_uid)
-        if worker:
-            tenant_id = str(worker.get("tenant_id") or "default")
-        from duckclaw.mcp_connector_defaults import (
-            ensure_default_mcp_connectors,
-            sync_worker_mcp_grants_from_manifest,
-        )
-
-        ensure_default_mcp_connectors(db, tenant_id=tenant_id, actor_email=actor_email)
-        mcp_grants_synced = sync_worker_mcp_grants_from_manifest(
-            db,
-            worker_uid=worker_uid,
-            tenant_id=tenant_id,
-            manifest=manifest_snapshot,
-            actor_email=actor_email,
-        )
+        # MCP connectors/grants: solo Admin (/mcp). No auto-seed ni sync por manifest.
 
     version = add_worker_version(
         db,

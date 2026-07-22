@@ -71,16 +71,20 @@ wait_gateway_health() {
 }
 """.strip()
 
+_MCP_NAME = "DuckClaw-MCP"
+
 _PM2_STOP_BLOCK = f"""
 echo "==> Deteniendo stack PM2…"
 pm2 stop {GATEWAY_NAME} 2>/dev/null || true
 pm2 stop {DB_WRITER_NAME} 2>/dev/null || true
 pm2 stop {INDEXER_NAME} 2>/dev/null || true
 pm2 stop {HEARTBEAT_NAME} 2>/dev/null || true
+pm2 stop {_MCP_NAME} 2>/dev/null || true
 wait_pm2_stopped {GATEWAY_NAME} 15 || true
 wait_pm2_stopped {DB_WRITER_NAME} 15 || true
 wait_pm2_stopped {INDEXER_NAME} 15 || true
 wait_pm2_stopped {HEARTBEAT_NAME} 15 || true
+wait_pm2_stopped {_MCP_NAME} 15 || true
 """.strip()
 
 
@@ -242,12 +246,12 @@ def run_stack_deploy(
     if sync_deps and not run_uv_sync(repo_root=root, print_fn=print_fn):
         return 1
 
-    if migrate:
-        if not run_pm2_stop_stack(print_fn=print_fn, repo_root=root):
-            print_fn("ERROR: no se liberó el lock de DuckDB; abortando migrate")
-            return 1
-        if not run_migrate(repo_root=root, print_fn=print_fn):
-            return 1
+    if not run_pm2_stop_stack(print_fn=print_fn, repo_root=root):
+        print_fn("ERROR: no se liberó el lock de DuckDB; abortando deploy")
+        return 1
+
+    if migrate and not run_migrate(repo_root=root, print_fn=print_fn):
+        return 1
 
     print_fn("==> Reciclando stack PM2 (DB-Writer → Knowledge-Indexer → Heartbeat → Gateway)…")
     shell = stack_deploy_shell(repo_root=root)

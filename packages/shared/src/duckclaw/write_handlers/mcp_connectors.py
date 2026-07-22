@@ -105,7 +105,7 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
         conn.execute(
             """
             UPDATE main.admin_mcp_connectors
-            SET owner_email = ?, display_name = ?, transport = ?, endpoint_url = ?,
+            SET tenant_id = ?, owner_email = ?, display_name = ?, transport = ?, endpoint_url = ?,
                 launch_command = ?, launch_args_json = ?, launch_env_json = ?,
                 auth_kind = ?, auth_secret_key = ?, tool_allowlist_json = ?,
                 tool_denylist_json = ?, read_only = ?, egress_hosts_json = ?,
@@ -114,6 +114,7 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
             WHERE connector_id = ?
             """,
             [
+                tenant_id,
                 actor,
                 display_name,
                 transport,

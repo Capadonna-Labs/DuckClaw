@@ -187,6 +187,10 @@ def test_register_worker_mcp_connector_tools_resolves_catalog_worker_id(
         "duckclaw.forge.skills.mcp_connector_bridge.connect_worker_mcp_connectors",
         _fake_connect,
     )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.mcp_connector_bridge._open_catalog_db",
+        lambda: con,
+    )
 
     tools: list = []
     register_worker_mcp_connector_tools(
@@ -197,7 +201,7 @@ def test_register_worker_mcp_connector_tools_resolves_catalog_worker_id(
     )
     assert len(tools) == 1
     assert tools[0].name == "mcp__mcp_mcp_time__get_current_time"
-    con.close()
+    # Do not close ``con`` here: register uses the monkeypatched catalog handle.
 
 
 def test_factory_tool_builder_passes_worker_id_not_display_name(

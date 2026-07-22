@@ -19,7 +19,7 @@ def test_presets_include_remote_http_oauth_and_stdio_profiles() -> None:
 
     presets = {p["preset_id"]: p for p in list_mcp_connector_presets()}
     assert "remote_http_oauth" in presets
-    assert "remote_http_oauth" in default_mcp_connector_preset_ids()
+    assert default_mcp_connector_preset_ids() == []
     assert presets["remote_http_oauth"]["transport"] == "streamable_http"
     assert presets["remote_http_oauth"]["metadata"]["oauth_pkce"] is True
     assert presets["remote_http_oauth"]["metadata"]["manifest_skill_id"] == "higgsfield"
@@ -27,6 +27,13 @@ def test_presets_include_remote_http_oauth_and_stdio_profiles() -> None:
     assert presets["mcp_fetch"]["transport"] == "stdio"
     assert presets["mcp_fetch"]["launch_command"] == "npx"
     assert preset_payload("unknown") is None
+
+
+def test_default_mcp_connector_id_is_stable() -> None:
+    from duckclaw.mcp_connector_presets import default_mcp_connector_id
+
+    assert default_mcp_connector_id("remote_http_oauth") == "mcp_remote_http_oauth"
+    assert default_mcp_connector_id("notion", tenant_id="tenant-acme") == "mcp_notion"
 
 
 def test_upsert_mcp_connector_from_preset_uses_stable_id() -> None:

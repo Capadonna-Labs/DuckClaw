@@ -20,7 +20,7 @@ def test_migrations_create_expected_tables() -> None:
     con = duckdb.connect(str(tmp / "test.duckdb"))
 
     applied = run_pending_migrations(con)
-    assert len(applied) == 1, f"Expected 1 baseline migration, got {len(applied)}: {applied}"
+    assert len(applied) == 2, f"Expected baseline + productivity migrations, got {len(applied)}: {applied}"
 
     rows = con.execute(
         "SELECT table_name FROM information_schema.tables WHERE table_schema='main'"
@@ -407,16 +407,60 @@ def test_phase4_tables_have_key_columns() -> None:
 
 
 def test_versioned_migrations_use_create_not_alter() -> None:
-    """Fresh installs must not rely on ALTER TABLE in numbered migrations."""
+    """Fresh installs must not rely on ALTER/ADD COLUMN in numbered migrations."""
+    import re
+
     from duckclaw.schema_migrations import _ALL_MIGRATIONS, _LEGACY_MIGRATION_DDL
 
-    alters: list[str] = []
-    for version, name, ddl in _ALL_MIGRATIONS + _LEGACY_MIGRATION_DDL:
+    trap_re = re.compile(
+        r"\b(ALTER\s+TABLE|ADD\s+COLUMN|DROP\s+COLUMN|RENAME\s+COLUMN)\b",
+        re.I,
+    )
+    traps: list[str] = []
+    for version, name, ddl in list(_ALL_MIGRATIONS) + list(_LEGACY_MIGRATION_DDL):
         for stmt in ddl:
-            normalized = stmt.strip().upper()
-            if normalized.startswith("ALTER TABLE"):
-                alters.append(f"v{version:03d}_{name}: {stmt.strip()[:80]}")
-    assert alters == [], f"ALTER in versioned migrations: {alters}"
+            if trap_re.search(stmt):
+                traps.append(f"v{version:03d}_{name}: {stmt.strip()[:100]}")
+    assert traps == [], f"Schema traps in versioned migrations: {traps}"
+
+
+def test_fresh_migrate_starts_clean_without_user_or_mcp_data() -> None:
+    """Dev nuevo: CREATE-only baseline, sin MCP/workers/users; seeds solo de framework."""
+    import duckdb
+    import tempfile
+    from pathlib import Path
+
+    from duckclaw.mcp_connector_presets import (
+        clear_mcp_connector_presets_cache,
+        default_mcp_connector_preset_ids,
+    )
+    from duckclaw.schema_migrations import migrate_gateway_database, run_pending_migrations
+
+    clear_mcp_connector_presets_cache()
+    assert default_mcp_connector_preset_ids() == []
+
+    tmp = Path(tempfile.mkdtemp())
+    db_path = tmp / "fresh.duckdb"
+    applied = migrate_gateway_database(str(db_path), seed_admin=False)
+    assert applied == [1, 2]
+
+    con = duckdb.connect(str(db_path), read_only=True)
+    assert con.execute("SELECT COUNT(*) FROM main.admin_mcp_connectors").fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM main.admin_worker_mcp_grants").fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM main.admin_worker_catalog").fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM main.admin_console_users").fetchone()[0] == 0
+    assert con.execute("SELECT COUNT(*) FROM main.admin_user_profiles").fetchone()[0] == 0
+    # Framework catalog/policies are intentional product seeds, not user config.
+    assert con.execute("SELECT COUNT(*) FROM main.admin_skill_catalog_items").fetchone()[0] > 0
+    assert con.execute("SELECT COUNT(*) FROM main.prompt_policy_registry").fetchone()[0] > 0
+    con.close()
+
+    # Remigrate is a no-op (no ALTER traps / no re-seed explosions).
+    assert migrate_gateway_database(str(db_path), seed_admin=False) == []
+    con2 = duckdb.connect(str(tmp / "empty_only.duckdb"))
+    assert run_pending_migrations(con2) == ["001_baseline_v1", "002_productivity_artifacts_v1"]
+    assert con2.execute("SELECT COUNT(*) FROM main.admin_mcp_connectors").fetchone()[0] == 0
+    con2.close()
 
 
 def test_phase4_check_constraints_reject_invalid() -> None:

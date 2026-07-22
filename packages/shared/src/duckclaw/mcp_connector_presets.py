@@ -184,7 +184,9 @@ def default_mcp_connector_preset_ids() -> list[str]:
     return out
 
 
-def default_mcp_connector_id(preset_id: str) -> str:
+def default_mcp_connector_id(preset_id: str, *, tenant_id: str = "default") -> str:
+    """Stable connector id from preset. ``tenant_id`` kept for call-site compat; unused."""
+    del tenant_id
     return f"mcp_{resolve_preset_id(preset_id)}"
 
 

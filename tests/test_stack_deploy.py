@@ -3,14 +3,42 @@ from __future__ import annotations
 from duckclaw.ops.stack_deploy import HEARTBEAT_NAME, INDEXER_NAME, stack_deploy_shell
 
 
-def test_stack_deploy_shell_includes_indexer_heartbeat_and_recycle() -> None:
+def test_stack_deploy_shell_includes_indexer_heartbeat_mcp_and_recycle() -> None:
     script = stack_deploy_shell(repo_root="/tmp/duckclaw")
     assert INDEXER_NAME in script
     assert HEARTBEAT_NAME in script
+    assert "DuckClaw-MCP" in script
     assert "DuckClaw-Gateway" in script
     assert "DuckClaw-DB-Writer" in script
     assert "pm2 delete" in script
     assert "STACK_DEPLOY_OK" in script
+
+
+def test_run_stack_deploy_always_stops_before_recycle(monkeypatch, tmp_path) -> None:
+    from duckclaw.ops import stack_deploy as mod
+
+    (tmp_path / ".env").write_text("X=1\n", encoding="utf-8")
+    stops: list[bool] = []
+
+    monkeypatch.setattr(mod, "run_uv_sync", lambda **_k: True)
+    monkeypatch.setattr(mod, "run_pm2_stop_stack", lambda **_k: stops.append(True) or True)
+    monkeypatch.setattr(mod, "run_migrate", lambda **_k: (_ for _ in ()).throw(AssertionError("migrate skipped")))
+    monkeypatch.setattr(mod, "_wait_gateway_health", lambda *_a, **_k: True)
+    monkeypatch.setattr(mod, "_pm2_status", lambda _n: "online")
+    monkeypatch.setattr(
+        mod.subprocess,
+        "run",
+        lambda *_a, **_k: type("P", (), {"returncode": 0})(),
+    )
+
+    code = mod.run_stack_deploy(
+        repo_root=tmp_path,
+        print_fn=lambda _m: None,
+        migrate=False,
+        sync_deps=False,
+    )
+    assert code == 0
+    assert stops == [True]
 
 
 def test_run_stack_deploy_full_calls_offline_post(monkeypatch, tmp_path) -> None:

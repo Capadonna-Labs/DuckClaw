@@ -6,7 +6,11 @@ import uuid
 from typing import Any
 
 from duckclaw.report_engine.preview import render_preview_html
-from duckclaw.report_engine.state import init_state_from_schema, patch_section
+from duckclaw.report_engine.state import (
+    init_state_from_schema,
+    merge_missing_schema_sections,
+    patch_section,
+)
 from duckclaw.write_handlers.workspace import _require_project_access
 
 
@@ -289,8 +293,12 @@ def _apply_patch_report_section(conn: Any, payload: dict) -> None:
     _assert_actor_on_instance(conn, instance, actor)
     template = _require_template(conn, str(instance["template_id"]), tenant_id)
 
+    # Plantilla blank ampliada (p. ej. 3 → 15 slots): fusiona huecos nuevos sin borrar datos.
+    base_state = merge_missing_schema_sections(
+        instance["state"], template["section_schema"]
+    )
     state = patch_section(
-        instance["state"],
+        base_state,
         section_id=section_id,
         content=content,
         mode="append" if mode == "append" else "replace",

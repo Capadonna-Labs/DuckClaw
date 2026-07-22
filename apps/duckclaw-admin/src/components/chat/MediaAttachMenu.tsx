@@ -33,7 +33,7 @@ export function MediaAttachMenu({
   liveVoiceAvailable = false,
   liveVoiceActive = false,
   imageCount,
-  maxImages = 3,
+  maxImages = 15,
   variant = 'default',
   onPickImage,
   onPaste,

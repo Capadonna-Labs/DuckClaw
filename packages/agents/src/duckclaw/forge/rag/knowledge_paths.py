@@ -63,6 +63,65 @@ def knowledge_output_roots() -> list[Path]:
     return knowledge_allowed_roots()
 
 
+def relative_path_under_output_root(path: Path, roots: list[Path] | None = None) -> tuple[Path, str] | None:
+    """Si ``path`` cae bajo alguna OUTPUT root, devuelve (root, relative_posix)."""
+    resolved = path.expanduser().resolve()
+    candidates = roots if roots is not None else knowledge_output_roots()
+    best: tuple[Path, str] | None = None
+    best_len = -1
+    for root in candidates:
+        root_r = root.expanduser().resolve()
+        try:
+            rel = resolved.relative_to(root_r)
+        except ValueError:
+            continue
+        if len(str(root_r)) > best_len:
+            best = (root_r, rel.as_posix())
+            best_len = len(str(root_r))
+    return best
+
+
+def replicate_file_to_all_output_roots(
+    primary: Path,
+    *,
+    roots: list[Path] | None = None,
+) -> list[str]:
+    """Copia ``primary`` a todas las OUTPUT roots con la misma ruta relativa.
+
+    Garantiza trazabilidad local (espejo) + nube (Drive) cuando hay varias roots.
+    Devuelve la lista de paths absolutos que quedaron escritos (incluye primary).
+    """
+    import shutil
+
+    primary_r = primary.expanduser().resolve()
+    if not primary_r.is_file():
+        raise ValueError(f"archivo primario no existe: {primary}")
+    out_roots = roots if roots is not None else knowledge_output_roots()
+    if not out_roots:
+        return [str(primary_r)]
+
+    matched = relative_path_under_output_root(primary_r, out_roots)
+    if matched is None:
+        # Primary fuera de roots: solo devolver el path original.
+        return [str(primary_r)]
+
+    _root, rel = matched
+    written: list[str] = []
+    seen: set[str] = set()
+    for root in out_roots:
+        dest = (root.expanduser().resolve() / rel).resolve()
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest != primary_r:
+            shutil.copy2(primary_r, dest)
+        key = str(dest)
+        if key not in seen:
+            seen.add(key)
+            written.append(key)
+    if str(primary_r) not in seen:
+        written.insert(0, str(primary_r))
+    return written
+
+
 def path_under_any_root(target: Path, roots: list[Path]) -> bool:
     resolved = target.expanduser().resolve()
     return any(resolved == root or root in resolved.parents for root in roots)

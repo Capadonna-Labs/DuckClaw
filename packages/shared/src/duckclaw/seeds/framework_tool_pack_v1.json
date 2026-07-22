@@ -13,6 +13,7 @@
     "read_project_knowledge",
     "search_project_knowledge",
     "write_output_document",
+    "delete_output_document",
     "extract_document_text",
     "render_docx_template",
     "export_docx_to_pdf",
@@ -60,6 +61,7 @@
       "read_project_knowledge",
       "search_project_knowledge",
       "write_output_document",
+      "delete_output_document",
       "extract_document_text",
       "render_docx_template",
       "export_docx_to_pdf"
@@ -76,7 +78,8 @@
       "list_project_knowledge",
       "read_project_knowledge",
       "search_project_knowledge",
-      "write_output_document"
+      "write_output_document",
+      "delete_output_document"
     ]
   }
 }

@@ -95,7 +95,12 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         StructuredTool.from_function(
             _read_sql_worker,
             name="read_sql",
-            description="Solo lectura SQL. SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA. Restringe a tablas permitidas del worker.",
+            description=(
+                "Solo lectura SQL (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA) sobre DuckDB del worker. "
+                "Úsala para consultar datos/tablas. "
+                "NO la uses para generar o rellenar un informe Word / informe mensual: "
+                "eso es Report Engine (register_report_template → patch_report_section → render)."
+            ),
         )
     )
 
@@ -199,7 +204,12 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         StructuredTool.from_function(
             _inspect_schema_worker,
             name="inspect_schema",
-            description="Lista las tablas disponibles en la base de datos. Usar para preguntas sobre tablas, esquema o estructura.",
+            description=(
+                "Lista tablas/esquema de la base DuckDB del worker. "
+                "Úsala solo si preguntan qué tablas hay, estructura SQL o esquema. "
+                "NO la uses si piden informe mensual, ejecuciones 1.1/2.1 o rellenar Word: "
+                "esa intención es Report Engine, no inventario de tablas."
+            ),
         )
     )
 

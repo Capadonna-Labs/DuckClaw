@@ -112,6 +112,9 @@ def test_framework_pack_includes_report_engine_guidance() -> None:
     assert "render_report_instance" in content
     assert "patch_report_section" in content
     assert "extract_document_text" in content
+    assert "Disambiguación de intención" in content
+    assert "informe mensual" in content.lower()
+    assert "append_images_to_report" in content
     assert "convert_document" not in content
 
     default = get_framework_policy_content("system_prompt", "default")
@@ -179,3 +182,184 @@ def test_generate_report_docx_from_markdown_happy_path(monkeypatch: pytest.Monke
     assert payload["instance_id"] == "rpt_abc"
     assert payload["relative_path"] == "Informe_N_4_rpt_abc.docx"
     assert calls == ["resumen_ejecutivo"]
+
+
+def test_create_blank_document_blocks_when_conversation_draft_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw.forge.skills import report_engine_bridge as bridge
+
+    monkeypatch.setattr(
+        bridge,
+        "list_report_instances",
+        lambda limit=20: json.dumps(
+            {
+                "instances": [
+                    {
+                        "instance_id": "rpt_existing",
+                        "title": "Evidencias 1.1-1.3",
+                        "same_conversation": True,
+                    }
+                ],
+                "resume_suggestion": "rpt_existing",
+                "count": 1,
+            }
+        ),
+    )
+
+    raw = bridge.create_blank_document(title="Evidencia 1.4 sola")
+    payload = json.loads(raw)
+    assert "error" in payload
+    assert payload.get("resume_instance_id") == "rpt_existing"
+    assert "append_images_to_report" in (payload.get("hint") or "")
+
+
+def test_append_images_to_report_fills_next_free_slot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from duckclaw.forge.skills import report_engine_bridge as bridge
+    from duckclaw.report_engine.blank_template import BLANK_SECTION_SCHEMA
+    from duckclaw.report_engine.state import init_state_from_schema
+
+    img = tmp_path / "shot.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+
+    state = init_state_from_schema(BLANK_SECTION_SCHEMA)
+    state["sections"]["imagen_1"]["content"] = "/old/a.png"
+    state["sections"]["imagen_1"]["status"] = "complete"
+    state["sections"]["imagen_2"]["content"] = "/old/b.png"
+    state["sections"]["imagen_2"]["status"] = "complete"
+    state["sections"]["imagen_3"]["content"] = "/old/c.png"
+    state["sections"]["imagen_3"]["status"] = "complete"
+
+    monkeypatch.setattr(bridge, "_session_scope", lambda: ("default", "samuel@x.com", ""))
+    monkeypatch.setattr(bridge, "_ensure_blank_template_up_to_date", lambda *_a, **_k: "rtpl_blank")
+    monkeypatch.setattr(bridge, "_open_hub_db", lambda: object())
+    monkeypatch.setattr(bridge, "_close_hub_db_if_owned", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "duckclaw.report_engine.admin_report_read.get_report_instance",
+        lambda *_a, **_k: {
+            "instance_id": "rpt_ev",
+            "state": state,
+            "template_id": "rtpl_blank",
+        },
+    )
+    monkeypatch.setattr(
+        "duckclaw.report_engine.admin_report_read.actor_can_access_instance",
+        lambda *_a, **_k: True,
+    )
+
+    patched: list[str] = []
+
+    def _patch_img(**kwargs: object) -> str:
+        patched.append(str(kwargs.get("section_id")))
+        return json.dumps({"ok": True, "section_id": kwargs.get("section_id")})
+
+    monkeypatch.setattr(bridge, "patch_report_image", _patch_img)
+    monkeypatch.setattr(
+        bridge,
+        "patch_report_section",
+        lambda **kwargs: json.dumps({"ok": True, "section_id": kwargs.get("section_id")}),
+    )
+
+    raw = bridge.append_images_to_report(
+        instance_id="rpt_ev",
+        image_paths=str(img),
+        captions="Evidencia ejecución 1.4",
+    )
+    payload = json.loads(raw)
+    assert payload.get("instance_id") == "rpt_ev"
+    assert payload["images_appended"][0]["section_id"] == "imagen_4"
+    assert patched == ["imagen_4"]
+
+
+def test_decode_admin_images_allows_up_to_15() -> None:
+    import sys
+
+    gw = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
+    if str(gw) not in sys.path:
+        sys.path.insert(0, str(gw))
+    from core import vlm_ingest as vlm
+
+    tiny = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    images = [{"mime_type": "image/png", "data_base64": tiny} for _ in range(15)]
+    decoded = vlm.decode_admin_images_payload(images)
+    assert len(decoded) == 15
+    with pytest.raises(ValueError, match="máximo 15"):
+        vlm.decode_admin_images_payload(images + [images[0]])
+
+
+def test_resume_score_prefers_multi_evidence_over_complement() -> None:
+    from duckclaw.forge.skills.report_engine_bridge import _pick_resume, _resume_score
+
+    complement = {
+        "instance_id": "rpt_0f5f3213b0",
+        "title": "EVIDENCIA – EJECUCIÓN 1.4 – JULIO 2025",
+        "output_filename": "EVIDENCIA_EJECUCION_1.4_JULIO_2025_rpt_0f5f3213b0.docx",
+        "same_conversation": True,
+        "status": "ready",
+        "images_filled": 2,
+        "progress": 40,
+    }
+    main = {
+        "instance_id": "rpt_58e9d22888",
+        "title": "EVIDENCIAS – EJECUCIONES 1.1 A 1.4 – JULIO 2025",
+        "output_filename": "EVIDENCIAS_EJECUCIONES_1.1_A_1.4_JULIO_2025_rpt_58e9d22888.docx",
+        "same_conversation": True,
+        "status": "ready",
+        "images_filled": 3,
+        "progress": 70,
+    }
+    assert _resume_score(main) > _resume_score(complement)
+    assert _pick_resume([complement, main]) == "rpt_58e9d22888"
+    assert (
+        _pick_resume(
+            [complement, main],
+            query="EVIDENCIAS_EJECUCIONES_1.1_A_1.4_JULIO_2025_rpt_58e9d22888.docx",
+        )
+        == "rpt_58e9d22888"
+    )
+
+
+def test_resolve_report_instance_by_filename(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw.forge.skills import report_engine_bridge as bridge
+
+    monkeypatch.setattr(
+        bridge,
+        "list_report_instances",
+        lambda limit=50, query="": json.dumps(
+            {
+                "instances": [
+                    {
+                        "instance_id": "rpt_0f5f3213b0",
+                        "title": "EVIDENCIA 1.4",
+                        "output_filename": "EVIDENCIA_EJECUCION_1.4_JULIO_2025_rpt_0f5f3213b0.docx",
+                        "same_conversation": True,
+                        "status": "ready",
+                        "images_filled": 1,
+                        "progress": 30,
+                        "next_free_slot": "imagen_2",
+                    },
+                    {
+                        "instance_id": "rpt_58e9d22888",
+                        "title": "EVIDENCIAS 1.1 A 1.4",
+                        "output_filename": "EVIDENCIAS_EJECUCIONES_1.1_A_1.4_JULIO_2025_rpt_58e9d22888.docx",
+                        "same_conversation": True,
+                        "status": "ready",
+                        "images_filled": 3,
+                        "progress": 70,
+                        "next_free_slot": "imagen_4",
+                    },
+                ],
+                "resume_suggestion": "rpt_58e9d22888",
+                "count": 2,
+            }
+        ),
+    )
+    raw = bridge.resolve_report_instance(
+        "EVIDENCIAS_EJECUCIONES_1.1_A_1.4_JULIO_2025_rpt_58e9d22888.docx"
+    )
+    payload = json.loads(raw)
+    assert payload["instance_id"] == "rpt_58e9d22888"

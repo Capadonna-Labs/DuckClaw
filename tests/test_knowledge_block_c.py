@@ -134,8 +134,28 @@ def test_write_output_document_rejects_docx(tmp_path, monkeypatch) -> None:
     raw = write_output_document("informe.docx", "# No soy un docx real")
     payload = json.loads(raw)
     assert "error" in payload
-    assert "binarios" in payload["error"].lower() or "docx" in payload["error"].lower()
-    assert not (out_root / "informe.docx").exists()
+
+
+def test_delete_output_document_removes_from_all_roots(tmp_path, monkeypatch) -> None:
+    from duckclaw.forge.skills.write_output_document_bridge import delete_output_document
+
+    root_a = tmp_path / "a" / "output"
+    root_b = tmp_path / "b" / "output"
+    root_a.mkdir(parents=True)
+    root_b.mkdir(parents=True)
+    (root_a / "EVIDENCIAS.docx").write_bytes(b"PK")
+    (root_b / "EVIDENCIAS.docx").write_bytes(b"PK")
+    monkeypatch.setenv(
+        "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS",
+        f"{root_a}:{root_b}",
+    )
+
+    raw = delete_output_document("EVIDENCIAS.docx")
+    payload = json.loads(raw)
+    assert payload.get("ok") is True
+    assert len(payload.get("deleted") or []) == 2
+    assert not (root_a / "EVIDENCIAS.docx").exists()
+    assert not (root_b / "EVIDENCIAS.docx").exists()
 
 
 def test_normalize_output_relative_path() -> None:

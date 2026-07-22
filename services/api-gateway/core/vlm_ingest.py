@@ -1401,7 +1401,7 @@ async def _run_vlm_album_from_bytes(
         _vlm_memory_mitigation()
 
 
-_ADMIN_MAX_IMAGES = 3
+_ADMIN_MAX_IMAGES = 15
 
 
 def decode_admin_image_b64(data_base64: str) -> bytes:
@@ -1454,7 +1454,7 @@ def format_attached_image_paths_block(paths: list[str]) -> str:
     """Bloque legible por el agente con las rutas para patch_report_image."""
     if not paths:
         return ""
-    # Mapeo sugerido a huecos de create_blank_document (imagen_1..3).
+    # Mapeo sugerido a huecos de create_blank_document / append_images_to_report.
     lines = [
         f"imagen_{idx} → {path}"
         for idx, path in enumerate(paths[:_ADMIN_MAX_IMAGES], start=1)
@@ -1462,8 +1462,10 @@ def format_attached_image_paths_block(paths: list[str]) -> str:
     listing = "\n".join(lines)
     return (
         "[IMAGENES_ADJUNTAS] Archivos guardados en el vault (NO hace falta VLM). "
-        "Para un documento en blanco: create_blank_document → patch_report_image "
-        "con section_id=imagen_N y la ruta correspondiente → render_report_instance.\n"
+        "Documento NUEVO: create_blank_document → render. "
+        "Documento YA EXISTENTE (agregar más evidencias): list_report_instances → "
+        "append_images_to_report(instance_id, image_paths) → render_report_instance. "
+        "NO crees un Word nuevo si el usuario pide agregar a uno ya construido.\n"
         f"{listing}"
     )
 

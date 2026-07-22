@@ -70,6 +70,48 @@ def write_output_document(relative_path: str, content: str, output_root: str = "
         return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
+def delete_output_document(relative_path: str) -> str:
+    """Elimina un archivo bajo DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS (todas las raíces).
+
+    Acepta .md/.txt y también .docx/.pdf generados por Report Engine.
+    """
+    from duckclaw.forge.rag.knowledge_paths import knowledge_output_roots
+
+    try:
+        rel = (relative_path or "").replace("\\", "/").strip().lstrip("/")
+        if not rel or ".." in rel.split("/"):
+            raise ValueError("relative_path inválido")
+        roots = knowledge_output_roots()
+        if not roots:
+            return json.dumps(
+                {"error": "DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS no configurado"},
+                ensure_ascii=False,
+            )
+        deleted: list[str] = []
+        missing: list[str] = []
+        for root in roots:
+            root_r = root.expanduser().resolve()
+            target = (root_r / rel).resolve()
+            if target != root_r and root_r not in target.parents:
+                raise ValueError(f"Ruta fuera de output: {rel}")
+            if target.is_file():
+                target.unlink()
+                deleted.append(str(target))
+            else:
+                missing.append(str(target))
+        return json.dumps(
+            {
+                "relative_path": rel,
+                "deleted": deleted,
+                "missing": missing,
+                "ok": bool(deleted),
+            },
+            ensure_ascii=False,
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+
 def register_write_output_document_tool(tools_list: list[Any]) -> None:
     tools_list.append(
         StructuredTool.from_function(
@@ -81,7 +123,20 @@ def register_write_output_document_tool(tools_list: list[Any]) -> None:
                 "Prohibido .docx/.pdf/.xlsx. "
                 "Documentos Word por plantilla: Report Engine "
                 "(register_report_template → create → patch → render_report_instance), "
-                "no uses este tool como sustituto del .docx final."
+                "no uses este tool como sustituto del .docx final. "
+                "Para borrar un archivo en output/: delete_output_document."
+            ),
+        )
+    )
+    tools_list.append(
+        StructuredTool.from_function(
+            delete_output_document,
+            name="delete_output_document",
+            description=(
+                "Elimina un archivo en output/ (todas las raíces: local + Drive). "
+                "Úsalo para borrar .docx/.pdf/.md erróneos. "
+                "Para archivar un informe del Report Engine preferí delete_report_instance "
+                "(también puede borrar el .docx renderizado)."
             ),
         )
     )

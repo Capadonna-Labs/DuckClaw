@@ -339,3 +339,20 @@ def test_playground_vlm_all_failed_degrades_instead_of_502(
     assert "VLM" in msg or "visión" in msg
     assert "IMAGENES_ADJUNTAS" in msg
     assert "/vault/inbound/degraded.png" in msg
+
+
+def test_playground_chat_body_accepts_up_to_15_images() -> None:
+    from routers.admin_domains.playground.schemas import PlaygroundChatBody
+
+    imgs = [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64} for _ in range(15)]
+    body = PlaygroundChatBody(worker_id="default", message="evidencias", images=imgs)
+    assert len(body.images) == 15
+
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        PlaygroundChatBody(
+            worker_id="default",
+            message="too many",
+            images=imgs + [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+        )

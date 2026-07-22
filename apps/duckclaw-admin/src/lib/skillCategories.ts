@@ -73,6 +73,7 @@ export const FALLBACK_BASELINE_PROFILES: Record<ToolProfile, string[]> = {
     'read_project_knowledge',
     'search_project_knowledge',
     'write_output_document',
+    'delete_output_document',
     'convert_document',
     'extract_document_text',
     'render_docx_template',
@@ -84,6 +85,7 @@ export const FALLBACK_BASELINE_PROFILES: Record<ToolProfile, string[]> = {
     'read_project_knowledge',
     'search_project_knowledge',
     'write_output_document',
+    'delete_output_document',
   ],
 };
 

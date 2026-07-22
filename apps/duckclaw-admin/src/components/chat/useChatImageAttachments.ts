@@ -87,7 +87,7 @@ function fileToBase64(file: File): Promise<string> {
   });
 }
 
-export function useChatImageAttachments(maxCount = 3, maxBytes = DEFAULT_MAX_BYTES) {
+export function useChatImageAttachments(maxCount = 15, maxBytes = DEFAULT_MAX_BYTES) {
   const [pending, setPending] = useState<PendingChatImage[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);

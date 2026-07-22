@@ -58,8 +58,9 @@ def assert_ready_to_render(
     }
     required_missing = [sid for sid in missing_ids if sid in required_ids]
 
-    # Si no hay flags required en schema legacy, exigir cero missing.
-    if required_ids:
+    # Con schema explícito: solo bloquean required. Huecos opcionales vacíos (blank 1..15) OK.
+    # Sin schema (legacy): exigir cero missing.
+    if schema:
         blockers = required_missing
         label = "secciones required vacías"
     else:

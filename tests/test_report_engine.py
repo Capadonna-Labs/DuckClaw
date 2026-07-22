@@ -105,14 +105,30 @@ def test_image_sections_excluded_from_text_context() -> None:
 
 
 def test_blank_template_schema_has_text_and_image_slots() -> None:
-    from duckclaw.report_engine.blank_template import BLANK_SECTION_SCHEMA
+    from duckclaw.report_engine.blank_template import BLANK_IMAGE_SLOTS, BLANK_SECTION_SCHEMA
 
     kinds = {s["id"]: s.get("kind") for s in BLANK_SECTION_SCHEMA}
     assert kinds.get("intro") == "text"
     assert kinds.get("imagen_1") == "image"
-    assert any(v == "image" for v in kinds.values())
+    assert kinds.get(f"imagen_{BLANK_IMAGE_SLOTS}") == "image"
+    assert kinds.get(f"texto_{BLANK_IMAGE_SLOTS}") == "text"
+    assert sum(1 for v in kinds.values() if v == "image") == BLANK_IMAGE_SLOTS
     assert any(v == "text" for v in kinds.values())
 
+
+def test_merge_missing_schema_sections_preserves_content() -> None:
+    from duckclaw.report_engine.blank_template import BLANK_SECTION_SCHEMA
+    from duckclaw.report_engine.state import init_state_from_schema, merge_missing_schema_sections
+
+    old_schema = [s for s in BLANK_SECTION_SCHEMA if s["id"] in {"titulo", "intro", "imagen_1", "texto_1", "cierre"}]
+    state = init_state_from_schema(old_schema)
+    state["sections"]["imagen_1"]["content"] = "/vault/a.png"
+    state["sections"]["imagen_1"]["status"] = "complete"
+    merged = merge_missing_schema_sections(state, BLANK_SECTION_SCHEMA)
+    assert merged["sections"]["imagen_1"]["content"] == "/vault/a.png"
+    assert "imagen_4" in merged["sections"]
+    assert merged["sections"]["imagen_4"]["kind"] == "image"
+    assert merged["sections"]["imagen_4"]["status"] == "empty"
 
 def test_fit_inline_image_inches_caps_tall_portrait(tmp_path: Path) -> None:
     from PIL import Image

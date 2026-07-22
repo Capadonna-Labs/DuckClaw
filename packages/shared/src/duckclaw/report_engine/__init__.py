@@ -6,6 +6,7 @@ from duckclaw.report_engine.render import render_instance_docx_from_uri
 from duckclaw.report_engine.state import (
     build_render_context,
     init_state_from_schema,
+    merge_missing_schema_sections,
     patch_section,
     summarize_status,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "analyze_docx_template",
     "build_render_context",
     "init_state_from_schema",
+    "merge_missing_schema_sections",
     "patch_section",
     "render_instance_docx_from_uri",
     "render_preview_html",

@@ -25,6 +25,23 @@ def _normalize_kind(raw: Any) -> str:
     return _KIND_IMAGE if str(raw or "").strip().lower() == _KIND_IMAGE else _KIND_TEXT
 
 
+def _entry_from_schema_item(raw: dict[str, Any], sid: str) -> dict[str, Any]:
+    entry = {
+        "status": _SECTION_EMPTY,
+        "content": "",
+        "label": str(raw.get("label") or sid),
+        "required": bool(raw.get("required", False)),
+        "kind": _normalize_kind(raw.get("kind")),
+        "updated_at": "",
+    }
+    if entry["kind"] == _KIND_IMAGE:
+        try:
+            entry["width_in"] = float(raw.get("width_in") or _DEFAULT_IMAGE_WIDTH_IN)
+        except (TypeError, ValueError):
+            entry["width_in"] = _DEFAULT_IMAGE_WIDTH_IN
+    return entry
+
+
 def init_state_from_schema(section_schema: list[dict[str, Any]]) -> dict[str, Any]:
     sections: dict[str, Any] = {}
     for raw in section_schema:
@@ -33,21 +50,31 @@ def init_state_from_schema(section_schema: list[dict[str, Any]]) -> dict[str, An
         sid = str(raw.get("id") or "").strip()
         if not sid:
             continue
-        entry = {
-            "status": _SECTION_EMPTY,
-            "content": "",
-            "label": str(raw.get("label") or sid),
-            "required": bool(raw.get("required", False)),
-            "kind": _normalize_kind(raw.get("kind")),
-            "updated_at": "",
-        }
-        if entry["kind"] == _KIND_IMAGE:
-            try:
-                entry["width_in"] = float(raw.get("width_in") or _DEFAULT_IMAGE_WIDTH_IN)
-            except (TypeError, ValueError):
-                entry["width_in"] = _DEFAULT_IMAGE_WIDTH_IN
-        sections[sid] = entry
+        sections[sid] = _entry_from_schema_item(raw, sid)
     return {"sections": sections}
+
+
+def merge_missing_schema_sections(
+    state: dict[str, Any],
+    section_schema: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Añade huecos del schema que faltan en state (p. ej. imagen_4..15 tras ampliar blank).
+
+    No pisa contenido ni status de secciones ya existentes.
+    """
+    sections = state.get("sections")
+    if not isinstance(sections, dict):
+        sections = {}
+        state = {**state, "sections": sections}
+    for raw in section_schema:
+        if not isinstance(raw, dict):
+            continue
+        sid = str(raw.get("id") or "").strip()
+        if not sid or sid in sections:
+            continue
+        sections[sid] = _entry_from_schema_item(raw, sid)
+    state["sections"] = sections
+    return state
 
 
 def _status_for_content(content: str, *, mark_complete: bool) -> str:

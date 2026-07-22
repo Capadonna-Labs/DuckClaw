@@ -1395,9 +1395,8 @@ def _migration_035_loop_runs_backfill(db: Any) -> None:
 
 
 def _migration_034_default_mcp_higgsfield(db: Any) -> None:
-    from duckclaw.mcp_connector_defaults import backfill_default_mcp_connectors_and_grants
-
-    backfill_default_mcp_connectors_and_grants(db)
+    """Historical no-op: MCP connectors are admin-configured, never seeded by migrate."""
+    del db
 
 
 _M033_HOMEOSTASIS_MAIN = [
@@ -1467,7 +1466,7 @@ _LEGACY_MIGRATION_DDL: list[tuple[int, str, list[str]]] = [
     (29, "skill_catalog_github_mcp", []),
     (30, "user_agent_draft_policy", _M030_USER_AGENT_DRAFT_POLICY),
     (33, "homeostasis_main_schema", _M033_HOMEOSTASIS_MAIN),
-    (34, "default_mcp_higgsfield", []),
+    (34, "default_mcp_higgsfield_noop", []),
     (35, "loop_runs_main", _M035_LOOP_RUNS),
 ]
 

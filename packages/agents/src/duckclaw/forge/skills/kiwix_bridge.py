@@ -295,11 +295,13 @@ def register_kiwix_tools(
 ) -> None:
     """Registra kiwix_search + kiwix_read si hay entorno."""
     try:
+        existing = {getattr(t, "name", None) for t in tools_list}
         search = kiwix_search_tool(config)
-        if search:
+        if search and getattr(search, "name", None) not in existing:
             tools_list.append(search)
+            existing.add(search.name)
         read = kiwix_read_tool(config)
-        if read:
+        if read and getattr(read, "name", None) not in existing:
             tools_list.append(read)
     except Exception as exc:
         _log.warning("kiwix tools no registradas: %s", exc)

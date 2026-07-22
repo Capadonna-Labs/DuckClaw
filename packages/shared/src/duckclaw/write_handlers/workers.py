@@ -149,24 +149,6 @@ def _apply_upsert_worker(conn: Any, payload: dict) -> None:
             ],
         )
 
-    manifest = payload.get("manifest_snapshot")
-    if isinstance(manifest, dict) and existing_uid:
-        from duckclaw.mcp_connector_defaults import (
-            ensure_default_mcp_connectors,
-            sync_worker_mcp_grants_from_manifest,
-        )
-
-        ensure_default_mcp_connectors(
-            conn, tenant_id=tenant_id, actor_email=owner
-        )
-        sync_worker_mcp_grants_from_manifest(
-            conn,
-            worker_uid=existing_uid,
-            tenant_id=tenant_id,
-            manifest=manifest,
-            actor_email=owner,
-        )
-
     system_prompt = str(payload.get("system_prompt", "")).strip()
     if system_prompt:
         existing_context = conn.execute(
@@ -279,22 +261,6 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
             )
     manifest_path = f"db://admin_worker_catalog/{worker_uid}/manifest.json"
 
-    def _sync_mcp_grants() -> None:
-        from duckclaw.mcp_connector_defaults import (
-            ensure_default_mcp_connectors,
-            sync_worker_mcp_grants_from_manifest,
-        )
-
-        actor_email = str(profile.get("email") or actor)
-        ensure_default_mcp_connectors(conn, tenant_id=tenant_id, actor_email=actor_email)
-        sync_worker_mcp_grants_from_manifest(
-            conn,
-            worker_uid=worker_uid,
-            tenant_id=tenant_id,
-            manifest=manifest,
-            actor_email=actor_email,
-        )
-
     existing_user_agent = conn.execute(
         "SELECT worker_id FROM main.admin_user_agents WHERE tenant_id = ? AND worker_id = ?",
         [tenant_id, worker_id],
@@ -321,7 +287,6 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
             actor_email=str(profile.get("email") or actor),
             worker_uid=worker_uid,
         )
-        _sync_mcp_grants()
         _bump_worker_capabilities_catalog_cache(worker_id)
         return
     conn.execute(
@@ -344,7 +309,6 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
         actor_email=str(profile.get("email") or actor),
         worker_uid=worker_uid,
     )
-    _sync_mcp_grants()
     _bump_worker_capabilities_catalog_cache(worker_id)
 
 

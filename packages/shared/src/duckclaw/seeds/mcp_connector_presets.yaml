@@ -1,8 +1,8 @@
 # Packaged MCP connector presets (T1 profiles).
 # Override: DUCKCLAW_MCP_PRESETS_PATH or {DUCKCLAW_REPO_ROOT}/config/mcp_connector_presets.yaml
 
-default_connectors:
-  - remote_http_oauth
+# Vacío a propósito: MCP se crea solo desde Admin (/mcp), no por migrate/boot.
+default_connectors: []
 
 defaults:
   tool_allowlist: ["*"]

@@ -100,7 +100,10 @@ def test_write_output_document_tool(tmp_path, monkeypatch) -> None:
 
     out_root = tmp_path / "vault-out"
     out_root.mkdir()
-    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS", str(out_root))
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.write_output_document_bridge.knowledge_output_roots",
+        lambda: [out_root],
+    )
     monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_AUTO_SYNC", "false")
 
     raw = write_output_document("notes/answer.md", "# Respuesta\n\nContenido generado.")
@@ -114,7 +117,10 @@ def test_write_output_document_respects_explicit_py_extension(tmp_path, monkeypa
 
     out_root = tmp_path / "vault-out"
     out_root.mkdir()
-    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS", str(out_root))
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.write_output_document_bridge.knowledge_output_roots",
+        lambda: [out_root],
+    )
     monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_AUTO_SYNC", "false")
 
     raw = write_output_document("scripts/hola.py", "print('hola')")
@@ -123,12 +129,39 @@ def test_write_output_document_respects_explicit_py_extension(tmp_path, monkeypa
     assert (out_root / "scripts" / "hola.py").read_text(encoding="utf-8") == "print('hola')"
 
 
+def test_write_output_document_dual_writes_all_roots(tmp_path, monkeypatch) -> None:
+    from duckclaw.forge.skills.write_output_document_bridge import write_output_document
+
+    root_a = tmp_path / "local" / "output"
+    root_b = tmp_path / "drive" / "output"
+    root_a.mkdir(parents=True)
+    root_b.mkdir(parents=True)
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.write_output_document_bridge.knowledge_output_roots",
+        lambda: [root_a, root_b],
+    )
+    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_AUTO_SYNC", "false")
+
+    raw = write_output_document(
+        "procedimientos/metricas_archivistas.md",
+        "# Métricas\n\nContenido formal.",
+    )
+    payload = json.loads(raw)
+    assert "error" not in payload, payload
+    assert len(payload.get("paths") or []) == 2
+    assert (root_a / "procedimientos" / "metricas_archivistas.md").is_file()
+    assert (root_b / "procedimientos" / "metricas_archivistas.md").is_file()
+
+
 def test_write_output_document_rejects_docx(tmp_path, monkeypatch) -> None:
     from duckclaw.forge.skills.write_output_document_bridge import write_output_document
 
     out_root = tmp_path / "vault-out"
     out_root.mkdir()
-    monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS", str(out_root))
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.write_output_document_bridge.knowledge_output_roots",
+        lambda: [out_root],
+    )
     monkeypatch.setenv("DUCKCLAW_KNOWLEDGE_AUTO_SYNC", "false")
 
     raw = write_output_document("informe.docx", "# No soy un docx real")

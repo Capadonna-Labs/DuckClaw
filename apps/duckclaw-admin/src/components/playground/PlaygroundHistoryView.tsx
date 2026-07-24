@@ -16,10 +16,18 @@ import type { PlaygroundConfig } from './playgroundTypes';
 export function PlaygroundHistoryView({
   tenantId,
   workers,
+  configLoading = false,
+  configError = null,
+  authHydrated = true,
+  onRetryConfig,
   onSelectConversation,
 }: {
   tenantId?: string;
   workers?: NonNullable<PlaygroundConfig>['workers'];
+  configLoading?: boolean;
+  configError?: string | null;
+  authHydrated?: boolean;
+  onRetryConfig?: () => void;
   onSelectConversation?: (id: string) => void;
 }) {
   const [conversations, setConversations] = useState<AdminConversation[]>([]);
@@ -104,20 +112,42 @@ export function PlaygroundHistoryView({
         </Link>
       </header>
       <div className="scrollbar-thin h-full min-h-0 overflow-y-auto p-4">
-        {!tenantId?.trim() && (
+        {!tenantId?.trim() && !authHydrated && (
           <p className="text-sm text-gov-gray-400 text-center py-10">Cargando perfil…</p>
         )}
-        {tenantId?.trim() && loading && (
+        {authHydrated && !tenantId?.trim() && (
+          <div className="rounded-3xl border border-dashed dark:border-dark-border p-10 text-center">
+            <p className="font-bold dark:text-dark-text">Perfil sin tenant</p>
+            <p className="text-sm text-gov-gray-500 mt-1">
+              No se pudo resolver tu tenant. Recarga la página o vuelve a iniciar sesión.
+            </p>
+          </div>
+        )}
+        {tenantId?.trim() && configError && (
+          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-6 text-center dark:border-amber-900/50 dark:bg-amber-950/20">
+            <p className="text-sm text-amber-900 dark:text-amber-200">{configError}</p>
+            {onRetryConfig ? (
+              <button
+                type="button"
+                onClick={onRetryConfig}
+                className="mt-3 text-xs font-bold rounded-xl bg-gov-blue-700 text-white px-3 py-2 hover:bg-gov-blue-800"
+              >
+                Reintentar configuración
+              </button>
+            ) : null}
+          </div>
+        )}
+        {tenantId?.trim() && (loading || (configLoading && !configError)) && (
           <p className="text-sm text-gov-gray-400 text-center py-10">Cargando historial…</p>
         )}
         {tenantId?.trim() && error && <p className="text-sm text-red-600 text-center py-10">{error}</p>}
-        {tenantId?.trim() && !loading && !error && uniqueConversations.length === 0 && (
+        {tenantId?.trim() && !loading && !error && !(configLoading && !configError) && uniqueConversations.length === 0 && (
           <div className="rounded-3xl border border-dashed dark:border-dark-border p-10 text-center">
             <p className="font-bold dark:text-dark-text">Sin conversaciones</p>
             <p className="text-sm text-gov-gray-500 mt-1">Crea una conversación para verla aquí.</p>
           </div>
         )}
-        {tenantId?.trim() && !loading && !error && uniqueConversations.length > 0 && (
+        {tenantId?.trim() && !loading && !error && !(configLoading && !configError) && uniqueConversations.length > 0 && (
           <ul className="grid gap-2">
             {uniqueConversations.map((conversation) => {
               const isRenaming = renamingSessionId === conversation.session_id;

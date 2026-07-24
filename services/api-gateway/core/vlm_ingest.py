@@ -1474,9 +1474,11 @@ def format_attached_image_paths_block(paths: list[str]) -> str:
 _VISION_INTENT_RE = re.compile(
     r"(?is)\b("
     r"analiz[aeo]|describ[ae]|interpret[ae]|explica|explicame|"
-    r"qu[eé]\s+ves|qu[eé]\s+hay|qu[eé]\s+dice|lee\s+(la\s+)?imagen|"
+    r"qu[eé]\s+ves|qu[eé]\s+hay|qu[eé]\s+dice|lee(r)?\s+(la\s+)?imagen|"
+    r"lee(r)?\s+(esto|esta|la\s+foto|la\s+captura)|"
     r"ocr|extrae\s+(el\s+)?texto|transcribe|resume\s+(la\s+)?imagen|"
     r"identifica|reconoce|compar(a|e)\s+(estas\s+)?imagen|"
+    r"mira\s+(esto|esta|la)|"
     r"visual\s+context|what\s+do\s+you\s+see|describe\s+(this|the)\s+image|"
     r"analyze\s+(this|the)\s+image|read\s+(this|the)\s+image"
     r")\b"
@@ -1491,18 +1493,16 @@ _DOCUMENT_ATTACHMENT_RE = re.compile(
 
 
 def should_run_vlm_for_caption(message: str) -> bool:
-    """VLM es opt-in por intención de visión; adjuntar ≠ analizar.
+    """VLM por defecto cuando hay imagen; solo se omite en adjunto documental puro.
 
-    - Con intención visual explícita → True.
-    - Con intención documental/adjunto (documento, ponla, Word…) → False.
-    - Caption vacío o neutro con imagen → False (solo persistir rutas).
+    - Caption vacío / neutro → True (usuario espera que se lea la imagen).
+    - Intención visual explícita → True.
+    - Solo intención documental (Word/informe/ponla…) sin visión → False.
     """
     text = (message or "").strip()
-    if not text:
-        return False
     if _DOCUMENT_ATTACHMENT_RE.search(text) and not _VISION_INTENT_RE.search(text):
         return False
-    return bool(_VISION_INTENT_RE.search(text))
+    return True
 
 
 def decode_admin_images_payload(
@@ -1533,7 +1533,7 @@ async def enrich_message_with_admin_images(
 ) -> str:
     """
     Carril 1 (siempre): decodifica + persiste bytes → [IMAGENES_ADJUNTAS].
-    Carril 2 (opt-in): VLM solo si la caption pide análisis visual.
+    Carril 2 (default on): VLM salvo caption de adjunto documental puro.
 
     ``force_vlm``: None = auto por intención; True/False fuerza el carril.
     """

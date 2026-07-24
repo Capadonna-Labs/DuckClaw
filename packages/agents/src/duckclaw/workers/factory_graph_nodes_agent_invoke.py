@@ -257,7 +257,6 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 _auto_tools,
                 spec=spec,
             )
-            # #endregion
             _hide_sandbox = should_hide_sandbox_tools(incoming, _intent_incoming)
             if _hide_sandbox:
                 _auto_tools = without_sandbox_tools(_auto_tools)

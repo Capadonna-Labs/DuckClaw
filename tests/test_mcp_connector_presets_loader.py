@@ -111,7 +111,21 @@ def test_list_mcp_connector_presets_includes_all_bundled_ids() -> None:
         "github",
         "mcp_fetch",
         "mcp_time",
+        "spotify",
     }.issubset(presets)
+
+
+def test_spotify_preset_is_stdio_npx() -> None:
+    payload = preset_payload("spotify")
+    assert payload is not None
+    assert payload["display_name"] == "Spotify"
+    assert payload["transport"] == "stdio"
+    assert payload["launch_command"] == "npx"
+    assert payload["launch_args"] == ["-y", "@0xbarandiaran/spotify-mcp-server"]
+    assert payload["read_only"] is False
+    assert payload["metadata"]["manifest_skill_id"] == "spotify"
+    assert payload["metadata"].get("oauth_pkce") is True
+    assert "0xbarandiaran" in str(payload["metadata"].get("docs_url") or "")
 
 
 def test_tavily_preset_is_remote_bearer() -> None:

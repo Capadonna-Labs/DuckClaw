@@ -2,12 +2,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-
-function repoRoot(): string {
-  const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
-  if (fromEnv) return fromEnv;
-  return join(process.cwd(), '..', '..');
-}
+import { repoRoot } from '@/lib/localOps';
 
 export type OfficialMcpServer = {
   id: string;

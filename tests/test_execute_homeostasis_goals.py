@@ -21,6 +21,22 @@ def _disable_sync_manifest_write(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def _patch_sync_writes_store(
+    monkeypatch: pytest.MonkeyPatch,
+    store_holder: dict[str, HomeostasisManifest],
+    saved: list[HomeostasisManifest],
+) -> None:
+    def _sync(_db: Any, _tenant_id: str, manifest: HomeostasisManifest) -> bool:
+        store_holder["store"] = manifest
+        saved.append(manifest)
+        return True
+
+    monkeypatch.setattr(
+        "duckclaw.commands.goals._try_sync_write_homeostasis_manifest",
+        _sync,
+    )
+
+
 def _make_db(path: Path) -> Any:
     from duckclaw import DuckClaw
 
@@ -66,7 +82,7 @@ def test_execute_homeostasis_goals_set_infra(
         return True
 
     monkeypatch.setattr("harness_core.targets.save_homeostasis_manifest", _fake_save)
-    _disable_sync_manifest_write(monkeypatch)
+    _patch_sync_writes_store(monkeypatch, {"store": HomeostasisManifest()}, saved)
     out = execute_homeostasis_goals(db, "5", "--set error_rate_pct 2", tenant_id="t1")
     assert "error_rate_pct" in out
     assert saved and saved[-1].infra.error_rate_pct == 2.0
@@ -87,20 +103,22 @@ def test_execute_homeostasis_goals_add_and_rm(
         ]
     )
 
+    store_holder: dict[str, HomeostasisManifest] = {"store": store}
+    saved: list[HomeostasisManifest] = []
+
     def _fake_save(**kwargs: Any) -> bool:
-        nonlocal store
-        store = kwargs["manifest"]
+        store_holder["store"] = kwargs["manifest"]
         return True
 
     monkeypatch.setattr("harness_core.targets.save_homeostasis_manifest", _fake_save)
     monkeypatch.setattr(
         "harness_core.targets.load_homeostasis_manifest",
-        lambda *_a, **_k: store,
+        lambda *_a, **_k: store_holder["store"],
     )
-    _disable_sync_manifest_write(monkeypatch)
+    _patch_sync_writes_store(monkeypatch, store_holder, saved)
     out_rm = execute_homeostasis_goals(db, "9", "--rm completion_rate_pct", tenant_id="t1")
     assert "eliminada" in out_rm.lower()
-    assert store.goals == []
+    assert store_holder["store"].goals == []
 
 
 def test_execute_homeostasis_goals_migrate(
@@ -119,17 +137,18 @@ def test_execute_homeostasis_goals_migrate(
             }
         ],
     )
-    captured: dict[str, Any] = {}
+    captured: dict[str, Any] = {"store": HomeostasisManifest()}
+    saved: list[HomeostasisManifest] = []
 
     def _fake_save(**kwargs: Any) -> bool:
         captured["manifest"] = kwargs["manifest"]
         return True
 
     monkeypatch.setattr("harness_core.targets.save_homeostasis_manifest", _fake_save)
-    _disable_sync_manifest_write(monkeypatch)
+    _patch_sync_writes_store(monkeypatch, captured, saved)
     out = execute_homeostasis_goals(db, "7", "--migrate", tenant_id="t1")
     assert "Migradas" in out
-    assert captured["manifest"].goals[0].belief_key == "latency_ms"
+    assert saved and saved[-1].goals[0].belief_key == "latency_ms"
 
 
 def _manifest_with_goals() -> HomeostasisManifest:
@@ -154,21 +173,20 @@ def _manifest_with_goals() -> HomeostasisManifest:
 def _patch_manifest_store(
     monkeypatch: pytest.MonkeyPatch, initial: HomeostasisManifest
 ) -> list[HomeostasisManifest]:
-    store = initial
+    store_holder: dict[str, HomeostasisManifest] = {"store": initial}
     saved: list[HomeostasisManifest] = []
 
     def _fake_save(**kwargs: Any) -> bool:
-        nonlocal store
-        store = kwargs["manifest"]
-        saved.append(store)
+        store_holder["store"] = kwargs["manifest"]
+        saved.append(store_holder["store"])
         return True
 
     monkeypatch.setattr("harness_core.targets.save_homeostasis_manifest", _fake_save)
     monkeypatch.setattr(
         "harness_core.targets.load_homeostasis_manifest",
-        lambda *_a, **_k: store,
+        lambda *_a, **_k: store_holder["store"],
     )
-    _disable_sync_manifest_write(monkeypatch)
+    _patch_sync_writes_store(monkeypatch, store_holder, saved)
     return saved
 
 
@@ -179,7 +197,64 @@ def test_execute_homeostasis_goals_rm_all(
     saved = _patch_manifest_store(monkeypatch, _manifest_with_goals())
     out = execute_homeostasis_goals(db, "10", "rm all", tenant_id="t1")
     assert "eliminadas" in out.lower()
+    assert "vacío" in out.lower()
     assert saved and saved[-1].goals == []
+
+
+def test_rm_all_rw_sync_fail_reports_error_not_ok(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """RW worker must not treat async queue-only as success (state drift)."""
+    db = _make_db(tmp_path / "queue_only.duckdb")
+    manifest = _manifest_with_goals()
+    payload = json.dumps(manifest.model_dump(), ensure_ascii=False)
+    db.execute(
+        "INSERT INTO main.homeostasis_targets (tenant_id, targets_json) VALUES (?, ?)",
+        ["t1", payload],
+    )
+    monkeypatch.setattr(
+        "duckclaw.commands.goals._try_sync_write_homeostasis_manifest",
+        lambda *_a, **_k: False,
+    )
+    monkeypatch.setattr("harness_core.targets.save_homeostasis_manifest", lambda **_k: True)
+    out = execute_homeostasis_goals(db, "10", "rm all", tenant_id="t1")
+    assert "sync falló" in out.lower() or "no se pudo guardar" in out.lower()
+    rows = db.execute(
+        "SELECT targets_json FROM main.homeostasis_targets WHERE tenant_id = ?",
+        ["t1"],
+    )
+    assert rows
+    data = json.loads(rows[0][0]) if isinstance(rows[0][0], str) else rows[0][0]
+    assert len(data.get("goals", [])) == 2
+
+
+def test_list_after_rm_all_ignores_legacy_ghost_goals(tmp_path: Path) -> None:
+    """List reflects DB manifest only; no ghost goals from agent_config after rm all."""
+    db = _make_db(tmp_path / "ghost_list.duckdb")
+    manifest = _manifest_with_goals()
+    payload = json.dumps(manifest.model_dump(), ensure_ascii=False)
+    db.execute(
+        "INSERT INTO main.homeostasis_targets (tenant_id, targets_json) VALUES (?, ?)",
+        ["t1", payload],
+    )
+    set_manager_goals(
+        db,
+        "10",
+        [
+            {
+                "belief_key": "ghost_legacy",
+                "target_value": 1.0,
+                "threshold": 0.1,
+                "title": "Ghost legacy",
+            }
+        ],
+    )
+    out_rm = execute_homeostasis_goals(db, "10", "rm all", tenant_id="t1")
+    assert "eliminadas" in out_rm.lower()
+    out_list = execute_homeostasis_goals(db, "10", "", tenant_id="t1")
+    assert "ghost_legacy" not in out_list
+    assert "completion_rate_pct" not in out_list
+    assert "(ninguna)" in out_list
 
 
 def test_execute_homeostasis_goals_rm_by_key_without_dash(

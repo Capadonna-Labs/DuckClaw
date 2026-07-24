@@ -1,11 +1,16 @@
 export type AdminRole = 'admin' | 'user' | 'viewer';
 
+export interface AdminUserProfile {
+  tenant_id?: string;
+}
+
 export interface AdminUser {
   id: string;
   email: string;
   nombre: string;
   rol: AdminRole;
   initials: string;
+  profile?: AdminUserProfile;
 }
 
 export interface TemplateSummary {

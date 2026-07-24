@@ -8,12 +8,10 @@ Salida 1 = ingress roto (Tailscale parado, funnel caído, gateway no responde).
 
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
 import sys
-import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -21,7 +19,6 @@ from pathlib import Path
 from duckops.paths import repo_root
 
 REPO_ROOT = repo_root()
-_DEBUG_LOG = REPO_ROOT / ".cursor" / "debug-77cb49.log"
 
 
 def _load_dotenv() -> None:
@@ -35,23 +32,6 @@ def _load_dotenv() -> None:
             key = k.strip()
             if key and key not in os.environ:
                 os.environ[key] = v.strip().strip("'\"")
-
-
-def _agent_log(message: str, data: dict, hypothesis_id: str) -> None:
-    try:
-        payload = {
-            "sessionId": "77cb49",
-            "timestamp": int(time.time() * 1000),
-            "location": "check_telegram_ingress.py",
-            "message": message,
-            "data": data,
-            "hypothesisId": hypothesis_id,
-            "runId": "ingress-check",
-        }
-        with _DEBUG_LOG.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
 
 
 def _tailscale_running() -> bool:
@@ -108,7 +88,6 @@ def main() -> int:
         if issues:
             for line in issues:
                 print(f"error: {line}", file=sys.stderr)
-            _agent_log("ingress check failed", {"issues": issues}, "H6")
             return 1
         print("ok: sin DUCKCLAW_PUBLIC_URL (solo comprobado gateway local)")
         return 0
@@ -149,11 +128,9 @@ def main() -> int:
     if issues:
         for line in issues:
             print(f"error: {line}", file=sys.stderr)
-        _agent_log("telegram ingress broken", {"issues": issues, "public": public}, "H6")
         return 1
 
     print(f"ok: Telegram ingress ({public} → gateway :{port})")
-    _agent_log("telegram ingress ok", {"public": public, "port": port}, "H6")
     return 0
 
 

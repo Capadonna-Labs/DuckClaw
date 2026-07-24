@@ -1,15 +1,10 @@
 import { join } from 'path';
 import { spawn } from 'child_process';
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { repoRoot } from '@/lib/localOps';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
 import { buildUvRunArgv } from '@/lib/resolveRepoRuntime';
 import { runStackRestartCoreLocal } from '@/lib/stackRestartCore';
-
-function repoRoot(): string {
-  const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
-  if (fromEnv) return fromEnv;
-  return join(process.cwd(), '..', '..');
-}
 
 function runArgv(
   cwd: string,
@@ -48,12 +43,6 @@ function runArgv(
   });
 }
 
-const PREPARE_MIGRATE_PY = [
-  'from pathlib import Path',
-  'from duckops.stack_shutdown import prepare_duckdb_for_migrate',
-  'raise SystemExit(prepare_duckdb_for_migrate(Path(".").resolve()))',
-].join('; ');
-
 /**
  * Detiene PM2 (Gateway/Writer/Indexer/Heartbeat), libera locks DuckDB,
  * aplica migraciones/seeders y vuelve a levantar el stack.
@@ -62,7 +51,7 @@ export async function runStackRecoverLocal(): Promise<NormalizedOpsRunResult> {
   const cwd = repoRoot();
   const chunks: string[] = [];
 
-  const prepareArgv = buildUvRunArgv(['python', '-c', PREPARE_MIGRATE_PY]);
+  const prepareArgv = buildUvRunArgv(['duckops', 'down', '--prepare-migrate']);
   const prepare = await runArgv(cwd, prepareArgv, 90_000);
   chunks.push(
     '── Detener stack + liberar locks DuckDB (antes de migrate) ──\n',

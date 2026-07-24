@@ -30,9 +30,14 @@ def test_decode_admin_image_b64() -> None:
 def test_should_run_vlm_for_caption_separates_document_vs_vision() -> None:
     from core.vlm_ingest import should_run_vlm_for_caption
 
-    assert should_run_vlm_for_caption("") is False
+    # Default: image attached → run VLM (empty / neutral caption).
+    assert should_run_vlm_for_caption("") is True
+    assert should_run_vlm_for_caption("hola") is True
+    assert should_run_vlm_for_caption("leer esta imagen") is True
+    # Document-only still skips.
     assert should_run_vlm_for_caption("pon esta imagen en un documento en blanco") is False
     assert should_run_vlm_for_caption("crea un Word con esta foto") is False
+    # Explicit vision.
     assert should_run_vlm_for_caption("¿Qué ves en la imagen?") is True
     assert should_run_vlm_for_caption("analiza esta captura") is True
     assert should_run_vlm_for_caption("describe la imagen y luego ponla en el informe") is True

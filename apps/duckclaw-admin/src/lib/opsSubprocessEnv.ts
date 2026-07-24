@@ -21,7 +21,6 @@ function augmentPathForOps(pathValue: string | undefined): string {
     '/opt/homebrew/bin',
     '/usr/local/bin',
     `${home}/.local/bin`,
-    '/root/.local/bin',
   ].filter((p, i, arr) => arr.indexOf(p) === i);
   const base = (pathValue || '').trim();
   if (!base) return prefixes.join(':');

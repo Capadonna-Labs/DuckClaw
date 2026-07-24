@@ -62,6 +62,34 @@ def test_upsert_mcp_connector_from_preset_uses_stable_id() -> None:
     con.close()
 
 
+def test_upsert_empty_launch_args_merges_spotify_preset() -> None:
+    """CreateBody defaults launch_args=[] must not block preset package args."""
+    tmp = Path(tempfile.mkdtemp())
+    con = duckdb.connect(str(tmp / "mcp-spotify.duckdb"))
+    run_pending_migrations(con)
+
+    _apply_upsert_mcp_connector(
+        con,
+        {
+            "tenant_id": "default",
+            "actor_email": "admin@test.local",
+            "preset_id": "spotify",
+            "connector_id": "mcp_spotify",
+            "launch_args": [],
+            "metadata": {},
+        },
+    )
+    row = con.execute(
+        "SELECT launch_command, launch_args_json, metadata_json FROM main.admin_mcp_connectors "
+        "WHERE connector_id = 'mcp_spotify'"
+    ).fetchone()
+    assert row is not None
+    assert row[0] == "npx"
+    assert "@0xbarandiaran/spotify-mcp-server" in str(row[1])
+    assert "spotify" in str(row[2]).lower() or "0xbarandiaran" in str(row[2])
+    con.close()
+
+
 def test_upsert_mcp_connector_command_registered() -> None:
     cmd = UpsertMcpConnectorCommand(
         tenant_id="default",

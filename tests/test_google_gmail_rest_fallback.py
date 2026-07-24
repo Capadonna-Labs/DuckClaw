@@ -69,3 +69,77 @@ def test_create_draft_posts_raw() -> None:
     posted = client.post.await_args
     assert posted.args[0].endswith("/users/me/drafts")
     assert "raw" in posted.kwargs["json"]["message"]
+
+
+def test_get_message_rest_success() -> None:
+    resp = MagicMock()
+    resp.status_code = 200
+    resp.content = b'{"id":"19f6fa44a4dec1eb"}'
+    resp.json.return_value = {"id": "19f6fa44a4dec1eb"}
+    resp.text = resp.content.decode()
+
+    client = MagicMock()
+    client.get = AsyncMock(return_value=resp)
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("duckclaw.forge.skills.google_gmail_rest.httpx.AsyncClient", return_value=client):
+        out = asyncio.run(
+            call_google_gmail_rest(
+                "get_message",
+                {"messageId": "19f6fa44a4dec1eb"},
+                headers={"Authorization": "Bearer tok"},
+            )
+        )
+    assert "19f6fa44a4dec1eb" in out
+    assert client.get.await_args.args[0].endswith("/users/me/messages/19f6fa44a4dec1eb")
+
+
+def test_get_message_rejects_gmail_web_link() -> None:
+    list_resp = MagicMock()
+    list_resp.status_code = 200
+    list_resp.content = b'{"messages":[{"id":"19f6fa44a4dec1eb","threadId":"19f6fa44a4dec1eb"}]}'
+    list_resp.json.return_value = {
+        "messages": [{"id": "19f6fa44a4dec1eb", "threadId": "19f6fa44a4dec1eb"}]
+    }
+    list_resp.text = list_resp.content.decode()
+
+    meta_resp = MagicMock()
+    meta_resp.status_code = 200
+    meta_resp.content = b"{}"
+    meta_resp.json.return_value = {
+        "id": "19f6fa44a4dec1eb",
+        "threadId": "19f6fa44a4dec1eb",
+        "snippet": "See What's Shaping the Market",
+        "payload": {
+            "headers": [
+                {"name": "Subject", "value": "See what's moving the markets this week"},
+                {"name": "From", "value": "Seeking Alpha <subscriptions@seekingalpha.com>"},
+                {"name": "Date", "value": "Fri, 17 Jul 2026 05:34:00 -0500"},
+            ]
+        },
+    }
+    meta_resp.text = "{}"
+
+    client = MagicMock()
+    client.get = AsyncMock(side_effect=[list_resp, meta_resp])
+    client.__aenter__ = AsyncMock(return_value=client)
+    client.__aexit__ = AsyncMock(return_value=None)
+
+    with patch("duckclaw.forge.skills.google_gmail_rest.httpx.AsyncClient", return_value=client):
+        out = asyncio.run(
+            call_google_gmail_rest(
+                "get_message",
+                {
+                    "messageId": (
+                        "https://mail.google.com/mail/u/0/#inbox/"
+                        "FMfcgzQhVNfMDHmMskGmCMxCKRmRMGbZ"
+                    )
+                },
+                headers={"Authorization": "Bearer tok"},
+            )
+        )
+    assert "gmail_web_sync_id" in out
+    assert "19f6fa44a4dec1eb" in out
+    assert "Seeking Alpha" in out
+    assert "Do NOT invent" in out

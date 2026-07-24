@@ -25,7 +25,6 @@ export function resolveUvBin(): string {
   const home = process.env.HOME?.trim() || '/root';
   const candidates = [
     join(home, '.local', 'bin', 'uv'),
-    '/root/.local/bin/uv',
     '/usr/local/bin/uv',
   ];
   for (const candidate of candidates) {
@@ -45,22 +44,17 @@ function resolveVenvScript(name: string, root = repoRoot()): string | null {
   return null;
 }
 
-/**
- * Equivalente a `uv run …` con fallback al venv cuando `uv` no está en PATH (PM2 admin).
- * - `['duckclaw-migrate']` → `.venv/bin/duckclaw-migrate`
- * - `['python', '-c', '…']` → venv python -c …
- */
+/** Equivalente a `uv run …` con fallback al venv cuando `uv` no está en PATH (PM2 admin). */
 export function buildUvRunArgv(args: string[], root = repoRoot()): string[] {
+  if (args[0] === 'python') {
+    const py = resolveRepoPython(root);
+    if (py !== 'python3') return [py, ...args.slice(1)];
+  }
+  const script = resolveVenvScript(args[0], root);
+  if (script) return [script, ...args.slice(1)];
   const uv = resolveUvBin();
   if (uv !== 'uv' && existsSync(uv)) {
     return [uv, 'run', ...args];
-  }
-  if (args[0] === 'python') {
-    return [resolveRepoPython(root), ...args.slice(1)];
-  }
-  if (args.length === 1) {
-    const script = resolveVenvScript(args[0], root);
-    if (script) return [script];
   }
   return [uv, 'run', ...args];
 }

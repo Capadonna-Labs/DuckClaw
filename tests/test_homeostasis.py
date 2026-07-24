@@ -264,6 +264,54 @@ def test_register_homeostasis_skill_with_config() -> None:
     assert plan["action"] == "maintain"
 
 
+def test_manage_homeostasis_goals_reuses_bound_worker_db_on_write() -> None:
+    """Writes must not open a second DuckClaw on the same vault path in-process."""
+    from unittest.mock import MagicMock, patch
+
+    from duckclaw.forge.skills.homeostasis_bridge import register_homeostasis_skill
+
+    vault = "/tmp/worker_goals.duckdb"
+    bound = MagicMock()
+    bound._path = vault
+    bound._read_only = False
+
+    spec = type("Spec", (), {
+        "homeostasis_config": {
+            "beliefs": [{"key": "completion_rate_pct", "target": 95.0, "threshold": 2.0}],
+            "actions": [],
+        },
+        "schema_name": "agent_worker",
+    })()
+    tools: list = []
+
+    with patch(
+        "duckclaw.forge.skills.goals_tool_context.get_goals_tool_chat_id",
+        return_value="chat-1",
+    ):
+        with patch(
+            "duckclaw.forge.skills.goals_tool_context.get_goals_tool_db_path",
+            return_value=vault,
+        ):
+            with patch(
+                "duckclaw.forge.skills.goals_tool_context.get_goals_tool_tenant_id",
+                return_value="default",
+            ):
+                with patch("duckclaw.DuckClaw") as duck_ctor:
+                    with patch(
+                        "duckclaw.commands.goals.execute_homeostasis_goals",
+                        return_value="ok",
+                    ) as exec_goals:
+                        register_homeostasis_skill(tools, spec, bound)
+                        mgr = next(t for t in tools if t.name == "manage_homeostasis_goals")
+                        raw = mgr.invoke({"command": "rm all"})
+
+    duck_ctor.assert_not_called()
+    exec_goals.assert_called_once()
+    assert exec_goals.call_args[0][0] is bound
+    payload = json.loads(raw)
+    assert payload["status"] == "ok"
+
+
 def test_loader_ensures_agent_beliefs() -> None:
     """run_schema creates agent_beliefs table in worker schema."""
     from duckclaw.workers.loader import run_schema

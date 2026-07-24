@@ -258,6 +258,16 @@ async def complete_connector_oauth(
         bundle = build_oauth_completion_commands(code=body.code.strip(), state=body.state.strip())
         pending = bundle["pending"]
         tokens = await exchange_mcp_oauth_code_for_token(code=body.code.strip(), pending=pending)
+        from duckclaw.mcp_connector_presets import resolve_preset_id
+
+        if resolve_preset_id(str(pending.get("preset_id") or "")) == "spotify":
+            # Tokens already written to ~/.spotify-mcp/config.json in exchange.
+            return {
+                "ok": True,
+                "task_id": "",
+                "connector_id": str(pending.get("connector_id") or ""),
+                "auth_storage": "spotify_mcp_config",
+            }
         command = SetMcpConnectorAuthCommand(
             tenant_id=str(pending.get("tenant_id") or "default"),
             actor_email=str(pending.get("actor_email") or "system"),
@@ -306,6 +316,10 @@ async def oauth_callback_public(
         bundle = build_oauth_completion_commands(code=code.strip(), state=state.strip())
         pending = bundle["pending"]
         tokens = await exchange_mcp_oauth_code_for_token(code=code.strip(), pending=pending)
+        from duckclaw.mcp_connector_presets import resolve_preset_id
+
+        if resolve_preset_id(str(pending.get("preset_id") or "")) == "spotify":
+            return RedirectResponse(url=ok, status_code=302)
         command = SetMcpConnectorAuthCommand(
             tenant_id=str(pending.get("tenant_id") or "default"),
             actor_email=str(pending.get("actor_email") or "system"),
@@ -332,7 +346,8 @@ async def test_connector(connector_id: str, actor: str = Depends(actor_from_head
         try:
             from duckclaw.forge.skills.mcp_connector_bridge import test_mcp_connector
 
-            return await test_mcp_connector(db, connector)
+            result = await test_mcp_connector(db, connector)
+            return result
         except Exception as exc:
             raise _problem(502, "Test MCP falló", str(exc)) from exc
 

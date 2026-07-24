@@ -12,14 +12,42 @@ from typing import Any, Dict, List, Optional
 from langchain_core.tools import StructuredTool
 
 
+def _same_db_path(left: str, right: str) -> bool:
+    if not left or not right:
+        return False
+    try:
+        from pathlib import Path
+
+        return Path(left).resolve() == Path(right).resolve()
+    except Exception:
+        return left == right
+
+
+def _resolve_goals_tool_db(bound_db: Any, db_path: str, *, writable: bool = False) -> tuple[Any, bool]:
+    """
+    Reuse worker-bound DuckClaw on the same vault file to avoid DuckDB
+    "different configuration than existing connections" in one PID.
+    """
+    base_path = str(getattr(bound_db, "_path", "") or "")
+    want_path = (db_path or base_path or "").strip()
+    if not want_path:
+        return bound_db, False
+    if base_path and _same_db_path(base_path, want_path):
+        return bound_db, False
+    try:
+        from duckclaw import DuckClaw
+
+        return DuckClaw(want_path, read_only=not writable, engine="python"), True
+    except Exception:
+        return bound_db, False
+
+
 def register_goals_alignment_skill(
     tools_list: List[Any],
     db: Any,
 ) -> None:
     """Registra assess_crons_alignment (objetivos /crons vs contexto observable)."""
     try:
-        from pathlib import Path
-
         from duckclaw.homeostasis.goals_alignment import assess_goals_alignment
         from duckclaw.forge.skills.goals_tool_context import (
             get_goals_tool_chat_id,
@@ -30,25 +58,8 @@ def register_goals_alignment_skill(
 
         def _tool_db(*, writable: bool = False) -> Any:
             path = get_goals_tool_db_path()
-            base_path = str(getattr(db, "_path", "") or "")
-            want_path = (path or base_path or "").strip()
-            if not want_path:
-                return db
-            # Same handle: reuse worker DuckClaw (usually RW). Different path: open dedicated.
-            same = False
-            if base_path and want_path:
-                try:
-                    same = Path(base_path).resolve() == Path(want_path).resolve()
-                except Exception:
-                    same = base_path == want_path
-            if same and (not writable or not bool(getattr(db, "_read_only", False))):
-                return db
-            try:
-                from duckclaw import DuckClaw
-
-                return DuckClaw(want_path, read_only=not writable, engine="python")
-            except Exception:
-                return db
+            handle, _close = _resolve_goals_tool_db(db, path, writable=writable)
+            return handle
 
         def assess_crons_alignment() -> str:
             """Mide desalineación entre manifiesto /goals y el contexto observable; devuelve JSON."""
@@ -82,21 +93,8 @@ def register_goals_alignment_skill(
             tid = (get_goals_tool_tenant_id() or "").strip() or "default"
             cmd = (command or "").strip()
             needs_write = bool(cmd)  # empty = list (RO ok); any mutation needs RW
-            if needs_write:
-                # Short-lived RW handle: release DuckDB lock after each mutation so
-                # DB-Writer can apply UPSERT_HOMEOSTASIS_MANIFEST without 24-retry storms.
-                path = (get_goals_tool_db_path() or str(getattr(db, "_path", "") or "")).strip()
-                if path:
-                    from duckclaw import DuckClaw
-
-                    use_db = DuckClaw(path, read_only=False, engine="python")
-                    close_after = True
-                else:
-                    use_db = _tool_db(writable=True)
-                    close_after = use_db is not db and hasattr(use_db, "close")
-            else:
-                use_db = _tool_db(writable=False)
-                close_after = use_db is not db and hasattr(use_db, "close")
+            path = get_goals_tool_db_path() or str(getattr(db, "_path", "") or "")
+            use_db, close_after = _resolve_goals_tool_db(db, path, writable=needs_write)
             try:
                 msg = execute_homeostasis_goals(
                     use_db,
@@ -110,7 +108,18 @@ def register_goals_alignment_skill(
                         use_db.close()
                     except Exception:
                         pass
-            return json.dumps({"status": "ok", "message": msg}, ensure_ascii=False)
+            status = "ok"
+            if msg.startswith("⚠️") or msg.startswith("No se pudo"):
+                status = "error"
+            goal_count: int | None = None
+            if cmd:
+                from duckclaw.commands.goals import _reload_goals_manifest
+
+                goal_count = len(_reload_goals_manifest(use_db, cid, tid).goals or [])
+            payload: dict[str, Any] = {"status": status, "message": msg}
+            if goal_count is not None:
+                payload["goal_count"] = goal_count
+            return json.dumps(payload, ensure_ascii=False)
 
         tools_list.append(
             StructuredTool.from_function(
@@ -128,13 +137,11 @@ def register_goals_alignment_skill(
                 name="manage_homeostasis_goals",
                 description=(
                     "Lista/añade/borra metas homeostasis (/goals). "
-                    "command='' lista; 'rm <belief_key>' o 'rm all'; '--reset' (limpia dominio); "
-                    "texto libre añade meta; '--set error_rate_pct 2' umbral infra; "
-                    "'--monitor <goal_id>' revisión continua; '--task <goal_id>' tarea discreta. "
-                    "CRÍTICO: no llames este tool dos veces en paralelo — serializa "
-                    "(p.ej. un solo 'rm all' o un rm seguido de list en el siguiente round). "
-                    "Tras rm/--reset, vuelve a listar (command='') antes de afirmar que una meta "
-                    "desapareció; nunca inventes cumplimiento de metas borradas."
+                    "command='' lista el manifiesto DB; 'rm all' o 'rm <belief_key>'; '--reset'; "
+                    "texto libre añade meta; '--set error_rate_pct 2'; '--priority <goal_id> <n>'. "
+                    "Un comando por invocación (no repitas list tras cada rm: confía en el ✅). "
+                    "Metas legacy en agent_config solo con '--migrate'. "
+                    "No llames este tool varias veces en paralelo en el mismo turno."
                 ),
             )
         )

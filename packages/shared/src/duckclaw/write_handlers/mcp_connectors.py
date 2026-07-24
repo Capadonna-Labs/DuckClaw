@@ -42,8 +42,13 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
     launch_args = payload.get("launch_args")
     if launch_args is None and preset:
         launch_args = preset.get("launch_args") or []
+    elif isinstance(launch_args, list) and not launch_args and preset:
+        # CreateBody defaults launch_args=[] — empty must not block preset merge.
+        launch_args = preset.get("launch_args") or []
     launch_env = payload.get("launch_env")
     if launch_env is None and preset:
+        launch_env = preset.get("launch_env") or {}
+    elif isinstance(launch_env, dict) and not launch_env and preset:
         launch_env = preset.get("launch_env") or {}
 
     auth_kind = str(payload.get("auth_kind") or "").strip().lower()
@@ -71,6 +76,8 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
         egress_hosts = preset.get("egress_hosts") or []
     metadata = payload.get("metadata")
     if metadata is None and preset:
+        metadata = preset.get("metadata") or {}
+    elif isinstance(metadata, dict) and not metadata and preset:
         metadata = preset.get("metadata") or {}
     enabled = bool(payload.get("enabled", True))
 

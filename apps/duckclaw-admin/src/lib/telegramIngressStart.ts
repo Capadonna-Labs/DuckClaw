@@ -1,12 +1,6 @@
 import { spawn } from 'child_process';
-import { join } from 'path';
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
-
-function repoRoot(): string {
-  const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
-  if (fromEnv) return fromEnv;
-  return join(process.cwd(), '..', '..');
-}
+import { repoRoot } from '@/lib/localOps';
 
 /** Tailscale up + funnel + register_webhooks + check (host local). */
 export async function runTelegramIngressStartLocal(): Promise<NormalizedOpsRunResult> {

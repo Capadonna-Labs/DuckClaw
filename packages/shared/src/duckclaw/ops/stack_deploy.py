@@ -184,13 +184,8 @@ def run_pm2_stop_stack(*, print_fn: PrintFn, repo_root: Path | None = None) -> b
     print_fn("==> Deteniendo stack PM2 (liberar DuckDB antes de migrate)…")
     root = Path(repo_root or Path.cwd()).resolve()
     # No importar duckops desde shared (evita ciclo). Misma lógica que el BFF admin.
-    prepare_py = (
-        "from pathlib import Path; "
-        "from duckops.stack_shutdown import prepare_duckdb_for_migrate; "
-        "raise SystemExit(prepare_duckdb_for_migrate(Path('.').resolve()))"
-    )
     proc = subprocess.run(
-        ["uv", "run", "python", "-c", prepare_py],
+        ["uv", "run", "duckops", "down", "--prepare-migrate"],
         cwd=str(root),
         check=False,
     )

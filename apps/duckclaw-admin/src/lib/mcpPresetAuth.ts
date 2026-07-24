@@ -192,6 +192,12 @@ export function existingPresetIdsFromConnectors(
 
 export function presetAuthHint(preset: McpConnectorPreset): string {
   if (presetUsesOAuthPkce(preset)) {
+    if ((preset.preset_id || '').trim().toLowerCase() === 'spotify') {
+      return (
+        'Tras crear, usa «Conectar OAuth». Requiere SPOTIFY_CLIENT_ID/SECRET en Gateway y ' +
+        'redirect URI de DuckClaw en Spotify Dashboard. Tokens → ~/.spotify-mcp/config.json.'
+      );
+    }
     return 'Se abrirá OAuth del proveedor al confirmar.';
   }
   if (preset.auth_kind === 'bearer') {

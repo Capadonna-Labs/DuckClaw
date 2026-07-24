@@ -1,6 +1,6 @@
 import { spawn } from 'child_process';
-import { join } from 'path';
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { repoRoot } from '@/lib/localOps';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
 import { buildUvRunArgv } from '@/lib/resolveRepoRuntime';
 import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell, pm2RecycleHeartbeatShell, pm2RecycleKnowledgeIndexerShell } from '@/lib/pm2Recycle';
@@ -15,12 +15,6 @@ const SYNC_PM2 = buildUvRunArgv([
     'print("PM2 config sincronizado")',
   ].join('; '),
 ]);
-
-function repoRoot(): string {
-  const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
-  if (fromEnv) return fromEnv;
-  return join(process.cwd(), '..', '..');
-}
 
 function runArgv(
   cwd: string,

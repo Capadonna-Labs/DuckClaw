@@ -175,6 +175,20 @@ presets:
     metadata:
       install: npx -y @modelcontextprotocol/server-time
 
+  # Spotify playback MCP (stdio). Auth = host ~/.spotify-mcp/config.json + `npx … auth`.
+  # Package: @0xbarandiaran/spotify-mcp-server (npm; Feb 2026 API). Not @marcelmarais/… (404).
+  spotify:
+    profile: stdio_npx_rw
+    display_name: Spotify
+    launch_args: ["-y", "@0xbarandiaran/spotify-mcp-server"]
+    metadata:
+      install: npx -y @0xbarandiaran/spotify-mcp-server
+      oauth_pkce: true
+      manifest_skill_id: spotify
+      admin_label: Spotify playback (local stdio · OAuth Admin)
+      docs_url: https://www.npmjs.com/package/@0xbarandiaran/spotify-mcp-server
+      # OAuth Admin escribe ~/.spotify-mcp/config.json (SPOTIFY_CLIENT_ID/SECRET en Gateway).
+
   # ═══════════════════════════════════════════
   # Infra / Cloud
   # ═══════════════════════════════════════════

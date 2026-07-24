@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { join } from 'path';
+import { repoRoot } from '@/lib/localOps';
 import { loadOfficialMcpReferenceFromRepo } from '@/lib/mcpOfficialReference';
 
 const MCP_TOOLS = [
@@ -24,12 +25,6 @@ const MCP_TOOLS = [
     server: 'duckclaw_mcp',
   },
 ] as const;
-
-export function repoRoot(): string {
-  const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
-  if (fromEnv) return fromEnv;
-  return join(process.cwd(), '..', '..');
-}
 
 function seedDir(): string {
   return join(

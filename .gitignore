@@ -118,3 +118,6 @@ debug-*.log
 
 # VPS-only: deploy patches, probes, host-specific ops (never commit)
 _vps_local/
+_vps_*.py
+_probe_*.py
+_verify_*.js

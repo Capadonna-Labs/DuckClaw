@@ -74,12 +74,20 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         return;
       }
       const raw = (data.user ?? data) as Record<string, unknown>;
+      const profileRaw = raw.profile;
+      const tenantId =
+        profileRaw &&
+        typeof profileRaw === 'object' &&
+        typeof (profileRaw as Record<string, unknown>).tenant_id === 'string'
+          ? String((profileRaw as Record<string, unknown>).tenant_id).trim()
+          : '';
       const user: AdminUser = {
         id: String(raw.id ?? `user-${raw.email}`),
         email: String(raw.email),
         nombre: String(raw.nombre ?? raw.email),
         rol: normalizeAdminRole(raw.rol) as AdminRole,
         initials: String(raw.initials ?? String(raw.email).slice(0, 2).toUpperCase()),
+        profile: tenantId ? { tenant_id: tenantId } : undefined,
       };
       set({
         usuario: user,

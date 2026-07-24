@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import { existsSync } from 'fs';
 import { join } from 'path';
 import { HOST_ONLY_OPS, type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
@@ -105,10 +106,23 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
   },
 };
 
-export function repoRoot(): string {
-  const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
-  if (fromEnv) return fromEnv;
+function monorepoFromAdminCwd(): string {
   return join(process.cwd(), '..', '..');
+}
+
+/** True when `root` is the DuckClaw monorepo (has admin app), not a vault-only data tree. */
+function looksLikeDuckclawMonorepo(root: string): boolean {
+  return existsSync(join(root, 'apps', 'duckclaw-admin', 'package.json'));
+}
+
+export function repoRoot(): string {
+  const adminOverride = process.env.DUCKCLAW_ADMIN_REPO_ROOT?.trim();
+  if (adminOverride) return adminOverride;
+  const fromCwd = monorepoFromAdminCwd();
+  const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
+  // ponytail: DUCKCLAW_REPO_ROOT may point at vault/data root; admin ops need monorepo.
+  if (fromEnv && looksLikeDuckclawMonorepo(fromEnv)) return fromEnv;
+  return fromCwd;
 }
 
 const PM2_SHELL_OPS: Record<string, (root: string) => string> = {

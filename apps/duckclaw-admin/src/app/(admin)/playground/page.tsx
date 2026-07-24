@@ -33,6 +33,7 @@ import {
   Pm2LiveLogsViewport,
 } from '@/components/admin/Pm2LiveLogsPanel';
 import { writeLastProjectId } from '@/lib/floatingChatProject';
+import { useAuthStore } from '@/store/authStore';
 import {
   defaultKnowledgeScope,
   knowledgeScopeLabel,
@@ -62,6 +63,12 @@ export default function PlaygroundPage() {
   const [systemPreview, setSystemPreview] = useState('');
   const [settingsModal, setSettingsModal] = useState<PlaygroundSettingsModal>(null);
   const [config, setConfig] = useState<PlaygroundConfig | null>(null);
+  const [configError, setConfigError] = useState<string | null>(null);
+  const [configLoading, setConfigLoading] = useState(true);
+  const usuario = useAuthStore((s) => s.usuario);
+  const authHydrated = useAuthStore((s) => s.hasHydrated);
+  const profileTenantId = usuario?.profile?.tenant_id?.trim() || '';
+  const effectiveTenantId = config?.effective_tenant_id?.trim() || profileTenantId || undefined;
   const [workerId, setWorkerId] = useState(initialWorker);
   const [projectId, setProjectId] = useState(initialProject);
   const [knowledgeScope, setKnowledgeScope] = useState<KnowledgeScope>(
@@ -71,7 +78,7 @@ export default function PlaygroundPage() {
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [sandboxToggling, setSandboxToggling] = useState(false);
 
-  const conv = useActiveConversation(config?.effective_tenant_id, 'playground', {
+  const conv = useActiveConversation(effectiveTenantId, 'playground', {
     defaultWorkerId: workerId || 'default',
   });
   const {
@@ -177,6 +184,7 @@ export default function PlaygroundPage() {
 
   const loadConfig = useCallback(() => {
     const chatId = conv.sessionId ?? undefined;
+    setConfigLoading(true);
     adminService
       .getPlaygroundConfig(
         chatId
@@ -188,6 +196,7 @@ export default function PlaygroundPage() {
       )
       .then((c) => {
         setConfig(c);
+        setConfigError(null);
         if (c.knowledge_scope) {
           setKnowledgeScope(normalizeKnowledgeScope(c.knowledge_scope, projectId));
         }
@@ -206,7 +215,10 @@ export default function PlaygroundPage() {
         }
         setWorkerId(nextWorker);
       })
-      .catch(() => undefined);
+      .catch((err) => {
+        setConfigError(err instanceof Error ? err.message : 'No se pudo cargar la configuración del playground');
+      })
+      .finally(() => setConfigLoading(false));
   }, [initialWorker, conv.sessionId, projectId]);
 
   const persistKnowledgeScope = useCallback(
@@ -600,8 +612,12 @@ export default function PlaygroundPage() {
 
       {isHistoryView ? (
         <PlaygroundHistoryView
-          tenantId={config?.effective_tenant_id}
+          tenantId={effectiveTenantId}
           workers={config?.workers}
+          configLoading={configLoading}
+          configError={configError}
+          authHydrated={authHydrated}
+          onRetryConfig={loadConfig}
           onSelectConversation={(id) => {
             void conv.selectConversationById(id).then(() => setShowHistory(false));
           }}

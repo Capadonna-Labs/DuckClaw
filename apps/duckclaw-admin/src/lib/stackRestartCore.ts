@@ -1,26 +1,14 @@
 import { spawn } from 'child_process';
 
-import { join } from 'path';
-
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+
+import { repoRoot } from '@/lib/localOps';
 
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
 
 import { pm2EnsureRestartDbWriterShell, pm2EnsureRestartGatewayShell, pm2EnsureRestartHeartbeatShell } from '@/lib/pm2EnsureRestart';
 
 import { pm2WaitShellPreamble } from '@/lib/pm2WaitShell';
-
-
-
-function repoRoot(): string {
-
-  const fromEnv = process.env.DUCKCLAW_REPO_ROOT?.trim();
-
-  if (fromEnv) return fromEnv;
-
-  return join(process.cwd(), '..', '..');
-
-}
 
 
 

@@ -183,7 +183,12 @@ def get_mcp_connector_runtime(db: Any, *, connector_id: str, tenant_id: str = "d
 def _connector_has_auth(db: Any, connector: dict[str, Any]) -> bool:
     kind = str(connector.get("auth_kind") or "none").strip().lower()
     preset = str(connector.get("preset_id") or "").strip().lower()
-    from duckclaw.mcp_connector_presets import preset_supports_oauth_pkce
+    from duckclaw.mcp_connector_presets import preset_supports_oauth_pkce, resolve_preset_id
+
+    if resolve_preset_id(preset) == "spotify":
+        from duckclaw.mcp_spotify_oauth import spotify_mcp_config_authenticated
+
+        return spotify_mcp_config_authenticated()
 
     if preset_supports_oauth_pkce(preset) and kind in ("", "none"):
         kind = "bearer"

@@ -15,12 +15,20 @@ const AuthHydrationContext = createContext(false);
 
 function parseSessionUser(raw: Record<string, unknown> | undefined | null): AdminUser | null {
   if (!raw?.email) return null;
+  const profileRaw = raw.profile;
+  const tenantId =
+    profileRaw &&
+    typeof profileRaw === 'object' &&
+    typeof (profileRaw as Record<string, unknown>).tenant_id === 'string'
+      ? String((profileRaw as Record<string, unknown>).tenant_id).trim()
+      : '';
   return {
     id: String(raw.id ?? `user-${raw.email}`),
     email: String(raw.email),
     nombre: String(raw.nombre ?? raw.email),
     rol: normalizeAdminRole(raw.rol),
     initials: String(raw.initials ?? String(raw.email).slice(0, 2).toUpperCase()),
+    profile: tenantId ? { tenant_id: tenantId } : undefined,
   };
 }
 

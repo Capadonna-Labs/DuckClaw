@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Callable, Optional
 
 from duckclaw.commands.chat_state import get_chat_state, set_chat_state
+
+_log = logging.getLogger(__name__)
 
 LlmTripletResolver = Callable[[Any, Any], tuple[str, str, str]]
 VaultUserIdResolver = Callable[..., str]
@@ -186,6 +189,18 @@ def _default_vault_user_id_resolver(
     return str(vault_user_id or chat_id or tid or "default")
 
 
+def _reload_goals_manifest(db: Any, chat_id: Any, tenant_id: str) -> Any:
+    from harness_core.targets import load_homeostasis_manifest
+
+    tid = str(tenant_id or "default").strip() or "default"
+    return load_homeostasis_manifest(db, tid, chat_id=chat_id, migrate_legacy=False)
+
+
+def _goal_count_suffix(db: Any, chat_id: Any, tenant_id: str) -> str:
+    n = len(_reload_goals_manifest(db, chat_id, tenant_id).goals or [])
+    return f" ({n} meta(s) en manifiesto)"
+
+
 def _persist_homeostasis_manifest_db(
     db: Any,
     chat_id: Any,
@@ -209,6 +224,8 @@ def _persist_homeostasis_manifest_db(
     # Prefer sync write when vault handle is RW (worker / fly). Skip async enqueue when
     # sync succeeded — duplicate UPSERTs contend on DuckDB lock with gateway sessions.
     sync_ok = _try_sync_write_homeostasis_manifest(db, tenant_id, manifest)
+    goal_n = len(getattr(manifest, "goals", None) or [])
+    read_only = bool(getattr(db, "_read_only", False))
     if sync_ok:
         return True, ""
     queued = save_homeostasis_manifest(
@@ -217,8 +234,10 @@ def _persist_homeostasis_manifest_db(
         target_db_path=vault,
         manifest=manifest,
     )
-    if queued:
+    if read_only and queued:
         return True, ""
+    if queued:
+        return False, "sync falló; delta encolado — espera y vuelve a listar antes de seguir"
     return False, "cola meditate/homeostasis no disponible y vault RO"
 
 
@@ -270,7 +289,12 @@ def _try_sync_write_homeostasis_manifest(db: Any, tenant_id: str, manifest: Any)
                 "targets_json = excluded.targets_json, updated_at = now()"
             )
         return True
-    except Exception:
+    except Exception as exc:
+        _log.warning(
+            "homeostasis manifest sync write failed tenant=%s: %s",
+            tid,
+            exc,
+        )
         return False
 
 
@@ -438,7 +462,8 @@ def execute_homeostasis_goals(
     registry = _get_goals_registry_for_chat(db, chat_id, tenant_id=tid)
     raw = (args or "").strip()
     toks = raw.split()
-    manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id)
+    # DB-first: legacy agent_config goals only via explicit --migrate (never ghost-list after rm).
+    manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id, migrate_legacy=False)
 
     if toks and toks[0] == "--migrate":
         manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id, migrate_legacy=False)
@@ -483,7 +508,9 @@ def execute_homeostasis_goals(
         if not ok:
             return f"No se pudo resetear: {err}"
         _clear_legacy_manager_goals(db, chat_id)
-        return "✅ Manifiesto homeostasis restaurado a defaults. Añade metas con /goals <objetivo>."
+        if _reload_goals_manifest(db, chat_id, tid).goals:
+            return "⚠️ --reset no vació el manifiesto en DB. Reintenta rm all o /goals --migrate tras revisar db-writer."
+        return "✅ Manifiesto homeostasis vacío (0 metas). Añade con /goals <objetivo>."
 
     if toks and toks[0] in ("rm", "--rm"):
         if len(toks) < 2:
@@ -501,7 +528,13 @@ def execute_homeostasis_goals(
             if not ok:
                 return f"No se pudo guardar: {err_save}"
             _clear_legacy_manager_goals(db, chat_id)
-            return f"✅ Eliminadas {removed_count} meta(s) del manifiesto."
+            verify = _reload_goals_manifest(db, chat_id, tid)
+            if verify.goals:
+                return (
+                    f"⚠️ rm all incompleto: persistieron {len(verify.goals)} meta(s) "
+                    f"({', '.join((g.belief_key or '?') for g in verify.goals[:5])}). Reintenta."
+                )
+            return f"✅ Eliminadas {removed_count} meta(s). Manifiesto vacío."
         key_resolved = _resolve_goal_id(manifest, target)
         updated, err = _apply_goals_rm(manifest, target)
         if err:
@@ -581,12 +614,7 @@ def execute_homeostasis_goals(
         if not ok:
             return f"No se pudo guardar: {err_save}"
         kid = key_resolved or target
-        listing = _format_homeostasis_manifest_listing(
-            db, chat_id, updated, registry=registry
-        )
-        return (
-            f"✅ Meta `{kid}` → **P{prio}** (menor número = atender antes).\n\n{listing}"
-        )
+        return f"✅ Meta `{kid}` → **P{prio}** (menor número = atender antes){_goal_count_suffix(db, chat_id, tid)}"
 
     if raw and not raw.startswith("--") and toks[0] != "rm":
         key_norm = _normalize_belief_key(raw)
@@ -635,7 +663,7 @@ def execute_homeostasis_goals(
         title_display = new_goal.title or new_goal.belief_key
         return (
             f"✅ Meta homeostasis añadida: {title_display} "
-            f"(prioridad P{new_goal.priority})"
+            f"(prioridad P{new_goal.priority}){_goal_count_suffix(db, chat_id, tid)}"
         )
 
     return (

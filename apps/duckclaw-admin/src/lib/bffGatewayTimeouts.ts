@@ -14,8 +14,11 @@ export function bffGatewayTimeoutMs(sub: string, method: string): number {
   if (path === 'health' || path === 'bootstrap/status') {
     return BFF_TIMEOUT_HEALTH_MS;
   }
-  if (path.startsWith('auth/') || path.startsWith('playground/config')) {
+  if (path.startsWith('auth/')) {
     return BFF_TIMEOUT_FAST_MS;
+  }
+  if (path.startsWith('playground/config')) {
+    return BFF_TIMEOUT_DEFAULT_GET_MS;
   }
   if (path.startsWith('knowledge/') && verb !== 'GET' && verb !== 'HEAD') {
     return BFF_TIMEOUT_KNOWLEDGE_MUTATION_MS;

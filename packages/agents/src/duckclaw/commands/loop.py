@@ -746,6 +746,10 @@ def format_loop_next_tick_footer(db: Any, chat_id: Any, *, now: float | None = N
             try:
                 next_epoch = last_act + secs
                 remaining = max(0, int(next_epoch - ts))
+                if next_epoch <= ts:
+                    # ponytail: ancla vencida — estimar desde ahora (heartbeat disparará pronto).
+                    next_epoch = ts + secs
+                    remaining = secs
                 clock = datetime.fromtimestamp(next_epoch, tz=tz).strftime("%H:%M")
                 remain_h = (
                     format_goals_delta_interval_human(remaining) if remaining > 0 else "< 1 min"
@@ -855,8 +859,8 @@ def apply_loop_idle_schedule(
         ok, err = _persist_loop_chat_state(db, chat_id, k, v, tenant_id=tid)
         if not ok:
             return {"status": "error", "error": err or f"persist failed: {k}"}
-    if get_loop_last_activity_epoch(db, chat_id) <= 0:
-        touch_loop_last_activity(db, chat_id, tenant_id=tid)
+    # Re-anclar al activar/reconfigurar --delta (evita pie con hora obsoleta de sesión previa).
+    touch_loop_last_activity(db, chat_id, tenant_id=tid)
     human = format_goals_delta_interval_human(secs)
     return {
         "status": "ok",

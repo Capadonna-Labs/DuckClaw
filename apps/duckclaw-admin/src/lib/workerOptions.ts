@@ -60,9 +60,14 @@ export function stripChatIdentityNoise(
 
   for (const token of tokens) {
     const esc = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const plainCotHeader = new RegExp(`^${esc}(?:\\s+\\d+)?\\s*·[^\\n]*\\bCOT\\b`, 'iu');
+    // Encabezado Caveman plano: no partir el nombre del timestamp (deja «· … COT» huérfano).
+    if (plainCotHeader.test(body)) {
+      continue;
+    }
     body = body
-      .replace(new RegExp(`^${esc}(?:\\s+\\d+)?(?:\\s*[—–-]\\s*)?`, 'u'), '')
       .replace(new RegExp(`^\\*\\*${esc}(?:\\s+\\d+)?\\s*·[^*]+\\*\\*\\s*`, 'iu'), '')
+      .replace(new RegExp(`^${esc}(?:\\s+\\d+)?(?:\\s*[—–-]\\s*)?`, 'u'), '')
       .trim();
   }
 

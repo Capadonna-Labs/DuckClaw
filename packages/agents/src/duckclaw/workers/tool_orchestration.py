@@ -491,6 +491,34 @@ def resolve_forced_tool(
     return None
 
 
+_EMAIL_INTENT_RE = re.compile(
+    r"(?is)\b("
+    r"correo|correos|e-mail|email|gmail|"
+    r"bandeja\s+de\s+entrada|inbox|mail"
+    r")\b|busca(r)?\s+(el\s+)?correo|"
+    r"saca(r)?\s+insights\s+(del\s+)?correo"
+)
+
+
+def incoming_has_email_intent(text: str) -> bool:
+    """True when the user asks to find/read/analyze email (Spanish/English cues)."""
+    t = (text or "").strip()
+    if not t or "[system_directive:" in t.lower():
+        return False
+    return bool(_EMAIL_INTENT_RE.search(t))
+
+
+def find_gmail_mcp_search_tool(tools_by_name: dict[str, Any]) -> str | None:
+    """Resolve bound Gmail MCP ``search_threads`` tool name (connector id varies)."""
+    candidates = [n for n in tools_by_name if n.endswith("__search_threads")]
+    gmail_named = [n for n in candidates if "gmail" in n.lower()]
+    if gmail_named:
+        return gmail_named[0]
+    if len(candidates) == 1:
+        return candidates[0]
+    return None
+
+
 def _iter_assistant_bodies_newest_first(history: Any) -> list[str]:
     out: list[str] = []
     if not history:

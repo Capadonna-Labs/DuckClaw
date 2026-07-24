@@ -14,6 +14,12 @@ _TICKER_PAT = re.compile(r"\b([A-Z]{1,5})\b")
 # Probable quote-like figure: decimal with at least 2 fractional digits or a $ prefix.
 _PRICE_PAT = re.compile(r"(?:\$\s*)?(\d{1,6}\.\d{2,6})\b")
 _VLM_MARKER = "VLM_CONTEXT"
+_VLM_GATEWAY_BLOCK = "Contexto visual adjunto:"
+_VLM_CONFIDENCE_RE = re.compile(
+    r"\[VLM_CONTEXT[^\]]*confidence=([\d.]+)\]",
+    re.IGNORECASE,
+)
+_GATEWAY_VLM_MIN_CONFIDENCE = 0.5
 _EVIDENCE_TOOLS = {"read_sql", "verify_visual_claim"}
 _NUMERIC_VERIFY_STATUSES = frozenset({"verified", "mismatch", "no_evidence"})
 
@@ -260,6 +266,22 @@ def visual_evidence_retry_system_message() -> SystemMessage:
     return SystemMessage(content=_VISUAL_EVIDENCE_RETRY_DIRECTIVE)
 
 
+def _incoming_has_gateway_vlm_evidence(inc: str) -> bool:
+    """
+    Playground/Telegram gateway already ran VLM and injected structured evidence.
+    That block is sufficient; do not force read_sql/verify_visual_claim on top.
+    """
+    if _VLM_MARKER not in inc or _VLM_GATEWAY_BLOCK not in inc:
+        return False
+    m = _VLM_CONFIDENCE_RE.search(inc)
+    if not m:
+        return True
+    try:
+        return float(m.group(1)) >= _GATEWAY_VLM_MIN_CONFIDENCE
+    except ValueError:
+        return True
+
+
 def enforce_visual_evidence_rule(
     *,
     incoming: str,
@@ -275,7 +297,11 @@ def enforce_visual_evidence_rule(
     text = (reply or "").strip()
     if not inc or _VLM_MARKER not in inc:
         return reply, None
-    if not _PRICE_PAT.search(text):
+    has_price_figure = bool(_PRICE_PAT.search(text) or _PCT_FIGURE_RE.search(text))
+    gateway_vlm = _incoming_has_gateway_vlm_evidence(inc)
+    if gateway_vlm:
+        return reply, None
+    if not has_price_figure:
         return reply, None
 
     for m in messages or []:

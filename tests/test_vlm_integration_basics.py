@@ -143,6 +143,20 @@ def test_visual_evidence_rule_blocks_prices_without_tool_evidence() -> None:
     assert reason == VISUAL_EVIDENCE_RETRY_REASON
 
 
+def test_visual_evidence_rule_allows_gateway_vlm_without_tool_evidence() -> None:
+    reply, reason = enforce_visual_evidence_rule(
+        incoming=(
+            "Usuario dice: x\n"
+            "Contexto visual adjunto: VIX 24.55\n"
+            "[VLM_CONTEXT image_hash=abc confidence=0.8]"
+        ),
+        messages=[],
+        reply="VIX está en 24.55 y bajando",
+    )
+    assert reason is None
+    assert reply == "VIX está en 24.55 y bajando"
+
+
 def test_visual_evidence_retry_system_message_content() -> None:
     msg = visual_evidence_retry_system_message()
     text = str(getattr(msg, "content", "") or "")
@@ -180,6 +194,20 @@ def test_visual_evidence_rule_blocks_price_without_tools() -> None:
     )
     assert reason == VISUAL_EVIDENCE_RETRY_REASON
     assert "Regla de Evidencia" in reply
+
+
+def test_visual_evidence_rule_allows_gateway_vlm_price_without_tools() -> None:
+    reply, reason = enforce_visual_evidence_rule(
+        incoming=(
+            "Usuario dice: x\n"
+            "Contexto visual adjunto: AAPL 150.2500\n"
+            "[VLM_CONTEXT image_hash=abc confidence=0.8]"
+        ),
+        messages=[],
+        reply="En la imagen AAPL cotiza 150.2500.",
+    )
+    assert reason is None
+    assert "150.2500" in reply
 
 
 def test_visual_evidence_rule_accepts_verify_visual_claim_numeric() -> None:

@@ -65,6 +65,7 @@ presets:
     endpoint_url: https://workspacemcp.googleapis.com/mcp/v1
     auth_kind: bearer
     read_only: true
+    tool_denylist: [search_corpus]
     egress_hosts: [workspacemcp.googleapis.com, oauth2.googleapis.com, accounts.google.com]
     metadata:
       oauth_pkce: true

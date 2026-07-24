@@ -164,6 +164,34 @@ def _wrap_connector_tool(
     )
 
 
+def _register_connector_tool_specs(
+    db: Any,
+    connector: dict[str, Any],
+    specs: list[Any],
+    tools: list[Any],
+) -> int:
+    added = 0
+    for spec in specs:
+        wrapped = _wrap_connector_tool(db, connector, spec)
+        if wrapped is not None:
+            tools.append(wrapped)
+            added += 1
+    return added
+
+
+def _gmail_rest_fallback_specs_if_ready(db: Any, connector: dict[str, Any]) -> list[Any]:
+    from duckclaw.forge.skills.google_gmail_rest import (
+        gmail_rest_fallback_tool_specs,
+        uses_google_gmail_rest_fallback,
+    )
+
+    if not uses_google_gmail_rest_fallback(connector):
+        return []
+    if not resolve_connector_bearer_token(db, connector):
+        return []
+    return gmail_rest_fallback_tool_specs()
+
+
 async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: str = "default") -> list[Any]:
     if not _mcp_available():
         return []
@@ -178,11 +206,16 @@ async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: 
                 connector.get("connector_id"),
                 exc,
             )
+            fallback = _gmail_rest_fallback_specs_if_ready(db, connector)
+            if fallback:
+                added = _register_connector_tool_specs(db, connector, fallback, tools)
+                _log.info(
+                    "Gmail REST fallback registered %d tools connector=%s",
+                    added,
+                    connector.get("connector_id"),
+                )
             continue
-        for spec in specs:
-            wrapped = _wrap_connector_tool(db, connector, spec)
-            if wrapped is not None:
-                tools.append(wrapped)
+        _register_connector_tool_specs(db, connector, specs, tools)
     return tools
 
 

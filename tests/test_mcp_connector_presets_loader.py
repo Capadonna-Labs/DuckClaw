@@ -115,6 +115,26 @@ def test_list_mcp_connector_presets_includes_all_bundled_ids() -> None:
     }.issubset(presets)
 
 
+def test_google_workspace_preset_denies_search_corpus() -> None:
+    payload = preset_payload("google_workspace")
+    assert payload is not None
+    assert "search_corpus" in (payload.get("tool_denylist") or [])
+
+
+def test_tool_allowed_by_policy_blocks_workspace_search_corpus() -> None:
+    from duckclaw.admin_mcp_connectors import tool_allowed_by_policy
+
+    connector = {
+        "preset_id": "google_workspace",
+        "endpoint_url": "https://workspacemcp.googleapis.com/mcp/v1",
+        "tool_allowlist": ["*"],
+        "tool_denylist": [],
+        "read_only": True,
+    }
+    assert tool_allowed_by_policy(connector, "search_corpus") is False
+    assert tool_allowed_by_policy(connector, "list_files") is True
+
+
 def test_spotify_preset_is_stdio_npx() -> None:
     payload = preset_payload("spotify")
     assert payload is not None

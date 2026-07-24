@@ -217,6 +217,30 @@ def test_format_meditate_next_tick_footer_idle_mode() -> None:
     assert "silencio" in footer.lower() or "--delta" in footer.lower()
 
 
+def test_loop_delta_apply_refreshes_stale_last_activity_anchor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reconfiguring /loop --delta must re-anchor to now, not reuse stale loop_last_activity."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from duckclaw.commands.loop import format_loop_next_tick_footer, get_loop_last_activity_epoch
+
+    db = _FakeDb()
+    set_chat_state(db, "12", "worker_id", "worker-a")
+    tz = ZoneInfo("America/Bogota")
+    now_dt = datetime(2026, 7, 24, 7, 28, 0, tzinfo=tz)
+    ts = now_dt.timestamp()
+    stale = datetime(2026, 7, 23, 18, 10, 0, tzinfo=tz).timestamp()
+    set_chat_state(db, "12", "loop_last_activity_epoch", str(stale))
+    monkeypatch.setattr("duckclaw.commands.loop.time.time", lambda: ts)
+    msg = execute_loop(db, "12", "--delta 25min", tenant_id="default")
+    assert "18:35 COT" not in msg
+    assert abs(get_loop_last_activity_epoch(db, "12") - ts) < 1
+    footer = format_loop_next_tick_footer(db, "12", now=ts)
+    assert "07:53 COT" in footer
+
+
 def test_format_meditate_next_tick_footer_scheduled() -> None:
     from duckclaw.commands.loop import format_meditate_next_tick_footer
 

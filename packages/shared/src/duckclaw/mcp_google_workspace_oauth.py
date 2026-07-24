@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
+
+_log = logging.getLogger(__name__)
+
+_log = logging.getLogger(__name__)
 
 from duckclaw.mcp_higgsfield_oauth import (
     _decode_oauth_state,
@@ -247,6 +252,11 @@ def refresh_google_access_token(refresh_token: str) -> str:
             headers={"Accept": "application/json"},
         )
         if resp.status_code >= 400:
+            try:
+                err = resp.json().get("error")
+            except Exception:
+                err = None
+            _log.warning("google oauth refresh failed: %s %s", resp.status_code, err or resp.text[:120])
             return ""
         tokens = resp.json()
     access = str(tokens.get("access_token") or "").strip()

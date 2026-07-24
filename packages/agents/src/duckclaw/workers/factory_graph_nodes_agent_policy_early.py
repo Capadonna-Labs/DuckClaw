@@ -390,6 +390,33 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                                 ),
                             )
 
+                from duckclaw.workers.tool_orchestration import (
+                    find_gmail_mcp_search_tool,
+                    incoming_has_email_intent,
+                )
+
+                _email_intent = incoming_has_email_intent(_orch_incoming)
+                _gmail_search_tool = (
+                    find_gmail_mcp_search_tool(tools_by_name) if _email_intent else None
+                )
+                if (
+                    _gmail_search_tool
+                    and _worker_use_heuristic_first_tool(spec)
+                    and not already_has_tool_result
+                    and not force_orch_tool
+                    and not telegram_context_summarize_directive
+                    and not summarize_stored_directive
+                    and not (
+                        force_schema
+                        or force_admin_sql
+                        or force_read_sql
+                        or force_tavily
+                        or force_visual
+                        or force_reddit
+                    )
+                ):
+                    force_orch_tool = _gmail_search_tool
+
                 ctx.agent_turn = {'_intent_incoming': _intent_incoming, '_orch': _orch, '_orch_forced': _orch_forced, '_reddit_resolved_comments_url': _reddit_resolved_comments_url, '_reddit_share_mcp_exhausted': _reddit_share_mcp_exhausted, '_visual_tool_already_ok': _visual_tool_already_ok, '_wl': _wl, 'already_has_tool_result': already_has_tool_result, 'force_admin_sql': force_admin_sql, 'force_orch_tool': force_orch_tool, 'force_read_sql': force_read_sql, 'force_reddit': force_reddit, 'force_schema': force_schema, 'force_tavily': force_tavily, 'force_visual': force_visual, 'incoming': incoming, 'incoming_for_reddit': incoming_for_reddit, 'is_latest_game': is_latest_game, 'is_schema': is_schema, 'is_table_content': is_table_content, 'reddit_search_tool_count': reddit_search_tool_count, 'state': state, 'summarize_stored_directive': summarize_stored_directive, 'telegram_context_summarize_directive': telegram_context_summarize_directive}
                 return None
 

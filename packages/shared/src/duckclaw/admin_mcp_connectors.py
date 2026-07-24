@@ -275,9 +275,6 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             if row:
                 refresh = str(row[0] if not isinstance(row, dict) else row.get("value_text") or "").strip()
 
-    if not refresh:
-        return token
-
     # ponytail: Google access tokens ~1h; refresh if missing/stale without tokeninfo roundtrip.
     stale = True
     if token and updated_at is not None:
@@ -294,7 +291,6 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
     elif not token:
         stale = True
     else:
-        # updated_at unknown — verify with tokeninfo once
         try:
             import httpx
 
@@ -310,14 +306,18 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
     if not stale:
         return token
 
+    if not refresh:
+        return ""
+
     try:
         from duckclaw.mcp_google_workspace_oauth import refresh_google_access_token
 
         fresh = refresh_google_access_token(refresh)
     except Exception:
-        return token
+        fresh = ""
     if not fresh:
-        return token
+        # ponytail: stale/revoked refresh must not leak dead bearer to Gmail REST (401 loop).
+        return ""
     if not getattr(db, "_read_only", False):
         try:
             from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
@@ -396,6 +396,13 @@ def validate_connector_egress(connector: dict[str, Any]) -> None:
 def tool_allowed_by_policy(connector: dict[str, Any], tool_name: str) -> bool:
     name = str(tool_name or "").strip()
     if not name:
+        return False
+    preset = str(connector.get("preset_id") or "").strip().lower()
+    # ponytail: workspacemcp search_corpus fails TaskGroup on VPS; Gmail REST covers email.
+    if name.lower() == "search_corpus" and (
+        preset == "google_workspace"
+        or "workspacemcp.googleapis.com" in str(connector.get("endpoint_url") or "").lower()
+    ):
         return False
     denylist = {str(x).strip().lower() for x in connector.get("tool_denylist") or [] if str(x).strip()}
     if name.lower() in denylist:

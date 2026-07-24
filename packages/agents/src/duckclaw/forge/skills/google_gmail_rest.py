@@ -364,6 +364,11 @@ async def call_google_gmail_rest(
             return f"Error Gmail REST ({name}): {exc}"
 
         if resp.status_code >= 400:
+            if resp.status_code == 401:
+                return (
+                    f"Error Gmail REST ({name}): 401 Invalid Credentials. "
+                    "Reconecta Google Gmail en Admin → MCP Connectors (OAuth revocado o expirado)."
+                )
             return f"Error Gmail REST ({name}): {resp.status_code} {resp.text[:400]}"
         if not resp.content:
             return json.dumps({"ok": True}, ensure_ascii=False)
@@ -377,3 +382,49 @@ def uses_google_gmail_rest_fallback(connector: dict[str, Any]) -> bool:
     preset = str(connector.get("preset_id") or "").strip().lower()
     url = str(connector.get("endpoint_url") or "").strip().lower()
     return preset == "google_gmail" or "gmailmcp.googleapis.com" in url
+
+
+def gmail_rest_fallback_tool_specs() -> list[Any]:
+    """Static Gmail MCP tool surface when gmailmcp list_tools is unavailable."""
+    from types import SimpleNamespace
+
+    _obj = {
+        "type": "object",
+        "properties": {},
+    }
+    _q = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Gmail search query (e.g. is:inbox newer_than:1d)"},
+            "pageSize": {"type": "integer", "description": "Max threads to return"},
+        },
+    }
+    _id = {
+        "type": "object",
+        "properties": {
+            "messageId": {"type": "string", "description": "Gmail API message id or mail.google.com link"},
+            "threadId": {"type": "string", "description": "Gmail API thread id or mail.google.com link"},
+        },
+    }
+    return [
+        SimpleNamespace(
+            name="search_threads",
+            description="Search Gmail threads by query (REST fallback when Gmail MCP list_tools fails).",
+            inputSchema=_q,
+        ),
+        SimpleNamespace(
+            name="get_thread",
+            description="Fetch a Gmail thread by id (REST fallback).",
+            inputSchema=_id,
+        ),
+        SimpleNamespace(
+            name="get_message",
+            description="Fetch a Gmail message by id (REST fallback).",
+            inputSchema=_id,
+        ),
+        SimpleNamespace(
+            name="list_labels",
+            description="List Gmail labels (REST fallback).",
+            inputSchema=_obj,
+        ),
+    ]

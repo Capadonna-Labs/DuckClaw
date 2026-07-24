@@ -19,11 +19,24 @@ def _route_after_set_reply(state: dict) -> str:
 
 def test_visual_evidence_retry_reason_constant() -> None:
     _, reason = enforce_visual_evidence_rule(
-        incoming="x\n[VLM_CONTEXT image_hash=abc confidence=0.8]",
+        incoming="x\n[VLM_CONTEXT h=1]",
         messages=[],
         reply="SPY cotiza 450.25",
     )
     assert reason == VISUAL_EVIDENCE_RETRY_REASON
+
+
+def test_gateway_vlm_block_skips_visual_evidence_audit() -> None:
+    reply, reason = enforce_visual_evidence_rule(
+        incoming=(
+            "Analiza\nContexto visual adjunto: Nikkei 225 2.73% ▼\n"
+            "[VLM_CONTEXT image_hash=abc confidence=0.85]"
+        ),
+        messages=[],
+        reply="El Nikkei 225 cerró con -2.73% hoy.",
+    )
+    assert reason is None
+    assert "2.73" in reply
 
 
 def test_route_after_set_reply_when_retry_flag() -> None:

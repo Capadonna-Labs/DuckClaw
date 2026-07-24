@@ -1450,22 +1450,28 @@ def _persist_admin_images_for_tenant(
     return paths
 
 
-def format_attached_image_paths_block(paths: list[str]) -> str:
-    """Bloque legible por el agente con las rutas para patch_report_image."""
+def format_attached_image_paths_block(paths: list[str], *, report_hints: bool = True) -> str:
+    """Bloque legible por el agente con las rutas persistidas."""
     if not paths:
         return ""
-    # Mapeo sugerido a huecos de create_blank_document / append_images_to_report.
     lines = [
         f"imagen_{idx} → {path}"
         for idx, path in enumerate(paths[:_ADMIN_MAX_IMAGES], start=1)
     ]
     listing = "\n".join(lines)
+    if report_hints:
+        return (
+            "[IMAGENES_ADJUNTAS] Archivos guardados en el vault (NO hace falta VLM). "
+            "Documento NUEVO: create_blank_document → render. "
+            "Documento YA EXISTENTE (agregar más evidencias): list_report_instances → "
+            "append_images_to_report(instance_id, image_paths) → render_report_instance. "
+            "NO crees un Word nuevo si el usuario pide agregar a uno ya construido.\n"
+            f"{listing}"
+        )
     return (
-        "[IMAGENES_ADJUNTAS] Archivos guardados en el vault (NO hace falta VLM). "
-        "Documento NUEVO: create_blank_document → render. "
-        "Documento YA EXISTENTE (agregar más evidencias): list_report_instances → "
-        "append_images_to_report(instance_id, image_paths) → render_report_instance. "
-        "NO crees un Word nuevo si el usuario pide agregar a uno ya construido.\n"
+        "[IMAGENES_ADJUNTAS] Archivos guardados en el vault. "
+        "Usa Contexto visual (si hay) y responde con análisis útil; "
+        "no exijas herramientas de informe Word salvo que el usuario las pida.\n"
         f"{listing}"
     )
 
@@ -1490,6 +1496,33 @@ _DOCUMENT_ATTACHMENT_RE = re.compile(
     r"usa\s+(esta|la)\s+imagen|mete|incluy[ea]|coloca"
     r")\b"
 )
+
+# Turno solo-imagen (playground/Telegram): intención explícita para el LLM y user_incoming.
+_IMAGE_ONLY_DEFAULT_INTENT = "Analiza esta imagen y responde según el contexto del chat."
+_IMAGE_ONLY_DIRECTIVE = (
+    "[DIRECTIVA_IMAGEN] Solo imagen(es) sin texto. "
+    "Responde con análisis útil (Contexto visual si hay, rutas en [IMAGENES_ADJUNTAS]). "
+    "No preguntes qué hacer. "
+    "NO invoques create_blank_document ni append_images_to_report salvo que el chat pida informe Word."
+)
+_EMAIL_DIRECTIVE = (
+    "[DIRECTIVA_CORREO] Pide correo/email. Usa Gmail MCP search_threads → get_message/get_thread. "
+    "NO uses search_corpus (Workspace) ni extract_document_text en .png/.jpg. "
+    "Si VLM no describe la captura, busca is:inbox newer_than:1d o pide remitente/asunto."
+)
+
+
+def first_user_line_from_enriched_message(enriched: str) -> str:
+    """Primera línea humana antes de bloques [META]/[IMAGENES_ADJUNTAS]/[Nota]."""
+    text = (enriched or "").strip()
+    if not text:
+        return ""
+    return text.split("\n\n[", 1)[0].strip()
+
+
+def default_intent_for_image_only_turn(enriched: str = "") -> str:
+    head = first_user_line_from_enriched_message(enriched)
+    return head or _IMAGE_ONLY_DEFAULT_INTENT
 
 
 def should_run_vlm_for_caption(message: str) -> bool:
@@ -1541,12 +1574,24 @@ async def enrich_message_with_admin_images(
         return (message or "").strip()
 
     decoded = decode_admin_images_payload(images)
-    base = (message or "").strip()
+    user_caption = (message or "").strip()
+    _email_directive = False
+    try:
+        from duckclaw.workers.tool_orchestration import incoming_has_email_intent
+
+        _email_directive = incoming_has_email_intent(user_caption)
+    except Exception:
+        pass
+    base = user_caption
+    image_only = bool(decoded) and not base
+    if image_only:
+        base = _IMAGE_ONLY_DEFAULT_INTENT
     run_vlm = should_run_vlm_for_caption(base) if force_vlm is None else bool(force_vlm)
 
     # Persistencia PRIMERO: si VLM se cancela/falla, el documento aún tiene paths.
     saved_paths = _persist_admin_images_for_tenant(decoded, tenant_id)
     blocks: list[str] = []
+    vlm_ok = False
 
     if run_vlm:
         caption = base or "Analiza esta imagen."
@@ -1561,6 +1606,7 @@ async def enrich_message_with_admin_images(
             else:
                 out = await run_vlm_on_images_batch(items=decoded, caption=caption)
             blocks.append(format_vlm_enrichment_block(out, user_caption=base))
+            vlm_ok = True
         except VlmIngestAllFailed:
             # Carril documental intacto: paths ya persistidos.
             blocks.append(
@@ -1574,16 +1620,21 @@ async def enrich_message_with_admin_images(
                 "y el agente puede usarlas sin descripción visual.]"
             )
 
-    path_block = format_attached_image_paths_block(saved_paths)
+    path_block = format_attached_image_paths_block(saved_paths, report_hints=not image_only)
     if path_block:
         blocks.append(path_block)
     elif tenant_id and decoded:
         blocks.append(
             "[IMAGENES_ADJUNTAS] No se pudieron guardar las rutas (revisa vault del tenant)."
         )
+    if image_only and saved_paths:
+        blocks.append(_IMAGE_ONLY_DIRECTIVE)
+    if _email_directive:
+        blocks.append(_EMAIL_DIRECTIVE)
 
     parts = [p for p in [base, *blocks] if p]
-    return "\n\n".join(parts).strip()
+    enriched = "\n\n".join(parts).strip()
+    return enriched
 
 
 async def push_vlm_state_delta_redis(

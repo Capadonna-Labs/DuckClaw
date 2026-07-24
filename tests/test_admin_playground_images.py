@@ -109,6 +109,35 @@ def test_enrich_attachment_only_skips_vlm(monkeypatch: pytest.MonkeyPatch) -> No
     assert "imagen_1" in out
 
 
+def test_enrich_image_only_injects_intent_and_directive(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core import vlm_ingest as vlm
+
+    async def _fail(**_kwargs):
+        raise vlm.VlmIngestAllFailed(RuntimeError("mlx down"))
+
+    monkeypatch.setattr(vlm, "run_vlm_on_image_bytes", _fail)
+    monkeypatch.setattr(
+        vlm,
+        "_persist_admin_images_for_tenant",
+        lambda *_a, **_k: ["/vault/inbound/solo.png"],
+    )
+
+    async def _run():
+        return await vlm.enrich_message_with_admin_images(
+            "",
+            [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+            tenant_id="default",
+        )
+
+    out = asyncio.run(_run())
+    assert out.startswith("Analiza esta imagen")
+    assert "DIRECTIVA_IMAGEN" in out
+    assert "IMAGENES_ADJUNTAS" in out
+    assert "create_blank_document →" not in out
+    assert "append_images_to_report(instance_id" not in out
+    assert vlm.default_intent_for_image_only_turn(out).startswith("Analiza esta imagen")
+
+
 def test_enrich_vlm_failure_still_returns_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     from core import vlm_ingest as vlm
 
@@ -134,6 +163,32 @@ def test_enrich_vlm_failure_still_returns_paths(monkeypatch: pytest.MonkeyPatch)
     assert "VLM" in out or "visión" in out
     assert "IMAGENES_ADJUNTAS" in out
     assert "/vault/inbound/b.png" in out
+
+
+def test_enrich_email_intent_injects_directive(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core import vlm_ingest as vlm
+
+    async def _fail(**_kwargs):
+        raise vlm.VlmIngestAllFailed(RuntimeError("mlx down"))
+
+    monkeypatch.setattr(vlm, "run_vlm_on_image_bytes", _fail)
+    monkeypatch.setattr(
+        vlm,
+        "_persist_admin_images_for_tenant",
+        lambda *_a, **_k: ["/vault/inbound/email.png"],
+    )
+
+    async def _run():
+        return await vlm.enrich_message_with_admin_images(
+            "busca el correo y saca insights",
+            [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+            tenant_id="default",
+        )
+
+    out = asyncio.run(_run())
+    assert "DIRECTIVA_CORREO" in out
+    assert "extract_document_text" in out
+    assert "IMAGENES_ADJUNTAS" in out
 
 
 def test_playground_chat_requires_message_or_images(admin_client: TestClient) -> None:
@@ -291,6 +346,56 @@ def test_playground_fly_command_skips_vlm_with_images(
         },
     )
     assert r.status_code == 200, r.text
+
+
+def test_playground_image_only_sets_user_incoming(
+    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from core import vlm_ingest as vlm
+
+    async def _fail(**_k):
+        raise vlm.VlmIngestAllFailed(RuntimeError("mlx down"))
+
+    monkeypatch.setattr(vlm, "run_vlm_on_image_bytes", _fail)
+    monkeypatch.setattr(vlm, "run_vlm_on_images_batch", _fail)
+    monkeypatch.setattr(
+        vlm,
+        "_persist_admin_images_for_tenant",
+        lambda *_a, **_k: ["/vault/inbound/solo.png"],
+    )
+
+    import routers.admin_domains.playground.chat_turn as playground_chat_turn
+    import routers.admin_domains.playground_chat as playground_chat_router
+    from test_admin_router import _mock_playground_team
+
+    seen: dict[str, str] = {}
+
+    async def _fake_invoke(chat, *_a, **_k):
+        seen["message"] = str(getattr(chat, "message", "") or "")
+        seen["user_incoming"] = str(getattr(chat, "user_incoming", "") or "")
+        return {"response": "ok", "assigned_worker_id": "default"}
+
+    monkeypatch.setattr(
+        playground_chat_router,
+        "_playground_team_context",
+        lambda **_: _mock_playground_team(workers=["default"]),
+    )
+    monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "1")
+
+    r = admin_client.post(
+        "/api/v1/admin/playground/chat",
+        headers={"X-Admin-Key": "test-admin-key"},
+        json={
+            "worker_id": "default",
+            "message": "",
+            "chat_id": "admin-playground",
+            "images": [{"mime_type": "image/png", "data_base64": _TINY_PNG_B64}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert seen.get("user_incoming", "").startswith("Analiza esta imagen")
+    assert "DIRECTIVA_IMAGEN" in seen.get("message", "")
 
 
 def test_playground_vlm_all_failed_degrades_instead_of_502(

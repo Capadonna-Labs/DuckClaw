@@ -44,6 +44,11 @@ def convert_file_path_to_text(path: str | Path) -> str:
     if suffix in INGEST_NATIVE_SUFFIXES:
         return target.read_text(encoding="utf-8", errors="replace").strip()
     if suffix not in EXTRACT_SUFFIXES:
+        if suffix in {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp"}:
+            raise ValueError(
+                f"extract_document_text no admite extensión: {suffix}. "
+                "Capturas/imágenes: visión (VLM) o Gmail MCP; MarkItDown solo PDF/Office/HTML."
+            )
         raise ValueError(f"extract_document_text no admite extensión: {suffix}")
     return _convert_path(target)
 

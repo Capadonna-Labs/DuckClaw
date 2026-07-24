@@ -225,6 +225,10 @@ async def prepare_playground_chat_turn(
     )
     if body.images and not is_fly:
         msg = await ingest_playground_message_with_images(msg, body.images, eff_tenant=turn.eff_tenant)
+        if not original_user_message:
+            from core.vlm_ingest import default_intent_for_image_only_turn
+
+            original_user_message = default_intent_for_image_only_turn(msg)
     if not msg:
         raise problem(400, "message vacío tras VLM", body.message)
 

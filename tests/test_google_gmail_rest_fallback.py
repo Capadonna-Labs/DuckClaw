@@ -20,6 +20,43 @@ def test_uses_fallback_for_gmailmcp_preset() -> None:
     )
 
 
+def test_gmail_rest_fallback_tool_specs_names() -> None:
+    from duckclaw.forge.skills.google_gmail_rest import gmail_rest_fallback_tool_specs
+
+    names = {getattr(s, "name", "") for s in gmail_rest_fallback_tool_specs()}
+    assert "search_threads" in names
+    assert "get_message" in names
+
+
+def test_connect_worker_mcp_registers_gmail_rest_when_list_tools_fails() -> None:
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from duckclaw.forge.skills import mcp_connector_bridge as bridge
+
+    connector = {
+        "connector_id": "mcp_google_gmail",
+        "preset_id": "google_gmail",
+        "endpoint_url": "https://gmailmcp.googleapis.com/mcp/v1",
+        "transport": "streamable_http",
+        "auth_kind": "bearer",
+    }
+    db = MagicMock()
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("list_tools down")
+
+    with patch.object(bridge, "_list_connector_tools", _boom):
+        with patch.object(bridge, "list_worker_mcp_connectors", return_value=[connector]):
+            with patch.object(bridge, "resolve_connector_bearer_token", return_value="tok"):
+                with patch.object(bridge, "_mcp_available", return_value=True):
+                    tools = asyncio.run(
+                        bridge.connect_worker_mcp_connectors(
+                            db, worker_uid="uid", tenant_id="default"
+                        )
+                    )
+    assert any(getattr(t, "name", "").endswith("__search_threads") for t in tools)
+
+
 def test_search_threads_rest_success() -> None:
     resp = MagicMock()
     resp.status_code = 200

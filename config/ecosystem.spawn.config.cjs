@@ -3,10 +3,55 @@
  * Spec: docs/GETTING_STARTED.md
  */
 const path = require("path");
+const fs = require("fs");
 const root = path.resolve(__dirname, "..");
 const { resolveRepoPython } = require("./ecosystem.runtime.cjs");
 const python = resolveRepoPython(root);
 const envFile = path.join(root, ".env");
+const adminDir = path.join(root, "apps/duckclaw-admin");
+const nextBin = path.join(adminDir, "node_modules", "next", "dist", "bin", "next");
+
+/** ponytail: on Windows PM2 wraps pnpm in CMD.EXE (visible black windows on crash-loop). */
+function adminUiPm2App() {
+  if (process.platform === "win32" && fs.existsSync(nextBin)) {
+    return {
+      name: "duckclaw-admin-ui",
+      script: process.execPath,
+      args: `"${nextBin}" start -p 3000 -H 0.0.0.0`,
+      cwd: adminDir,
+      env_file: envFile,
+      interpreter: "none",
+      autorestart: true,
+      watch: false,
+      max_restarts: 10,
+      min_uptime: 5000,
+      windowsHide: true,
+      env: {
+        PORT: "3000",
+        NODE_ENV: "production",
+        DUCKCLAW_REPO_ROOT: root,
+      },
+    };
+  }
+  return {
+    name: "duckclaw-admin-ui",
+    script: "pnpm",
+    args: "run start -- -p 3000 -H 0.0.0.0",
+    cwd: adminDir,
+    env_file: envFile,
+    interpreter: "none",
+    autorestart: true,
+    watch: false,
+    max_restarts: 10,
+    min_uptime: 5000,
+    windowsHide: true,
+    env: {
+      PORT: "3000",
+      NODE_ENV: "production",
+      DUCKCLAW_REPO_ROOT: root,
+    },
+  };
+}
 
 module.exports = {
   apps: [
@@ -20,6 +65,7 @@ module.exports = {
       autorestart: true,
       watch: false,
       max_restarts: 10,
+      windowsHide: true,
       env: {
         PYTHONPATH: root,
         DUCKCLAW_REPO_ROOT: root,
@@ -27,21 +73,7 @@ module.exports = {
         NODE_ENV: "production",
       },
     },
-    {
-      name: "duckclaw-admin-ui",
-      script: "pnpm",
-      args: "run start -- -p 3000 -H 0.0.0.0",
-      cwd: path.join(root, "apps/duckclaw-admin"),
-      env_file: envFile,
-      interpreter: "none",
-      autorestart: true,
-      watch: false,
-      env: {
-        PORT: "3000",
-        NODE_ENV: "production",
-        DUCKCLAW_REPO_ROOT: root,
-      },
-    },
+    adminUiPm2App(),
     {
       name: "DuckClaw-Heartbeat",
       script: python,

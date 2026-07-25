@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Default DuckClaw desktop capabilities","local":true,"windows":["main"],"permissions":["core:default","shell:allow-spawn","shell:allow-kill"]}}

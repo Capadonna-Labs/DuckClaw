@@ -103,6 +103,25 @@ async def enqueue_write(req: WriteRequest, request: Request) -> EnqueueResponse:
         "query": req.query,
         "params": req.params,
     }
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+    if spawn_inline_writes_enabled():
+        from duckclaw.db_write_queue import enqueue_dict_command
+
+        try:
+            enqueue_dict_command(
+                payload,
+                db_path=db_path,
+                user_id=user_id,
+                tenant_id=str(tenant_id or "default"),
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Inline write failed: {str(exc)[:500]}",
+            ) from exc
+        return EnqueueResponse(status="completed", task_id=task_id)
+
     try:
         await request.app.state.redis.lpush("duckdb_write_queue", json.dumps(payload))
     except redis.RedisError as exc:

@@ -34,11 +34,14 @@ def check_schema_readiness(gateway_db_path: str) -> tuple[bool, str]:
 
 async def assert_gateway_startup_ready(*, redis_url: str, gateway_db_path: str) -> None:
     """Raise RuntimeError with remediation hints when startup prerequisites fail."""
-    redis_ok, redis_msg = check_redis_readiness(redis_url)
-    if not redis_ok:
-        raise RuntimeError(
-            f"{redis_msg}. Hint: run `duckclaw-healthcheck --fix` or start Redis locally."
-        )
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+    if not spawn_inline_writes_enabled():
+        redis_ok, redis_msg = check_redis_readiness(redis_url)
+        if not redis_ok:
+            raise RuntimeError(
+                f"{redis_msg}. Hint: run `duckclaw-healthcheck --fix` or start Redis locally."
+            )
 
     schema_ok, schema_msg = check_schema_readiness(gateway_db_path)
     if not schema_ok:

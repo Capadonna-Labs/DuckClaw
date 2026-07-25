@@ -52,6 +52,7 @@ duckclaw-mcp = { path = "packages/mcp/duckclaw", editable = true }
 dev = [
     "pytest>=7.0.0",
     "httpx>=0.25.0",
+    "pyinstaller>=6.0.0",
 ]
 
 [tool.pytest.ini_options]

@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -46,6 +47,57 @@ def redis_url_from_env() -> str:
 
 def task_status_redis_key(task_id: str) -> str:
     return f"{TASK_STATUS_KEY_PREFIX}{task_id}"
+
+
+_inline_task_status_lock = threading.Lock()
+_inline_task_status: dict[str, tuple[float, str]] = {}
+
+
+def _purge_expired_inline_task_status(*, now: float | None = None) -> None:
+    ts = time.monotonic() if now is None else now
+    expired = [k for k, (exp, _) in _inline_task_status.items() if exp <= ts]
+    for key in expired:
+        _inline_task_status.pop(key, None)
+
+
+def _store_inline_task_status(task_id: str, status: DbWriteTaskStatus) -> None:
+    with _inline_task_status_lock:
+        _purge_expired_inline_task_status()
+        _inline_task_status[task_id] = (
+            time.monotonic() + TASK_STATUS_TTL_SEC,
+            status.model_dump_json(),
+        )
+
+
+def get_task_status_sync(task_id: str) -> DbWriteTaskStatus | None:
+    """Read ``task_status:{id}`` from in-process store (Spawn) or Redis."""
+    tid = (task_id or "").strip()
+    if not tid:
+        return None
+    if spawn_inline_writes_enabled():
+        with _inline_task_status_lock:
+            entry = _inline_task_status.get(tid)
+            if not entry:
+                return None
+            expires, raw = entry
+            if time.monotonic() > expires:
+                _inline_task_status.pop(tid, None)
+                return None
+            try:
+                return DbWriteTaskStatus.model_validate_json(raw)
+            except Exception:
+                return None
+    try:
+        import redis
+
+        r = redis.from_url(redis_url_from_env(), decode_responses=True)
+        raw = r.get(task_status_redis_key(tid))
+        if not raw:
+            return None
+        return DbWriteTaskStatus.model_validate_json(raw)
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("task_status read skipped: %s", exc)
+        return None
 
 
 def _is_duckdb_lock_error(exc: BaseException) -> bool:
@@ -292,6 +344,9 @@ def apply_duckdb_write_sync(
 
 def _publish_inline_task_status(task_id: str, status: DbWriteTaskStatus) -> None:
     """Compatibilidad con callers que hacen poll tras enqueue (p. ej. vault RO efímero)."""
+    if spawn_inline_writes_enabled():
+        _store_inline_task_status(task_id, status)
+        return
     try:
         import redis
 
@@ -505,6 +560,15 @@ def poll_task_status_sync(
     interval_sec: float = 0.05,
 ) -> DbWriteTaskStatus | None:
     """GET task_status:<id> hasta timeout. None si no hubo confirmación."""
+    if spawn_inline_writes_enabled():
+        deadline = time.monotonic() + timeout_sec
+        while time.monotonic() < deadline:
+            row = get_task_status_sync(task_id)
+            if row is not None:
+                return row
+            time.sleep(interval_sec)
+        return None
+
     import redis
 
     r = redis.from_url(redis_url_from_env(), decode_responses=True)

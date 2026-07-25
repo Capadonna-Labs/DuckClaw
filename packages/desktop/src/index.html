@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DuckClaw</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0b0f14; color: #c8d0dc; font-family: system-ui, sans-serif; }
+      .wrap { display: grid; place-items: center; height: 100%; text-align: center; padding: 2rem; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <p>Starting DuckClaw…</p>
+      <p id="status">Sidecar booting</p>
+    </div>
+    <script>
+      const gateway = "http://127.0.0.1:8000";
+      const statusEl = document.getElementById("status");
+      async function waitReady() {
+        for (let i = 0; i < 60; i++) {
+          try {
+            const r = await fetch(gateway + "/health");
+            if (r.ok) {
+              window.location.replace(gateway);
+              return;
+            }
+          } catch (_) {}
+          statusEl.textContent = "Waiting for sidecar (" + (i + 1) + "/60)…";
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        statusEl.textContent = "Sidecar did not respond on " + gateway;
+      }
+      waitReady();
+    </script>
+  </body>
+</html>

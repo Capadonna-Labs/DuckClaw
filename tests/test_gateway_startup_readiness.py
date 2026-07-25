@@ -10,6 +10,9 @@ import pytest
 def test_assert_gateway_startup_ready_fails_without_redis(monkeypatch) -> None:
     from duckclaw.infra.readiness import assert_gateway_startup_ready
 
+    monkeypatch.delenv("LITE_MODE", raising=False)
+    monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
+    monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
     monkeypatch.setenv("DUCKCLAW_DEV_MODE", "1")
 
     async def _run() -> None:

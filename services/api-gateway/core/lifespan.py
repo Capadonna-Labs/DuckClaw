@@ -144,7 +144,13 @@ async def lifespan(app: FastAPI):
     )
 
     _warn_if_loopback_gateway_port_steals_telegram_funnel()
-    app.state.redis = redis.from_url(str(gw_settings.resolved_redis_url()), decode_responses=True)
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+    if spawn_inline_writes_enabled():
+        app.state.redis = None
+        _log.info("Spawn/lite profile: Redis client omitted (inline writes + in-process task_status)")
+    else:
+        app.state.redis = redis.from_url(str(gw_settings.resolved_redis_url()), decode_responses=True)
     app.state.goals_ticker_task = None
     app.state.knowledge_auto_sync_task = None
     _normalize_local_artifacts_to_db()
@@ -315,4 +321,6 @@ async def lifespan(app: FastAPI):
             _log.warning("Telegram MCP: error al cerrar sesión: %s", exc)
         app.state.telegram_mcp = None
 
-    await app.state.redis.aclose()
+    _redis_client = getattr(app.state, "redis", None)
+    if _redis_client is not None:
+        await _redis_client.aclose()

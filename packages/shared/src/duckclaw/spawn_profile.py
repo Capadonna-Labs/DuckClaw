@@ -48,3 +48,22 @@ def spawn_inline_writes_enabled() -> bool:
     """
     apply_lite_mode_env()
     return is_spawn_profile() and not _env_truthy("DUCKCLAW_SPAWN_USE_DB_WRITER")
+
+
+def effective_hub_read_only(db_path: str, read_only: bool) -> bool:
+    """ponytail: spawn/lite hub must share one RW DuckDB config in-process."""
+    if not read_only:
+        return False
+    if not spawn_inline_writes_enabled():
+        return True
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw:
+        return True
+    try:
+        if os.path.normcase(os.path.abspath(db_path)) == os.path.normcase(os.path.abspath(gw)):
+            return False
+    except OSError:
+        pass
+    return True

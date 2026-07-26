@@ -10,6 +10,8 @@ import {
 } from '@/lib/pm2AppResolve';
 import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell } from '@/lib/pm2Recycle';
 import { runStackRecoverLocal } from '@/lib/stackRecover';
+import { runStackRecoverDesktop } from '@/lib/stackRecoverDesktop';
+import { isDesktopLiteMode } from '@/lib/desktopEnvFile';
 import { runStackStartLocal } from '@/lib/stackStart';
 import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
 
@@ -247,6 +249,9 @@ export async function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult>
     return runStackStartLocal();
   }
   if (opId === 'restart_stack') {
+    if (isDesktopLiteMode()) {
+      return runStackRecoverDesktop();
+    }
     return runStackRecoverLocal();
   }
   if (opId === 'start_telegram_ingress') {

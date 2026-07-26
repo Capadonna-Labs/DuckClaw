@@ -37,6 +37,8 @@ type Pm2LogsContextValue = {
   setSelectedApp: (app: string) => void;
   runningApps: string[];
   offlineApps: string[];
+  logApps: string[];
+  desktopLogs: boolean;
   streaming: boolean;
   logText: string;
   error: string | null;
@@ -65,8 +67,10 @@ type ProviderProps = {
 
 export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderProps) {
   const [selectedApp, setSelectedApp] = useState<string>('DuckClaw-Gateway');
-  const [runningApps, setRunningApps] = useState<string[]>([...PM2_LOGGABLE_APPS]);
+  const [runningApps, setRunningApps] = useState<string[]>(['DuckClaw-Gateway']);
   const [offlineApps, setOfflineApps] = useState<string[]>([]);
+  const [logApps, setLogApps] = useState<string[]>([...PM2_LOGGABLE_APPS]);
+  const [desktopLogs, setDesktopLogs] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [logText, setLogText] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +97,10 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
   const clear = useCallback(() => setLogText(''), []);
 
   const start = useCallback(async () => {
-    if (!selectedApp || !runningApps.includes(selectedApp)) {
+    const canStream =
+      runningApps.includes(selectedApp) ||
+      (desktopLogs && selectedApp === 'DuckClaw-Gateway');
+    if (!selectedApp || !canStream) {
       setError('Elige un servicio activo en PM2');
       return;
     }
@@ -146,7 +153,7 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
         setStreaming(false);
       }
     }
-  }, [appendLog, runningApps, selectedApp, stop]);
+  }, [appendLog, desktopLogs, runningApps, selectedApp, stop]);
 
   useEffect(() => {
     if (!autoScroll || !tailRef.current) return;
@@ -164,12 +171,49 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
           credentials: 'include',
           cache: 'no-store',
         });
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { running?: string[]; offline?: string[] };
-        const running = Array.isArray(data.running) ? data.running : [];
-        const offline = Array.isArray(data.offline) ? data.offline : [];
+        if (cancelled) return;
+
+        let running: string[] = [];
+        let offline: string[] = [];
+        let all: string[] = [...PM2_LOGGABLE_APPS];
+        let mode = 'unknown';
+
+        if (res.ok) {
+          const data = (await res.json()) as {
+            running?: string[];
+            offline?: string[];
+            all?: string[];
+            mode?: string;
+          };
+          running = Array.isArray(data.running) ? data.running : [];
+          offline = Array.isArray(data.offline) ? data.offline : [];
+          all = Array.isArray(data.all) && data.all.length > 0 ? data.all : [...PM2_LOGGABLE_APPS];
+          mode = typeof data.mode === 'string' ? data.mode : 'pm2';
+        }
+
+        if (running.length === 0) {
+          const bootRes = await fetch('/api/admin/bootstrap/status', {
+            headers: sessionHeaders('GET'),
+            credentials: 'include',
+            cache: 'no-store',
+          });
+          if (bootRes.ok) {
+            const boot = (await bootRes.json()) as { gatewayReachable?: boolean };
+            if (boot.gatewayReachable) {
+              running = ['DuckClaw-Gateway'];
+              offline = PM2_LOGGABLE_APPS.filter((name) => name !== 'DuckClaw-Gateway');
+              all = ['DuckClaw-Gateway'];
+              mode = 'desktop-client-fallback';
+            }
+          }
+        }
+
+        if (cancelled) return;
+
         setRunningApps(running);
         setOfflineApps(offline);
+        setLogApps(all);
+        setDesktopLogs(mode.startsWith('desktop'));
         if (running.length > 0) {
           setSelectedApp((prev) => (running.includes(prev) ? prev : running[0]));
         }
@@ -184,10 +228,13 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
 
   useEffect(() => {
     if (!autoStart || autoStartedRef.current) return;
-    if (!runningApps.includes(selectedApp)) return;
+    const canStart =
+      runningApps.includes(selectedApp) ||
+      (desktopLogs && selectedApp === 'DuckClaw-Gateway');
+    if (!canStart) return;
     autoStartedRef.current = true;
     void start();
-  }, [autoStart, runningApps, selectedApp, start]);
+  }, [autoStart, desktopLogs, runningApps, selectedApp, start]);
 
   useEffect(() => {
     if (!autoStart) {
@@ -200,6 +247,8 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
     setSelectedApp,
     runningApps,
     offlineApps,
+    logApps,
+    desktopLogs,
     streaming,
     logText,
     error,
@@ -224,6 +273,8 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
     setSelectedApp,
     runningApps,
     offlineApps,
+    logApps,
+    desktopLogs,
     streaming,
     error,
     autoScroll,
@@ -243,7 +294,7 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
     >
       <div className="flex min-w-0 items-center gap-1.5">
         <label className="sr-only" htmlFor="pm2-log-app-select">
-          Servicio PM2
+          {desktopLogs ? 'Servicio (desktop)' : 'Servicio PM2'}
         </label>
         <select
           id="pm2-log-app-select"
@@ -256,7 +307,7 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
               : 'min-w-0 flex-1 truncate rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs font-semibold text-slate-100 disabled:opacity-60'
           }
         >
-          {PM2_LOGGABLE_APPS.map((name) => {
+          {logApps.map((name) => {
             const isRunning = runningApps.includes(name);
             return (
               <option key={name} value={name} disabled={!isRunning}>
@@ -269,7 +320,7 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
           <button
             type="button"
             onClick={() => void start()}
-            disabled={!runningApps.includes(selectedApp)}
+            disabled={!runningApps.includes(selectedApp) && !(desktopLogs && selectedApp === 'DuckClaw-Gateway')}
             className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-gov-blue-700 px-2 py-1.5 text-[11px] font-semibold text-white hover:bg-gov-blue-800 disabled:opacity-50"
             title="Iniciar stream"
           >
@@ -315,10 +366,13 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
             ● En vivo
           </span>
         ) : null}
-        {offlineApps.length > 0 ? (
+        {offlineApps.length > 0 && !desktopLogs ? (
           <span className="text-amber-700 dark:text-amber-400">
             Offline: {offlineApps.join(', ')}
           </span>
+        ) : null}
+        {desktopLogs ? (
+          <span className="text-sky-700 dark:text-sky-400">Modo desktop (sin PM2)</span>
         ) : null}
       </div>
       {error ? (

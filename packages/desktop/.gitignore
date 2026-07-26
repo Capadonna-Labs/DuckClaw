@@ -1,4 +1,14 @@
 node_modules/
 src-tauri/target/
+.tauri/*.key
+!.tauri/*.key.pub
 src-tauri/bin/*.exe
 !src-tauri/bin/.gitkeep
+src-tauri/resources/*
+!src-tauri/resources/.gitkeep
+!src-tauri/resources/admin-ui/
+src-tauri/resources/admin-ui/*
+!src-tauri/resources/admin-ui/.gitkeep
+!src-tauri/resources/node/
+src-tauri/resources/node/*
+!src-tauri/resources/node/.gitkeep

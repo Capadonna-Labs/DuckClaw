@@ -1,14 +1,18 @@
 {
-  "name": "duckclaw-desktop",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Tauri shell for DuckClaw desktop sidecar",
-  "scripts": {
-    "tauri": "tauri",
-    "dev": "tauri dev",
-    "build": "tauri build"
-  },
-  "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0"
-  }
+    "name":  "duckclaw-desktop",
+    "version":  "0.2.0",
+    "private":  true,
+    "description":  "Tauri shell for DuckClaw desktop sidecar",
+    "scripts":  {
+                    "tauri":  "tauri",
+                    "dev":  "tauri dev",
+                    "build":  "tauri build"
+                },
+    "dependencies":  {
+                         "@tauri-apps/plugin-process":  "^2.0.0",
+                         "@tauri-apps/plugin-updater":  "^2.0.0"
+                     },
+    "devDependencies":  {
+                            "@tauri-apps/cli":  "^2.0.0"
+                        }
 }

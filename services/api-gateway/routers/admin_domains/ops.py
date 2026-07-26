@@ -154,6 +154,16 @@ async def run_ops_command(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     op_id = (body.op_id or "").strip()
+    if op_id == "restart_stack":
+        from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+        if spawn_inline_writes_enabled():
+            from duckclaw.desktop_sidecar_restart import restart_desktop_sidecar
+
+            result = await restart_desktop_sidecar()
+            _admin_audit("ops.run", op_id, "desktop sidecar restart", actor=actor, meta=result)
+            return {"op_id": op_id, **result}
+
     argv = _OPS_ALLOWLIST.get(op_id)
     if not argv:
         raise _problem(400, "Comando no permitido", op_id)

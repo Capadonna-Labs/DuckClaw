@@ -56,11 +56,13 @@ async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response
         UpsertConsoleUserCommand,
     )
 
-    redis_client = getattr(request.app.state, "redis", None)
+    from duckclaw.lite_session_store import admin_session_backend
+
+    session_backend = admin_session_backend(request.app.state)
     ip = client_ip(request)
-    if redis_client is not None:
-        await check_ip_rate_limit(redis_client, ip)
-        await apply_login_delay(redis_client, body.email)
+    if session_backend is not None:
+        await check_ip_rate_limit(session_backend, ip)
+        await apply_login_delay(session_backend, body.email)
 
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
@@ -118,8 +120,8 @@ async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response
             )
         except RuntimeError as exc:
             raise problem(503, "DB-writer rechazó fallo de login", str(exc)) from exc
-        if redis_client is not None:
-            await record_email_failure(redis_client, body.email)
+        if session_backend is not None:
+            await record_email_failure(session_backend, body.email)
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     try:
@@ -144,10 +146,10 @@ async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response
     except RuntimeError as exc:
         raise problem(503, "DB-writer rechazó estado de login", str(exc)) from exc
 
-    if redis_client is None:
+    if session_backend is None:
         raise problem(503, "Redis no disponible para sesiones", "redis")
-    await clear_email_failures(redis_client, body.email)
-    session_id, csrf_token = await create_session(redis_client, user=user)
+    await clear_email_failures(session_backend, body.email)
+    session_id, csrf_token = await create_session(session_backend, user=user)
     set_auth_cookies(response, session_id, csrf_token, request=request)
     _log.info("login_success email=%s ip=%s", body.email, ip)
     return {"user": console_user_public(user)}
@@ -164,18 +166,20 @@ async def admin_auth_me(request: Request) -> dict[str, Any]:
     from core.admin_identity import attach_profile_to_console_user, open_gateway_db
     from duckclaw.admin_console_users import get_by_email
 
-    redis_client = getattr(request.app.state, "redis", None)
+    from duckclaw.lite_session_store import admin_session_backend
+
+    session_backend = admin_session_backend(request.app.state)
     session_id = request.cookies.get(SESSION_COOKIE)
-    if not redis_client or not session_id:
+    if not session_backend or not session_id:
         raise HTTPException(status_code=401, detail="Unauthorized")
 
-    session = await load_session(redis_client, session_id)
+    session = await load_session(session_backend, session_id)
     if not session:
         raise HTTPException(status_code=401, detail="Session expired")
 
     email = str(session.get("email") or "").strip()
     if not email:
-        await destroy_session(redis_client, session_id)
+        await destroy_session(session_backend, session_id)
         raise HTTPException(status_code=401, detail="Session user missing")
 
     def _resolve_session_from_db() -> dict[str, Any] | None:
@@ -194,11 +198,11 @@ async def admin_auth_me(request: Request) -> dict[str, Any]:
 
     resolved = await asyncio.to_thread(_resolve_session_from_db)
     if resolved is None:
-        await destroy_session(redis_client, session_id)
+        await destroy_session(session_backend, session_id)
         raise HTTPException(status_code=401, detail="Session user not active")
     session = resolved
 
-    session = await refresh_session(redis_client, session_id, session)
+    session = await refresh_session(session_backend, session_id, session)
     if not (session.get("profile") or {}).get("tenant_id") and email:
 
         def _attach_profile() -> dict[str, Any]:
@@ -213,9 +217,11 @@ async def admin_auth_me(request: Request) -> dict[str, Any]:
 async def admin_auth_logout(request: Request, response: Response) -> dict[str, Any]:
     from core.admin_auth import SESSION_COOKIE, clear_auth_cookies, destroy_session
 
-    redis_client = getattr(request.app.state, "redis", None)
+    from duckclaw.lite_session_store import admin_session_backend
+
+    session_backend = admin_session_backend(request.app.state)
     session_id = request.cookies.get(SESSION_COOKIE)
-    if redis_client and session_id:
-        await destroy_session(redis_client, session_id)
+    if session_backend and session_id:
+        await destroy_session(session_backend, session_id)
     clear_auth_cookies(response)
     return {"ok": True}

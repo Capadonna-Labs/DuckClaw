@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-prepare-update"
+description = "Gracefully stop sidecar and admin before applying an update."
+commands.allow = ["prepare_for_update"]

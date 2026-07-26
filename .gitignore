@@ -115,6 +115,11 @@ _auto_publish_fix/
 _reports_fix_staging/
 _reports_staging/
 debug-*.log
+build_desktop.log
+tauri_build.log
+
+# Windows Next standalone build workaround (scripts/build_desktop.ps1 creates transiently)
+apps/duckclaw-admin/.npmrc
 
 # VPS-only: deploy patches, probes, host-specific ops (never commit)
 _vps_local/

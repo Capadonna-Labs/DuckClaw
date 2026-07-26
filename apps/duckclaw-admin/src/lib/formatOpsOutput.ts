@@ -24,7 +24,6 @@ export const HOST_ONLY_OPS = new Set([
   'pm2_restart_db_writer',
   'pm2_start_gateway',
   'start_stack',
-  'restart_stack',
   'start_telegram_ingress',
 ]);
 

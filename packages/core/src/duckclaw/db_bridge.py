@@ -42,6 +42,9 @@ def _duckdb_python_connect_with_retry(db_path: str, *, read_only: bool) -> Any:
     Abre duckdb.connect; en solo lectura reintenta ante lock — alineado con
     ``graph_server._open_duckclaw_readonly_with_retry`` y ``context_injection_handler._connect_duckdb_writable``.
     """
+    from duckclaw.spawn_profile import effective_hub_read_only
+
+    read_only = effective_hub_read_only(db_path, read_only)
     raw_attempts = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS") or "24").strip()
     try:
         attempts = max(1, min(int(raw_attempts), 80))

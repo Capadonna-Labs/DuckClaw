@@ -57,7 +57,10 @@ def resolve_vault_path(vault_path: str | None) -> str:
 def connect_readonly(path: str) -> Any:
     import duckdb
 
-    return duckdb.connect(path, read_only=True)
+    from duckclaw.spawn_profile import effective_hub_read_only
+
+    ro = effective_hub_read_only(path, True)
+    return duckdb.connect(path, read_only=ro)
 
 
 class _DuckDbQueryAdapter:

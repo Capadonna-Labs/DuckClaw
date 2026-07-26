@@ -10,6 +10,7 @@ import { useEffect, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { PlatformStatusStrip } from '@/components/admin/GatewayStatusBadge';
+import { UpdateBanner } from '@/components/layout/UpdateBanner';
 import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 
 interface TopbarProps {
@@ -90,7 +91,9 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
   };
 
   return (
-    <header
+    <>
+      <UpdateBanner />
+      <header
       role="banner"
       className="h-16 bg-white border-b border-gov-gray-100 shadow-sm px-4 md:px-6 flex items-center justify-between shrink-0 dark:bg-dark-surface dark:border-dark-border"
     >
@@ -155,6 +158,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
         )}
       </div>
     </header>
+    </>
   );
 }
 

@@ -1,5 +1,7 @@
 import { NextRequest } from 'next/server';
 import { startPm2LogsStream } from '@/lib/pm2LogStream';
+import { startDesktopGatewayLogStream } from '@/lib/desktopGatewayLogStream';
+import { shouldUseDesktopGatewayLogs } from '@/lib/desktopEnvFile';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 export const runtime = 'nodejs';
@@ -15,7 +17,11 @@ export async function GET(req: NextRequest) {
     const ac = new AbortController();
     req.signal.addEventListener('abort', () => ac.abort(), { once: true });
 
-    const { stream } = startPm2LogsStream(apps, ac.signal);
+    const useDesktopGateway = shouldUseDesktopGatewayLogs(apps);
+
+    const { stream } = useDesktopGateway
+      ? startDesktopGatewayLogStream(ac.signal)
+      : startPm2LogsStream(apps, ac.signal);
 
     return new Response(stream, {
       status: 200,
@@ -23,7 +29,7 @@ export async function GET(req: NextRequest) {
         'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
         'X-Content-Type-Options': 'nosniff',
-        'X-Duckclaw-Ops-Via': 'local-pm2-stream',
+        'X-Duckclaw-Ops-Via': useDesktopGateway ? 'desktop-health-stream' : 'local-pm2-stream',
       },
     });
   } catch (e) {

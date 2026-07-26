@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { HOST_ONLY_OPS, isLocalOpId, listOpsCommands, runOpsLocal } from '@/lib/localOps';
+import { applyDesktopEnvToProcessEnv, desktopAdminApiKey } from '@/lib/desktopEnvFile';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
+
+applyDesktopEnvToProcessEnv();
 
 function gatewayBase(): string | null {
   const raw =
@@ -11,7 +14,7 @@ function gatewayBase(): string | null {
 }
 
 function adminKey(): string {
-  return (process.env.DUCKCLAW_ADMIN_API_KEY || '').trim();
+  return desktopAdminApiKey();
 }
 
 /** Ejecuta ops en el host del admin cuando el gateway aún no expone POST /ops/run. */

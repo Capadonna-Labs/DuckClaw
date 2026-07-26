@@ -1,6 +1,8 @@
 import { join } from 'path';
 import { spawn } from 'child_process';
 import { type NormalizedOpsRunResult, normalizeOpsResult } from '@/lib/formatOpsOutput';
+import { isDesktopLiteMode } from '@/lib/desktopEnvFile';
+import { runStackRecoverDesktop } from '@/lib/stackRecoverDesktop';
 import { repoRoot } from '@/lib/localOps';
 import { opsSubprocessEnv } from '@/lib/opsSubprocessEnv';
 import { buildUvRunArgv } from '@/lib/resolveRepoRuntime';
@@ -48,6 +50,9 @@ function runArgv(
  * aplica migraciones/seeders y vuelve a levantar el stack.
  */
 export async function runStackRecoverLocal(): Promise<NormalizedOpsRunResult> {
+  if (isDesktopLiteMode()) {
+    return runStackRecoverDesktop();
+  }
   const cwd = repoRoot();
   const chunks: string[] = [];
 

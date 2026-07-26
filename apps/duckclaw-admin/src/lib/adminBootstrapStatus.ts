@@ -1,4 +1,5 @@
 import { adminApiKey, gatewayBase, gatewayConnectHint, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { isDesktopLiteMode } from '@/lib/desktopEnvFile';
 import { parsePm2Jlist, pm2JlistStdout } from '@/lib/pm2Jlist';
 
 export type AdminBootstrapStatus = {
@@ -80,9 +81,12 @@ async function resolvePm2GatewayStatus(): Promise<{
 }
 
 function baseStatusFields(pm2Status: AdminBootstrapStatus['pm2Status']) {
+  const desktop = isDesktopLiteMode();
   return {
     pm2Status,
-    recoveryCommand: 'Reiniciar stack (barra superior: migrate + PM2)',
+    recoveryCommand: desktop
+      ? 'Reiniciar sistema (barra superior) o scripts/desktop_restart.ps1'
+      : 'Reiniciar stack (barra superior: migrate + PM2)',
   };
 }
 
@@ -175,6 +179,8 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
       canAttemptLogin: false,
       code: 'admin_key_invalid',
       message: 'La clave admin del BFF no coincide con la del Gateway.',
+      detail:
+        'Desktop: revisa %LOCALAPPDATA%\\DuckClaw\\desktop.env (misma DUCKCLAW_ADMIN_API_KEY en gateway y consola). Si PM2 usa :8000, ejecuta pm2 stop duckclaw-gateway.',
       gatewayHint,
       ...baseStatusFields(pm2Status),
       checkedAt,

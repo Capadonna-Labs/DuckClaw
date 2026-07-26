@@ -31,7 +31,9 @@ Entry: `services/desktop-sidecar/run.py`
 - Binds `127.0.0.1`; health at `GET /health`.
 - Does **not** start db-writer, heartbeat PM2, knowledge-indexer, or separate MCP HTTP.
 
-Admin UI v1: point webview at `http://127.0.0.1:8000` (gateway). Embedded Next admin is out of scope for sidecar v1.
+Admin UI v1: embedded Next.js admin (`duckclaw-admin`) on `http://127.0.0.1:3000/login`. Tauri spawns bundled `node.exe` + standalone `server.js` after backend health. Gateway stays on `:8000` for API/BFF proxy.
+
+Desktop credentials: `%LOCALAPPDATA%\DuckClaw\desktop.env` (stable `DUCKCLAW_ADMIN_API_KEY`, seed email/password on first run).
 
 ## Out of scope (v1)
 
@@ -48,8 +50,11 @@ Admin UI v1: point webview at `http://127.0.0.1:8000` (gateway). Embedded Next a
 |----------|------|
 | Sidecar entry | `services/desktop-sidecar/run.py` |
 | PyInstaller build | `scripts/build_desktop_sidecar.ps1` |
+| Full desktop build | `scripts/build_desktop.ps1` (sidecar + admin standalone + node + Tauri NSIS) |
 | Spec | `services/desktop-sidecar/duckclaw_sidecar.spec` |
 | Tauri shell | `packages/desktop/` |
+| Admin UI bundle | `packages/desktop/src-tauri/resources/admin-ui/` (build artifact) |
+| Node runtime | `packages/desktop/src-tauri/resources/node/node.exe` (build artifact) |
 
 Build ships **with console first** (`console=True`). Switch to `--noconsole` only after smoke is stable.
 
@@ -76,13 +81,23 @@ Introduce a local queue **only if** lite bypass stops being enough (e.g. sidecar
 
 Until then: YAGNI; Spawn inline is the queue bypass.
 
+## Auto-updater (Tauri 2)
+
+- Plugin: `@tauri-apps/plugin-updater` + Minisign signatures.
+- Endpoint: `https://github.com/<owner>/<repo>/releases/latest/download/latest.json` (synced from `origin` at build time)
+- Release: `scripts/release_desktop.ps1`; signing setup: `scripts/setup_desktop_signing.ps1`
+- Production sidecar: bundled `externalBin` only (updater replaces install dir). Dev hot-reload: `DUCKCLAW_DESKTOP_DEV_SIDECAR=1`.
+- User data under `%LOCALAPPDATA%\DuckClaw\` (db, desktop.env) is **not** modified by updates.
+
 ## Acceptance
 
 1. `LITE_MODE=1` → gateway writes DuckDB without Redis/db-writer.
 2. Sidecar responds on loopback `/health`.
 3. PyInstaller exe passes smoke on Win10/11.
-4. Tauri spawns/kills sidecar without residual processes.
-5. No trading-vertical product code in diff.
+4. Tauri spawns/kills sidecar **and** admin Node without residual processes.
+5. Webview opens admin login (`:3000/login`), not gateway JSON root.
+6. Signed auto-update from GitHub Releases updates shell + sidecar + admin bundle; user DB/env persist.
+7. No trading-vertical product code in diff.
 
 ## Related
 

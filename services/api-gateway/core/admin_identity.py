@@ -40,7 +40,11 @@ def open_gateway_db(*, read_only: bool = False) -> Iterator[Any]:
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         raise FileNotFoundError("Gateway DuckDB no disponible")
-    db = DuckClaw(gw, read_only=read_only, engine="python")
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+    # Spawn/lite: hub already open RW in-process; RO connections break DuckDB.
+    effective_ro = bool(read_only) and not spawn_inline_writes_enabled()
+    db = DuckClaw(gw, read_only=effective_ro, engine="python")
     try:
         yield db
     finally:

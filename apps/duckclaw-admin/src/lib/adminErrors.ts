@@ -1,5 +1,20 @@
 /** Mensajes legibles cuando el BFF no alcanza el gateway. */
 
+function isDesktopRuntime(): boolean {
+  return (
+    (process.env.NEXT_PUBLIC_DUCKCLAW_DESKTOP || '').trim() === '1' ||
+    (process.env.LITE_MODE || '').trim() === '1'
+  );
+}
+
+function desktopGatewayDownMessage(): string {
+  return 'El gateway embebido no responde. Cierra DuckClaw por completo y ábrelo de nuevo, o usa «Reiniciar sistema» en la barra superior.';
+}
+
+function hostGatewayDownMessage(): string {
+  return 'El API Gateway no está en marcha en este equipo. Usa «Iniciar stack» para levantar DuckClaw-DB-Writer y DuckClaw-Gateway (PM2).';
+}
+
 export function isGatewayUnreachableMessage(message: string): boolean {
   const m = message.toLowerCase();
   if (
@@ -57,10 +72,12 @@ export function friendlyGatewayError(raw: string): string {
     return 'La respuesta de voz tardó más de lo que el proxy admite. El agente puede haber terminado en el servidor; recarga el chat o reintenta con una pregunta más corta.';
   }
   if (isGatewayUnreachableMessage(raw)) {
-    return 'El API Gateway no está en marcha en este equipo. Usa «Iniciar stack» para levantar DuckClaw-DB-Writer y DuckClaw-Gateway (PM2).';
+    return isDesktopRuntime() ? desktopGatewayDownMessage() : hostGatewayDownMessage();
   }
   if (raw === 'Internal Server Error') {
-    return 'No se pudo contactar el gateway. Comprueba PM2 o inicia el stack desde el botón de abajo.';
+    return isDesktopRuntime()
+      ? desktopGatewayDownMessage()
+      : 'No se pudo contactar el gateway. Comprueba PM2 o inicia el stack desde el botón de abajo.';
   }
   if (/stt inference failed|stt no disponible/i.test(raw)) {
     return 'No se pudo transcribir el audio. El nodo sensory no decodificó el formato; reintenta tras actualizar.';

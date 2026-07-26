@@ -14,6 +14,7 @@ const securityHeaders = [
 const relaxBuild = process.env.DUCKCLAW_ADMIN_RELAX_BUILD === '1';
 
 const nextConfig = {
+  output: "standalone",
   transpilePackages: ['date-fns'],
   ...(relaxBuild
     ? {

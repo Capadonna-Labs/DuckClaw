@@ -31,7 +31,9 @@ class ReadOnlyGatewayAclDb:
     def query(self, sql: str, params: tuple | list | None = None) -> str:
         import duckdb
 
-        con = duckdb.connect(self._path, read_only=True)
+        from duckclaw.spawn_profile import effective_hub_read_only
+
+        con = duckdb.connect(self._path, read_only=effective_hub_read_only(self._path, True))
         try:
             if params is not None:
                 result = con.execute(sql, params)

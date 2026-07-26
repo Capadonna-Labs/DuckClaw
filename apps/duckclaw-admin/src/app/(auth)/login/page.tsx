@@ -7,6 +7,12 @@ import { adminPostAuthPath, useAuthStore } from '@/store/authStore';
 import { DEV_HINT_EMAIL, DEV_LOGIN_HINT_ENABLED } from '@/config/adminUsers';
 import { BootstrapStatusBanner } from '@/components/auth/BootstrapStatusBanner';
 import { useAdminBootstrapStatus } from '@/hooks/useAdminBootstrapStatus';
+import {
+  clearSavedLoginCredentials,
+  confirmSaveLoginCredentials,
+  readSavedLoginCredentials,
+  saveSavedLoginCredentials,
+} from '@/lib/savedLoginCredentials';
 
 function LoginForm() {
   const router = useRouter();
@@ -19,6 +25,7 @@ function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [rememberPassword, setRememberPassword] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
 
   const redirectIfAuthed = useCallback(() => {
@@ -32,6 +39,27 @@ function LoginForm() {
   useEffect(() => {
     if (hasHydrated && isAuthenticated) router.replace(adminPostAuthPath(null));
   }, [hasHydrated, isAuthenticated, router]);
+
+  useEffect(() => {
+    const saved = readSavedLoginCredentials();
+    if (!saved) return;
+    setEmail(saved.email);
+    setPassword(saved.password);
+    setRememberPassword(true);
+  }, []);
+
+  const persistCredentialsIfAllowed = useCallback((em: string, pw: string) => {
+    if (rememberPassword) {
+      if (confirmSaveLoginCredentials()) {
+        saveSavedLoginCredentials({ email: em, password: pw });
+      } else {
+        setRememberPassword(false);
+        clearSavedLoginCredentials();
+      }
+    } else {
+      clearSavedLoginCredentials();
+    }
+  }, [rememberPassword]);
 
   const submitLogin = useCallback(
     async (rawEmail: string, rawPassword: string) => {
@@ -51,9 +79,12 @@ function LoginForm() {
       }
       setFieldError(null);
       await loginWithCredentials(em, pw);
-      redirectIfAuthed();
+      if (useAuthStore.getState().isAuthenticated) {
+        persistCredentialsIfAllowed(em, pw);
+        redirectIfAuthed();
+      }
     },
-    [bootstrap.canAttemptLogin, loginWithCredentials, redirectIfAuthed]
+    [bootstrap.canAttemptLogin, loginWithCredentials, persistCredentialsIfAllowed, redirectIfAuthed]
   );
 
   useEffect(() => {
@@ -143,6 +174,21 @@ function LoginForm() {
               </button>
             </div>
           </div>
+
+          <label className="flex items-start gap-2 text-sm text-slate-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={rememberPassword}
+              onChange={(e) => setRememberPassword(e.target.checked)}
+              className="mt-0.5 rounded border-slate-300"
+            />
+            <span>
+              Recordar contraseña en este equipo
+              <span className="block text-xs text-slate-400 mt-0.5">
+                Al entrar, te pediremos confirmación antes de guardarla.
+              </span>
+            </span>
+          </label>
 
           {displayError && (
             <p className="flex items-center gap-2 text-sm text-red-600 bg-red-50 p-3 rounded-xl">

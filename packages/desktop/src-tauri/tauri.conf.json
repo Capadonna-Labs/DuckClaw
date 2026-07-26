@@ -1,37 +1,50 @@
 {
-  "$schema": "https://schema.tauri.app/config/2",
-  "productName": "DuckClaw",
-  "version": "0.1.0",
-  "identifier": "com.duckclaw.desktop",
-  "build": {
-    "frontendDist": "../src"
-  },
-  "app": {
-    "windows": [
-      {
-        "title": "DuckClaw",
-        "width": 1280,
-        "height": 800,
-        "resizable": true
-      }
-    ],
-    "security": {
-      "csp": null,
-      "capabilities": ["default"]
-    }
-  },
-  "bundle": {
-    "active": true,
-    "targets": "all",
-    "externalBin": [
-      "bin/duckclaw_backend"
-    ],
-    "icon": [
-      "icons/32x32.png",
-      "icons/128x128.png",
-      "icons/256x256.png",
-      "icons/icon.ico"
-    ]
-  },
-  "plugins": {}
+    "$schema":  "https://schema.tauri.app/config/2",
+    "productName":  "DuckClaw",
+    "version":  "0.2.0",
+    "identifier":  "com.duckclaw.desktop",
+    "build":  {
+                  "frontendDist":  "../src"
+              },
+    "app":  {
+                "windows":  [
+                                {
+                                    "title":  "DuckClaw",
+                                    "width":  1280,
+                                    "height":  800,
+                                    "resizable":  true
+                                }
+                            ],
+                "security":  {
+                                 "csp":  "default-src \u0027self\u0027 \u0027unsafe-inline\u0027; connect-src \u0027self\u0027 http://127.0.0.1:* http://localhost:* ipc: http://ipc.localhost https://tauri.localhost https://github.com https://*.githubusercontent.com",
+                                 "capabilities":  [
+                                                      "default"
+                                                  ]
+                             }
+            },
+    "bundle":  {
+                   "active":  true,
+                   "targets":  "all",
+                   "createUpdaterArtifacts":  true,
+                   "resources":  [
+                                     "resources/"
+                                 ],
+                   "externalBin":  [
+                                       "bin/duckclaw_backend"
+                                   ],
+                   "icon":  [
+                                "icons/32x32.png",
+                                "icons/128x128.png",
+                                "icons/256x256.png",
+                                "icons/icon.ico"
+                            ]
+               },
+    "plugins":  {
+                    "updater":  {
+                                    "pubkey":  "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU2QkYxQ0MxNEM2QjA1MzQKUldRMEJXdE13UnkvNWo1OFM5dytBekdJdFZiZXRpZ2wzNlVpTGU0WSswTnN6N1ZRQlZrZ0czbGoK",
+                                    "endpoints":  [
+                                                      "https://github.com/Capadonna-Labs/duckclaw/releases/latest/download/latest.json"
+                                                  ]
+                                }
+                }
 }

@@ -18,6 +18,10 @@ export function gatewayLongFetch(input: string | URL, init?: RequestInit): Promi
   }) as unknown as Promise<Response>;
 }
 
+import { desktopAdminApiKey, applyDesktopEnvToProcessEnv } from '@/lib/desktopEnvFile';
+
+applyDesktopEnvToProcessEnv();
+
 /** Cabeceras comunes al llamar al API Gateway desde el BFF (servidor Next). */
 export function gatewayBase(): string | null {
   const explicit =
@@ -41,7 +45,7 @@ export function gatewayConnectHint(): string {
 }
 
 export function adminApiKey(): string {
-  return (process.env.DUCKCLAW_ADMIN_API_KEY || '').trim();
+  return desktopAdminApiKey();
 }
 
 export function tailscaleAuthKey(): string {

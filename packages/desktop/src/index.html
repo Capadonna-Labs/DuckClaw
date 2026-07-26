@@ -12,24 +12,48 @@
   <body>
     <div class="wrap">
       <p>Starting DuckClaw…</p>
-      <p id="status">Sidecar booting</p>
+      <p id="status">Backend booting</p>
     </div>
     <script>
       const gateway = "http://127.0.0.1:8000";
+      const admin = "http://127.0.0.1:3000";
+      const loginUrl = admin + "/login";
       const statusEl = document.getElementById("status");
+
+      async function backendReady() {
+        try {
+          const r = await fetch(gateway + "/health");
+          return r.ok;
+        } catch (_) {
+          return false;
+        }
+      }
+
+      async function adminReady() {
+        try {
+          const r = await fetch(loginUrl, { redirect: "manual" });
+          return r.status > 0 && r.status < 500;
+        } catch (_) {
+          return false;
+        }
+      }
+
       async function waitReady() {
-        for (let i = 0; i < 60; i++) {
-          try {
-            const r = await fetch(gateway + "/health");
-            if (r.ok) {
-              window.location.replace(gateway);
-              return;
-            }
-          } catch (_) {}
-          statusEl.textContent = "Waiting for sidecar (" + (i + 1) + "/60)…";
+        for (let i = 0; i < 180; i++) {
+          const backend = await backendReady();
+          const ui = backend ? await adminReady() : false;
+          if (backend && ui) {
+            window.location.replace(loginUrl);
+            return;
+          }
+          if (!backend) {
+            statusEl.textContent = "Waiting for backend (" + (i + 1) + "/180)…";
+          } else {
+            statusEl.textContent = "Waiting for admin UI (" + (i + 1) + "/180)…";
+          }
           await new Promise((r) => setTimeout(r, 1000));
         }
-        statusEl.textContent = "Sidecar did not respond on " + gateway;
+        statusEl.textContent = "Services did not start (backend :8000, admin :3000). Close PM2 gateway if port 8000 is busy, then retry.";
       }
       waitReady();
     </script>

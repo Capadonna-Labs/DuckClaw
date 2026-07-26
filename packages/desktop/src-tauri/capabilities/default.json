@@ -6,6 +6,12 @@
   "permissions": [
     "core:default",
     "shell:allow-spawn",
-    "shell:allow-kill"
-  ]
+    "shell:allow-kill",
+    "updater:default",
+    "process:allow-restart",
+    "allow-prepare-update"
+  ],
+  "remote": {
+    "urls": ["http://127.0.0.1:3000/*", "http://localhost:3000/*"]
+  }
 }

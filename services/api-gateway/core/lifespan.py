@@ -147,8 +147,12 @@ async def lifespan(app: FastAPI):
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
 
     if spawn_inline_writes_enabled():
-        app.state.redis = None
-        _log.info("Spawn/lite profile: Redis client omitted (inline writes + in-process task_status)")
+        from duckclaw.lite_session_store import LITE_SESSION_STORE
+
+        app.state.redis = LITE_SESSION_STORE
+        _log.info(
+            "Spawn/lite profile: in-process LiteSessionStore (inline writes + in-process task_status)"
+        )
     else:
         app.state.redis = redis.from_url(str(gw_settings.resolved_redis_url()), decode_responses=True)
     app.state.goals_ticker_task = None

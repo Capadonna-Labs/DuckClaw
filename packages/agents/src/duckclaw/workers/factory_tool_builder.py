@@ -15,8 +15,15 @@ from duckclaw.workers import read_pool
 from duckclaw.workers.db_runtime import infer_user_id_for_writer as _infer_user_id_for_writer
 from duckclaw.workers.loader import load_skills
 from duckclaw.workers.manifest import WorkerSpec
+from duckclaw.workers.tool_surface_policy import expose_privileged_mutation_tool_names
 
 _log = logging.getLogger(__name__)
+
+
+def _admin_sql_privileged_exposed(spec: WorkerSpec) -> bool:
+    """True when manifest opts admin_sql into read_only workers via tool_surface."""
+
+    return "admin_sql" in expose_privileged_mutation_tool_names(spec)
 
 
 def _ensure_worker_duckdb_extensions(db: Any, spec: WorkerSpec) -> None:
@@ -114,10 +121,14 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         if allowed_tables_error:
             return allowed_tables_error
 
-        # Respetar read_only del worker para operaciones destructivas/escrituras.
-        if spec.read_only and any(
+        # Respetar read_only salvo admin_sql expuesto en tool_surface del manifest.
+        if (
+            spec.read_only
+            and not _admin_sql_privileged_exposed(spec)
+            and any(
             kw in upper
             for kw in ("INSERT", "UPDATE", "DELETE", "DROP", "CREATE", "ALTER", "TRUNCATE")
+        )
         ):
             return json.dumps({"error": "Este trabajador es solo lectura. No se permiten escrituras."})
 
@@ -187,7 +198,8 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         except Exception as e:
             return json.dumps({"error": str(e)})
 
-    if not spec.read_only:
+    _admin_exposed = _admin_sql_privileged_exposed(spec)
+    if not spec.read_only or _admin_exposed:
         tools.append(
             StructuredTool.from_function(
                 _admin_sql_worker,

@@ -1,5 +1,7 @@
 import { adminApiKey, gatewayBase, gatewayConnectHint, gatewayProxyHeaders } from '@/lib/gatewayProxy';
 import { isDesktopLiteMode } from '@/lib/desktopEnvFile';
+import { GATEWAY_PM2_CANDIDATES } from '@/lib/pm2AppResolve';
+import { gatewayHealthOk } from '@/lib/gatewayHealthCheck';
 import { parsePm2Jlist, pm2JlistStdout } from '@/lib/pm2Jlist';
 
 export type AdminBootstrapStatus = {
@@ -52,9 +54,15 @@ async function resolvePm2GatewayStatus(): Promise<{
     }
     const gateway = rows.find((row) => {
       if (!row || typeof row !== 'object') return false;
-      return (row as { name?: string }).name === 'DuckClaw-Gateway';
+      const name = (row as { name?: string }).name;
+      return Boolean(name && GATEWAY_PM2_CANDIDATES.includes(name as (typeof GATEWAY_PM2_CANDIDATES)[number]));
     }) as { pm2_env?: { status?: string; restart_time?: number } } | undefined;
     if (!gateway) {
+      if (await gatewayHealthOk()) {
+        const systemd = { status: 'online' as const, restartCount: null };
+        pm2Cache = { ...systemd, expiresAt: Date.now() + PM2_CACHE_MS };
+        return systemd;
+      }
       const miss = { status: 'missing' as const, restartCount: null };
       pm2Cache = { ...miss, expiresAt: Date.now() + PM2_CACHE_MS };
       return miss;

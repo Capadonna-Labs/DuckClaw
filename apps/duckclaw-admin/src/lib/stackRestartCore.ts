@@ -112,17 +112,25 @@ ${pm2EnsureRestartHeartbeatShell(cwd).trim()}
 
 wait_pm2_online DuckClaw-Heartbeat 30 || echo "PM2_WARN: DuckClaw-Heartbeat not online yet"
 
-${pm2EnsureRestartGatewayShell(cwd).trim()}
+if [ -n "\${DUCKCLAW_GATEWAY_SYSTEMD_UNIT:-}" ]; then
+  for n in DuckClaw-Gateway duckclaw-gateway DuckClaw-API; do
+    pm2 delete "\$n" 2>/dev/null || true
+  done
+  systemctl restart "\$DUCKCLAW_GATEWAY_SYSTEMD_UNIT"
+  wait_gateway_health 60 || true
+else
+  ${pm2EnsureRestartGatewayShell(cwd).trim()}
 
-wait_pm2_online DuckClaw-Gateway 45 || wait_pm2_online duckclaw-gateway 45 || {
+  wait_pm2_online DuckClaw-Gateway 45 || wait_pm2_online duckclaw-gateway 45 || {
 
-  echo "PM2_FALLBACK: starting DuckClaw-Gateway"
+    echo "PM2_FALLBACK: starting DuckClaw-Gateway"
 
-  pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway
+    pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway
 
-  wait_pm2_online DuckClaw-Gateway 30 || exit 1
+    wait_pm2_online DuckClaw-Gateway 30 || exit 1
 
-}
+  }
+fi
 
 wait_gateway_health 60 || true
 

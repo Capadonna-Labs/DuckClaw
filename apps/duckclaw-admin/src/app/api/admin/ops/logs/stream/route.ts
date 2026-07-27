@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server';
 import { startPm2LogsStream } from '@/lib/pm2LogStream';
 import { startDesktopGatewayLogStream } from '@/lib/desktopGatewayLogStream';
+import { startSystemdGatewayLogStream } from '@/lib/systemdGatewayLogStream';
 import { shouldUseDesktopGatewayLogs } from '@/lib/desktopEnvFile';
+import { gatewaySystemdUnit } from '@/lib/gatewaySystemd';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 export const runtime = 'nodejs';
@@ -18,10 +20,14 @@ export async function GET(req: NextRequest) {
     req.signal.addEventListener('abort', () => ac.abort(), { once: true });
 
     const useDesktopGateway = shouldUseDesktopGatewayLogs(apps);
+    const systemdUnit =
+      apps?.includes('DuckClaw-Gateway') ? gatewaySystemdUnit() : null;
 
     const { stream } = useDesktopGateway
       ? startDesktopGatewayLogStream(ac.signal)
-      : startPm2LogsStream(apps, ac.signal);
+      : systemdUnit
+        ? startSystemdGatewayLogStream(systemdUnit, ac.signal)
+        : startPm2LogsStream(apps, ac.signal);
 
     return new Response(stream, {
       status: 200,
@@ -29,7 +35,11 @@ export async function GET(req: NextRequest) {
         'Content-Type': 'text/plain; charset=utf-8',
         'Cache-Control': 'no-cache, no-transform',
         'X-Content-Type-Options': 'nosniff',
-        'X-Duckclaw-Ops-Via': useDesktopGateway ? 'desktop-health-stream' : 'local-pm2-stream',
+        'X-Duckclaw-Ops-Via': useDesktopGateway
+          ? 'desktop-health-stream'
+          : systemdUnit
+            ? 'systemd-journal-stream'
+            : 'local-pm2-stream',
       },
     });
   } catch (e) {

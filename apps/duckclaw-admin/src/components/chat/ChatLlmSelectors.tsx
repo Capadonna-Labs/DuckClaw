@@ -14,6 +14,7 @@ import {
   type MlxInferenceCatalog,
 } from '@/lib/llmModelPresets';
 import { SearchableModelSelect } from '@/components/chat/SearchableModelSelect';
+import { writePlaygroundLastLlm } from '@/lib/playgroundLastSelection';
 
 type CatalogItem = {
   id: string;
@@ -26,6 +27,7 @@ type CatalogItem = {
 
 type Props = {
   chatId: string;
+  tenantId?: string;
   provider: string;
   model: string;
   catalog: CatalogItem[];
@@ -40,6 +42,7 @@ type Props = {
 
 export function ChatLlmSelectors({
   chatId,
+  tenantId,
   provider,
   model,
   catalog,
@@ -110,6 +113,10 @@ export function ChatLlmSelectors({
         chat_id: chatId,
         provider: pid,
         ...(modelArg ? { model: modelArg } : {}),
+      });
+      writePlaygroundLastLlm(tenantId, {
+        provider: pid,
+        model: modelArg || currentModel,
       });
       onUpdated();
     } catch (e) {

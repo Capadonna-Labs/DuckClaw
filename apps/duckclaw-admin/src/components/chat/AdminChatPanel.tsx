@@ -123,8 +123,8 @@ export function AdminChatPanel({
     imageAttachments,
     vaultPath,
     setVaultPath,
-    sessionTokenTotal,
-    contextTokensEstimated,
+    lastTurnUsage,
+    contextEstimatedTokens,
     reloadConfig,
     reloadHistory,
   } = chat;
@@ -466,8 +466,8 @@ export function AdminChatPanel({
         <PlaygroundChatStudioHeader
           conversationTitle={conversationTitle}
           onRenameConversation={onRenameConversation}
-          tokenTotal={sessionTokenTotal}
-          contextEstimated={contextTokensEstimated}
+          tokenUsage={lastTurnUsage}
+          contextEstimatedTokens={contextEstimatedTokens}
         />
       ) : null}
 

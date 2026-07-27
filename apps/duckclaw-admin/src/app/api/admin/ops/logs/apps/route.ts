@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 import { isDesktopLiteMode, readDesktopEnvFile } from '@/lib/desktopEnvFile';
-import { listRunningPm2AppNames } from '@/lib/pm2RunningApps';
+import { listRunningPm2AppNamesAsync } from '@/lib/pm2RunningApps';
 import { PM2_LOGGABLE_APPS } from '@/lib/pm2LogApps';
 
 export const runtime = 'nodejs';
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
     return desktopLogsAppsResponse('desktop');
   }
 
-  const running = listRunningPm2AppNames();
+  const running = await listRunningPm2AppNamesAsync();
   if (
     running.length === 0 &&
     process.platform === 'win32' &&

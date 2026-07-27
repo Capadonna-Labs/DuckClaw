@@ -26,7 +26,6 @@ import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 
 import {
-  readStoredChatTokens,
   readStoredWorker,
   revokeMessageImagePreviews,
   stripThinkingStatusHeartbeats,
@@ -34,6 +33,7 @@ import {
 } from './adminChatPure';
 import { runAdminChatTurn } from './runAdminChatTurn';
 import { useAdminChatHistory } from './useAdminChatHistory';
+import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
 
 
 export {
@@ -169,8 +169,8 @@ export function useAdminChat({
   });
   const [error, setError] = useState<string | null>(null);
   const [vaultPath, setVaultPathState] = useState('');
-  const [sessionTokenTotal, setSessionTokenTotal] = useState(0);
-  const [contextTokensEstimated, setContextTokensEstimated] = useState(false);
+  const [lastTurnUsage, setLastTurnUsage] = useState<UsageTokenBreakdown | null>(null);
+  const [contextEstimatedTokens, setContextEstimatedTokens] = useState<number | null>(null);
   const thinkingStartedAt = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -220,8 +220,8 @@ export function useAdminChat({
   }, [chatId, finalizeCancelledGeneration]);
 
   useEffect(() => {
-    setSessionTokenTotal(readStoredChatTokens(chatId));
-    setContextTokensEstimated(false);
+    setLastTurnUsage(null);
+    setContextEstimatedTokens(null);
   }, [chatId]);
 
   const loadConfig = useCallback(() => {
@@ -347,8 +347,8 @@ export function useAdminChat({
         setThinkingIdentity,
         setError,
         setMessages,
-        setSessionTokenTotal,
-        setContextTokensEstimated,
+        setLastTurnUsage,
+        setContextEstimatedTokens,
         setLoopSchedulePolling,
         finalizeCancelledGeneration,
         clearLoopHistoryReload,
@@ -553,8 +553,8 @@ export function useAdminChat({
     imageAttachments,
     vaultPath,
     setVaultPath,
-    sessionTokenTotal,
-    contextTokensEstimated,
+    lastTurnUsage,
+    contextEstimatedTokens,
     reloadConfig: loadConfig,
     reloadHistory,
   };

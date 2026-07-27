@@ -40,6 +40,13 @@ import {
   normalizeKnowledgeScope,
   type KnowledgeScope,
 } from '@/lib/knowledgeScope';
+import { readStoredWorker } from '@/components/chat/adminChatPure';
+import {
+  readPlaygroundLastLlm,
+  readPlaygroundLastWorker,
+  writePlaygroundLastLlm,
+  writePlaygroundLastWorker,
+} from '@/lib/playgroundLastSelection';
 
 import { PlaygroundHistoryView } from '@/components/playground/PlaygroundHistoryView';
 import {
@@ -194,32 +201,67 @@ export default function PlaygroundPage() {
             }
           : undefined
       )
-      .then((c) => {
+      .then(async (c) => {
         setConfig(c);
         setConfigError(null);
         if (c.knowledge_scope) {
           setKnowledgeScope(normalizeKnowledgeScope(c.knowledge_scope, projectId));
         }
+        const tenantId = (c.effective_tenant_id || profileTenantId || 'default').trim() || 'default';
         const fromServer = (c.selected_worker_id || '').trim();
         const ids = workerOptionIds(c.workers);
-        let nextWorker = 'default';
-        if (initialWorker && (ids.includes(initialWorker) || initialWorker === 'default')) {
+        const workerOk = (id: string) => Boolean(id && (ids.includes(id) || id === 'default'));
+        let nextWorker = '';
+        if (initialWorker && workerOk(initialWorker)) {
           nextWorker = initialWorker;
-        } else if (fromServer) {
-          // Confiar en el gateway aunque el catálogo aún no liste ese id.
+        } else if (fromServer && workerOk(fromServer)) {
           nextWorker = fromServer;
-        } else if (ids.includes('default')) {
-          nextWorker = 'default';
-        } else if (ids[0]) {
-          nextWorker = ids[0];
+        } else if (chatId) {
+          const stored = readStoredWorker(chatId);
+          if (stored && workerOk(stored)) nextWorker = stored;
+        }
+        if (!nextWorker) {
+          const lastWorker = readPlaygroundLastWorker(tenantId);
+          if (lastWorker && workerOk(lastWorker)) nextWorker = lastWorker;
+        }
+        if (!nextWorker) {
+          nextWorker = ids.includes('default') ? 'default' : ids[0] ?? 'default';
         }
         setWorkerId(nextWorker);
+        writePlaygroundLastWorker(tenantId, nextWorker);
+
+        if (chatId) {
+          const lastLlm = readPlaygroundLastLlm(tenantId);
+          const scope = c.llm?.scope;
+          const serverProvider = (c.llm?.provider || '').trim();
+          const serverModel = (c.llm?.model || '').trim();
+          if (
+            lastLlm &&
+            (scope === 'env_bootstrap' || scope === 'runtime' || !serverModel) &&
+            (serverProvider !== lastLlm.provider || serverModel !== lastLlm.model)
+          ) {
+            try {
+              await adminService.setPlaygroundModel({
+                chat_id: chatId,
+                provider: lastLlm.provider,
+                ...(lastLlm.model ? { model: lastLlm.model } : {}),
+              });
+              const refreshed = await adminService.getPlaygroundConfig({
+                chat_id: chatId,
+                tenant_id: undefined,
+              });
+              setConfig(refreshed);
+            } catch {
+              /* keep server config */
+            }
+          }
+        }
       })
       .catch((err) => {
         setConfigError(err instanceof Error ? err.message : 'No se pudo cargar la configuración del playground');
       })
       .finally(() => setConfigLoading(false));
-  }, [initialWorker, conv.sessionId, projectId]);
+  }, [initialWorker, conv.sessionId, projectId, profileTenantId]);
 
   const persistKnowledgeScope = useCallback(
     async (nextScope: KnowledgeScope) => {
@@ -404,9 +446,10 @@ export default function PlaygroundPage() {
   const selectWorker = useCallback(
     (next: string) => {
       setWorkerId(next);
+      const tid = (config?.effective_tenant_id || profileTenantId || 'default').trim() || 'default';
+      writePlaygroundLastWorker(tid, next);
       const chatId = conv.sessionId;
       if (chatId && next.trim()) {
-        const tid = (config?.effective_tenant_id || 'default').trim() || 'default';
         void adminService
           .setPlaygroundWorker({
             chat_id: chatId,
@@ -414,9 +457,10 @@ export default function PlaygroundPage() {
             worker_id: next.trim(),
           })
           .catch(() => undefined);
+        chat.setWorkerId(next.trim(), { persist: true });
       }
     },
-    [config?.effective_tenant_id, conv.sessionId]
+    [chat.setWorkerId, config?.effective_tenant_id, conv.sessionId, profileTenantId]
   );
   const panelToggleTitle = panelOpen ? 'Ocultar panel de configuración' : 'Mostrar panel de configuración';
 
@@ -509,6 +553,7 @@ export default function PlaygroundPage() {
                 <p className="text-xs font-black uppercase tracking-wider text-gov-gray-500">LLM</p>
                 <ChatLlmSelectors
                   chatId={conv.sessionId}
+                  tenantId={config?.effective_tenant_id || profileTenantId}
                   provider={config?.llm?.provider ?? ''}
                   model={config?.llm?.model ?? ''}
                   catalog={config?.catalog ?? []}

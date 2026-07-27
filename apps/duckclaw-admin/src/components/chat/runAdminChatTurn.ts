@@ -19,12 +19,12 @@ import {
 } from '@/lib/toolHeartbeat';
 
 import {
-  applyContextEstimatedTokens,
-  applySessionTokenDelta,
+  applyLastTurnTokenDisplay,
   artifactImagePreview,
   isLoopProgressHeartbeat,
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
+import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
 
 export type ThinkingIdentity = { workerId: string; swarmSlot: number };
 
@@ -47,8 +47,8 @@ export type RunAdminChatTurnParams = {
   setThinkingIdentity: Dispatch<SetStateAction<ThinkingIdentity>>;
   setError: Dispatch<SetStateAction<string | null>>;
   setMessages: Dispatch<SetStateAction<ChatMsg[]>>;
-  setSessionTokenTotal: Dispatch<SetStateAction<number>>;
-  setContextTokensEstimated: Dispatch<SetStateAction<boolean>>;
+  setLastTurnUsage: Dispatch<SetStateAction<UsageTokenBreakdown | null>>;
+  setContextEstimatedTokens: Dispatch<SetStateAction<number | null>>;
   setLoopSchedulePolling: Dispatch<SetStateAction<boolean>>;
   finalizeCancelledGeneration: () => void;
   clearLoopHistoryReload: () => void;
@@ -80,8 +80,8 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setThinkingIdentity,
     setError,
     setMessages,
-    setSessionTokenTotal,
-    setContextTokensEstimated,
+    setLastTurnUsage,
+    setContextEstimatedTokens,
     setLoopSchedulePolling,
     finalizeCancelledGeneration,
     clearLoopHistoryReload,
@@ -343,15 +343,7 @@ try {
         };
       },
       onDone: (meta) => {
-        if (
-          meta.context_estimated_tokens != null &&
-          Number.isFinite(meta.context_estimated_tokens)
-        ) {
-          applyContextEstimatedTokens(chatId, setSessionTokenTotal, meta.context_estimated_tokens);
-          setContextTokensEstimated(true);
-        } else {
-          applySessionTokenDelta(chatId, setSessionTokenTotal, meta.usage_tokens);
-        }
+        applyLastTurnTokenDisplay(setLastTurnUsage, setContextEstimatedTokens, meta);
         if ((meta.response || '').trim()) {
           authoritativeResponse = meta.response.trim();
         }

@@ -191,7 +191,7 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
           mode = typeof data.mode === 'string' ? data.mode : 'pm2';
         }
 
-        if (running.length === 0) {
+        if (!running.includes('DuckClaw-Gateway')) {
           const bootRes = await fetch('/api/admin/bootstrap/status', {
             headers: sessionHeaders('GET'),
             credentials: 'include',

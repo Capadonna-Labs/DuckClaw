@@ -41,7 +41,62 @@ const DEFAULT_GITHUB_CONFIG: Record<string, unknown> = {
   hitl_destructive: true,
 };
 
-function addSkillBinding(
+const PRIVILEGED_MUTATION_SKILLS = new Set(['admin_sql']);
+
+function parseToolSurfaceExposed(yamlText: string): string[] {
+  if (!yamlText.trim()) return [];
+  try {
+    const doc = yaml.load(yamlText) as Record<string, unknown> | undefined;
+    const raw = doc?.tool_surface;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+    const items = (raw as Record<string, unknown>).expose_privileged_mutation_tools;
+    if (typeof items === 'string') return [normalizeSkillId(items)].filter(Boolean);
+    if (!Array.isArray(items)) return [];
+    return items.map((item) => normalizeSkillId(String(item))).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+function syncPrivilegedToolSurface(
+  doc: Record<string, unknown>,
+  selectedOptional: string[]
+): void {
+  const selectedPrivileged = selectedOptional
+    .map(normalizeSkillId)
+    .filter((id) => PRIVILEGED_MUTATION_SKILLS.has(id));
+  const raw = doc.tool_surface;
+  const toolSurface =
+    raw && typeof raw === 'object' && !Array.isArray(raw)
+      ? { ...(raw as Record<string, unknown>) }
+      : {};
+  const existing = toolSurface.expose_privileged_mutation_tools;
+  const exposed = new Set<string>(
+    typeof existing === 'string'
+      ? [normalizeSkillId(existing)]
+      : Array.isArray(existing)
+        ? existing.map((item) => normalizeSkillId(String(item)))
+        : []
+  );
+  for (const skillId of PRIVILEGED_MUTATION_SKILLS) {
+    exposed.delete(skillId);
+  }
+  for (const skillId of selectedPrivileged) {
+    exposed.add(skillId);
+  }
+  if (exposed.size > 0) {
+    toolSurface.expose_privileged_mutation_tools = Array.from(exposed);
+    doc.tool_surface = toolSurface;
+  } else if ('expose_privileged_mutation_tools' in toolSurface) {
+    delete toolSurface.expose_privileged_mutation_tools;
+    if (Object.keys(toolSurface).length > 0) {
+      doc.tool_surface = toolSurface;
+    } else {
+      delete doc.tool_surface;
+    }
+  }
+}
+
   bindings: ManifestSkillBindings,
   skillNames: string[],
   name: string,
@@ -179,6 +234,7 @@ export function applyManifestSkills(
   const optionalEntries = selected.map((skillId) => skillEntryForYaml(skillId, bindings));
   const baselineEntries = baselineOrdered.map((skillId) => skillEntryForYaml(skillId, bindings));
   doc.skills = [...baselineEntries, ...optionalEntries];
+  syncPrivilegedToolSurface(doc, selected);
   return `${yaml.dump(doc, { lineWidth: -1, noRefs: true, sortKeys: false }).trimEnd()}\n`;
 }
 

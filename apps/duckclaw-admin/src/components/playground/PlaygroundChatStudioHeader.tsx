@@ -1,25 +1,34 @@
 'use client';
 
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
-import { formatTokenCount } from '@/lib/formatTokenCount';
+import {
+  formatTokenCount,
+  formatUsageTokensLogLine,
+  type UsageTokenBreakdown,
+} from '@/lib/formatTokenCount';
 
 type PlaygroundChatStudioHeaderProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
-  tokenTotal?: number;
-  contextEstimated?: boolean;
+  tokenUsage?: UsageTokenBreakdown | null;
+  contextEstimatedTokens?: number | null;
   fallbackTitle?: string;
 };
 
-/** Cabecera estilo AI Studio: título editable + contador de tokens de sesión. */
+/** Cabecera estilo AI Studio: título editable + tokens del último turno (misma línea que gateway logs). */
 export function PlaygroundChatStudioHeader({
   conversationTitle,
   onRenameConversation,
-  tokenTotal = 0,
-  contextEstimated = false,
+  tokenUsage = null,
+  contextEstimatedTokens = null,
   fallbackTitle = 'Nueva conversación',
 }: PlaygroundChatStudioHeaderProps) {
   const displayTitle = (conversationTitle || '').trim() || fallbackTitle;
+  const tokenLabel = tokenUsage
+    ? formatUsageTokensLogLine(tokenUsage)
+    : contextEstimatedTokens != null && contextEstimatedTokens > 0
+      ? `${formatTokenCount(contextEstimatedTokens)} (est.)`
+      : null;
 
   return (
     <header className="flex shrink-0 items-center gap-3 border-b border-gov-gray-100 py-3 pl-14 pr-4 sm:pl-[7.75rem] dark:border-dark-border">
@@ -36,16 +45,18 @@ export function PlaygroundChatStudioHeader({
             {displayTitle}
           </h2>
         )}
-        <span
-          className="shrink-0 text-xs tabular-nums text-gov-gray-500 dark:text-dark-muted"
-          title={
-            contextEstimated
-              ? 'Tokens estimados del contexto activo tras compactar el hilo'
-              : 'Tokens acumulados en esta conversación (turnos con métricas del LLM)'
-          }
-        >
-          {formatTokenCount(tokenTotal)}
-        </span>
+        {tokenLabel ? (
+          <span
+            className="shrink-0 text-xs tabular-nums text-gov-gray-500 dark:text-dark-muted"
+            title={
+              tokenUsage
+                ? 'Tokens del último turno (igual que gateway logs: Total [P:prompt, C:completion])'
+                : 'Tokens estimados del contexto tras compactar el hilo'
+            }
+          >
+            {tokenLabel}
+          </span>
+        ) : null}
       </div>
     </header>
   );

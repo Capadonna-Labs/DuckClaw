@@ -1,6 +1,6 @@
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import { artifactPreviewApiPath } from '@/lib/artifactPreview';
-import { accumulateUsageTokens } from '@/lib/formatTokenCount';
+import { normalizeUsageTokens, type UsageTokenBreakdown } from '@/lib/formatTokenCount';
 
 export function artifactImagePreview(
   tenantId: string,
@@ -136,50 +136,26 @@ export function readStoredWorker(chatId: string): string | null {
   }
 }
 
-export function chatTokenStorageKey(chatId: string): string {
-  return `duckclaw.chat_tokens.${chatId}`;
-}
+export type TurnTokenMeta = {
+  usage_tokens?: Record<string, number> | null;
+  context_estimated_tokens?: number | null;
+};
 
-export function readStoredChatTokens(chatId: string): number {
-  if (!chatId || typeof window === 'undefined') return 0;
-  try {
-    const raw = sessionStorage.getItem(chatTokenStorageKey(chatId));
-    const n = raw ? Number.parseInt(raw, 10) : 0;
-    return Number.isFinite(n) && n > 0 ? n : 0;
-  } catch {
-    return 0;
-  }
-}
-
-export function writeStoredChatTokens(chatId: string, total: number): void {
-  if (!chatId || typeof window === 'undefined') return;
-  try {
-    sessionStorage.setItem(chatTokenStorageKey(chatId), String(Math.max(0, Math.floor(total))));
-  } catch {
-    /* ignore quota */
-  }
-}
-
-export function applyContextEstimatedTokens(
-  chatId: string,
-  setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
-  contextEstimated?: number | null
+/** Header mirrors gateway log line: last turn usage_tokens, not session sum. */
+export function applyLastTurnTokenDisplay(
+  setLastTurnUsage: (value: UsageTokenBreakdown | null) => void,
+  setContextEstimatedTokens: (value: number | null) => void,
+  meta: TurnTokenMeta
 ): void {
-  if (contextEstimated == null || !Number.isFinite(contextEstimated) || contextEstimated < 0) return;
-  const next = Math.floor(contextEstimated);
-  setSessionTokenTotal(next);
-  writeStoredChatTokens(chatId, next);
-}
-
-export function applySessionTokenDelta(
-  chatId: string,
-  setSessionTokenTotal: (value: number | ((prev: number) => number)) => void,
-  usage?: Record<string, number> | null
-): void {
-  if (!usage) return;
-  setSessionTokenTotal((prev) => {
-    const next = accumulateUsageTokens(prev, usage);
-    if (next !== prev) writeStoredChatTokens(chatId, next);
-    return next;
-  });
+  const usage = normalizeUsageTokens(meta.usage_tokens);
+  if (usage) {
+    setLastTurnUsage(usage);
+    setContextEstimatedTokens(null);
+    return;
+  }
+  const ctx = meta.context_estimated_tokens;
+  if (ctx != null && Number.isFinite(ctx) && ctx >= 0) {
+    setLastTurnUsage(null);
+    setContextEstimatedTokens(Math.floor(ctx));
+  }
 }

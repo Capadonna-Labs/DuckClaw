@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isProd = process.env.ENV === 'production';
+const isDesktopBuild = process.env.NEXT_PUBLIC_DUCKCLAW_DESKTOP === '1';
 
 const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -22,6 +27,18 @@ const nextConfig = {
         eslint: { ignoreDuringBuilds: true },
       }
     : {}),
+  webpack(config) {
+    if (!isDesktopBuild) {
+      const stub = path.join(__dirname, 'src/lib/tauriStubs/empty.ts');
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        '@tauri-apps/plugin-updater': stub,
+        '@tauri-apps/plugin-process': stub,
+        '@tauri-apps/api/core': stub,
+      };
+    }
+    return config;
+  },
   async headers() {
     return [
       {

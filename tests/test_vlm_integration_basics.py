@@ -722,3 +722,35 @@ def test_vlm_mlx_enospc_hint_when_enabled(monkeypatch: pytest.MonkeyPatch) -> No
     out = vlm_mod._vlm_mlx_exception_with_enospc_hint(exc)
     assert out is not exc
     assert "macmini_disk_drain" in str(out).lower() or "drenaje" in str(out).lower()
+
+
+def test_mlx_album_uses_single_vision_calls_when_multi_image(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[int] = []
+
+    async def _single(**kwargs: object) -> str:
+        calls.append(len(kwargs.get("image_bytes") or b""))
+        return f"ok-{len(calls)}"
+
+    async def _multi(**kwargs: object) -> str:
+        raise AssertionError("multi must not run for MLX album workaround")
+
+    monkeypatch.setattr(vlm_mod, "_call_openai_vision", _single)
+    monkeypatch.setattr(vlm_mod, "_call_openai_vision_multi", _multi)
+    monkeypatch.setenv("DUCKCLAW_VLM_MLX_ALBUM_SINGLE_ONLY", "1")
+
+    out = asyncio.run(
+        vlm_mod._call_openai_vision_mlx_album(
+            base_url="http://127.0.0.1:8081/v1",
+            api_key="",
+            model="test-model",
+            images=[("image/png", b"a"), ("image/jpeg", b"bb")],
+            user_caption="analiza",
+            http_timeout_s=5.0,
+        )
+    )
+
+    assert calls == [1, 2]
+    assert "[Imagen 1/2] ok-1" in out
+    assert "[Imagen 2/2] ok-2" in out

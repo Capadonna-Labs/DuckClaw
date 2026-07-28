@@ -694,6 +694,56 @@ async def _call_openai_vision(
         raise RuntimeError(f"Respuesta VLM inválida: {exc}") from exc
 
 
+def _mlx_album_single_image_only() -> bool:
+    """mlx-openai-server (gemma4): multi image_url in one request can fail (mlx concatenate)."""
+    raw = (os.environ.get("DUCKCLAW_VLM_MLX_ALBUM_SINGLE_ONLY") or "1").strip().lower()
+    return raw not in ("0", "false", "no", "off")
+
+
+async def _call_openai_vision_mlx_album(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    images: list[tuple[str, bytes]],
+    user_caption: str,
+    http_timeout_s: float = 120.0,
+) -> str:
+    """MLX HTTP álbum: 1 imagen por request cuando el servidor no soporta multi-image_url."""
+    if len(images) <= 1 or not _mlx_album_single_image_only():
+        return await _call_openai_vision_multi(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            images=images,
+            user_caption=user_caption,
+            http_timeout_s=http_timeout_s,
+        )
+    parts: list[str] = []
+    total = len(images)
+    for idx, (mime_type, image_bytes) in enumerate(images, start=1):
+        cap = (
+            user_caption
+            if total == 1
+            else f"{user_caption}\n(Describe solo la imagen {idx} de {total}.)"
+        )
+        piece = await _call_openai_vision(
+            base_url=base_url,
+            api_key=api_key,
+            model=model,
+            mime_type=mime_type,
+            image_bytes=image_bytes,
+            user_caption=cap,
+            http_timeout_s=http_timeout_s,
+        )
+        text = (piece or "").strip()
+        if text:
+            parts.append(f"[Imagen {idx}/{total}] {text}")
+    if not parts:
+        raise RuntimeError("VLM MLX álbum: respuestas vacías")
+    return "\n\n".join(parts)
+
+
 async def _call_openai_vision_multi(
     *,
     base_url: str,
@@ -1251,7 +1301,7 @@ async def _run_vlm_album_from_bytes(
                         )
                         continue
                     await _mlx_disk_preflight_or_raise()
-                    summary = await _call_openai_vision_multi(
+                    summary = await _call_openai_vision_mlx_album(
                         base_url=mlx_base,
                         api_key=(os.environ.get("DUCKCLAW_VLM_MLX_API_KEY") or "").strip(),
                         model=mlx_model,

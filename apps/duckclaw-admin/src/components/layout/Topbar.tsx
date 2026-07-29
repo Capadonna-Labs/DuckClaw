@@ -11,6 +11,7 @@ import { adminService } from '@/services/adminService';
 import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { PlatformStatusStrip } from '@/components/admin/GatewayStatusBadge';
 import { UpdateBanner } from '@/components/layout/UpdateBanner';
+import { markStackReloadPending } from '@/lib/playgroundLastSelection';
 import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 
 interface TopbarProps {
@@ -39,6 +40,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
 
   useEffect(() => {
     if (!stackRestartMessage?.startsWith('Stack recuperado')) return;
+    markStackReloadPending();
     const timer = window.setTimeout(() => {
       window.location.reload();
     }, 3000);

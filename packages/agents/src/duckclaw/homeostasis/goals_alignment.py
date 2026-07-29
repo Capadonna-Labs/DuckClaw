@@ -8,7 +8,8 @@ import os
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
-from duckclaw.homeostasis.surprise import compute_surprise
+from duckclaw.homeostasis.surprise import compute_surprise, detect_value_scale_mismatch
+from duckclaw.homeostasis.unit_conversion import goal_target_unit
 
 GOALS_ALIGNMENT_REVIEW_PHRASE = "Revisión de alineación con /goals"
 
@@ -41,6 +42,7 @@ class AlignmentItem:
     comparison: str = "symmetric"
     goal_kind: str = "task"
     priority: int = 100
+    scale_mismatch: bool = False
 
 
 @dataclass
@@ -179,22 +181,76 @@ def refresh_goals_list_observations(
     chat_id: Any,
     worker_id: str,
     goals: list[dict],
+    *,
+    tenant_id: str | None = None,
+    persist_manifest: bool = False,
 ) -> list[dict]:
-    """Refresh observed_value on an in-memory goals list (no agent_config persist)."""
+    """Refresh and unit-normalize observed_value on an in-memory goals list."""
     if not goals:
         return goals
-    _ = (db, chat_id, worker_id)
+    _ = worker_id
+
+    from duckclaw.homeostasis.unit_conversion import (
+        build_settings_lookup,
+        collect_anchor_keys,
+        goal_target_unit,
+        try_normalize_goal_observed,
+    )
+
+    tid = (tenant_id or "default").strip() or "default"
+    settings_lookup = build_settings_lookup(db, chat_id, tid, collect_anchor_keys(goals))
+
     out: list[dict] = []
+    changed = False
     for g in goals:
         if not isinstance(g, dict):
             continue
         row = dict(g)
-        new_obs: float | None = None
-        if row.get("observed_value") is not None:
-            new_obs = _parse_float(row.get("observed_value"))
-        if new_obs is not None:
-            row["observed_value"] = new_obs
+        raw_obs = _parse_float(row.get("observed_value"))
+        if raw_obs is not None:
+            row["observed_value"] = raw_obs
+        target = _parse_float(row.get("target_value"))
+        thresh = _parse_float(row.get("threshold"))
+        if (
+            raw_obs is not None
+            and target is not None
+            and thresh is not None
+            and goal_target_unit(row) == "pct"
+        ):
+            normalized = try_normalize_goal_observed(
+                row,
+                settings_lookup=settings_lookup,
+                target=target,
+                threshold=thresh,
+            )
+            if normalized is not None and normalized != raw_obs:
+                row["observed_value"] = normalized
+                changed = True
         out.append(row)
+
+    if changed and persist_manifest and tenant_id:
+        try:
+            from harness_core.states.loop_state import DomainGoal, HomeostasisManifest
+            from harness_core.targets import load_homeostasis_manifest
+
+            from duckclaw.commands.goals import _persist_homeostasis_manifest_db
+
+            manifest = load_homeostasis_manifest(
+                db, tid, chat_id=chat_id, migrate_legacy=False
+            )
+            updated: list[DomainGoal] = []
+            by_key = {(g.get("belief_key") or "").strip(): g for g in out}
+            for existing in manifest.goals:
+                key = (existing.belief_key or "").strip()
+                if key in by_key:
+                    updated.append(DomainGoal.model_validate(by_key[key]))
+                else:
+                    updated.append(existing)
+            manifest = manifest.model_copy(update={"goals": updated})
+            _persist_homeostasis_manifest_db(db, chat_id, tid, manifest)
+        except Exception:
+            pass
+
     return out
 
 
@@ -204,12 +260,21 @@ def assess_goals_list_alignment(
     goals: list[dict],
     *,
     worker_id: str = "",
+    tenant_id: str | None = None,
+    persist_manifest: bool = False,
 ) -> AlignmentReport:
     from duckclaw.commands.goals import _get_goals_registry_for_chat
     from harness_core.goal_priority import parse_goal_priority, sort_goals_by_priority
 
     goals = sort_goals_by_priority(
-        refresh_goals_list_observations(db, chat_id, worker_id, goals)
+        refresh_goals_list_observations(
+            db,
+            chat_id,
+            worker_id,
+            goals,
+            tenant_id=tenant_id,
+            persist_manifest=persist_manifest,
+        )
     )
     registry = _get_goals_registry_for_chat(db, chat_id)
     key_to_belief = {b.key.strip(): b for b in (registry.beliefs if registry else [])}
@@ -232,6 +297,10 @@ def assess_goals_list_alignment(
         if b is not None:
             comp = getattr(b, "comparison", "symmetric") or "symmetric"
 
+        value_unit = (g.get("value_unit") or (getattr(b, "value_unit", None) if b else None) or None)
+        if goal_target_unit(g) == "pct":
+            value_unit = value_unit or "percent"
+
         title = _goal_title(g, key)
         goal_kind = str(g.get("goal_kind") or "task").strip() or "task"
         priority = parse_goal_priority(g.get("priority"))
@@ -250,6 +319,28 @@ def assess_goals_list_alignment(
                     comparison=comp,
                     goal_kind=goal_kind,
                     priority=priority,
+                )
+            )
+            continue
+
+        scale_mismatch = detect_value_scale_mismatch(
+            observed, target, thresh, value_unit=value_unit
+        )
+        if scale_mismatch:
+            items.append(
+                AlignmentItem(
+                    belief_key=key,
+                    title=title,
+                    target=target,
+                    observed=observed,
+                    threshold=thresh,
+                    delta=0.0,
+                    is_anomaly=False,
+                    has_data=False,
+                    comparison=comp,
+                    goal_kind=goal_kind,
+                    priority=priority,
+                    scale_mismatch=True,
                 )
             )
             continue
@@ -310,7 +401,14 @@ def assess_goals_alignment(
         manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id)
         goals = manifest_goals_as_dicts(manifest)
         if goals:
-            return assess_goals_list_alignment(db, chat_id, goals, worker_id=worker_id)
+            return assess_goals_list_alignment(
+                db,
+                chat_id,
+                goals,
+                worker_id=worker_id,
+                tenant_id=tid,
+                persist_manifest=True,
+            )
     except Exception:
         pass
     goals = refresh_goal_observations(db, chat_id, worker_id)
@@ -342,7 +440,15 @@ def format_alignment_report_markdown(report: AlignmentReport) -> str:
         title = (item.title or item.belief_key or "?").strip()
         pl = f"P{item.priority} · " if item.priority >= 1 else ""
         if not item.has_data:
-            lines.append(f"- {pl}**{title}** (`{kind}`): sin datos observables aún")
+            if item.scale_mismatch:
+                obs = item.observed if item.observed is not None else "?"
+                target = item.target if item.target is not None else "?"
+                lines.append(
+                    f"- {pl}**{title}** (`{kind}`): obs={obs}, meta={target} "
+                    f"(escala incompatible — no evaluable)"
+                )
+            else:
+                lines.append(f"- {pl}**{title}** (`{kind}`): sin datos observables aún")
             continue
         flag = "⚠️" if item.is_anomaly else "✓"
         obs = item.observed if item.observed is not None else "?"

@@ -34,7 +34,7 @@ export interface SandboxRunDetail {
 }
 
 export type SandboxArtifactPreviewPayload = {
-  preview_kind: 'markdown' | 'text' | 'json' | 'tabular' | 'parquet';
+  preview_kind: 'markdown' | 'text' | 'json' | 'tabular' | 'parquet' | 'csv';
   mime?: string;
   content?: string;
   truncated?: boolean;

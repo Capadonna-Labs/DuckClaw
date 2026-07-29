@@ -53,6 +53,10 @@ class DomainGoal(BaseModel):
     goal_kind: Literal["task", "monitor"] = "task"
     title: str = ""
     observed_value: float | None = None
+    # pct | usd | raw — how target_value/threshold are expressed (default: no conversion).
+    target_unit: Literal["pct", "usd", "raw"] = "raw"
+    # Opaque session-settings key for pct conversion (required when target_unit == "pct").
+    anchor_setting_key: str = ""
     # Lower number = higher priority (P1 before P2). Agent should address in this order.
     priority: int = Field(default=100, ge=1)
 

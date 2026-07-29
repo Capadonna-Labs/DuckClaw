@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 import duckdb
-
 from duckclaw.homeostasis.goals_alignment import (
     AlignmentReport,
     assess_goals_alignment,
@@ -118,6 +117,30 @@ def test_refresh_goal_observations_preserves_persisted_observed_value(tmp_path: 
     )
     goals = refresh_goal_observations(db, chat_id, "analytics-worker")
     assert goals and float(goals[0].get("observed_value")) == 250.5
+
+
+def test_assess_goals_alignment_percent_vs_absolute_mismatch_no_false_alarm(tmp_path: Path) -> None:
+    """Without target_unit, large absolute observed vs percent target stays non-evaluable."""
+    from duckclaw.homeostasis.goals_alignment import assess_goals_list_alignment
+
+    db = _make_db(tmp_path / "mismatch.duckdb")
+    chat_id = "unit-mismatch"
+    goals = [
+        {
+            "belief_key": "metric_pct_limit",
+            "target_value": 2.0,
+            "threshold": 0.5,
+            "observed_value": -3993.59,
+            "title": "Metric within percent ceiling",
+            "goal_kind": "monitor",
+            "priority": 1,
+        }
+    ]
+    report = assess_goals_list_alignment(db, chat_id, goals, worker_id="worker-a")
+    assert report.aligned is True
+    assert report.misaligned_count == 0
+    assert report.items[0].scale_mismatch is True
+    assert report.items[0].has_data is False
 
 
 def test_execute_goals_delta_with_notify_and_mode(tmp_path: Path) -> None:

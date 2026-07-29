@@ -173,7 +173,26 @@ def register_homeostasis_skill(
 
         def homeostasis_check(belief_key: str, observed_value: float) -> str:
             """Compara un valor observado con la creencia. Devuelve Action_Plan (restore o maintain)."""
-            plan = manager.check(belief_key, observed_value, auto_update=True, invoke_restoration=False)
+            from duckclaw.forge.skills.goals_tool_context import (
+                get_goals_tool_chat_id,
+                get_goals_tool_tenant_id,
+            )
+            from duckclaw.homeostasis.unit_conversion import build_settings_lookup
+
+            cid = get_goals_tool_chat_id()
+            tid = (get_goals_tool_tenant_id() or "").strip() or "default"
+            belief = manager.registry.get_belief(belief_key)
+            lookup: dict[str, float] = {}
+            anchor_key = (getattr(belief, "anchor_setting_key", None) or "").strip() if belief else ""
+            if belief and belief.value_unit == "percent" and anchor_key and cid:
+                lookup = build_settings_lookup(db, cid, tid, [anchor_key])
+            plan = manager.check(
+                belief_key,
+                observed_value,
+                auto_update=True,
+                invoke_restoration=False,
+                settings_lookup=lookup,
+            )
             return json.dumps(plan, ensure_ascii=False)
 
         tool = StructuredTool.from_function(

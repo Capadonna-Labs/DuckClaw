@@ -97,6 +97,7 @@ function syncPrivilegedToolSurface(
   }
 }
 
+function addSkillBinding(
   bindings: ManifestSkillBindings,
   skillNames: string[],
   name: string,

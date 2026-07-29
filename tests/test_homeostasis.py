@@ -54,6 +54,22 @@ def test_compute_surprise_exact_threshold() -> None:
     assert r.is_anomaly is False
 
 
+def test_detect_value_scale_mismatch_percent_vs_absolute() -> None:
+    from duckclaw.homeostasis.surprise import detect_value_scale_mismatch
+
+    assert detect_value_scale_mismatch(-3993.59, 2.0, 0.5) is True
+    assert detect_value_scale_mismatch(0.42, 2.0, 0.5) is False
+    assert detect_value_scale_mismatch(820.53, 850.0, 5.0) is False
+    assert detect_value_scale_mismatch(400.0, 250.0, 25.0) is False
+
+
+def test_detect_value_scale_mismatch_explicit_unit() -> None:
+    from duckclaw.homeostasis.surprise import detect_value_scale_mismatch
+
+    assert detect_value_scale_mismatch(5000.0, 2.0, 0.5, value_unit="percent") is True
+    assert detect_value_scale_mismatch(50.0, 2.0, 0.5, value_unit="percent") is False
+
+
 def test_surprise_calculator_compute() -> None:
     """SurpriseCalculator.compute is alias for compute_surprise."""
     r = SurpriseCalculator.compute(5.0, 5.0, 1.0)

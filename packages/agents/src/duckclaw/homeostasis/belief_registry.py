@@ -14,6 +14,8 @@ class Belief:
     target: float
     threshold: float
     comparison: str = "symmetric"
+    value_unit: str | None = None
+    anchor_setting_key: str = ""
 
 
 @dataclass
@@ -39,8 +41,18 @@ def load_beliefs_from_config(config: dict[str, Any] | None) -> tuple[list[Belief
                 threshold = float(b.get("threshold", 0))
                 comp_raw = str(b.get("comparison") or "symmetric").strip().lower()
                 comparison = comp_raw if comp_raw in ("symmetric", "ceiling") else "symmetric"
+                unit_raw = str(b.get("value_unit") or "").strip().lower()
+                value_unit = unit_raw if unit_raw in ("percent", "absolute", "ratio") else None
+                anchor_setting_key = str(b.get("anchor_setting_key") or "").strip()
                 beliefs.append(
-                    Belief(key=str(b["key"]).strip(), target=target, threshold=threshold, comparison=comparison)
+                    Belief(
+                        key=str(b["key"]).strip(),
+                        target=target,
+                        threshold=threshold,
+                        comparison=comparison,
+                        value_unit=value_unit,
+                        anchor_setting_key=anchor_setting_key,
+                    )
                 )
             except (TypeError, ValueError):
                 pass

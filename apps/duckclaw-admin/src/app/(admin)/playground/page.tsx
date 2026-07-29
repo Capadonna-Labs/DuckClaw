@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { adminService } from '@/services/adminService';
@@ -42,10 +42,17 @@ import {
 } from '@/lib/knowledgeScope';
 import { readStoredWorker } from '@/components/chat/adminChatPure';
 import {
+  backfillPlaygroundLastFromServer,
+  consumePlaygroundLlmSnapshot,
+  consumeStackReloadPending,
+  mergePlaygroundConfigWithLastLlm,
+  playgroundLlmNeedsRestore,
   readPlaygroundLastLlm,
   readPlaygroundLastWorker,
+  resolvePlaygroundWorkerId,
   writePlaygroundLastLlm,
   writePlaygroundLastWorker,
+  writePlaygroundLlmSnapshot,
 } from '@/lib/playgroundLastSelection';
 
 import { PlaygroundHistoryView } from '@/components/playground/PlaygroundHistoryView';
@@ -84,6 +91,8 @@ export default function PlaygroundPage() {
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [sandboxToggling, setSandboxToggling] = useState(false);
+  const loadConfigRunningRef = useRef(false);
+  const llmRestoreCompleteRef = useRef(false);
 
   const conv = useActiveConversation(effectiveTenantId, 'playground', {
     defaultWorkerId: workerId || 'default',
@@ -192,6 +201,8 @@ export default function PlaygroundPage() {
   const loadConfig = useCallback(() => {
     const chatId = conv.sessionId ?? undefined;
     setConfigLoading(true);
+    loadConfigRunningRef.current = true;
+    llmRestoreCompleteRef.current = false;
     adminService
       .getPlaygroundConfig(
         chatId
@@ -202,65 +213,127 @@ export default function PlaygroundPage() {
           : undefined
       )
       .then(async (c) => {
-        setConfig(c);
         setConfigError(null);
         if (c.knowledge_scope) {
           setKnowledgeScope(normalizeKnowledgeScope(c.knowledge_scope, projectId));
         }
         const tenantId = (c.effective_tenant_id || profileTenantId || 'default').trim() || 'default';
         const fromServer = (c.selected_worker_id || '').trim();
+        const afterStackReload = consumeStackReloadPending();
+        const snapshotLlm = afterStackReload ? consumePlaygroundLlmSnapshot() : null;
+        if (snapshotLlm) {
+          writePlaygroundLastLlm(tenantId, snapshotLlm);
+        }
+        backfillPlaygroundLastFromServer(tenantId, { workerId: fromServer });
+
+        const readLastLlm = () =>
+          readPlaygroundLastLlm(tenantId) ||
+          (profileTenantId && profileTenantId !== tenantId
+            ? readPlaygroundLastLlm(profileTenantId)
+            : null);
+
+        const lastLlmInitial = readLastLlm();
+        setConfig(mergePlaygroundConfigWithLastLlm(c, lastLlmInitial));
+
         const ids = workerOptionIds(c.workers);
-        const workerOk = (id: string) => Boolean(id && (ids.includes(id) || id === 'default'));
-        let nextWorker = '';
-        if (initialWorker && workerOk(initialWorker)) {
-          nextWorker = initialWorker;
-        } else if (fromServer && workerOk(fromServer)) {
-          nextWorker = fromServer;
-        } else if (chatId) {
-          const stored = readStoredWorker(chatId);
-          if (stored && workerOk(stored)) nextWorker = stored;
-        }
-        if (!nextWorker) {
-          const lastWorker = readPlaygroundLastWorker(tenantId);
-          if (lastWorker && workerOk(lastWorker)) nextWorker = lastWorker;
-        }
-        if (!nextWorker) {
-          nextWorker = ids.includes('default') ? 'default' : ids[0] ?? 'default';
-        }
+        const storedWorker = chatId ? readStoredWorker(chatId) : null;
+        const lastWorker =
+          readPlaygroundLastWorker(tenantId) ||
+          (profileTenantId && profileTenantId !== tenantId
+            ? readPlaygroundLastWorker(profileTenantId)
+            : null);
+        const nextWorker = resolvePlaygroundWorkerId({
+          initialWorker,
+          fromServer,
+          lastWorker,
+          storedWorker,
+          validIds: ids,
+        });
         setWorkerId(nextWorker);
-        writePlaygroundLastWorker(tenantId, nextWorker);
+        const shouldSyncWorker =
+          chatId &&
+          nextWorker &&
+          fromServer !== nextWorker &&
+          !(nextWorker === 'default' && fromServer && fromServer !== 'default');
+        if (shouldSyncWorker) {
+          void adminService
+            .setPlaygroundWorker({
+              chat_id: chatId,
+              tenant_id: tenantId,
+              worker_id: nextWorker,
+            })
+            .catch(() => undefined);
+        }
 
         if (chatId) {
-          const lastLlm = readPlaygroundLastLlm(tenantId);
-          const scope = c.llm?.scope;
-          const serverProvider = (c.llm?.provider || '').trim();
-          const serverModel = (c.llm?.model || '').trim();
-          if (
-            lastLlm &&
-            (scope === 'env_bootstrap' || scope === 'runtime' || !serverModel) &&
-            (serverProvider !== lastLlm.provider || serverModel !== lastLlm.model)
-          ) {
-            try {
-              await adminService.setPlaygroundModel({
-                chat_id: chatId,
-                provider: lastLlm.provider,
-                ...(lastLlm.model ? { model: lastLlm.model } : {}),
-              });
-              const refreshed = await adminService.getPlaygroundConfig({
-                chat_id: chatId,
-                tenant_id: undefined,
-              });
-              setConfig(refreshed);
-            } catch {
-              /* keep server config */
+          const restoreLlmFromLocal = async (cfg: typeof c) => {
+            const lastLlm = readLastLlm();
+            const serverProvider = (cfg.llm?.provider || '').trim();
+            const serverModel = (cfg.llm?.model || '').trim();
+            if (
+              !lastLlm ||
+              !playgroundLlmNeedsRestore(
+                { provider: serverProvider, model: serverModel },
+                lastLlm
+              )
+            ) {
+              return cfg;
             }
+            await adminService.setPlaygroundModel({
+              chat_id: chatId,
+              provider: lastLlm.provider,
+              ...(lastLlm.model ? { model: lastLlm.model } : {}),
+            });
+            return adminService.getPlaygroundConfig({
+              chat_id: chatId,
+              tenant_id: undefined,
+            });
+          };
+
+          let refreshed = c;
+          const maxAttempts = afterStackReload ? 6 : 1;
+          for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+            if (attempt > 0) {
+              await new Promise((r) => window.setTimeout(r, 1500 * attempt));
+            }
+            try {
+              refreshed = await restoreLlmFromLocal(refreshed);
+              const sp = (refreshed.llm?.provider || '').trim();
+              const sm = (refreshed.llm?.model || '').trim();
+              const lastLlm = readLastLlm();
+              const needsRestore = Boolean(
+                lastLlm && playgroundLlmNeedsRestore({ provider: sp, model: sm }, lastLlm)
+              );
+              if (!needsRestore) {
+                break;
+              }
+            } catch {
+              /* db-writer may still be starting after stack restart */
+            }
+          }
+          const lastLlmFinal = readLastLlm();
+          const merged = mergePlaygroundConfigWithLastLlm(refreshed, lastLlmFinal);
+          setConfig(merged);
+          if (lastLlmFinal && (merged.llm?.scope === 'chat' || merged.llm?.scope === 'runtime')) {
+            writePlaygroundLastLlm(tenantId, {
+              provider: (merged.llm?.provider || '').trim(),
+              model: (merged.llm?.model || '').trim(),
+            });
+            writePlaygroundLlmSnapshot(tenantId, {
+              provider: (merged.llm?.provider || '').trim(),
+              model: (merged.llm?.model || '').trim(),
+            });
           }
         }
       })
       .catch((err) => {
         setConfigError(err instanceof Error ? err.message : 'No se pudo cargar la configuración del playground');
       })
-      .finally(() => setConfigLoading(false));
+      .finally(() => {
+        loadConfigRunningRef.current = false;
+        llmRestoreCompleteRef.current = true;
+        setConfigLoading(false);
+      });
   }, [initialWorker, conv.sessionId, projectId, profileTenantId]);
 
   const persistKnowledgeScope = useCallback(
@@ -287,6 +360,26 @@ export default function PlaygroundPage() {
   useEffect(() => {
     loadConfig();
   }, [loadConfig]);
+
+  useEffect(() => {
+    if (loadConfigRunningRef.current || configLoading || !llmRestoreCompleteRef.current) return;
+    if (!config?.llm || !conv.sessionId) return;
+    const scope = (config.llm.scope || '').trim();
+    if (scope !== 'chat' && scope !== 'runtime') return;
+    const provider = (config.llm.provider || '').trim();
+    const model = (config.llm.model || '').trim();
+    if (!provider) return;
+    const tid = effectiveTenantId || 'default';
+    writePlaygroundLastLlm(tid, { provider, model });
+    writePlaygroundLlmSnapshot(tid, { provider, model });
+  }, [
+    config?.llm?.provider,
+    config?.llm?.model,
+    config?.llm?.scope,
+    configLoading,
+    conv.sessionId,
+    effectiveTenantId,
+  ]);
 
   useEffect(() => {
     adminService
@@ -324,6 +417,13 @@ export default function PlaygroundPage() {
   useEffect(() => {
     if (!activeProject || projectWorkerIds.length === 0) return;
     if (workerBelongsToActiveProject(workerId)) return;
+    const tid = (config?.effective_tenant_id || profileTenantId || 'default').trim() || 'default';
+    const last = readPlaygroundLastWorker(tid);
+    if (last && workerBelongsToActiveProject(last)) {
+      setWorkerId(last);
+      syncProjectWorkerSelection(last);
+      return;
+    }
     const nextWorker = firstProjectWorkerId;
     if (!nextWorker) return;
     // El worker actual no pertenece al proyecto: usar el primer agente asignado.
@@ -336,6 +436,8 @@ export default function PlaygroundPage() {
     syncProjectWorkerSelection,
     workerBelongsToActiveProject,
     workerId,
+    config?.effective_tenant_id,
+    profileTenantId,
   ]);
 
   useEffect(() => {

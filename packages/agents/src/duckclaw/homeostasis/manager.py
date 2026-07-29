@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from duckclaw.homeostasis.belief_registry import BeliefRegistry
-from duckclaw.homeostasis.surprise import compute_surprise
+from duckclaw.homeostasis.surprise import compute_surprise, detect_value_scale_mismatch
 
 
 def _safe_ident(name: str) -> str:
@@ -74,6 +74,34 @@ class HomeostasisManager:
         except Exception:
             pass
 
+    def _normalize_observed_for_belief(
+        self,
+        belief: Any,
+        observed_value: float,
+        *,
+        settings_lookup: dict[str, float],
+    ) -> float:
+        from duckclaw.homeostasis.unit_conversion import (
+            needs_pct_conversion,
+            normalize_observed,
+        )
+
+        value_unit = (getattr(belief, "value_unit", None) or "").strip().lower()
+        anchor_key = (getattr(belief, "anchor_setting_key", None) or "").strip()
+        if value_unit != "percent" or not anchor_key:
+            return observed_value
+        if not needs_pct_conversion(observed_value, belief.target, belief.threshold):
+            return observed_value
+        try:
+            return normalize_observed(
+                observed_value,
+                target_unit="pct",
+                anchor_setting_key=anchor_key,
+                settings_lookup=settings_lookup,
+            )
+        except ValueError:
+            return observed_value
+
     def check(
         self,
         belief_key: str,
@@ -81,6 +109,7 @@ class HomeostasisManager:
         *,
         auto_update: bool = True,
         invoke_restoration: bool = False,
+        settings_lookup: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         """Compare observed_value with a belief and return an action plan."""
         belief = self.registry.get_belief(belief_key)
@@ -89,6 +118,26 @@ class HomeostasisManager:
                 "action": "unknown",
                 "message": f"Creencia '{belief_key}' no definida en homeostasis.",
                 "belief_key": belief_key,
+            }
+
+        observed_value = self._normalize_observed_for_belief(
+            belief, observed_value, settings_lookup=settings_lookup or {}
+        )
+
+        value_unit = getattr(belief, "value_unit", None)
+        if detect_value_scale_mismatch(
+            observed_value, belief.target, belief.threshold, value_unit=value_unit
+        ):
+            return {
+                "action": "maintain",
+                "message": (
+                    f"Observación en {belief_key} no comparable con la meta "
+                    f"(escala incompatible: obs={observed_value}, meta={belief.target})."
+                ),
+                "belief_key": belief_key,
+                "observed": observed_value,
+                "target": belief.target,
+                "scale_mismatch": True,
             }
 
         result = compute_surprise(

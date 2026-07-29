@@ -125,6 +125,49 @@ def _goal_title(goal: dict, fallback_key: str) -> str:
     return (goal.get("belief_key") or fallback_key or "").strip()
 
 
+def _belief_target_unit(belief: Any) -> str:
+    unit = (getattr(belief, "value_unit", None) or "").strip().lower()
+    if unit == "percent":
+        return "pct"
+    if unit == "absolute":
+        return "usd"
+    return "raw"
+
+
+def patch_goal_units_in_manifest(manifest: Any) -> tuple[Any, list[str]]:
+    """Idempotent unit metadata patch for goals with anchor keys or stale absolute observed."""
+    from harness_core.states.loop_state import HomeostasisManifest
+    from duckclaw.homeostasis.unit_conversion import needs_pct_conversion
+
+    if not isinstance(manifest, HomeostasisManifest):
+        return manifest, []
+    changed_keys: list[str] = []
+    new_goals = []
+    for g in manifest.goals:
+        key = (g.belief_key or "").strip()
+        updates: dict[str, Any] = {}
+        anchor_key = (g.anchor_setting_key or "").strip()
+        target_unit = (g.target_unit or "raw").strip().lower() or "raw"
+        if target_unit == "raw" and anchor_key:
+            updates["target_unit"] = "pct"
+            target_unit = "pct"
+        observed = g.observed_value
+        if (
+            target_unit == "pct"
+            and observed is not None
+            and needs_pct_conversion(float(observed), float(g.target_value), float(g.threshold))
+        ):
+            updates["observed_value"] = None
+        if updates:
+            changed_keys.append(key)
+            new_goals.append(g.model_copy(update=updates))
+        else:
+            new_goals.append(g)
+    if not changed_keys:
+        return manifest, []
+    return manifest.model_copy(update={"goals": new_goals}), changed_keys
+
+
 def _extract_json_object(content: str) -> str:
     start = content.find("{")
     end = content.rfind("}") + 1
@@ -398,7 +441,7 @@ def _format_homeostasis_manifest_listing(
     *,
     registry: Any = None,
 ) -> str:
-    from duckclaw.homeostasis.surprise import compute_surprise
+    from duckclaw.homeostasis.surprise import compute_surprise, detect_value_scale_mismatch
     from harness_core.goal_priority import goal_priority_display, sort_goals_by_priority
 
     lines = ["Manifiesto homeostasis", ""]
@@ -424,12 +467,21 @@ def _format_homeostasis_manifest_listing(
             kind = getattr(g, "goal_kind", None) or "task"
             kind_tag = " · tipo=monitor" if kind == "monitor" else ""
             prio_tag = f"**{goal_priority_display(g, rank=rank)}** · "
+            value_unit = getattr(b, "value_unit", None) if b is not None else None
             if observed is not None and (target != 0 or thresh != 0):
-                res = compute_surprise(float(observed), target, thresh, comparison=comp)
-                st = "⚠️" if res.is_anomaly else "✓"
-                lines.append(
-                    f"- {prio_tag}{id_label} · {title}{kind_tag}: target={target} (obs: {observed}) {st}"
-                )
+                if detect_value_scale_mismatch(
+                    float(observed), target, thresh, value_unit=value_unit
+                ):
+                    lines.append(
+                        f"- {prio_tag}{id_label} · {title}{kind_tag}: target={target} "
+                        f"(obs: {observed}, escala incompatible) —"
+                    )
+                else:
+                    res = compute_surprise(float(observed), target, thresh, comparison=comp)
+                    st = "⚠️" if res.is_anomaly else "✓"
+                    lines.append(
+                        f"- {prio_tag}{id_label} · {title}{kind_tag}: target={target} (obs: {observed}) {st}"
+                    )
             else:
                 lines.append(
                     f"- {prio_tag}{id_label} · {title}{kind_tag}: target={target}, thresh={thresh} (sin dato)"
@@ -499,6 +551,18 @@ def execute_homeostasis_goals(
         if not ok:
             return f"Migración falló: {err}"
         return f"✅ Migradas {len(goals)} meta(s) desde agent_config al manifiesto homeostasis."
+
+    if toks and toks[0] == "--normalize-units":
+        updated, patched = patch_goal_units_in_manifest(manifest)
+        if not patched:
+            return "Sin metas que requieran normalización de unidades."
+        ok, err = _persist_homeostasis_manifest_db(
+            db, chat_id, tid, updated, vault_user_id=vault_user_id
+        )
+        if not ok:
+            return f"No se pudo guardar: {err}"
+        keys = ", ".join(f"`{k}`" for k in patched)
+        return f"✅ Unidades normalizadas para: {keys}. observed_value absoluto cacheado limpiado donde aplica."
 
     if toks and toks[0] == "--reset":
         manifest = HomeostasisManifest()
@@ -633,6 +697,8 @@ def execute_homeostasis_goals(
                 threshold=float(belief.threshold),
                 title=belief.key,
                 priority=next_goal_priority(manifest.goals),
+                target_unit=_belief_target_unit(belief),
+                anchor_setting_key=str(getattr(belief, "anchor_setting_key", "") or "").strip(),
             )
         else:
             params = _natural_language_goal_to_params(db, chat_id, raw)
@@ -671,5 +737,6 @@ def execute_homeostasis_goals(
         + "\n\nUso: /goals <objetivo> · /goals --set error_rate_pct 2 · "
         "/goals rm <goal_id> · /goals rm all · /goals --priority <goal_id> <n> · "
         "/goals --monitor <goal_id> · "
-        "/goals --task <goal_id> · /goals --migrate · /goals --reset"
+        "/goals --task <goal_id> · /goals --migrate · /goals --reset · "
+        "/goals --normalize-units"
     )

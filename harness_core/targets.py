@@ -14,6 +14,12 @@ _log = logging.getLogger(__name__)
 _INFRA_KEYS = frozenset(HomeostasisTarget.model_fields.keys())
 _MANIFEST_TABLE_SCHEMAS = ("main", "harness_core")
 _CHAT_TENANT_STATE_KEYS = ("goals_proactive_tenant_id", "tenant_id")
+_VALID_TARGET_UNITS = frozenset({"pct", "usd", "raw"})
+
+
+def _coerce_target_unit(raw: Any) -> str:
+    unit = str(raw or "raw").strip().lower()
+    return unit if unit in _VALID_TARGET_UNITS else "raw"
 
 
 def resolve_homeostasis_tenant_id(db: Any, chat_id: Any, tenant_id: Any) -> str:
@@ -106,6 +112,8 @@ def _legacy_goals_from_chat(db: Any, chat_id: Any) -> list[DomainGoal]:
                             if g.get("observed_value") is not None
                             else None
                         ),
+                        target_unit=_coerce_target_unit(g.get("target_unit")),
+                        anchor_setting_key=str(g.get("anchor_setting_key") or "").strip(),
                         priority=prio,
                     )
                 )

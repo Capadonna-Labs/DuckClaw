@@ -20,6 +20,7 @@ export default defineConfig({
       'src/lib/tauriRuntime.test.ts',
       'src/lib/desktopEnvFile.test.ts',
       'src/lib/savedLoginCredentials.test.ts',
+      'src/lib/playgroundLastSelection.test.ts',
       'src/components/chat/useAdminChatLoopPolling.test.ts',
       'src/components/chat/chatMarkdownMermaid.test.ts',
       'src/components/chat/chatMarkdown.test.ts',

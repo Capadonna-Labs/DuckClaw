@@ -14,6 +14,30 @@ class SurpriseResult:
     target: float
     observed: float
     threshold: float
+    scale_mismatch: bool = False
+
+
+def detect_value_scale_mismatch(
+    observed: float,
+    target: float,
+    threshold: float,
+    *,
+    value_unit: str | None = None,
+) -> bool:
+    """True when observed and target appear to use incompatible numeric scales."""
+    o = abs(float(observed))
+    t = abs(float(target))
+    th = abs(float(threshold))
+    unit = (value_unit or "").strip().lower()
+    if unit == "percent":
+        # ponytail: |obs| > 100 usually means absolute units, not percent
+        return o > max(100.0, 10.0 * (t + th + 1.0))
+    if unit == "absolute":
+        return False
+    # Heuristic: small percent-like target (<=100) vs order-of-magnitude larger observed
+    if 0 < t <= 100 and th <= t and o > 10.0 * max(t + th, 1.0):
+        return True
+    return False
 
 
 def compute_surprise(

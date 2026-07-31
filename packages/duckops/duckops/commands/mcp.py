@@ -43,3 +43,30 @@ def prefetch_reddit(
         typer.echo(f"Error: no se encontró {server}", err=True)
         raise typer.Exit(1)
     typer.echo(f"OK: {server.resolve()}")
+
+
+_YOUTUBE_TRANSCRIPT_GIT = "git+https://github.com/jkawamoto/mcp-youtube-transcript"
+
+
+@prefetch_app.command("youtube-transcript")
+def prefetch_youtube_transcript(
+    response_limit: int = typer.Option(15000, "--response-limit", help="Límite de caracteres por respuesta MCP."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Muestra comando sin ejecutar."),
+) -> None:
+    """Precalienta cache uvx de mcp-youtube-transcript (cold start gateway)."""
+    argv = [
+        "uvx",
+        "--from",
+        _YOUTUBE_TRANSCRIPT_GIT,
+        "--with",
+        "mcp>=1.9,<2",
+        "mcp-youtube-transcript",
+        "--response-limit",
+        str(response_limit),
+        "--help",
+    ]
+    if dry_run:
+        typer.echo("dry-run: " + " ".join(argv))
+        return
+    subprocess.run(argv, check=True)
+    typer.echo("OK: uvx cache warmed for mcp-youtube-transcript")

@@ -216,6 +216,19 @@ async def lifespan(app: FastAPI):
         _log.warning("Reddit MCP: warm no iniciado: %s", exc)
 
     try:
+        from duckclaw.forge.skills.youtube_transcript_bridge import _uvx_available
+
+        if _uvx_available():
+            _log.info("YouTube Transcript MCP: uvx disponible (skill opt-in vía manifest)")
+        else:
+            _log.warning(
+                "YouTube Transcript MCP: uvx no encontrado. "
+                "Instala uv o ejecuta: uv run duckops mcp prefetch youtube-transcript"
+            )
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("YouTube Transcript MCP: gate omitido: %s", exc)
+
+    try:
         from duckclaw.process_role import embed_goals_ticker_in_gateway, embed_knowledge_sync_in_gateway
 
         if embed_goals_ticker_in_gateway():

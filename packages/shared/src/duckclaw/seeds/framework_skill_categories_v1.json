@@ -76,6 +76,14 @@
             "mcp_read_only": true,
             "hitl_destructive": true
           }
+        },
+        {
+          "id": "youtube_transcript",
+          "label": "YouTube Transcript",
+          "hint": "Transcripciones YouTube vía uvx. Opcional: tools: [get_transcript] para whitelist",
+          "default_config": {
+            "response_limit": 15000
+          }
         }
       ]
     }

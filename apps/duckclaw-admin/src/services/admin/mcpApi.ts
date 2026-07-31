@@ -136,6 +136,7 @@ export const mcpApi = {
         }[];
       };
       github_note: string;
+      youtube_transcript_note?: string;
       _gateway_stale?: boolean;
     }>('/catalog/mcp'),
 };

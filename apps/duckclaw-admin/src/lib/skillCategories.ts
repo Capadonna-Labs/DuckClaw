@@ -60,6 +60,11 @@ export const FALLBACK_PLATFORM_CATEGORIES: SkillCategory[] = [
         label: 'GitHub',
         hint: 'GitHub MCP oficial (Docker + GITHUB_TOKEN)',
       },
+      {
+        id: 'youtube_transcript',
+        label: 'YouTube Transcript',
+        hint: 'Transcripciones YouTube vía uvx (read-only)',
+      },
     ],
   },
 ];

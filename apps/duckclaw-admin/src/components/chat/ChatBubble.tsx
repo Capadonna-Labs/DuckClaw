@@ -6,11 +6,6 @@ import { ArtifactImageLightbox } from '@/components/chat/ArtifactImageLightbox';
 import { ChatMarkdown, looksLikeMarkdown } from '@/components/chat/ChatMarkdown';
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
-import {
-  formatToolDisplayName,
-  formatToolDurationMs,
-  parseToolNameFromHeartbeatText,
-} from '@/lib/toolHeartbeat';
 import { stripContextBlocksForDisplay } from '@/lib/chatMessageImages';
 import {
   formatChatIdentityPrefix,
@@ -25,39 +20,6 @@ export function stripHeartbeatBodyPrefix(
 ): string {
   void swarmSlot;
   return stripChatIdentityNoise(text, { workerId, displayName });
-}
-
-/** Quita prefijo duplicado en heartbeat (UI ya muestra worker + tipo). */
-function ToolHeartbeatBody({ message: m }: { message: ChatMsg }) {
-  const toolName = formatToolDisplayName(
-    (m.toolName || '').trim() || parseToolNameFromHeartbeatText(m.text || '') || 'tool'
-  );
-  const running =
-    m.toolPhase === 'running' ||
-    m.toolPhase === 'start' ||
-    (m.heartbeatKind === 'tool' && m.toolPhase !== 'done' && m.toolPhase !== 'error');
-  const [liveMs, setLiveMs] = useState<number | null>(null);
-
-  useEffect(() => {
-    if (!running) {
-      setLiveMs(m.toolElapsedMs ?? null);
-      return;
-    }
-    const t0 = m.toolStartedAt ?? Date.now();
-    const tick = () => setLiveMs(Math.max(0, Date.now() - t0));
-    tick();
-    const id = window.setInterval(tick, 50);
-    return () => window.clearInterval(id);
-  }, [running, m.toolStartedAt, m.toolElapsedMs, m.toolPhase]);
-
-  const durMs = running ? liveMs : (m.toolElapsedMs ?? liveMs);
-  const dur = formatToolDurationMs(durMs);
-  return (
-    <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-      {`Usando: ${toolName}`}
-      {dur ? ` · ${dur}` : running ? ' · en curso' : ''}
-    </span>
-  );
 }
 
 export function ChatBubble({
@@ -84,6 +46,7 @@ export function ChatBubble({
   const isUser = m.role === 'user';
   const isError = m.role === 'error';
   const isHeartbeat = m.role === 'heartbeat';
+  const isToolHeartbeat = isHeartbeat && m.heartbeatKind === 'tool';
   const isInterrupted = Boolean(m.interrupted);
   const isAssistant = m.role === 'assistant';
   const technicalId = (m.workerId || activeWorkerId || '').trim();
@@ -169,6 +132,7 @@ export function ChatBubble({
     !(m.imagePreviews?.length) &&
     !m.audioBase64;
   if (isIdentityOnlyAssistant) return null;
+  if (isToolHeartbeat) return null;
 
   return (
     <div
@@ -273,9 +237,7 @@ export function ChatBubble({
         </div>
       )}
       <ArtifactImageLightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />
-      {isHeartbeat && m.heartbeatKind === 'tool' ? (
-        <ToolHeartbeatBody message={m} />
-      ) : isUser || isError || isInterrupted || isHeartbeat ? (
+      {isUser || isError || isInterrupted || isHeartbeat ? (
         displayText?.trim() ? (
           isUser && looksLikeMarkdown(displayText) ? (
             <div className="min-w-0">

@@ -24,6 +24,7 @@ export default defineConfig({
       'src/components/chat/useAdminChatLoopPolling.test.ts',
       'src/components/chat/chatMarkdownMermaid.test.ts',
       'src/components/chat/chatMarkdown.test.ts',
+      'src/lib/toolUsageGroup.test.ts',
     ],
   },
   resolve: {

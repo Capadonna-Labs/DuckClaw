@@ -139,6 +139,7 @@ _OPTIONAL_EXTRAS_SILENT: frozenset[str] = frozenset(
         "reddit",
         "notion",
         "github",
+        "youtube_transcript",
         "comfyui",
         "higgsfield",
         "fal",

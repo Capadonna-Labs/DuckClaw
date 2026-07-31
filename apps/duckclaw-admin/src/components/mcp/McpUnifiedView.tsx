@@ -230,6 +230,9 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
               ))}
             </ul>
             <p className="mt-3 text-xs text-gov-gray-500">{data.github_note}</p>
+            {data.youtube_transcript_note ? (
+              <p className="mt-1 text-xs text-gov-gray-500">{data.youtube_transcript_note}</p>
+            ) : null}
           </section>
         </>
       )}

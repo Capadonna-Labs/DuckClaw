@@ -41,6 +41,10 @@ const DEFAULT_GITHUB_CONFIG: Record<string, unknown> = {
   hitl_destructive: true,
 };
 
+const DEFAULT_YOUTUBE_TRANSCRIPT_CONFIG: Record<string, unknown> = {
+  response_limit: 15000,
+};
+
 const PRIVILEGED_MUTATION_SKILLS = new Set(['admin_sql']);
 
 function parseToolSurfaceExposed(yamlText: string): string[] {
@@ -193,6 +197,7 @@ function defaultConfigForSkill(skillId: string): Record<string, unknown> | null 
   if (normalized === 'higgsfield') return { ...DEFAULT_HIGGSFIELD_CONFIG };
   if (normalized === 'fal') return { ...DEFAULT_FAL_CONFIG };
   if (normalized === 'github') return { ...DEFAULT_GITHUB_CONFIG };
+  if (normalized === 'youtube_transcript') return { ...DEFAULT_YOUTUBE_TRANSCRIPT_CONFIG };
   return null;
 }
 

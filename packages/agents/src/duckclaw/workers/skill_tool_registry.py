@@ -50,6 +50,14 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         empty_config_registers=False,
     ),
     SkillToolRegistrar(
+        skill_name="youtube_transcript",
+        phase="pre_llm",
+        registrar_path="duckclaw.forge.skills.youtube_transcript_bridge:register_youtube_transcript_skill",
+        hint_surfaces=("url_research", "full"),
+        hint_contains=("youtube.com", "youtu.be"),
+        empty_config_registers=False,
+    ),
+    SkillToolRegistrar(
         skill_name="research",
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.research_bridge:register_research_skill",

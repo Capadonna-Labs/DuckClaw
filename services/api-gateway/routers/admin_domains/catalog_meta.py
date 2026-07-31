@@ -306,4 +306,7 @@ async def catalog_mcp() -> dict[str, Any]:
         "stdio_servers": stdio_servers,
         "official_reference": official_reference,
         "github_note": "GitHub MCP vía duckclaw.github.mcp_bridge (Docker)",
+        "youtube_transcript_note": (
+            "YouTube Transcript MCP vía duckclaw.forge.skills.youtube_transcript_bridge (uvx stdio)"
+        ),
     }

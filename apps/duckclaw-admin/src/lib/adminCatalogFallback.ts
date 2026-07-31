@@ -73,6 +73,8 @@ export function fallbackMcpCatalog() {
     stdio_servers,
     official_reference: loadOfficialMcpReferenceFromRepo(),
     github_note: 'GitHub MCP vía duckclaw.github.mcp_bridge (Docker)',
+    youtube_transcript_note:
+      'YouTube Transcript MCP vía duckclaw.forge.skills.youtube_transcript_bridge (uvx stdio)',
     _fallback: true as const,
     _gateway_stale: true as const,
   };

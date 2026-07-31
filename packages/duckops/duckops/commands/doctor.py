@@ -507,6 +507,15 @@ def cmd_doctor(
     except Exception as exc:
         _emit("Offline knowledge", False, str(exc)[:160])
 
+    uvx_bin = shutil.which("uvx")
+    _emit(
+        "uvx (YouTube Transcript MCP)",
+        uvx_bin is not None,
+        uvx_bin
+        if uvx_bin
+        else "no encontrado — curl -LsSf https://astral.sh/uv/install.sh | sh",
+    )
+
     admin_key = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
     key_ok = is_admin_key_valid(admin_key)
     _emit(

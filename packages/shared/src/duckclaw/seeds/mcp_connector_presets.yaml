@@ -162,6 +162,24 @@ presets:
       docs_url: https://docs.github.com/es/copilot/how-tos/provide-context/use-mcp-in-your-ide/set-up-the-github-mcp-server
       repo_url: https://github.com/github/github-mcp-server
 
+  youtube_transcript:
+    profile: stdio_uvx_ro
+    display_name: YouTube Transcript
+    launch_args:
+      - "--from"
+      - "git+https://github.com/jkawamoto/mcp-youtube-transcript"
+      - "--with"
+      - "mcp>=1.9,<2"
+      - "mcp-youtube-transcript"
+      - "--response-limit"
+      - "15000"
+    metadata:
+      manifest_skill_id: youtube_transcript
+      admin_label: YouTube transcript (local stdio · uvx · read-only)
+      docs_url: https://github.com/jkawamoto/mcp-youtube-transcript
+      install: uvx --from git+https://github.com/jkawamoto/mcp-youtube-transcript --with 'mcp>=1.9,<2' mcp-youtube-transcript
+      note: Activa vía skill youtube_transcript en manifest del worker (bridge DuckClaw); no requiere conector OAuth.
+
   mcp_fetch:
     profile: stdio_npx_ro
     display_name: MCP Fetch (local stdio)

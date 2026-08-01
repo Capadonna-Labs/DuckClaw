@@ -27,7 +27,7 @@ export type AdminNavEntry =
   | { type: 'item'; item: AdminNavItem }
   | { type: 'group'; group: AdminNavGroup };
 
-/** Destinos principales: Inicio, Chat, Proyectos, Agentes, Base de Conocimiento, Train. */
+/** Destinos principales: Inicio, Chat, Proyectos, Agentes, Base de Conocimiento, Productividad. */
 export const PRIMARY_NAV_GROUP: AdminNavGroup = {
   id: 'primary',
   label: 'Principal',
@@ -39,6 +39,7 @@ export const PRIMARY_NAV_GROUP: AdminNavGroup = {
     { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
     { href: '/knowledge', label: 'Base de Conocimiento', section: 'core', audience: 'all' },
+    { href: '/productividad', label: 'Productividad', section: 'core', audience: 'admin' },
   ],
 };
 
@@ -51,7 +52,6 @@ export const MORE_NAV_GROUP: AdminNavGroup = {
   items: [
     { href: '/train', label: 'Train', section: 'core', audience: 'admin' },
     { href: '/sandbox', label: 'Sandbox', section: 'core', audience: 'all' },
-    { href: '/productividad', label: 'Productividad', section: 'core', audience: 'admin' },
     { href: '/plataforma', label: 'Plataforma', section: 'core', audience: 'admin' },
     { href: '/integraciones', label: 'Integraciones', section: 'integrations', audience: 'admin' },
     {

@@ -9,7 +9,7 @@ import {
   isThinkingStatusHeartbeat,
   shouldSkipEmptyStreamingAssistant,
 } from '@/components/chat/useAdminChat';
-import { groupMessagesForDisplay } from '@/lib/toolUsageGroup';
+import { groupMessagesForDisplay, toolGroupStableKey } from '@/lib/toolUsageGroup';
 import type { RefObject } from 'react';
 
 export type AdminChatMessageListProps = {
@@ -131,7 +131,7 @@ export function AdminChatMessageList({
             const first = messages[firstIdx];
             return (
               <ToolUsageGroup
-                key={`tool-group-${item.indices.join('-')}-${itemIdx}`}
+                key={toolGroupStableKey(messages, item.indices)}
                 messages={messages}
                 indices={item.indices}
                 identityLabel={labelForWorkerId(first?.workerId || workerId)}

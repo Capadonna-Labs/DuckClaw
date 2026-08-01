@@ -1,5 +1,6 @@
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import { artifactPreviewApiPath } from '@/lib/artifactPreview';
+import { interleaveEphemeralIntoHistory } from '@/lib/chatEphemeralMerge';
 import { normalizeUsageTokens, type UsageTokenBreakdown } from '@/lib/formatTokenCount';
 
 export function artifactImagePreview(
@@ -21,7 +22,7 @@ export function artifactImagePreview(
 /** Heartbeats/plan/tool no están en Redis; conservarlos si recargamos historial en vivo. */
 export function mergeHistoryWithEphemeral(server: ChatMsg[], ephemeral: ChatMsg[]): ChatMsg[] {
   if (!ephemeral.length) return server;
-  return [...server, ...ephemeral];
+  return interleaveEphemeralIntoHistory(server, ephemeral);
 }
 
 export function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {

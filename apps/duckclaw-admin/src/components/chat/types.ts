@@ -25,6 +25,8 @@ export type ChatMsg = {
   toolPhase?: ToolHeartbeatPhase;
   toolStartedAt?: number;
   toolElapsedMs?: number;
+  /** Turno (usuarios previos) para reinsertar heartbeats tras reload. */
+  turnUserIndex?: number;
   imagePreviews?: ChatImagePreview[];
   /** Mensaje de usuario originado por nota de voz. */
   voiceNote?: boolean;

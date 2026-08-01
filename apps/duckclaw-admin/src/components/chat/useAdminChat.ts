@@ -134,7 +134,7 @@ export function useAdminChat({
   const prevWorkerIdRef = useRef(workerId);
   useEffect(() => {
     const prev = prevWorkerIdRef.current;
-    if (prev && workerId && prev !== workerId) {
+    if (prev && workerId && !workerMatches(prev, workerId)) {
       clearEphemeralHeartbeats(chatId, prev);
       clearLegacyEphemeralHeartbeats(chatId);
       setMessages((msgs) =>

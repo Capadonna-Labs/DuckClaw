@@ -1,8 +1,9 @@
 /** Heartbeats/plan/tool SSE: no están en Redis; persistencia por chat+worker en sessionStorage. */
 
 import type { ChatMsg } from '@/components/chat/types';
+import { countUsersBefore } from '@/lib/chatEphemeralMerge';
 import { toolHeartbeatInvocationKey } from '@/lib/toolHeartbeat';
-import { workerMatches } from '@/lib/workerOptions';
+import { normalizeWorkerKey, workerMatches } from '@/lib/workerOptions';
 
 const KEY_PREFIX = 'duckclaw-admin-chat-ephemeral-';
 
@@ -12,10 +13,28 @@ function legacyStorageKey(chatId: string): string {
 
 function storageKey(chatId: string, workerId: string): string {
   const cid = chatId.trim();
-  const wid = workerId.trim();
+  const wid = normalizeWorkerKey(workerId);
   if (!cid) return '';
   if (!wid) return legacyStorageKey(cid);
   return `${KEY_PREFIX}${cid}-${wid}`;
+}
+
+/** Canonical + legacy slug keys for chat (pre-normalize writes still readable). */
+function allStorageKeysForChat(chatId: string, workerId: string): string[] {
+  const cid = chatId.trim();
+  if (!cid) return [];
+  const keys = new Set<string>([legacyStorageKey(cid)]);
+  if (workerId.trim()) keys.add(storageKey(chatId, workerId));
+  const prefix = `${KEY_PREFIX}${cid}-`;
+  try {
+    for (let i = 0; i < sessionStorage.length; i++) {
+      const k = sessionStorage.key(i);
+      if (k?.startsWith(prefix)) keys.add(k);
+    }
+  } catch {
+    /* ignore */
+  }
+  return [...keys];
 }
 
 function isEphemeralMessage(m: ChatMsg): boolean {
@@ -50,31 +69,40 @@ export function mergeEphemeralHeartbeats(a: ChatMsg[], b: ChatMsg[]): ChatMsg[] 
   return [...other, ...orderedKeys.map((k) => byInvocation.get(k)!).filter(Boolean)];
 }
 
+function parseStoredHeartbeats(raw: string | null): ChatMsg[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (m): m is ChatMsg =>
+        typeof m === 'object' && m !== null && (m as ChatMsg).role === 'heartbeat'
+    );
+  } catch {
+    return [];
+  }
+}
+
 export function readEphemeralHeartbeats(chatId: string, workerId = ''): ChatMsg[] {
   if (typeof window === 'undefined' || !chatId.trim()) return [];
+  // La clave ya está acotada al worker; no se re-filtra por m.workerId (el gateway
+  // manda un worker_id que no siempre coincide con el id de la UI).
   const keys = workerId.trim()
-    ? [storageKey(chatId, workerId)]
+    ? [storageKey(chatId, workerId), legacyStorageKey(chatId)]
     : [legacyStorageKey(chatId)];
   const out: ChatMsg[] = [];
+  const seen = new Set<string>();
   for (const key of keys) {
-    try {
-      const raw = sessionStorage.getItem(key);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw) as unknown;
-      if (!Array.isArray(parsed)) continue;
-      out.push(
-        ...parsed.filter(
-          (m): m is ChatMsg =>
-            typeof m === 'object' &&
-            m !== null &&
-            (m as ChatMsg).role === 'heartbeat'
-        )
-      );
-    } catch {
-      /* ignore corrupt */
+    for (const m of parseStoredHeartbeats(sessionStorage.getItem(key))) {
+      const id =
+        toolHeartbeatInvocationKey(m) ||
+        `${m.toolName || ''}|${m.toolStartedAt || ''}|${m.text || ''}|${out.length}`;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      out.push(m);
     }
   }
-  return filterEphemeralForWorker(out, workerId);
+  return out;
 }
 
 export function writeEphemeralHeartbeats(
@@ -83,16 +111,22 @@ export function writeEphemeralHeartbeats(
   messages: ChatMsg[]
 ): void {
   if (typeof window === 'undefined' || !chatId.trim()) return;
-  const ephemeral = filterEphemeralForWorker(
-    messages.filter(isEphemeralMessage),
-    workerId
-  );
+  // ponytail: remount post-reload empieza con messages=[]; no borrar sessionStorage
+  // o se pierden tools antes de mergeHistory. Clear explícito vía clearEphemeralHeartbeats.
+  if (messages.length === 0) return;
+  // El worker_id que llega por SSE no siempre normaliza igual que el id de la UI,
+  // así que filtrar aquí descartaba todos los heartbeats. La clave ya acota al worker.
+  const ephemeral: ChatMsg[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== 'heartbeat') continue;
+    ephemeral.push({ ...m, turnUserIndex: countUsersBefore(messages, i) });
+  }
   try {
     const key = storageKey(chatId, workerId);
-    if (!ephemeral.length) {
-      sessionStorage.removeItem(key);
-      return;
-    }
+    if (!key) return;
+    // Historial sin heartbeats no borra: el clear explícito es clearEphemeralHeartbeats.
+    if (!ephemeral.length) return;
     sessionStorage.setItem(key, JSON.stringify(ephemeral));
   } catch {
     /* ignore quota */
@@ -103,7 +137,9 @@ export function clearEphemeralHeartbeats(chatId: string, workerId = ''): void {
   if (typeof window === 'undefined' || !chatId.trim()) return;
   try {
     if (workerId.trim()) {
-      sessionStorage.removeItem(storageKey(chatId, workerId));
+      for (const key of allStorageKeysForChat(chatId, workerId)) {
+        sessionStorage.removeItem(key);
+      }
       return;
     }
     sessionStorage.removeItem(legacyStorageKey(chatId));

@@ -3,7 +3,9 @@ import type { ChatMsg } from '@/components/chat/types';
 import {
   groupMessagesForDisplay,
   isToolHeartbeatMessage,
+  toolGroupCurrentToolName,
   toolGroupHasRunning,
+  toolGroupStableKey,
   toolGroupTotalElapsedMs,
 } from './toolUsageGroup';
 
@@ -59,6 +61,23 @@ describe('toolUsageGroup', () => {
       kind: 'toolGroup',
       indices: [1],
     });
+  });
+
+  it('stable key survives new tools in same turn', () => {
+    const msgs = [user, tool('a'), tool('b'), assistant];
+    const k1 = toolGroupStableKey(msgs, [1, 2]);
+    const k2 = toolGroupStableKey([user, tool('c'), tool('a'), tool('b'), assistant], [1, 2, 3]);
+    expect(k1).toBe('tool-group-turn-0');
+    expect(k2).toBe('tool-group-turn-0');
+  });
+
+  it('current tool prefers running, else newest', () => {
+    const running = tool('web_search', 'running');
+    running.toolStartedAt = 100;
+    const done = tool('get_current_time', 'done');
+    done.toolStartedAt = 50;
+    expect(toolGroupCurrentToolName([user, running, done], [1, 2])).toBe('web_search');
+    expect(toolGroupCurrentToolName([user, done], [1])).toBe('get_current_time');
   });
 
   it('reports running state and total elapsed', () => {

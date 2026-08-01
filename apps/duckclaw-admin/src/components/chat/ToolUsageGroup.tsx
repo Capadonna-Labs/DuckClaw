@@ -6,7 +6,11 @@ import { ToolHeartbeatRow } from '@/components/chat/ToolHeartbeatRow';
 import type { ChatMsg } from '@/components/chat/types';
 import { formatChatIdentityPrefix } from '@/lib/workerOptions';
 import { formatToolDurationMs } from '@/lib/toolHeartbeat';
-import { toolGroupHasRunning, toolGroupTotalElapsedMs } from '@/lib/toolUsageGroup';
+import {
+  toolGroupCurrentToolName,
+  toolGroupHasRunning,
+  toolGroupTotalElapsedMs,
+} from '@/lib/toolUsageGroup';
 
 export function ToolUsageGroup({
   messages,
@@ -21,18 +25,18 @@ export function ToolUsageGroup({
   const items = indices.map((i) => messages[i]).filter(Boolean);
   const anyRunning = toolGroupHasRunning(messages, indices);
   const totalMs = toolGroupTotalElapsedMs(messages, indices);
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const isOpen = userOpen ?? anyRunning;
+  const [isOpen, setIsOpen] = useState(false);
 
   const identityPrefix = formatChatIdentityPrefix(identityLabel);
   const count = items.length;
   const totalLabel = totalMs != null ? formatToolDurationMs(totalMs) : '';
+  const currentTool = !isOpen ? toolGroupCurrentToolName(messages, indices) : '';
 
   return (
     <div className="mx-auto w-full max-w-full min-w-0 rounded-2xl bg-sky-50 text-sky-950 border border-sky-200/80 dark:bg-sky-950/25 dark:text-sky-100 dark:border-sky-800/60 overflow-hidden">
       <button
         type="button"
-        onClick={() => setUserOpen((prev) => !(prev ?? anyRunning))}
+        onClick={() => setIsOpen((open) => !open)}
         className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left"
         aria-expanded={isOpen}
         aria-controls={panelId}
@@ -41,6 +45,12 @@ export function ToolUsageGroup({
           <span className="normal-case text-sky-800 dark:text-sky-200">{identityPrefix}</span>
           {' · '}
           Herramientas ({count})
+          {!isOpen && currentTool ? (
+            <span className="normal-case font-semibold text-sky-600 dark:text-sky-400">
+              {' '}
+              · {currentTool}
+            </span>
+          ) : null}
           {totalLabel ? (
             <span className="normal-case font-semibold text-sky-600 dark:text-sky-400">
               {' '}

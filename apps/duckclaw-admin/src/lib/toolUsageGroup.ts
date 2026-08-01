@@ -1,7 +1,11 @@
 /** Agrupa heartbeats tool consecutivos para render en caja desplegable. */
 
 import type { ChatMsg } from '@/components/chat/types';
-import { isToolHeartbeatRunning } from '@/lib/toolHeartbeat';
+import {
+  formatToolDisplayName,
+  isToolHeartbeatRunning,
+  parseToolNameFromHeartbeatText,
+} from '@/lib/toolHeartbeat';
 
 export type ChatDisplayItem =
   | { kind: 'message'; index: number }
@@ -50,4 +54,37 @@ export function toolGroupTotalElapsedMs(messages: ChatMsg[], indices: number[]):
     }
   }
   return any ? total : null;
+}
+
+/** Clave estable por turno: no cambia al añadir tools al mismo grupo. */
+export function toolGroupStableKey(messages: ChatMsg[], indices: number[]): string {
+  const start = indices[0] ?? 0;
+  for (let j = start - 1; j >= 0; j--) {
+    if (messages[j]?.role === 'user') return `tool-group-turn-${j}`;
+  }
+  const oldest = messages[indices[indices.length - 1] ?? start];
+  const id = oldest?.toolInvocationId ?? oldest?.toolStartedAt ?? start;
+  return `tool-group-orphan-${id}`;
+}
+
+function toolDisplayName(m: ChatMsg): string {
+  return formatToolDisplayName(
+    (m.toolName || '').trim() || parseToolNameFromHeartbeatText(m.text || '') || 'tool'
+  );
+}
+
+function newestByStartedAt(items: ChatMsg[]): ChatMsg | null {
+  return items.reduce<ChatMsg | null>((best, m) => {
+    if (!best) return m;
+    return (m.toolStartedAt ?? 0) >= (best.toolStartedAt ?? 0) ? m : best;
+  }, null);
+}
+
+/** Tool en curso (running) o la más reciente del grupo — para header colapsado. */
+export function toolGroupCurrentToolName(messages: ChatMsg[], indices: number[]): string {
+  const items = indices.map((i) => messages[i]).filter(isToolHeartbeatMessage);
+  if (!items.length) return '';
+  const running = items.filter((m) => isToolHeartbeatRunning(m));
+  const target = newestByStartedAt(running.length ? running : items);
+  return target ? toolDisplayName(target) : '';
 }

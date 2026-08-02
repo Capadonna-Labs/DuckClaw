@@ -363,20 +363,13 @@ async def create_knowledge_source(
             documents = scan.file_count
             skipped_hidden = scan.skipped_hidden
             skipped_unsupported = scan.skipped_unsupported
-            sync_job_id = enqueue_knowledge_sync_job(
-                kind="folder_ingest",
-                source_id=source_id,
-                tenant_id=profile["tenant_id"],
-                actor_email=profile["email"],
-                compute_embeddings=body.compute_embeddings,
-                files_total=documents,
-            )
             source_metadata = _indexing_metadata(
                 source_metadata,
-                sync_job_id=sync_job_id,
+                sync_job_id="",
                 file_count=documents,
             )
 
+        # Persist source row before the indexer job (avoids source_not_found race).
         command = CreateKnowledgeSourceCommand(
             source_id=source_id,
             tenant_id=profile["tenant_id"],
@@ -390,6 +383,37 @@ async def create_knowledge_source(
             metadata=source_metadata,
         )
         task_ids.append(_enqueue_knowledge_command(command))
+
+        if body.ingest and documents > 0:
+            sync_job_id = enqueue_knowledge_sync_job(
+                kind="folder_ingest",
+                source_id=source_id,
+                tenant_id=profile["tenant_id"],
+                actor_email=profile["email"],
+                compute_embeddings=body.compute_embeddings,
+                files_total=documents,
+            )
+            source_metadata = _indexing_metadata(
+                source_metadata,
+                sync_job_id=sync_job_id,
+                file_count=documents,
+            )
+            task_ids.append(
+                _enqueue_knowledge_command(
+                    CreateKnowledgeSourceCommand(
+                        source_id=source_id,
+                        tenant_id=profile["tenant_id"],
+                        actor_email=profile["email"],
+                        project_id=body.project_id.strip(),
+                        worker_uid=body.worker_uid.strip(),
+                        source_kind=body.source_kind.strip() or "folder",  # type: ignore[arg-type]
+                        source_uri=body.source_uri.strip(),
+                        display_name=body.display_name.strip(),
+                        status="indexing",
+                        metadata=source_metadata,
+                    )
+                )
+            )
     except Exception as exc:
         raise problem(400, str(exc), "knowledge_source") from exc
 
@@ -453,18 +477,6 @@ async def upload_knowledge_files(
         staging_dir = str(
             stage_browser_upload(job_id=f"kupload_{source_id}", files=file_payloads)
         )
-        job_id = enqueue_browser_upload_job(
-            source_id=source_id,
-            tenant_id=profile["tenant_id"],
-            actor_email=profile["email"],
-            staging_dir=staging_dir,
-            project_id=project_id.strip(),
-            worker_uid=worker_uid.strip(),
-            display_name=resolved_display,
-            file_names=upload_labels,
-            compute_embeddings=compute_embeddings,
-            files_total=len(file_payloads),
-        )
         source_cmd = CreateKnowledgeSourceCommand(
             source_id=source_id,
             tenant_id=profile["tenant_id"],
@@ -477,11 +489,41 @@ async def upload_knowledge_files(
             status="indexing",
             metadata=_indexing_metadata(
                 {"upload": True, "file_names": upload_labels},
-                sync_job_id=job_id,
+                sync_job_id="",
                 file_count=len(file_payloads),
             ),
         )
         task_id = _enqueue_knowledge_command(source_cmd)
+        job_id = enqueue_browser_upload_job(
+            source_id=source_id,
+            tenant_id=profile["tenant_id"],
+            actor_email=profile["email"],
+            staging_dir=staging_dir,
+            project_id=project_id.strip(),
+            worker_uid=worker_uid.strip(),
+            display_name=resolved_display,
+            file_names=upload_labels,
+            compute_embeddings=compute_embeddings,
+            files_total=len(file_payloads),
+        )
+        _enqueue_knowledge_command(
+            CreateKnowledgeSourceCommand(
+                source_id=source_id,
+                tenant_id=profile["tenant_id"],
+                actor_email=profile["email"],
+                project_id=project_id.strip(),
+                worker_uid=worker_uid.strip(),
+                source_kind="file",
+                source_uri=f"upload://{source_id}",
+                display_name=resolved_display,
+                status="indexing",
+                metadata=_indexing_metadata(
+                    {"upload": True, "file_names": upload_labels},
+                    sync_job_id=job_id,
+                    file_count=len(file_payloads),
+                ),
+            )
+        )
     except Exception as exc:
         raise problem(400, "No se pudo encolar la carga RAG", str(exc)) from exc
 

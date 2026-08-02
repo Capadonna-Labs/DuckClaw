@@ -5,6 +5,10 @@ export function formatKnowledgeError(raw: string): string {
 
   const rules: Array<[RegExp, string]> = [
     [
+      /source_not_found|waiting_for_source/i,
+      'La fuente aún se estaba registrando. Reintenta «Actualizar» o «Añadir al chat» en unos segundos.',
+    ],
+    [
       /hidden knowledge files are not allowed/i,
       'La carpeta incluye archivos ocultos (.obsidian, .git…). Reinicia el Gateway con el último código: ahora se omiten automáticamente.',
     ],
@@ -55,7 +59,7 @@ export interface KnowledgeFolderPreview {
 }
 
 export function formatFolderPreviewLine(preview: KnowledgeFolderPreview): string {
-  const parts = [`${preview.file_count} archivo(s) listos para indexar`];
+  const parts = [`${preview.file_count} candidato(s) · aún no están en el chat`];
   if (preview.skipped_hidden > 0) {
     parts.push(`${preview.skipped_hidden} ocultos omitidos (.obsidian, etc.)`);
   }

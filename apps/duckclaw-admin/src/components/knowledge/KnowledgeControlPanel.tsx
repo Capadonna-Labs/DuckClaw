@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef } from 'react';
-import { UploadCloud } from 'lucide-react';
+import { HardDrive, MessageSquareText, UploadCloud } from 'lucide-react';
 import type { WorkspaceProjectSummary } from '@/services/adminService';
 import { KnowledgeFolderBrowser } from '@/components/knowledge/KnowledgeFolderBrowser';
 import {
@@ -25,6 +25,8 @@ export type KnowledgeControlPanelProps = {
   busy: boolean;
   filesCount: number;
   allowedRootsConfigured: boolean | null;
+  /** True when selected path already has a registered RAG source. */
+  existingSourceForPath?: boolean;
   onProjectChange: (projectId: string) => void;
   onWorkerChange: (workerUid: string) => void;
   onComputeEmbeddingsChange: (value: boolean) => void;
@@ -46,6 +48,7 @@ export function KnowledgeControlPanel({
   busy,
   filesCount,
   allowedRootsConfigured,
+  existingSourceForPath = false,
   onProjectChange,
   onWorkerChange,
   onComputeEmbeddingsChange,
@@ -55,11 +58,21 @@ export function KnowledgeControlPanel({
   onFilesSelected,
 }: KnowledgeControlPanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importLabel = existingSourceForPath
+    ? busy
+      ? 'Actualizando…'
+      : 'Actualizar en el chat'
+    : busy
+      ? 'Añadiendo…'
+      : 'Añadir al chat';
 
   return (
     <aside className="rounded-2xl border border-gov-gray-100 bg-white p-4 shadow-sm dark:border-dark-border dark:bg-dark-surface lg:sticky lg:top-4 space-y-5">
       <div className="space-y-3">
         <h2 className="text-sm font-black text-gov-gray-900 dark:text-dark-text">Alcance</h2>
+        <p className="text-[11px] text-gov-gray-500 dark:text-dark-muted">
+          Por defecto las carpetas van a la plataforma (todos los agentes). Acota solo si lo necesitas.
+        </p>
         <label className="block text-xs font-bold text-gov-gray-700 dark:text-dark-text">
           Proyecto
           <select
@@ -95,9 +108,12 @@ export function KnowledgeControlPanel({
 
       <div className="space-y-3 border-t border-gov-gray-100 pt-4 dark:border-dark-border">
         <h2 className="flex items-center gap-2 text-sm font-black text-gov-gray-900 dark:text-dark-text">
-          <UploadCloud size={16} />
-          Agregar documentos
+          <HardDrive size={16} />
+          En disco
         </h2>
+        <p className="text-[11px] leading-relaxed text-gov-gray-500 dark:text-dark-muted">
+          Carpetas que el servidor puede leer. Elegir una ruta no la pone en búsqueda semántica del chat.
+        </p>
 
         <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-gov-gray-700 dark:text-dark-text">
           <input
@@ -106,7 +122,7 @@ export function KnowledgeControlPanel({
             onChange={(e) => onComputeEmbeddingsChange(e.target.checked)}
             className="rounded border-gov-gray-300"
           />
-          Búsqueda semántica
+          Búsqueda semántica al añadir al chat
         </label>
 
         {allowedRootsConfigured === false ? (
@@ -150,22 +166,35 @@ export function KnowledgeControlPanel({
           </div>
         ) : null}
 
-        <button
-          type="button"
-          onClick={onImport}
-          disabled={
-            !serverPath.trim() ||
-            busy ||
-            previewBusy ||
-            !folderPreview ||
-            folderPreview.file_count === 0
-          }
-          className="w-full rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
-        >
-          {busy ? 'Indexando…' : 'Indexar carpeta'}
-        </button>
+        <div className="space-y-2 border-t border-gov-gray-100 pt-3 dark:border-dark-border">
+          <h3 className="flex items-center gap-2 text-xs font-black text-gov-gray-900 dark:text-dark-text">
+            <MessageSquareText size={14} />
+            En el chat
+          </h3>
+          <p className="text-[11px] text-gov-gray-500 dark:text-dark-muted">
+            Indexa la carpeta elegida para que los agentes la busquen en conversación.
+          </p>
+          <button
+            type="button"
+            onClick={onImport}
+            disabled={
+              !serverPath.trim() ||
+              busy ||
+              previewBusy ||
+              !folderPreview ||
+              folderPreview.file_count === 0
+            }
+            className="w-full rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
+          >
+            {importLabel}
+          </button>
+        </div>
 
         <div className="space-y-2 border-t border-gov-gray-100 pt-3 dark:border-dark-border">
+          <h3 className="flex items-center gap-2 text-xs font-black text-gov-gray-900 dark:text-dark-text">
+            <UploadCloud size={14} />
+            Subir archivos
+          </h3>
           <input
             ref={fileInputRef}
             type="file"

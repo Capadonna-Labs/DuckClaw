@@ -43,6 +43,10 @@ function defaultSourceLabel(serverPath: string, files: File[]): string {
   return base || 'Documentos';
 }
 
+function normalizeKnowledgeUri(uri: string): string {
+  return uri.trim().replace(/\/+$/, '').toLowerCase();
+}
+
 export default function KnowledgePage() {
   const searchParams = useSearchParams();
   const initialProject = searchParams.get('project') || '';
@@ -270,6 +274,23 @@ export default function KnowledgePage() {
     setError(null);
     setNotice(null);
     try {
+      const pathKey = normalizeKnowledgeUri(serverPath);
+      const existing = sources.find(
+        (source) =>
+          source.source_kind === 'folder' &&
+          normalizeKnowledgeUri(source.source_uri || '') === pathKey
+      );
+      if (existing) {
+        const result = await adminService.syncKnowledgeSource(existing.source_id, {
+          compute_embeddings: computeEmbeddings,
+        });
+        setNotice(result.message ?? 'Actualización encolada…');
+        void waitForKnowledgeJob(result.sync_job_id, 'Actualizando carpeta', {
+          sourceId: existing.source_id,
+        });
+        return;
+      }
+
       const result = await adminService.createKnowledgeSource({
         source_uri: serverPath.trim(),
         display_name: defaultSourceLabel(serverPath, []),
@@ -283,7 +304,7 @@ export default function KnowledgePage() {
       setFolderPreview(null);
       setNotice(
         result.status === 'indexing'
-          ? `Indexando ${result.documents} documento(s)…`
+          ? `Añadiendo al chat ${result.documents} documento(s)…`
           : `Importación encolada: ${result.documents} documento(s).`
       );
       await loadSources();
@@ -296,7 +317,15 @@ export default function KnowledgePage() {
     } finally {
       setBusy(false);
     }
-  }, [computeEmbeddings, loadSources, projectId, serverPath, waitForKnowledgeJob, workerUid]);
+  }, [
+    computeEmbeddings,
+    loadSources,
+    projectId,
+    serverPath,
+    sources,
+    waitForKnowledgeJob,
+    workerUid,
+  ]);
 
   const syncSource = useCallback(
     async (source: KnowledgeSource) => {
@@ -363,7 +392,7 @@ export default function KnowledgePage() {
             Conocimiento
           </h1>
           <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
-            Documentos indexados para el chat de tus agentes.
+            En disco = lectura permitida. En el chat = indexado para búsqueda de los agentes.
           </p>
           {knowledgeScopeStatusVisible(sources, loading) ? (
             <div className="mt-2">
@@ -413,6 +442,12 @@ export default function KnowledgePage() {
             busy={busy}
             filesCount={files.length}
             allowedRootsConfigured={allowedRootsConfigured}
+            existingSourceForPath={sources.some(
+              (source) =>
+                source.source_kind === 'folder' &&
+                normalizeKnowledgeUri(source.source_uri || '') ===
+                  normalizeKnowledgeUri(serverPath)
+            )}
             onProjectChange={(value) => {
               setProjectId(value);
               setWorkerUid('');

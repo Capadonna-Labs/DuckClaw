@@ -47,7 +47,7 @@ export function KnowledgeSourcesGrid({
     <section className="min-w-0 space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Fuentes registradas</h2>
+          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">En el chat</h2>
           {summary ? (
             <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">{summary}</p>
           ) : null}

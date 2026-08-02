@@ -139,3 +139,70 @@ def test_enqueue_and_dequeue_job(monkeypatch) -> None:
     assert job is not None
     assert job.source_id == "ksrc_x"
     assert job.kind == "folder_ingest"
+
+
+def test_process_job_waits_when_source_missing(monkeypatch) -> None:
+    from dataclasses import replace
+
+    from duckclaw.knowledge_sync_queue import (
+        KNOWLEDGE_SYNC_QUEUE_KEY,
+        KnowledgeSyncJob,
+        get_job_status,
+        process_knowledge_sync_job,
+    )
+
+    store: dict[str, str] = {}
+    queue: list[str] = []
+
+    class FakeRedis:
+        def lpush(self, key: str, value: str) -> int:
+            queue.insert(0, value)
+            return len(queue)
+
+        def set(self, key: str, value: str, ex: int | None = None) -> bool:
+            store[key] = value
+            return True
+
+        def get(self, key: str):
+            return store.get(key)
+
+    monkeypatch.setattr("duckclaw.knowledge_sync_queue._redis_client", lambda: FakeRedis())
+    monkeypatch.setattr("duckclaw.knowledge_sync_queue.time.sleep", lambda _s: None)
+    monkeypatch.setattr(
+        "duckclaw.knowledge_sync_queue._open_hub_db_readonly",
+        lambda: (object(), "/tmp/hub.duckdb"),
+    )
+
+    class _Db:
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "duckclaw.knowledge_sync_queue._open_hub_db_readonly",
+        lambda: (_Db(), "/tmp/hub.duckdb"),
+    )
+    monkeypatch.setattr(
+        "duckclaw.admin_knowledge_read.get_knowledge_source",
+        lambda *_a, **_k: None,
+    )
+
+    job = KnowledgeSyncJob(
+        job_id="ksync_wait1",
+        kind="folder_ingest",
+        source_id="ksrc_missing",
+        tenant_id="tenant_a",
+        actor_email="admin@test.com",
+        metadata={"source_wait_attempts": 0},
+    )
+    out = process_knowledge_sync_job(job)
+    assert out["deferred"] is True
+    assert out["reason"] == "waiting_for_source"
+    assert len(queue) == 1
+    status = get_job_status(job.job_id)
+    assert status is not None
+    assert status["detail"] == "waiting_for_source"
+
+    exhausted = replace(job, metadata={"source_wait_attempts": 20})
+    out2 = process_knowledge_sync_job(exhausted)
+    assert out2["ok"] is False
+    assert out2["reason"] == "source_not_found"

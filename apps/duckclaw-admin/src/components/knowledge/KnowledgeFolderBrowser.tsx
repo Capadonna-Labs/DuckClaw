@@ -89,7 +89,7 @@ export function KnowledgeFolderBrowser({
               onClick={() => onSelect(currentPath)}
               className="ml-auto rounded-lg bg-gov-blue-700 px-3 py-1 text-xs font-black text-white"
             >
-              Usar {pathLabel(currentPath, payload?.roots_mode ?? true)}
+              Elegir {pathLabel(currentPath, payload?.roots_mode ?? true)}
             </button>
           ) : null}
         </div>
@@ -100,7 +100,7 @@ export function KnowledgeFolderBrowser({
               {selectedPath}
             </>
           ) : payload?.roots_mode ? (
-            'Selecciona una raíz permitida'
+            'Carpetas en disco (permitidas). Elegir no las pone en el chat.'
           ) : (
             currentPath || '—'
           )}
@@ -125,7 +125,7 @@ export function KnowledgeFolderBrowser({
         {!loading && !error && payload ? (
           payload.entries.filter((e) => e.kind !== 'file').length === 0 ? (
             <p className="px-2 py-6 text-sm text-gov-gray-500 dark:text-dark-muted">
-              No hay subcarpetas aquí. Usa «Usar …» arriba si esta carpeta contiene documentos.
+              No hay subcarpetas aquí. Usa «Elegir …» arriba si esta carpeta contiene documentos.
             </p>
           ) : (
             <ul className="space-y-1">
@@ -158,7 +158,7 @@ export function KnowledgeFolderBrowser({
                         onClick={() => onSelect(entry.path)}
                         className="shrink-0 rounded-lg border border-gov-blue-200 px-2 py-1 text-[10px] font-black text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan"
                       >
-                        Usar
+                        Elegir
                       </button>
                     ) : null}
                   </div>

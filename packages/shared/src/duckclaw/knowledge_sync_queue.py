@@ -6,7 +6,7 @@ import json
 import logging
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -15,6 +15,8 @@ _log = logging.getLogger(__name__)
 KNOWLEDGE_SYNC_QUEUE_KEY = "duckclaw:knowledge_sync_jobs"
 KNOWLEDGE_SYNC_STATUS_PREFIX = "duckclaw:knowledge_sync_status:"
 KNOWLEDGE_SYNC_STATUS_TTL_SEC = 86400
+# CreateKnowledgeSource may still be in db-writer when indexer dequeues.
+SOURCE_WAIT_MAX_ATTEMPTS = 20
 
 KnowledgeJobKind = Literal["folder_sync", "folder_ingest", "browser_upload", "single_file_sync"]
 
@@ -319,6 +321,15 @@ def process_knowledge_sync_job(job: KnowledgeSyncJob) -> dict[str, Any]:
     try:
         source = get_knowledge_source(db, tenant_id=job.tenant_id, source_id=job.source_id)
         if not source:
+            attempts = int(job.metadata.get("source_wait_attempts") or 0)
+            if attempts < SOURCE_WAIT_MAX_ATTEMPTS:
+                time.sleep(min(0.25 * (attempts + 1), 2.0))
+                deferred = replace(
+                    job,
+                    metadata={**job.metadata, "source_wait_attempts": attempts + 1},
+                )
+                _requeue_knowledge_sync_job(deferred, detail="waiting_for_source")
+                return {"ok": False, "deferred": True, "reason": "waiting_for_source"}
             set_job_status(job.job_id, status="failed", detail="source_not_found")
             return {"ok": False, "reason": "source_not_found"}
         if job.kind == "folder_sync":

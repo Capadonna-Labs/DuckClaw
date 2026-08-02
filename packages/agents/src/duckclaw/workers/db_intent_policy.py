@@ -74,6 +74,26 @@ def explicit_duckdb_schema_request(text: str) -> bool:
     return bool(SCHEMA_TABLE_NEAR_DB.search(raw))
 
 
+def explicit_duckdb_storage_request(text: str) -> bool:
+    """True when the user explicitly wants DuckDB tools (schema, named tools, or SELECT).
+
+    Used as the escape hatch when RAG inventory is injected into the turn: without this,
+    ``read_sql`` / ``inspect_schema`` stay hidden even if the user asks for them by name.
+    """
+    if explicit_duckdb_schema_request(text):
+        return True
+    raw = (text or "").strip().lower()
+    if not raw:
+        return False
+    if re.search(r"\b(read_sql|inspect_schema|admin_sql|get_db_path)\b", raw):
+        return True
+    if re.search(r"\bselect\s+\d+\b", raw) or re.search(r"\bselect\s+.+\s+as\b", raw):
+        return True
+    if re.search(r"\bcu[aá]ntas?\s+tablas?\b", raw):
+        return True
+    return False
+
+
 def incoming_is_schema_query_heuristic(text: str) -> bool:
     if not text or not text.strip():
         return False

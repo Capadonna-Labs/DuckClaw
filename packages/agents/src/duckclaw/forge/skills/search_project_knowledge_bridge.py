@@ -7,6 +7,8 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
+from duckclaw.forge.skills.knowledge_tool_copy import SEARCH_PROJECT_KNOWLEDGE_DESCRIPTION
+
 _EXCERPT_MAX_CHARS = 240
 
 
@@ -125,11 +127,6 @@ def register_search_project_knowledge_tool(tools_list: list[Any]) -> None:
         StructuredTool.from_function(
             search_project_knowledge,
             name="search_project_knowledge",
-            description=(
-                "Busca fragmentos en la base de conocimiento RAG del proyecto/bóveda "
-                "(documentos indexados del usuario). "
-                "NO uses esta tool para Wikipedia u 'enciclopedia offline': usa kiwix_search. "
-                "No uses read_sql para tablas de knowledge."
-            ),
+            description=SEARCH_PROJECT_KNOWLEDGE_DESCRIPTION,
         )
     )

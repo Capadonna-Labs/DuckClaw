@@ -157,9 +157,9 @@ def verify_schema_integrity(db_path: str) -> tuple[bool, str]:
     if not path.is_file():
         return False, f"Gateway database not found at {path}. Run: duckclaw-migrate"
 
-    import duckdb
+    from duckclaw.db_bridge import _duckdb_python_connect_with_retry
 
-    con = duckdb.connect(str(path), read_only=True)
+    con = _duckdb_python_connect_with_retry(str(path), read_only=True)
     try:
         applied = applied_versions(con, create_table=False)
         expected_versions = {version for version, _, _ in _ALL_MIGRATIONS}

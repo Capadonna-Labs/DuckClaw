@@ -46,6 +46,7 @@ include = ["duckclaw*", "harness_core*"]
 
 [tool.setuptools.package-data]
 "duckclaw.guardrails" = ["**/*.md", "manager_tasks/**/*.md", "capabilities/**/*.md", "planner_tasks/**/*.md"]
+"duckclaw.workers" = ["data/*.yaml"]
 
 [tool.uv.sources]
 duckclaw-edge-devices = { path = "../../integrations/edge-devices", editable = true }

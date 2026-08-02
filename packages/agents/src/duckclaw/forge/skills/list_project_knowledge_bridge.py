@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
+from duckclaw.forge.skills.knowledge_tool_copy import LIST_PROJECT_KNOWLEDGE_DESCRIPTION
 from duckclaw.forge.skills.search_project_knowledge_bridge import _open_hub_db
 
 
@@ -70,9 +71,6 @@ def register_list_project_knowledge_tool(tools_list: list[Any]) -> None:
         StructuredTool.from_function(
             list_project_knowledge,
             name="list_project_knowledge",
-            description=(
-                "Lista documentos indexados en la base RAG del alcance activo "
-                "(plataforma, proyecto o ambos). Úsalo para inventario completo."
-            ),
+            description=LIST_PROJECT_KNOWLEDGE_DESCRIPTION,
         )
     )

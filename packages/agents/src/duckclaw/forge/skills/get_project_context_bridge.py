@@ -7,11 +7,36 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
+from duckclaw.forge.skills.knowledge_tool_copy import GET_PROJECT_CONTEXT_DESCRIPTION
 from duckclaw.forge.skills.search_project_knowledge_bridge import _open_hub_db
 
 
+def _disk_allowed_roots_preview() -> list[dict[str, Any]]:
+    """Raíces de disco (ALLOWED_ROOTS); no son fuentes RAG hasta indexar."""
+    try:
+        from duckclaw.forge.rag.knowledge_paths import knowledge_allowed_roots
+    except Exception:
+        return []
+    rows: list[dict[str, Any]] = []
+    for root in knowledge_allowed_roots():
+        try:
+            exists = root.exists()
+        except OSError:
+            exists = False
+        rows.append(
+            {
+                "label": root.name or str(root),
+                "path": str(root),
+                "exists": exists,
+                "in_chat": False,
+                "note": "Solo disco hasta «Añadir al chat» en Conocimiento",
+            }
+        )
+    return rows[:16]
+
+
 def get_project_context() -> str:
-    """Devuelve alcance RAG, proyecto, fuentes y totales del turno actual."""
+    """Devuelve alcance RAG, proyecto, fuentes indexadas y raíces de disco."""
     from duckclaw.admin_knowledge_read import list_knowledge_sources
     from duckclaw.forge.skills.knowledge_tool_context import (
         get_knowledge_tool_project_id,
@@ -25,6 +50,7 @@ def get_project_context() -> str:
     tenant_id = get_knowledge_tool_tenant_id()
     worker_uid = get_knowledge_tool_worker_uid()
     scope = normalize_knowledge_scope(get_knowledge_tool_scope(), project_id=project_id)
+    disk_roots = _disk_allowed_roots_preview()
 
     if not scope_allows_retrieval(scope, project_id=project_id):
         return json.dumps(
@@ -40,6 +66,14 @@ def get_project_context() -> str:
                 ),
                 "source_count": 0,
                 "chunk_count": 0,
+                "disk_allowed_roots": disk_roots,
+                "lanes": {
+                    "in_chat": "Fuentes indexadas → search/list/read_project_knowledge",
+                    "on_disk": (
+                        "Raíces permitidas → list_disk_roots / list_disk_folder / "
+                        "read_disk_text / extract_document_text (no RAG)"
+                    ),
+                },
             },
             ensure_ascii=False,
         )
@@ -75,6 +109,17 @@ def get_project_context() -> str:
             and int(s.get("chunk_count") or 0) > 0
         )
 
+        indexed_uris = {
+            str(s.get("source_uri") or "").rstrip("/").lower()
+            for s in sources
+            if str(s.get("source_uri") or "").strip()
+        }
+        for row in disk_roots:
+            path_key = str(row.get("path") or "").rstrip("/").lower()
+            if path_key and path_key in indexed_uris:
+                row["in_chat"] = True
+                row["note"] = "También indexada en el chat"
+
         summary_sources = [
             {
                 "display_name": s.get("display_name") or s.get("source_id"),
@@ -83,6 +128,7 @@ def get_project_context() -> str:
                 "project_id": s.get("project_id") or "",
                 "document_count": int(s.get("document_count") or 0),
                 "chunk_count": int(s.get("chunk_count") or 0),
+                "source_uri": s.get("source_uri") or "",
             }
             for s in sources[:12]
         ]
@@ -99,6 +145,14 @@ def get_project_context() -> str:
             "document_count": doc_total,
             "chunk_count": chunk_total,
             "sources_preview": summary_sources,
+            "disk_allowed_roots": disk_roots,
+            "lanes": {
+                "in_chat": "Fuentes indexadas → search/list/read_project_knowledge",
+                "on_disk": (
+                    "Raíces permitidas → list_disk_roots / list_disk_folder / "
+                    "read_disk_text / extract_document_text; no búsqueda semántica"
+                ),
+            },
         }
         if chunk_total == 0 and len(sources) > 0:
             payload["warning"] = (
@@ -106,11 +160,20 @@ def get_project_context() -> str:
             )
         elif chunk_total == 0:
             payload["warning"] = (
-                "No hay conocimiento indexado para este alcance. Sube documentos en Conocimiento."
+                "No hay conocimiento indexado en el chat para este alcance. "
+                "Las carpetas en disk_allowed_roots existen en disco pero no se buscan con RAG "
+                "hasta «Añadir al chat» en Conocimiento."
             )
         return json.dumps(payload, ensure_ascii=False)
     except Exception as exc:
-        return json.dumps({"error": str(exc), "project_id": project_id}, ensure_ascii=False)
+        return json.dumps(
+            {
+                "error": str(exc),
+                "project_id": project_id,
+                "disk_allowed_roots": disk_roots,
+            },
+            ensure_ascii=False,
+        )
     finally:
         if db is not None:
             try:
@@ -124,9 +187,6 @@ def register_get_project_context_tool(tools_list: list[Any]) -> None:
         StructuredTool.from_function(
             get_project_context,
             name="get_project_context",
-            description=(
-                "Resumen del alcance RAG activo: plataforma/proyecto/ambos, fuentes, fragmentos y avisos. "
-                "Úsalo al inicio si necesitas saber qué conocimiento está disponible."
-            ),
+            description=GET_PROJECT_CONTEXT_DESCRIPTION,
         )
     )

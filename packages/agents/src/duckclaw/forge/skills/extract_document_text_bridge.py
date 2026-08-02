@@ -9,6 +9,7 @@ from langchain_core.tools import StructuredTool
 
 from duckclaw.document_toolbox.extract import extract_document_text_from_path, markitdown_available
 from duckclaw.forge.rag.knowledge_paths import resolve_readable_document_path
+from duckclaw.forge.skills.knowledge_tool_copy import EXTRACT_DOCUMENT_TEXT_DESCRIPTION
 
 
 def extract_document_text(relative_path: str, root_hint: str = "") -> str:
@@ -42,10 +43,6 @@ def register_extract_document_text_tool(tools_list: list[Any]) -> None:
         StructuredTool.from_function(
             extract_document_text,
             name="extract_document_text",
-            description=(
-                "Extrae texto plano de PDF, Word, PowerPoint u HTML en el vault (MarkItDown). "
-                "Úsalo para leer binarios completos sin RAG o antes de indexar. "
-                "No genera PDF/Word — solo lectura a texto."
-            ),
+            description=EXTRACT_DOCUMENT_TEXT_DESCRIPTION,
         )
     )

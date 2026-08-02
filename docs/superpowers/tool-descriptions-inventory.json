@@ -1,0 +1,408 @@
+[
+  {
+    "name": "admin_sql",
+    "lane": "core",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[DuckDB] Qué hace: SQL con posibles escrituras (INSERT/UPDATE/DELETE/DDL) según policy del worker / tool_surface. Cuándo: mutaciones explícitas pedidas por el usuario. NO para lecturas simples → preferir read_sql. Devuelve status/error JSON."
+  },
+  {
+    "name": "get_db_path",
+    "lane": "core",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[DuckDB] Qué hace: devuelve la ruta del archivo .duckdb del agente. Cuándo: preguntan el nombre/ruta de la base. NO ejecuta SQL. Devuelve string path."
+  },
+  {
+    "name": "inspect_schema",
+    "lane": "core",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[DuckDB] Qué hace: lista tablas/esquemas del DuckDB del worker. Cuándo: 'qué tablas hay' / estructura SQL. NO para informe mensual/Word (Report Engine). Devuelve listado de tablas."
+  },
+  {
+    "name": "read_sql",
+    "lane": "core",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[DuckDB] Qué hace: SQL solo lectura (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA). Cuándo: consultar tablas/datos del vault DuckDB del worker. NO informes Word (Report Engine); NO RAG (search_project_knowledge). Devuelve resultado tabular o JSON error."
+  },
+  {
+    "name": "delete_output_document",
+    "lane": "docs",
+    "status": "needs_prefix",
+    "file": "write_output_document_bridge.py",
+    "description": "Elimina un archivo en output/ (todas las raíces: local + Drive). Úsalo para borrar .docx/.pdf/.md erróneos. Para archivar un informe del Report Engine preferí delete_report_instance (también puede borrar el .docx renderizado)."
+  },
+  {
+    "name": "export_docx_to_pdf",
+    "lane": "docs",
+    "status": "needs_prefix",
+    "file": "export_docx_to_pdf_bridge.py",
+    "description": "Convierte un .docx ya generado (Report Engine / OUTPUT) a PDF con LibreOffice. Preferir instance_id tras render_report_instance; alternativas: relative_path o docx_path bajo OUTPUT/ALLOWED. No convierte markdown: el Word serio sale del Report Engine."
+  },
+  {
+    "name": "publish_custom_report",
+    "lane": "docs",
+    "status": "needs_prefix",
+    "file": "custom_reports_bridge.py",
+    "description": "ÚNICA herramienta de escritura para main.custom_reports (UPSERT vía StateDelta). Reemplaza INSERT/UPDATE SQL. Republica html_content completo; actualiza title. report_id debe ser el chat_id de la sesión admin."
+  },
+  {
+    "name": "read_llm_usage_summary",
+    "lane": "docs",
+    "status": "needs_prefix",
+    "file": "custom_reports_bridge.py",
+    "description": "Lee agregados de tokens y coste USD desde main.llm_usage_log (gateway hub)."
+  },
+  {
+    "name": "render_docx_template",
+    "lane": "docs",
+    "status": "needs_prefix",
+    "file": "render_docx_template_bridge.py",
+    "description": "SOLO plantilla built-in corporate_report (one-pager genérico). Si el actor tiene plantillas Report Engine, está bloqueado (usa render_report_instance). Escape: allow_ad_hoc_docx=true. Variables: title, subtitle, author, tenant_name, body, date."
+  },
+  {
+    "name": "update_custom_report_title",
+    "lane": "docs",
+    "status": "needs_prefix",
+    "file": "custom_reports_bridge.py",
+    "description": "Actualiza solo el título de un reporte en main.custom_reports (UPSERT StateDelta). No requiere INSERT/UPDATE SQL ni reenviar HTML; lee html_content de la DB."
+  },
+  {
+    "name": "write_output_document",
+    "lane": "docs",
+    "status": "needs_prefix",
+    "file": "write_output_document_bridge.py",
+    "description": "Escribe un archivo de texto UTF-8 en output/ (.md, .txt, .json, .csv, .yaml, .py, .html, …). Con varias raíces (local + Drive) escribe en TODAS automáticamente; NO pases output_root salvo que el usuario lo pida. Prohibido .docx/.pdf/.xlsx. Word por plantilla: Report Engine (register → create → patch → render). Borrar: delete_output_document."
+  },
+  {
+    "name": "extract_document_text",
+    "lane": "knowledge",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[Disco / raíces permitidas] Qué hace: extrae texto de PDF/Word/PPT/HTML (MarkItDown) bajo raíces permitidas. Cuándo: binarios o Office en disco con path conocido. NO búsqueda semántica; NO listar carpetas (list_disk_folder); para .md/.txt/.py usa read_disk_text. Devuelve JSON {{path, text, char_count}}."
+  },
+  {
+    "name": "get_project_context",
+    "lane": "knowledge",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[RAG indexado] Qué hace: resume el alcance activo (fuentes indexadas + raíces de disco). Cuándo: al inicio si preguntan qué conocimiento/carpetas hay. NO inventes docs: si solo están en disk_allowed_roots, dilo. Devuelve JSON con sources_preview, disk_allowed_roots, lanes, warnings. Siguiente paso disco: list_disk_folder / read_disk_text / extract_document_text. Siguiente paso RAG: search_project_knowledge."
+  },
+  {
+    "name": "list_disk_folder",
+    "lane": "knowledge",
+    "status": "standardized",
+    "file": "disk_knowledge_bridge.py",
+    "description": "[Disco / raíces permitidas] Qué hace: lista subcarpetas/archivos bajo una ruta permitida. Cuándo: explorar código o docs en disco (ej. /Users/.../Developer/duckclaw). NO indexa ni busca semánticamente. Parámetro path: absoluto bajo ALLOWED_ROOTS, o vacío para raíces. include_files=true para ver archivos (por defecto solo carpetas). Devuelve JSON tipo browse (entries[], path, parent_path). Leer archivo: read_disk_text o extract_document_text."
+  },
+  {
+    "name": "list_disk_roots",
+    "lane": "knowledge",
+    "status": "standardized",
+    "file": "disk_knowledge_bridge.py",
+    "description": "[Disco / raíces permitidas] Qué hace: lista raíces ALLOWED_ROOTS / mirror (disco, no RAG). Cuándo: 'qué carpetas puedo leer en disco' sin indexar. NO implica que estén en el chat; in_chat solo si también hay fuente RAG. Devuelve JSON {{roots: [label, path, exists]}}. Para entrar en una carpeta: list_disk_folder(path)."
+  },
+  {
+    "name": "list_project_knowledge",
+    "lane": "knowledge",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[RAG indexado] Qué hace: inventario de documentos indexados (relative_path). Cuándo: listar qué hay en el RAG del alcance. NO listar disco: usa list_disk_roots / list_disk_folder. Devuelve JSON con document_count y documents[]."
+  },
+  {
+    "name": "read_disk_text",
+    "lane": "knowledge",
+    "status": "standardized",
+    "file": "disk_knowledge_bridge.py",
+    "description": "[Disco / raíces permitidas] Qué hace: lee texto UTF-8 de un archivo bajo raíces permitidas (.md, .txt, .py, .ts, .tsx, .json, .yaml, .toml, .css, .html, …). Cuándo: el usuario pide ver código o un archivo concreto en disco. NO para PDF/Word (extract_document_text); NO RAG (read_project_knowledge). path: absoluto o relative_path+root_hint. Devuelve JSON {{path, content, truncated}} (tope ~80k chars)."
+  },
+  {
+    "name": "read_project_knowledge",
+    "lane": "knowledge",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[RAG indexado] Qué hace: lee texto indexado por relative_path (ej. Aws Knowledge/012_IAM_Usuarios.md). Cuándo: detalle de un doc ya en el chat. NO si el archivo solo está en disco → read_disk_text o extract_document_text. Devuelve JSON {{relative_path, content}} o error."
+  },
+  {
+    "name": "search_project_knowledge",
+    "lane": "knowledge",
+    "status": "standardized",
+    "file": "knowledge_tool_copy.py",
+    "description": "[RAG indexado] Qué hace: búsqueda semántica en documentos YA indexados (En el chat). Cuándo: el usuario pregunta por contenido de MacMiniVault u otra fuente ready. NO listar filesystem ni código no indexado; NO Wikipedia (kiwix_search); NO SQL (read_sql). Si 0 hits: get_project_context (puede estar solo en disco). Devuelve JSON {{chunks: [relative_path, excerpt, score]}}."
+  },
+  {
+    "name": "append_images_to_report",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Agrega imágenes al siguiente hueco libre de un Word YA existente. Pasa query=EVIDENCIAS_….docx o instance_id. Si la 1.4 está en otro doc complemento, inspect_report_images de ese y reusa el path; NO pidas reenviar 1.1–1.3. Luego render."
+  },
+  {
+    "name": "create_blank_document",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Crea un Word NUEVO desde cero (hasta 15 imágenes). PROHIBIDO si el usuario pide agregar/completar un doc ya generado: entonces resolve_report_instance → append_images_to_report. Si ya hay borrador de esta conversación, esta tool falla salvo force_new=true. Pasa image_paths de [IMAGENES_ADJUNTAS]."
+  },
+  {
+    "name": "create_report_instance",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Crea borrador Word desde plantilla registrada (template_id + title). Úsalo tras register/list cuando el usuario da textos de ejecuciones (1.1, 1.2, …) o pide generar el informe mensual. Luego patch_report_section por cada section_id y render_report_instance. NO pidas periodo como campo de producto; la identidad es instance_id."
+  },
+  {
+    "name": "delete_report_instance",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Archiva un documento Report Engine (soft-delete) y opcionalmente borra sus .docx en output/ (todas las raíces). Úsalo cuando pidan eliminar un informe/evidencias generado por error."
+  },
+  {
+    "name": "generate_report_docx_from_markdown",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "ÚLTIMO RECURSO — solo plantillas de UN campo. Informe mensual multi-campo ({{ejecucion1.1}}, …): create + patch por section_id + render. No sustituye el flujo por sección. PDF: export_docx_to_pdf tras el render."
+  },
+  {
+    "name": "get_report_status",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Estado de secciones del borrador Word (faltantes/parciales/completas). Úsalo antes de cerrar el informe. No consulta el esquema DuckDB."
+  },
+  {
+    "name": "inspect_report_images",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Lista imágenes YA guardadas en un Word (paths vault). PROHIBIDO pedir al usuario que reenvíe esas imágenes. Solo pide adjuntos nuevos para next_free_slot."
+  },
+  {
+    "name": "list_report_instances",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Lista borradores Word. Pasa query=nombre.docx o rpt_XXX si el usuario nombra un archivo. resume_suggestion prioriza el doc con MÁS imágenes (p. ej. evidencias 1.1–1.4), no el complemento suelto más reciente. ÚSALO ANTES de create. No confundir con tablas SQL."
+  },
+  {
+    "name": "list_report_templates",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Lista plantillas Word (.docx) del Report Engine ya registradas. Úsala cuando el usuario pide un informe/documento Word por plantilla (p. ej. informe mensual de actividades) y necesitas el template_id. NO sirve para listar tablas DuckDB ni el esquema de la base."
+  },
+  {
+    "name": "patch_report_image",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Coloca una imagen adjunta (por su path del chat/vault) en una sección kind=image (p. ej. imagen_1). Se inserta como InlineImage en el render, conservando el layout. Para agregar varias al doc existente preferí append_images_to_report. Para texto usa patch_report_section."
+  },
+  {
+    "name": "patch_report_section",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Rellena UNA sección del informe Word (mode append|replace) por section_id del schema (p. ej. ejecucion1.1, ejecucion2.1, fecha_ejecucion). Cuando el usuario dicte , mapea a ese id y escribe en pasado con tildes. Texto plano por hueco — no pegues tablas markdown ni inventes SQL. La plantilla conserva layout; tú solo llenas huecos."
+  },
+  {
+    "name": "register_report_template",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Registra un .docx del vault (p. ej. INFORME MENSUAL.docx) en el Report Engine. Paso 1 cuando piden rellenar/generar un informe Word con huecos {{ejecucionN.M}} o {{fecha_ejecucion}}. Detecta section_id por placeholders. NO uses inspect_schema/read_sql para este pedido: el destino es Word, no DuckDB."
+  },
+  {
+    "name": "render_report_instance",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Genera el .docx final (docxtpl) en OUTPUT tras patch. Escribe en todas las DUCKCLAW_KNOWLEDGE_OUTPUT_ROOTS a la vez (espejo local + Drive) para trazabilidad. Úsalo cuando el usuario pide generar/exportar el informe en la carpeta output para revisar (luego evidencias). Falla si faltan required o quedan {{ }}. force=true exporta borrador incompleto. No inventes Word fuera del motor."
+  },
+  {
+    "name": "resolve_report_instance",
+    "lane": "reports",
+    "status": "needs_prefix",
+    "file": "report_engine_bridge.py",
+    "description": "Resuelve instance_id desde un .docx o rpt_XXX citado por el usuario. Obligatorio cuando dicen «agrégalo en EVIDENCIAS_…_rpt_….docx»."
+  },
+  {
+    "name": "browser_navigate",
+    "lane": "research",
+    "status": "needs_prefix",
+    "file": "research_bridge.py",
+    "description": "Navega a una URL y ejecuta una tarea (extraer datos, rellenar formularios, etc.). Usa cuando una búsqueda simple no basta. Parámetros: url (p. ej. https://ejemplo.com), task (qué hacer en la página)."
+  },
+  {
+    "name": "kiwix_read",
+    "lane": "research",
+    "status": "needs_prefix",
+    "file": "kiwix_bridge.py",
+    "description": "Lee el texto completo de un artículo de la enciclopedia offline (ZIM). Pasa el título exacto devuelto por kiwix_search. Obligatoria cuando el usuario pide explicación o detalle, no solo títulos."
+  },
+  {
+    "name": "kiwix_search",
+    "lane": "research",
+    "status": "needs_prefix",
+    "file": "kiwix_bridge.py",
+    "description": "Busca TÍTULOS en la enciclopedia offline (Wikipedia ZIM/Kiwix). No usa RAG ni internet. Tras encontrar títulos, llama kiwix_read para obtener el texto del artículo. ZIMs: {zim_names}."
+  },
+  {
+    "name": "assess_crons_alignment",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "homeostasis_bridge.py",
+    "description": "Evalúa alineación entre el manifiesto /goals y datos observables genéricos. Devuelve JSON con aligned, items y desvíos."
+  },
+  {
+    "name": "configure_loop_homeostasis",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "loop_bridge.py",
+    "description": "Programa auto-mejora /loop (evalúa /goals periódicamente). interval= o /. mode= (reloj) o  (silencio desde último mensaje). Revisión ligera al usuario: /crons --delta."
+  },
+  {
+    "name": "context_hub_bridge",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "context_hub_bridge.py",
+    "description": "Consulta documentación oficial/actualizada de una API externa usando Context Hub. Úsala ANTES de escribir código o hacer llamadas a APIs externas. Parámetros: api_name (p. ej. , ), resource opcional (p. ej. , , )."
+  },
+  {
+    "name": "edit_visual_asset",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "comfyui_bridge.py",
+    "description": "Edita una foto existente con ComfyUI (img2img). Parámetros: source_image_path (ruta absoluta en inbound/ o artifacts/ del tenant), edit_prompt (instrucciones en español), negative_prompt (opcional), denoise (0.35-0.75, default 0.55). Usar cuando el mensaje incluya [COMFYUI_EDIT ...] o el usuario pida modificar una foto enviada."
+  },
+  {
+    "name": "execute_comfy_workflow",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "fal_bridge.py",
+    "description": "Ejecuta un workflow_api.json de ComfyUI en GPUs serverless de Fal.ai. Parametro comfy_workflow_json obligatorio."
+  },
+  {
+    "name": "execute_slm",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "slm_eval_bridge.py",
+    "description": "Inyecta un prompt sintético en el SLM local (MLX-Inference PM2) para evaluar formato XML, tool_calls y adherencia. Usar temperature=0 para eval determinística. Requiere SLM habilitado en la conversación."
+  },
+  {
+    "name": "generate_flux_image",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "fal_bridge.py",
+    "description": "Genera imagen fotorrealista via Fal.ai (Flux Dev/Pro). Parametros: prompt, aspect_ratio (1:1, 16:9, 9:16), model_endpoint opcional."
+  },
+  {
+    "name": "generate_higgsfield_image",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "higgsfield_bridge.py",
+    "description": "Genera imagen via Higgsfield. Parametros: prompt (descripcion), aspect_ratio (16:9, 9:16, 1:1)."
+  },
+  {
+    "name": "generate_higgsfield_video",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "higgsfield_bridge.py",
+    "description": "Genera video via Higgsfield (DoP model). Parametros: prompt (descripcion), image_url (opcional, image-to-video), aspect_ratio (16:9, 9:16, 1:1), duration_sec (1-30), model (dop-turbo)."
+  },
+  {
+    "name": "generate_kling_video",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "fal_bridge.py",
+    "description": "Genera video via Fal.ai (Kling/Wan). Parametros: prompt, aspect_ratio, duration_sec (1-30)."
+  },
+  {
+    "name": "generate_visual_asset",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "comfyui_bridge.py",
+    "description": "Genera una imagen con ComfyUI a partir de un prompt de texto. Parámetros: prompt (obligatorio), negative_prompt (opcional), aspect_ratio (1:1, 16:9, 9:16, 4:3, 3:4). Guarda el archivo en artifacts del tenant y devuelve file_path. Usar cuando el usuario pida ilustración, diagrama visual o arte generado."
+  },
+  {
+    "name": "get_loop_homeostasis_status",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "loop_bridge.py",
+    "description": "Consulta meditate activo, intervalo, manifiesto homeostasis y metas cargadas."
+  },
+  {
+    "name": "homeostasis_check",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "homeostasis_bridge.py",
+    "description": "Compara un valor observado con las creencias del agente (homeostasis). Recibe belief_key (ej. monthly_metric, test_coverage) y observed_value. Devuelve Action_Plan: restore si hay anomalía, maintain si está en equilibrio."
+  },
+  {
+    "name": "manage_homeostasis_goals",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "homeostasis_bridge.py",
+    "description": "Lista/añade/borra metas homeostasis (/goals). command= lista el manifiesto DB;  o ; ; texto libre añade meta; ; . Un comando por invocación (no repitas list tras cada rm: confía en el ✅). Metas legacy en agent_config solo con . No llames este tool varias veces en paralelo en el mismo turno."
+  },
+  {
+    "name": "openweather_current_city",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "openweather_bridge.py",
+    "description": "Consulta clima actual por ciudad con OpenWeather (temperatura, sensacion, humedad, viento y precipitacion). Parametros: city, country opcional, units, lang."
+  },
+  {
+    "name": "record_slm_eval_lesson",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "slm_eval_bridge.py",
+    "description": "Persiste una lección RSI (field_lesson) cuando el SLM falla el examen. Parámetros: context_trigger, lesson_text, confidence_score."
+  },
+  {
+    "name": "request_homeostasis_validation",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "loop_bridge.py",
+    "description": "Paso HITL final de /loop solo para metas **task** (sin metas monitor en manifiesto). Metas monitor (métricas continuas como latencia o error_rate) se revisan cada ciclo y **nunca** se declaran cumplidas. Solo si no hay desviaciones. Detente tras llamar; homeostasis solo tras /loop-approve."
+  },
+  {
+    "name": "request_model_approval",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "slm_eval_bridge.py",
+    "description": "Solicita aprobación HITL para promover un adapter LoRA a producción. El admin debe confirmar con /approve-model."
+  },
+  {
+    "name": "send_dm",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "send_dm_bridge.py",
+    "description": "Envía un mensaje privado (DM) a un usuario. Parámetros: user_id (chat_id de Telegram), text (contenido)."
+  },
+  {
+    "name": "tailscale_status",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "tailscale_bridge.py",
+    "description": "Verifica el estado de la red Tailscale Mesh. Retorna ConnectionStatus (Active/Down) y lista de peers conectados. Usa para diagnosticar conectividad entre Mac Mini y VPS."
+  },
+  {
+    "name": "update_my_system_prompt",
+    "lane": "skills",
+    "status": "has_bracket",
+    "file": "update_worker_system_prompt_bridge.py",
+    "description": "[deprecated — usa update_system_prompt] Persiste cambios en tu system prompt. mode=append | mode=replace. Mín. 10 caracteres."
+  },
+  {
+    "name": "update_system_prompt",
+    "lane": "skills",
+    "status": "needs_prefix",
+    "file": "update_worker_system_prompt_bridge.py",
+    "description": "Persiste cambios en tu system prompt (auto-mejora). Usa mode=append para añadir reglas aprendidas o mode=replace para reescribirlo. Requiere instrucciones concretas (mín. 10 caracteres)."
+  }
+]

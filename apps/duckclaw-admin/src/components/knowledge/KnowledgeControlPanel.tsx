@@ -112,7 +112,9 @@ export function KnowledgeControlPanel({
           En disco
         </h2>
         <p className="text-[11px] leading-relaxed text-gov-gray-500 dark:text-dark-muted">
-          Carpetas que el servidor puede leer. Elegir una ruta no la pone en búsqueda semántica del chat.
+          Carpetas que el servidor puede leer en disco. Elegir aquí no hace que el agente las
+          busque: hace falta «Añadir al chat». Sin indexar, el agente solo puede abrir un archivo
+          concreto (extract_document_text), no inventariar ni buscar semánticamente.
         </p>
 
         <label className="flex cursor-pointer items-center gap-2 text-xs font-bold text-gov-gray-700 dark:text-dark-text">

@@ -24,7 +24,7 @@ from duckclaw.forge.rag.tool_policy import (
     without_storage_tools,
 )
 from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
-from duckclaw.workers.db_intent_policy import explicit_duckdb_schema_request
+from duckclaw.workers.db_intent_policy import explicit_duckdb_storage_request
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.factory_graph_nodes_agent_policy_early import make_agent_policy_early
 from duckclaw.workers.factory_graph_nodes_agent_policy_late import make_agent_policy_late
@@ -32,6 +32,7 @@ from duckclaw.workers.factory_graph_nodes_agent_shared import load_agent_env, un
 from duckclaw.workers.factory_reddit_helpers import _patch_reddit_get_post_args_from_canonical_url
 from duckclaw.workers.provider_input_budget import apply_provider_input_budget as _apply_provider_input_budget
 from duckclaw.workers.runtime_policy_helpers import worker_use_heuristic_first_tool as _worker_use_heuristic_first_tool
+from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs, log_pack_filter_result
 from duckclaw.workers.tool_surface_policy import (
     should_hide_sandbox_tools,
     should_hide_storage_identity_tools,
@@ -162,7 +163,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
         _rag_turn_without_db_intent = should_prioritize_rag_over_storage_tools(
             incoming,
             _intent_incoming,
-            explicit_storage_request=explicit_duckdb_schema_request,
+            explicit_storage_request=explicit_duckdb_storage_request,
         )
         if _rag_turn_without_db_intent:
             _rag_tid = (state.get("tenant_id") or "default").strip() or "default"
@@ -263,7 +264,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             _hide_storage_identity = should_hide_storage_identity_tools(
                 incoming,
                 _intent_incoming,
-                explicit_storage_request=explicit_duckdb_schema_request,
+                explicit_storage_request=explicit_duckdb_storage_request,
             )
             if _hide_storage_identity:
                 _auto_tools = without_storage_identity_tools(_auto_tools)
@@ -275,7 +276,16 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 ]
             if _rag_turn_without_db_intent:
                 _auto_tools = without_storage_tools(_auto_tools)
-            if len(_auto_tools) < len(_bind_base_identity):
+            _pack_result = apply_runtime_tool_packs(
+                _auto_tools,
+                spec=spec,
+                intent_text=_intent_incoming,
+                messages=state.get("messages") or [],
+            )
+            _auto_tools = _pack_result.tools
+            log_pack_filter_result(_wl, _pack_result)
+            _auto_after = [str(getattr(t, "name", "") or "") for t in _auto_tools]
+            if _auto_after != _auto_before:
                 _invoked_llm = _bind_tools(llm, _auto_tools)
         if _mlx_provider:
             _bound_n = _bind_est

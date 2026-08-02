@@ -230,11 +230,18 @@ def browse_knowledge_directories(
     if not allowed:
         raise ValueError(empty_msg)
 
-    suffixes = [
-        s.lower() if s.startswith(".") else f".{s.lower()}"
-        for s in (include_suffixes or [])
-        if str(s).strip()
-    ]
+    suffixes: list[str] = []
+    for raw in include_suffixes or []:
+        item = str(raw).strip()
+        if not item:
+            continue
+        # "*" = todos los archivos; no convertir a ".*" (sufijo literal inválido).
+        if item == "*":
+            suffixes.append("*")
+        elif item.startswith("."):
+            suffixes.append(item.lower())
+        else:
+            suffixes.append(f".{item.lower()}")
 
     uri = normalize_source_uri(path)
     if not uri:

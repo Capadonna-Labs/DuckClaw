@@ -18,6 +18,18 @@ llm:
 
 skills: []
 
+# Progressive disclosure de tools (opcional). Default: catálogo YAML del framework.
+# tool_surface:
+#   runtime_packs:
+#     enabled: true
+#     orphan_policy: include
+#     max_bound_tools: 28
+#     disabled_packs: []
+#     extra_always: [knowledge]
+#     pack_overrides:
+#       research:
+#         activation_signals: [wikipedia, internet]
+
 # Skills opcionales (añadir en agentes reales, no en esta plantilla):
 #   - research: { tavily_enabled: true }
 #   - comfyui: { enabled: true, template: comfy_default }

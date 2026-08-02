@@ -98,16 +98,18 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
 
     _read_sql_worker = log_tool_execution_sync(name="read_sql")(_read_sql_worker)
 
+    from duckclaw.forge.skills.knowledge_tool_copy import (
+        ADMIN_SQL_DESCRIPTION,
+        GET_DB_PATH_DESCRIPTION,
+        INSPECT_SCHEMA_DESCRIPTION,
+        READ_SQL_DESCRIPTION,
+    )
+
     tools.append(
         StructuredTool.from_function(
             _read_sql_worker,
             name="read_sql",
-            description=(
-                "Solo lectura SQL (SELECT/WITH/SHOW/DESCRIBE/EXPLAIN/PRAGMA) sobre DuckDB del worker. "
-                "Úsala para consultar datos/tablas. "
-                "NO la uses para generar o rellenar un informe Word / informe mensual: "
-                "eso es Report Engine (register_report_template → patch_report_section → render)."
-            ),
+            description=READ_SQL_DESCRIPTION,
         )
     )
 
@@ -204,7 +206,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
             StructuredTool.from_function(
                 _admin_sql_worker,
                 name="admin_sql",
-                description="SQL con permisos admin: lectura + escrituras (INSERT/UPDATE/DELETE/CREATE/ALTER/DROP si el worker no es read_only). Respeta allow-list de tablas del worker si aplica.",
+                description=ADMIN_SQL_DESCRIPTION,
             )
         )
 
@@ -216,12 +218,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         StructuredTool.from_function(
             _inspect_schema_worker,
             name="inspect_schema",
-            description=(
-                "Lista tablas/esquema de la base DuckDB del worker. "
-                "Úsala solo si preguntan qué tablas hay, estructura SQL o esquema. "
-                "NO la uses si piden informe mensual, ejecuciones 1.1/2.1 o rellenar Word: "
-                "esa intención es Report Engine, no inventario de tablas."
-            ),
+            description=INSPECT_SCHEMA_DESCRIPTION,
         )
     )
 
@@ -234,21 +231,25 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         StructuredTool.from_function(
             _get_db_path_worker,
             name="get_db_path",
-            description="Devuelve la ruta o nombre del archivo .duckdb al que tiene acceso el agente. Usar cuando pregunten por el nombre de la base de datos.",
+            description=GET_DB_PATH_DESCRIPTION,
         )
     )
 
     from duckclaw.forge.skills.list_project_knowledge_bridge import register_list_project_knowledge_tool
     from duckclaw.forge.skills.read_project_knowledge_bridge import register_read_project_knowledge_tool
     from duckclaw.forge.skills.search_project_knowledge_bridge import register_search_project_knowledge_tool
+    from duckclaw.forge.skills.disk_knowledge_bridge import register_disk_knowledge_tools
     from duckclaw.forge.skills.extract_document_text_bridge import register_extract_document_text_tool
     from duckclaw.forge.skills.render_docx_template_bridge import register_render_docx_template_tool
     from duckclaw.forge.skills.write_output_document_bridge import register_write_output_document_tool
     from duckclaw.forge.skills.get_project_context_bridge import register_get_project_context_tool
+    from duckclaw.forge.skills.tool_pack_bridge import register_tool_pack_meta_tools
 
+    register_tool_pack_meta_tools(tools, spec=spec)
     register_search_project_knowledge_tool(tools)
     register_list_project_knowledge_tool(tools)
     register_read_project_knowledge_tool(tools)
+    register_disk_knowledge_tools(tools)
     # Enciclopedia Wikipedia offline (ZIM): baseline, no depende del skill research
     try:
         from duckclaw.forge.skills.kiwix_bridge import register_kiwix_tools

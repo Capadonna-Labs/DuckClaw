@@ -155,7 +155,11 @@ def read_document_text(path: str | Path) -> tuple[str, str]:
     if suffix not in _ALLOWED_SUFFIXES:
         raise ValueError(f"unsupported knowledge file type: {suffix}")
     if suffix == ".json":
-        data = json.loads(p.read_text(encoding="utf-8"))
+        raw = p.read_text(encoding="utf-8", errors="replace")
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"JSON inválido en {p.name}: {exc}") from exc
         return json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True), "application/json"
     if suffix == ".csv":
         with p.open(encoding="utf-8", newline="") as handle:
@@ -177,7 +181,10 @@ def normalize_uploaded_document(filename: str, data: bytes) -> tuple[str, str, s
         raise ValueError(f"unsupported knowledge file type: {suffix}")
     raw = data.decode("utf-8", errors="replace")
     if suffix == ".json":
-        parsed = json.loads(raw)
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"JSON inválido en {relative_path}: {exc}") from exc
         return relative_path, json.dumps(parsed, ensure_ascii=False, indent=2, sort_keys=True), "application/json"
     if suffix == ".csv":
         rows = list(csv.DictReader(raw.splitlines()))

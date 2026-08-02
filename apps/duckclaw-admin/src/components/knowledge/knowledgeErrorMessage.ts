@@ -5,6 +5,10 @@ export function formatKnowledgeError(raw: string): string {
 
   const rules: Array<[RegExp, string]> = [
     [
+      /JSON inválido|Expecting property name enclosed in double quotes|JSONDecodeError/i,
+      'Hay un archivo .json mal formado en la carpeta (a menudo con comillas simples). Ese archivo se omite; el resto puede indexarse. Revisa el log del Knowledge-Indexer.',
+    ],
+    [
       /source_not_found|waiting_for_source/i,
       'La fuente aún se estaba registrando. Reintenta «Actualizar» o «Añadir al chat» en unos segundos.',
     ],

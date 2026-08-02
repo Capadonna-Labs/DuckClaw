@@ -31,6 +31,7 @@ from duckclaw.workers.context_monitor import (
 from duckclaw.workers.db_intent_policy import (
     TABLE_CONTENT_PHRASE as _TABLE_CONTENT_PHRASE,
     explicit_duckdb_schema_request,
+    explicit_duckdb_storage_request,
     incoming_is_manager_planned_guardrail_task,
     incoming_is_schema_query_heuristic,
     incoming_is_table_content_query as _incoming_is_table_content_query,
@@ -169,6 +170,7 @@ __all__ = [
     "WorkerFactory",
     "build_worker_graph",
     "explicit_duckdb_schema_request",
+    "explicit_duckdb_storage_request",
     "filter_tools_for_sandbox",
     "incoming_is_schema_query_heuristic",
     "list_workers",

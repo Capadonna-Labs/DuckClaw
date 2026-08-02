@@ -7,6 +7,7 @@ from typing import Any
 
 from langchain_core.tools import StructuredTool
 
+from duckclaw.forge.skills.knowledge_tool_copy import READ_PROJECT_KNOWLEDGE_DESCRIPTION
 from duckclaw.forge.skills.search_project_knowledge_bridge import _open_hub_db
 
 _READ_MAX_CHARS = 12000
@@ -91,10 +92,6 @@ def register_read_project_knowledge_tool(tools_list: list[Any]) -> None:
         StructuredTool.from_function(
             read_project_knowledge,
             name="read_project_knowledge",
-            description=(
-                "Lee el contenido indexado de un documento RAG por relative_path "
-                "(ej. IngenieroSoftware/Cache.md). Úsalo cuando el usuario pida "
-                "detalle de un doc concreto; no inventes contenido si falla."
-            ),
+            description=READ_PROJECT_KNOWLEDGE_DESCRIPTION,
         )
     )

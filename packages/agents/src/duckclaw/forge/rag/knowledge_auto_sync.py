@@ -179,7 +179,20 @@ def ingest_folder_paths(
                 phase="indexing",
                 current_file=file_path.name,
             )
-        payload = build_document_payload(root=base, path=file_path, source_id=source_id)
+        try:
+            payload = build_document_payload(root=base, path=file_path, source_id=source_id)
+        except ValueError as exc:
+            _log.warning("skip knowledge file %s: %s", file_path, exc)
+            if job_id:
+                update_job_progress(
+                    job_id,
+                    files_total=total,
+                    files_done=index + 1,
+                    chunks_done=chunks_total,
+                    phase="indexing",
+                    current_file=file_path.name,
+                )
+            continue
         file_task_ids, file_chunks = ingest_folder_payloads(
             source_id=source_id,
             tenant_id=tenant_id,

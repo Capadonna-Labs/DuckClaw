@@ -1,0 +1,162 @@
+# Catálogo declarativo de packs de tools en runtime (progressive disclosure).
+# Override por worker: manifest → tool_surface.runtime_packs
+# Membresía: exact + prefixes. Señales: substrings case-insensitive en el texto del turno.
+
+version: 1
+orphan_policy: include
+max_bound_tools: 28
+
+packs:
+  - id: core
+    always: true
+    description: "Contexto mínimo, SQL lectura y discovery de packs."
+    members:
+      exact:
+        - get_current_time
+        - get_project_context
+        - read_sql
+        - inspect_schema
+        - list_tool_packs
+        - unlock_tool_pack
+      prefixes: []
+    activation_signals: []
+
+  - id: knowledge
+    always: false
+    description: "RAG indexado + lectura de disco bajo raíces permitidas."
+    members:
+      exact:
+        - search_project_knowledge
+        - list_project_knowledge
+        - read_project_knowledge
+        - extract_document_text
+        - list_disk_roots
+        - list_disk_folder
+        - read_disk_text
+      prefixes: []
+    activation_signals:
+      - conocimiento
+      - knowledge
+      - rag
+      - vault
+      - macminivault
+      - carpeta
+      - carpetas
+      - disco
+      - documento
+      - documentos
+      - indexad
+      - buscar en
+      - lee el archivo
+      - leer archivo
+      - código fuente
+      - codigo fuente
+      - allowed_roots
+      - .md
+      - .py
+      - .pdf
+
+  - id: reports
+    always: false
+    description: "Report Engine (plantillas Word / instancias / render)."
+    members:
+      exact: []
+      prefixes:
+        - register_report_
+        - create_report_
+        - list_report_
+        - patch_report_
+        - render_report_
+        - resolve_report_
+        - delete_report_
+        - inspect_report_
+        - append_images_to_report
+    activation_signals:
+      - informe
+      - report engine
+      - plantilla word
+      - .docx
+      - docx
+      - secciones del informe
+      - render_report
+      - patch_report
+      - informe mensual
+      - ejecuciones
+
+  - id: docs_output
+    always: false
+    description: "Escritura de archivos en OUTPUT y conversión PDF ad-hoc."
+    members:
+      exact:
+        - write_output_document
+        - delete_output_document
+        - render_docx_template
+        - export_docx_to_pdf
+        - publish_custom_report
+        - update_custom_report_title
+        - read_llm_usage_summary
+      prefixes: []
+    activation_signals:
+      - escribe un archivo
+      - escribir archivo
+      - output/
+      - markdown en output
+      - exporta a pdf
+      - exportar a pdf
+      - custom_report
+      - uso de tokens
+      - llm_usage
+
+  - id: research
+    always: false
+    description: "Búsqueda web y Wikipedia offline (Kiwix)."
+    members:
+      exact:
+        - web_search
+        - tavily_search
+      prefixes:
+        - kiwix_
+        - research_
+    activation_signals:
+      - wikipedia
+      - kiwix
+      - busca en internet
+      - buscar en internet
+      - web search
+      - tavily
+      - noticias
+      - online
+
+  - id: prompt_meta
+    always: false
+    description: "Actualización del system prompt del worker."
+    members:
+      exact: []
+      prefixes:
+        - update_worker_system_prompt
+        - update_system_prompt
+        - update_my_system_prompt
+        - propose_system_prompt
+    activation_signals:
+      - system prompt
+      - cambia el prompt
+      - actualizar prompt
+      - actualiza el prompt
+      - instrucciones del agente
+
+  - id: visual
+    always: false
+    description: "Generación de imágenes / video (Comfy, Fal, etc.)."
+    members:
+      exact: []
+      prefixes:
+        - generate_visual
+        - comfyui_
+        - fal_
+        - higgsfield_
+    activation_signals:
+      - genera una imagen
+      - generar imagen
+      - comfyui
+      - imagen con ia
+      - video con ia

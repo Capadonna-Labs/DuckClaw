@@ -32,6 +32,19 @@ from duckclaw.workers.factory_sandbox_notify import (
 )
 from duckclaw.workers.skill_tool_registry import read_visual_artifact_image_as_b64 as _read_visual_artifact_image_as_b64
 from duckclaw.workers.tool_output_truncation import compact_run_sandbox_tool_content_for_llm as _compact_run_sandbox_tool_content_for_llm
+from duckclaw.workers.tool_harness import (
+    approval_blocks_execution,
+    circuit_block_envelope,
+    circuit_should_block,
+    classify_tool_risk,
+    content_indicates_failure,
+    destructive_gate_envelope,
+    log_harness_metric,
+    normalize_tool_failure,
+    record_tool_failure,
+    resolve_harness_config,
+    truncate_tool_result,
+)
 from langchain_core.messages import ToolMessage
 
 _log = logging.getLogger(__name__)
@@ -108,6 +121,53 @@ def make_tools_node(ctx: WorkerGraphContext):
         _hb_plan = (state.get("heartbeat_plan_title") or "").strip() or None
         _hb_tok = (state.get("outbound_telegram_bot_token") or "").strip() or None
 
+        _harness = resolve_harness_config(spec)
+        _approval_mode = str(_harness["approval_mode"])
+        _max_fail = int(_harness["max_failures_per_tool"])
+        _max_chars = int(_harness["max_tool_result_chars"])
+        _fail_counts: dict[str, int] = dict(state.get("_tool_fail_counts") or {})
+        _blocked: set[str] = set(state.get("_harness_blocked_tools") or [])
+        _harness_stats = {
+            "approval_mode": _approval_mode,
+            "circuit_blocks": 0,
+            "risk_denied": 0,
+            "failures": 0,
+            "truncated_results": 0,
+        }
+
+        def _apply_harness_post(
+            tool_name: str,
+            content: str,
+            *,
+            exc: BaseException | None = None,
+        ) -> str:
+            nonlocal _fail_counts
+            content = normalize_tool_failure(content, exc=exc)
+            content, was_trunc = truncate_tool_result(content, _max_chars)
+            if was_trunc:
+                _harness_stats["truncated_results"] += 1
+            if content_indicates_failure(content) or exc is not None:
+                _fail_counts = record_tool_failure(_fail_counts, tool_name)
+                _harness_stats["failures"] += 1
+                if circuit_should_block(_fail_counts, tool_name, _max_fail):
+                    _blocked.add(tool_name)
+            return content
+
+        def _harness_precheck(tool_name: str) -> str | None:
+            if tool_name in _blocked or circuit_should_block(
+                _fail_counts, tool_name, _max_fail
+            ):
+                _blocked.add(tool_name)
+                _harness_stats["circuit_blocks"] += 1
+                return circuit_block_envelope(
+                    tool_name, int(_fail_counts.get(tool_name) or _max_fail)
+                )
+            risk = classify_tool_risk(tool_name)
+            if approval_blocks_execution(risk, _approval_mode):  # type: ignore[arg-type]
+                _harness_stats["risk_denied"] += 1
+                return destructive_gate_envelope(tool_name, _approval_mode)  # type: ignore[arg-type]
+            return None
+
         _duck_exts = list(getattr(spec, "duckdb_extensions", None) or [])
         use_ephemeral_parallel = (
             read_pool.read_pool_active_for_worker(spec)
@@ -154,6 +214,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                 tid = tc.get("id") or ""
                 _tool_heartbeat(name)
                 _tool_t0 = time.perf_counter()
+                _exc: BaseException | None = None
                 try:
                     if name == "read_sql":
                         q = str(args.get("query", "")) if isinstance(args, dict) else ""
@@ -167,6 +228,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                     else:
                         content = json.dumps({"error": f"Herramienta inesperada en read-pool: {name}"})
                 except Exception as e:
+                    _exc = e
                     content = f"Error: {e}"
                     _log.warning("[%s] ephemeral tool=%s failed: %s", _wl, name, e)
                     _tool_notify(
@@ -182,6 +244,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                         "",
                         elapsed_ms=(time.perf_counter() - _tool_t0) * 1000,
                     )
+                content = _apply_harness_post(name, content, exc=_exc)
                 _log.info(
                     "[%s] tool=%s | ephemeral | result_len=%d | preview=%r",
                     _wl,
@@ -217,6 +280,11 @@ def make_tools_node(ctx: WorkerGraphContext):
                 name = (tc.get("name") or "").strip()
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
+                _pre = _harness_precheck(name)
+                if _pre is not None:
+                    new_msgs.append(ToolMessage(content=_pre, tool_call_id=tid, name=name))
+                    _tool_notify(name, "error", "harness_precheck", elapsed_ms=0)
+                    continue
                 tool = tool_lookup.get(name)
                 if tool:
                     _tool_t0: float | None = None
@@ -360,6 +428,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                                 )
                         if name.startswith("reddit_"):
                             content = format_reddit_mcp_reply_if_applicable(content)
+                        content = _apply_harness_post(name, content)
                         _prev = content[:120] + ("..." if len(content) > 120 else "")
                         _log.info(
                             "[%s] tool=%s | result_len=%d | preview=%r",
@@ -385,7 +454,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                             elapsed_ms=(time.perf_counter() - _tool_t0) * 1000,
                         )
                     except Exception as e:
-                        content = f"Error: {e}"
+                        content = _apply_harness_post(name, "", exc=e)
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
                         _tool_notify(
                             name,
@@ -404,6 +473,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                         content = "Sandbox deshabilitado en esta sesión. Actívalo con /sandbox on."
                     else:
                         content = f"Herramienta desconocida: {name}"
+                    content = _apply_harness_post(name, content)
                     _log.warning(
                         "[%s] unknown/unavailable tool: %s (sandbox_enabled=%s)",
                         _wl,
@@ -411,7 +481,14 @@ def make_tools_node(ctx: WorkerGraphContext):
                         sandbox_enabled,
                     )
                 new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
-        out: dict[str, Any] = {**state, "messages": new_msgs, "_tool_round": _tool_round}
+        out: dict[str, Any] = {
+            **state,
+            "messages": new_msgs,
+            "_tool_round": _tool_round,
+            "_tool_fail_counts": _fail_counts,
+            "_harness_blocked_tools": sorted(_blocked),
+        }
+        log_harness_metric(_wl, {**_harness_stats, "fail_counts": dict(_fail_counts)})
         if sandbox_b64:
             out["sandbox_photo_base64"] = sandbox_b64
         if visual_artifact_id:

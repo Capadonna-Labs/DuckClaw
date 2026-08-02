@@ -155,6 +155,8 @@ def _wrap_connector_tool(
         return raw
 
     desc = getattr(tool_spec, "description", None) or f"MCP {connector.get('display_name')}: {remote_name}"
+    connector_label = str(connector.get("display_name") or connector.get("connector_id") or "connector")
+    desc = f"[MCP {connector_label}] {desc}"
     return StructuredTool.from_function(
         _sync_call,
         name=public_name,

@@ -18,17 +18,23 @@ llm:
 
 skills: []
 
-# Progressive disclosure de tools (opcional). Default: catálogo YAML del framework.
+# Progressive disclosure de tools (N agentes × N MCP). Default: catálogo YAML del framework.
 # tool_surface:
 #   runtime_packs:
 #     enabled: true
-#     orphan_policy: include
-#     max_bound_tools: 28
+#     orphan_policy: exclude          # SOTA: sin tools huérfanas en el bind
+#     max_bound_tools: 16
 #     disabled_packs: []
-#     extra_always: [knowledge]
-#     pack_overrides:
-#       research:
-#         activation_signals: [wikipedia, internet]
+#     extra_always: []                # p.ej. [knowledge] si el agente es solo RAG
+#     pack_overrides: {}
+#     extra_packs: []                 # packs custom del tenant
+# MCP: packs dinámicos mcp_{connector}; unlock 'mcp' = todos; 'mcp_github' = fino.
+#   - github: {}  # tools salen como mcp__github__* → pack mcp_github
+# tool_surface:
+#   harness:
+#     approval_mode: suggest          # auto | suggest | never (destructive)
+#     max_failures_per_tool: 2        # circuit breaker por tool/turno
+#     max_tool_result_chars: 12000    # tope de tokens hacia el LLM
 
 # Skills opcionales (añadir en agentes reales, no en esta plantilla):
 #   - research: { tavily_enabled: true }

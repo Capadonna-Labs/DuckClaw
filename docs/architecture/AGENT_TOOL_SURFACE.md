@@ -1,71 +1,82 @@
 # Agent tool surface (SOTA)
 
 Contrato de diseño para tools del worker (LangChain `StructuredTool` / Forge bridges).
-Referencias: Anthropic *Advanced tool use* (Tool Search / `defer_loading`, Tool Use Examples),
-reglas de context engineering Claude 5 (progressive disclosure, descriptions en la tool),
-y límites prácticos (~20–30 tools always-loaded antes de degradar selección).
+Referencias: Anthropic [Tool Search / `defer_loading`](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool)
+(always-load 3–5), OpenAI function calling (menos de ~20 tools al inicio del turno),
+Google Gemini (active set 10–20 + selección dinámica).
 
-## Principios
+## Principios (N agentes × N MCP)
 
-1. **Description = contrato de selección.** Cada tool declara: qué hace, cuándo usarla, qué NO hacer, qué devuelve. El system prompt no debe repetir catálogos enteros.
-2. **Lanes explícitas.** Prefijos en copy (`[RAG indexado]`, `[Disco / raíces permitidas]`, `[DuckDB]`, …) para evitar confusión dual-lane.
-3. **Errores accionables.** Preferir JSON `{ok:false, error, hint, retry}` frente a strings opacos.
-4. **Surface acotada.** Mantener always-loaded bajo ~20 tools críticas; el resto via discovery (Tool Search / skill gating / MCP on-demand).
-5. **Read vs write.** Lecturas auto-ejecutables; mutaciones (admin_sql, write_output, report patches, prompt updates) con policy / HITL cuando el riesgo lo exige.
-6. **No God tools.** Preferir CRUD/átomos (report engine, knowledge) sobre un único “do_anything”.
+1. **Description = contrato de selección.** Qué / cuándo / NO / qué devuelve.
+2. **Progressive disclosure.** Always-on pequeño (`core`); dominios y MCP bajo demanda.
+3. **Namespacing MCP obligatorio.** `mcp__{connector_id}__{tool}` (conectores DB-first y skill GitHub).
+4. **Orphans excluidos por defecto.** Si una tool no está en un pack, no entra al bind (`orphan_policy: exclude`).
+5. **Sin hardcode por agente.** El catálogo es YAML; cada worker solo override vía `tool_surface.runtime_packs`.
+6. **Read vs write.** Mutaciones con policy / HITL; lecturas auto.
+7. **No God tools.** Átomos por dominio (reports, knowledge, mcp, …).
 
-## Surface actual (baseline factory)
-
-Always-loaded típico (sin MCP ni skills extra):
-
-| Lane | Tools |
-|------|--------|
-| Tiempo | `get_current_time` (si expuesto) |
-| DuckDB | `read_sql`, `admin_sql` (condicional), `inspect_schema`, `get_db_path` |
-| RAG | `get_project_context`, `search_project_knowledge`, `list_project_knowledge`, `read_project_knowledge` |
-| Disco | `list_disk_roots`, `list_disk_folder`, `read_disk_text`, `extract_document_text` |
-| Docs out | `write_output_document`, `render_docx_template`, `export_docx_to_pdf` |
-| Offline web | `kiwix_*` (si disponible) |
-| Meta | update system prompt tools |
-| Report | Report Engine (varios átomos) |
-
-Copy canónico: `packages/agents/.../knowledge_tool_copy.py`.
-Registro disco: `disk_knowledge_bridge.register_disk_knowledge_tools`.
-
-## Runtime tool packs (progressive disclosure)
-
-Implementación DuckClaw (no depende del `defer_loading` del API de Claude):
+## Runtime tool packs
 
 | Pieza | Rol |
 |-------|-----|
-| `workers/data/runtime_tool_packs.yaml` | Catálogo: packs, membresía exact/prefix, señales de activación |
-| `tool_pack_catalog.py` | Load + merge con `manifest.tool_surface.runtime_packs` |
-| `tool_pack_policy.py` | Resolve packs activos + filtro (sticky / unlock / signals) |
+| `workers/data/runtime_tool_packs.yaml` | Catálogo default (packs, membership, señales, `max_bound_tools`) |
+| `tool_pack_catalog.py` | Load + merge manifest |
+| `tool_pack_policy.py` | Activos = always ∪ señales ∪ sticky ∪ unlock ∪ **connector id en intent** |
 | `tool_pack_bridge.py` | `list_tool_packs` / `unlock_tool_pack` |
-| `factory_graph_nodes_agent_invoke.py` | Aplica filtro en bind `auto` + log `runtime_tool_packs …` |
+| `factory_graph_nodes_agent_invoke.py` | Filtro en bind `auto` + log |
 
-Activación (unión): `always` ∪ señales del turno ∪ sticky (tools ya usadas tras el último human) ∪ `unlock_tool_pack`.
-Overrides por worker sin tocar código: `tool_surface.runtime_packs` (`enabled`, `orphan_policy`, `pack_overrides`, `extra_packs`, …).
-Gates previos (sandbox / `admin_sql` / `get_db_path`) se mantienen; packs no los reemplazan.
+### Packs default
 
-## Gaps SOTA (backlog ordenado)
+| Pack | Always | Membership |
+|------|--------|------------|
+| `core` | sí | contexto, SQL lectura, discovery |
+| `mcp` | no | Umbrella (sin members); unlock expande a `mcp_*` |
+| `mcp_{connector}` | no (dinámico) | Prefijo `mcp__{connector}__` |
+| `knowledge` | no | RAG + disco |
+| `reports` | no | Report Engine |
+| `docs_output` | no | OUTPUT / PDF ad-hoc |
+| `research` | no | web / kiwix |
+| `prompt_meta` | no | system prompt |
+| `visual` | no | Comfy / Fal / … |
+| `sandbox` | no | Strix / browser |
+| `integrations` | no | reddit / weather / … |
 
-| Prioridad | Gap | Por qué importa | Acción sugerida |
-|-----------|-----|-----------------|-----------------|
-| P0 | Métrica admin `tools_bound` / packs activos | El log del worker existe; falta UI | Exponer en Studio / health |
-| P1 | `Field(description=…)` / schema estricto en todos los args | Param errors son el fallo #2 tras selection | ArgsSchema Pydantic en bridges |
-| P1 | Errores estructurados homogéneos | El modelo reintenta mal con texto libre | Helper `_tool_error` compartido |
-| P2 | Risk tiers + HITL writes | SOTA separa read auto / write confirm | Tags `risk` + confirm UI |
-| P2 | Namespacing fuerte | Prefijos en description ayudan | Alias de compat al renombrar |
-| P3 | Programmatic tool calling | Pipelines multi-step hinchan contexto | Sandbox code-exec (Strix) |
-| P3 | Mid-conversation tool changes / provider Tool Search | Cache prefix vs tool set dinámico | Cuando el provider lo soporte de forma estable |
+Activación MCP multi-agente:
+- Packs dinámicos `mcp_{connector_id}` (prefijo `mcp__{id}__`) derivados de tools registradas.
+- Intent con el id del conector como **token** (word-boundary; citar `mcp_github` no activa GitHub).
+- `unlock_tool_pack('mcp')` (umbrella) → todos los conectores del worker.
+- `unlock_tool_pack('mcp_github')` → un conector.
+- Métrica por turno (log `runtime_tool_packs_metric`): `active_packs`, `bound_count`,
+  `hidden`, `truncated`, `connector_ids`.
 
-## Dual-lane (conocimiento)
+### Override por worker (sin tocar código)
 
-- **En el chat (RAG):** indexado → `search_*` / `list_*` / `read_project_knowledge`.
-- **En disco:** `ALLOWED_ROOTS` → `list_disk_*` / `read_disk_text` / `extract_document_text`.
-- **No** indexar árboles enormes (p.ej. `~/Developer`) para “dar tools”; el disco ya es la lane correcta.
+```yaml
+tool_surface:
+  runtime_packs:
+    enabled: true
+    orphan_policy: exclude
+    max_bound_tools: 16
+    pack_overrides:
+      mcp:
+        activation_signals: [mcp, github, notion, slack]
+    extra_always: []   # p.ej. [knowledge] para un agente solo-RAG
+```
 
-## Inventario
+## Gaps restantes
 
-Snapshot de descriptions: `docs/superpowers/tool-descriptions-inventory.json` (regenerar al cambiar copy).
+| Pri | Gap |
+|-----|-----|
+| P0 | Exponer `tools_bound` / `harness_metric` en admin Overview |
+| P1 | ArgsSchema / Field descriptions homogéneos |
+| P1 | Envelope en **todos** los bridges (harness ya normaliza fallos en `tools_node`) |
+| P1 | HITL real `PENDING_HITL` para destructive (hoy: gate in-graph `suggest`/`never`) |
+| P2 | Verify-loop post-sandbox |
+| P3 | Provider Tool Search nativo |
+
+Harness de ejecución: ver [`AGENT_HARNESS_CONTROL.md`](./AGENT_HARNESS_CONTROL.md).
+
+## Dual-lane conocimiento
+
+- RAG: `search/list/read_project_knowledge`
+- Disco: `list_disk_*` / `read_disk_text` / `extract_document_text`

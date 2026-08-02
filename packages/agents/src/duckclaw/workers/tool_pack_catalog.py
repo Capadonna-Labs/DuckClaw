@@ -33,12 +33,12 @@ def clear_runtime_tool_pack_catalog_cache() -> None:
 
 
 def catalog_from_mapping(raw: dict[str, Any]) -> RuntimeToolPackCatalog:
-    orphan = str(raw.get("orphan_policy") or "include").strip().lower()
+    orphan = str(raw.get("orphan_policy") or "exclude").strip().lower()
     if orphan not in ("include", "exclude"):
-        orphan = "include"
-    max_bound = int(raw.get("max_bound_tools") or 28)
+        orphan = "exclude"
+    max_bound = int(raw.get("max_bound_tools") or 16)
     if max_bound < 1:
-        max_bound = 28
+        max_bound = 16
     packs_raw = raw.get("packs") or []
     if not isinstance(packs_raw, list):
         packs_raw = []
@@ -198,9 +198,13 @@ def _members_from_mapping(
 ) -> ToolPackMembers:
     exact_src = raw.get("exact") if "exact" in raw else sorted(fallback.exact)
     prefixes_src = raw.get("prefixes") if "prefixes" in raw else list(fallback.prefixes)
+    regex_src = (
+        raw.get("name_regexes") if "name_regexes" in raw else list(fallback.name_regexes)
+    )
     exact = frozenset(str(x).strip() for x in (exact_src or []) if str(x).strip())
     prefixes = tuple(str(x).strip() for x in (prefixes_src or []) if str(x).strip())
-    return ToolPackMembers(exact=exact, prefixes=prefixes)
+    name_regexes = tuple(str(x).strip() for x in (regex_src or []) if str(x).strip())
+    return ToolPackMembers(exact=exact, prefixes=prefixes, name_regexes=name_regexes)
 
 
 def _as_str_frozenset(value: Any) -> frozenset[str]:

@@ -12,28 +12,37 @@ from duckclaw.workers.tool_pack_policy import (
     LIST_PACKS_TOOL_NAME,
     UNLOCK_TOOL_NAME,
     catalog_public_summary,
+    expand_unlock_pack_ids,
+    with_mcp_connector_packs,
 )
 
 LIST_TOOL_PACKS_DESCRIPTION = (
     "[Packs] Qué hace: lista packs de herramientas disponibles (carta corta vs catálogo). "
     "Cuándo: necesitas una capacidad que no ves en las tools actuales "
-    "(informes Word, research web, escritura OUTPUT, visual). "
+    "(informes Word, research web, escritura OUTPUT, MCP por conector). "
     "NO ejecuta la capacidad: solo informa. "
-    "Siguiente: unlock_tool_pack(pack_id) y reintenta la acción."
+    "Siguiente: unlock_tool_pack(pack_id) y reintenta la acción. "
+    "MCP: pack 'mcp' (todos) o 'mcp_{connector}' (fino, p. ej. mcp_github)."
 )
 
 UNLOCK_TOOL_PACK_DESCRIPTION = (
     "[Packs] Qué hace: desbloquea un pack para el resto del turno "
-    "(p. ej. reports, research, docs_output, knowledge, visual). "
+    "(p. ej. reports, knowledge, mcp, mcp_github). "
     "Cuándo: list_tool_packs mostró el pack y lo necesitas ahora. "
-    "NO sustituye la tool de dominio (tras unlock llama search_project_knowledge, "
-    "render_report_instance, etc.). "
-    "Devuelve JSON {{ok, pack_id}}."
+    "NO sustituye la tool de dominio (tras unlock llama la tool MCP/dominio). "
+    "Devuelve JSON {{ok, pack_id, unlocked_packs}}."
 )
 
 
 def register_tool_pack_meta_tools(tools_list: list[Any], *, spec: Any = None) -> None:
     """Registra meta-tools cerradas sobre el WorkerSpec del grafo."""
+
+    def _tool_names() -> tuple[str, ...]:
+        return tuple(
+            str(getattr(t, "name", "") or "").strip()
+            for t in tools_list
+            if str(getattr(t, "name", "") or "").strip()
+        )
 
     def list_tool_packs() -> str:
         cfg = resolve_runtime_packs_config(spec)
@@ -50,14 +59,18 @@ def register_tool_pack_meta_tools(tools_list: list[Any], *, spec: Any = None) ->
                 },
                 ensure_ascii=False,
             )
+        names = _tool_names()
         return json.dumps(
             {
                 "ok": True,
                 "enabled": True,
                 "orphan_policy": cfg.catalog.orphan_policy,
                 "max_bound_tools": cfg.catalog.max_bound_tools,
-                "packs": catalog_public_summary(cfg),
-                "hint": "Para activar un pack en este turno: unlock_tool_pack(pack_id).",
+                "packs": catalog_public_summary(cfg, tool_names=names),
+                "hint": (
+                    "Para activar: unlock_tool_pack(pack_id). "
+                    "MCP fino: mcp_{connector}; umbrella: mcp."
+                ),
             },
             ensure_ascii=False,
         )
@@ -80,11 +93,14 @@ def register_tool_pack_meta_tools(tools_list: list[Any], *, spec: Any = None) ->
                     "ok": True,
                     "pack_id": cleaned,
                     "unlocked": cleaned,
+                    "unlocked_packs": [cleaned],
                     "note": "runtime_packs desactivado; unlock no cambia el surface.",
                 },
                 ensure_ascii=False,
             )
-        known = {p.pack_id for p in cfg.catalog.packs} - set(cfg.disabled_packs)
+        names = _tool_names()
+        enriched = with_mcp_connector_packs(cfg, names)
+        known = {p.pack_id for p in enriched.catalog.packs} - set(enriched.disabled_packs)
         if cleaned not in known:
             return json.dumps(
                 {
@@ -95,12 +111,13 @@ def register_tool_pack_meta_tools(tools_list: list[Any], *, spec: Any = None) ->
                 },
                 ensure_ascii=False,
             )
+        unlocked = expand_unlock_pack_ids(cleaned, cfg, tool_names=names)
         return json.dumps(
             {
                 "ok": True,
                 "pack_id": cleaned,
                 "unlocked": cleaned,
-                "unlocked_packs": [cleaned],
+                "unlocked_packs": unlocked,
                 "hint": (
                     f"Pack «{cleaned}» activo en el resto del turno; "
                     "llama la tool de dominio."

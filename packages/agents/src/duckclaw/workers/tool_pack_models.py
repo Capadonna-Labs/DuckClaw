@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -12,6 +13,7 @@ OrphanPolicy = Literal["include", "exclude"]
 class ToolPackMembers:
     exact: frozenset[str] = field(default_factory=frozenset)
     prefixes: tuple[str, ...] = ()
+    name_regexes: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -28,7 +30,13 @@ class ToolPackSpec:
             return False
         if name in self.members.exact:
             return True
-        return any(name.startswith(prefix) for prefix in self.members.prefixes if prefix)
+        if any(name.startswith(prefix) for prefix in self.members.prefixes if prefix):
+            return True
+        return any(
+            bool(re.search(pattern, name))
+            for pattern in self.members.name_regexes
+            if pattern
+        )
 
 
 @dataclass(frozen=True)
@@ -67,3 +75,19 @@ class PackFilterResult:
     managed_hidden: int
     applied: bool
     truncated: bool
+    connector_ids: frozenset[str] = frozenset()
+
+    @property
+    def bound_count(self) -> int:
+        return len(self.bound_names)
+
+    @property
+    def metrics(self) -> dict[str, Any]:
+        return {
+            "applied": self.applied,
+            "active_packs": sorted(self.active_packs),
+            "bound_count": self.bound_count,
+            "hidden": self.managed_hidden,
+            "truncated": self.truncated,
+            "connector_ids": sorted(self.connector_ids),
+        }

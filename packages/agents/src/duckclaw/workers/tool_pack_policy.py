@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any, Iterable
 
 from duckclaw.workers.tool_pack_catalog import resolve_runtime_packs_config
@@ -11,6 +12,7 @@ from duckclaw.workers.tool_pack_models import (
     PackFilterResult,
     RuntimePacksConfig,
     RuntimeToolPackCatalog,
+    ToolPackMembers,
     ToolPackSpec,
 )
 
@@ -18,6 +20,8 @@ _log = logging.getLogger(__name__)
 
 UNLOCK_TOOL_NAME = "unlock_tool_pack"
 LIST_PACKS_TOOL_NAME = "list_tool_packs"
+MCP_UMBRELLA_PACK_ID = "mcp"
+_MCP_CONNECTOR_PACK_PREFIX = "mcp_"
 
 
 def apply_runtime_tool_packs(
@@ -30,23 +34,88 @@ def apply_runtime_tool_packs(
     """Filtra tools según packs activos. No-op si ``runtime_packs.enabled`` es false."""
     cfg = resolve_runtime_packs_config(spec)
     tool_list = list(tools)
+    tool_names = tuple(_tool_name(t) for t in tool_list if _tool_name(t))
+    connector_ids = mcp_connector_ids_from_tool_names(tool_names)
     if not cfg.enabled:
-        names = tuple(_tool_name(t) for t in tool_list if _tool_name(t))
         return PackFilterResult(
             tools=tool_list,
             active_packs=frozenset(),
-            bound_names=names,
+            bound_names=tool_names,
             managed_hidden=0,
             applied=False,
             truncated=False,
+            connector_ids=connector_ids,
         )
 
+    cfg = with_mcp_connector_packs(cfg, tool_names)
     active = resolve_active_pack_ids(
         cfg,
         intent_text=intent_text,
         messages=messages or (),
+        available_tool_names=tool_names,
     )
-    return filter_tools_by_packs(tool_list, cfg=cfg, active_packs=active)
+    return filter_tools_by_packs(
+        tool_list,
+        cfg=cfg,
+        active_packs=active,
+        connector_ids=connector_ids,
+    )
+
+
+def with_mcp_connector_packs(
+    cfg: RuntimePacksConfig,
+    tool_names: Iterable[str],
+) -> RuntimePacksConfig:
+    """Devuelve cfg con packs dinámicos ``mcp_{connector}`` fusionados al catálogo."""
+    catalog = enrich_catalog_with_mcp_connectors(cfg.catalog, tool_names)
+    if catalog is cfg.catalog:
+        return cfg
+    return RuntimePacksConfig(
+        enabled=cfg.enabled,
+        catalog=catalog,
+        disabled_packs=cfg.disabled_packs,
+        extra_always=cfg.extra_always,
+        raw=cfg.raw,
+    )
+
+
+def enrich_catalog_with_mcp_connectors(
+    catalog: RuntimeToolPackCatalog,
+    tool_names: Iterable[str],
+) -> RuntimeToolPackCatalog:
+    """Añade un pack por conector MCP presente en ``tool_names`` (idempotente)."""
+    existing = {p.pack_id for p in catalog.packs}
+    extra: list[ToolPackSpec] = []
+    for connector_id in sorted(mcp_connector_ids_from_tool_names(tool_names)):
+        pack_id = mcp_pack_id_for_connector(connector_id)
+        if pack_id in existing:
+            continue
+        extra.append(
+            ToolPackSpec(
+                pack_id=pack_id,
+                description=f"Tools MCP del conector «{connector_id}».",
+                always=False,
+                members=ToolPackMembers(
+                    exact=frozenset(),
+                    prefixes=(f"mcp__{connector_id}__",),
+                ),
+                activation_signals=(connector_id,),
+            )
+        )
+        existing.add(pack_id)
+    if not extra:
+        return catalog
+    return RuntimeToolPackCatalog(
+        version=catalog.version,
+        orphan_policy=catalog.orphan_policy,
+        max_bound_tools=catalog.max_bound_tools,
+        packs=tuple(catalog.packs) + tuple(extra),
+    )
+
+
+def mcp_pack_id_for_connector(connector_id: str) -> str:
+    cleaned = str(connector_id or "").strip().lower()
+    return f"{_MCP_CONNECTOR_PACK_PREFIX}{cleaned}"
 
 
 def resolve_active_pack_ids(
@@ -54,10 +123,15 @@ def resolve_active_pack_ids(
     *,
     intent_text: str | None,
     messages: Iterable[Any] = (),
+    available_tool_names: Iterable[str] = (),
 ) -> frozenset[str]:
     catalog = cfg.catalog
     disabled = set(cfg.disabled_packs)
     active: set[str] = set()
+    connector_ids = mcp_connector_ids_from_tool_names(available_tool_names)
+    connector_pack_ids = {
+        mcp_pack_id_for_connector(cid) for cid in connector_ids
+    } - disabled
 
     for pack in catalog.packs:
         if pack.pack_id in disabled:
@@ -72,10 +146,35 @@ def resolve_active_pack_ids(
                 continue
             if _intent_matches_pack(intent, pack):
                 active.add(pack.pack_id)
+        # N agentes / N MCP: id del conector como token (no substring de mcp_github).
+        for connector_id in connector_ids:
+            pack_id = mcp_pack_id_for_connector(connector_id)
+            if pack_id in disabled:
+                continue
+            if intent_mentions_token(intent, connector_id):
+                active.add(pack_id)
 
     active |= sticky_packs_from_messages(messages, catalog) - disabled
     active |= unlocked_packs_from_messages(messages) - disabled
+
+    # Umbrella mcp (unlock / extra_always) → todos los conectores del worker.
+    if MCP_UMBRELLA_PACK_ID in active and MCP_UMBRELLA_PACK_ID not in disabled:
+        active |= connector_pack_ids
     return frozenset(active)
+
+
+def mcp_connector_ids_from_tool_names(tool_names: Iterable[str]) -> frozenset[str]:
+    """Extrae ids de conector desde nombres canónicos ``mcp__{connector}__{tool}``."""
+    found: set[str] = set()
+    for raw in tool_names:
+        name = str(raw or "").strip()
+        if not name.startswith("mcp__"):
+            continue
+        rest = name[5:]
+        connector, sep, _tool = rest.partition("__")
+        if sep and connector.strip():
+            found.add(connector.strip().lower())
+    return frozenset(found)
 
 
 def filter_tools_by_packs(
@@ -83,6 +182,7 @@ def filter_tools_by_packs(
     *,
     cfg: RuntimePacksConfig,
     active_packs: frozenset[str],
+    connector_ids: frozenset[str] | None = None,
 ) -> PackFilterResult:
     catalog = cfg.catalog
     kept: list[Any] = []
@@ -119,6 +219,9 @@ def filter_tools_by_packs(
         truncated = True
 
     names = tuple(_tool_name(t) for t in kept if _tool_name(t))
+    ids = connector_ids if connector_ids is not None else mcp_connector_ids_from_tool_names(
+        _tool_name(t) for t in tools
+    )
     return PackFilterResult(
         tools=kept,
         active_packs=frozenset(active_packs),
@@ -126,6 +229,7 @@ def filter_tools_by_packs(
         managed_hidden=hidden,
         applied=True,
         truncated=truncated,
+        connector_ids=frozenset(ids),
     )
 
 
@@ -177,17 +281,26 @@ def tool_names_after_last_human(messages: Iterable[Any]) -> frozenset[str]:
     return frozenset(names)
 
 
-def catalog_public_summary(cfg: RuntimePacksConfig) -> list[dict[str, Any]]:
+def catalog_public_summary(
+    cfg: RuntimePacksConfig,
+    *,
+    tool_names: Iterable[str] = (),
+) -> list[dict[str, Any]]:
+    enriched = with_mcp_connector_packs(cfg, tool_names)
     rows: list[dict[str, Any]] = []
-    for pack in cfg.catalog.packs:
-        if pack.pack_id in cfg.disabled_packs:
+    for pack in enriched.catalog.packs:
+        if pack.pack_id in enriched.disabled_packs:
             continue
-        member_count = len(pack.members.exact) + len(pack.members.prefixes)
+        member_count = (
+            len(pack.members.exact)
+            + len(pack.members.prefixes)
+            + len(pack.members.name_regexes)
+        )
         rows.append(
             {
                 "pack_id": pack.pack_id,
                 "description": pack.description,
-                "always": pack.always or pack.pack_id in cfg.extra_always,
+                "always": pack.always or pack.pack_id in enriched.extra_always,
                 "activation_signals": list(pack.activation_signals),
                 "member_hints": {
                     "exact_count": len(pack.members.exact),
@@ -199,23 +312,60 @@ def catalog_public_summary(cfg: RuntimePacksConfig) -> list[dict[str, Any]]:
     return rows
 
 
+def expand_unlock_pack_ids(
+    pack_id: str,
+    cfg: RuntimePacksConfig,
+    *,
+    tool_names: Iterable[str] = (),
+) -> list[str]:
+    """Si unlock es umbrella ``mcp``, expande a packs por conector presentes."""
+    cleaned = (pack_id or "").strip()
+    if not cleaned:
+        return []
+    enriched = with_mcp_connector_packs(cfg, tool_names)
+    known = {p.pack_id for p in enriched.catalog.packs} - set(enriched.disabled_packs)
+    if cleaned not in known:
+        return []
+    if cleaned != MCP_UMBRELLA_PACK_ID:
+        return [cleaned]
+    connector_packs = sorted(
+        p.pack_id
+        for p in enriched.catalog.packs
+        if p.pack_id.startswith(_MCP_CONNECTOR_PACK_PREFIX)
+        and p.pack_id != MCP_UMBRELLA_PACK_ID
+        and p.pack_id not in enriched.disabled_packs
+    )
+    return [MCP_UMBRELLA_PACK_ID, *connector_packs]
+
+
 def log_pack_filter_result(worker_label: str, result: PackFilterResult) -> None:
     if not result.applied:
         return
+    metrics = result.metrics
     _log.info(
-        "[%s] runtime_tool_packs active=%s bound=%s hidden=%s truncated=%s names=%s",
+        "[%s] runtime_tool_packs_metric %s names=%s",
         worker_label,
-        sorted(result.active_packs),
-        len(result.bound_names),
-        result.managed_hidden,
-        result.truncated,
+        metrics,
         list(result.bound_names)[:40],
     )
 
 
+def intent_mentions_token(intent_lower: str, token: str) -> bool:
+    """True si ``token`` aparece como palabra/token, no como substring de otro id.
+
+    Evita que citar ``mcp_github`` active el conector ``github``.
+    """
+    cleaned = (token or "").strip().lower()
+    if not cleaned or not intent_lower:
+        return False
+    # Límite: no letra/dígito/_ a ambos lados (pack ids usan _).
+    pattern = rf"(?<![a-z0-9_]){re.escape(cleaned)}(?![a-z0-9_])"
+    return re.search(pattern, intent_lower) is not None
+
+
 def _intent_matches_pack(intent_lower: str, pack: ToolPackSpec) -> bool:
     for signal in pack.activation_signals:
-        if signal and signal in intent_lower:
+        if intent_mentions_token(intent_lower, signal):
             return True
     return False
 

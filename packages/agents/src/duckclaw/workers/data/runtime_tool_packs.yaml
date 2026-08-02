@@ -1,15 +1,20 @@
-# Catálogo declarativo de packs de tools en runtime (progressive disclosure).
+# Catálogo declarativo de packs de tools (N agentes × N MCP).
 # Override por worker: manifest → tool_surface.runtime_packs
-# Membresía: exact + prefixes. Señales: substrings case-insensitive en el texto del turno.
+#
+# Buenas prácticas (Anthropic Tool Search / OpenAI <20 / Gemini 10–20):
+# - always-on pequeño (core)
+# - MCP y dominios bajo demanda (señales / unlock / sticky)
+# - orphan_policy: exclude → toda tool debe pertenecer a un pack
+# - Namespacing MCP: mcp__{connector}__{tool}
 
 version: 1
-orphan_policy: include
-max_bound_tools: 28
+orphan_policy: exclude
+max_bound_tools: 16
 
 packs:
   - id: core
     always: true
-    description: "Contexto mínimo, SQL lectura y discovery de packs."
+    description: "Surface mínima: contexto, SQL lectura y discovery de packs."
     members:
       exact:
         - get_current_time
@@ -18,6 +23,16 @@ packs:
         - inspect_schema
         - list_tool_packs
         - unlock_tool_pack
+      prefixes: []
+    activation_signals: []
+
+  - id: mcp
+    always: false
+    description: >
+      Umbrella MCP: unlock_tool_pack('mcp') activa todos los conectores del worker.
+      La membresía real es dinámica por conector (mcp_github, mcp_notion, …).
+    members:
+      exact: []
       prefixes: []
     activation_signals: []
 
@@ -39,7 +54,6 @@ packs:
       - knowledge
       - rag
       - vault
-      - macminivault
       - carpeta
       - carpetas
       - disco
@@ -49,18 +63,17 @@ packs:
       - buscar en
       - lee el archivo
       - leer archivo
-      - código fuente
-      - codigo fuente
       - allowed_roots
-      - .md
-      - .py
-      - .pdf
 
   - id: reports
     always: false
     description: "Report Engine (plantillas Word / instancias / render)."
     members:
-      exact: []
+      exact:
+        - create_blank_document
+        - get_report_status
+        - generate_report_docx_from_markdown
+        - append_images_to_report
       prefixes:
         - register_report_
         - create_report_
@@ -70,7 +83,6 @@ packs:
         - resolve_report_
         - delete_report_
         - inspect_report_
-        - append_images_to_report
     activation_signals:
       - informe
       - report engine
@@ -81,7 +93,6 @@ packs:
       - render_report
       - patch_report
       - informe mensual
-      - ejecuciones
 
   - id: docs_output
     always: false
@@ -160,3 +171,41 @@ packs:
       - comfyui
       - imagen con ia
       - video con ia
+
+  - id: sandbox
+    always: false
+    description: "Ejecución aislada (código / browser). También gated por tool_surface_policy."
+    members:
+      exact:
+        - run_sandbox
+        - run_browser_sandbox
+        - get_browser_session_url
+        - execute_sandbox_script
+      prefixes: []
+    activation_signals:
+      - sandbox
+      - ejecuta código
+      - ejecutar código
+      - run_sandbox
+      - playwright
+      - navegador
+
+  - id: integrations
+    always: false
+    description: "Skills de integración no-MCP (reddit, trends, weather, etc.)."
+    members:
+      exact: []
+      prefixes:
+        - reddit_
+        - google_trends_
+        - openweather_
+        - youtube_
+        - tailscale_
+        - slm_eval_
+    activation_signals:
+      - reddit
+      - youtube
+      - clima
+      - weather
+      - trends
+      - tailscale

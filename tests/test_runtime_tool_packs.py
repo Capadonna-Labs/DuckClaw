@@ -14,24 +14,40 @@ def _spec(**runtime_packs):
     return SimpleNamespace(tool_surface_config={"runtime_packs": dict(runtime_packs)})
 
 
-def test_default_catalog_loads_core_and_knowledge() -> None:
-    from duckclaw.workers.tool_pack_catalog import (
-        clear_runtime_tool_pack_catalog_cache,
-        load_default_runtime_tool_pack_catalog,
-    )
+@pytest.fixture(autouse=True)
+def _clear_catalog_cache() -> None:
+    from duckclaw.workers.tool_pack_catalog import clear_runtime_tool_pack_catalog_cache
 
     clear_runtime_tool_pack_catalog_cache()
+    yield
+    clear_runtime_tool_pack_catalog_cache()
+
+
+def test_default_catalog_is_multi_agent_sota() -> None:
+    from duckclaw.workers.tool_pack_catalog import load_default_runtime_tool_pack_catalog
+    from duckclaw.workers.tool_pack_policy import enrich_catalog_with_mcp_connectors
+
     catalog = load_default_runtime_tool_pack_catalog()
     ids = {p.pack_id for p in catalog.packs}
+    assert catalog.orphan_policy == "exclude"
+    assert catalog.max_bound_tools <= 16
     assert "core" in ids
+    assert "mcp" in ids
     assert "knowledge" in ids
-    assert "reports" in ids
-    assert catalog.packs_for_tool("patch_report_section") == frozenset({"reports"})
-    assert catalog.packs_for_tool("list_disk_folder") == frozenset({"knowledge"})
+    assert "sandbox" in ids
+    # Umbrella mcp no posee members: la membresía es por conector (dinámica).
+    assert catalog.packs_for_tool("mcp__github__list_issues") == frozenset()
+    enriched = enrich_catalog_with_mcp_connectors(
+        catalog,
+        ["mcp__github__list_issues", "mcp__notion_ws__query"],
+    )
+    assert enriched.packs_for_tool("mcp__github__list_issues") == frozenset({"mcp_github"})
+    assert enriched.packs_for_tool("mcp__notion_ws__query") == frozenset({"mcp_notion_ws"})
+    assert catalog.packs_for_tool("create_blank_document") == frozenset({"reports"})
     assert catalog.packs_for_tool("list_tool_packs") == frozenset({"core"})
 
 
-def test_filter_hides_reports_on_knowledge_intent() -> None:
+def test_exclude_orphans_hides_unmanaged_mcp_noise() -> None:
     from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
 
     tools = [
@@ -39,9 +55,9 @@ def test_filter_hides_reports_on_knowledge_intent() -> None:
         _tool("read_sql"),
         _tool("list_tool_packs"),
         _tool("search_project_knowledge"),
-        _tool("patch_report_section"),
-        _tool("web_search"),
-        _tool("some_mcp_custom_tool"),
+        _tool("mcp__github__list_issues"),
+        _tool("mcp__slack__post_message"),
+        _tool("mystery_unmanaged_tool"),
     ]
     result = apply_runtime_tool_packs(
         tools,
@@ -53,10 +69,145 @@ def test_filter_hides_reports_on_knowledge_intent() -> None:
     assert result.applied is True
     assert "search_project_knowledge" in names
     assert "get_project_context" in names
-    assert "patch_report_section" not in names
-    assert "web_search" not in names
-    # orphan MCP tool stays (orphan_policy include)
-    assert "some_mcp_custom_tool" in names
+    assert "mcp__github__list_issues" not in names
+    assert "mcp__slack__post_message" not in names
+    assert "mystery_unmanaged_tool" not in names
+
+
+def test_mcp_pack_activates_only_mentioned_connector() -> None:
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    tools = [
+        _tool("get_project_context"),
+        _tool("list_tool_packs"),
+        _tool("mcp__github__list_issues"),
+        _tool("mcp__notion__search"),
+        _tool("search_project_knowledge"),
+    ]
+    result = apply_runtime_tool_packs(
+        tools,
+        spec=_spec(enabled=True),
+        intent_text="lista issues abiertos en github",
+        messages=[],
+    )
+    assert "mcp_github" in result.active_packs
+    assert "mcp_notion" not in result.active_packs
+    assert "mcp__github__list_issues" in result.bound_names
+    assert "mcp__notion__search" not in result.bound_names
+    assert "search_project_knowledge" not in result.bound_names
+    assert result.connector_ids == frozenset({"github", "notion"})
+    assert result.bound_count == len(result.bound_names)
+    assert result.metrics["truncated"] is False
+    assert result.metrics["bound_count"] == result.bound_count
+    assert set(result.metrics["connector_ids"]) == {"github", "notion"}
+
+
+def test_pack_id_mention_does_not_activate_connector() -> None:
+    """Citar mcp_github / listar packs no debe activar tools del conector."""
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    tools = [
+        _tool("get_project_context"),
+        _tool("list_tool_packs"),
+        _tool("mcp__github__list_issues"),
+        _tool("mcp__tavily__search"),
+    ]
+    result = apply_runtime_tool_packs(
+        tools,
+        spec=_spec(enabled=True),
+        intent_text=(
+            "llama SOLO list_tool_packs y responde pack_id que empiecen por mcp "
+            "(mcp, mcp_github, mcp_tavily). nada mas."
+        ),
+        messages=[],
+    )
+    assert "mcp_github" not in result.active_packs
+    assert "mcp_tavily" not in result.active_packs
+    assert "mcp__github__list_issues" not in result.bound_names
+    assert "mcp__tavily__search" not in result.bound_names
+    assert "list_tool_packs" in result.bound_names
+
+
+def test_unlock_mcp_umbrella_exposes_all_connector_tools() -> None:
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    tools = [
+        _tool("get_project_context"),
+        _tool("mcp__acme__do_thing"),
+        _tool("mcp__other__x"),
+    ]
+    messages = [
+        HumanMessage(content="necesito el conector"),
+        ToolMessage(
+            content=json.dumps(
+                {"ok": True, "pack_id": "mcp", "unlocked_packs": ["mcp"]}
+            ),
+            tool_call_id="1",
+            name="unlock_tool_pack",
+        ),
+    ]
+    result = apply_runtime_tool_packs(
+        tools,
+        spec=_spec(enabled=True),
+        intent_text="necesito el conector",
+        messages=messages,
+    )
+    assert "mcp" in result.active_packs
+    assert "mcp_acme" in result.active_packs
+    assert "mcp_other" in result.active_packs
+    assert "mcp__acme__do_thing" in result.bound_names
+    assert "mcp__other__x" in result.bound_names
+
+
+def test_unlock_single_connector_pack_is_narrow() -> None:
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    tools = [
+        _tool("get_project_context"),
+        _tool("mcp__github__list_issues"),
+        _tool("mcp__slack__post_message"),
+    ]
+    messages = [
+        HumanMessage(content="github"),
+        ToolMessage(
+            content=json.dumps(
+                {
+                    "ok": True,
+                    "pack_id": "mcp_github",
+                    "unlocked_packs": ["mcp_github"],
+                }
+            ),
+            tool_call_id="1",
+            name="unlock_tool_pack",
+        ),
+    ]
+    result = apply_runtime_tool_packs(
+        tools,
+        spec=_spec(enabled=True),
+        intent_text="ok",
+        messages=messages,
+    )
+    assert "mcp__github__list_issues" in result.bound_names
+    assert "mcp__slack__post_message" not in result.bound_names
+
+
+def test_bind_surface_metrics_on_noop() -> None:
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    result = apply_runtime_tool_packs(
+        [_tool("read_sql")],
+        spec=_spec(enabled=False),
+        intent_text="hola",
+        messages=[],
+    )
+    assert result.applied is False
+    assert result.bound_count == 1
+    assert result.connector_ids == frozenset()
+    assert result.metrics["applied"] is False
 
 
 def test_sticky_keeps_reports_after_tool_use() -> None:
@@ -88,36 +239,10 @@ def test_sticky_keeps_reports_after_tool_use() -> None:
     assert "reports" in result.active_packs
 
 
-def test_unlock_tool_message_activates_pack() -> None:
-    from langchain_core.messages import HumanMessage, ToolMessage
-
-    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
-
-    tools = [_tool("get_project_context"), _tool("web_search"), _tool("unlock_tool_pack")]
-    messages = [
-        HumanMessage(content="necesito internet"),
-        ToolMessage(
-            content=json.dumps(
-                {"ok": True, "pack_id": "research", "unlocked_packs": ["research"]}
-            ),
-            tool_call_id="1",
-            name="unlock_tool_pack",
-        ),
-    ]
-    result = apply_runtime_tool_packs(
-        tools,
-        spec=_spec(enabled=True),
-        intent_text="necesito internet",
-        messages=messages,
-    )
-    assert "web_search" in result.bound_names
-    assert "research" in result.active_packs
-
-
 def test_disabled_runtime_packs_is_noop() -> None:
     from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
 
-    tools = [_tool("patch_report_section"), _tool("web_search")]
+    tools = [_tool("patch_report_section"), _tool("mcp__x__y")]
     result = apply_runtime_tool_packs(
         tools,
         spec=_spec(enabled=False),
@@ -125,70 +250,82 @@ def test_disabled_runtime_packs_is_noop() -> None:
         messages=[],
     )
     assert result.applied is False
-    assert set(result.bound_names) == {"patch_report_section", "web_search"}
+    assert set(result.bound_names) == {"patch_report_section", "mcp__x__y"}
 
 
-def test_manifest_pack_override_activation_signal() -> None:
+def test_manifest_can_opt_into_orphan_include() -> None:
     from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
 
-    tools = [_tool("get_project_context"), _tool("web_search")]
+    tools = [_tool("get_project_context"), _tool("legacy_unmanaged")]
     result = apply_runtime_tool_packs(
         tools,
-        spec=_spec(
-            enabled=True,
-            pack_overrides={"research": {"activation_signals": ["zorglub-signal"]}},
-        ),
-        intent_text="por favor zorglub-signal ahora",
+        spec=_spec(enabled=True, orphan_policy="include"),
+        intent_text="hola",
         messages=[],
     )
-    assert "web_search" in result.bound_names
+    assert "legacy_unmanaged" in result.bound_names
 
 
-def test_meta_tools_register_and_unlock() -> None:
-    from duckclaw.forge.skills.tool_pack_bridge import register_tool_pack_meta_tools
-
-    tools: list = []
-    register_tool_pack_meta_tools(tools, spec=_spec(enabled=True))
-    by_name = {t.name: t for t in tools}
-    assert "list_tool_packs" in by_name
-    assert "unlock_tool_pack" in by_name
-    listed = json.loads(by_name["list_tool_packs"].invoke({}))
-    assert listed["ok"] is True
-    assert any(p["pack_id"] == "knowledge" for p in listed["packs"])
-    unlocked = json.loads(by_name["unlock_tool_pack"].invoke({"pack_id": "reports"}))
-    assert unlocked["ok"] is True
-    assert unlocked["pack_id"] == "reports"
-    bad = json.loads(by_name["unlock_tool_pack"].invoke({"pack_id": "nope"}))
-    assert bad["ok"] is False
-
-
-def test_truncate_prefers_active_packs_over_orphans() -> None:
+def test_truncate_prefers_core_and_active_over_mcp_flood() -> None:
     from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
 
-    # Many unmanaged MCP-like tools would previously crowd out knowledge tools.
-    tools = [_tool("get_project_context"), _tool("search_project_knowledge"), _tool("list_disk_folder")]
-    tools.extend(_tool(f"mcp_noise_{i}") for i in range(40))
+    tools = [
+        _tool("get_project_context"),
+        _tool("search_project_knowledge"),
+        _tool("list_disk_folder"),
+        _tool("read_sql"),
+        _tool("inspect_schema"),
+        _tool("list_tool_packs"),
+        _tool("unlock_tool_pack"),
+    ]
+    tools.extend(_tool(f"mcp__noise__t{i}") for i in range(40))
     result = apply_runtime_tool_packs(
         tools,
-        spec=_spec(enabled=True, max_bound_tools=10),
+        # Forzar pack mcp siempre activo: flood de N conectores en el bind.
+        spec=_spec(enabled=True, max_bound_tools=10, extra_always=["mcp"]),
         intent_text="busca en el vault conocimiento",
         messages=[],
     )
     assert result.truncated is True
     assert "get_project_context" in result.bound_names
     assert "search_project_knowledge" in result.bound_names
-    assert "list_disk_folder" in result.bound_names
-    # Orphans only fill remaining slots after active packs.
-    assert sum(1 for n in result.bound_names if n.startswith("mcp_noise_")) <= 7
+    # Core/knowledge primero; MCP rellena el resto del cupo.
+    assert sum(1 for n in result.bound_names if n.startswith("mcp__")) <= 7
 
-    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
 
-    tools = [_tool("get_project_context"), _tool("mystery_tool")]
-    result = apply_runtime_tool_packs(
-        tools,
-        spec=_spec(enabled=True, orphan_policy="exclude"),
-        intent_text="hola",
-        messages=[],
+def test_meta_tools_register_and_unlock() -> None:
+    from duckclaw.forge.skills.tool_pack_bridge import register_tool_pack_meta_tools
+
+    tools: list = [_tool("mcp__github__list_issues"), _tool("mcp__slack__x")]
+    register_tool_pack_meta_tools(tools, spec=_spec(enabled=True))
+    by_name = {t.name: t for t in tools}
+    assert "list_tool_packs" in by_name
+    assert "unlock_tool_pack" in by_name
+    listed = json.loads(by_name["list_tool_packs"].invoke({}))
+    assert listed["ok"] is True
+    pack_ids = {p["pack_id"] for p in listed["packs"]}
+    assert "mcp" in pack_ids
+    assert "mcp_github" in pack_ids
+    assert "mcp_slack" in pack_ids
+    unlocked = json.loads(by_name["unlock_tool_pack"].invoke({"pack_id": "mcp"}))
+    assert unlocked["ok"] is True
+    assert "mcp_github" in unlocked["unlocked_packs"]
+    assert "mcp_slack" in unlocked["unlocked_packs"]
+
+
+def test_intent_mentions_token_word_boundary() -> None:
+    from duckclaw.workers.tool_pack_policy import intent_mentions_token
+
+    assert intent_mentions_token("issues en github hoy", "github") is True
+    assert intent_mentions_token("pack mcp_github y mcp_tavily", "github") is False
+    assert intent_mentions_token("pack mcp_github y mcp_tavily", "tavily") is False
+    assert intent_mentions_token("busca con tavily", "tavily") is True
+
+
+def test_mcp_connector_ids_parser() -> None:
+    from duckclaw.workers.tool_pack_policy import mcp_connector_ids_from_tool_names
+
+    ids = mcp_connector_ids_from_tool_names(
+        ["mcp__github__list_issues", "mcp__my_notion__query", "read_sql"]
     )
-    assert "get_project_context" in result.bound_names
-    assert "mystery_tool" not in result.bound_names
+    assert ids == frozenset({"github", "my_notion"})

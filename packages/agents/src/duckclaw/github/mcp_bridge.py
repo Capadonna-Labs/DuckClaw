@@ -272,24 +272,27 @@ def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Op
     from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
     from langchain_core.tools import StructuredTool
 
+    remote_name = str(name or "").strip()
+    public_name = f"mcp__github__{remote_name.replace('-', '_').replace('.', '_')}"
     raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
     args_model = mcp_input_schema_to_args_model(
         raw_schema if isinstance(raw_schema, dict) else None,
-        f"{name}_github",
+        f"{public_name}_args",
     )
 
     def _sync_call(**kwargs: Any) -> str:
         validated = args_model(**kwargs)
-        payload = apply_github_repo_scope(name, validated.model_dump(exclude_none=True))
-        branch_err = reject_protected_branch_mutation(name, payload)
+        payload = apply_github_repo_scope(remote_name, validated.model_dump(exclude_none=True))
+        branch_err = reject_protected_branch_mutation(remote_name, payload)
         if branch_err:
             return json.dumps({"error": branch_err}, ensure_ascii=False)
-        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, payload))
+        return _run_async_from_sync(mcp_stdio_call_tool(server_params, remote_name, payload))
 
-    desc = getattr(tool_spec, "description", None) or f"GitHub MCP tool: {name}"
+    desc = getattr(tool_spec, "description", None) or f"GitHub MCP tool: {remote_name}"
+    desc = f"[MCP github] {desc}"
     return StructuredTool.from_function(
         _sync_call,
-        name=name,
+        name=public_name,
         description=desc,
         args_schema=args_model,
         infer_schema=False,
@@ -299,23 +302,26 @@ def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Op
 def _wrap_with_hitl(tool_spec: Any, name: str) -> Optional[Any]:
     from langchain_core.tools import StructuredTool
 
+    remote_name = str(name or "").strip()
+    public_name = f"mcp__github__{remote_name.replace('-', '_').replace('.', '_')}"
     raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
     args_model = mcp_input_schema_to_args_model(
         raw_schema if isinstance(raw_schema, dict) else None,
-        f"{name}_github_hitl",
+        f"{public_name}_hitl_args",
     )
 
     def _call_hitl(**kwargs: Any) -> str:
         del kwargs
         return (
-            f"[HITL] La acción {name} requiere aprobación del usuario. "
+            f"[HITL] La acción {public_name} requiere aprobación del usuario. "
             "Usa /approve para confirmar, o /reject para cancelar."
         )
 
-    desc = (getattr(tool_spec, "description", None) or f"GitHub MCP: {name}") + " [Requiere /approve]"
+    desc = (getattr(tool_spec, "description", None) or f"GitHub MCP: {remote_name}") + " [Requiere /approve]"
+    desc = f"[MCP github] {desc}"
     return StructuredTool.from_function(
         _call_hitl,
-        name=name,
+        name=public_name,
         description=desc,
         args_schema=args_model,
         infer_schema=False,

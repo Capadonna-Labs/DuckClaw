@@ -65,6 +65,20 @@ export interface PgqGraphResult {
   warning?: string;
 }
 
+export interface PgqBootstrapResult {
+  ok: boolean;
+  vault_path: string;
+  pgq_available: boolean;
+  tables_created: string[];
+}
+
+export interface PgqRebuildResult {
+  ok: boolean;
+  vault_path: string;
+  html_path: string;
+  cache_key: string;
+}
+
 export interface VectorMemoryHit {
   id: string;
   text: string;
@@ -162,6 +176,21 @@ export const duckdbApi = {
   getDuckdbPgqGraph: (vaultPath?: string) => {
     const q = vaultPath ? `?vault_path=${encodeURIComponent(vaultPath)}` : '';
     return adminFetch<PgqGraphResult>(`/duckdb/pgq-graph${q}`);
+  },
+  bootstrapDuckdbPgq: (vaultPath?: string) =>
+    adminFetch<PgqBootstrapResult>('/duckdb/pgq/bootstrap', {
+      method: 'POST',
+      body: JSON.stringify({ vault_path: vaultPath }),
+    }),
+  rebuildDuckdbPgqGraph: (vaultPath?: string) =>
+    adminFetch<PgqRebuildResult>('/duckdb/pgq/rebuild', {
+      method: 'POST',
+      body: JSON.stringify({ vault_path: vaultPath }),
+    }),
+  pgqGraphHtmlUrl: (vaultPath: string, cacheToken?: number) => {
+    const q = new URLSearchParams({ vault_path: vaultPath });
+    q.set('_t', String(cacheToken ?? Date.now()));
+    return `/api/admin/duckdb/pgq-graph/html?${q}`;
   },
   searchDuckdbVectorMemory: (body: { query?: string; limit?: number; vault_path?: string }) =>
     adminFetch<VectorSearchResult>('/duckdb/vector-search', {

@@ -484,6 +484,109 @@ def test_duckdb_pgq_graph(admin_client: TestClient, explorer_db: Path) -> None:
     assert data["links"][0]["label"] == "SPENDS_ON"
 
 
+def test_duckdb_pgq_bootstrap(
+    admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "")
+    empty = tmp_path / "pgq-empty.duckdb"
+    duckdb.connect(str(empty)).close()
+
+    before = admin_client.get(
+        f"/api/v1/admin/duckdb/pgq-graph?vault_path={empty}",
+        headers=_ADMIN_HEADERS,
+    )
+    assert before.status_code == 200
+    assert before.json().get("warning")
+
+    boot = admin_client.post(
+        "/api/v1/admin/duckdb/pgq/bootstrap",
+        headers=_ADMIN_HEADERS,
+        json={"vault_path": str(empty)},
+    )
+    assert boot.status_code == 200
+    payload = boot.json()
+    assert payload["ok"] is True
+    assert "memory_nodes" in payload["tables_created"]
+    assert "memory_edges" in payload["tables_created"]
+    assert isinstance(payload["pgq_available"], bool)
+
+    after = admin_client.get(
+        f"/api/v1/admin/duckdb/pgq-graph?vault_path={empty}",
+        headers=_ADMIN_HEADERS,
+    )
+    assert after.status_code == 200
+    assert not after.json().get("warning")
+
+
+def test_duckdb_pgq_graph_html_missing(admin_client: TestClient, explorer_db: Path) -> None:
+    r = admin_client.get(
+        f"/api/v1/admin/duckdb/pgq-graph/html?vault_path={explorer_db}",
+        headers=_ADMIN_HEADERS,
+    )
+    assert r.status_code == 404
+    assert "no generado" in r.text.lower()
+
+
+def test_duckdb_pgq_rebuild(
+    admin_client: TestClient,
+    explorer_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess
+
+    from core.pgq_graph_cache import memory_graph_html_path
+
+    html_path = memory_graph_html_path(str(explorer_db))
+
+    def _fake_run(cmd, **kwargs):
+        out = kwargs.get("out") or html_path
+        for i, part in enumerate(cmd):
+            if part == "--out" and i + 1 < len(cmd):
+                out = Path(cmd[i + 1])
+                break
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text("<html><body>pgq graph</body></html>", encoding="utf-8")
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"ok": true}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+
+    rebuild = admin_client.post(
+        "/api/v1/admin/duckdb/pgq/rebuild",
+        headers=_ADMIN_HEADERS,
+        json={"vault_path": str(explorer_db)},
+    )
+    assert rebuild.status_code == 200
+    data = rebuild.json()
+    assert data["ok"] is True
+    assert html_path.is_file()
+
+    html = admin_client.get(
+        f"/api/v1/admin/duckdb/pgq-graph/html?vault_path={explorer_db}",
+        headers=_ADMIN_HEADERS,
+    )
+    assert html.status_code == 200
+    assert "pgq graph" in html.text
+
+
+def test_generate_memory_graph_self_check() -> None:
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[1]
+    script = repo / "scripts" / "generate_memory_graph.py"
+    proc = subprocess.run(
+        [sys.executable, str(script), "--self-check"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+
+
 def test_duckdb_vector_recent(admin_client: TestClient, explorer_db: Path) -> None:
     r = admin_client.post(
         "/api/v1/admin/duckdb/vector-search",

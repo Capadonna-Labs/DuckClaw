@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 const isDev = process.env.NODE_ENV === 'development';
 
-const REPORT_HTML_CSP =
+const FRAMED_HTML_CSP =
   "default-src 'self' https: data:; " +
   "script-src 'self' https: cdn.jsdelivr.net cdnjs.cloudflare.com unpkg.com cdn.tailwindcss.com 'unsafe-inline'; " +
   "style-src 'self' https: 'unsafe-inline'; " +
@@ -10,16 +10,19 @@ const REPORT_HTML_CSP =
   "connect-src 'self' https:; " +
   "frame-ancestors 'self'";
 
-function isReportHtmlRoute(pathname: string): boolean {
-  return /^\/api\/admin\/reports\/[^/]+$/.test(pathname);
+function isFramedHtmlRoute(pathname: string): boolean {
+  return (
+    /^\/api\/admin\/reports\/[^/]+$/.test(pathname) ||
+    pathname === '/api/admin/duckdb/pgq-graph/html'
+  );
 }
 
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
-  if (isReportHtmlRoute(pathname)) {
+  if (isFramedHtmlRoute(pathname)) {
     const response = NextResponse.next();
-    response.headers.set('Content-Security-Policy', REPORT_HTML_CSP);
+    response.headers.set('Content-Security-Policy', FRAMED_HTML_CSP);
     response.headers.set('X-Frame-Options', 'SAMEORIGIN');
     return response;
   }

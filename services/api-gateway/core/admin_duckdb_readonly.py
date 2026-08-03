@@ -288,40 +288,14 @@ def fetch_pgq_graph(
     max_nodes: int = 500,
     max_edges: int = 2000,
 ) -> dict[str, Any]:
-    if not _table_exists(con, "memory_nodes") or not _table_exists(con, "memory_edges"):
-        return {"nodes": [], "links": [], "warning": "Tablas memory_nodes/memory_edges no encontradas"}
+    from core.pgq_graph_fetch import fetch_pgq_graph_data
 
-    node_rows = con.execute(
-        f"""
-        SELECT node_id,
-               COALESCE(
-                 NULLIF(trim(json_extract_string(CAST(properties AS JSON), '$.name')), ''),
-                 node_id
-               ) AS label,
-               COALESCE(label, 'unknown') AS grp
-        FROM memory_nodes
-        LIMIT {int(max_nodes)}
-        """
-    ).fetchall()
-    nodes = [
-        {"id": str(r[0]), "label": str(r[1] or r[0]), "group": str(r[2] or "unknown")}
-        for r in node_rows
-    ]
-    node_ids = {n["id"] for n in nodes}
-
-    edge_rows = con.execute(
-        f"""
-        SELECT source_id, target_id, relationship
-        FROM memory_edges
-        LIMIT {int(max_edges)}
-        """
-    ).fetchall()
-    links = []
-    for src, tgt, rel in edge_rows:
-        s, t = str(src), str(tgt)
-        if s in node_ids and t in node_ids:
-            links.append({"source": s, "target": t, "label": str(rel or "")})
-    return {"nodes": nodes, "links": links}
+    payload = fetch_pgq_graph_data(con, max_nodes=max_nodes, max_edges=max_edges)
+    return {
+        "nodes": payload.get("nodes") or [],
+        "links": payload.get("links") or [],
+        **({"warning": payload["warning"]} if payload.get("warning") else {}),
+    }
 
 
 def ensure_semantic_memory_table(con: Any) -> None:

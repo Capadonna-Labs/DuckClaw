@@ -5,7 +5,7 @@ export const PLATAFORMA_TABS = [
   { id: 'skills', label: 'Skills', hint: 'Catálogo DuckDB y skills del manifest por agente' },
   { id: 'mcp', label: 'MCP', hint: 'Conectores externos y servidor DuckClaw MCP' },
   { id: 'imagenes', label: 'Imágenes', hint: 'Generación visual ComfyUI' },
-  { id: 'duckdb', label: 'DuckDB', hint: 'Explorador de datos' },
+  { id: 'duckdb', label: 'Base de Datos', hint: 'Explorador de datos' },
   { id: 'runtime', label: 'Runtime', hint: 'Overrides agent_config por bóveda y chat' },
 ] as const;
 

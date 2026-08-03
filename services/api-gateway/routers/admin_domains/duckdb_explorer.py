@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from duckclaw import db_write_queue
@@ -29,6 +32,25 @@ class DuckdbVectorSearchBody(BaseModel):
     query: str = ""
     limit: int = Field(default=10, ge=1, le=40)
     vault_path: str | None = None
+
+
+class DuckdbPgqVaultBody(BaseModel):
+    vault_path: str | None = None
+
+
+_PGQ_HTML_CSP = (
+    "default-src 'self' https: data:; "
+    "script-src 'self' https: cdn.jsdelivr.net cdnjs.cloudflare.com unpkg.com 'unsafe-inline'; "
+    "style-src 'self' https: 'unsafe-inline'"
+)
+
+_PGQ_HTML_PLACEHOLDER = """<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Grafo PGQ</title></head>
+<body style="font-family:system-ui;padding:2rem;color:#334155;background:#0f172a;color:#e2e8f0">
+<h3>Grafo HTML no generado</h3>
+<p>Pulsa <strong>Actualizar grafo</strong> en el panel PGQ para exportar la memoria a HTML.</p>
+</body></html>"""
 
 
 class DuckdbLegacySchemaDropBody(BaseModel):
@@ -207,6 +229,15 @@ def _duckdb_readonly_session(vault_path: str | None, *, actor: str | None = None
         vault_uid = _default_vault_user_id()
     con = connect_readonly(path)
     return con, path, _duckdb_actor_scope(actor, vault_uid)
+
+
+def _duckdb_writable_session(vault_path: str | None, *, actor: str | None = None):
+    from routers.admin import _open_playground_vault_db
+
+    _con, path, scope = _duckdb_readonly_session(vault_path, actor=actor)
+    _con.close()
+    db = _open_playground_vault_db(path, read_only=False)
+    return db, path, scope
 
 
 @router.get("/tables", dependencies=[Depends(require_admin_key)])
@@ -460,6 +491,157 @@ async def duckdb_pgq_graph(
         return {"vault_path": resolved, **graph}
     finally:
         con.close()
+
+
+@router.post("/pgq/bootstrap", dependencies=[Depends(require_admin_key)])
+async def duckdb_pgq_bootstrap(
+    body: DuckdbPgqVaultBody,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_duckdb_readonly import _table_exists
+    from duckclaw.graphs.graph_rag import ensure_graph_rag_schema
+
+    try:
+        db, resolved, scope = _duckdb_writable_session(body.vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    try:
+        had_nodes = _table_exists(db, "memory_nodes")
+        had_edges = _table_exists(db, "memory_edges")
+        pgq_available = ensure_graph_rag_schema(db)
+        tables_created = [
+            name
+            for name, existed in (("memory_nodes", had_nodes), ("memory_edges", had_edges))
+            if not existed
+        ]
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+    _admin_audit(
+        "duckdb.pgq.bootstrap",
+        resolved,
+        f"pgq_available={pgq_available}",
+        actor=actor,
+        meta={
+            "tenant_id": scope["tenant_id"],
+            "vault_user_id": scope["vault_user_id"],
+            "tables_created": tables_created,
+            "pgq_available": pgq_available,
+        },
+    )
+    return {
+        "ok": True,
+        "vault_path": resolved,
+        "pgq_available": pgq_available,
+        "tables_created": tables_created,
+    }
+
+
+@router.post("/pgq/rebuild", dependencies=[Depends(require_admin_key)])
+async def duckdb_pgq_rebuild(
+    body: DuckdbPgqVaultBody,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    from core.pgq_graph_cache import (
+        memory_graph_generator_script,
+        memory_graph_html_path,
+        pgq_repo_root,
+    )
+
+    try:
+        _con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    finally:
+        _con.close()
+
+    repo = pgq_repo_root()
+    out_path = memory_graph_html_path(resolved)
+    script = memory_graph_generator_script()
+
+    def _run() -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                "uv",
+                "run",
+                "python",
+                str(script),
+                "--vault-path",
+                resolved,
+                "--out",
+                str(out_path),
+            ],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+    try:
+        proc = await asyncio.to_thread(_run)
+    except subprocess.TimeoutExpired:
+        raise _problem(408, "Timeout generando grafo HTML", resolved) from None
+    except Exception as exc:
+        raise _problem(500, "Error generando grafo HTML", str(exc)) from exc
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "generate_memory_graph failed")[-2000:]
+        raise _problem(500, "Error generando grafo HTML", detail)
+
+    _admin_audit(
+        "duckdb.pgq.rebuild",
+        resolved,
+        str(out_path),
+        actor=actor,
+        meta={
+            "tenant_id": scope["tenant_id"],
+            "vault_user_id": scope["vault_user_id"],
+            "html_path": str(out_path),
+            "stdout": (proc.stdout or "")[-500:],
+        },
+    )
+    return {
+        "ok": True,
+        "vault_path": resolved,
+        "html_path": str(out_path),
+        "cache_key": out_path.parent.name,
+    }
+
+
+@router.get("/pgq-graph/html", response_class=HTMLResponse, dependencies=[Depends(require_admin_key)])
+async def duckdb_pgq_graph_html(
+    vault_path: str | None = Query(None),
+    _t: str | None = Query(None, description="Cache-bust token"),
+    actor: str = Depends(actor_from_header),
+) -> HTMLResponse:
+    from core.pgq_graph_cache import memory_graph_html_path
+
+    try:
+        _con, resolved, _scope = _duckdb_readonly_session(vault_path, actor=actor)
+    except FileNotFoundError as exc:
+        raise _problem(404, "Vault no encontrado", str(exc)) from exc
+    except PermissionError as exc:
+        raise _problem(403, "Vault no autorizado", str(exc)) from exc
+    finally:
+        _con.close()
+
+    html_path = memory_graph_html_path(resolved)
+    if not html_path.is_file():
+        return HTMLResponse(
+            content=_PGQ_HTML_PLACEHOLDER,
+            status_code=404,
+            headers={"Content-Security-Policy": _PGQ_HTML_CSP},
+        )
+
+    html = html_path.read_text(encoding="utf-8")
+    return HTMLResponse(content=html, headers={"Content-Security-Policy": _PGQ_HTML_CSP})
 
 
 @router.post("/vector-search", dependencies=[Depends(require_admin_key)])

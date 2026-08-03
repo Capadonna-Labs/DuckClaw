@@ -268,15 +268,17 @@ async def complete_connector_oauth(
                 "connector_id": str(pending.get("connector_id") or ""),
                 "auth_storage": "spotify_mcp_config",
             }
-        command = SetMcpConnectorAuthCommand(
+        from duckclaw.mcp_connector_oauth import persist_mcp_connector_oauth_tokens
+
+        connector_id = str(pending.get("connector_id") or "")
+        task_id = persist_mcp_connector_oauth_tokens(
             tenant_id=str(pending.get("tenant_id") or "default"),
             actor_email=str(pending.get("actor_email") or "system"),
-            connector_id=str(pending.get("connector_id") or ""),
+            connector_id=connector_id,
             bearer_token=tokens["access_token"],
             refresh_token=str(tokens.get("refresh_token") or ""),
         )
-        task_id = _enqueue(command)
-        return {"ok": True, "task_id": task_id, "connector_id": command.connector_id}
+        return {"ok": True, "task_id": task_id, "connector_id": connector_id}
     except ValueError as exc:
         raise _problem(400, "OAuth complete failed", str(exc)) from exc
     except Exception as exc:
@@ -320,14 +322,15 @@ async def oauth_callback_public(
 
         if resolve_preset_id(str(pending.get("preset_id") or "")) == "spotify":
             return RedirectResponse(url=ok, status_code=302)
-        command = SetMcpConnectorAuthCommand(
+        from duckclaw.mcp_connector_oauth import persist_mcp_connector_oauth_tokens
+
+        persist_mcp_connector_oauth_tokens(
             tenant_id=str(pending.get("tenant_id") or "default"),
             actor_email=str(pending.get("actor_email") or "system"),
             connector_id=str(pending.get("connector_id") or ""),
             bearer_token=tokens["access_token"],
             refresh_token=str(tokens.get("refresh_token") or ""),
         )
-        _enqueue(command)
         return RedirectResponse(url=ok, status_code=302)
     except Exception as exc:
         _log.warning("MCP OAuth callback failed: %s", exc)

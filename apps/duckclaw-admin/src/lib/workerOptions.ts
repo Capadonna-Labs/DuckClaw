@@ -35,7 +35,7 @@ export function resolveWorkerDisplayName(
 }
 
 /** Etiqueta de identidad en chat: solo nombre visible. Sin slot swarm. */
-export function formatChatIdentityPrefix(displayName?: string, _swarmSlot = 1): string {
+export function formatChatIdentityPrefix(displayName?: string): string {
   const label = (displayName || '').trim();
   return label || 'Agente';
 }

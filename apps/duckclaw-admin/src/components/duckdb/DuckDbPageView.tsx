@@ -81,7 +81,7 @@ export default function DuckDbPageView({ embedded = false }: EmbeddedViewProps) 
       <div className="space-y-4">
         {!embedded && (
           <header className="border-b border-gov-gray-200 pb-4 dark:border-dark-border">
-            <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">DuckDB</h1>
+            <h1 className="text-2xl font-bold text-gov-gray-900 dark:text-dark-text">Base de Datos</h1>
             <p className="mt-1 text-sm text-gov-gray-600 dark:text-dark-muted">
               Explorador de bóveda — solo lectura vía gateway salvo SQL acotado
             </p>
@@ -112,7 +112,7 @@ export default function DuckDbPageView({ embedded = false }: EmbeddedViewProps) 
             <div
               className="flex flex-wrap gap-1 border-b border-gov-gray-200 dark:border-dark-border"
               role="tablist"
-              aria-label="Secciones DuckDB"
+              aria-label="Secciones Base de Datos"
             >
               {TABS.map((t) => {
                 const selected = tab === t.id;

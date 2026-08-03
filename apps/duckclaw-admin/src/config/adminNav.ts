@@ -143,7 +143,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/policies': 'Reglas base',
   '/skills': 'Skills',
   '/mcp': 'MCP',
-  '/duckdb': 'DuckDB',
+  '/duckdb': 'Base de Datos',
   '/runtime': 'Runtime',
   '/integrations': 'Integraciones',
   '/gen': 'Gen',

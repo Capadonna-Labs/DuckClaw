@@ -64,6 +64,7 @@ def build_plan_node(
         _plan_prompt_policies = PromptPolicyResolver(_plan_cfg_db)
         _orch_affirm: tuple[str, list[str], str, str] | None = None
         _capability_fast: tuple[str, list[str], str, str] | None = None
+        _targeted_email_fast: tuple[str, list[str], str, str] | None = None
         if incoming:
             try:
                 from duckclaw.workers.manifest import load_manifest
@@ -79,6 +80,13 @@ def build_plan_node(
             except Exception:
                 _orch_affirm = None
         if incoming and not _orch_affirm:
+            try:
+                from duckclaw.workers.tool_orchestration import try_targeted_email_fast_plan
+
+                _targeted_email_fast = try_targeted_email_fast_plan(incoming)
+            except Exception:
+                _targeted_email_fast = None
+        if incoming and not _orch_affirm and not _targeted_email_fast:
             _capability_fast = _try_capability_fast_plan(
                 incoming,
                 [str(x) for x in (available_plan or []) if x],
@@ -87,6 +95,9 @@ def build_plan_node(
             )
         if _orch_affirm:
             plan_title, tasks, _inject_orch, _ov_orch = _orch_affirm
+            mercenary_spec = None
+        elif _targeted_email_fast:
+            plan_title, tasks, _inject_email, _ov_email = _targeted_email_fast
             mercenary_spec = None
         elif _capability_fast:
             plan_title, tasks, _inject_fast, _ov_fast = _capability_fast
@@ -122,6 +133,9 @@ def build_plan_node(
             override_worker = _ov_orch
             planned = _inject_orch
             planned_final = _inject_orch
+        elif _targeted_email_fast:
+            planned = _inject_email
+            planned_final = _inject_email
         elif _capability_fast:
             if _ov_fast and _ov_fast in (available_plan or []):
                 assigned = _ov_fast
@@ -139,7 +153,13 @@ def build_plan_node(
         _max_plan = int(state.get("plan_max_attempts") or _initial_replan_state()["plan_max_attempts"])
         planned_final = _planned_task_with_replan_suffix(planned_final, _pa_plan, _max_plan)
 
-        if coordinator_id and delegation_pool and not _orch_affirm and not _capability_fast:
+        if (
+            coordinator_id
+            and delegation_pool
+            and not _orch_affirm
+            and not _targeted_email_fast
+            and not _capability_fast
+        ):
             assigned = _resolve_orchestrator_delegate(
                 incoming,
                 delegation_pool,

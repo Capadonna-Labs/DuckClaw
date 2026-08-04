@@ -70,7 +70,7 @@ def _vlm_backend_order() -> list[str]:
 
 
 _VLM_SYSTEM_PROMPT = (
-    "Describe los datos financieros, texto o código presentes en esta imagen de forma concisa. "
+    "Describe el texto y elementos visibles en esta imagen de forma concisa. "
     "No inventes datos. "
     "Las fechas deben transcribirse exactamente como aparecen en la imagen (día/mes/año legibles). "
     "No completes el año ni el día desde memoria o patrones de entrenamiento; si la fecha no es "
@@ -1555,11 +1555,6 @@ _IMAGE_ONLY_DIRECTIVE = (
     "No preguntes qué hacer. "
     "NO invoques create_blank_document ni append_images_to_report salvo que el chat pida informe Word."
 )
-_EMAIL_DIRECTIVE = (
-    "[DIRECTIVA_CORREO] Pide correo/email. Usa Gmail MCP search_threads → get_message/get_thread. "
-    "NO uses search_corpus (Workspace) ni extract_document_text en .png/.jpg. "
-    "Si VLM no describe la captura, busca is:inbox newer_than:1d o pide remitente/asunto."
-)
 
 
 def first_user_line_from_enriched_message(enriched: str) -> str:
@@ -1645,6 +1640,11 @@ async def enrich_message_with_admin_images(
 
     if run_vlm:
         caption = base or "Analiza esta imagen."
+        if _email_directive:
+            caption = (
+                f"{caption}\n"
+                "Identifica remitente (nombre o email) y asunto del correo visible en la captura."
+            ).strip()
         try:
             if len(decoded) == 1:
                 mt, raw = decoded[0]
@@ -1679,11 +1679,13 @@ async def enrich_message_with_admin_images(
         )
     if image_only and saved_paths:
         blocks.append(_IMAGE_ONLY_DIRECTIVE)
-    if _email_directive:
-        blocks.append(_EMAIL_DIRECTIVE)
 
     parts = [p for p in [base, *blocks] if p]
     enriched = "\n\n".join(parts).strip()
+    if _email_directive:
+        from duckclaw.workers.tool_orchestration import format_email_directive
+
+        enriched = enriched + "\n\n" + format_email_directive(enriched)
     return enriched
 
 

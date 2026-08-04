@@ -508,6 +508,169 @@ def incoming_has_email_intent(text: str) -> bool:
     return bool(_EMAIL_INTENT_RE.search(t))
 
 
+def incoming_has_email_screenshot(text: str) -> bool:
+    """Email intent plus an attached screenshot (VLM ok or failed)."""
+    t = text or ""
+    if not incoming_has_email_intent(t):
+        return False
+    markers = (
+        "[VLM_CONTEXT",
+        "Contexto visual adjunto:",
+        "[IMAGENES_ADJUNTAS]",
+        "visión (VLM) no disponible",
+        "visión (VLM) falló",
+    )
+    return any(m in t for m in markers)
+
+
+def _vlm_unavailable(text: str) -> bool:
+    t = text or ""
+    return "visión (VLM) no disponible" in t or "visión (VLM) falló" in t
+
+
+def _strip_vlm_markdown_noise(value: str) -> str:
+    return re.sub(r"\*+", "", (value or "")).strip()
+
+
+def _extract_vlm_visual_context(text: str) -> str:
+    m = re.search(
+        r"Contexto visual adjunto:\s*(.+?)(?:\n\[VLM_CONTEXT|\n\[IMAGENES|\n\[DIRECTIVA|\Z)",
+        text or "",
+        re.S | re.I,
+    )
+    return m.group(1).strip() if m else ""
+
+
+def _gmail_from_clause(sender: str) -> str:
+    val = _strip_vlm_markdown_noise(sender.strip().strip("\"'"))
+    if not val:
+        return ""
+    m = re.search(r"[\w.+-]+@[\w.-]+\.\w+", val)
+    if m:
+        return f"from:{m.group(0)}"
+    return f'from:"{val}"'
+
+
+def build_gmail_targeted_query(text: str) -> str | None:
+    """Build Gmail query from VLM/caption text; generic labels only."""
+    combined = text or ""
+    ctx = _extract_vlm_visual_context(combined)
+    scan = ctx or combined
+    if not ctx and not incoming_has_email_intent(combined):
+        return None
+    parts: list[str] = []
+
+    for pat in (
+        r'(?:remitente|de|from)[:\s]+["\']([^"\']+)["\']',
+        r"(?:remitente|de|from)[:\s]+([^\n.]{2,120}?)(?:\n|$|\.)",
+    ):
+        m = re.search(pat, scan, re.I)
+        if m:
+            clause = _gmail_from_clause(m.group(1))
+            if clause:
+                parts.append(clause)
+            break
+
+    if not parts:
+        m = re.search(r"[\w.+-]+@[\w.-]+\.\w+", scan)
+        if m:
+            parts.append(f"from:{m.group(0)}")
+
+    for pat in (
+        r'(?:asunto|subject)[:\s]+["\']([^"\']+)["\']',
+        r"(?:asunto|subject)[:\s]+([^\n.]{2,200}?)(?:\n|$|\.)",
+        r'asunto\s+["\']([^"\']+)["\']',
+        r'(?:asunto|subject|t[ií]tulo)\s+(?:es|:)\s+["\']?([^"\'\n.]{5,200})',
+    ):
+        m = re.search(pat, scan, re.I)
+        if m:
+            subj = _strip_vlm_markdown_noise(m.group(1).strip().strip("\"'"))
+            if subj:
+                parts.append(f'subject:"{subj}"')
+            break
+
+    if parts:
+        return " ".join(parts)
+    return None
+
+
+def format_email_directive(enriched_text: str) -> str:
+    """Directive for single-email fetch via Gmail MCP."""
+    q = build_gmail_targeted_query(enriched_text)
+    has_vlm = "Contexto visual adjunto:" in (enriched_text or "")
+    has_screenshot = incoming_has_email_screenshot(enriched_text)
+    vlm_down = _vlm_unavailable(enriched_text)
+    base = (
+        "[DIRECTIVA_CORREO] Pide correo/email concreto. "
+        "Usa Gmail MCP search_threads → get_message/get_thread. "
+        "NO uses search_corpus (Workspace) ni extract_document_text en .png/.jpg. "
+        "NO escanees toda la bandeja (prohibido is:inbox newer_than salvo que el usuario pida inbox)."
+    )
+    if has_vlm:
+        if q:
+            directive = (
+                f"{base} Contexto visual identifica un correo: "
+                f"search_threads con query `{q}` → get_message/get_thread del primer hit."
+            )
+        else:
+            directive = (
+                f"{base} Extrae remitente/asunto del Contexto visual adjunto y "
+                "usa search_threads con from:/subject: acotados → get_message/get_thread."
+            )
+    elif has_screenshot and vlm_down:
+        directive = (
+            f"{base} Usuario adjuntó captura de UN correo pero VLM no está disponible. "
+            "NO hagas resumen de bandeja. Pregunta remitente/asunto visible en la captura "
+            "o espera a que visión funcione; luego search_threads acotado → get_message/get_thread."
+        )
+    elif has_screenshot:
+        directive = (
+            f"{base} Usuario adjuntó captura de UN correo. "
+            "Usa remitente/asunto visibles → search_threads acotado → get_message/get_thread."
+        )
+    else:
+        directive = (
+            f"{base} Si no tienes remitente/asunto, pregunta al usuario o "
+            "busca is:inbox newer_than:1d."
+        )
+    return directive
+
+
+def try_targeted_email_fast_plan(
+    incoming: str,
+) -> tuple[str, list[str], str, str] | None:
+    """Manager fast path: screenshot + email intent → one email, not inbox scan."""
+    text = (incoming or "").strip()
+    if not incoming_has_email_screenshot(text):
+        return None
+    q = build_gmail_targeted_query(text)
+    vlm_down = _vlm_unavailable(text)
+    title = "Buscar correo específico e insights"
+    if vlm_down:
+        tasks = [
+            "NO escanees bandeja ni resumas inbox",
+            "VLM no disponible: pide remitente/asunto del correo en la captura al usuario",
+            "Con from:/subject: confirmados → search_threads acotado → get_message/get_thread → insights",
+        ]
+    elif q:
+        tasks = [
+            f"Gmail search_threads con query acotada `{q}`",
+            "get_message o get_thread del primer resultado",
+            "Extraer insights del contenido de ese correo",
+        ]
+    else:
+        tasks = [
+            "Gmail search_threads con from:/subject: del Contexto visual",
+            "get_message o get_thread del primer resultado",
+            "Extraer insights del contenido de ese correo",
+        ]
+    guard = (
+        "[EMAIL_SCREENSHOT] Usuario adjuntó captura de UN correo. "
+        "Prohibido resumen de bandeja/inbox. Solo ese correo.\n\n"
+    )
+    return title, tasks, guard + text, ""
+
+
 def find_gmail_mcp_search_tool(tools_by_name: dict[str, Any]) -> str | None:
     """Resolve bound Gmail MCP ``search_threads`` tool name (connector id varies)."""
     candidates = [n for n in tools_by_name if n.endswith("__search_threads")]

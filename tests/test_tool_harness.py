@@ -18,6 +18,15 @@ def test_classify_risk_tiers() -> None:
     assert classify_tool_risk("run_sandbox") == "destructive"
 
 
+def test_sandbox_toggle_bypasses_harness_for_container_tools() -> None:
+    from duckclaw.workers.tool_harness import sandbox_toggle_bypasses_harness
+
+    assert sandbox_toggle_bypasses_harness("run_browser_sandbox", sandbox_enabled=True) is True
+    assert sandbox_toggle_bypasses_harness("execute_sandbox_script", sandbox_enabled=True) is True
+    assert sandbox_toggle_bypasses_harness("run_browser_sandbox", sandbox_enabled=False) is False
+    assert sandbox_toggle_bypasses_harness("delete_output_document", sandbox_enabled=True) is False
+
+
 def test_approval_blocks_only_destructive() -> None:
     from duckclaw.workers.tool_harness import approval_blocks_execution
 

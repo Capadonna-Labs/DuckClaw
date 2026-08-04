@@ -855,15 +855,17 @@ export default function PlaygroundPage() {
         )}
       </div>
 
-      <button
-        type="button"
-        onClick={() => setPanelOpen((open) => !open)}
-        className="hidden lg:flex fixed right-6 top-24 z-20 items-center justify-center px-2 py-3 rounded-l-2xl bg-white dark:bg-dark-surface border border-r-0 dark:border-dark-border shadow-md text-gov-blue-700 hover:bg-gov-gray-50 dark:hover:bg-dark-bg"
-        aria-label={panelToggleTitle}
-        title={panelToggleTitle}
-      >
-        {panelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />}
-      </button>
+      {!panelOpen ? (
+        <button
+          type="button"
+          onClick={() => setPanelOpen(true)}
+          className="hidden lg:flex fixed right-0 top-24 z-20 items-center justify-center px-2 py-3 rounded-l-2xl bg-white dark:bg-dark-surface border border-r-0 dark:border-dark-border shadow-md text-gov-blue-700 hover:bg-gov-gray-50 dark:hover:bg-dark-bg"
+          aria-label={panelToggleTitle}
+          title={panelToggleTitle}
+        >
+          <PanelRightOpen size={18} />
+        </button>
+      ) : null}
 
       {panelOpen && (
         <div
@@ -907,7 +909,15 @@ export default function PlaygroundPage() {
         <div className="flex h-full min-h-0 w-80 min-w-0 flex-col overflow-hidden rounded-2xl border border-gov-gray-200/90 bg-gov-gray-50/40 p-3 dark:border-dark-border dark:bg-dark-bg/60">
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gov-gray-200/80 pb-3 dark:border-dark-border">
             <h2 className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">Run settings</h2>
-            <Settings2 size={15} className="text-gov-gray-400 dark:text-dark-muted" aria-hidden />
+            <button
+              type="button"
+              onClick={() => setPanelOpen(false)}
+              className="rounded-lg p-1.5 text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+              aria-label={panelToggleTitle}
+              title={panelToggleTitle}
+            >
+              <PanelRightClose size={16} aria-hidden />
+            </button>
           </div>
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
             {runSettingsPanel}

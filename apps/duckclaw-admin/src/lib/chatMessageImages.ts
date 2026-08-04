@@ -44,27 +44,39 @@ export function payloadImagesFromPreviews(
   return out;
 }
 
-export function artifactIdFromMessageText(text: string): string | null {
+export function artifactIdsFromMessageText(text: string): string[] {
   const trimmed = (text || '').trim();
-  if (!trimmed) return null;
-  return parseArtifactIdFromPath(trimmed) || trimmed.match(ARTIFACT_ID_RE)?.[1] || null;
+  if (!trimmed) return [];
+  const ids: string[] = [];
+  const re = /(?:artifact[_-]?id\s*[=:]\s*|visual_artifact_id\s*[=:]\s*)([0-9a-f-]{36})/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(trimmed)) !== null) {
+    const aid = match[1];
+    if (aid && !ids.includes(aid)) ids.push(aid);
+  }
+  const pathId = parseArtifactIdFromPath(trimmed);
+  if (pathId && !ids.includes(pathId)) ids.push(pathId);
+  return ids;
+}
+
+export function artifactIdFromMessageText(text: string): string | null {
+  const ids = artifactIdsFromMessageText(text);
+  return ids[0] ?? null;
 }
 
 export function artifactPreviewFromMessage(
   text: string,
   tenantId: string
 ): ChatImagePreview[] | undefined {
-  const aid = artifactIdFromMessageText(text);
-  if (!aid) return undefined;
+  const aids = artifactIdsFromMessageText(text);
+  if (!aids.length) return undefined;
   const tid = (tenantId || 'default').trim() || 'default';
-  return [
-    {
-      url: artifactPreviewApiPath(tid, aid),
-      name: `${aid}.png`,
-      artifactId: aid,
-      tenantId: tid,
-    },
-  ];
+  return aids.map((aid) => ({
+    url: artifactPreviewApiPath(tid, aid),
+    name: `${aid}.png`,
+    artifactId: aid,
+    tenantId: tid,
+  }));
 }
 
 /** Reaplica miniaturas locales cuando el historial Redis no trae binarios/metadata. */

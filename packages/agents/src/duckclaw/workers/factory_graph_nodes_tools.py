@@ -39,6 +39,7 @@ from duckclaw.workers.tool_harness import (
     classify_tool_risk,
     content_indicates_failure,
     destructive_gate_envelope,
+    sandbox_toggle_bypasses_harness,
     log_harness_metric,
     normalize_tool_failure,
     record_tool_failure,
@@ -162,6 +163,8 @@ def make_tools_node(ctx: WorkerGraphContext):
                 return circuit_block_envelope(
                     tool_name, int(_fail_counts.get(tool_name) or _max_fail)
                 )
+            if sandbox_toggle_bypasses_harness(tool_name, sandbox_enabled=sandbox_enabled):
+                return None
             risk = classify_tool_risk(tool_name)
             if approval_blocks_execution(risk, _approval_mode):  # type: ignore[arg-type]
                 _harness_stats["risk_denied"] += 1

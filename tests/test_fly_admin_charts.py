@@ -71,6 +71,24 @@ def test_admin_visual_fields_fly_chart_artifact_ids() -> None:
     assert out.get("artifact_tenant_id") == "default"
 
 
+def test_embed_visual_artifact_markers_for_history() -> None:
+    from core.chat_visual_artifacts import embed_visual_artifact_markers_for_history
+
+    out = embed_visual_artifact_markers_for_history(
+        "Report ready",
+        {
+            "fly_chart_artifact_ids": [
+                "440754b9-d489-40cc-872f-4938faf89768",
+                "2ab40842-bc48-4497-a79a-60f54f92ddf0",
+            ],
+            "fly_chart_names": ["chart_a.png", "chart_b.png"],
+        },
+    )
+    assert "visual_artifact_id: 440754b9-d489-40cc-872f-4938faf89768" in out
+    assert "visual_artifact_id: 2ab40842-bc48-4497-a79a-60f54f92ddf0" in out
+    assert "Report ready" in out
+
+
 def test_persist_admin_fly_charts_writes_png(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from main import _persist_admin_fly_charts
 

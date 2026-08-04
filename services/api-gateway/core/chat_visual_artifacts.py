@@ -53,6 +53,49 @@ def persist_admin_fly_charts(tenant_id: str, fly_charts_b64: list[str]) -> list[
     return ids
 
 
+def collect_visual_artifact_ids_for_history(result: dict[str, Any]) -> list[str]:
+    """Artifact UUIDs to embed in Redis history for admin chart reload."""
+    if not isinstance(result, dict):
+        return []
+    seen: set[str] = set()
+    ordered: list[str] = []
+    fly_raw = result.get("fly_chart_artifact_ids")
+    if isinstance(fly_raw, list):
+        for raw in fly_raw:
+            aid = str(raw or "").strip()
+            if aid and aid not in seen:
+                seen.add(aid)
+                ordered.append(aid)
+    for key in ("artifact_id", "visual_artifact_id"):
+        aid = str(result.get(key) or "").strip()
+        if aid and aid not in seen:
+            seen.add(aid)
+            ordered.append(aid)
+    return ordered
+
+
+def embed_visual_artifact_markers_for_history(
+    text: str,
+    result: dict[str, Any],
+    *,
+    chart_names: list[str] | None = None,
+) -> str:
+    """
+    Append ``visual_artifact_id`` lines so admin UI can rebuild chart previews from Redis history.
+    """
+    aids = collect_visual_artifact_ids_for_history(result)
+    if not aids:
+        return text or ""
+    names = [str(n or "").strip() for n in (chart_names or []) if str(n or "").strip()]
+    lines: list[str] = []
+    for i, aid in enumerate(aids):
+        suffix = f"  # {names[i]}" if i < len(names) else ""
+        lines.append(f"visual_artifact_id: {aid}{suffix}")
+    block = "\n".join(lines)
+    base = (text or "").rstrip()
+    return f"{base}\n\n{block}" if base else block
+
+
 def admin_visual_fields_from_invoke_result(
     session_id: str,
     result: dict[str, Any],

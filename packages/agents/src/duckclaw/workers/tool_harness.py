@@ -15,6 +15,11 @@ DEFAULT_MAX_FAILURES_PER_TOOL = 2
 DEFAULT_MAX_TOOL_RESULT_CHARS = 12_000
 DEFAULT_APPROVAL_MODE: ApprovalMode = "suggest"
 
+# Sandbox tools are destructive tier but admin playground toggle = explicit consent.
+_SANDBOX_DESTRUCTIVE_TOOLS = frozenset(
+    {"run_sandbox", "run_browser_sandbox", "execute_sandbox_script"}
+)
+
 _DESTRUCTIVE_EXACT = frozenset(
     {
         "delete_report_instance",
@@ -228,6 +233,11 @@ def content_indicates_failure(content: str) -> bool:
     if isinstance(payload, dict) and payload.get("ok") is False:
         return True
     return False
+
+
+def sandbox_toggle_bypasses_harness(tool_name: str, *, sandbox_enabled: bool) -> bool:
+    """Admin activó sandbox en sesión → no exigir HITL harness para tools de contenedor."""
+    return bool(sandbox_enabled) and (tool_name or "").strip() in _SANDBOX_DESTRUCTIVE_TOOLS
 
 
 def approval_blocks_execution(risk: RiskTier, approval_mode: ApprovalMode) -> bool:

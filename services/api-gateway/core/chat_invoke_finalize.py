@@ -18,7 +18,10 @@ from core.chat_reply_format import (
     strip_markdown_bold,
     truncate_log,
 )
-from core.chat_visual_artifacts import admin_visual_fields_from_invoke_result
+from core.chat_visual_artifacts import (
+    admin_visual_fields_from_invoke_result,
+    embed_visual_artifact_markers_for_history,
+)
 from core.sandbox_figure_b64 import decode_sandbox_figure_base64, decode_valid_sandbox_image_bytes
 from core.telegram_chunking import (
     TELEGRAM_SENDMESSAGE_CHAR_LIMIT,
@@ -103,6 +106,33 @@ def _loop_footer_chat_id(prepared: PreparedChatInvoke) -> str:
         return _normalize_admin_chat_id(raw)
     except Exception:
         return raw
+
+
+def _history_reply_for_storage(
+    *,
+    prepared: PreparedChatInvoke,
+    session_id: str,
+    reply_plain_for_storage: str,
+    result: dict[str, Any],
+) -> str:
+    """Embed artifact markers for admin UI history reload (fly charts, ComfyUI, etc.)."""
+    try:
+        from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+    except Exception:
+        return reply_plain_for_storage
+    if not is_admin_ui_chat_session(session_id):
+        return reply_plain_for_storage
+    names_raw = result.get("fly_chart_names")
+    chart_names = (
+        [str(n).strip() for n in names_raw if str(n).strip()]
+        if isinstance(names_raw, list)
+        else None
+    )
+    return embed_visual_artifact_markers_for_history(
+        reply_plain_for_storage,
+        result,
+        chart_names=chart_names,
+    )
 
 
 async def finalize_chat_response(
@@ -281,7 +311,12 @@ async def finalize_chat_response(
     await persist_chat_history(
         prepared=prepared,
         redis_client=redis_client,
-        reply_plain_for_storage=reply_plain_for_storage,
+        reply_plain_for_storage=_history_reply_for_storage(
+            prepared=prepared,
+            session_id=session_id,
+            reply_plain_for_storage=reply_plain_for_storage,
+            result=result if isinstance(result, dict) else {},
+        ),
         effective_worker_id=effective_worker_id,
         history_for_model=history_for_model,
         message=message,

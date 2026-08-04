@@ -43,6 +43,17 @@ const history = historyToChatMessages(
 );
 assert.equal(history[0]?.imagePreviews?.[0]?.artifactId, aid);
 
+const historyMulti = historyToChatMessages(
+  [
+    {
+      role: 'assistant',
+      content: `Report ready\nvisual_artifact_id: ${aid}\nvisual_artifact_id: 2ab40842-bc48-4497-a79a-60f54f92ddf0`,
+    },
+  ],
+  'default'
+);
+assert.equal(historyMulti[0]?.imagePreviews?.length, 2);
+
 const server: ChatMsg[] = [{ role: 'user', text: 'foto' }];
 const prev: ChatMsg[] = [
   {

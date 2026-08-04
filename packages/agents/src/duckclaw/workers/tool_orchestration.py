@@ -229,6 +229,20 @@ def parse_tool_orchestration_from_spec(spec: Any) -> ToolOrchestration | None:
     return parse_tool_orchestration(spec)
 
 
+def orchestration_intent_text(user_incoming: str | None, incoming: str | None) -> str:
+    """
+    Manifest intent matching text for worker turns.
+
+    ``tool_surface_intent_text`` prefers the short user utterance; orchestration
+    also needs the manager planned task (same signal as replan ``combined``).
+    """
+    user = (user_incoming or "").strip()
+    inc = (incoming or "").strip()
+    if user and inc and user != inc:
+        return f"{user}\n{inc}"
+    return user or inc
+
+
 def match_intent(incoming: str, orch: ToolOrchestration) -> str | None:
     text = (incoming or "").strip()
     if not text or "[system_directive:" in text.lower():
@@ -270,6 +284,21 @@ def _tools_since(messages: list[Any], from_idx: int) -> list[str]:
             if n:
                 names.append(n)
     return names
+
+
+def _chain_prereqs_met(
+    prereqs: list[str],
+    ran: set[str],
+    tools_by_name: dict[str, Any],
+) -> bool:
+    """True when chain ``after_tools`` gate is satisfied for this bind surface."""
+    if not prereqs:
+        return False
+    bindable = [p for p in prereqs if p in tools_by_name]
+    if not bindable:
+        # ponytail: prereq tool not registered → do not block force_next once turn started
+        return bool(ran)
+    return all(p in ran for p in bindable)
 
 
 def _tool_called_since(messages: list[Any], from_idx: int, tool_name: str) -> bool:
@@ -358,17 +387,51 @@ def chain_after_tool(
     if not intent:
         return None
     lh = _last_human_index(messages)
-    ran = _tools_since(messages, lh)
+    ran = set(_tools_since(messages, lh))
     if not ran:
         return None
     for chain in orch.tool_chains:
         if intent not in chain.when_intents:
             continue
         prereqs = list(chain.after_tools)
-        if not prereqs or not all(tool in ran for tool in prereqs):
+        if not _chain_prereqs_met(prereqs, ran, tools_by_name):
             continue
         candidates = [chain.force_next, *list(chain.force_next_alternates or ())]
-        forced = _first_bindable_tool(candidates, tools_by_name, set(ran))
+        forced = _first_bindable_tool(candidates, tools_by_name, ran)
+        if forced:
+            return forced
+    return None
+
+
+def _force_replan_require_tool_when_unmet(
+    orch: ToolOrchestration,
+    incoming: str,
+    messages: list[Any],
+    tools_by_name: dict[str, Any],
+) -> str | None:
+    """
+    Manifest ``replan.rules[]`` with no ``after_tools``: force ``require_tool``
+    in-worker once the turn already invoked at least one tool.
+    """
+    intent = match_intent(incoming, orch)
+    if not intent:
+        return None
+    lh = _last_human_index(messages)
+    ran = set(_tools_since(messages, lh))
+    if not ran:
+        return None
+    for rule in orch.replan_rules:
+        if rule.when_intent != intent:
+            continue
+        if rule.after_tools:
+            continue
+        required = (rule.require_tool or "").strip()
+        if not required or required in ran:
+            continue
+        if rule.unless_tools and ran.intersection(rule.unless_tools):
+            continue
+        candidates = [required, *list(rule.require_tool_alternates or ())]
+        forced = _first_bindable_tool(candidates, tools_by_name, ran)
         if forced:
             return forced
     return None
@@ -481,6 +544,12 @@ def resolve_forced_tool(
     intent_first = _resolve_intent_force_first_tool(orch, incoming, messages, tools_by_name)
     if intent_first:
         return intent_first
+
+    replan_immediate = _force_replan_require_tool_when_unmet(
+        orch, incoming, messages, tools_by_name
+    )
+    if replan_immediate:
+        return replan_immediate
 
     affirm_pending = _force_tool_on_affirm_pending(orch, incoming, messages, tools_by_name)
     if affirm_pending and _sandbox_affirm_prereqs_met(

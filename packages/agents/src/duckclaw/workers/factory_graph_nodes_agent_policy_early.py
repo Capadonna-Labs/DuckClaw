@@ -140,11 +140,16 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
 
                 _orch = None
                 _orch_forced: str | None = None
-                _orch_incoming = (state.get("user_incoming") or "").strip() or incoming
                 try:
                     from duckclaw.workers.tool_orchestration import (
+                        orchestration_intent_text,
                         parse_tool_orchestration,
                         resolve_forced_tool,
+                    )
+
+                    _orch_incoming = orchestration_intent_text(
+                        state.get("user_incoming"),
+                        incoming,
                     )
 
                     _orch = parse_tool_orchestration(spec)

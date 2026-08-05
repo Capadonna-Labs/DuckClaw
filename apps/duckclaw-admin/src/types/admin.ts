@@ -61,6 +61,7 @@ export interface TemplateDetail {
   id: string;
   source?: 'catalog' | 'filesystem' | string;
   read_only?: boolean;
+  a2a_discoverable?: boolean;
   display_name?: string;
   name?: string;
   worker_uid?: string;

@@ -9,11 +9,12 @@ import { PageShell } from '@/components/admin/PageShell';
 import { useAuthStore } from '@/store/authStore';
 import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 import { CreateAgentDialog } from '@/components/templates/CreateAgentDialog';
+import { ImportSpawnPackageDialog } from '@/components/templates/ImportSpawnPackageDialog';
 import { isAdminRole } from '@/lib/roles';
 import { paginateItems } from '@/lib/pagination';
 import { agentCardSubtitle, agentMetadata, agentWorkerIcon } from '@/lib/agentCards';
 import { filterVisibleTemplates } from '@/lib/templateVisibility';
-import { ChevronLeft, ChevronRight, Plus, Power, Trash2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Power, Trash2, Upload } from 'lucide-react';
 
 const AGENTS_PAGE_SIZE = 8;
 
@@ -28,6 +29,7 @@ export default function TemplatesPage() {
   const [deleting, setDeleting] = useState(false);
   const [page, setPage] = useState(1);
   const [createOpen, setCreateOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
 
   const reload = useCallback(() => {
     adminService
@@ -95,18 +97,31 @@ export default function TemplatesPage() {
                 : 'Agentes disponibles para conversar o usar como base.'}
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="inline-flex items-center gap-2 rounded-lg bg-gov-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-gov-blue-800"
-          >
-            <Plus size={16} />
-            Nuevo agente
-          </button>
+          <div className="flex flex-wrap gap-2">
+            {canWrite ? (
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                className="inline-flex items-center gap-2 rounded-lg border border-gov-gray-300 px-4 py-2 text-sm font-semibold dark:border-dark-border"
+              >
+                <Upload size={16} />
+                Importar paquete
+              </button>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => setCreateOpen(true)}
+              className="inline-flex items-center gap-2 rounded-lg bg-gov-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-gov-blue-800"
+            >
+              <Plus size={16} />
+              Nuevo agente
+            </button>
+          </div>
         </div>
       </header>
 
       <CreateAgentDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={reload} />
+      <ImportSpawnPackageDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={reload} />
 
       {error ? (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">

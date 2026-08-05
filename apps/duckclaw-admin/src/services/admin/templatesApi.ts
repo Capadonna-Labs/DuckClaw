@@ -237,4 +237,75 @@ export const templatesApi = {
     adminFetch<{ ok: boolean; action: string }>(`/templates/${encodeURIComponent(id)}/reactivate`, {
       method: 'POST',
     }),
+  fetchAgentCard: (workerId: string) =>
+    adminFetch<Record<string, unknown>>(`/agents/${encodeURIComponent(workerId)}/agent-card`),
+  setA2aDiscoverable: (workerId: string, discoverable: boolean) =>
+    adminFetch<{ ok: boolean; a2a_discoverable: boolean }>(
+      `/agents/${encodeURIComponent(workerId)}/a2a-discoverable`,
+      { method: 'PATCH', body: JSON.stringify({ discoverable }) }
+    ),
+  previewSpawnPackage: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch('/api/admin/agents/spawn-package/preview', {
+      method: 'POST',
+      body: form,
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(String((body as { detail?: string }).detail || res.statusText));
+    }
+    return res.json() as Promise<{ ok: boolean; preview: SpawnPackagePreview; manifest_id?: string }>;
+  },
+  importSpawnPackage: async (
+    file: File,
+    options: { confirm_high_risk?: boolean; worker_id_override?: string }
+  ) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('options_json', JSON.stringify(options));
+    const res = await fetch('/api/admin/agents/spawn-package/import', {
+      method: 'POST',
+      body: form,
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const detail = (body as { detail?: string | { detail?: string } }).detail;
+      const msg = typeof detail === 'string' ? detail : detail?.detail || res.statusText;
+      throw new Error(msg);
+    }
+    return res.json();
+  },
+  downloadSpawnPackage: async (workerId: string) => {
+    const res = await fetch(
+      `/api/admin/agents/${encodeURIComponent(workerId)}/spawn-package`,
+      { method: 'GET', credentials: 'include' }
+    );
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(String((body as { detail?: string }).detail || res.statusText));
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('content-disposition') || '';
+    const match = disposition.match(/filename="?([^";]+)"?/);
+    const filename = match?.[1] || `${workerId}-spawn-package.zip`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
 };
+
+export interface SpawnPackagePreview {
+  worker_id: string;
+  required_tools: string[];
+  available_tools: string[];
+  missing_tools: string[];
+  high_risk_findings: string[];
+  import_blocked_until_confirm: boolean;
+  secret_findings: string[];
+}

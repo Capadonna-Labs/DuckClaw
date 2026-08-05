@@ -1536,7 +1536,16 @@ _MIGRATION_HOOKS = {
     1: _migration_001_baseline_hooks,
 }
 
+_M004_A2A_DISCOVERABLE = [
+    """
+    ALTER TABLE main.admin_worker_catalog
+    ADD COLUMN IF NOT EXISTS a2a_discoverable BOOLEAN DEFAULT false
+    """,
+]
+
+
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
     (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),
+    (36, "worker_a2a_discoverable", _M004_A2A_DISCOVERABLE),
 ]

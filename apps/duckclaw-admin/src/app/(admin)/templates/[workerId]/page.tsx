@@ -17,6 +17,7 @@ import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
 import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBanner';
 import { WorkerDisplayNameEditor } from '@/components/templates/WorkerDisplayNameEditor';
+import { WorkerSpawnActions } from '@/components/templates/WorkerSpawnActions';
 import {
   WorkerEditorSectionTabs,
   defaultFileForSection,
@@ -91,6 +92,7 @@ export default function TemplateEditorPage() {
     null
   );
   const [deletingContext, setDeletingContext] = useState(false);
+  const [a2aDiscoverable, setA2aDiscoverable] = useState(false);
 
   const markdownFile = isMarkdownPath(tab);
   const isCatalogWorker = detail?.source === 'catalog' || detail?.read_only === true;
@@ -138,6 +140,7 @@ export default function TemplateEditorPage() {
           setTab(preferred);
           setContent(enriched.contents[preferred] ?? '');
           setManifestYaml(enriched.contents[MANIFEST_PATH] ?? '');
+          setA2aDiscoverable(Boolean(enriched.a2a_discoverable));
         })
         .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
     },
@@ -353,6 +356,12 @@ export default function TemplateEditorPage() {
             )}
           </div>
         </div>
+        <WorkerSpawnActions
+          workerId={workerId}
+          a2aDiscoverable={a2aDiscoverable}
+          canWrite={canEditFiles && isCatalogWorker}
+          onDiscoverableChange={setA2aDiscoverable}
+        />
       </header>
 
       {showCreatedBanner && workerId && (

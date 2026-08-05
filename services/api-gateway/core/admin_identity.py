@@ -205,6 +205,7 @@ def list_templates_payload(
                 "display_name": str(row.get("display_name") or row.get("name") or wid),
                 "source": str(row.get("source") or "catalog"),
                 "visibility": str(row.get("visibility") or "private"),
+                "a2a_discoverable": bool(row.get("a2a_discoverable")),
                 "source_template_id": str(row.get("source_template_id") or "default"),
                 "status": str(row.get("status") or "active"),
                 "active": bool(row.get("active", True)),
@@ -252,6 +253,7 @@ def catalog_template_detail(db: Any, *, actor_email: str, worker_id: str) -> dic
         "files": files,
         "contents": contents,
         "contexts": contexts,
+        "a2a_discoverable": bool(worker.get("a2a_discoverable")),
     }
 
 

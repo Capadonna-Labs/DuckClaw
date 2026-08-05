@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter
 
 from routers.admin_domains.access_management import router as access_management_router
+from routers.admin_domains.agent_spawn import router as agent_spawn_router
 from routers.admin_domains.admin_common import (
     actor_from_header as _actor_from_header,
     admin_audit as _admin_audit,
@@ -82,6 +83,7 @@ from routers.admin_domains.write_tasks import router as write_tasks_router
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 router.include_router(access_management_router)
+router.include_router(agent_spawn_router)
 router.include_router(audit_router)
 router.include_router(auth_router)
 router.include_router(catalog_meta_router)

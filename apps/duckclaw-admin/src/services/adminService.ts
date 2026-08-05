@@ -59,6 +59,7 @@ export type {
   IntegrationGapPayload,
   WorkerMcpGrantRow,
   WorkerMcpGrantsPayload,
+  SpawnPackagePreview,
 } from './admin/templatesApi';
 export type {
   DuckdbTableCatalog,

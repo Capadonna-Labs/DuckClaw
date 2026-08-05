@@ -86,6 +86,12 @@ app.add_middleware(
 register_gateway_middleware(app)
 
 app.include_router(health_router)
+try:
+    from routers.a2a_discovery import router as a2a_discovery_router
+
+    app.include_router(a2a_discovery_router)
+except ImportError as _a2a_err:
+    _gateway_log.warning("A2A discovery router omitted: %s", _a2a_err)
 app.include_router(homeostasis_router)
 app.include_router(agent_routes_router)
 app.include_router(agent_chat_router)

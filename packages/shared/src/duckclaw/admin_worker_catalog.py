@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS main.admin_worker_catalog (
     source_kind VARCHAR DEFAULT 'runtime',
     source_template_id VARCHAR DEFAULT 'default',
     visibility VARCHAR DEFAULT 'private',
+    a2a_discoverable BOOLEAN DEFAULT false,
     status VARCHAR DEFAULT 'active',
     active BOOLEAN DEFAULT true,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -163,6 +164,11 @@ CREATE INDEX IF NOT EXISTS idx_worker_runtime_policies_lookup
     ON main.worker_runtime_policies (worker_uid, active, policy_scope, policy_key);
 """
 
+_A2A_DISCOVERABLE_ALTER = (
+    "ALTER TABLE main.admin_worker_catalog "
+    "ADD COLUMN IF NOT EXISTS a2a_discoverable BOOLEAN DEFAULT false"
+)
+
 
 def ensure_admin_worker_catalog_schema(db: Any) -> None:
     if getattr(db, "_read_only", False):
@@ -182,6 +188,7 @@ def ensure_admin_worker_catalog_schema(db: Any) -> None:
             sql = stmt.strip()
             if sql:
                 db.execute(sql)
+    db.execute(_A2A_DISCOVERABLE_ALTER)
     ensure_skill_catalog_schema(db)
 
 
@@ -228,6 +235,7 @@ def _worker_row_to_public(row: dict[str, Any]) -> dict[str, Any]:
         "source_kind": str(row.get("source_kind") or "runtime"),
         "source_template_id": str(row.get("source_template_id") or "default"),
         "visibility": str(row.get("visibility") or "private"),
+        "a2a_discoverable": _coerce_bool(row.get("a2a_discoverable"), False),
         "status": str(row.get("status") or "active"),
         "active": _coerce_bool(row.get("active"), True),
         "created_at": str(row.get("created_at") or ""),
@@ -240,7 +248,7 @@ def get_worker_by_uid(db: Any, worker_uid: str) -> dict[str, str] | None:
     row = _first_row(
         db,
         "SELECT worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, "
-        "source_template_id, visibility, status, active, created_at, updated_at "
+        "source_template_id, visibility, a2a_discoverable, status, active, created_at, updated_at "
         f"FROM main.admin_worker_catalog WHERE worker_uid = '{_sql_lit(worker_uid, 64)}' LIMIT 1",
     )
     return _worker_row_to_public(row) if row else None
@@ -251,7 +259,7 @@ def get_worker_by_tenant_worker_id(db: Any, *, tenant_id: str, worker_id: str) -
     row = _first_row(
         db,
         "SELECT worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, "
-        "source_template_id, visibility, status, active, created_at, updated_at "
+        "source_template_id, visibility, a2a_discoverable, status, active, created_at, updated_at "
         "FROM main.admin_worker_catalog "
         f"WHERE tenant_id = '{_sql_lit(tenant_id, 128)}' "
         f"AND worker_id = '{_sql_lit(sanitize_catalog_worker_id(worker_id), 64)}' "
@@ -322,7 +330,7 @@ def list_visible_workers_for_actor(
     rows = _query_all_dicts(
         db,
         "SELECT DISTINCT wc.worker_uid, wc.tenant_id, wc.owner_email, wc.worker_id, wc.display_name, "
-        "wc.source_kind, wc.source_template_id, wc.visibility, wc.status, wc.active, wc.created_at, wc.updated_at "
+        "wc.source_kind, wc.source_template_id, wc.visibility, wc.a2a_discoverable, wc.status, wc.active, wc.created_at, wc.updated_at "
         "FROM main.admin_worker_catalog wc "
         "LEFT JOIN main.admin_worker_assignments wa ON wa.worker_uid = wc.worker_uid "
         f"WHERE {'1 = 1' if include_inactive else 'wc.active = true'} "
@@ -345,6 +353,7 @@ def list_visible_workers_for_actor(
                 "display_name": public["display_name"],
                 "source": "catalog",
                 "visibility": public["visibility"],
+                "a2a_discoverable": public["a2a_discoverable"],
                 "source_template_id": public["source_template_id"],
                 "status": public["status"],
                 "active": public["active"],
@@ -563,6 +572,23 @@ def get_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -
     if worker and _coerce_bool(worker.get("active"), True) and worker["owner_email"] == profile["email"]:
         return worker
     return None
+
+
+def set_worker_a2a_discoverable(
+    db: Any,
+    *,
+    worker_uid: str,
+    discoverable: bool,
+) -> None:
+    ensure_admin_worker_catalog_schema(db)
+    flag = "true" if discoverable else "false"
+    db.execute(
+        f"""
+        UPDATE main.admin_worker_catalog
+        SET a2a_discoverable = {flag}, updated_at = CURRENT_TIMESTAMP
+        WHERE worker_uid = '{_sql_lit(worker_uid, 64)}'
+        """
+    )
 
 
 def _update_context_content(db: Any, *, worker_uid: str, title: str, content_md: str) -> bool:

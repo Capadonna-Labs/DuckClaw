@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "AgentCard",
+  "type": "object",
+  "required": [
+    "name",
+    "description",
+    "supportedInterfaces",
+    "version",
+    "capabilities",
+    "defaultInputModes",
+    "defaultOutputModes",
+    "skills"
+  ],
+  "properties": {
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "supportedInterfaces": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["url", "protocolBinding", "protocolVersion"],
+        "properties": {
+          "url": { "type": "string" },
+          "protocolBinding": { "type": "string" },
+          "protocolVersion": { "type": "string" }
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "properties": {
+        "organization": { "type": "string" },
+        "url": { "type": "string" }
+      }
+    },
+    "version": { "type": "string" },
+    "capabilities": {
+      "type": "object",
+      "properties": {
+        "streaming": { "type": "boolean" },
+        "pushNotifications": { "type": "boolean" }
+      }
+    },
+    "defaultInputModes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "defaultOutputModes": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1
+    },
+    "securitySchemes": { "type": "object" },
+    "securityRequirements": { "type": "array" },
+    "skills": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "description", "tags"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "description": { "type": "string" },
+          "tags": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1
+          }
+        }
+      }
+    },
+    "signatures": { "type": "array" },
+    "iconUrl": { "type": "string" },
+    "documentationUrl": { "type": "string" }
+  },
+  "additionalProperties": true
+}

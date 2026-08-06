@@ -23,6 +23,8 @@ packs:
         - inspect_schema
         - list_tool_packs
         - unlock_tool_pack
+        - update_system_prompt
+        - update_my_system_prompt
       prefixes: []
     activation_signals: []
 
@@ -140,13 +142,11 @@ packs:
 
   - id: prompt_meta
     always: false
-    description: "Actualización del system prompt del worker."
+    description: "Propuestas de system prompt (HITL); update_system_prompt vive en core."
     members:
       exact: []
       prefixes:
         - update_worker_system_prompt
-        - update_system_prompt
-        - update_my_system_prompt
         - propose_system_prompt
     activation_signals:
       - system prompt

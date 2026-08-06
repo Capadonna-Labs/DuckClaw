@@ -45,6 +45,31 @@ def test_default_catalog_is_multi_agent_sota() -> None:
     assert enriched.packs_for_tool("mcp__notion_ws__query") == frozenset({"mcp_notion_ws"})
     assert catalog.packs_for_tool("create_blank_document") == frozenset({"reports"})
     assert catalog.packs_for_tool("list_tool_packs") == frozenset({"core"})
+    assert catalog.packs_for_tool("update_system_prompt") == frozenset({"core"})
+
+
+def test_update_system_prompt_always_bound_in_core() -> None:
+    """Platform default: every worker keeps update_system_prompt without unlock."""
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    tools = [
+        _tool("get_project_context"),
+        _tool("read_sql"),
+        _tool("list_tool_packs"),
+        _tool("update_system_prompt"),
+        _tool("update_my_system_prompt"),
+        _tool("record_operational_lesson"),
+    ]
+    result = apply_runtime_tool_packs(
+        tools,
+        spec=_spec(enabled=True),
+        intent_text="portfolio shy bonds",
+        messages=[],
+    )
+    assert "update_system_prompt" in result.bound_names
+    assert "update_my_system_prompt" in result.bound_names
+    assert "core" in result.active_packs
+    assert "prompt_meta" not in result.active_packs
 
 
 def test_exclude_orphans_hides_unmanaged_mcp_noise() -> None:

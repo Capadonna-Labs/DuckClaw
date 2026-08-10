@@ -38,6 +38,7 @@ def groq_tools_without_reddit_for_bind(tools: list[Any]) -> list[Any]:
 
 _MLX_BIND_PRIORITY_TOOL_NAMES: tuple[str, ...] = (
     "read_sql",
+    "admin_sql",
     "inspect_schema",
     "get_schema_info",
     "tavily_search",

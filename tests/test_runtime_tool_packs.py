@@ -55,6 +55,7 @@ def test_update_system_prompt_always_bound_in_core() -> None:
     tools = [
         _tool("get_project_context"),
         _tool("read_sql"),
+        _tool("admin_sql"),
         _tool("list_tool_packs"),
         _tool("update_system_prompt"),
         _tool("update_my_system_prompt"),
@@ -68,6 +69,7 @@ def test_update_system_prompt_always_bound_in_core() -> None:
     )
     assert "update_system_prompt" in result.bound_names
     assert "update_my_system_prompt" in result.bound_names
+    assert "admin_sql" in result.bound_names
     assert "core" in result.active_packs
     assert "prompt_meta" not in result.active_packs
 

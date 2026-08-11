@@ -1,9 +1,10 @@
 import type { McpConnectorPreset, McpConnectorSummary } from '@/services/adminService';
+import { trimStr } from '@/lib/utils';
 
 /** Nombre de producto para UI. Nunca meter transporte/auth en el título. */
 export function presetAdminLabel(preset: McpConnectorPreset): string {
-  const name = (preset.display_name || preset.preset_id || '').trim();
-  return name || preset.preset_id;
+  const name = trimStr(preset.display_name || preset.preset_id);
+  return name || trimStr(preset.preset_id);
 }
 
 export function presetConnectorId(preset: McpConnectorPreset): string {
@@ -22,17 +23,23 @@ export function presetUsesOAuthPkce(preset: McpConnectorPreset | undefined): boo
   return preset.metadata.oauth_pkce === true;
 }
 
+export function presetUsesAdbDevice(preset: McpConnectorPreset | undefined): boolean {
+  if (!preset) return false;
+  if (trimStr(preset.auth_kind).toLowerCase() === 'adb') return true;
+  return preset.metadata?.connection_type === 'adb_device';
+}
+
 export function connectorUsesOAuthPkce(
   connector: McpConnectorSummary,
   presetById: Record<string, McpConnectorPreset>
 ): boolean {
-  const presetId = connector.preset_id?.trim();
+  const presetId = trimStr(connector.preset_id);
   if (!presetId) return false;
   return presetUsesOAuthPkce(presetById[presetId]);
 }
 
 export function presetTransportLabel(preset: McpConnectorPreset): string {
-  const transport = (preset.transport || '').trim().toLowerCase();
+  const transport = trimStr(preset.transport).toLowerCase();
   if (transport === 'stdio') return 'Proceso local (stdio)';
   if (transport === 'streamable_http') return 'HTTP remoto (Streamable HTTP)';
   return preset.transport || '—';
@@ -40,7 +47,8 @@ export function presetTransportLabel(preset: McpConnectorPreset): string {
 
 export function presetAuthKindLabel(preset: McpConnectorPreset): string {
   if (presetUsesOAuthPkce(preset)) return 'OAuth PKCE';
-  const kind = (preset.auth_kind || 'none').trim().toLowerCase();
+  if (presetUsesAdbDevice(preset)) return 'ADB dispositivo';
+  const kind = trimStr(preset.auth_kind || 'none').toLowerCase();
   if (kind === 'bearer') return 'Token Bearer';
   if (kind === 'none') return 'Sin credenciales';
   return kind;
@@ -101,7 +109,7 @@ const GROUP_LABELS: Record<McpPresetSelectGroupId, string> = {
 };
 
 function isDatabasePreset(preset: McpConnectorPreset): boolean {
-  const id = (preset.preset_id || '').trim().toLowerCase();
+  const id = trimStr(preset.preset_id).toLowerCase();
   if (DATABASE_PRESET_IDS.has(id)) return true;
   if (SECRET_ENV_PRESETS.has(id)) return true;
   if (preset.metadata?.secret_env) return true;
@@ -113,7 +121,8 @@ function isDatabasePreset(preset: McpConnectorPreset): boolean {
 
 export function presetSelectGroupId(preset: McpConnectorPreset): McpPresetSelectGroupId {
   if (isDatabasePreset(preset)) return 'databases';
-  const transport = (preset.transport || '').trim().toLowerCase();
+  if (presetUsesAdbDevice(preset)) return 'local_stdio';
+  const transport = trimStr(preset.transport).toLowerCase();
   if (transport === 'streamable_http' || transport === 'http') {
     return presetUsesOAuthPkce(preset) ? 'remote_oauth' : 'remote_bearer';
   }
@@ -148,7 +157,7 @@ export function filterMcpPresets(
   presets: McpConnectorPreset[],
   query: string
 ): McpConnectorPreset[] {
-  const q = query.trim().toLowerCase();
+  const q = trimStr(query).toLowerCase();
   if (!q) return presets;
   return presets.filter((preset) => {
     const haystack = [
@@ -180,9 +189,9 @@ export function existingPresetIdsFromConnectors(
 ): Set<string> {
   const ids = new Set<string>();
   for (const connector of connectors) {
-    const presetId = (connector.preset_id || '').trim();
+    const presetId = trimStr(connector.preset_id);
     if (presetId) ids.add(presetId);
-    const connectorId = (connector.connector_id || '').trim();
+    const connectorId = trimStr(connector.connector_id);
     if (connectorId.startsWith('mcp_')) {
       ids.add(connectorId.slice('mcp_'.length));
     }
@@ -191,8 +200,11 @@ export function existingPresetIdsFromConnectors(
 }
 
 export function presetAuthHint(preset: McpConnectorPreset): string {
+  if (presetUsesAdbDevice(preset)) {
+    return 'Conecta el teléfono vía ADB wireless (ANDROID_ADB_HOST) y arranca Android-MCP desde el drawer.';
+  }
   if (presetUsesOAuthPkce(preset)) {
-    if ((preset.preset_id || '').trim().toLowerCase() === 'spotify') {
+    if (trimStr(preset.preset_id).toLowerCase() === 'spotify') {
       return (
         'Tras crear, usa «Conectar OAuth». Requiere SPOTIFY_CLIENT_ID/SECRET en Gateway y ' +
         'redirect URI de DuckClaw en Spotify Dashboard. Tokens → ~/.spotify-mcp/config.json.'

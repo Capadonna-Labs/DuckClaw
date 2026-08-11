@@ -1,12 +1,15 @@
+import { trimStr } from '@/lib/utils';
+
 /** Worker en config del gateway: string legacy o { id, label }. */
 export type WorkerOption = string | { id: string; label: string };
 
 export function workerOptionId(w: WorkerOption): string {
-  return typeof w === 'string' ? w : w.id;
+  return typeof w === 'string' ? trimStr(w) : trimStr(w.id);
 }
 
 export function workerOptionLabel(w: WorkerOption): string {
-  return typeof w === 'string' ? w : w.label || w.id;
+  if (typeof w === 'string') return trimStr(w);
+  return trimStr(w.label) || trimStr(w.id);
 }
 
 export function workerOptionIds(workers: WorkerOption[] | undefined): string[] {
@@ -25,11 +28,11 @@ export function resolveWorkerDisplayName(
   workers: WorkerOption[] | undefined,
   workerId: string | undefined
 ): string {
-  const id = (workerId || '').trim();
+  const id = trimStr(workerId);
   if (!id) return '';
   const match = (workers ?? []).find((w) => workerOptionId(w) === id);
   if (!match) return '';
-  const label = workerOptionLabel(match).trim();
+  const label = workerOptionLabel(match);
   if (!label || label === id) return '';
   return label;
 }

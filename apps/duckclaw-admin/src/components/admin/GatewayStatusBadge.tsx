@@ -64,7 +64,7 @@ export function PlatformStatusStrip() {
       aria-label="Estado de la plataforma"
     >
       <span
-        className={`inline-flex items-center gap-1.5 px-2.5 py-2 ${
+        className={`inline-flex items-center ${recovering ? 'px-2' : 'gap-1.5 px-2.5'} py-2 ${
           recovering
             ? 'text-amber-800 dark:text-amber-300'
             : checking
@@ -88,7 +88,7 @@ export function PlatformStatusStrip() {
           }`}
           aria-hidden
         />
-        <span className="text-xs font-bold">{gatewayLabel}</span>
+        {!recovering ? <span className="text-xs font-bold">{gatewayLabel}</span> : null}
       </span>
 
       <span className="w-px self-stretch bg-gov-gray-200 dark:bg-dark-border" aria-hidden />

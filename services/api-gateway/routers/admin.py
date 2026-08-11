@@ -19,6 +19,7 @@ from routers.admin_domains.audit import router as audit_router
 from routers.admin_domains.auth import router as auth_router
 from routers.admin_domains.catalog_meta import router as catalog_meta_router
 from routers.admin_domains.catalog_skills import router as catalog_skills_router
+from routers.admin_domains.devices import router as devices_router
 from routers.admin_domains.duckdb_explorer import router as duckdb_explorer_router
 from routers.admin_domains.env_config import env_file as _env_file
 from routers.admin_domains.env_config import router as env_config_router
@@ -89,6 +90,7 @@ router.include_router(auth_router)
 router.include_router(catalog_meta_router)
 router.include_router(catalog_skills_router)
 router.include_router(duckdb_explorer_router)
+router.include_router(devices_router)
 router.include_router(env_config_router)
 router.include_router(fly_commands_catalog_router)
 router.include_router(gateway_resources_router)

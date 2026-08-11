@@ -5,7 +5,8 @@ import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedV
 import { VoiceLabPanel } from '@/components/sensory/VoiceLabPanel';
 
 const PM2_CMD = 'pm2 start config/ecosystem.sensory.config.cjs';
-const HEALTH_CURL = 'curl http://100.99.72.63:8001/health';
+const HEALTH_CURL =
+  'curl http://${DUCKCLAW_SENSORY_BIND_HOST:-192.0.2.20}:${DUCKCLAW_SENSORY_PORT:-8001}/health';
 const GATEWAY_HEALTH =
   'curl -H "X-Admin-Key: $DUCKCLAW_ADMIN_API_KEY" http://127.0.0.1:8000/api/v1/sensory/health';
 
@@ -59,7 +60,7 @@ export default function SensoryNodePageView({ embedded = false }: EmbeddedViewPr
             <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
               <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Mac mini (PM2)</p>
               <pre className="scrollbar-hide mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gov-gray-50 p-3 font-mono text-[11px] dark:bg-dark-bg">
-                {`DUCKCLAW_SENSORY_BIND_HOST=100.99.72.63
+                {`DUCKCLAW_SENSORY_BIND_HOST=192.0.2.20
 DUCKCLAW_SENSORY_PORT=8001
 uv sync --project integrations/sensory-node
 ${PM2_CMD}`}
@@ -68,17 +69,17 @@ ${PM2_CMD}`}
             </section>
 
             <section className="rounded-xl border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
-              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Gateway VPS</p>
+              <p className="text-sm font-semibold text-gov-gray-900 dark:text-dark-text">Gateway host</p>
               <pre className="scrollbar-hide mt-2 overflow-x-auto whitespace-pre-wrap rounded-lg bg-gov-gray-50 p-3 font-mono text-[11px] dark:bg-dark-bg">
-                {`DUCKCLAW_SENSORY_BASE_URL=http://100.99.72.63:8001
+                {`DUCKCLAW_SENSORY_BASE_URL=http://192.0.2.20:8001
 ${GATEWAY_HEALTH}`}
               </pre>
               <p className="mt-3 text-xs">
                 <Link
-                  href="/integraciones?tab=edge"
+                  href="/integraciones?tab=dispositivos"
                   className="font-medium text-gov-blue-700 dark:text-dark-cyan"
                 >
-                  Edge devices
+                  Dispositivos
                 </Link>
               </p>
             </section>

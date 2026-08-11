@@ -156,6 +156,60 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     }
   };
 
+  const connectAdb = async (connectorId: string) => {
+    if (busyId) return;
+    setBusyId(`adb:${connectorId}`);
+    setError(null);
+    setConnectorNotices((prev) => {
+      const next = { ...prev };
+      delete next[connectorId];
+      return next;
+    });
+    try {
+      const out = await adminService.runOps('android_adb_connect');
+      if (!out.ok) {
+        throw new Error(out.stderr || out.stdout || 'adb connect falló');
+      }
+      await load();
+    } catch (e) {
+      const message = e instanceof Error ? e.message : 'No se pudo conectar ADB';
+      setConnectorNotices((prev) => ({ ...prev, [connectorId]: message }));
+      setError(message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const refreshAdbStatus = async (connectorId: string) => {
+    if (busyId) return;
+    setBusyId(`adb-refresh:${connectorId}`);
+    setError(null);
+    try {
+      await adminService.runOps('android_adb_status');
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'No se pudo refrescar estado ADB');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const runAndroidMcpOp = async (opId: 'pm2_start_android_mcp' | 'pm2_restart_android_mcp') => {
+    if (busyId) return;
+    setBusyId(opId);
+    setError(null);
+    try {
+      const out = await adminService.runOps(opId);
+      if (!out.ok) {
+        throw new Error(out.stderr || out.stdout || `Ops ${opId} falló`);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Error ejecutando PM2 Android-MCP');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const presetById = useMemo(
     () => Object.fromEntries(presets.map((preset) => [preset.preset_id, preset])),
     [presets]
@@ -237,6 +291,10 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
   const handleRowPrimary = (connectorId: string, kind: McpConnectorPrimaryKind) => {
     if (kind === 'connect_oauth') {
       void connectOAuth(connectorId);
+      return;
+    }
+    if (kind === 'connect_adb') {
+      void connectAdb(connectorId);
       return;
     }
     if (kind === 'configure_bearer') {
@@ -571,6 +629,9 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
           }
           onSaveAuth={() => saveAuth(selectedConnector.connector_id)}
           onConnectOAuth={() => connectOAuth(selectedConnector.connector_id)}
+          onConnectAdb={() => connectAdb(selectedConnector.connector_id)}
+          onRefreshAdbStatus={() => refreshAdbStatus(selectedConnector.connector_id)}
+          onRunAndroidMcpOp={(opId) => void runAndroidMcpOp(opId)}
           onTest={() => runTest(selectedConnector.connector_id)}
           onGrant={() => grantWorker(selectedConnector.connector_id)}
           onRevoke={() => revokeGrant(selectedConnector.connector_id)}

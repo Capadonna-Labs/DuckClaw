@@ -197,7 +197,21 @@ def _connector_has_auth(db: Any, connector: dict[str, Any]) -> bool:
     if kind == "bearer":
         token = resolve_connector_bearer_token(db, connector)
         return bool(token)
+    if kind == "adb" or _connector_uses_adb_device(connector):
+        from duckclaw.mcp_android_adb import adb_auth_ready, android_device_status
+
+        status = android_device_status()
+        return adb_auth_ready(
+            adb_connected=bool(status.get("adb_connected")),
+            mcp_reachable=bool(status.get("mcp_reachable")),
+        )
     return False
+
+
+def _connector_uses_adb_device(connector: dict[str, Any]) -> bool:
+    from duckclaw.mcp_android_adb import connector_uses_adb_auth
+
+    return connector_uses_adb_auth(connector)
 
 
 def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:

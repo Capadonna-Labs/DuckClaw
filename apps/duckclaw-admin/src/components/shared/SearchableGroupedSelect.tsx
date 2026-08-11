@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Check, ChevronDown, Search } from 'lucide-react';
+import { trimStr } from '@/lib/utils';
 
 export type SearchableGroupedOption = {
   value: string;
@@ -78,7 +79,7 @@ export function SearchableGroupedSelect({
   );
 
   const selected = flatOptions.find((option) => option.value === value);
-  const displayLabel = selected?.label ?? (value.trim() || placeholder);
+  const displayLabel = selected?.label ?? (trimStr(value) || placeholder);
 
   const filteredGroups = useMemo(() => {
     const q = query.trim().toLowerCase();

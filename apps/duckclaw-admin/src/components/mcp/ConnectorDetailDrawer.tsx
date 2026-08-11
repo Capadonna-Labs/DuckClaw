@@ -27,6 +27,7 @@ import {
   interpretMcpTestFailure,
   isGoogleWorkspacePreset,
 } from '@/lib/mcpConnectorHealth';
+import { trimStr } from '@/lib/utils';
 
 type Props = {
   open: boolean;
@@ -48,6 +49,9 @@ type Props = {
   onGrantWorkerChange: (value: string) => void;
   onSaveAuth: () => void;
   onConnectOAuth: () => void;
+  onConnectAdb: () => void;
+  onRefreshAdbStatus: () => void;
+  onRunAndroidMcpOp: (opId: 'pm2_start_android_mcp' | 'pm2_restart_android_mcp') => void;
   onTest: () => void;
   onGrant: () => Promise<void>;
   onRevoke: () => Promise<void>;
@@ -118,6 +122,9 @@ export function ConnectorDetailDrawer({
   onGrantWorkerChange,
   onSaveAuth,
   onConnectOAuth,
+  onConnectAdb,
+  onRefreshAdbStatus,
+  onRunAndroidMcpOp,
   onTest,
   onGrant,
   onRevoke,
@@ -129,7 +136,7 @@ export function ConnectorDetailDrawer({
 
   if (!connector) return null;
 
-  const { usesOAuth, needsBearer, needsAuth, authReady } = mcpConnectorAuthFlags(
+  const { usesOAuth, usesAdbDevice, needsBearer, needsAuth, authReady } = mcpConnectorAuthFlags(
     connector,
     preset
   );
@@ -137,7 +144,7 @@ export function ConnectorDetailDrawer({
   const testFailure =
     testResult && !testResult.ok ? interpretMcpTestFailure(testResult.error || '') : null;
   const selectedWorker = workers.find((w) => w.id === grantWorkerId);
-  const workerLabel = (selectedWorker?.name || selectedWorker?.id || grantWorkerId).trim();
+  const workerLabel = trimStr(selectedWorker?.name || selectedWorker?.id || grantWorkerId);
   const endpoint = connector.endpoint_url || connector.transport;
   const readyForPlayground = authReady && grantedWorkerLabels.length > 0;
 
@@ -229,7 +236,15 @@ export function ConnectorDetailDrawer({
             </Chip>
             {needsAuth ? (
               <Chip tone={connector.has_auth ? 'ok' : 'warn'}>
-                {connector.has_auth ? 'auth OK' : usesOAuth ? 'falta OAuth' : 'falta Bearer'}
+                {connector.has_auth
+                  ? usesAdbDevice
+                    ? 'ADB conectado'
+                    : 'auth OK'
+                  : usesAdbDevice
+                    ? 'ADB offline'
+                    : usesOAuth
+                      ? 'falta OAuth'
+                      : 'falta Bearer'}
               </Chip>
             ) : null}
             <Chip tone={grantedWorkerLabels.length > 0 ? 'ok' : 'warn'}>
@@ -263,8 +278,65 @@ export function ConnectorDetailDrawer({
         </div>
 
         {/* 1 · Auth — only if needed */}
-        {canWrite && (usesOAuth || needsBearer) ? (
-          <Section step={1} title="Credenciales">
+        {canWrite && (usesOAuth || needsBearer || usesAdbDevice) ? (
+          <Section step={1} title={usesAdbDevice ? 'Conexión ADB' : 'Credenciales'}>
+            {usesAdbDevice ? (
+              <div className="space-y-3 rounded-xl border border-gov-gray-100 p-3 dark:border-dark-border">
+                <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+                  Auth por dispositivo físico (ADB wireless). Telemetría detallada en{' '}
+                  <Link href="/integraciones?tab=dispositivos" className="font-semibold text-gov-blue-700 dark:text-dark-cyan">
+                    Integraciones → Dispositivos
+                  </Link>
+                  .
+                </p>
+                {connectorNotice ? (
+                  <p className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-800 dark:bg-red-950/30 dark:text-red-200">
+                    {connectorNotice}
+                  </p>
+                ) : null}
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <button
+                    type="button"
+                    onClick={onConnectAdb}
+                    disabled={busyId === `adb:${connector.connector_id}`}
+                    className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
+                  >
+                    {busyId === `adb:${connector.connector_id}` ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <LogIn size={14} />
+                    )}
+                    {connector.has_auth ? 'Reconectar ADB' : 'Conectar ADB'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onRefreshAdbStatus}
+                    disabled={busyId === `adb-refresh:${connector.connector_id}`}
+                    className="rounded-xl border border-gov-gray-200 px-4 py-2.5 text-sm font-bold dark:border-dark-border"
+                  >
+                    Refrescar estado
+                  </button>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                  <button
+                    type="button"
+                    onClick={() => onRunAndroidMcpOp('pm2_start_android_mcp')}
+                    disabled={busyId === 'pm2_start_android_mcp'}
+                    className="rounded-xl border border-gov-gray-200 px-4 py-2 text-xs font-bold dark:border-dark-border disabled:opacity-50"
+                  >
+                    Iniciar Android-MCP
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onRunAndroidMcpOp('pm2_restart_android_mcp')}
+                    disabled={busyId === 'pm2_restart_android_mcp'}
+                    className="rounded-xl border border-gov-gray-200 px-4 py-2 text-xs font-bold dark:border-dark-border disabled:opacity-50"
+                  >
+                    Reiniciar Android-MCP
+                  </button>
+                </div>
+              </div>
+            ) : null}
             {usesOAuth ? (
               <div className="space-y-3 rounded-xl border border-gov-gray-100 p-3 dark:border-dark-border">
                 {googleWorkspace ? (
@@ -335,7 +407,10 @@ export function ConnectorDetailDrawer({
         ) : null}
 
         {/* 2 · Health */}
-        <Section step={canWrite && (usesOAuth || needsBearer) ? 2 : 1} title="Salud">
+        <Section
+          step={canWrite && (usesOAuth || needsBearer || usesAdbDevice) ? 2 : 1}
+          title="Salud"
+        >
           <button
             type="button"
             onClick={onTest}
@@ -376,6 +451,15 @@ export function ConnectorDetailDrawer({
                       Reconectar OAuth
                     </button>
                   ) : null}
+                  {usesAdbDevice ? (
+                    <button
+                      type="button"
+                      onClick={onConnectAdb}
+                      className="rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-bold text-white dark:bg-dark-cyan dark:text-dark-bg"
+                    >
+                      Reconectar ADB
+                    </button>
+                  ) : null}
                   {needsBearer ? (
                     <button
                       type="button"
@@ -411,7 +495,7 @@ export function ConnectorDetailDrawer({
         {/* 3 · Grants */}
         {canWrite ? (
           <Section
-            step={canWrite && (usesOAuth || needsBearer) ? 3 : 2}
+            step={canWrite && (usesOAuth || needsBearer || usesAdbDevice) ? 3 : 2}
             title="Acceso a workers"
           >
             <div className="flex flex-col gap-2 sm:flex-row">

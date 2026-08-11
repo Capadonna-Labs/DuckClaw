@@ -12,6 +12,7 @@ import { OfficialMcpReferenceTable } from '@/components/mcp/OfficialMcpReference
 import { useMcpCatalog, useMcpLiveStatus } from '@/components/mcp/useMcpCatalog';
 import { useDeveloperMode } from '@/hooks/useDeveloperMode';
 import { formatOpsOutput } from '@/lib/formatOpsOutput';
+import { trimStr } from '@/lib/utils';
 import { isAdminRole } from '@/lib/roles';
 import { adminService } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
@@ -44,8 +45,8 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
 
   useEffect(() => {
     if (!data) return;
-    setMcpPort(data.duckclaw_mcp.port || '8001');
-    setMcpSource(data.duckclaw_mcp.source || 'default');
+    setMcpPort(trimStr(data.duckclaw_mcp.port) || '8001');
+    setMcpSource(trimStr(data.duckclaw_mcp.source) || 'default');
   }, [data]);
 
   const selectTab = (next: McpTabId) => {
@@ -89,7 +90,7 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
 
   const saveMcpSettings = async () => {
     if (!canRunOps) return;
-    const port = mcpPort.trim();
+    const port = trimStr(mcpPort);
     if (!/^\d{2,5}$/.test(port)) {
       setSettingsMsg('Puerto inválido');
       return;

@@ -149,7 +149,7 @@ export const ADMIN_PAGE_TITLES: Record<string, string> = {
   '/gen': 'Gen',
   '/gen/image': 'Imágenes',
   '/telegram': 'Telegram',
-  '/integrations/edge-devices': 'Edge devices',
+  '/integrations/edge-devices': 'Dispositivos',
   '/integrations/sensory-node': 'Sensory node',
   '/admin/access': 'Acceso',
   '/admin': 'Administración',

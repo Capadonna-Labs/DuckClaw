@@ -57,7 +57,7 @@ export function ConnectorListRow({
   onOpenDetail,
   onPrimary,
 }: Props) {
-  const { usesOAuth, needsAuth } = mcpConnectorAuthFlags(connector, preset);
+  const { usesOAuth, usesAdbDevice, needsAuth } = mcpConnectorAuthFlags(connector, preset);
   const primary = resolveMcpConnectorPrimaryAction(connector, {
     preset,
     grantCount: grantedWorkerLabels.length,
@@ -71,6 +71,7 @@ export function ConnectorListRow({
     testResult,
   });
   const oauthBusy = busyId === `oauth:${connector.connector_id}`;
+  const adbBusy = busyId === `adb:${connector.connector_id}`;
   const endpoint = connector.endpoint_url || connector.transport;
   const hintTone =
     testResult && !testResult.ok ? 'error' : testResult?.ok ? 'ok' : 'muted';
@@ -100,7 +101,15 @@ export function ConnectorListRow({
             </StatusChip>
             {needsAuth ? (
               <StatusChip tone={connector.has_auth ? 'ok' : 'warn'}>
-                {connector.has_auth ? 'auth OK' : usesOAuth ? 'falta OAuth' : 'falta Bearer'}
+                {connector.has_auth
+                  ? usesAdbDevice
+                    ? 'ADB conectado'
+                    : 'auth OK'
+                  : usesAdbDevice
+                    ? 'ADB offline'
+                    : usesOAuth
+                      ? 'falta OAuth'
+                      : 'falta Bearer'}
               </StatusChip>
             ) : null}
             <StatusChip tone={grantedWorkerLabels.length > 0 ? 'ok' : 'warn'}>
@@ -135,17 +144,17 @@ export function ConnectorListRow({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          {canWrite && primary.kind === 'connect_oauth' ? (
+          {canWrite && (primary.kind === 'connect_oauth' || primary.kind === 'connect_adb') ? (
             <button
               type="button"
               onClick={(event) => {
                 event.stopPropagation();
                 onPrimary(primary.kind);
               }}
-              disabled={oauthBusy}
+              disabled={oauthBusy || adbBusy}
               className="inline-flex items-center gap-1.5 rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
             >
-              {oauthBusy ? <Loader2 size={12} className="animate-spin" /> : null}
+              {oauthBusy || adbBusy ? <Loader2 size={12} className="animate-spin" /> : null}
               {primary.label}
             </button>
           ) : (

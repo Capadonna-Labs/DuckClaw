@@ -194,6 +194,16 @@ def normalize_tool_failure(content: str | None, *, exc: BaseException | None = N
     return text
 
 
+def harness_max_chars_for_tool(tool_name: str, default_max: int) -> int:
+    """Per-tool harness budget; Android ui_dump needs full notification tree."""
+    name = (tool_name or "").strip().lower()
+    if name.endswith("__get_ui_dump"):
+        return max(default_max, 48_000)
+    if name.endswith("__get_screenshot"):
+        return default_max  # compacted to artifact JSON in tools_node
+    return default_max
+
+
 def truncate_tool_result(content: str, max_chars: int) -> tuple[str, bool]:
     if max_chars < 1 or len(content) <= max_chars:
         return content, False

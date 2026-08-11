@@ -494,3 +494,16 @@ presets:
       admin_label: MongoDB Atlas · Bearer (API key o connection string)
       docs_url: https://www.mongodb.com/docs/
       env_vars: [MONGODB_URI, MONGODB_ATLAS_API_KEY, MONGODB_ATLAS_API_SECRET]
+
+  android:
+    transport: streamable_http
+    endpoint_url: http://127.0.0.1:8080/mcp
+    display_name: Android Agent
+    auth_kind: adb
+    read_only: false
+    metadata:
+      oauth_pkce: false
+      connection_type: adb_device
+      manifest_skill_id: android
+      admin_label: Android · ADB wireless + MCP
+      env_vars: [ANDROID_ADB_HOST, ANDROID_MCP_PORT, ANDROID_MCP_COMMAND]

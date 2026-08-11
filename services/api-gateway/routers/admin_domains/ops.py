@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -39,6 +40,12 @@ _OPS_ALLOWLIST: dict[str, list[str]] = {
     "pm2_start_edge_streamlit": ["pm2", "start", "config/ecosystem.edge-devices.config.cjs", "--update-env"],
     "pm2_restart_edge_streamlit": ["pm2", "restart", "Edge-Streamlit", "--update-env"],
     "pm2_logs_edge_streamlit": ["pm2", "logs", "Edge-Streamlit", "--lines", "40", "--nostream"],
+    "android_adb_status": ["__android_adb_status__"],
+    "android_adb_connect": ["__android_adb_connect__"],
+    "android_expand_notifications": ["__android_expand_notifications__"],
+    "android_collapse_notifications": ["__android_collapse_notifications__"],
+    "pm2_start_android_mcp": ["pm2", "start", "config/ecosystem.android-mcp.config.cjs", "--update-env"],
+    "pm2_restart_android_mcp": ["pm2", "restart", "Android-MCP", "--update-env"],
     "doctor": ["uv", "run", "duckops", "doctor"],
     "bootstrap_dbs": ["uv", "run", "duckops", "db", "bootstrap"],
 }
@@ -121,6 +128,12 @@ async def list_ops_commands() -> dict[str, Any]:
         "pm2_start_edge_streamlit": "Iniciar dashboard Edge (Streamlit :8501)",
         "pm2_restart_edge_streamlit": "Reiniciar dashboard Edge (Streamlit)",
         "pm2_logs_edge_streamlit": "Últimas líneas log Edge Streamlit",
+        "android_adb_status": "Estado ADB + Android MCP",
+        "android_adb_connect": "Conectar ADB wireless (ANDROID_ADB_HOST)",
+        "android_expand_notifications": "Abrir panel notificaciones (ADB expand-notifications)",
+        "android_collapse_notifications": "Cerrar panel notificaciones (ADB collapse)",
+        "pm2_start_android_mcp": "Iniciar Android-MCP (ecosystem.android-mcp.config.cjs)",
+        "pm2_restart_android_mcp": "Reiniciar Android-MCP",
         "doctor": "Diagnóstico local (duckops doctor)",
         "bootstrap_dbs": "Bootstrap DuckDB (uv run duckops db bootstrap)",
     }
@@ -163,6 +176,43 @@ async def run_ops_command(
             result = await restart_desktop_sidecar()
             _admin_audit("ops.run", op_id, "desktop sidecar restart", actor=actor, meta=result)
             return {"op_id": op_id, **result}
+
+    if op_id in ("android_adb_status", "android_adb_connect"):
+        from duckclaw.mcp_android_adb import android_adb_connect, android_device_status
+
+        payload = (
+            android_device_status()
+            if op_id == "android_adb_status"
+            else android_adb_connect()
+        )
+        ok = bool(payload.get("ok"))
+        result = {
+            "exit_code": 0 if ok else 1,
+            "stdout": json.dumps(payload, ensure_ascii=False),
+            "stderr": str(payload.get("error") or payload.get("stderr") or "")[:8000],
+        }
+        _admin_audit("ops.run", op_id, op_id, actor=actor, meta={"ok": ok})
+        return {"ok": ok, "op_id": op_id, **result}
+
+    if op_id in ("android_expand_notifications", "android_collapse_notifications"):
+        from duckclaw.mcp_android_adb import (
+            android_collapse_statusbar,
+            android_expand_notifications,
+        )
+
+        payload = (
+            android_expand_notifications()
+            if op_id == "android_expand_notifications"
+            else android_collapse_statusbar()
+        )
+        ok = bool(payload.get("ok"))
+        result = {
+            "exit_code": 0 if ok else 1,
+            "stdout": json.dumps(payload, ensure_ascii=False),
+            "stderr": str(payload.get("error") or payload.get("stderr") or "")[:8000],
+        }
+        _admin_audit("ops.run", op_id, op_id, actor=actor, meta={"ok": ok})
+        return {"ok": ok, "op_id": op_id, **result}
 
     argv = _OPS_ALLOWLIST.get(op_id)
     if not argv:

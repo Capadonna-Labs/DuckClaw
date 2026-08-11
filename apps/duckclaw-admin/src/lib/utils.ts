@@ -1,6 +1,13 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
+/** Coerce gateway/API values before `.trim()` (JSON may send numbers). */
+export function trimStr(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim();
+  return String(value).trim();
+}
+
 /**
  * Combina clases de Tailwind de forma segura usando clsx y tailwind-merge.
  */
@@ -19,12 +26,13 @@ export function truncarTexto(texto: string, maxLength: number): string {
 /**
  * Extrae las primeras dos iniciales del nombre: "Carlos Arturo López" -> "CA"
  */
-export function obtenerIniciales(nombreCompleto: string): string {
-  if (!nombreCompleto) return '--';
-  
-  const partes = nombreCompleto.trim().split(/\s+/);
+export function obtenerIniciales(nombreCompleto: unknown): string {
+  const name = trimStr(nombreCompleto);
+  if (!name) return '--';
+
+  const partes = name.split(/\s+/);
   if (partes.length === 1) return partes[0].substring(0, 2).toUpperCase();
-  
+
   const iniciales = (partes[0][0] + partes[1][0]).toUpperCase();
   return iniciales;
 }
@@ -32,11 +40,12 @@ export function obtenerIniciales(nombreCompleto: string): string {
 /**
  * Extrae el email real de una cadena que puede venir como "Nombre <email@dominio.com>"
  */
-export function extraerEmail(input: string): string {
-  if (!input) return '';
-  const match = input.match(/<([^>]+)>/);
+export function extraerEmail(input: unknown): string {
+  const raw = trimStr(input);
+  if (!raw) return '';
+  const match = raw.match(/<([^>]+)>/);
   if (match && match[1]) {
-    return match[1].trim();
+    return trimStr(match[1]);
   }
-  return input.trim();
+  return raw;
 }

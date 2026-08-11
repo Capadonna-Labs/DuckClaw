@@ -14,6 +14,10 @@ import { runStackRecoverDesktop } from '@/lib/stackRecoverDesktop';
 import { isDesktopLiteMode } from '@/lib/desktopEnvFile';
 import { runStackStartLocal } from '@/lib/stackStart';
 import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
+import {
+  androidAdbConnectLocal,
+  androidDeviceStatusLocal,
+} from '@/lib/androidAdbBff';
 
 export { HOST_ONLY_OPS };
 
@@ -24,6 +28,10 @@ export const INTEGRATION_ONLY_OPS = new Set([
   'pm2_start_edge_streamlit',
   'pm2_restart_edge_streamlit',
   'pm2_logs_edge_streamlit',
+  'android_adb_status',
+  'android_adb_connect',
+  'pm2_start_android_mcp',
+  'pm2_restart_android_mcp',
 ]);
 
 export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = {
@@ -100,6 +108,22 @@ export const OPS_ALLOWLIST: Record<string, { label: string; argv: string[] }> = 
   pm2_logs_edge_streamlit: {
     label: 'Últimas líneas log Edge Streamlit',
     argv: ['pm2', 'logs', 'Edge-Streamlit', '--lines', '40', '--nostream'],
+  },
+  android_adb_status: {
+    label: 'Estado ADB + Android MCP',
+    argv: ['__android_adb_status__'],
+  },
+  android_adb_connect: {
+    label: 'Conectar ADB wireless',
+    argv: ['__android_adb_connect__'],
+  },
+  pm2_start_android_mcp: {
+    label: 'Iniciar Android-MCP',
+    argv: ['pm2', 'start', 'config/ecosystem.android-mcp.config.cjs', '--update-env'],
+  },
+  pm2_restart_android_mcp: {
+    label: 'Reiniciar Android-MCP',
+    argv: ['pm2', 'restart', 'Android-MCP', '--update-env'],
   },
   doctor: { label: 'Diagnóstico local (duckops doctor)', argv: ['uv', 'run', 'duckops', 'doctor'] },
   bootstrap_dbs: {
@@ -256,6 +280,26 @@ export async function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult>
   }
   if (opId === 'start_telegram_ingress') {
     return runTelegramIngressStartLocal();
+  }
+  if (opId === 'android_adb_status') {
+    const payload = await androidDeviceStatusLocal();
+    return normalizeOpsResult({
+      op_id: opId,
+      exit_code: payload.ok ? 0 : 1,
+      stdout: JSON.stringify(payload),
+      stderr: payload.adb_stderr || '',
+      executed_via: 'local',
+    });
+  }
+  if (opId === 'android_adb_connect') {
+    const payload = await androidAdbConnectLocal();
+    return normalizeOpsResult({
+      op_id: opId,
+      exit_code: payload.ok ? 0 : 1,
+      stdout: JSON.stringify(payload),
+      stderr: payload.stderr || payload.error || '',
+      executed_via: 'local',
+    });
   }
   const entry = OPS_ALLOWLIST[opId];
   if (!entry) {

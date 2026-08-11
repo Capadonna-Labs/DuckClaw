@@ -1,3 +1,4 @@
+import { trimStr } from '@/lib/utils';
 import type { McpConnectorSummary } from '@/services/adminService';
 
 export const MCP_CONNECTORS_PAGE_SIZE = 10;
@@ -16,11 +17,11 @@ export function filterMcpConnectors(
   if (!needle) return [...connectors];
   return connectors.filter((connector) => {
     const haystack = [
-      connector.display_name,
-      connector.connector_id,
-      connector.transport,
-      connector.endpoint_url ?? '',
-      connector.preset_id ?? '',
+      trimStr(connector.display_name),
+      trimStr(connector.connector_id),
+      trimStr(connector.transport),
+      trimStr(connector.endpoint_url),
+      trimStr(connector.preset_id),
     ]
       .join(' ')
       .toLocaleLowerCase();

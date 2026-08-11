@@ -78,8 +78,9 @@ async def _list_connector_tools(db: Any, connector: dict[str, Any]) -> list[Any]
         return await mcp_stdio_list_tools(params)
     if transport == "streamable_http":
         from duckclaw.forge.skills.mcp_http_util import mcp_http_list_tools
+        from duckclaw.mcp_android_adb import resolve_connector_endpoint_url
 
-        url = str(connector.get("endpoint_url") or "").strip()
+        url = resolve_connector_endpoint_url(connector)
         return await mcp_http_list_tools(url, headers=_http_headers(db, connector))
     raise ValueError(f"unsupported transport: {transport}")
 
@@ -97,8 +98,9 @@ async def _call_connector_tool(
         return await mcp_stdio_call_tool(params, tool_name, arguments)
     if transport == "streamable_http":
         from duckclaw.forge.skills.mcp_http_util import mcp_http_call_tool
+        from duckclaw.mcp_android_adb import resolve_connector_endpoint_url
 
-        url = str(connector.get("endpoint_url") or "").strip()
+        url = resolve_connector_endpoint_url(connector)
         headers = _http_headers(db, connector)
         from duckclaw.forge.skills.google_calendar_rest import (
             call_google_calendar_rest,
@@ -288,6 +290,21 @@ def register_worker_mcp_connector_tools(
                 len(connector_tools),
                 worker_id,
             )
+        connectors = list_worker_mcp_connectors(
+            catalog_db, worker_uid=worker_uid, tenant_id=tenant_id
+        )
+        from duckclaw.mcp_android_adb import connector_uses_adb_auth
+
+        if any(
+            connector_uses_adb_auth(c)
+            or str(c.get("preset_id") or "").strip().lower() == "android"
+            for c in connectors
+        ):
+            from duckclaw.forge.skills.mcp_android_adb_bridge import (
+                register_android_adb_helper_tools,
+            )
+
+            register_android_adb_helper_tools(tools_list)
     except Exception:
         _log.warning("register_worker_mcp_connector_tools failed worker=%s", worker_id, exc_info=True)
     finally:

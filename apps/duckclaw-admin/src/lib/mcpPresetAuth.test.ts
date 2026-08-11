@@ -29,6 +29,11 @@ describe('mcpPresetAuth selector helpers', () => {
     expect(presetAdminLabel(row)).toBe('Google Gmail');
   });
 
+  it('coerces non-string display_name from API JSON', () => {
+    const row = preset({ preset_id: 'android', display_name: 8080 as unknown as string });
+    expect(presetAdminLabel(row)).toBe('8080');
+  });
+
   it('groups remote oauth, bearer, databases and local stdio', () => {
     const rows = [
       preset({

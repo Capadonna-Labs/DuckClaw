@@ -125,4 +125,5 @@ apps/duckclaw-admin/.npmrc
 _vps_local/
 _vps_*.py
 _probe_*.py
+_debug_*.py
 _verify_*.js

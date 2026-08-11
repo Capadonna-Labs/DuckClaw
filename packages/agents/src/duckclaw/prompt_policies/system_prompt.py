@@ -129,6 +129,26 @@ def _worker_includes_report_engine_directive(spec: WorkerSpec | None) -> bool:
     return worker_has_report_engine_skill(spec)
 
 
+def worker_has_android_mcp_tools(tools: list[Any] | None) -> bool:
+    for tool in tools or []:
+        name = str(getattr(tool, "name", "") or "").strip().lower()
+        if name.startswith("mcp__android__") or name.startswith("mcp__mcp_android__"):
+            return True
+        if name in ("android_expand_notifications", "android_collapse_notifications"):
+            return True
+    return False
+
+
+def append_android_mcp_directive_if_tools(
+    db: Any,
+    base: str,
+    tools: list[Any] | None,
+) -> str:
+    if not worker_has_android_mcp_tools(tools):
+        return (base or "").strip()
+    return _append_framework_directive(db, base, "android_mcp")
+
+
 def _append_framework_directive(db: Any, base: str, directive_name: str) -> str:
     body = (base or "").strip()
     if not body:
@@ -163,9 +183,10 @@ def resolve_effective_system_prompt_with_directives(
     )
     if db is None:
         return base
-    if not _worker_includes_report_engine_directive(spec):
-        return base
-    return _append_framework_directive(db, base, "report_engine")
+    out = base
+    if _worker_includes_report_engine_directive(spec):
+        out = _append_framework_directive(db, out, "report_engine")
+    return out
 
 
 def resolve_effective_system_prompt_for_worker(

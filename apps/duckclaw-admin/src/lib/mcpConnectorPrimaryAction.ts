@@ -3,11 +3,13 @@ import type {
   McpConnectorSummary,
   McpConnectorTestResult,
 } from '@/services/adminService';
-import { presetUsesOAuthPkce } from '@/lib/mcpPresetAuth';
+import { presetUsesAdbDevice, presetUsesOAuthPkce } from '@/lib/mcpPresetAuth';
 import { interpretMcpTestFailure } from '@/lib/mcpConnectorHealth';
+import { trimStr } from '@/lib/utils';
 
 export type McpConnectorPrimaryKind =
   | 'connect_oauth'
+  | 'connect_adb'
   | 'configure_bearer'
   | 'grant'
   | 'open_detail';
@@ -22,19 +24,22 @@ export function mcpConnectorAuthFlags(
   preset?: McpConnectorPreset
 ): {
   usesOAuth: boolean;
+  usesAdbDevice: boolean;
   needsBearer: boolean;
   needsAuth: boolean;
   authReady: boolean;
 } {
   const usesOAuth = presetUsesOAuthPkce(preset);
+  const usesAdbDevice =
+    presetUsesAdbDevice(preset) || trimStr(connector.auth_kind).toLowerCase() === 'adb';
   const needsBearer = connector.auth_kind === 'bearer' && !usesOAuth;
-  const needsAuth = needsBearer || usesOAuth;
+  const needsAuth = needsBearer || usesOAuth || usesAdbDevice;
   const authReady = !needsAuth || connector.has_auth;
-  return { usesOAuth, needsBearer, needsAuth, authReady };
+  return { usesOAuth, usesAdbDevice, needsBearer, needsAuth, authReady };
 }
 
 /**
- * CTA primaria de la fila (inventario). OAuth se dispara inline;
+ * CTA primaria de la fila (inventario). OAuth/ADB se disparan inline;
  * Bearer/grant/detalle abren o enfocan el drawer.
  */
 export function resolveMcpConnectorPrimaryAction(
@@ -46,7 +51,7 @@ export function resolveMcpConnectorPrimaryAction(
     testResult?: McpConnectorTestResult;
   }
 ): McpConnectorPrimaryAction {
-  const { usesOAuth, needsBearer, authReady } = mcpConnectorAuthFlags(
+  const { usesOAuth, usesAdbDevice, needsBearer, authReady } = mcpConnectorAuthFlags(
     connector,
     opts.preset
   );
@@ -60,6 +65,12 @@ export function resolveMcpConnectorPrimaryAction(
     return {
       kind: 'connect_oauth',
       label: connector.has_auth || authTestFailed ? 'Reconectar OAuth' : 'Conectar OAuth',
+    };
+  }
+  if (opts.canWrite && usesAdbDevice && (!connector.has_auth || authTestFailed)) {
+    return {
+      kind: 'connect_adb',
+      label: connector.has_auth ? 'Refrescar ADB' : 'Conectar ADB',
     };
   }
   if (opts.canWrite && needsBearer && (!connector.has_auth || authTestFailed)) {

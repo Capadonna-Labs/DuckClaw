@@ -148,6 +148,23 @@ _OPTIONAL_EXTRAS_SILENT: frozenset[str] = frozenset(
     }
 )
 
+# Skill → sandbox Docker (UI: execute_sandbox_script). run_sandbox puede estar
+# registrado siempre en el grafo; el warning solo aplica si el worker lo optó.
+_SANDBOX_EXEC_SKILLS: frozenset[str] = frozenset({"execute_sandbox_script", "run_sandbox"})
+
+
+def _normalized_skill_names(skills: list[str] | None) -> set[str]:
+    return {
+        str(s).strip().lower().replace("-", "_")
+        for s in (skills or [])
+        if str(s).strip()
+    }
+
+
+def _sandbox_exec_skill_opted_in(skills_effective: list[str] | None) -> bool:
+    return bool(_normalized_skill_names(skills_effective) & _SANDBOX_EXEC_SKILLS)
+
+
 # Skills declarables pero retiradas a propósito del bind.
 _RETIRED_SKILLS: frozenset[str] = frozenset({"convert_document"})
 
@@ -259,7 +276,13 @@ def _compute_gaps(
     integration_gaps: list[dict[str, Any]] = []
     runtime_set = set(tools_runtime)
 
-    if sandbox_registered and not docker_ok:
+    # run_sandbox puede existir en tools_by_name aunque el worker no haya
+    # activado execute_sandbox_script en el catálogo de herramientas.
+    if (
+        sandbox_registered
+        and not docker_ok
+        and _sandbox_exec_skill_opted_in(skills_effective)
+    ):
         gaps.append("run_sandbox registrado pero Docker no está disponible en el host")
 
     integration_gaps = build_integration_secret_gaps(
@@ -377,6 +400,7 @@ def build_worker_capabilities_payload(
     framework_baseline = should_apply_framework_baseline(manifest_data)
 
     tools_runtime, sandbox_registered = _runtime_tools_for_worker(wid, tenant_id=tenant_id)
+    sandbox_opted_in = _sandbox_exec_skill_opted_in(skills_effective)
 
     try:
         from duckclaw.graphs.sandbox import _docker_available
@@ -413,7 +437,8 @@ def build_worker_capabilities_payload(
         "tools_runtime": tools_runtime,
         "framework_baseline": framework_baseline,
         "sandbox": {
-            "registered": sandbox_registered,
+            # "registered" = tool presente Y skill sandbox opt-in en el worker
+            "registered": bool(sandbox_registered and sandbox_opted_in),
             "docker_ok": docker_ok,
             "session_enabled": None,
         },

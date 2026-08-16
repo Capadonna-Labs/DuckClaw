@@ -475,6 +475,196 @@ def _apply_hard_delete_catalog_worker(conn: Any, payload: dict) -> None:
         raise ValueError(f"Worker not found in catalog: {worker_id}")
 
 
+def _migrate_system_prompt_policy_name(
+    conn: Any,
+    *,
+    old_worker_id: str,
+    new_worker_id: str,
+    worker_uid: str,
+    actor_email: str,
+) -> None:
+    """Move active ``system_prompt/<old>`` content under the new worker_id."""
+    from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
+    from duckclaw.admin_worker_catalog import get_latest_worker_version
+
+    latest = get_latest_worker_version(conn, worker_uid=worker_uid) or {}
+    files = dict(latest.get("files_snapshot") or {})
+    if files:
+        sync_worker_system_prompt_policy(
+            conn,
+            worker_id=new_worker_id,
+            files=files,
+            actor_email=actor_email,
+            worker_uid=worker_uid,
+            force=True,
+        )
+    else:
+        row = conn.execute(
+            "SELECT content FROM main.prompt_policy_registry "
+            "WHERE policy_type = 'system_prompt' AND policy_name = ? "
+            "AND active = true AND status = 'active' "
+            "ORDER BY version DESC LIMIT 1",
+            [old_worker_id],
+        ).fetchone()
+        content = ""
+        if row:
+            content = str(row[0] if not isinstance(row, dict) else row.get("content") or "")
+        if content.strip():
+            from duckclaw.write_handlers.prompt_policies import _apply_upsert_prompt_policy
+
+            version_row = conn.execute(
+                "SELECT COALESCE(MAX(version), 0) FROM main.prompt_policy_registry "
+                "WHERE policy_type = 'system_prompt' AND policy_name = ?",
+                [new_worker_id],
+            ).fetchone()
+            next_version = int(version_row[0] if version_row else 0) + 1
+            conn.execute(
+                "UPDATE main.prompt_policy_registry "
+                "SET active = false, status = 'inactive', updated_at = CURRENT_TIMESTAMP "
+                "WHERE policy_type = 'system_prompt' AND policy_name = ? AND active = true",
+                [new_worker_id],
+            )
+            _apply_upsert_prompt_policy(
+                conn,
+                {
+                    "policy_type": "system_prompt",
+                    "policy_name": new_worker_id,
+                    "version": next_version,
+                    "status": "active",
+                    "content": content,
+                    "metadata": {
+                        "seed": "rename_catalog_worker",
+                        "owner": actor_email,
+                        "worker_id": new_worker_id,
+                        "worker_uid": worker_uid,
+                        "source": "admin_worker_catalog",
+                    },
+                },
+            )
+
+    conn.execute(
+        "UPDATE main.prompt_policy_registry "
+        "SET active = false, status = 'inactive', updated_at = CURRENT_TIMESTAMP "
+        "WHERE policy_type = 'system_prompt' AND policy_name = ? AND active = true",
+        [old_worker_id],
+    )
+
+
+def _update_latest_manifest_worker_id(conn: Any, *, worker_uid: str, new_worker_id: str) -> None:
+    row = conn.execute(
+        "SELECT version, manifest_snapshot_json FROM main.admin_worker_versions "
+        "WHERE worker_uid = ? ORDER BY version DESC LIMIT 1",
+        [worker_uid],
+    ).fetchone()
+    if not row:
+        return
+    version = int(row[0] if not isinstance(row, dict) else row.get("version") or 0)
+    raw = str(row[1] if not isinstance(row, dict) else row.get("manifest_snapshot_json") or "{}")
+    try:
+        manifest = json.loads(raw) if raw.strip() else {}
+    except json.JSONDecodeError:
+        return
+    if not isinstance(manifest, dict):
+        return
+    if str(manifest.get("id") or "") == new_worker_id:
+        return
+    manifest["id"] = new_worker_id
+    conn.execute(
+        "UPDATE main.admin_worker_versions "
+        "SET manifest_snapshot_json = ? "
+        "WHERE worker_uid = ? AND version = ?",
+        [json.dumps(manifest, ensure_ascii=False, sort_keys=True), worker_uid, version],
+    )
+
+
+def _apply_rename_catalog_worker(conn: Any, payload: dict) -> None:
+    actor = _catalog_worker_actor(payload)
+    old_worker_id = sanitize_catalog_worker_id(
+        sanitize_user_agent_worker_id(_catalog_worker_id(payload))
+    )
+    new_raw = str(payload.get("new_worker_id") or "").strip()
+    if not new_raw:
+        raise ValueError("new_worker_id required")
+    new_worker_id = sanitize_catalog_worker_id(sanitize_user_agent_worker_id(new_raw))
+    if new_worker_id in {"default", "entry_router", "manager_router"}:
+        raise ValueError(f"Protected worker_id: {new_worker_id}")
+    if new_worker_id == old_worker_id:
+        return
+
+    worker = get_visible_worker_for_actor(conn, actor_email=actor, worker_id=old_worker_id)
+    if not worker:
+        raise ValueError(f"Worker not visible in catalog: {old_worker_id}")
+
+    tenant_id = str(worker.get("tenant_id") or payload.get("tenant_id") or "default").strip() or "default"
+    worker_uid = str(worker["worker_uid"])
+
+    conflict = conn.execute(
+        "SELECT worker_uid FROM main.admin_worker_catalog "
+        "WHERE tenant_id = ? AND worker_id = ? AND worker_uid != ?",
+        [tenant_id, new_worker_id, worker_uid],
+    ).fetchone()
+    if conflict:
+        raise ValueError(f"worker_id ya existe para el tenant: {new_worker_id}")
+
+    ensure_admin_worker_catalog_schema(conn)
+
+    conn.execute(
+        "UPDATE main.admin_worker_catalog "
+        "SET worker_id = ?, updated_at = CURRENT_TIMESTAMP "
+        "WHERE worker_uid = ? AND tenant_id = ?",
+        [new_worker_id, worker_uid, tenant_id],
+    )
+
+    ua_conflict = conn.execute(
+        "SELECT 1 FROM main.admin_user_agents WHERE tenant_id = ? AND worker_id = ?",
+        [tenant_id, new_worker_id],
+    ).fetchone()
+    if ua_conflict:
+        # Target id already has a user-agent row; drop the old row to avoid PK clash.
+        conn.execute(
+            "DELETE FROM main.admin_user_agents WHERE tenant_id = ? AND worker_id = ?",
+            [tenant_id, old_worker_id],
+        )
+    else:
+        conn.execute(
+            "UPDATE main.admin_user_agents SET worker_id = ? "
+            "WHERE tenant_id = ? AND worker_id = ?",
+            [new_worker_id, tenant_id, old_worker_id],
+        )
+
+    _update_latest_manifest_worker_id(conn, worker_uid=worker_uid, new_worker_id=new_worker_id)
+    _migrate_system_prompt_policy_name(
+        conn,
+        old_worker_id=old_worker_id,
+        new_worker_id=new_worker_id,
+        worker_uid=worker_uid,
+        actor_email=actor,
+    )
+
+    for column in ("worker_id", "last_worker_id", "preferred_worker_id"):
+        try:
+            conn.execute(
+                f"UPDATE main.admin_conversations SET {column} = ? "
+                f"WHERE tenant_id = ? AND {column} = ?",
+                [new_worker_id, tenant_id, old_worker_id],
+            )
+        except Exception:
+            # Column may be missing on older schemas; migrations cover current gateway DBs.
+            pass
+
+    try:
+        conn.execute(
+            "UPDATE main.admin_user_profiles SET default_worker_id = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE tenant_id = ? AND default_worker_id = ?",
+            [new_worker_id, tenant_id, old_worker_id],
+        )
+    except Exception:
+        pass
+
+    _bump_worker_capabilities_catalog_cache(old_worker_id)
+    _bump_worker_capabilities_catalog_cache(new_worker_id)
+
+
 def _require_worker_uid_for_tenant(conn: Any, worker_uid: str, tenant_id: str) -> None:
     row = conn.execute(
         "SELECT worker_uid FROM main.admin_worker_catalog "
@@ -658,6 +848,7 @@ register_handler("update_catalog_worker_file", _apply_update_catalog_worker_file
 register_handler("deactivate_catalog_worker", _apply_deactivate_catalog_worker)
 register_handler("reactivate_catalog_worker", _apply_reactivate_catalog_worker)
 register_handler("hard_delete_catalog_worker", _apply_hard_delete_catalog_worker)
+register_handler("rename_catalog_worker", _apply_rename_catalog_worker)
 register_handler("import_templates_to_catalog", _apply_import_templates_to_catalog)
 register_handler("upsert_worker_context", _apply_upsert_worker_context)
 register_handler("reorder_worker_contexts", _apply_reorder_worker_contexts)

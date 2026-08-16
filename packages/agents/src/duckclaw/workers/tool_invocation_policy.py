@@ -232,3 +232,87 @@ def decide_current_time_tool_invocation(
         direct_tool_call=True,
         tool_args={},
     )
+
+
+def _update_system_prompt_intent(text: str) -> bool:
+    """User asks to persist/adjust behavior into the worker system prompt (not DB rows)."""
+    value = (text or "").strip().lower()
+    if not value:
+        return False
+    if "[system_directive:" in value or value.startswith("[system_event:"):
+        return False
+    if "update_system_prompt" in value or "update_my_system_prompt" in value:
+        return True
+    # Frases cortas: «ajusta/actualiza/mejora/modifica tu prompt»
+    if re.search(
+        r"\b(ajusta|ajustar|actualiza|actualizar|mejora|mejorar|modifica|modificar|"
+        r"cambia|cambiar|guarda|guardar|gu[aá]rdalo|gu[aá]rdala|a[nñ]ade|a[nñ]adir|"
+        r"agrega|agregar|persiste|persistir|reescribe|reescribir|update|improve|adjust|"
+        r"rewrite|append)\w*"
+        r"\s+(?:un\s+poco\s+)?"
+        r"(?:el\s+|la\s+|tu\s+|tus\s+|mi\s+|mis\s+|the\s+|your\s+|my\s+)?"
+        r"(?:system\s+)?prompt\b"
+        r"|\b(system\s+)?prompt\s+(?:del\s+sistema\s+)?"
+        r"(?:aj[uú]stalo|actual[ií]zalo|mej[oó]ralo|modif[ií]calo|gu[aá]rdalo)\b",
+        value,
+    ):
+        return True
+    prompt_ref = re.search(
+        r"\b(tu\s+|tus\s+|mi\s+|el\s+|la\s+|your\s+|my\s+|the\s+)?"
+        r"(system\s+)?prompt\b"
+        r"|\bprompt\s+del\s+sistema\b"
+        r"|\binstrucciones\s+(del\s+sistema|permanentes|base)\b"
+        r"|\bsystem\s+prompt\b",
+        value,
+    )
+    if not prompt_ref:
+        return False
+    return bool(
+        re.search(
+            r"\b(ajusta|ajustar|actualiza|actualizar|mejora|mejorar|"
+            r"guarda|guardar|gu[aá]rdalo|gu[aá]rdala|"
+            r"a[nñ]ade|a[nñ]adir|agrega|agregar|persiste|persistir|"
+            r"modifica|modificar|cambia|cambiar|escribe|escribir|"
+            r"reescribe|reescribir|mete|incluir|incluye|"
+            r"save|update|append|rewrite|improve|adjust|"
+            r"pon(?:lo|la)?\s+en)\b",
+            value,
+        )
+    )
+
+
+def decide_update_system_prompt_invocation(
+    *,
+    incoming: str,
+    available_tools: Collection[str] | Mapping[str, Any],
+    called_tools_since_last_human: Collection[str] = (),
+    already_has_tool_result: bool = False,
+    summarize_directive: bool = False,
+) -> ToolInvocationDecision:
+    """
+    Force ``update_system_prompt`` when the user asks to persist prompt changes.
+
+    Without tool_choice, models often invent a JSON block in chat instead of calling the tool
+    (logs show ``tools usadas=ninguna`` while the reply claims success).
+    """
+    tool_names = _tool_names(available_tools)
+    called = {str(n) for n in called_tools_since_last_human}
+    if already_has_tool_result or summarize_directive:
+        return _no_tool_invocation()
+    if "update_system_prompt" in called or "update_my_system_prompt" in called:
+        return _no_tool_invocation()
+    if not _update_system_prompt_intent(incoming):
+        return _no_tool_invocation()
+    if "update_system_prompt" in tool_names:
+        return ToolInvocationDecision(
+            tool_name="update_system_prompt",
+            reason="platform.update_system_prompt.persist_request",
+            requires_heuristic_first_tool=False,
+        )
+    if "update_my_system_prompt" in tool_names:
+        return ToolInvocationDecision(
+            tool_name="update_my_system_prompt",
+            reason="platform.update_my_system_prompt.persist_request",
+            requires_heuristic_first_tool=False,
+        )
+    return _no_tool_invocation()

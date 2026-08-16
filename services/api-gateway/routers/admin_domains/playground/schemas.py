@@ -96,6 +96,14 @@ class PlaygroundImageIn(BaseModel):
     data_base64: str = Field(..., max_length=20_000_000)
 
 
+class PlaygroundDocumentIn(BaseModel):
+    """Adjunto de documento (PDF/Office/texto) para contexto del turno — no RAG."""
+
+    filename: str = Field(..., min_length=1, max_length=256)
+    mime_type: str = Field(default="application/octet-stream", max_length=128)
+    data_base64: str = Field(..., min_length=1, max_length=10_000_000)
+
+
 class PlaygroundModelBody(BaseModel):
     chat_id: str = Field(..., min_length=1, max_length=128)
     provider: str = Field(..., min_length=1, max_length=32)
@@ -158,6 +166,11 @@ class PlaygroundChatBody(BaseModel):
         description="Override DuckDB por conversación (prioridad sobre manifest del worker).",
     )
     images: list[PlaygroundImageIn] = Field(default_factory=list, max_length=15)
+    documents: list[PlaygroundDocumentIn] = Field(
+        default_factory=list,
+        max_length=5,
+        description="Documentos del turno (PDF/Office/texto); se extraen a texto, no se indexan en RAG.",
+    )
     stream: bool = Field(
         default=False,
         description="Si true, respuesta text/event-stream (tokens SSE + [DONE]).",
@@ -173,9 +186,9 @@ class PlaygroundChatBody(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _message_or_images(self) -> PlaygroundChatBody:
-        if not (self.message or "").strip() and not self.images:
-            raise ValueError("message o images requeridos")
+    def _message_or_attachments(self) -> PlaygroundChatBody:
+        if not (self.message or "").strip() and not self.images and not self.documents:
+            raise ValueError("message, images o documents requeridos")
         return self
 
 

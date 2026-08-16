@@ -61,7 +61,7 @@ export function WorkerCapabilitiesCard({
 
   useEffect(() => {
     void load();
-  }, [load, refreshKey]);
+  }, [load, refreshKey, optionalSkills]);
 
   const showRuntimeSection = loading || apiUnavailable || Boolean(error) || runtimeGaps.length > 0;
 

@@ -7,12 +7,17 @@ from pydantic import BaseModel, Field
 
 from duckclaw import db_write_queue
 from duckclaw.admin_user_profiles import ensure_profile_for_user
-from duckclaw.admin_worker_catalog import get_visible_worker_for_actor
+from duckclaw.admin_worker_catalog import (
+    get_visible_worker_for_actor,
+    get_worker_by_tenant_worker_id,
+    sanitize_catalog_worker_id,
+)
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.write_commands import (
     DeactivateCatalogWorkerCommand,
     HardDeleteCatalogWorkerCommand,
     ReactivateCatalogWorkerCommand,
+    RenameCatalogWorkerCommand,
     UpdateCatalogWorkerFileCommand,
     UpsertWorkerCommand,
 )
@@ -35,6 +40,10 @@ router = APIRouter(prefix="/templates", tags=["admin-templates"])
 
 class TemplatePatchBody(BaseModel):
     display_name: str = Field(..., min_length=1, max_length=128)
+
+
+class TemplateRenameBody(BaseModel):
+    new_worker_id: str = Field(..., min_length=1, max_length=64)
 
 
 def _problem(status_code: int, title: str, detail: str) -> HTTPException:
@@ -130,6 +139,55 @@ async def patch_template(
         task_id=task_id,
     )
     return {"ok": True, "worker_id": wid, "display_name": display_name, "task_id": task_id}
+
+
+@router.post("/{worker_id}/rename", dependencies=[Depends(require_admin_key)])
+async def rename_template(
+    worker_id: str,
+    body: TemplateRenameBody,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    wid = _template_worker_id(worker_id)
+    actor_email = effective_actor_email(actor)
+    try:
+        new_wid = sanitize_catalog_worker_id(body.new_worker_id)
+    except ValueError as exc:
+        raise _problem(400, "new_worker_id inválido", str(exc)) from exc
+    if new_wid in {"default", "entry_router", "manager_router"}:
+        raise _problem(403, "Plantilla protegida", new_wid)
+    if new_wid == wid:
+        return {"ok": True, "worker_id": wid, "previous_worker_id": wid, "task_id": None}
+
+    with open_gateway_db(read_only=True) as db:
+        profile = ensure_profile_for_user(db, email=actor_email)
+        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+        tenant_id = str(profile.get("tenant_id") or (worker or {}).get("tenant_id") or "default")
+        conflict = get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=new_wid)
+    if not worker:
+        raise _problem(404, "Worker no visible en catálogo", wid)
+    if conflict and str(conflict.get("worker_uid") or "") != str(worker.get("worker_uid") or ""):
+        raise _problem(409, "worker_id ya existe", new_wid)
+
+    command = RenameCatalogWorkerCommand(
+        tenant_id=str(profile.get("tenant_id") or worker.get("tenant_id") or "default"),
+        actor_email=str(profile.get("email") or actor_email),
+        worker_id=wid,
+        new_worker_id=new_wid,
+    )
+    task_id = _enqueue_template_catalog_command(command)
+    _admin_audit(
+        "template.rename",
+        f"templates/{wid}",
+        f"new_worker_id={new_wid}",
+        actor=actor,
+        task_id=task_id,
+    )
+    return {
+        "ok": True,
+        "worker_id": new_wid,
+        "previous_worker_id": wid,
+        "task_id": task_id,
+    }
 
 
 @router.put("/{worker_id}/files/{file_path:path}", dependencies=[Depends(require_admin_key)])

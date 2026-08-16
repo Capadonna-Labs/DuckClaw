@@ -38,7 +38,26 @@ def test_build_a2a_agent_card_required_fields() -> None:
     assert card["version"] == "2.1.0"
     assert card["supportedInterfaces"][0]["protocolVersion"] == "1.0"
     assert card["skills"][0]["tags"]
-    assert "system_prompt" not in json.dumps(card).lower()
+    assert "system_prompt.md" not in str(card.get("description") or "").lower()
+
+
+def test_build_a2a_agent_card_allows_update_system_prompt_skill() -> None:
+    """Regression: skill id ``update_system_prompt`` must not trip prompt-leak scan."""
+    manifest = {
+        "id": "finanz-1",
+        "skills": ["research", "admin_sql", "update_system_prompt"],
+    }
+    files = {"soul.md": "Assistant for personal finance."}
+    card = build_a2a_agent_card("finanz-1", manifest=manifest, files=files)
+    skill_ids = {s["id"] for s in card["skills"]}
+    assert "update_system_prompt" in skill_ids
+
+
+def test_agent_card_rejects_prompt_markers_in_description() -> None:
+    manifest = {"id": "w", "skills": [], "description": "See system_prompt.md for rules"}
+    files = {"soul.md": ""}
+    with pytest.raises(ValueError, match="prompt file"):
+        build_a2a_agent_card("w", manifest=manifest, files=files)
 
 
 def test_agent_card_validates_against_schema(agent_card_schema: dict) -> None:

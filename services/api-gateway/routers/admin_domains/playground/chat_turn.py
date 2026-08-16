@@ -15,7 +15,11 @@ from core.models import ChatRequest
 from duckclaw.channels import GatewayDeliveryContext
 from routers.admin_domains.admin_common import admin_audit, problem
 from routers.admin_domains.playground.project_rag_context import project_context_message
-from routers.admin_domains.playground.schemas import PlaygroundChatBody, PlaygroundImageIn
+from routers.admin_domains.playground.schemas import (
+    PlaygroundChatBody,
+    PlaygroundDocumentIn,
+    PlaygroundImageIn,
+)
 from routers.admin_domains.playground.team_context import (
     playground_team_context,
     playground_worker_allowed_in_team,
@@ -186,6 +190,79 @@ async def ingest_playground_message_with_images(
         raise problem(502, "Error procesando imagen adjunta", str(exc)) from exc
 
 
+_CHAT_DOC_MAX_BYTES = 5 * 1024 * 1024
+_CHAT_DOC_MAX_CHARS_PER_FILE = 50_000
+_CHAT_DOC_MAX_CHARS_TOTAL = 120_000
+
+
+def _decode_playground_document_b64(data_base64: str) -> bytes:
+    import base64
+
+    raw = (data_base64 or "").strip()
+    if not raw:
+        raise ValueError("data_base64 vacío")
+    try:
+        return base64.b64decode(raw, validate=False)
+    except Exception as exc:
+        raise ValueError("data_base64 inválido") from exc
+
+
+def _document_bytes_to_text(*, data: bytes, filename: str) -> str:
+    from pathlib import Path
+
+    from duckclaw.document_toolbox.extract import convert_bytes_to_text
+    from duckclaw.document_toolbox.registry import EXTRACT_SUFFIXES, INGEST_NATIVE_SUFFIXES
+
+    suffix = Path(filename).suffix.lower()
+    if suffix in INGEST_NATIVE_SUFFIXES:
+        return data.decode("utf-8", errors="replace").strip()
+    if suffix in EXTRACT_SUFFIXES:
+        return convert_bytes_to_text(data=data, filename=filename)
+    allowed = ", ".join(sorted(INGEST_NATIVE_SUFFIXES | EXTRACT_SUFFIXES))
+    raise ValueError(f"Extensión no admitida ({suffix or 'sin extensión'}). Permitidas: {allowed}")
+
+
+def enrich_message_with_playground_documents(
+    msg: str,
+    documents: list[PlaygroundDocumentIn],
+) -> tuple[str, list[str]]:
+    """Extrae texto de documentos del turno y lo antepone al mensaje (request-scoped)."""
+    if not documents:
+        return msg, []
+
+    blocks: list[str] = []
+    names: list[str] = []
+    total_chars = 0
+    for doc in documents:
+        name = (doc.filename or "").replace("\\", "/").split("/")[-1].strip() or "documento"
+        names.append(name)
+        raw = _decode_playground_document_b64(doc.data_base64)
+        if len(raw) > _CHAT_DOC_MAX_BYTES:
+            raise ValueError(f"{name}: supera {_CHAT_DOC_MAX_BYTES // (1024 * 1024)} MB")
+        text = _document_bytes_to_text(data=raw, filename=name)
+        if not text:
+            raise ValueError(f"{name}: no se extrajo texto")
+        remaining = _CHAT_DOC_MAX_CHARS_TOTAL - total_chars
+        if remaining <= 0:
+            blocks.append(f"[Documento adjunto: {name}]\n(omitido: límite total de contexto)")
+            continue
+        clipped = text[: min(_CHAT_DOC_MAX_CHARS_PER_FILE, remaining)]
+        if len(text) > len(clipped):
+            clipped = f"{clipped}\n…[truncado]"
+        total_chars += len(clipped)
+        blocks.append(f"[Documento adjunto: {name}]\n{clipped}")
+
+    prefix = "\n\n".join(blocks)
+    body = (msg or "").strip()
+    if body:
+        return f"{prefix}\n\n--- Mensaje del usuario ---\n{body}", names
+    return (
+        f"{prefix}\n\n--- Mensaje del usuario ---\n"
+        "Revisa los documentos adjuntos y responde según el contenido.",
+        names,
+    )
+
+
 @dataclass
 class PlaygroundPreparedChat:
     wid: str
@@ -217,20 +294,37 @@ async def prepare_playground_chat_turn(
     )
     msg = (body.message or "").strip()
     original_user_message = ((body.user_incoming or "").strip() or msg)
-    if not msg and not body.images:
-        raise problem(400, "message o images requeridos", "")
+    if not msg and not body.images and not body.documents:
+        raise problem(400, "message, images o documents requeridos", "")
     is_fly = _playground_message_is_fly_command(
         user_incoming=original_user_message,
         message=msg,
     )
+    doc_names: list[str] = []
+    if body.documents and not is_fly:
+        try:
+            msg, doc_names = enrich_message_with_playground_documents(msg, body.documents)
+        except ValueError as exc:
+            raise problem(400, str(exc), "documents") from exc
+        except Exception as exc:
+            raise problem(502, "Error extrayendo texto del documento", str(exc)) from exc
+        if not original_user_message:
+            original_user_message = "📎 " + ", ".join(doc_names) if doc_names else "📎 documento"
+        admin_audit(
+            "playground.chat.documents",
+            (body.chat_id or "admin-playground").strip() or "admin-playground",
+            f"count={len(body.documents)} names={','.join(doc_names)[:200]}",
+            actor=actor,
+        )
     if body.images and not is_fly:
         msg = await ingest_playground_message_with_images(msg, body.images, eff_tenant=turn.eff_tenant)
-        if not original_user_message:
+        if not original_user_message or original_user_message.startswith("📎 "):
             from core.vlm_ingest import default_intent_for_image_only_turn
 
-            original_user_message = default_intent_for_image_only_turn(msg)
+            if not (body.user_incoming or "").strip() and not (body.message or "").strip():
+                original_user_message = default_intent_for_image_only_turn(msg)
     if not msg:
-        raise problem(400, "message vacío tras VLM", body.message)
+        raise problem(400, "message vacío tras adjuntos", body.message)
 
     team_ctx = playground_team_context(
         telegram_user_id=turn.profile.get("telegram_user_id") or telegram_user_id_override or body.telegram_user_id,

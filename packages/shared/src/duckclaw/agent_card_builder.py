@@ -161,9 +161,17 @@ def build_a2a_agent_card(
     if docs.startswith("http"):
         card["documentationUrl"] = docs
     _redact_secrets(card)
-    # ponytail: block accidental prompt leak via description
-    for forbidden in ("system_prompt", "domain_closure"):
-        if forbidden in json.dumps(card, ensure_ascii=False).lower():
+    # Only scan public description — skill ids like ``update_system_prompt`` are valid.
+    desc_l = str(card.get("description") or "").lower()
+    for marker in (
+        "system_prompt.md",
+        "domain_closure.md",
+        "# system_prompt",
+        "## system_prompt",
+        "# domain_closure",
+        "## domain_closure",
+    ):
+        if marker in desc_l:
             raise ValueError("Agent card must not embed prompt file content")
     return card
 

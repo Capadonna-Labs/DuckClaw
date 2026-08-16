@@ -302,6 +302,7 @@ export const chatApi = {
     vault_db_path?: string;
     stream?: boolean;
     images?: { mime_type: string; data_base64: string }[];
+    documents?: { filename: string; mime_type: string; data_base64: string }[];
   }) =>
     adminFetch<{
       ok: boolean;
@@ -337,6 +338,7 @@ export const chatApi = {
       telegram_user_id?: string;
       vault_db_path?: string;
       images?: { mime_type: string; data_base64: string }[];
+      documents?: { filename: string; mime_type: string; data_base64: string }[];
       voice_response?: boolean;
     },
     handlers: {

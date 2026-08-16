@@ -4,6 +4,8 @@ export const LIMITS = {
   searchQuery: 50,
   workerId: 64,
   displayName: 128,
+  projectName: 200,
+  projectDescription: 8000,
   templatePath: 120,
   runtimeKey: 128,
   runtimeValue: 8000,
@@ -18,6 +20,16 @@ const WORKER_ID_RE = /^[a-zA-Z0-9_-]+$/;
 
 export function clampInput(value: string, max: number): string {
   return value.slice(0, max);
+}
+
+/** Normaliza un ID técnico de worker (slug lowercase, guiones). */
+export function slugifyWorkerId(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, LIMITS.workerId);
 }
 
 export function validateWorkerId(id: string): string | null {

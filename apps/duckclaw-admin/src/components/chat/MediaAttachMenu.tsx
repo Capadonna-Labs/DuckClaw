@@ -1,7 +1,17 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { ImagePlus, Mic, Paperclip, ClipboardPaste, PhoneCall, Square, Volume2, VolumeX } from 'lucide-react';
+import {
+  FileText,
+  ImagePlus,
+  Mic,
+  Paperclip,
+  ClipboardPaste,
+  PhoneCall,
+  Square,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
 
 export type MediaAttachMenuProps = {
   canSend: boolean;
@@ -13,10 +23,13 @@ export type MediaAttachMenuProps = {
   liveVoiceAvailable?: boolean;
   liveVoiceActive?: boolean;
   imageCount: number;
+  documentCount?: number;
   maxImages?: number;
+  maxDocuments?: number;
   /** Botones sin borde para barra de composición tipo AI Studio. */
   variant?: 'default' | 'minimal';
   onPickImage: () => void;
+  onPickFile?: () => void;
   onPaste?: () => void;
   onToggleVoiceResponse: () => void;
   onVoiceNoteClick: () => void;
@@ -33,9 +46,12 @@ export function MediaAttachMenu({
   liveVoiceAvailable = false,
   liveVoiceActive = false,
   imageCount,
+  documentCount = 0,
   maxImages = 15,
+  maxDocuments = 5,
   variant = 'default',
   onPickImage,
+  onPickFile,
   onPaste,
   onToggleVoiceResponse,
   onVoiceNoteClick,
@@ -56,6 +72,8 @@ export function MediaAttachMenu({
 
   const imageDisabled =
     !canSend || loading || voiceRecording || imageCount >= maxImages;
+  const fileDisabled =
+    !onPickFile || !canSend || loading || voiceRecording || documentCount >= maxDocuments;
   const ttsDisabled = !canSend || !voiceResponseAvailable;
   const ttsUnavailableTitle = voiceResponseAvailable
     ? undefined
@@ -95,7 +113,7 @@ export function MediaAttachMenu({
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 mb-2 min-w-[11.5rem] rounded-xl border bg-white dark:bg-dark-surface dark:border-dark-border shadow-lg p-1 z-50"
+          className="absolute bottom-full right-0 mb-2 w-[13.5rem] max-w-[calc(100vw-1.5rem)] rounded-xl border bg-white dark:bg-dark-surface dark:border-dark-border shadow-lg p-1 z-[60] origin-bottom-right"
         >
           <button
             type="button"
@@ -107,9 +125,24 @@ export function MediaAttachMenu({
             }}
             className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left hover:bg-gov-gray-100 dark:hover:bg-dark-bg disabled:opacity-50"
           >
-            <ImagePlus size={16} aria-hidden />
-            Imagen
+            <ImagePlus size={16} className="shrink-0" aria-hidden />
+            <span className="truncate">Imagen</span>
           </button>
+          {onPickFile ? (
+            <button
+              type="button"
+              role="menuitem"
+              disabled={fileDisabled}
+              onClick={() => {
+                onPickFile();
+                setOpen(false);
+              }}
+              className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left hover:bg-gov-gray-100 dark:hover:bg-dark-bg disabled:opacity-50"
+            >
+              <FileText size={16} className="shrink-0" aria-hidden />
+              <span className="truncate">Archivo</span>
+            </button>
+          ) : null}
           {onPaste ? (
             <button
               type="button"
@@ -121,8 +154,8 @@ export function MediaAttachMenu({
               }}
               className="w-full flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-left hover:bg-gov-gray-100 dark:hover:bg-dark-bg disabled:opacity-50"
             >
-              <ClipboardPaste size={16} aria-hidden />
-              Pegar
+              <ClipboardPaste size={16} className="shrink-0" aria-hidden />
+              <span className="truncate">Pegar</span>
             </button>
           ) : null}
           <button
@@ -139,8 +172,12 @@ export function MediaAttachMenu({
             aria-pressed={voiceResponseMode}
             aria-disabled={ttsDisabled}
           >
-            {voiceResponseMode ? <Volume2 size={16} aria-hidden /> : <VolumeX size={16} aria-hidden />}
-            Voz automática
+            {voiceResponseMode ? (
+              <Volume2 size={16} className="shrink-0" aria-hidden />
+            ) : (
+              <VolumeX size={16} className="shrink-0" aria-hidden />
+            )}
+            <span className="truncate">Voz automática</span>
           </button>
           <button
             type="button"
@@ -155,8 +192,8 @@ export function MediaAttachMenu({
               liveVoiceActive ? 'text-red-700 dark:text-red-400 font-semibold' : ''
             }`}
           >
-            <PhoneCall size={16} aria-hidden />
-            {liveVoiceActive ? 'Colgar voz en vivo' : 'Voz en vivo'}
+            <PhoneCall size={16} className="shrink-0" aria-hidden />
+            <span className="truncate">{liveVoiceActive ? 'Colgar voz en vivo' : 'Voz en vivo'}</span>
           </button>
           <button
             type="button"
@@ -170,8 +207,12 @@ export function MediaAttachMenu({
               voiceRecording ? 'text-red-700 dark:text-red-400 font-semibold' : ''
             }`}
           >
-            {voiceRecording ? <Square size={16} aria-hidden /> : <Mic size={16} aria-hidden />}
-            {voiceRecording ? 'Enviar nota de voz' : 'Nota de voz'}
+            {voiceRecording ? (
+              <Square size={16} className="shrink-0" aria-hidden />
+            ) : (
+              <Mic size={16} className="shrink-0" aria-hidden />
+            )}
+            <span className="truncate">{voiceRecording ? 'Enviar nota de voz' : 'Nota de voz'}</span>
           </button>
         </div>
       )}

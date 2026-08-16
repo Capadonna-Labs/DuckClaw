@@ -18,18 +18,9 @@ import {
   WORKER_ROLE_TEMPLATES,
   type WorkerRoleTemplateId,
 } from '@/lib/workerRoleTemplates';
-import { clampInput } from '@/lib/validation';
+import { clampInput, slugifyWorkerId } from '@/lib/validation';
 import { pollWriteTask } from '@/lib/pollWriteTask';
 import { knowledgeHref, playgroundHref, writeLastCreatedWorker } from '@/lib/onboardingFlow';
-
-function slugifyId(raw: string): string {
-  return raw
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64);
-}
 
 type WizardStep = 1 | 2;
 type InstructionTab = 'system_prompt' | 'soul';
@@ -123,7 +114,7 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
 
   if (!open) return null;
 
-  const effectiveId = workerId.trim() || slugifyId(displayName);
+  const effectiveId = workerId.trim() || slugifyWorkerId(displayName);
   const promptReady = behaviorPrompt.trim().length >= 10;
   const systemPromptLen = draft?.system_prompt.trim().length ?? 0;
   const soulLen = draft?.soul.trim().length ?? 0;
@@ -382,7 +373,7 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                   value={displayName}
                   onChange={(e) => {
                     setDisplayName(clampInput(e.target.value, 128));
-                    if (!workerId) setWorkerId(slugifyId(e.target.value));
+                    if (!workerId) setWorkerId(slugifyWorkerId(e.target.value));
                   }}
                   maxLength={128}
                   placeholder="Marco-DevOps"
@@ -393,7 +384,7 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                 <span className="text-xs font-medium text-gov-gray-700 dark:text-dark-text">ID técnico (opcional)</span>
                 <input
                   value={workerId}
-                  onChange={(e) => setWorkerId(slugifyId(e.target.value))}
+                  onChange={(e) => setWorkerId(slugifyWorkerId(e.target.value))}
                   placeholder="marco-devops"
                   className={`${INPUT_CLASS} font-mono`}
                 />
@@ -437,7 +428,7 @@ export function CreateAgentDialog({ open, onClose, onCreated }: CreateAgentDialo
                   <span className="text-xs font-medium">ID técnico</span>
                   <input
                     value={draft.worker_id}
-                    onChange={(e) => updateDraft({ worker_id: slugifyId(e.target.value) })}
+                    onChange={(e) => updateDraft({ worker_id: slugifyWorkerId(e.target.value) })}
                     className={`${INPUT_CLASS} font-mono`}
                   />
                 </label>

@@ -113,6 +113,30 @@ def test_worker_capabilities_gaps_sandbox_alias_and_mcp_github() -> None:
     assert isinstance(integration, list)
 
 
+def test_worker_capabilities_gaps_docker_only_when_sandbox_skill_on() -> None:
+    from routers.admin_domains.worker_capabilities import _compute_gaps
+
+    gaps_off, _ = _compute_gaps(
+        skills_effective=["read_sql", "get_current_time", "admin_sql"],
+        tools_runtime=["run_sandbox", "read_sql", "get_current_time", "admin_sql"],
+        sandbox_registered=True,
+        docker_ok=False,
+        manifest_data={"framework_baseline": False},
+        optional={},
+    )
+    assert not any("Docker" in g for g in gaps_off)
+
+    gaps_on, _ = _compute_gaps(
+        skills_effective=["execute_sandbox_script", "read_sql"],
+        tools_runtime=["run_sandbox", "read_sql"],
+        sandbox_registered=True,
+        docker_ok=False,
+        manifest_data={"framework_baseline": False},
+        optional={},
+    )
+    assert any("Docker no está disponible" in g for g in gaps_on)
+
+
 def test_worker_capabilities_not_found(admin_client: TestClient) -> None:
     response = admin_client.get(
         "/api/v1/admin/workers/does-not-exist-xyz/capabilities",

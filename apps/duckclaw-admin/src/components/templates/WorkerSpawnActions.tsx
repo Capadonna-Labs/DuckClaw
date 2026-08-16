@@ -4,6 +4,22 @@ import { useCallback, useState } from 'react';
 import { Download, Globe, Package } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 
+function errorMessage(e: unknown, fallback: string): string {
+  if (e instanceof Error && e.message.trim()) return e.message;
+  if (typeof e === 'string' && e.trim()) return e;
+  if (e && typeof e === 'object') {
+    const detail = (e as { detail?: unknown; message?: unknown }).detail
+      ?? (e as { message?: unknown }).message;
+    if (typeof detail === 'string' && detail.trim()) return detail;
+    if (detail && typeof detail === 'object') {
+      const inner = detail as { detail?: unknown; title?: unknown };
+      if (typeof inner.detail === 'string' && inner.detail.trim()) return inner.detail;
+      if (typeof inner.title === 'string' && inner.title.trim()) return inner.title;
+    }
+  }
+  return fallback;
+}
+
 type Props = {
   workerId: string;
   a2aDiscoverable?: boolean;
@@ -33,7 +49,7 @@ export function WorkerSpawnActions({
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al descargar Agent Card');
+      setError(errorMessage(e, 'Error al descargar Agent Card'));
     } finally {
       setBusy(null);
     }
@@ -45,7 +61,7 @@ export function WorkerSpawnActions({
     try {
       await adminService.downloadSpawnPackage(workerId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al descargar paquete');
+      setError(errorMessage(e, 'Error al descargar paquete'));
     } finally {
       setBusy(null);
     }
@@ -60,7 +76,7 @@ export function WorkerSpawnActions({
       await adminService.setA2aDiscoverable(workerId, next);
       onDiscoverableChange?.(next);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Error al actualizar discovery');
+      setError(errorMessage(e, 'Error al actualizar discovery'));
     } finally {
       setBusy(null);
     }

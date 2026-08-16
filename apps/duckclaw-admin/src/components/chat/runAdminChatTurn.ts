@@ -31,7 +31,9 @@ export type ThinkingIdentity = { workerId: string; swarmSlot: number };
 export type RunAdminChatTurnParams = {
   text: string;
   payloadImages?: { mime_type: string; data_base64: string }[];
+  payloadDocuments?: { filename: string; mime_type: string; data_base64: string }[];
   userPreviewImages?: ChatImagePreview[];
+  documentNames?: string[];
   chatId: string;
   workerId: string;
   projectId: string;
@@ -64,7 +66,9 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
   const {
     text,
     payloadImages = [],
+    payloadDocuments = [],
     userPreviewImages = [],
+    documentNames = [],
     chatId,
     workerId,
     projectId,
@@ -91,7 +95,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
   } = params;
 
 
-if (!text && payloadImages.length === 0) return;
+if (!text && payloadImages.length === 0 && payloadDocuments.length === 0) return;
 void requestNotificationPermission();
 abortControllerRef.current?.abort();
 const abortController = new AbortController();
@@ -103,6 +107,10 @@ const userPreviews =
     : payloadImages.length > 0
       ? userPreviewsFromPayload(payloadImages)
       : undefined;
+const docLabels =
+  documentNames.length > 0
+    ? documentNames
+    : payloadDocuments.map((d) => d.filename).filter(Boolean);
 const userLabel = text;
 let loopFollowUp = /^\/(loop|meditate)\b/i.test(text.trim());
 
@@ -117,6 +125,7 @@ setMessages((m) => [
     role: 'user',
     text: userLabel,
     imagePreviews: userPreviews?.length ? userPreviews : undefined,
+    documentNames: docLabels.length ? docLabels : undefined,
   },
   { role: 'assistant', text: '', streaming: true },
 ]);
@@ -330,6 +339,7 @@ try {
           telegram_user_id: telegramUserId,
       vault_db_path: vaultPath || undefined,
       images: payloadImages.length ? payloadImages : undefined,
+      documents: payloadDocuments.length ? payloadDocuments : undefined,
       voice_response: voiceResponseMode,
     },
     {

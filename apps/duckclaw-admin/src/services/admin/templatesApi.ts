@@ -5,6 +5,7 @@ import type {
   VaultOption,
 } from '@/types/admin';
 
+import { parseApiErrorDetail } from '@/lib/adminErrors';
 import { adminFetch, adminFetchOptional } from './http';
 
 export interface UserAgentDraft {
@@ -84,6 +85,16 @@ export const templatesApi = {
         body: JSON.stringify(body),
       }
     ),
+  renameTemplate: (workerId: string, newWorkerId: string) =>
+    adminFetch<{
+      ok: boolean;
+      worker_id: string;
+      previous_worker_id: string;
+      task_id?: string | null;
+    }>(`/templates/${encodeURIComponent(workerId)}/rename`, {
+      method: 'POST',
+      body: JSON.stringify({ new_worker_id: newWorkerId }),
+    }),
   getWorkerCapabilities: (workerId: string) =>
     adminFetchOptional<WorkerCapabilities>(
       `/workers/${encodeURIComponent(workerId)}/capabilities`
@@ -254,7 +265,7 @@ export const templatesApi = {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(String((body as { detail?: string }).detail || res.statusText));
+      throw new Error(parseApiErrorDetail(body, res.status) || res.statusText);
     }
     return res.json() as Promise<{ ok: boolean; preview: SpawnPackagePreview; manifest_id?: string }>;
   },
@@ -272,9 +283,7 @@ export const templatesApi = {
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      const detail = (body as { detail?: string | { detail?: string } }).detail;
-      const msg = typeof detail === 'string' ? detail : detail?.detail || res.statusText;
-      throw new Error(msg);
+      throw new Error(parseApiErrorDetail(body, res.status) || res.statusText);
     }
     return res.json();
   },
@@ -285,7 +294,7 @@ export const templatesApi = {
     );
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error(String((body as { detail?: string }).detail || res.statusText));
+      throw new Error(parseApiErrorDetail(body, res.status) || res.statusText || `Error ${res.status}`);
     }
     const blob = await res.blob();
     const disposition = res.headers.get('content-disposition') || '';

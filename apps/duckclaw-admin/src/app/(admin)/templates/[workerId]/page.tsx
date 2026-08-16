@@ -17,6 +17,7 @@ import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
 import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBanner';
 import { WorkerDisplayNameEditor } from '@/components/templates/WorkerDisplayNameEditor';
+import { WorkerIdEditor } from '@/components/templates/WorkerIdEditor';
 import { WorkerSpawnActions } from '@/components/templates/WorkerSpawnActions';
 import {
   WorkerEditorSectionTabs,
@@ -317,17 +318,27 @@ export default function TemplateEditorPage() {
           </span>
         </nav>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <WorkerDisplayNameEditor
-            workerId={workerId}
-            displayName={(detail?.display_name || detail?.name || '').trim()}
-            canEdit={canEditFiles && isCatalogWorker}
-            onSaved={(next) => {
-              setDetail((prev) =>
-                prev ? { ...prev, display_name: next, name: next } : prev
-              );
-              setMsg('Nombre actualizado.');
-            }}
-          />
+          <div className="min-w-0 space-y-1.5">
+            <WorkerDisplayNameEditor
+              workerId={workerId}
+              displayName={(detail?.display_name || detail?.name || '').trim()}
+              canEdit={canEditFiles && isCatalogWorker}
+              onSaved={(next) => {
+                setDetail((prev) =>
+                  prev ? { ...prev, display_name: next, name: next } : prev
+                );
+                setMsg('Nombre actualizado.');
+              }}
+            />
+            <WorkerIdEditor
+              workerId={workerId}
+              canEdit={canEditFiles && isCatalogWorker}
+              onRenamed={(nextId) => {
+                setMsg('ID técnico actualizado.');
+                router.replace(`/templates/${encodeURIComponent(nextId)}`);
+              }}
+            />
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {hasUnsavedChanges ? (
               <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10px] font-black uppercase text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">

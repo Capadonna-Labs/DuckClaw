@@ -86,6 +86,8 @@ async def admin_agent_card(
             card = build_a2a_agent_card_from_db(db, wid, tenant_id=tenant_id)
         except FileNotFoundError as exc:
             raise problem(404, "Worker no encontrado", str(exc)) from exc
+        except ValueError as exc:
+            raise problem(400, "Agent card inválida", str(exc)) from exc
     return JSONResponse(
         content=card,
         headers={

@@ -124,6 +124,14 @@ class HardDeleteCatalogWorkerCommand(WriteCommand):
     worker_id: str
 
 
+class RenameCatalogWorkerCommand(WriteCommand):
+    """Rename a catalog worker_id while preserving worker_uid and scoped relations."""
+
+    command_type: Literal["rename_catalog_worker"] = "rename_catalog_worker"
+    worker_id: str
+    new_worker_id: str
+
+
 class ImportTemplatesToCatalogCommand(WriteCommand):
     """Import filesystem worker templates into the DB catalog."""
 
@@ -247,6 +255,8 @@ class ConfirmWorkspaceManagedDraftCommand(WriteCommand):
     source_kind: str = "managed_draft"
     context_title: str = "Contexto compartido"
     change_note: str = "Created from DB-first managed draft"
+    # Pre-parsed spawn packages (manifest + files). Imported atomically with the project.
+    spawn_imports: list[dict[str, Any]] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

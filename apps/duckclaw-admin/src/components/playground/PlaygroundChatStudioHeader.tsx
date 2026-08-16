@@ -31,7 +31,7 @@ export function PlaygroundChatStudioHeader({
       : null;
 
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b border-gov-gray-100 py-3 pl-14 pr-4 sm:pl-[7.75rem] dark:border-dark-border">
+    <header className="flex shrink-0 items-center gap-3 border-b border-gov-gray-100 py-3 pl-12 pr-4 sm:pl-14 dark:border-dark-border">
       <div className="flex min-w-0 flex-1 items-center gap-2">
         {onRenameConversation ? (
           <EditableConversationTitle

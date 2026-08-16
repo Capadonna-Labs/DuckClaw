@@ -8,6 +8,7 @@ import {
   userPreviewsFromPayload,
 } from '@/lib/chatMessageImages';
 import { useChatImageAttachments } from '@/components/chat/useChatImageAttachments';
+import { useChatDocumentAttachments } from '@/components/chat/useChatDocumentAttachments';
 import { useChatScrollAnchor } from '@/components/chat/useChatScrollAnchor';
 import {
   clearEphemeralHeartbeats,
@@ -161,6 +162,7 @@ export function useAdminChat({
   const [historyLoading, setHistoryLoading] = useState(false);
   const [input, setInput] = useState('');
   const imageAttachments = useChatImageAttachments();
+  const documentAttachments = useChatDocumentAttachments();
   const [loading, setLoading] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [thinkingIdentity, setThinkingIdentity] = useState<{ workerId: string; swarmSlot: number }>({
@@ -326,12 +328,16 @@ export function useAdminChat({
     async (
       text: string,
       payloadImages: { mime_type: string; data_base64: string }[] = [],
-      userPreviewImages: ChatImagePreview[] = []
+      userPreviewImages: ChatImagePreview[] = [],
+      payloadDocuments: { filename: string; mime_type: string; data_base64: string }[] = [],
+      documentNames: string[] = []
     ) => {
       await runAdminChatTurn({
         text,
         payloadImages,
+        payloadDocuments,
         userPreviewImages,
+        documentNames,
         chatId,
         workerId,
         projectId,
@@ -379,12 +385,21 @@ export function useAdminChat({
     const text = input.trim();
     const names = imageAttachments.pendingImages.map((p) => p.name);
     const payloadImages = imageAttachments.buildPayloadImages();
-    if ((!text && payloadImages.length === 0) || loading || !workerId) return;
+    const docNames = documentAttachments.pendingDocuments.map((p) => p.name);
+    const payloadDocuments = documentAttachments.buildPayloadDocuments();
+    if (
+      (!text && payloadImages.length === 0 && payloadDocuments.length === 0) ||
+      loading ||
+      !workerId
+    ) {
+      return;
+    }
     const userPreviewImages = userPreviewsFromPayload(payloadImages, names);
     setInput('');
     imageAttachments.clearImages({ revoke: true });
-    await runChatTurn(text, payloadImages, userPreviewImages);
-  }, [input, loading, workerId, imageAttachments, runChatTurn]);
+    documentAttachments.clearDocuments();
+    await runChatTurn(text, payloadImages, userPreviewImages, payloadDocuments, docNames);
+  }, [input, loading, workerId, imageAttachments, documentAttachments, runChatTurn]);
 
   const retryFromMessage = useCallback(
     async (messageIndex: number) => {
@@ -551,6 +566,7 @@ export function useAdminChat({
     cancelGeneration,
     clearMessages,
     imageAttachments,
+    documentAttachments,
     vaultPath,
     setVaultPath,
     lastTurnUsage,

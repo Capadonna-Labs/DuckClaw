@@ -24,6 +24,17 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   try {
     const res = await fetch(target, { method: 'GET', headers, cache: 'no-store' });
     const contentType = res.headers.get('content-type') || 'application/zip';
+    if (!res.ok) {
+      if (contentType.includes('application/json')) {
+        const data = await res.json().catch(() => ({ detail: `Error ${res.status}` }));
+        return NextResponse.json(data, { status: res.status });
+      }
+      const text = await res.text().catch(() => '');
+      return NextResponse.json(
+        { detail: text || `Error ${res.status}` },
+        { status: res.status }
+      );
+    }
     const disposition = res.headers.get('content-disposition');
     const body = await res.arrayBuffer();
     const outHeaders: Record<string, string> = {

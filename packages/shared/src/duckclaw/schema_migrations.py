@@ -1532,8 +1532,15 @@ def _migration_001_baseline_hooks(db: Any) -> None:
         hook(db)
 
 
+def _migration_037_managed_workspace_draft_policy_v2(db: Any) -> None:
+    from duckclaw.managed_workspace_draft_policy import apply_managed_workspace_draft_policy
+
+    apply_managed_workspace_draft_policy(db, force=False)
+
+
 _MIGRATION_HOOKS = {
     1: _migration_001_baseline_hooks,
+    37: _migration_037_managed_workspace_draft_policy_v2,
 }
 
 _M004_A2A_DISCOVERABLE = [
@@ -1543,9 +1550,51 @@ _M004_A2A_DISCOVERABLE = [
     """,
 ]
 
+_M037_MANAGED_WORKSPACE_DRAFT_POLICY_V2: list[str] = [
+    # Policy body applied via hook (idempotent checksum upsert).
+]
+
+# Parity with Redis AdminConversationMeta for durable desktop/server history.
+_M038_ADMIN_CONVERSATIONS_META_V2: list[str] = [
+    """
+    ALTER TABLE main.admin_conversations
+    ADD COLUMN IF NOT EXISTS section VARCHAR DEFAULT ''
+    """,
+    """
+    ALTER TABLE main.admin_conversations
+    ADD COLUMN IF NOT EXISTS last_worker_id VARCHAR DEFAULT ''
+    """,
+    """
+    ALTER TABLE main.admin_conversations
+    ADD COLUMN IF NOT EXISTS preferred_worker_id VARCHAR DEFAULT ''
+    """,
+    """
+    ALTER TABLE main.admin_conversations
+    ADD COLUMN IF NOT EXISTS workers_json TEXT DEFAULT '[]'
+    """,
+    """
+    ALTER TABLE main.admin_conversations
+    ADD COLUMN IF NOT EXISTS last_message_preview VARCHAR DEFAULT ''
+    """,
+    """
+    ALTER TABLE main.admin_conversations
+    ADD COLUMN IF NOT EXISTS message_count INTEGER DEFAULT 0
+    """,
+    """
+    ALTER TABLE main.admin_conversations
+    ADD COLUMN IF NOT EXISTS origin VARCHAR DEFAULT 'admin_ui'
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_conversations_tenant_updated
+        ON main.admin_conversations (tenant_id, updated_at)
+    """,
+]
+
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
     (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),
     (36, "worker_a2a_discoverable", _M004_A2A_DISCOVERABLE),
+    (37, "managed_workspace_draft_policy_v2", _M037_MANAGED_WORKSPACE_DRAFT_POLICY_V2),
+    (38, "admin_conversations_meta_v2", _M038_ADMIN_CONVERSATIONS_META_V2),
 ]

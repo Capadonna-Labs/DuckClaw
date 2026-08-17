@@ -28,7 +28,55 @@ class AdminLoginBody(BaseModel):
     def password_length(cls, v: str) -> str:
         if len(v) < 8 or len(v) > 128:
             raise ValueError("invalid password length")
+        if "\r" in v or "\n" in v:
+            raise ValueError("invalid password characters")
         return v
+
+
+class AdminRegisterBody(AdminLoginBody):
+    nombre: str = ""
+
+
+async def admin_auth_register_impl(body: AdminRegisterBody) -> dict[str, Any]:
+    """Create the first local administrator through the singleton DB writer."""
+    from duckclaw import DuckClaw
+    from duckclaw.admin_console_users import count_console_users
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.write_commands import UpsertConsoleUserCommand
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise problem(503, "Gateway DuckDB no disponible", gw)
+
+    db = DuckClaw(gw, read_only=True, engine="python")
+    try:
+        has_users = count_console_users(db) > 0
+    finally:
+        db.close()
+    if has_users:
+        raise HTTPException(
+            status_code=409,
+            detail="El registro inicial ya fue completado. Un administrador puede crear más cuentas desde Accesos.",
+        )
+
+    from duckclaw.gateway_enqueue import enqueue_admin_command
+
+    try:
+        task_id = enqueue_admin_command(
+            UpsertConsoleUserCommand(
+                actor_email="bootstrap",
+                tenant_id="default",
+                email=body.email,
+                nombre=body.nombre.strip() or body.email,
+                rol="admin",
+                password=body.password,
+                initials="",
+                active=True,
+            )
+        )
+    except (RuntimeError, ValueError) as exc:
+        raise problem(503, "No se pudo crear la cuenta inicial", str(exc)) from exc
+    return {"ok": True, "task_id": task_id, "email": body.email}
 
 
 async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response: Response) -> dict[str, Any]:
@@ -158,6 +206,11 @@ async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response
 @router.post("/login")
 async def admin_auth_login(body: AdminLoginBody, request: Request, response: Response) -> dict[str, Any]:
     return await admin_auth_login_impl(body, request, response)
+
+
+@router.post("/register")
+async def admin_auth_register(body: AdminRegisterBody) -> dict[str, Any]:
+    return await admin_auth_register_impl(body)
 
 
 @router.get("/me")

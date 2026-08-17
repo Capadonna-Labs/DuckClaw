@@ -1,6 +1,6 @@
 import type { TemplateSummary } from '@/types/admin';
 
-import { adminFetch } from './http';
+import { adminFetch, adminFormFetch } from './http';
 
 export interface ManagedWorkspaceDraft {
   project: {
@@ -102,6 +102,17 @@ export const workspaceApi = {
       project: WorkspaceProjectSummary;
       agents: NonNullable<WorkspaceProjectSummary['agents']>;
     }>(`/workspace/projects/${encodeURIComponent(projectId)}`),
+  updateWorkspaceProject: (
+    projectId: string,
+    body: { name?: string; description?: string; visibility?: string }
+  ) =>
+    adminFetch<{ ok: boolean; task_id?: string; project: WorkspaceProjectSummary }>(
+      `/workspace/projects/${encodeURIComponent(projectId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(body),
+      }
+    ),
   deleteWorkspaceProject: (projectId: string) =>
     adminFetch<{ ok: boolean; hard_deleted: boolean; project_id: string }>(
       `/workspace/projects/${encodeURIComponent(projectId)}`,
@@ -168,4 +179,41 @@ export const workspaceApi = {
       method: 'POST',
       body: JSON.stringify({ draft }),
     }),
+  confirmManagedWorkspaceDraftWithImport: (
+    draft: ManagedWorkspaceDraft,
+    packages: {
+      file: File;
+      role?: string;
+      confirm_high_risk?: boolean;
+      worker_id_override?: string;
+    }[]
+  ) => {
+    const form = new FormData();
+    form.append('draft_json', JSON.stringify(draft));
+    const mapping = packages.map((pkg, file_index) => ({
+      file_index,
+      role: pkg.role || 'member',
+      confirm_high_risk: Boolean(pkg.confirm_high_risk),
+      worker_id_override: pkg.worker_id_override || undefined,
+    }));
+    form.append('mapping_json', JSON.stringify(mapping));
+    for (const pkg of packages) {
+      form.append('files', pkg.file);
+    }
+    return adminFormFetch<{
+      ok: boolean;
+      task_id: string;
+      project: {
+        project_id: string;
+        tenant_id: string;
+        owner_email: string;
+        name: string;
+        description: string;
+        status: string;
+        visibility: string;
+      };
+      created: { workers: TemplateSummary[] };
+      spawn_import_count: number;
+    }>('/workspace/orchestrator/confirm-with-import', form);
+  },
 };

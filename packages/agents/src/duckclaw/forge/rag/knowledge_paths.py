@@ -127,6 +127,22 @@ def path_under_any_root(target: Path, roots: list[Path]) -> bool:
     return any(resolved == root or root in resolved.parents for root in roots)
 
 
+def is_tenant_inbound_artifact_path(path: Path) -> bool:
+    """Absolute paths under ``db/private/{tenant}/inbound/`` (chat upload copies)."""
+    try:
+        from duckclaw.vaults import db_root
+
+        private = (db_root() / "private").expanduser().resolve()
+        resolved = path.expanduser().resolve()
+        if not resolved.is_file():
+            return False
+        rel = resolved.relative_to(private)
+        parts = rel.parts
+        return len(parts) >= 3 and parts[1].lower() == "inbound"
+    except Exception:
+        return False
+
+
 def normalize_source_uri(raw: str) -> str:
     return (raw or "").strip().strip("'\"")
 
@@ -364,15 +380,19 @@ def resolve_readable_document_path(*, relative_path: str, root_hint: str = "") -
     ingest_roots = knowledge_allowed_roots()
     output_roots = knowledge_output_roots()
     roots = list(dict.fromkeys(ingest_roots + output_roots))
-    if not roots:
-        raise ValueError("No hay raíces de conocimiento configuradas")
 
     absolute = Path(cleaned).expanduser()
     if absolute.is_absolute():
         resolved = absolute.resolve()
-        if resolved.is_file() and path_under_any_root(resolved, roots):
+        if resolved.is_file() and (
+            (roots and path_under_any_root(resolved, roots))
+            or is_tenant_inbound_artifact_path(resolved)
+        ):
             return resolved
         raise ValueError(f"Ruta absoluta fuera de raíces permitidas o inexistente: {cleaned}")
+
+    if not roots:
+        raise ValueError("No hay raíces de conocimiento configuradas")
 
     cleaned = cleaned.lstrip("/")
     if root_hint.strip():

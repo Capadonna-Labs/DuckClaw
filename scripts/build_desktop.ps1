@@ -2,6 +2,9 @@
 # Full DuckClaw desktop build: sidecar + admin standalone + node + Tauri NSIS.
 #
 # Prereq: uv, pnpm, npm, Rust/cargo (tauri build), network for node download.
+# Icons: src-tauri/icons/* from `pnpm exec tauri icon` using
+#   apps/duckclaw-admin/public/brand/duckclaw-icon.png (or packages/desktop/app-icon.png).
+#   tauri.conf.json bundle.icon already points at 32/128/256/icon.ico.
 #
 # Output:
 #   packages/desktop/src-tauri/target/release/bundle/nsis/DuckClaw_*_x64-setup.exe

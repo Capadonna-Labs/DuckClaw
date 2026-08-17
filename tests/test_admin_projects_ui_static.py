@@ -130,9 +130,14 @@ def test_projects_catalog_links_to_project_detail_page() -> None:
 
     assert detail_page.exists()
     detail_text = detail_page.read_text(encoding="utf-8")
+    inline_editors = Path(
+        "apps/duckclaw-admin/src/components/projects/ProjectInlineEditors.tsx"
+    ).read_text(encoding="utf-8")
     assert "getWorkspaceProject" in detail_text
     assert "ProjectAgentsSection" in detail_text
-    assert "Contexto del proyecto" in detail_text
+    # El bloque de contexto es editable inline: el encabezado vive en ProjectInlineEditors.
+    assert "ProjectContextEditor" in detail_text
+    assert "Contexto del proyecto" in inline_editors
     assert "Conocimiento RAG" in detail_text
     assert "listKnowledgeSources" in detail_text
     assert "Gestionar RAG" in detail_text
@@ -302,6 +307,12 @@ def test_projects_catalog_and_managed_workspace_draft_are_separate_routes() -> N
     assert "ProjectManagedWorkspaceDraftWizard" in wizard_page
     assert "createManagedWorkspaceDraft" in wizard_component
     assert "confirmManagedWorkspaceDraft" in wizard_component
+    assert "confirmManagedWorkspaceDraftWithImport" in wizard_component
+    assert "pendingPackages" in wizard_component
+    assert "Importar .zip" in wizard_component
+    assert "previewOnly" in wizard_component
+    assert "No hay skills sugeridas para este objetivo" in wizard_component
+    assert "Adjunto .zip (preview)" in wizard_component
     assert "questionAnswers" in wizard_component
     assert "Análisis del borrador administrado" in wizard_component
     assert "htmlFor={answerId}" in wizard_component
@@ -309,6 +320,25 @@ def test_projects_catalog_and_managed_workspace_draft_are_separate_routes() -> N
     assert "Respuesta opcional" in wizard_component
     assert "Continuar sin responder" in wizard_component
     assert "Para incorporarlas al borrador, ajusta el objetivo" in wizard_component
+
+    service = Path("apps/duckclaw-admin/src/services/admin/workspaceApi.ts").read_text(encoding="utf-8")
+    assert "confirmManagedWorkspaceDraftWithImport" in service
+    assert "confirm-with-import" in service
+
+    import_dialog = Path(
+        "apps/duckclaw-admin/src/components/templates/ImportSpawnPackageDialog.tsx"
+    ).read_text(encoding="utf-8")
+    assert "previewOnly" in import_dialog
+    assert "Adjuntar al borrador" in import_dialog
+
+    managed_draft_router = Path(
+        "services/api-gateway/routers/admin_domains/workspace_managed_draft.py"
+    ).read_text(encoding="utf-8")
+    assert "confirm-with-import" in managed_draft_router
+    assert "_merge_suggested_skills" in managed_draft_router
+    assert "managed_workspace_draft_policy_v2" in Path(
+        "packages/shared/src/duckclaw/schema_migrations.py"
+    ).read_text(encoding="utf-8")
 
 
 def test_managed_workspace_draft_copy_and_symbols_avoid_orchestrator_product_naming() -> None:

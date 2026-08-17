@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Optional
 
+from duckclaw.forge.rag.tool_policy import has_playground_documents, user_request_text
 from duckclaw.guardrails.loader import format_guardrail, load_guardrail
 from duckclaw.manager.manager_entry_routes import (
     _duckdb_admin_write_intent,
@@ -100,6 +101,12 @@ def _plan_task(
     # (ej. IB «Cambios en calificaciones» → inspect_schema; logs 2026-05-11 gateway).
     if "[VLM_CONTEXT" in text and "Contexto visual adjunto:" in text:
         return (incoming or "").strip(), None
+    # Adjuntos de chat (Excel/PDF/Word): el texto extraído y las rutas del vault traen
+    # «nombre», «db» o «datos» sin que el usuario pregunte por la base de datos. Sin este
+    # bypass, _plan_task sustituye el mensaje por TAREA: duckdb_name_query y el worker
+    # responde la ruta del .duckdb en vez de analizar el archivo.
+    if has_playground_documents(text) and not explicit_duckdb_schema_request(user_request_text(text)):
+        return (incoming or "").strip(), None
     # Briefings estructurados (macro, geopolítica, etc.): no sustituir por TAREA de listar tablas.
     if re.match(r"^##\s+\S", text):
         return text, None
@@ -107,6 +114,19 @@ def _plan_task(
     override: Optional[str] = None
     if _duckdb_admin_write_intent(text):
         return _db_tool_pressure_task(text, prompt_policies), None
+    try:
+        from duckclaw.workers.tool_invocation_policy import _update_system_prompt_intent
+
+        if _update_system_prompt_intent(text):
+            return (
+                "TAREA: Persiste el cambio con la tool update_system_prompt "
+                "(mode=append salvo que el usuario pida replace). "
+                "No simules la llamada en texto ni inventes JSON de la tool; "
+                "invócala de verdad y confirma solo tras el resultado.\n\n"
+                f"--- Mensaje del usuario ---\n{text}"
+            ), None
+    except Exception:
+        pass
     _explicit_duckdb_schema_request = explicit_duckdb_schema_request(text)
     # BI Analyst: preguntas meta (qué puedes hacer, quién eres) → el modelo a veces ignora soul.md y copia
     # el tono genérico «Agente de Investigación Activa»; la tarea explícita lo corrige sin depender del historial.

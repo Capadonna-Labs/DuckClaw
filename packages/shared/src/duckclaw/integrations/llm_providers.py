@@ -613,7 +613,9 @@ def invoke_chat_model_with_transient_retries_and_fallback(
         return invoke_chat_model_with_transient_retries(fallback, messages, **invoke_kwargs)
 
 
-_REMOTE_USER_FACING_LLM = frozenset({"deepseek", "groq", "openai", "anthropic"})
+_REMOTE_USER_FACING_LLM = frozenset(
+    {"deepseek", "groq", "openai", "anthropic", "openrouter", "gemini", "google"}
+)
 _LOCAL_INFERENCE_FAIL_LABELS = frozenset({"mlx", "iotcorelabs"})
 
 

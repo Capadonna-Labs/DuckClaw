@@ -91,6 +91,70 @@ def test_extract_native_md_without_markitdown(tmp_path: Path) -> None:
     assert convert_file_path_to_text(md) == "# Título"
 
 
+def test_xlsx_fallback_when_magika_models_missing(tmp_path: Path) -> None:
+    pytest.importorskip("openpyxl")
+    from openpyxl import Workbook
+
+    from duckclaw.document_toolbox import extract as extract_mod
+
+    xlsx = tmp_path / "movimientos.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Contabilidad"
+    ws.append(["Fecha", "Monto"])
+    ws.append(["2026-01-01", 1500])
+    wb.save(xlsx)
+
+    class _Boom:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(
+                "model dir not found at C:\\Temp\\_MEI123\\magika\\models\\standard_v3_3"
+            )
+
+    with patch.object(extract_mod, "markitdown_available", return_value=True), patch.dict(
+        "sys.modules",
+        {"markitdown": MagicMock(MarkItDown=_Boom, StreamInfo=MagicMock)},
+    ):
+        # Force import path inside _convert_path to use our boom MarkItDown
+        import sys
+
+        fake = MagicMock()
+        fake.MarkItDown = _Boom
+        fake.StreamInfo = MagicMock(return_value=None)
+        sys.modules["markitdown"] = fake
+        text = extract_mod.convert_bytes_to_text(
+            data=xlsx.read_bytes(),
+            filename="2026 MOVIMIENTOS CONTABILIDAD.xlsx",
+        )
+    assert "Contabilidad" in text or "Fecha" in text
+    assert "1500" in text
+
+
+def test_convert_file_path_leaves_original_bytes_intact(tmp_path: Path) -> None:
+    """Binary extract must copy first; the user's original file must not change."""
+    pytest.importorskip("openpyxl")
+    import hashlib
+
+    from openpyxl import Workbook
+
+    from duckclaw.document_toolbox.extract import convert_file_path_to_text
+
+    xlsx = tmp_path / "original.xlsx"
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Datos"
+    ws.append(["A", "B"])
+    ws.append([1, 2])
+    wb.save(xlsx)
+    before = hashlib.sha256(xlsx.read_bytes()).hexdigest()
+    before_mtime = xlsx.stat().st_mtime_ns
+
+    text = convert_file_path_to_text(xlsx)
+    assert "Datos" in text or "A" in text
+    assert hashlib.sha256(xlsx.read_bytes()).hexdigest() == before
+    assert xlsx.stat().st_mtime_ns == before_mtime
+
+
 def test_render_docx_template_roundtrip(tmp_path: Path) -> None:
     pytest.importorskip("docxtpl")
     from duckclaw.document_toolbox.templates import render_docx_template

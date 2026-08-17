@@ -105,8 +105,10 @@ export function ChatSlmSelector({
 
   if (!chatId) return null;
 
-  const modelLabel = slm?.model_short || slm?.model || 'MLX-Inference';
-  const pm2Name = slm?.pm2_name || 'MLX-Inference';
+  const modelLabel = slm?.model_short || slm?.model || 'Inferencia local';
+  const rawRuntime = (slm?.pm2_name || '').trim();
+  const runtimeLabel =
+    !rawRuntime || /^mlx(-inference)?$/i.test(rawRuntime) ? 'Inferencia local' : rawRuntime;
 
   return (
     <div
@@ -115,16 +117,16 @@ export function ChatSlmSelector({
           ? 'flex flex-col items-stretch gap-2 w-full max-w-full'
           : 'flex flex-wrap items-center gap-2'
       }`}
-      title="SLM local opcional (MLX-Inference PM2)"
+      title="SLM de inferencia local"
     >
       <label
         className={`flex flex-col gap-1.5 ${size === 'modal' ? 'w-full' : ''}`}
         htmlFor={`slm-select-${chatId}`}
       >
         <span className={`${labelCls} flex items-center gap-2 flex-wrap`}>
-          SLM (opcional)
+          SLM
           {statusBadge(slm?.mlx_status)}
-          <span className="font-normal text-gov-gray-400">{pm2Name}</span>
+          <span className="font-normal text-gov-gray-400">{runtimeLabel}</span>
         </span>
         {size !== 'modal' && size !== 'compact' && (
           <span className="text-[10px] text-gov-gray-500 dark:text-dark-muted flex items-center gap-1">
@@ -138,7 +140,7 @@ export function ChatSlmSelector({
             disabled={disabled || pending}
             onChange={(e) => void applySlm(e.target.value)}
             className={selectCls}
-            aria-label="SLM opcional MLX-Inference"
+            aria-label="SLM"
           >
             <option value={NONE_VALUE}>Ninguno</option>
             <option value="default">

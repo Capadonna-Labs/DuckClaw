@@ -144,7 +144,10 @@ export interface ReleaseWorkerCacheResult {
 export interface AdminHealth {
   status: string;
   workers_count: number;
+  /** Nombres visibles para UI (tooltip Topbar). */
   workers: string[];
+  /** Ids técnicos paralelos a ``workers`` (opcional; backends antiguos no lo envían). */
+  worker_ids?: string[];
   redis: boolean;
   templates_dir: string;
   api_revision?: number;

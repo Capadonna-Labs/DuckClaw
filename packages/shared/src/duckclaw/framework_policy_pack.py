@@ -63,22 +63,31 @@ def _pack_metadata() -> dict[str, Any]:
     return {"seed": PACK_SEED, "scope": "framework", "editable": True}
 
 
+def _fetchone(result: Any) -> Any | None:
+    """DuckClaw.execute returns a list; DuckDB returns a cursor."""
+    if hasattr(result, "fetchone"):
+        return result.fetchone()
+    if isinstance(result, list):
+        return result[0] if result else None
+    return None
+
+
 def _next_policy_version(db: Any, policy_type: str, policy_name: str) -> int:
-    row = db.execute(
+    row = _fetchone(db.execute(
         """
         SELECT COALESCE(MAX(version), 0)
         FROM main.prompt_policy_registry
         WHERE policy_type = ? AND policy_name = ?
         """,
         [policy_type, policy_name],
-    ).fetchone()
+    ))
     if not row:
         return 1
     return int(row[0]) + 1
 
 
 def _active_policy_row(db: Any, policy_type: str, policy_name: str) -> tuple[str, str, int] | None:
-    result = db.execute(
+    result = _fetchone(db.execute(
         """
         SELECT content, checksum, version
         FROM main.prompt_policy_registry
@@ -90,7 +99,7 @@ def _active_policy_row(db: Any, policy_type: str, policy_name: str) -> tuple[str
         LIMIT 1
         """,
         [policy_type, policy_name],
-    ).fetchone()
+    ))
     if not result:
         return None
     if isinstance(result, dict):
@@ -133,14 +142,14 @@ def apply_framework_policy_pack(db: Any, *, force: bool = False) -> list[str]:
         if active and not force:
             _active_content, active_checksum, active_version = active
             if active_checksum == checksum:
-                row = db.execute(
+                row = _fetchone(db.execute(
                     """
                     SELECT metadata_json
                     FROM main.prompt_policy_registry
                     WHERE policy_type = ? AND policy_name = ? AND version = ?
                     """,
                     [policy_type, policy_name, active_version],
-                ).fetchone()
+                ))
                 raw_meta = ""
                 if isinstance(row, dict):
                     raw_meta = str(row.get("metadata_json") or "")

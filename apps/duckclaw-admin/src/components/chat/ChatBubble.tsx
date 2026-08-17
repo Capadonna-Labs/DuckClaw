@@ -121,7 +121,8 @@ export function ChatBubble({
     !isInterrupted &&
     m.streaming &&
     !(displayText || '').trim() &&
-    !(m.imagePreviews?.length);
+    !(m.imagePreviews?.length) &&
+    !(m.documentNames?.length);
   if (isEmptyAssistantShell) return null;
 
   // Solo era el prefijo técnico "d 1" / id+slot — no mostrar burbuja vacía.
@@ -130,6 +131,7 @@ export function ChatBubble({
     !m.streaming &&
     !(displayText || '').trim() &&
     !(m.imagePreviews?.length) &&
+    !(m.documentNames?.length) &&
     !m.audioBase64;
   if (isIdentityOnlyAssistant) return null;
   if (isToolHeartbeat) return null;
@@ -213,7 +215,7 @@ export function ChatBubble({
         </p>
       )}
       {m.imagePreviews && m.imagePreviews.length > 0 && (
-        <div className={`flex flex-wrap gap-2 ${displayText?.trim() ? 'mb-2' : ''}`}>
+        <div className={`flex flex-wrap gap-2 ${displayText?.trim() || m.documentNames?.length ? 'mb-2' : ''}`}>
           {m.imagePreviews.map((img) => (
             <button
               key={img.url}
@@ -233,6 +235,23 @@ export function ChatBubble({
                 }
               />
             </button>
+          ))}
+        </div>
+      )}
+      {m.documentNames && m.documentNames.length > 0 && (
+        <div className={`flex flex-wrap gap-1.5 ${displayText?.trim() ? 'mb-2' : ''}`}>
+          {m.documentNames.map((name) => (
+            <span
+              key={name}
+              className={
+                isUser
+                  ? 'inline-flex max-w-[12rem] items-center truncate rounded-md bg-white/15 px-2 py-0.5 text-[11px] font-medium'
+                  : 'inline-flex max-w-[12rem] items-center truncate rounded-md border border-gov-gray-200 bg-gov-gray-50 px-2 py-0.5 text-[11px] font-medium dark:border-dark-border dark:bg-dark-bg'
+              }
+              title={name}
+            >
+              📎 {name}
+            </span>
           ))}
         </div>
       )}

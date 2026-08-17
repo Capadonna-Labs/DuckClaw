@@ -8,7 +8,7 @@ if (-not (Test-Path $exe)) {
 }
 
 Write-Host "Deteniendo duckclaw_backend..."
-taskkill /F /IM duckclaw_backend.exe 2>$null | Out-Null
+cmd /c "taskkill /F /IM duckclaw_backend.exe >nul 2>nul"
 Start-Sleep -Seconds 1
 
 if (Test-Path $envFile) {

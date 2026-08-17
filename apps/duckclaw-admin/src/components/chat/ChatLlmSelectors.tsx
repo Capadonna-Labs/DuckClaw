@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import {
@@ -11,6 +11,7 @@ import {
   mlxInferenceModelPaths,
   defaultMlxModel,
   isForeignModelForMlx,
+  effectiveLlmModelId,
   type MlxInferenceCatalog,
 } from '@/lib/llmModelPresets';
 import { SearchableModelSelect } from '@/components/chat/SearchableModelSelect';
@@ -31,7 +32,7 @@ type Props = {
   provider: string;
   model: string;
   catalog: CatalogItem[];
-  /** Modelos/adapters expuestos por MLX-Inference PM2 (mismo origen que SLM config). */
+  /** Catálogo de modelos/adapters del runtime de inferencia local (mismo origen que SLM). */
   mlxInference?: MlxInferenceCatalog | null;
   onUpdated: () => void;
   disabled?: boolean;
@@ -77,13 +78,14 @@ export function ChatLlmSelectors({
       ),
     [activeProvider, catalogItem?.model_example, model, mlxModelPaths]
   );
-  const currentModel =
-    (activeProvider === 'mlx' && isForeignModelForMlx(model)
-      ? defaultMlxModel(mlxInference)
-      : model.trim()) ||
-    modelOptions[0] ||
-    '';
+  const currentModel = effectiveLlmModelId(
+    activeProvider,
+    model,
+    catalogItem?.model_example,
+    mlxInference
+  );
   const openRouter = isOpenRouterProvider(activeProvider);
+  const syncedEmptyModelRef = useRef('');
 
   const searchableOptions = useMemo(
     () =>
@@ -106,9 +108,18 @@ export function ChatLlmSelectors({
     setError(null);
     setPending(next.provider ? 'provider' : 'model');
     try {
-      const modelArg =
-        next.model?.trim() ||
-        (next.provider && pid === 'mlx' ? defaultMlxModel(mlxInference) : undefined);
+      let modelArg = next.model?.trim();
+      if (!modelArg && next.provider) {
+        modelArg =
+          pid === 'mlx'
+            ? defaultMlxModel(mlxInference)
+            : modelOptionsForProvider(
+                pid,
+                item?.model_example,
+                '',
+                pid === 'mlx' ? mlxInferenceModelPaths(mlxInference) : undefined
+              )[0];
+      }
       await adminService.setPlaygroundModel({
         chat_id: chatId,
         provider: pid,
@@ -129,6 +140,18 @@ export function ChatLlmSelectors({
       setPending(null);
     }
   };
+
+  /** Si el gateway trae provider sin model, persiste el preset que ya muestra el selector. */
+  useEffect(() => {
+    if (!chatId || disabled || pending) return;
+    if ((model || '').trim()) return;
+    if (!activeProvider || !currentModel) return;
+    const key = `${chatId}:${activeProvider}:${currentModel}`;
+    if (syncedEmptyModelRef.current === key) return;
+    syncedEmptyModelRef.current = key;
+    void applyModel({ model: currentModel });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sync one-shot por conversación/proveedor
+  }, [chatId, disabled, pending, model, activeProvider, currentModel]);
 
   const selectCls =
     size === 'modal'
@@ -223,8 +246,8 @@ export function ChatLlmSelectors({
       </label>
       {activeProvider === 'mlx' && size === 'modal' && (
         <p className="text-[10px] text-gov-gray-400 dark:text-dark-muted leading-snug">
-          Inferencia local vía PM2 MLX-Inference (OpenAI-compatible). El adapter activo en PM2 define el
-          modelo cargado; cambiar LoRA puede requerir reiniciar MLX-Inference.
+          Inferencia local vía endpoint OpenAI-compatible. El adapter activo define el modelo
+          cargado; cambiar LoRA puede requerir reiniciar el proceso de inferencia local.
         </p>
       )}
       {error && (

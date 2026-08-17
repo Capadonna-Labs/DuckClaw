@@ -171,3 +171,25 @@ export function modelOptionsForProvider(
   if (example) add(example);
   return out;
 }
+
+/** Modelo efectivo para UI: si el gateway no trae model, usa el primer preset del proveedor. */
+export function effectiveLlmModelId(
+  providerId: string,
+  modelId: string,
+  catalogModelExample?: string,
+  mlxCatalog?: MlxInferenceCatalog | null
+): string {
+  const pid = (providerId || '').trim().toLowerCase();
+  const mid = (modelId || '').trim();
+  if (pid === 'mlx' && isForeignModelForMlx(mid)) {
+    return defaultMlxModel(mlxCatalog);
+  }
+  if (mid) return mid;
+  const options = modelOptionsForProvider(
+    pid,
+    catalogModelExample,
+    '',
+    pid === 'mlx' ? mlxInferenceModelPaths(mlxCatalog) : undefined
+  );
+  return options[0] || '';
+}

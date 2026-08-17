@@ -28,6 +28,8 @@ export type ChatMsg = {
   /** Turno (usuarios previos) para reinsertar heartbeats tras reload. */
   turnUserIndex?: number;
   imagePreviews?: ChatImagePreview[];
+  /** Nombres de documentos adjuntos en el turno (sin binarios). */
+  documentNames?: string[];
   /** Mensaje de usuario originado por nota de voz. */
   voiceNote?: boolean;
   /** Audio TTS (base64) en respuesta del asistente. */

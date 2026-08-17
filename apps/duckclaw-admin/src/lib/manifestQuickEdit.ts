@@ -35,10 +35,11 @@ function readBool(yaml: string, key: string): boolean {
 }
 
 function readAgentNodeMaxToolRounds(yaml: string): number {
-  const blockMatch = yaml.match(/^agent_node:\s*\n((?:  .+\n)*)/m);
+  const normalized = yaml.replace(/\r\n/g, '\n');
+  const blockMatch = normalized.match(/^agent_node:\s*\n((?:[ \t]+.+(?:\n|$))*)/m);
   if (!blockMatch) return DEFAULT_MAX_TOOL_ROUNDS;
   const inner = blockMatch[1];
-  const mtr = inner.match(/^  max_tool_rounds:\s*(\d+)\s*$/m);
+  const mtr = inner.match(/^[ \t]+max_tool_rounds:\s*(\d+)[ \t]*$/m);
   if (!mtr) return DEFAULT_MAX_TOOL_ROUNDS;
   const n = Number.parseInt(mtr[1], 10);
   if (!Number.isFinite(n) || n < 1) return DEFAULT_MAX_TOOL_ROUNDS;
@@ -103,28 +104,30 @@ function upsertResearchSkill(yaml: string, enabled: boolean): string {
 
 function upsertAgentNodeMaxToolRounds(yaml: string, rounds: number): string {
   const value = Math.max(1, Math.min(MAX_TOOL_ROUNDS_CEILING, Math.floor(rounds)));
-  const blockRe = /^agent_node:\s*\n((?:  .+\n)*)/m;
-  const hasBlock = blockRe.test(yaml);
+  const normalized = yaml.replace(/\r\n/g, '\n');
+  const blockRe = /^agent_node:\s*\n((?:[ \t]+.+(?:\n|$))*)/m;
+  const hasBlock = blockRe.test(normalized);
   const roundsLine = `  max_tool_rounds: ${value}`;
 
   if (value === DEFAULT_MAX_TOOL_ROUNDS) {
-    if (!hasBlock) return yaml;
-    let out = yaml.replace(/^  max_tool_rounds:\s*\d+\s*\n/m, '');
+    if (!hasBlock) return normalized;
+    // Do not let \s* eat the trailing newline — that breaks the next parse.
+    let out = normalized.replace(/^[ \t]+max_tool_rounds:\s*\d+[ \t]*\n?/m, '');
     const afterRemove = out.match(blockRe);
-    if (afterRemove && !/^  \S/m.test(afterRemove[1])) {
-      out = out.replace(/^agent_node:\s*\n/m, '');
+    if (afterRemove && !/^[ \t]+\S/m.test(afterRemove[1])) {
+      out = out.replace(/^agent_node:\s*\n?/m, '');
     }
     return out;
   }
 
   if (hasBlock) {
-    if (/^  max_tool_rounds:\s*\d+\s*$/m.test(yaml)) {
-      return yaml.replace(/^  max_tool_rounds:\s*\d+\s*$/m, roundsLine);
+    if (/^[ \t]+max_tool_rounds:\s*\d+[ \t]*$/m.test(normalized)) {
+      return normalized.replace(/^[ \t]+max_tool_rounds:\s*\d+[ \t]*$/m, roundsLine);
     }
-    return yaml.replace(/^agent_node:\s*\n/m, `agent_node:\n${roundsLine}\n`);
+    return normalized.replace(/^agent_node:\s*\n/m, `agent_node:\n${roundsLine}\n`);
   }
 
-  const trimmed = yaml.trimEnd();
+  const trimmed = normalized.trimEnd();
   return `${trimmed}\nagent_node:\n${roundsLine}\n`;
 }
 

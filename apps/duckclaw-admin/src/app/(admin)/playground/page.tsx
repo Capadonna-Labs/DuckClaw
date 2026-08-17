@@ -54,12 +54,16 @@ import {
   writePlaygroundLastWorker,
   writePlaygroundLlmSnapshot,
 } from '@/lib/playgroundLastSelection';
+import {
+  shouldRedirectToProjectsForMissingWorkers,
+  WORKER_REQUIRED_ALERT_MESSAGE,
+  WORKER_REQUIRED_PROJECTS_HREF,
+} from '@/lib/playgroundWorkerGate';
 
 import { PlaygroundHistoryView } from '@/components/playground/PlaygroundHistoryView';
 import {
   ChatCommandsPanel,
   ProjectAgentControls,
-  SettingValue,
   SettingsModal,
 } from '@/components/playground/PlaygroundSettingsParts';
 import type {
@@ -79,6 +83,8 @@ export default function PlaygroundPage() {
   const [config, setConfig] = useState<PlaygroundConfig | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
+  const [workerRequiredNotice, setWorkerRequiredNotice] = useState(false);
+  const workerRequiredRedirectedRef = useRef(false);
   const usuario = useAuthStore((s) => s.usuario);
   const authHydrated = useAuthStore((s) => s.hasHydrated);
   const profileTenantId = usuario?.profile?.tenant_id?.trim() || '';
@@ -90,6 +96,7 @@ export default function PlaygroundPage() {
   );
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
+  const [toolUsageEnabled, setToolUsageEnabled] = useState(true);
   const [sandboxToggling, setSandboxToggling] = useState(false);
   const loadConfigRunningRef = useRef(false);
   const llmRestoreCompleteRef = useRef(false);
@@ -362,6 +369,23 @@ export default function PlaygroundPage() {
   }, [loadConfig]);
 
   useEffect(() => {
+    if (
+      !shouldRedirectToProjectsForMissingWorkers({
+        configLoading,
+        configError,
+        configLoaded: Boolean(config),
+        workers: config?.workers,
+        alreadyRedirected: workerRequiredRedirectedRef.current,
+      })
+    ) {
+      return;
+    }
+    workerRequiredRedirectedRef.current = true;
+    setWorkerRequiredNotice(true);
+    router.replace(WORKER_REQUIRED_PROJECTS_HREF);
+  }, [config, configError, configLoading, router]);
+
+  useEffect(() => {
     if (loadConfigRunningRef.current || configLoading || !llmRestoreCompleteRef.current) return;
     if (!config?.llm || !conv.sessionId) return;
     const scope = (config.llm.scope || '').trim();
@@ -585,6 +609,8 @@ export default function PlaygroundPage() {
         invalidWorkers={config?.workers_invalid ?? []}
         logsPanelOpen={logsPanelOpen}
         onLogsToggle={handleLogsToggle}
+        toolUsageEnabled={toolUsageEnabled}
+        onToolUsageToggle={() => setToolUsageEnabled((enabled) => !enabled)}
         logsControls={logsPanelOpen ? <Pm2LiveLogsControls variant="studio" /> : null}
         logsViewport={logsPanelOpen ? <Pm2LiveLogsViewport /> : null}
         onSandboxToggle={handleSandboxToggle}
@@ -641,17 +667,13 @@ export default function PlaygroundPage() {
       {settingsModal === 'model' && (
         <SettingsModal
           title="Model selection"
-          description="Proveedor LLM (nube o MLX-Inference local). SLM opcional abajo es herramienta aparte."
+          description="Proveedor LLM (nube o inferencia local). SLM abajo es herramienta aparte."
           size="wide"
           onClose={() => setSettingsModal(null)}
         >
           {conv.sessionId ? (
             <div className="space-y-6">
               <div className="space-y-3">
-                <SettingValue
-                  label="LLM actual"
-                  value={`${config?.llm?.provider || '—'} · ${config?.llm?.model || '—'}`}
-                />
                 <p className="text-xs font-black uppercase tracking-wider text-gov-gray-500">LLM</p>
                 <ChatLlmSelectors
                   chatId={conv.sessionId}
@@ -666,16 +688,8 @@ export default function PlaygroundPage() {
                 />
               </div>
               <div className="space-y-3 border-t dark:border-dark-border pt-4">
-                <SettingValue
-                  label="SLM actual"
-                  value={
-                    config?.slm?.enabled
-                      ? `${config.slm.model_short || config.slm.model} (${config.slm.mlx_status})`
-                      : 'Ninguno'
-                  }
-                />
                 <p className="text-xs font-black uppercase tracking-wider text-gov-gray-500">
-                  SLM (opcional)
+                  SLM
                 </p>
                 <ChatSlmSelector
                   chatId={conv.sessionId}
@@ -757,6 +771,15 @@ export default function PlaygroundPage() {
         onScrollBottom={() => pageScroll.scrollToBottom('smooth')}
       />
 
+      {workerRequiredNotice ? (
+        <div
+          role="alert"
+          className="absolute inset-x-3 top-3 z-30 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100"
+        >
+          {WORKER_REQUIRED_ALERT_MESSAGE}
+        </div>
+      ) : null}
+
       {isHistoryView ? (
         <PlaygroundHistoryView
           tenantId={effectiveTenantId}
@@ -775,11 +798,11 @@ export default function PlaygroundPage() {
         <button
           type="button"
           onClick={() => setShowHistory(true)}
-          className="absolute left-3 top-3 z-20 flex items-center gap-1.5 rounded-full border border-gov-blue-100 bg-white/90 px-2.5 py-2 text-[11px] font-black text-gov-blue-800 shadow-sm backdrop-blur hover:bg-gov-blue-50 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan dark:hover:bg-dark-bg"
+          className="absolute left-3 top-3 z-20 flex items-center justify-center rounded-full border border-gov-blue-100 bg-white/90 p-2 text-gov-blue-800 shadow-sm backdrop-blur hover:bg-gov-blue-50 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan dark:hover:bg-dark-bg"
           aria-label="Volver al historial"
+          title="Volver al historial"
         >
           <ArrowLeft size={14} />
-          <span className="hidden sm:inline">Historial</span>
         </button>
         <div className="lg:hidden absolute right-3 top-3 z-20 flex items-center gap-2">
           <Link
@@ -841,6 +864,7 @@ export default function PlaygroundPage() {
             showStudioHeader
             showWorkerLink={false}
             composeLayout="studio"
+            showToolUsage={toolUsageEnabled}
             composeChips={playgroundComposeChips}
             conversationTitle={conv.conversationTitle}
             onRenameConversation={conv.renameConversation}

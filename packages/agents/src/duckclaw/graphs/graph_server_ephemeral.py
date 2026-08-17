@@ -77,10 +77,13 @@ def is_openrouter_chat_provider(provider: str) -> bool:
 
 
 def openrouter_gateway_config_error(exc: BaseException) -> RuntimeError:
+    detail = str(exc).strip()
+    suffix = f" Detalle: {detail[:240]}" if detail else ""
     return RuntimeError(
-        "OpenRouter no está configurado en el gateway: añade OPENROUTER_API_KEY "
-        "al .env del repositorio y reinicia DuckClaw-Gateway "
-        "(pm2 restart DuckClaw-Gateway --update-env)."
+        "OpenRouter no está configurado para este tenant: guarda la API key en "
+        "Admin → Integraciones → API keys (o define OPENROUTER_API_KEY en el entorno "
+        "del gateway) y reintenta. No hace falta MLX local."
+        f"{suffix}"
     )
 
 
@@ -145,6 +148,9 @@ def resolve_llm_triplet_for_graph_invoke(
 def invoke_ephemeral_gateway_graph(
     chat_id: str | None = None,
     vault_db_path: str | None = None,
+    *,
+    tenant_id: str = "default",
+    actor_email: str = "",
 ) -> tuple[Any, Any]:
     """
     Abre DuckClaw RO al archivo del gateway, compila el manager y devuelve (graph, db).
@@ -153,6 +159,9 @@ def invoke_ephemeral_gateway_graph(
     Si ``chat_id`` tiene llm_* en agent_config (p. ej. /model), el LLM del grafo sigue esa
     tripleta en lugar del cache global basado solo en env. Con ``vault_db_path`` distinto
     del hub, gana el override del hub (consola admin); el vault solo si el hub no tiene llm_*.
+
+    ``tenant_id`` / ``actor_email`` se usan para resolver API keys DB-first (p. ej. OpenRouter
+    en Integraciones). Sin ellos, un chat OpenRouter puede caer al default global ``mlx``.
     """
     from duckclaw.integrations.llm_providers import build_llm
     from duckclaw.manager.graph import trim_worker_graph_cache
@@ -166,6 +175,8 @@ def invoke_ephemeral_gateway_graph(
     os.makedirs(str(Path(db_path).parent), exist_ok=True)
     trim_worker_graph_cache()
     v_p = (vault_db_path or "").strip()
+    tid = (tenant_id or "default").strip() or "default"
+    actor = (actor_email or "").strip()
     from duckclaw.spawn_profile import spawn_inline_writes_enabled
 
     use_spawn_rw = spawn_inline_writes_enabled() and (
@@ -190,7 +201,15 @@ def invoke_ephemeral_gateway_graph(
         if trip is not None:
             tp, tm, tu = trip
             try:
-                built = build_llm(tp, tm, tu, prefer_env_provider=False)
+                built = build_llm(
+                    tp,
+                    tm,
+                    tu,
+                    prefer_env_provider=False,
+                    db=db,
+                    tenant_id=tid,
+                    actor_email=actor,
+                )
             except Exception as exc:
                 _log.warning(
                     "graph_server: build_llm(chat triplet) failed provider=%s err=%s",
@@ -198,7 +217,9 @@ def invoke_ephemeral_gateway_graph(
                     exc,
                     exc_info=True,
                 )
-                if is_openrouter_chat_provider(tp) and "OPENROUTER_API_KEY" in str(exc):
+                if is_openrouter_chat_provider(tp) and (
+                    "OPENROUTER_API_KEY" in str(exc) or "openrouter" in str(exc).lower()
+                ):
                     raise openrouter_gateway_config_error(exc) from exc
                 built = None
             if built is not None:
@@ -214,20 +235,30 @@ def invoke_ephemeral_gateway_graph(
                     tp,
                     (tm or "")[:80],
                 )
+                # No degradar silenciosamente un chat cloud (p. ej. OpenRouter) al default MLX.
+                if is_openrouter_chat_provider(tp):
+                    raise openrouter_gateway_config_error(
+                        RuntimeError("build_llm returned None for openrouter chat triplet")
+                    )
         _invoke_provider = str(graph_state.get("provider") or "")
         if ovr.get("llm_provider_override"):
             _invoke_provider = str(ovr.get("llm_provider_override") or "")
         elif trip:
             _invoke_provider = str(trip[0] or "")
         _log.info(
-            "graph_server: llm_invoke_override chat_id=%s trip_source=%s has_trip=%s ovr=%s global_provider=%s",
+            "graph_server: llm_invoke_override chat_id=%s trip_source=%s has_trip=%s ovr=%s "
+            "global_provider=%s tenant_id=%s",
             chat_id,
             trip_source,
             trip is not None,
             bool(ovr),
             _invoke_provider,
+            tid,
         )
     except Exception as exc:
+        # Errores de configuración OpenRouter deben llegar al caller (no caer a MLX).
+        if "OpenRouter no está configurado" in str(exc):
+            raise
         _log.warning("graph_server: LLM override resolution failed: %s", exc, exc_info=True)
     graph = _build_manager_graph_for_db(db, **ovr)
     return graph, db

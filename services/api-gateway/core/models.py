@@ -24,6 +24,14 @@ class ChatRequest(BaseModel):
         None,
         description="Texto original del usuario cuando message incluye contexto inyectado.",
     )
+    graph_user_incoming: str | None = Field(
+        None,
+        description="Uso interno: texto que el grafo debe recibir cuando hay adjuntos extraídos.",
+    )
+    document_turn: bool = Field(
+        False,
+        description="Uso interno: aísla un análisis de adjuntos del historial conversacional para el grafo.",
+    )
     chat_id: str | None = Field(
         None,
         description="ID del chat o grupo (thread_id); alias: session_id, thread_id, chatId",

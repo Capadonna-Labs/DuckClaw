@@ -32,6 +32,7 @@ from duckclaw.workers.tool_binding import tool_called_since as _tool_called_sinc
 from duckclaw.workers.tool_invocation_policy import (
     decide_current_time_tool_invocation as _decide_current_time_tool_invocation,
     decide_db_first_tool_invocation as _decide_db_first_tool_invocation,
+    decide_update_system_prompt_invocation as _decide_update_system_prompt_invocation,
 )
 from duckclaw.workers.tool_surface_policy import tool_surface_intent_text
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -398,7 +399,28 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                 from duckclaw.workers.tool_orchestration import (
                     find_gmail_mcp_search_tool,
                     incoming_has_email_intent,
+                    _last_human_index,
+                    _tools_since,
                 )
+
+                _usp_msgs = state.get("messages") or []
+                _usp_lh = _last_human_index(list(_usp_msgs))
+                _usp_ran = set(_tools_since(list(_usp_msgs), _usp_lh))
+                usp_decision = _decide_update_system_prompt_invocation(
+                    incoming=_intent_incoming or incoming,
+                    available_tools=tools_by_name,
+                    called_tools_since_last_human=_usp_ran,
+                    already_has_tool_result=already_has_tool_result,
+                    summarize_directive=telegram_context_summarize_directive,
+                )
+                if usp_decision.should_force and usp_decision.tool_name:
+                    force_orch_tool = usp_decision.tool_name
+                    force_schema = False
+                    force_admin_sql = False
+                    force_read_sql = False
+                    force_tavily = False
+                    force_reddit = False
+                    force_visual = False
 
                 _email_intent = incoming_has_email_intent(_orch_incoming)
                 _gmail_search_tool = (

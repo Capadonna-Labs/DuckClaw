@@ -53,6 +53,8 @@ export type AdminChatPanelProps = {
   composeChips?: React.ReactNode;
   /** `studio`: caja única redondeada con chips dentro (Playground). */
   composeLayout?: 'default' | 'studio';
+  /** Muestra u oculta el detalle de herramientas usado durante una respuesta. */
+  showToolUsage?: boolean;
   /** Compatibilidad: los contenedores pueden resolver gestión de conversaciones fuera del panel base. */
   conversationManage?: Pick<
     ConversationManagePanelProps,
@@ -81,6 +83,7 @@ export function AdminChatPanel({
   headerActions,
   composeChips,
   composeLayout = 'default',
+  showToolUsage = true,
   conversationManage,
   className = '',
 }: AdminChatPanelProps) {
@@ -121,6 +124,7 @@ export function AdminChatPanel({
     inputRef,
     cancelGeneration,
     imageAttachments,
+    documentAttachments,
     vaultPath,
     setVaultPath,
     lastTurnUsage,
@@ -184,7 +188,9 @@ export function AdminChatPanel({
     Boolean(workerId) &&
     !loading &&
     !liveVoice.isActive &&
-    (input.trim().length > 0 || imageAttachments.hasImages);
+    (input.trim().length > 0 ||
+      imageAttachments.hasImages ||
+      documentAttachments.hasDocuments);
 
   const voice = useVoiceNoteRecorder();
 
@@ -199,7 +205,11 @@ export function AdminChatPanel({
     setInput,
     inputRef,
     ingestFiles: imageAttachments.ingestFiles,
-    setAttachError: imageAttachments.setAttachError,
+    ingestDocuments: documentAttachments.ingestFiles,
+    setAttachError: (message) => {
+      imageAttachments.setAttachError(message);
+      documentAttachments.setAttachError(message);
+    },
   });
 
   const handleVoiceClick = useCallback(async () => {
@@ -318,7 +328,7 @@ export function AdminChatPanel({
                     <label className="flex flex-col gap-1 text-[10px] w-full min-w-0">
                       <span className="flex items-center gap-2 text-gov-gray-500 dark:text-dark-muted shrink-0">
                         <Cpu size={14} className="text-gov-blue-600 dark:text-dark-cyan shrink-0" />
-                        SLM (opcional)
+                        SLM
                       </span>
                       <ChatSlmSelector
                         chatId={chatId}
@@ -416,7 +426,7 @@ export function AdminChatPanel({
                 {chatId && (
                   <div className="flex flex-col gap-2 min-w-0">
                     <span className="text-[10px] font-black uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted">
-                      SLM (opcional)
+                      SLM
                     </span>
                     <ChatSlmSelector
                       chatId={chatId}
@@ -498,6 +508,7 @@ export function AdminChatPanel({
         thinkingIdentity={thinkingIdentity}
         labelForWorkerId={labelForWorkerId}
         loading={loading}
+        showToolUsage={showToolUsage}
         isCompact={isCompact}
         scrollRef={scrollRef}
         showScrollButton={showScrollButton}
@@ -525,6 +536,7 @@ export function AdminChatPanel({
         liveVoiceAvailable={liveVoiceAvailable}
         setVoiceResponseMode={setVoiceResponseMode}
         imageAttachments={imageAttachments}
+        documentAttachments={documentAttachments}
         send={send}
         cancelGeneration={cancelGeneration}
         onTextareaPaste={onTextareaPaste}

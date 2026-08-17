@@ -146,10 +146,13 @@ def _agent_node_llm_failure_user_message(exc: BaseException, *, provider: str) -
     if pl == "openrouter" and ("402" in raw or "payment required" in low or "more credits" in low):
         return (
             "OpenRouter rechazó la petición (créditos insuficientes o `max_tokens` demasiado alto). "
-            "Opciones: añade créditos en openrouter.ai/settings/credits, usa DeepSeek/Groq en el selector, "
+            "Opciones: añade créditos en openrouter.ai/settings/credits, cambia el modelo en el selector "
+            "(sigue siendo OpenRouter, p. ej. `deepseek/deepseek-v4-flash`), "
             "o baja `DUCKCLAW_OPENROUTER_MAX_OUTPUT_TOKENS` (p. ej. 2048). "
             f"Detalle: {detail}"
         )
+    if pl == "openrouter":
+        return load_guardrail("errors", "llm_failure_openrouter").format(detail=detail)
     if pl in ("mlx", "iotcorelabs"):
         return mlx_hint
     return load_guardrail("errors", "llm_failure_generic").format(detail=detail)

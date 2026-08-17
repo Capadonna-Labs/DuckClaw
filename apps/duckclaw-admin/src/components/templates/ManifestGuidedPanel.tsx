@@ -99,11 +99,12 @@ export function ManifestGuidedPanel({ yaml, onChange, disabled }: ManifestGuided
                   disabled={disabled}
                   className="w-16 rounded-lg border border-gov-gray-200 px-2 py-1 text-center text-xs font-semibold tabular-nums dark:border-dark-border dark:bg-dark-bg"
                   onChange={(e) => {
-                    const n = Number.parseInt(e.target.value, 10);
+                    const raw = e.target.value.trim();
+                    if (!raw) return;
+                    const n = Number.parseInt(raw, 10);
+                    if (!Number.isFinite(n)) return;
                     patch({
-                      maxToolRounds: Number.isFinite(n)
-                        ? Math.max(1, Math.min(MAX_TOOL_ROUNDS_CEILING, n))
-                        : DEFAULT_MAX_TOOL_ROUNDS,
+                      maxToolRounds: Math.max(1, Math.min(MAX_TOOL_ROUNDS_CEILING, n)),
                     });
                   }}
                 />

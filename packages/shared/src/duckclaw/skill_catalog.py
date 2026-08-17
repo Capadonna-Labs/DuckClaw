@@ -257,6 +257,7 @@ def sync_framework_skill_catalog_from_pack(db: Any) -> int:
 def list_skill_categories_from_db(db: Any) -> list[dict[str, Any]]:
     ensure_skill_catalog_schema(db)
     seed_framework_skill_catalog_if_empty(db)
+    sync_framework_skill_catalog_from_pack(db)
     categories: list[dict[str, Any]] = []
     cat_rows = _query_all_dicts(
         db,

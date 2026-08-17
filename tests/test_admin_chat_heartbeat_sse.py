@@ -48,6 +48,48 @@ def test_parse_admin_heartbeat_payload_tool_fields() -> None:
     assert parsed["elapsed_ms"] == 12.3
 
 
+def test_iter_admin_heartbeats_with_lite_store() -> None:
+    """Desktop lite: heartbeats must flow without Redis."""
+    import asyncio
+    import json
+
+    from core.admin_chat_heartbeat import admin_heartbeat_channel, iter_admin_heartbeats
+    from duckclaw.lite_session_store import LiteSessionStore
+
+    store = LiteSessionStore()
+    chat_id = "admin-conv-lite-hb"
+    channel = admin_heartbeat_channel(chat_id)
+    stop = asyncio.Event()
+
+    async def _run() -> None:
+        received: list[dict] = []
+
+        async def _listen() -> None:
+            async for item in iter_admin_heartbeats(store, chat_id, stop=stop):
+                received.append(item)
+                stop.set()
+                break
+
+        listener = asyncio.create_task(_listen())
+        await asyncio.sleep(0.05)
+        payload = json.dumps(
+            {
+                "text": "🔄 Usando: inspect_schema",
+                "kind": "tool",
+                "tool_name": "inspect_schema",
+                "tool_phase": "start",
+            },
+            ensure_ascii=False,
+        )
+        assert store.publish(channel, payload) == 1
+        await asyncio.wait_for(listener, timeout=2.0)
+        assert len(received) == 1
+        assert received[0]["tool_name"] == "inspect_schema"
+        assert received[0]["kind"] == "tool"
+
+    asyncio.run(_run())
+
+
 def test_sse_heartbeat_tool_fields() -> None:
     raw = sse_heartbeat(
         "🔄 Usando: read_sql",
@@ -64,4 +106,4 @@ def test_friendly_chat_error_mlx_port() -> None:
         ConnectionError("[Errno 61] Connection refused connecting to http://127.0.0.1:8080/v1")
     )
     assert "8080" in msg
-    assert "MLX" in msg
+    assert "motor local" in msg

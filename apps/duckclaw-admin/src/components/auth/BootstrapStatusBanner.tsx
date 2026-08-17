@@ -36,15 +36,20 @@ export function BootstrapStatusBanner({
 
   const isGatewayStarting =
     status.code === 'gateway_unreachable' || status.code === 'gateway_unconfigured';
+  const isDesktopLite = (status.recoveryCommand || '').includes('desktop_restart');
   const gatewayTitle =
     isGatewayStarting && status.pm2Status === 'missing'
-      ? 'Gateway no registrado en PM2'
+      ? isDesktopLite
+        ? 'Gateway embebido detenido'
+        : 'Gateway no registrado en PM2'
       : isGatewayStarting
         ? 'Gateway iniciando'
         : status.message;
   const gatewayDetail =
     isGatewayStarting && status.pm2Status === 'missing'
-      ? 'El frontend está listo, pero falta iniciar el stack backend con el launcher operativo.'
+      ? isDesktopLite
+        ? 'La consola está lista, pero duckclaw_backend no responde. Usa Reiniciar sistema o cierra y vuelve a abrir DuckClaw.'
+        : 'El frontend está listo, pero falta iniciar el stack backend con el launcher operativo.'
       : isGatewayStarting
         ? 'Reintentando automáticamente. Puedes abrir la interfaz antes del Gateway sin perder el flujo.'
         : 'Revisa la configuración bootstrap del BFF y del Gateway.';

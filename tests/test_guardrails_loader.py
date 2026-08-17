@@ -57,7 +57,7 @@ _REMOVED_MANAGER_TASK_MARKDOWN = {
 }
 
 _RUNTIME_MANAGER_TASK_FILES = [
-    Path("packages/agents/src/duckclaw/graphs/manager_graph.py"),
+    Path("packages/agents/src/duckclaw/manager/manager_plan_task.py"),
     Path("packages/agents/src/duckclaw/manager/fast_plans.py"),
 ]
 

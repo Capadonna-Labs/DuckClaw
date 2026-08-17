@@ -18,8 +18,12 @@ from duckclaw.workers.factory_agent_node_helpers import (
     _raise_if_chat_cancelled_from_state,
     _worker_log_label,
 )
-from duckclaw.forge.rag.prompt_policy import rag_turn_system_prompt
+from duckclaw.forge.rag.prompt_policy import (
+    playground_document_turn_system_prompt,
+    rag_turn_system_prompt,
+)
 from duckclaw.forge.rag.tool_policy import (
+    should_prioritize_documents_over_storage_tools,
     should_prioritize_rag_over_storage_tools,
     without_storage_tools,
 )
@@ -165,7 +169,17 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             _intent_incoming,
             explicit_storage_request=explicit_duckdb_storage_request,
         )
-        if _rag_turn_without_db_intent:
+        _document_turn_without_db_intent = should_prioritize_documents_over_storage_tools(
+            incoming,
+            _intent_incoming,
+            explicit_storage_request=explicit_duckdb_storage_request,
+        )
+        if _document_turn_without_db_intent:
+            _log.info("[%s] document attachment turn: storage tools hidden", _wl)
+            _msg_list = [
+                SystemMessage(content=playground_document_turn_system_prompt())
+            ] + [m for m in _msg_list if not isinstance(m, SystemMessage)]
+        elif _rag_turn_without_db_intent:
             _rag_tid = (state.get("tenant_id") or "default").strip() or "default"
             _msg_list = [
                 SystemMessage(
@@ -274,7 +288,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                     for t in _auto_tools
                     if not str(getattr(t, "name", "") or "").startswith("reddit_")
                 ]
-            if _rag_turn_without_db_intent:
+            if _rag_turn_without_db_intent or _document_turn_without_db_intent:
                 _auto_tools = without_storage_tools(_auto_tools)
             _pack_result = apply_runtime_tool_packs(
                 _auto_tools,

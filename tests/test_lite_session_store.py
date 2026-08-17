@@ -46,3 +46,24 @@ def test_lite_session_store_lock_acquire_release() -> None:
         await lock.release()
 
     asyncio.run(_run())
+
+
+def test_lite_session_store_pubsub_deliver_message() -> None:
+    """Admin tool heartbeats need in-process pub/sub when Redis is omitted."""
+    from duckclaw.lite_session_store import LiteSessionStore
+
+    store = LiteSessionStore()
+
+    async def _run() -> None:
+        channel = "duckclaw:admin-heartbeat:admin-conv-test"
+        pubsub = store.pubsub()
+        await pubsub.subscribe(channel)
+        n = store.publish(channel, '{"text":"🔄 Usando: inspect_schema","kind":"tool"}')
+        assert n == 1
+        msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+        assert msg is not None
+        assert msg["type"] == "message"
+        assert "inspect_schema" in str(msg["data"])
+        await pubsub.aclose()
+
+    asyncio.run(_run())

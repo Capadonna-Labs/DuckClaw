@@ -89,6 +89,7 @@ const WRITE_METHODS = new Set(['PUT', 'PATCH', 'POST', 'DELETE']);
 
 function userWriteAllowed(sub: string, method: string): boolean {
   if (method === 'POST' && sub === 'projects') return true;
+  if (sub.startsWith('workspace/orchestrator/')) return true;
   if (sub.startsWith('playground/')) return true;
   if (sub.startsWith('conversations')) return true;
   // Informes Word / Report Engine — cada usuario registra plantillas e instancias propias

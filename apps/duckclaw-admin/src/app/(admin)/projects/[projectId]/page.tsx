@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Bot, ChevronRight, Database, FolderKanban, PlayCircle, RefreshCw } from 'lucide-react';
+import { Bot, ChevronRight, Database, PlayCircle, RefreshCw } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import type { KnowledgeSource, WorkspaceProjectSummary } from '@/services/adminService';
 import { KnowledgeStatusBadge } from '@/components/knowledge/KnowledgeStatusBadge';
@@ -12,6 +12,10 @@ import {
   knowledgeSourceSecondaryLine,
 } from '@/components/knowledge/knowledgeSourceLabel';
 import { ProjectAgentsSection } from '@/components/projects/ProjectAgentsSection';
+import {
+  ProjectContextEditor,
+  ProjectNameEditor,
+} from '@/components/projects/ProjectInlineEditors';
 import { useAuthStore } from '@/store/authStore';
 import { isAdminRole } from '@/lib/roles';
 
@@ -65,6 +69,17 @@ export default function ProjectDetailPage() {
     loadKnowledge();
   }, [loadKnowledge]);
 
+  const applyProjectPatch = useCallback((next: WorkspaceProjectSummary) => {
+    setDetail((prev) =>
+      prev
+        ? {
+            ...prev,
+            project: { ...prev.project, ...next },
+          }
+        : prev
+    );
+  }, []);
+
   const project = detail?.project;
   const agents = useMemo(() => detail?.agents ?? project?.agents ?? [], [detail?.agents, project?.agents]);
   const firstAgent = agents[0];
@@ -94,9 +109,7 @@ export default function ProjectDetailPage() {
       <header className="rounded-3xl border border-gov-blue-100 bg-white p-6 dark:border-dark-border dark:bg-dark-surface">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
-            <h1 className="flex items-center gap-2 text-3xl font-black text-gov-gray-900 dark:text-dark-text">
-              <FolderKanban size={28} /> {project.name}
-            </h1>
+            <ProjectNameEditor project={project} canEdit={canWrite} onSaved={applyProjectPatch} />
             <p className="mt-2 max-w-3xl text-sm text-gov-gray-600 dark:text-dark-muted">
               {project.description || 'Sin descripción.'}
             </p>
@@ -131,18 +144,7 @@ export default function ProjectDetailPage() {
         <InfoCard label="Actualizado" value={fmt(project.updated_at)} />
       </section>
 
-      <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
-        <div className="mb-4">
-          <h2 className="text-lg font-black text-gov-gray-900 dark:text-dark-text">Contexto del proyecto</h2>
-          <p className="text-sm text-gov-gray-500 dark:text-dark-muted">
-            Este bloque se inyecta al Playground cuando envías mensajes con `project_id`.
-          </p>
-        </div>
-        <div className="rounded-2xl bg-gov-gray-50 p-4 text-sm dark:bg-dark-bg">
-          <p className="font-black text-gov-gray-900 dark:text-dark-text">{project.name}</p>
-          <p className="mt-2 text-gov-gray-600 dark:text-dark-muted">{project.description || 'Sin descripción.'}</p>
-        </div>
-      </section>
+      <ProjectContextEditor project={project} canEdit={canWrite} onSaved={applyProjectPatch} />
 
       <section className="rounded-3xl border border-gov-blue-100 bg-white p-5 dark:border-dark-border dark:bg-dark-surface">
         <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

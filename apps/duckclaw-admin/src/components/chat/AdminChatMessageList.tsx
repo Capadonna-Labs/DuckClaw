@@ -22,6 +22,8 @@ export type AdminChatMessageListProps = {
   thinkingIdentity: { workerId: string; swarmSlot: number };
   labelForWorkerId: (id?: string) => string;
   loading: boolean;
+  /** Muestra u oculta el detalle de invocaciones de herramientas del chat. */
+  showToolUsage?: boolean;
   isCompact: boolean;
   scrollRef: RefObject<HTMLDivElement>;
   showScrollButton: boolean;
@@ -91,6 +93,7 @@ export function AdminChatMessageList({
   thinkingIdentity,
   labelForWorkerId,
   loading,
+  showToolUsage = true,
   isCompact,
   scrollRef,
   showScrollButton,
@@ -127,6 +130,7 @@ export function AdminChatMessageList({
         )}
         {displayItems.map((item, itemIdx) => {
           if (item.kind === 'toolGroup') {
+            if (!showToolUsage) return null;
             const firstIdx = item.indices[0];
             const first = messages[firstIdx];
             return (
@@ -153,7 +157,10 @@ export function AdminChatMessageList({
           }
           const isEmptyStreaming =
             m.role === 'assistant' && m.streaming && !m.text && thinking && i === messages.length - 1;
-          if (isEmptyStreaming && !hasToolHeartbeatInCurrentTurn(messages)) {
+          if (
+            isEmptyStreaming &&
+            (!showToolUsage || !hasToolHeartbeatInCurrentTurn(messages))
+          ) {
             return (
               <ThinkingBubble
                 key={`${i}-thinking`}

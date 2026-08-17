@@ -18,6 +18,19 @@
       ]
     },
     {
+      "id": "duckdb_write",
+      "title": "DuckDB (escritura)",
+      "description": "Mutaciones SQL privilegiadas (opt-in vía tool_surface).",
+      "sort_order": 15,
+      "skills": [
+        {
+          "id": "admin_sql",
+          "label": "admin_sql",
+          "hint": "SQL de escritura/admin en DuckDB (privilegiado)"
+        }
+      ]
+    },
+    {
       "id": "web",
       "title": "Web e investigación",
       "description": "Búsqueda web, tendencias y fuentes externas.",
@@ -49,6 +62,19 @@
         { "id": "publish_custom_report", "hint": "Publicar HTML en main.custom_reports" },
         { "id": "update_custom_report_title", "hint": "Actualizar título sin reenviar HTML" },
         { "id": "read_llm_usage_summary", "hint": "Métricas de uso LLM para dashboards" }
+      ]
+    },
+    {
+      "id": "agent_prompt",
+      "title": "Prompt del agente",
+      "description": "Automodificación persistente del system prompt del worker.",
+      "sort_order": 45,
+      "skills": [
+        {
+          "id": "update_system_prompt",
+          "label": "update_system_prompt",
+          "hint": "Persiste cambios en el system prompt (append o replace)"
+        }
       ]
     },
     {

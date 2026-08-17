@@ -135,18 +135,47 @@ def save_inbound_bytes_for_tenant(
     tenant_id: str,
     *,
     mime_type: str = "image/jpeg",
+    filename: str | None = None,
 ) -> Path:
-    """Guarda bytes ya descargados (tests o reutilización)."""
+    """Guarda bytes ya descargados (tests o reutilización).
+
+    Never writes back to the caller's original path — always a new UUID file under
+    ``{vault}/inbound/``.
+    """
     from duckclaw.vaults import user_vault_dir
 
     tid = (tenant_id or "default").strip() or "default"
     ext = ".jpg"
-    if (mime_type or "").strip().lower() == "image/png":
-        ext = ".png"
-    elif (mime_type or "").strip().lower() == "image/webp":
-        ext = ".webp"
+    name = (filename or "").replace("\\", "/").split("/")[-1].strip()
+    if name and "." in name:
+        cand = "." + name.rsplit(".", 1)[-1].lower()
+        if cand and cand != "." and len(cand) <= 16 and all(c.isalnum() or c == "." for c in cand):
+            ext = cand
+    else:
+        mt = (mime_type or "").strip().lower()
+        if mt == "image/png":
+            ext = ".png"
+        elif mt == "image/webp":
+            ext = ".webp"
+        elif mt == "application/pdf":
+            ext = ".pdf"
+        elif "spreadsheet" in mt or mt.endswith("sheet"):
+            ext = ".xlsx"
+        elif "wordprocessing" in mt:
+            ext = ".docx"
+        elif mt in {"text/plain", "text/csv", "text/markdown", "text/html", "application/json"}:
+            ext = {
+                "text/plain": ".txt",
+                "text/csv": ".csv",
+                "text/markdown": ".md",
+                "text/html": ".html",
+                "application/json": ".json",
+            }[mt]
     inbound_dir = user_vault_dir(tid) / "inbound"
     inbound_dir.mkdir(parents=True, exist_ok=True)
-    out_path = (inbound_dir / f"{uuid.uuid4()}{ext}").resolve()
+    # Keep original basename stem for agent readability; UUID avoids collisions.
+    stem = Path(name).stem if name else "upload"
+    stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in stem)[:48] or "upload"
+    out_path = (inbound_dir / f"{stem}_{uuid.uuid4().hex[:12]}{ext}").resolve()
     out_path.write_bytes(raw)
     return out_path

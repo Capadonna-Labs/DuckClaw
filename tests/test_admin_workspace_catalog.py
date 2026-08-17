@@ -297,8 +297,8 @@ def test_orchestrator_draft_suggests_available_skills_without_creating_project(
     assert body["workers"][0]["worker_id"]
     assert body["workers"][0]["display_name"] != body["project"]["name"]
     assert "Asistente" in body["workers"][0]["display_name"]
-    assert "Lectura del objetivo" in body["shared_context"]
     assert "Análisis del proyecto" in body["shared_context"]
+    assert "## Objetivo" in body["shared_context"]
     assert any(skill["name"] == "ticket_lookup" and skill["available"] for skill in body["suggested_skills"])
 
     con = duckdb.connect(str(gateway_db))
@@ -408,13 +408,22 @@ def test_orchestrator_draft_uses_db_first_prompt_policy_for_prompt_and_naming(
 
     con = duckdb.connect(str(gateway_db))
     try:
+        # La migración siembra la política v2; esta prueba publica una versión superior.
+        con.execute(
+            """
+            UPDATE main.prompt_policy_registry
+            SET active = false, status = 'inactive'
+            WHERE policy_type = 'manager_task'
+              AND policy_name = 'admin_workspace_managed_draft'
+            """
+        )
         con.execute(
             """
             INSERT INTO main.prompt_policy_registry
               (policy_id, policy_type, policy_name, version, status, content, checksum, active)
-            VALUES (?, 'manager_task', 'admin_workspace_managed_draft', 2, 'active', ?, ?, true)
+            VALUES (?, 'manager_task', 'admin_workspace_managed_draft', 99, 'active', ?, ?, true)
             """,
-            ["test_admin_workspace_managed_draft_v2", content, checksum],
+            ["test_admin_workspace_managed_draft_v99", content, checksum],
         )
     finally:
         con.close()
@@ -1378,7 +1387,8 @@ def test_admin_health_uses_actor_visible_db_first_workers(
     assert response.status_code == 200
     data = response.json()
     assert data["workers_count"] == 1
-    assert set(data["workers"]) == {"dev-coder"}
+    assert set(data["workers"]) == {"Dev Coder"}
+    assert set(data.get("worker_ids") or []) == {"dev-coder"}
 
 
 def test_playground_llm_scope_does_not_report_legacy(gateway_admin_client) -> None:

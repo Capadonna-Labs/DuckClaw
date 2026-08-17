@@ -40,6 +40,7 @@ class PreparedChatInvoke:
     telegram_acl_for_guard: str | None
     delivery_context: GatewayDeliveryContext
     history_for_model: list[dict[str, Any]]
+    history_for_graph: list[dict[str, Any]]
     is_system_prompt: bool
     skip_session_lock: bool
     shared_db_path: str | None
@@ -119,6 +120,12 @@ async def prepare_chat_invoke(
         and not history_for_model
     ):
         history_for_model = await redis_load_chat_history(redis_client, tenant_id, session_id)
+    # An attachment is self-contained.  Previous failed assistant replies (for
+    # example DB/tool menus) strongly anchor the next model response, especially
+    # on compact models.  Keep that history for persistence/UI, but do not send
+    # it to the graph for this isolated analysis turn.
+    document_turn = bool(getattr(payload, "document_turn", False))
+    history_for_graph = [] if document_turn else history_for_model
 
     chat_ident = chat_identity_label(session_id, username)
     set_log_context(tenant_id=tenant_id, worker_id="manager", chat_id=chat_ident)
@@ -188,6 +195,7 @@ async def prepare_chat_invoke(
         telegram_acl_for_guard=telegram_acl_for_guard,
         delivery_context=delivery_context,
         history_for_model=history_for_model,
+        history_for_graph=history_for_graph,
         is_system_prompt=is_system_prompt,
         skip_session_lock=skip_session_lock,
         shared_db_path=shared_db_path,

@@ -1,7 +1,8 @@
 """
-Índice de conversaciones admin UI en Redis (metadatos + listado).
+Índice de conversaciones admin UI.
 
-Complementa ``chat_history.py`` (mensajes). Solo sesiones admin UI o ``admin-conv-*``.
+Fuente de verdad: DuckDB (``admin_conversations`` / ``admin_conversation_messages``).
+Redis / LiteSessionStore: caché best-effort (TTL / memoria de proceso).
 """
 
 from __future__ import annotations
@@ -68,6 +69,81 @@ def _meta_key(tenant_id: str, session_id: str) -> str:
     tid = (tenant_id or "default").strip() or "default"
     sid = (session_id or "").strip()
     return f"{_CONV_META_PREFIX}{tid}:{sid}"
+
+
+async def _cache_upsert_meta(redis_client: Any, meta: AdminConversationMeta) -> None:
+    if redis_client is None or meta is None:
+        return
+    try:
+        ttl = _conv_ttl_sec()
+        tid = meta.tenant_id
+        sid = meta.session_id
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        await redis_client.set(
+            _meta_key(tid, sid),
+            json.dumps(meta.model_dump(), ensure_ascii=False),
+            ex=ttl,
+        )
+        await redis_client.zadd(_zset_key(tid), {sid: now_ms})
+        await redis_client.expire(_zset_key(tid), ttl)
+    except Exception as exc:
+        _log.debug("admin_conversations: redis cache upsert skip: %s", exc)
+
+
+async def _redis_get_meta(
+    redis_client: Any,
+    tenant_id: str,
+    session_id: str,
+) -> AdminConversationMeta | None:
+    if redis_client is None:
+        return None
+    key = _meta_key(tenant_id, session_id)
+    try:
+        raw = await redis_client.get(key)
+        if not raw:
+            return None
+        data = json.loads(raw)
+        if not isinstance(data, dict):
+            return None
+        return AdminConversationMeta.model_validate(data)
+    except Exception as exc:
+        _log.warning("admin_conversations: get meta %s: %s", key, exc)
+        return None
+
+
+async def _hydrate_db_from_redis_meta(
+    redis_client: Any,
+    meta: AdminConversationMeta,
+) -> AdminConversationMeta:
+    """Copy Redis-only conversation into DuckDB once; return DuckDB row if written."""
+    try:
+        from core.admin_conversations_db import db_get_conversation_meta, db_save_messages, db_upsert_conversation_meta
+        from core.chat_history import redis_load_chat_history
+
+        existing = db_get_conversation_meta(meta.tenant_id, meta.session_id)
+        if existing is not None:
+            return existing
+        written = db_upsert_conversation_meta(
+            tenant_id=meta.tenant_id,
+            session_id=meta.session_id,
+            actor=meta.actor,
+            section=meta.section,
+            last_worker_id=meta.last_worker_id,
+            preferred_worker_id=meta.preferred_worker_id,
+            workers=meta.workers,
+            message_count=meta.message_count,
+            title=meta.title,
+            vault_db_path=meta.vault_db_path,
+            origin=meta.origin,
+            assistant_message=meta.last_message_preview,
+        )
+        msgs = await redis_load_chat_history(redis_client, meta.tenant_id, meta.session_id)
+        if msgs:
+            db_save_messages(meta.tenant_id, meta.session_id, msgs)
+        return written or meta
+    except Exception as exc:
+        _log.debug("admin_conversations: hydrate duckdb skip: %s", exc)
+        return meta
 
 
 def admin_conversation_tenant_candidates(primary_tenant_id: str) -> list[str]:
@@ -143,20 +219,20 @@ async def get_conversation_meta(
     tenant_id: str,
     session_id: str,
 ) -> AdminConversationMeta | None:
-    if redis_client is None:
+    from core.admin_conversations_db import db_get_conversation_meta
+
+    tid = (tenant_id or "default").strip() or "default"
+    sid = (session_id or "").strip()
+    if not sid:
         return None
-    key = _meta_key(tenant_id, session_id)
-    try:
-        raw = await redis_client.get(key)
-        if not raw:
-            return None
-        data = json.loads(raw)
-        if not isinstance(data, dict):
-            return None
-        return AdminConversationMeta.model_validate(data)
-    except Exception as exc:
-        _log.warning("admin_conversations: get meta %s: %s", key, exc)
+    meta = db_get_conversation_meta(tid, sid)
+    if meta is not None:
+        await _cache_upsert_meta(redis_client, meta)
+        return meta
+    redis_meta = await _redis_get_meta(redis_client, tid, sid)
+    if redis_meta is None:
         return None
+    return await _hydrate_db_from_redis_meta(redis_client, redis_meta)
 
 
 async def upsert_conversation_meta(
@@ -172,74 +248,94 @@ async def upsert_conversation_meta(
     message_count: int | None = None,
     title: str | None = None,
 ) -> AdminConversationMeta | None:
-    if redis_client is None or not should_index_admin_conversation(session_id):
+    if not should_index_admin_conversation(session_id):
         return None
+    from core.admin_conversations_db import db_upsert_conversation_meta
+
     tid = (tenant_id or "default").strip() or "default"
     sid = (session_id or "").strip()
     if not sid:
         return None
-    now = _now_iso()
-    now_ms = int(datetime.now(UTC).timestamp() * 1000)
-    ttl = _conv_ttl_sec()
     existing = await get_conversation_meta(redis_client, tid, sid)
-    sec = derive_section_from_session_id(sid, origin_section=section)
     workers = list(existing.workers) if existing else []
     lw = (last_worker_id or "").strip()
     if lw and lw not in workers:
         workers.append(lw)
-    preview_src = (assistant_message or user_message or "").strip()
-    preview = _preview_text(preview_src)
-    if existing:
-        meta = existing.model_copy(
-            update={
-                "updated_at": now,
-                "actor": (actor or existing.actor or "").strip() or existing.actor,
-                "section": (sec or existing.section) if sec else existing.section,
-                "last_worker_id": lw or existing.last_worker_id,
-                "workers": workers,
-                "last_message_preview": preview or existing.last_message_preview,
-                "message_count": message_count
+    preferred = existing.preferred_worker_id if existing else ""
+    vault = existing.vault_db_path if existing else ""
+    origin = existing.origin if existing else "admin_ui"
+
+    meta = db_upsert_conversation_meta(
+        tenant_id=tid,
+        session_id=sid,
+        actor=actor,
+        section=section,
+        last_worker_id=lw,
+        preferred_worker_id=preferred,
+        workers=workers,
+        user_message=user_message,
+        assistant_message=assistant_message,
+        message_count=message_count,
+        title=title,
+        vault_db_path=vault,
+        origin=origin,
+    )
+    if meta is None:
+        # Fallback in-memory shape when DuckDB unavailable (tests / misconfig).
+        now = _now_iso()
+        sec = derive_section_from_session_id(sid, origin_section=section)
+        preview = _preview_text((assistant_message or user_message or "").strip())
+        if existing:
+            meta = existing.model_copy(
+                update={
+                    "updated_at": now,
+                    "actor": (actor or existing.actor or "").strip() or existing.actor,
+                    "section": (sec or existing.section) if sec else existing.section,
+                    "last_worker_id": lw or existing.last_worker_id,
+                    "workers": workers,
+                    "last_message_preview": preview or existing.last_message_preview,
+                    "message_count": message_count
+                    if message_count is not None
+                    else existing.message_count + (1 if user_message and assistant_message else 0),
+                }
+            )
+            if title and title.strip():
+                meta.title = title.strip()
+            elif _is_generic_conversation_title(meta.title):
+                auto_title = _title_from_first_message(user_message)
+                if auto_title:
+                    meta.title = auto_title
+        else:
+            auto_title = _title_from_first_message(user_message) or _title_from_first_message(
+                assistant_message
+            )
+            if not auto_title:
+                auto_title = f"Conversación {now[:10]}"
+            explicit = (title or "").strip()
+            if explicit and not _is_generic_conversation_title(explicit):
+                resolved_title = explicit
+            elif _title_from_first_message(user_message):
+                resolved_title = _title_from_first_message(user_message)
+            else:
+                resolved_title = explicit or auto_title
+            meta = AdminConversationMeta(
+                session_id=sid,
+                tenant_id=tid,
+                title=resolved_title,
+                created_at=now,
+                updated_at=now,
+                actor=(actor or "").strip(),
+                section=sec,
+                last_worker_id=lw,
+                workers=workers,
+                last_message_preview=preview,
+                message_count=message_count
                 if message_count is not None
-                else existing.message_count + (1 if user_message and assistant_message else 0),
-            }
-        )
-        if title and title.strip():
-            meta.title = title.strip()
-        elif _is_generic_conversation_title(meta.title):
-            auto_title = _title_from_first_message(user_message)
-            if auto_title:
-                meta.title = auto_title
-    else:
-        auto_title = _title_from_first_message(user_message) or _title_from_first_message(
-            assistant_message
-        )
-        if not auto_title:
-            auto_title = f"Conversación {now[:10]}"
-        meta = AdminConversationMeta(
-            session_id=sid,
-            tenant_id=tid,
-            title=(title or auto_title).strip(),
-            created_at=now,
-            updated_at=now,
-            actor=(actor or "").strip(),
-            section=sec,
-            last_worker_id=lw,
-            workers=workers,
-            last_message_preview=preview,
-            message_count=message_count if message_count is not None else (2 if user_message and assistant_message else 0),
-            origin="admin_ui",
-        )
-    meta_key = _meta_key(tid, sid)
-    zkey = _zset_key(tid)
-    try:
-        payload = meta.model_dump()
-        await redis_client.set(meta_key, json.dumps(payload, ensure_ascii=False), ex=ttl)
-        await redis_client.zadd(zkey, {sid: now_ms})
-        await redis_client.expire(zkey, ttl)
-        return meta
-    except Exception as exc:
-        _log.warning("admin_conversations: upsert %s: %s", meta_key, exc)
-        return None
+                else (2 if user_message and assistant_message else 0),
+                origin="admin_ui",
+            )
+    await _cache_upsert_meta(redis_client, meta)
+    return meta
 
 
 async def resolve_conversation_view(
@@ -247,8 +343,9 @@ async def resolve_conversation_view(
     primary_tenant_id: str,
     session_id: str,
 ) -> tuple[str, AdminConversationMeta | None, list[dict[str, Any]]]:
-    """Meta + historial: tenant del perfil primero, luego legado ``default``."""
-    from core.chat_history import redis_load_chat_history
+    """Meta + historial: DuckDB primero; Redis fallback + hydrate."""
+    from core.admin_conversations_db import db_load_messages
+    from core.chat_history import redis_load_chat_history, redis_save_chat_history
 
     sid = (session_id or "").strip()
     if not sid:
@@ -258,9 +355,23 @@ async def resolve_conversation_view(
     resolved_tid = (primary_tenant_id or "default").strip() or "default"
     for try_tid in admin_conversation_tenant_candidates(resolved_tid):
         meta = await get_conversation_meta(redis_client, try_tid, sid)
-        messages = await redis_load_chat_history(redis_client, try_tid, sid)
+        messages = db_load_messages(try_tid, sid)
+        if not messages:
+            messages = await redis_load_chat_history(redis_client, try_tid, sid)
+            if messages and meta is not None:
+                try:
+                    from core.admin_conversations_db import db_save_messages
+
+                    db_save_messages(try_tid, sid, messages)
+                except Exception:
+                    pass
         if meta is None and not messages:
             continue
+        if messages and redis_client is not None:
+            try:
+                await redis_save_chat_history(redis_client, try_tid, sid, messages)
+            except Exception:
+                pass
         resolved_tid = try_tid
         best_meta = meta
         best_messages = messages
@@ -313,34 +424,43 @@ async def list_conversations(
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[AdminConversationMeta], int]:
-    if redis_client is None:
-        return [], 0
+    from core.admin_conversations_db import db_list_conversations
+
     tid = (tenant_id or "default").strip() or "default"
-    zkey = _zset_key(tid)
-    limit = max(1, min(int(limit), 200))
-    offset = max(0, int(offset))
-    try:
-        session_ids = await redis_client.zrevrange(zkey, 0, -1)
-    except Exception as exc:
-        _log.warning("admin_conversations: zrevrange %s: %s", zkey, exc)
-        return [], 0
-    if not session_ids:
-        return [], 0
-    decoded: list[str] = []
-    for sid in session_ids:
-        if isinstance(sid, bytes):
-            decoded.append(sid.decode("utf-8", errors="replace"))
-        else:
-            decoded.append(str(sid))
-    items: list[AdminConversationMeta] = []
+    db_items, db_total = db_list_conversations(
+        tid,
+        section=section,
+        worker=worker,
+        actor=actor,
+        q=q,
+        limit=200,
+        offset=0,
+    )
+    seen: dict[str, AdminConversationMeta] = {m.session_id: m for m in db_items}
+
+    # Merge Redis-only entries and hydrate into DuckDB.
+    if redis_client is not None:
+        try:
+            session_ids = await redis_client.zrevrange(_zset_key(tid), 0, -1)
+        except Exception:
+            session_ids = []
+        for sid in session_ids or []:
+            sid_s = sid.decode("utf-8") if isinstance(sid, bytes) else str(sid)
+            if sid_s in seen:
+                continue
+            redis_meta = await _redis_get_meta(redis_client, tid, sid_s)
+            if redis_meta is None:
+                continue
+            hydrated = await _hydrate_db_from_redis_meta(redis_client, redis_meta)
+            seen[sid_s] = hydrated
+
+    items = list(seen.values())
     sec_f = (section or "").strip().lower()
     worker_f = (worker or "").strip()
     actor_f = (actor or "").strip().lower()
     q_f = (q or "").strip().lower()
-    for sid in decoded:
-        meta = await get_conversation_meta(redis_client, tid, sid)
-        if meta is None:
-            continue
+    filtered: list[AdminConversationMeta] = []
+    for meta in items:
         if sec_f and meta.section.lower() != sec_f:
             continue
         if worker_f:
@@ -352,10 +472,13 @@ async def list_conversations(
             blob = f"{meta.title} {meta.last_message_preview}".lower()
             if q_f not in blob:
                 continue
-        items.append(meta)
-    total = len(items)
-    page = items[offset : offset + limit]
-    return page, total
+        filtered.append(meta)
+    filtered.sort(key=lambda m: m.updated_at or "", reverse=True)
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    for meta in filtered:
+        await _cache_upsert_meta(redis_client, meta)
+    return filtered[offset : offset + limit], len(filtered)
 
 
 async def patch_conversation_title(
@@ -364,22 +487,21 @@ async def patch_conversation_title(
     session_id: str,
     title: str,
 ) -> AdminConversationMeta | None:
-    meta = await get_conversation_meta(redis_client, tenant_id, session_id)
-    if meta is None:
-        return None
-    meta.title = (title or "").strip() or meta.title
-    meta.updated_at = _now_iso()
-    ttl = _conv_ttl_sec()
-    try:
-        await redis_client.set(
-            _meta_key(tenant_id, session_id),
-            json.dumps(meta.model_dump(), ensure_ascii=False),
-            ex=ttl,
-        )
-        return meta
-    except Exception as exc:
-        _log.warning("admin_conversations: patch %s: %s", session_id, exc)
-        return None
+    from core.admin_conversations_db import db_patch_conversation_title
+
+    sid = (session_id or "").strip()
+    for try_tid in admin_conversation_tenant_candidates(tenant_id):
+        meta = await get_conversation_meta(redis_client, try_tid, sid)
+        if meta is None:
+            continue
+        patched = db_patch_conversation_title(meta.tenant_id, sid, title)
+        if patched is None:
+            meta.title = (title or "").strip() or meta.title
+            meta.updated_at = _now_iso()
+            patched = meta
+        await _cache_upsert_meta(redis_client, patched)
+        return patched
+    return None
 
 
 async def patch_conversation_vault(
@@ -389,22 +511,21 @@ async def patch_conversation_vault(
     vault_db_path: str | None,
 ) -> AdminConversationMeta | None:
     """Persiste bóveda DuckDB por conversación (admin UI). Vacío = quitar override."""
-    meta = await get_conversation_meta(redis_client, tenant_id, session_id)
-    if meta is None:
-        return None
-    meta.vault_db_path = (vault_db_path or "").strip()
-    meta.updated_at = _now_iso()
-    ttl = _conv_ttl_sec()
-    try:
-        await redis_client.set(
-            _meta_key(tenant_id, session_id),
-            json.dumps(meta.model_dump(), ensure_ascii=False),
-            ex=ttl,
-        )
-        return meta
-    except Exception as exc:
-        _log.warning("admin_conversations: patch vault %s: %s", session_id, exc)
-        return None
+    from core.admin_conversations_db import db_patch_conversation_vault
+
+    sid = (session_id or "").strip()
+    for try_tid in admin_conversation_tenant_candidates(tenant_id):
+        meta = await get_conversation_meta(redis_client, try_tid, sid)
+        if meta is None:
+            continue
+        patched = db_patch_conversation_vault(meta.tenant_id, sid, vault_db_path)
+        if patched is None:
+            meta.vault_db_path = (vault_db_path or "").strip()
+            meta.updated_at = _now_iso()
+            patched = meta
+        await _cache_upsert_meta(redis_client, patched)
+        return patched
+    return None
 
 
 async def patch_conversation_worker(
@@ -414,25 +535,24 @@ async def patch_conversation_worker(
     worker_id: str | None,
 ) -> AdminConversationMeta | None:
     """Persiste worker preferido por conversación (admin UI). Vacío = quitar override."""
-    meta = await get_conversation_meta(redis_client, tenant_id, session_id)
-    if meta is None:
-        return None
-    wid = (worker_id or "").strip()
-    meta.preferred_worker_id = wid
-    if wid and wid not in meta.workers:
-        meta.workers = [*meta.workers, wid]
-    meta.updated_at = _now_iso()
-    ttl = _conv_ttl_sec()
-    try:
-        await redis_client.set(
-            _meta_key(tenant_id, session_id),
-            json.dumps(meta.model_dump(), ensure_ascii=False),
-            ex=ttl,
-        )
-        return meta
-    except Exception as exc:
-        _log.warning("admin_conversations: patch worker %s: %s", session_id, exc)
-        return None
+    from core.admin_conversations_db import db_patch_conversation_worker
+
+    sid = (session_id or "").strip()
+    for try_tid in admin_conversation_tenant_candidates(tenant_id):
+        meta = await get_conversation_meta(redis_client, try_tid, sid)
+        if meta is None:
+            continue
+        patched = db_patch_conversation_worker(meta.tenant_id, sid, worker_id)
+        if patched is None:
+            wid = (worker_id or "").strip()
+            meta.preferred_worker_id = wid
+            if wid and wid not in meta.workers:
+                meta.workers = [*meta.workers, wid]
+            meta.updated_at = _now_iso()
+            patched = meta
+        await _cache_upsert_meta(redis_client, patched)
+        return patched
+    return None
 
 
 async def delete_conversation(
@@ -440,22 +560,25 @@ async def delete_conversation(
     tenant_id: str,
     session_id: str,
 ) -> bool:
-    if redis_client is None:
-        return False
+    from core.admin_conversations_db import db_delete_conversation
+
     tid = (tenant_id or "default").strip() or "default"
     sid = (session_id or "").strip()
     if not sid:
         return False
-    try:
-        from core.chat_history import history_redis_key
+    db_ok = db_delete_conversation(tid, sid)
+    redis_ok = False
+    if redis_client is not None:
+        try:
+            from core.chat_history import history_redis_key
 
-        await redis_client.delete(_meta_key(tid, sid))
-        await redis_client.zrem(_zset_key(tid), sid)
-        await redis_client.delete(history_redis_key(tid, sid))
-        return True
-    except Exception as exc:
-        _log.warning("admin_conversations: delete %s: %s", sid, exc)
-        return False
+            await redis_client.delete(_meta_key(tid, sid))
+            await redis_client.zrem(_zset_key(tid), sid)
+            await redis_client.delete(history_redis_key(tid, sid))
+            redis_ok = True
+        except Exception as exc:
+            _log.warning("admin_conversations: delete redis %s: %s", sid, exc)
+    return db_ok or redis_ok
 
 
 async def delete_conversation_merged(
@@ -469,6 +592,8 @@ async def delete_conversation_merged(
     lista tenant actual + default; borrar debe resolver el tenant real antes de
     limpiar metadatos e historial.
     """
+    from core.admin_conversations_db import db_load_messages
+
     sid = (session_id or "").strip()
     if not sid:
         return None
@@ -477,7 +602,9 @@ async def delete_conversation_merged(
         if meta is None:
             from core.chat_history import redis_load_chat_history
 
-            messages = await redis_load_chat_history(redis_client, tid, sid)
+            messages = db_load_messages(tid, sid) or await redis_load_chat_history(
+                redis_client, tid, sid
+            )
             if not messages:
                 continue
         if await delete_conversation(redis_client, tid, sid):
@@ -489,7 +616,7 @@ async def reindex_admin_conversations(
     redis_client: Any,
     tenant_id: str,
 ) -> dict[str, int]:
-    """Registra en el índice sesiones admin con historial Redis existente."""
+    """Registra en DuckDB (+ caché Redis) sesiones admin con historial Redis existente."""
     if redis_client is None:
         return {"indexed": 0, "scanned": 0}
     tid = (tenant_id or "default").strip() or "default"
@@ -497,6 +624,7 @@ async def reindex_admin_conversations(
     indexed = 0
     scanned = 0
     try:
+        from core.admin_conversations_db import db_save_messages
         from core.chat_history import redis_load_chat_history
 
         cursor = 0
@@ -516,7 +644,6 @@ async def reindex_admin_conversations(
                     continue
                 last_user = ""
                 last_asst = ""
-                workers: list[str] = []
                 for item in msgs:
                     role = item.get("role")
                     content = (item.get("content") or "").strip()
@@ -532,6 +659,7 @@ async def reindex_admin_conversations(
                     assistant_message=last_asst,
                     message_count=len(msgs),
                 )
+                db_save_messages(tid, sid, msgs)
                 indexed += 1
             if cursor == 0:
                 break

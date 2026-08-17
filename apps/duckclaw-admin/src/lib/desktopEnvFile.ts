@@ -29,6 +29,15 @@ function parseDesktopEnv(text: string): Record<string, string> {
   return out;
 }
 
+function replaceDesktopEnvValue(content: string, key: string, value: string): string {
+  const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const line = `${key}=${value}`;
+  const expression = new RegExp(`^\\s*${escapedKey}\\s*=.*$`, 'm');
+  if (expression.test(content)) return content.replace(expression, line);
+  const suffix = content && !content.endsWith('\n') ? '\n' : '';
+  return `${content}${suffix}${line}\n`;
+}
+
 /** `%LOCALAPPDATA%\\DuckClaw\\desktop.env` — source of truth for desktop bundle. */
 export function readDesktopEnvFile(): Record<string, string> {
   const file = desktopEnvPath();
@@ -37,6 +46,22 @@ export function readDesktopEnvFile(): Record<string, string> {
     return parseDesktopEnv(fs.readFileSync(file, 'utf8'));
   } catch {
     return {};
+  }
+}
+
+/** Updates only the bootstrap credentials in the local desktop environment file. */
+export function updateDesktopAdminCredentials(email: string, password: string): boolean {
+  const file = desktopEnvPath();
+  const normalizedEmail = email.trim().toLowerCase();
+  if (!file || !normalizedEmail || !password || /[\r\n]/.test(normalizedEmail + password)) return false;
+  try {
+    const current = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+    const withEmail = replaceDesktopEnvValue(current, 'DUCKCLAW_ADMIN_EMAIL', normalizedEmail);
+    const next = replaceDesktopEnvValue(withEmail, 'DUCKCLAW_ADMIN_PASSWORD', password);
+    fs.writeFileSync(file, next, { encoding: 'utf8', mode: 0o600 });
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -493,7 +493,9 @@ def test_managed_workspace_draft_routes_live_in_domain_module() -> None:
     assert 'router = APIRouter(tags=["admin-workspace-managed-draft"])' in managed_draft
     assert '@router.post("/workspace/orchestrator/draft", dependencies=[Depends(require_admin_key)])' in managed_draft
     assert '@router.post("/workspace/orchestrator/confirm", dependencies=[Depends(require_admin_key)])' in managed_draft
+    assert '@router.post("/workspace/orchestrator/confirm-with-import", dependencies=[Depends(require_admin_key)])' in managed_draft
     assert "WorkspaceManagedDraft" in managed_draft
+    assert "_merge_suggested_skills" in managed_draft
 
 
 def test_managed_workspace_draft_router_uses_typed_commands_only() -> None:

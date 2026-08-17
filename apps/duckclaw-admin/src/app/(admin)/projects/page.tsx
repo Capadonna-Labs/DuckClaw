@@ -1,13 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { FolderKanban } from 'lucide-react';
+import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
+import { FolderKanban, Sparkles } from 'lucide-react';
 import { ProjectsControlPanel } from '@/components/projects/ProjectsControlPanel';
 import { ProjectsGrid } from '@/components/projects/ProjectsGrid';
 import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 import { adminService } from '@/services/adminService';
 import type { WorkspaceProjectSummary, WorkspaceProjectsQuery } from '@/services/adminService';
 import { useAuthStore } from '@/store/authStore';
+import { WORKER_REQUIRED_ALERT_MESSAGE } from '@/lib/playgroundWorkerGate';
 
 type CatalogSort = NonNullable<WorkspaceProjectsQuery['sort']>;
 type CatalogStatus = NonNullable<WorkspaceProjectsQuery['status']>;
@@ -15,6 +18,8 @@ type CatalogStatus = NonNullable<WorkspaceProjectsQuery['status']>;
 const CATALOG_DIRECTION = 'desc' as const;
 
 export default function ProjectsPage() {
+  const searchParams = useSearchParams();
+  const showWorkerRequiredBanner = searchParams.get('onboarding') === 'worker-required';
   const { usuario } = useAuthStore();
   const canWrite = usuario?.rol === 'admin';
   const [projects, setProjects] = useState<WorkspaceProjectSummary[]>([]);
@@ -115,6 +120,29 @@ export default function ProjectsPage() {
       {error ? (
         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
           {error}
+        </div>
+      ) : null}
+
+      {showWorkerRequiredBanner ? (
+        <div
+          role="alert"
+          className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-100"
+        >
+          <p className="flex items-center gap-2 font-black">
+            <Sparkles size={16} />
+            {WORKER_REQUIRED_ALERT_MESSAGE}
+          </p>
+          <p className="mt-2 text-xs text-amber-900/80 dark:text-amber-100/80">
+            Crea un proyecto con agentes para poder usar el Chat.
+          </p>
+          {canWrite ? (
+            <Link
+              href="/projects/orchestrator"
+              className="mt-3 inline-flex items-center rounded-xl bg-gov-blue-700 px-3 py-2 text-xs font-bold text-white hover:bg-gov-blue-800"
+            >
+              Crear proyecto con agentes
+            </Link>
+          ) : null}
         </div>
       ) : null}
 

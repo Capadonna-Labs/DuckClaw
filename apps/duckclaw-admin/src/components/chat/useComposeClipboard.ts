@@ -6,6 +6,7 @@ import {
   imageFilesFromClipboardData,
   nonImageFilesFromClipboardData,
 } from '@/components/chat/useChatImageAttachments';
+import { isAllowedChatDocument } from '@/lib/chatDocumentAttachments';
 
 type ComposeClipboardDeps = {
   canSend: boolean;
@@ -13,6 +14,7 @@ type ComposeClipboardDeps = {
   setInput: (value: string | ((prev: string) => string)) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   ingestFiles: (files: FileList | readonly File[] | null) => Promise<void>;
+  ingestDocuments?: (files: FileList | readonly File[] | null) => Promise<void>;
   setAttachError: (message: string | null) => void;
 };
 
@@ -61,6 +63,7 @@ export function useComposeClipboard({
   setInput,
   inputRef,
   ingestFiles,
+  ingestDocuments,
   setAttachError,
 }: ComposeClipboardDeps) {
   const onTextareaPaste = useCallback(
@@ -75,15 +78,25 @@ export function useComposeClipboard({
       }
       if (otherFiles.length > 0) {
         event.preventDefault();
-        const names = otherFiles.map((f) => f.name).filter(Boolean).join(', ');
-        setAttachError(
-          names
-            ? `Adjunto «${names}»: en el chat solo imágenes (JPEG/PNG/WebP). Pega el texto del documento o súbelo al proyecto RAG.`
-            : 'Solo se pueden adjuntar imágenes JPEG, PNG o WebP en el mensaje.'
-        );
+        const docs = otherFiles.filter(isAllowedChatDocument);
+        const rejected = otherFiles.filter((f) => !isAllowedChatDocument(f));
+        if (docs.length > 0 && ingestDocuments) {
+          void ingestDocuments(docs);
+        }
+        if (rejected.length > 0 || (docs.length > 0 && !ingestDocuments)) {
+          const names = (rejected.length ? rejected : otherFiles)
+            .map((f) => f.name)
+            .filter(Boolean)
+            .join(', ');
+          setAttachError(
+            names
+              ? `Adjunto «${names}»: usa Archivo (PDF/Word/Excel…) o Imagen (JPEG/PNG/WebP).`
+              : 'Formato no admitido en el chat.'
+          );
+        }
       }
     },
-    [canSend, ingestFiles, setAttachError]
+    [canSend, ingestDocuments, ingestFiles, setAttachError]
   );
 
   const pasteFromClipboard = useCallback(async () => {

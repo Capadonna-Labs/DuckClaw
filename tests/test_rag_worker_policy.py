@@ -4,12 +4,19 @@ import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
-from duckclaw.forge.rag.prompt_policy import rag_turn_system_prompt
+from duckclaw.forge.rag.prompt_policy import (
+    playground_document_turn_system_prompt,
+    rag_turn_system_prompt,
+)
 from duckclaw.forge.rag.tool_policy import (
+    has_playground_documents,
     has_rag_context,
+    should_prioritize_documents_over_storage_tools,
     should_prioritize_rag_over_storage_tools,
+    user_request_text,
     without_storage_tools,
 )
+from duckclaw.workers.db_intent_policy import explicit_duckdb_storage_request
 from duckclaw.workers.tool_surface_policy import (
     should_hide_sandbox_tools,
     should_hide_storage_identity_tools,
@@ -56,6 +63,80 @@ def test_explicit_storage_intent_keeps_storage_tools_available() -> None:
         "que tablas tengo?",
         explicit_storage_request=lambda text: "tablas" in text.lower(),
     )
+
+
+def test_document_turn_without_db_intent_hides_storage_tools() -> None:
+    incoming = (
+        "[DOCUMENTOS_ADJUNTOS] El usuario adjuntó 1 archivo(s).\n"
+        "[Documento adjunto: balance.xlsx]\nIngresos: 100\n"
+        "--- Mensaje del usuario ---\nResume este archivo"
+    )
+
+    assert has_playground_documents(incoming)
+    assert should_prioritize_documents_over_storage_tools(
+        incoming,
+        incoming,
+        explicit_storage_request=lambda text: "duckdb" in text.lower(),
+    )
+
+    tools = [ToolStub("read_sql"), ToolStub("inspect_schema"), ToolStub("get_db_path"), ToolStub("search_knowledge")]
+    assert [tool.name for tool in without_storage_tools(tools)] == ["search_knowledge"]
+
+
+def test_document_turn_ignores_db_words_from_injected_context_and_attachment() -> None:
+    """Only the user's own request decides storage intent for an attachment turn."""
+    incoming = (
+        "[PROJECT_CONTEXT]\n"
+        "Nombre: Finanz 1\n"
+        "Descripción: tablas contables en la base de datos del área\n"
+        "[/PROJECT_CONTEXT]\n\n"
+        "[DOCUMENTOS_ADJUNTOS] El usuario adjuntó 1 archivo(s).\n"
+        "[Documento adjunto: movimientos.xlsx]\n"
+        "listar tablas de la base de datos | 100\n"
+        "--- Mensaje del usuario ---\nrevisa este archivo"
+    )
+
+    assert user_request_text(incoming) == "revisa este archivo"
+    assert should_prioritize_documents_over_storage_tools(
+        incoming,
+        incoming,
+        explicit_storage_request=explicit_duckdb_storage_request,
+    )
+
+
+def test_document_turn_yields_to_explicit_database_question() -> None:
+    incoming = (
+        "[DOCUMENTOS_ADJUNTOS] El usuario adjuntó 1 archivo(s).\n"
+        "[Documento adjunto: balance.xlsx]\nIngresos: 100\n"
+        "--- Mensaje del usuario ---\nqué tablas hay en la base de datos?"
+    )
+
+    assert not should_prioritize_documents_over_storage_tools(
+        incoming,
+        incoming,
+        explicit_storage_request=explicit_duckdb_storage_request,
+    )
+
+
+def test_document_turn_detected_without_inbound_copy_header() -> None:
+    """Persistence can fail; the extracted text still drives attachment mode."""
+    incoming = "[Documento adjunto: nota.txt]\nsaldo 10\n--- Mensaje del usuario ---\nresume"
+
+    assert has_playground_documents(incoming)
+    assert should_prioritize_documents_over_storage_tools(
+        incoming,
+        incoming,
+        explicit_storage_request=explicit_duckdb_storage_request,
+    )
+
+
+def test_document_turn_prompt_forbids_internal_tool_menu() -> None:
+    prompt = playground_document_turn_system_prompt().lower()
+
+    assert "analízalo directamente" in prompt
+    assert "herramientas" in prompt
+    assert "rutas internas" in prompt
+    assert "base de datos" in prompt
 
 
 def test_plain_greeting_hides_storage_identity_tools_from_auto_bind() -> None:
@@ -238,9 +319,10 @@ def test_rag_debug_instrumentation_is_not_left_in_runtime_modules() -> None:
     runtime_paths = [
         Path("packages/agents/src/duckclaw/workers/factory.py"),
         Path("packages/agents/src/duckclaw/forge/rag/context_provider.py"),
-        Path("packages/agents/src/duckclaw/graphs/manager_graph.py"),
         Path("packages/agents/src/duckclaw/graphs/graph_server.py"),
         Path("packages/agents/src/duckclaw/manager/manager_graph_routing.py"),
+        Path("packages/agents/src/duckclaw/manager/manager_plan_task.py"),
+        Path("packages/agents/src/duckclaw/manager/manager_nodes_invoke.py"),
         Path("packages/agents/src/duckclaw/forge/skills/update_worker_system_prompt_bridge.py"),
         Path("services/api-gateway/routers/admin.py"),
         Path("services/api-gateway/main.py"),
@@ -271,12 +353,14 @@ def test_factory_uses_extracted_rag_policy_for_get_db_path() -> None:
     assert "from duckclaw.forge.rag.prompt_policy import" in factory_invoke
     assert "from duckclaw.workers.tool_surface_policy import" in factory_invoke
     assert "should_prioritize_rag_over_storage_tools(" in factory_invoke
+    assert "should_prioritize_documents_over_storage_tools(" in factory_invoke
     assert "should_hide_storage_identity_tools(" in factory_invoke
     assert "_auto_tools = without_storage_identity_tools(_auto_tools)" in factory_invoke
     assert "without_privileged_mutation_tools_for_auto_bind(" in factory_invoke
     assert "_auto_tools = without_sandbox_tools(_auto_tools)" in factory_invoke
     assert "_auto_tools = without_storage_tools(_auto_tools)" in factory_invoke
     assert "rag_turn_system_prompt(" in factory_invoke
+    assert "playground_document_turn_system_prompt()" in factory_invoke
 
 
 def test_rag_tool_policy_lives_in_rag_package_not_workers() -> None:

@@ -1,5 +1,10 @@
 import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
 import { mutationHeaders } from '@/lib/csrfClient';
+import {
+  isUnauthorizedDetail,
+  isUnauthorizedStatus,
+  redirectToLoginOnUnauthorized,
+} from '@/lib/sessionExpired';
 
 export function sessionHeaders(method = 'GET'): HeadersInit {
   return mutationHeaders(method);
@@ -27,6 +32,20 @@ export function coalesceAdminGet<T>(key: string, run: () => Promise<T>): Promise
   return pending;
 }
 
+function throwAdminError(res: Response, data: unknown): never {
+  const raw = parseApiErrorDetail(data, res.status);
+  if (isUnauthorizedStatus(res.status) || isUnauthorizedDetail(raw)) {
+    redirectToLoginOnUnauthorized();
+    // Tras redirigir, no dejes el mensaje en paneles (chat / ops) como estado “colgado”.
+    throw new Error('No autenticado');
+  }
+  const detail =
+    (data as { code?: string } | null)?.code === 'gateway_unreachable' || res.status === 503
+      ? friendlyGatewayError(raw || 'gateway_unreachable')
+      : friendlyGatewayError(raw || `Error ${res.status}`);
+  throw new Error(detail);
+}
+
 export async function adminFetchOptional<T>(path: string, init?: RequestInit): Promise<T | null> {
   const method = init?.method || 'GET';
   const res = await fetch(`/api/admin${path}`, {
@@ -42,12 +61,7 @@ export async function adminFetchOptional<T>(path: string, init?: RequestInit): P
   if (res.status === 404) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const raw = parseApiErrorDetail(data, res.status);
-    const detail =
-      data?.code === 'gateway_unreachable' || res.status === 503
-        ? friendlyGatewayError(raw || 'gateway_unreachable')
-        : friendlyGatewayError(raw || `Error ${res.status}`);
-    throw new Error(detail);
+    throwAdminError(res, data);
   }
   return data as T;
 }
@@ -66,12 +80,7 @@ export async function adminFetch<T>(path: string, init?: RequestInit): Promise<T
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const raw = parseApiErrorDetail(data, res.status);
-    const detail =
-      data?.code === 'gateway_unreachable' || res.status === 503
-        ? friendlyGatewayError(raw || 'gateway_unreachable')
-        : friendlyGatewayError(raw || `Error ${res.status}`);
-    throw new Error(detail);
+    throwAdminError(res, data);
   }
   return data as T;
 }
@@ -88,8 +97,7 @@ export async function adminFormFetch<T>(path: string, formData: FormData, method
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    const raw = parseApiErrorDetail(data, res.status);
-    throw new Error(friendlyGatewayError(raw || `Error ${res.status}`));
+    throwAdminError(res, data);
   }
   return data as T;
 }

@@ -2,6 +2,7 @@
 
 import type { ChatMsg } from '@/components/chat/types';
 import { countUsersBefore } from '@/lib/chatEphemeralMerge';
+import { isLoopProgressHeartbeat } from '@/components/chat/adminChatPure';
 import { toolHeartbeatInvocationKey } from '@/lib/toolHeartbeat';
 import { normalizeWorkerKey, workerMatches } from '@/lib/workerOptions';
 
@@ -50,23 +51,36 @@ export function filterEphemeralForWorker(messages: ChatMsg[], workerId: string):
   );
 }
 
-/** Dedupe por invocación de tool (start/done del mismo id); conserva varias del mismo toolName. */
+function ephemeralDedupeKey(m: ChatMsg): string | null {
+  if (m.heartbeatKind === 'tool' && m.toolName) {
+    return toolHeartbeatInvocationKey(m) || `${m.toolName}@${m.toolStartedAt ?? ''}`;
+  }
+  const text = (m.text || '').trim();
+  if (!text) return null;
+  if (m.heartbeatKind === 'loop_tick' || isLoopProgressHeartbeat(text)) {
+    return `loop:${text.slice(0, 240)}`;
+  }
+  if (m.heartbeatKind === 'status' && /^Pensando/i.test(text)) {
+    return 'status:pensando';
+  }
+  if (m.heartbeatKind === 'plan') {
+    return `plan:${text.slice(0, 240)}`;
+  }
+  return `${m.heartbeatKind || 'status'}:${text.slice(0, 240)}`;
+}
+
+/** Dedupe por invocación de tool; status/loop/plan por texto estable. */
 export function mergeEphemeralHeartbeats(a: ChatMsg[], b: ChatMsg[]): ChatMsg[] {
   const combined = [...a, ...b].filter(isEphemeralMessage);
   if (!combined.length) return [];
-  const byInvocation = new Map<string, ChatMsg>();
+  const byKey = new Map<string, ChatMsg>();
   const orderedKeys: string[] = [];
-  const other: ChatMsg[] = [];
   for (const m of combined) {
-    if (m.heartbeatKind === 'tool' && m.toolName) {
-      const key = toolHeartbeatInvocationKey(m) || `${m.toolName}@${orderedKeys.length}`;
-      if (!byInvocation.has(key)) orderedKeys.push(key);
-      byInvocation.set(key, m);
-    } else {
-      other.push(m);
-    }
+    const key = ephemeralDedupeKey(m) || `other@${orderedKeys.length}`;
+    if (!byKey.has(key)) orderedKeys.push(key);
+    byKey.set(key, m);
   }
-  return [...other, ...orderedKeys.map((k) => byInvocation.get(k)!).filter(Boolean)];
+  return orderedKeys.map((k) => byKey.get(k)!).filter(Boolean);
 }
 
 function parseStoredHeartbeats(raw: string | null): ChatMsg[] {

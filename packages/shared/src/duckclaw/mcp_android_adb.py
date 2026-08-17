@@ -16,6 +16,10 @@ def android_adb_host() -> str:
     return (os.environ.get("ANDROID_ADB_HOST") or "").strip()
 
 
+def android_adb_debug_port() -> str:
+    return (os.environ.get("ANDROID_ADB_DEBUG_PORT") or "5555").strip()
+
+
 def android_mcp_port() -> int:
     raw = (os.environ.get("ANDROID_MCP_PORT") or "8080").strip()
     try:
@@ -173,7 +177,11 @@ def android_collapse_statusbar(*, serial: str | None = None) -> dict[str, Any]:
     }
 
 
-def android_adb_connect(host: str | None = None) -> dict[str, Any]:
+def android_adb_connect(
+    host: str | None = None,
+    *,
+    debug_port: str | int | None = None,
+) -> dict[str, Any]:
     target = (host or android_adb_host()).strip()
     if not target:
         return {"ok": False, "error": "ANDROID_ADB_HOST no configurado"}
@@ -193,15 +201,20 @@ def android_adb_connect(host: str | None = None) -> dict[str, Any]:
                 "stderr": pstderr.strip(),
             }
 
+    used_port = ""
     if not re.search(r":\d+$", target):
-        debug_port = (os.environ.get("ANDROID_ADB_DEBUG_PORT") or "5555").strip()
-        target = f"{target}:{debug_port}"
+        used_port = str(debug_port).strip() if debug_port is not None else android_adb_debug_port()
+        target = f"{target}:{used_port}"
+    else:
+        m = re.search(r":(\d+)$", target)
+        used_port = m.group(1) if m else ""
     code, stdout, stderr = _run_adb(["connect", target])
     merged = f"{stdout}\n{stderr}".lower()
     ok = code == 0 and ("connected" in merged or "already connected" in merged)
     return {
         "ok": ok,
         "host": target,
+        "debug_port": used_port,
         "exit_code": code,
         "stdout": stdout.strip(),
         "stderr": stderr.strip(),
@@ -235,6 +248,7 @@ def android_device_status() -> dict[str, Any]:
         "adb_available": adb_available,
         "adb_connected": adb_connected,
         "adb_host": host,
+        "adb_debug_port": android_adb_debug_port(),
         "mcp_url": mcp_url,
         "mcp_reachable": mcp_ok,
         "mcp_error": mcp_err if not mcp_ok else "",

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
+
+_log = logging.getLogger(__name__)
 
 _worker_graph_cache: OrderedDict[str, Any] = OrderedDict()
 _vault_invoke_guard = threading.Lock()
@@ -114,12 +117,35 @@ def remember_worker_graph_cache(cache_key: str, graph: Any) -> None:
         _evict_cache_key(oldest_key)
 
 
+def _rehydrate_graph_worker_db(graph: Any) -> bool:
+    """Reabre handle DuckDB cerrado tras release; evita rebuild de 150+ tools."""
+    wdb = getattr(graph, "_worker_db", None)
+    if wdb is None:
+        return False
+    if getattr(wdb, "_con", None) is not None:
+        return True
+    resume = getattr(wdb, "resume_file_handle", None)
+    if not callable(resume):
+        return False
+    try:
+        resume()
+    except Exception as exc:
+        _log.debug("worker_graph_cache rehydrate failed: %s", exc)
+        return False
+    ok = getattr(wdb, "_con", None) is not None
+    return ok
+
+
 def worker_graph_cache_get(cache_key: str) -> Any | None:
     graph = _worker_graph_cache.get(cache_key)
     if graph is None:
         return None
     wdb = getattr(graph, "_worker_db", None)
     if wdb is not None and getattr(wdb, "_con", None) is not None:
+        touch_worker_graph_cache(cache_key)
+        setattr(graph, "_cache_last_used", time.monotonic())
+        return graph
+    if _rehydrate_graph_worker_db(graph):
         touch_worker_graph_cache(cache_key)
         setattr(graph, "_cache_last_used", time.monotonic())
         return graph
@@ -150,14 +176,20 @@ def _release_worker_db_handle(worker_graph: Any | None, *, cache_key: str = "") 
     wdb = getattr(worker_graph, "_worker_db", None)
     if wdb is None:
         return False
-    try:
-        wdb.close()
-    except Exception:
-        pass
-    try:
-        worker_graph._worker_db = None
-    except Exception:
-        pass
+    release = getattr(wdb, "release_file_handle_for_external_writer", None)
+    if callable(release):
+        try:
+            release()
+        except Exception:
+            try:
+                wdb.close()
+            except Exception:
+                pass
+    else:
+        try:
+            wdb.close()
+        except Exception:
+            pass
     if cache_key and worker_graph_cache_enabled():
         setattr(worker_graph, "_cache_last_used", time.monotonic())
         return True

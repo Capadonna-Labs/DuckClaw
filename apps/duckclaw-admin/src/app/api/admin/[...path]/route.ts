@@ -154,9 +154,11 @@ async function projectDetailFallbackFromList(
 async function localOpsRunFallback(sub: string, method: string, bodyText: string): Promise<NextResponse | null> {
   if (sub !== 'ops/run' || method !== 'POST') return null;
   let opId = '';
+  let params: Record<string, unknown> | undefined;
   try {
-    const parsed = JSON.parse(bodyText || '{}') as { op_id?: string };
+    const parsed = JSON.parse(bodyText || '{}') as { op_id?: string; params?: Record<string, unknown> };
     opId = String(parsed.op_id || '').trim();
+    params = parsed.params;
   } catch {
     return NextResponse.json({ detail: 'Payload ops/run inválido' }, { status: 400 });
   }
@@ -166,7 +168,7 @@ async function localOpsRunFallback(sub: string, method: string, bodyText: string
   }
 
   try {
-    const result = await runOpsLocal(opId);
+    const result = await runOpsLocal(opId, params);
     return NextResponse.json(
       { ...result, _gateway_stale: true },
       { headers: { 'X-Duckclaw-Ops-Via': 'bff-fallback' } }

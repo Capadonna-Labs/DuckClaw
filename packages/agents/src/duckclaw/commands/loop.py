@@ -288,6 +288,35 @@ def build_loop_active_user_continuation(
     )
 
 
+def _worker_has_position_metrics(
+    db: Any,
+    chat_id: Any,
+    *,
+    tenant_id: str,
+    entry_worker_id: str | None = None,
+) -> bool:
+    """True when bound worker declares skill ``position_metrics``."""
+    try:
+        wid = _resolve_loop_worker_id(
+            db, chat_id, tenant_id=tenant_id, entry_worker_id=entry_worker_id
+        )
+        if not wid:
+            return False
+        from duckclaw.workers.manifest import load_manifest
+
+        spec = load_manifest(wid, db=db, tenant_id=tenant_id)
+        configs = getattr(spec, "skill_configs", None) or {}
+        if "position_metrics" in configs:
+            cfg = configs.get("position_metrics")
+            if isinstance(cfg, dict) and cfg.get("enabled") is False:
+                return False
+            return True
+        skills = getattr(spec, "skills_list", None) or []
+        return any(str(s).strip().lower().replace("-", "_") == "position_metrics" for s in skills)
+    except Exception:
+        return False
+
+
 def build_loop_self_system_event_message(
     db: Any,
     chat_id: Any,
@@ -344,6 +373,11 @@ def build_loop_self_system_event_message(
         priority_note = (
             " Atiende metas en orden de prioridad (P1 antes que P2; menor número primero). "
         )
+    metrics_note = (
+        " Para distancias SL/TP y % PnL por ticker: el grafo inyecta "
+        "calculate_tp_sl_distance sobre niveles ACTIVE; "
+        "prohibido inventar o invertir signos de % en prosa. "
+    )
     return (
         f"[SYSTEM_EVENT: {hitl_prefix}Ciclo de auto-mejora {trigger}. Metas (/goals): {summary}.{priority_note} "
         "1) Usa assess_crons_alignment (o evaluate_homeostasis si tu worker la expone) "
@@ -351,7 +385,7 @@ def build_loop_self_system_event_message(
         "2) Si métricas alineadas (sin desviaciones), llama request_homeostasis_validation "
         "y DETENTE — pregunta confirmación HITL; no declares homeostasis hasta /loop-approve. "
         "3) Si hay desviaciones, planifica corrección con las tools de este worker y pregunta. "
-        f"Metas solo vía /goals o manage_homeostasis_goals.{wait_note}]"
+        f"{metrics_note}Metas solo vía /goals o manage_homeostasis_goals.{wait_note}]"
     )
 
 

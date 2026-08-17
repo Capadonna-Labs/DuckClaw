@@ -63,7 +63,11 @@ def make_route_after_fact_check(ctx: WorkerGraphContext):
 
 def make_route_after_set_reply(ctx: WorkerGraphContext):
     def route_after_set_reply(state: dict) -> str:
-        return "agent" if state.get("visual_evidence_graph_retry") else "end"
+        return (
+            "agent"
+            if state.get("visual_evidence_graph_retry") or state.get("position_metrics_graph_retry")
+            else "end"
+        )
 
     return route_after_set_reply
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -30,11 +31,34 @@ def test_worker_graph_cache_lru_evicts_oldest() -> None:
     assert "k3" in mwc._worker_graph_cache
 
 
-def test_worker_graph_cache_get_drops_closed_db() -> None:
+def test_worker_graph_cache_get_rehydrates_closed_db() -> None:
+    from duckclaw.manager import manager_worker_cache as mwc
+
+    wdb = MagicMock(_con=None, _path="/tmp/vault.duckdb")
+
+    def _resume() -> None:
+        wdb._con = object()
+
+    wdb.resume_file_handle = _resume
+
+    class _Graph:
+        _worker_db = wdb
+
+    graph = _Graph()
+    mwc.remember_worker_graph_cache("k1", graph)
+    got = mwc.worker_graph_cache_get("k1")
+    assert got is graph
+    assert wdb._con is not None
+    assert mwc.worker_graph_cache_entry_count() == 1
+
+
+def test_worker_graph_cache_get_evicts_when_rehydrate_fails() -> None:
     from duckclaw.manager import manager_worker_cache as mwc
 
     graph = MagicMock()
-    graph._worker_db = MagicMock(_con=None)
+    wdb = MagicMock(_con=None, _path="/nonexistent/bad.duckdb")
+    wdb.resume_file_handle = MagicMock(side_effect=OSError("nope"))
+    graph._worker_db = wdb
     mwc.remember_worker_graph_cache("k1", graph)
     assert mwc.worker_graph_cache_get("k1") is None
     assert mwc.worker_graph_cache_entry_count() == 0

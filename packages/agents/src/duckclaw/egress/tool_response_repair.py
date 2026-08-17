@@ -171,6 +171,7 @@ def _humanize_tool_line(tool_name: str, tool_content: str) -> str:
     stripped = strip_tool_label_prefix(tool_content or "").strip()
     if not stripped:
         return ""
+    name = (tool_name or "").strip()
     if stripped.startswith("{"):
         try:
             parsed = json.loads(stripped)
@@ -180,6 +181,28 @@ def _humanize_tool_line(tool_name: str, tool_content: str) -> str:
             err_txt = str(parsed.get("error") or "").strip()
             if err_txt:
                 return f"No se pudo completar: {err_txt[:200]}"
+            if name in ("evaluate_homeostasis", "assess_crons_alignment"):
+                aligned = parsed.get("aligned")
+                if aligned is None:
+                    aligned = parsed.get("metrics_aligned")
+                achieved = parsed.get("homeostasis_achieved")
+                goals = parsed.get("goals_count")
+                mis = parsed.get("misaligned_count")
+                parts: list[str] = []
+                if achieved is True:
+                    parts.append("Homeostasis métricas OK")
+                elif achieved is False:
+                    parts.append("Homeostasis con desviaciones")
+                if aligned is True:
+                    parts.append("alineado con /goals")
+                elif aligned is False:
+                    parts.append("desalineado vs /goals")
+                if mis is not None:
+                    parts.append(f"desvíos={mis}")
+                if goals is not None:
+                    parts.append(f"metas={goals}")
+                if parts:
+                    return "; ".join(parts) + "."
             status = str(parsed.get("status") or "").strip().lower()
             if status in ("success", "ok"):
                 label = (
@@ -187,7 +210,8 @@ def _humanize_tool_line(tool_name: str, tool_content: str) -> str:
                 )
                 if label:
                     return f"Operación completada ({label})."
-                return "Operación completada."
+                # Generic success without label: omit (avoid useless "Operación completada.")
+                return ""
             preview = parsed.get("preview")
             if isinstance(preview, str) and preview.strip():
                 return preview.strip()[:220]

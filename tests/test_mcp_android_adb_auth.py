@@ -50,6 +50,22 @@ def test_resolve_connector_endpoint_url_uses_live_mcp_port(
     assert resolve_connector_endpoint_url(connector) == "http://127.0.0.1:9090/mcp"
 
 
+def test_android_adb_connect_uses_debug_port_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw.mcp_android_adb import android_adb_connect
+
+    monkeypatch.setenv("ANDROID_ADB_HOST", "192.0.2.10")
+    monkeypatch.setenv("ANDROID_ADB_DEBUG_PORT", "5555")
+    with patch(
+        "duckclaw.mcp_android_adb._run_adb",
+        return_value=(0, "connected to 192.0.2.10:39069", ""),
+    ) as run:
+        out = android_adb_connect(debug_port="39069")
+    assert out["ok"] is True
+    assert out["host"] == "192.0.2.10:39069"
+    assert out["debug_port"] == "39069"
+    run.assert_called_once_with(["connect", "192.0.2.10:39069"])
+
+
 def test_android_adb_connect_requires_host(monkeypatch: pytest.MonkeyPatch) -> None:
     from duckclaw.mcp_android_adb import android_adb_connect
 

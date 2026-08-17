@@ -48,10 +48,10 @@ assert.deepEqual(primaryLabelsFor('admin'), [
   'Productividad',
 ]);
 assert.deepEqual(moreLabelsFor('admin'), [
-  'Train',
-  'Sandbox',
   'Plataforma',
   'Integraciones',
+  'Sandbox',
+  'Train',
   'Administración',
 ]);
 assert.equal(adminLabels.includes('DuckDB'), false);

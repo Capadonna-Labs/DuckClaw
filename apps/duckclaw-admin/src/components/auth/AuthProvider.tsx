@@ -10,6 +10,7 @@ import {
   readAuthSnapshot,
   writeAuthSnapshot,
 } from '@/lib/authSessionCache';
+import { redirectToLoginOnUnauthorized } from '@/lib/sessionExpired';
 
 const AuthHydrationContext = createContext(false);
 
@@ -57,6 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setAuthError('Gateway no disponible. Revisa que duckops up haya terminado.');
         } else if (res.status === 401) {
           setAuthError(null);
+          redirectToLoginOnUnauthorized();
         } else {
           setAuthError(`No se pudo validar la sesión (${res.status}).`);
         }

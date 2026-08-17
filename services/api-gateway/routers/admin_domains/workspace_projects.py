@@ -177,6 +177,55 @@ async def get_workspace_project(
     return {"project": project, "agents": agents}
 
 
+class WorkspaceProjectPatchBody(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=8000)
+    visibility: str | None = Field(default=None, max_length=32)
+
+
+@router.patch("/workspace/projects/{project_id}", dependencies=[Depends(require_admin_key)])
+async def update_workspace_project(
+    project_id: str,
+    body: WorkspaceProjectPatchBody,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    """Actualiza nombre / descripción / visibilidad (upsert vía create_project)."""
+    project = _project_snapshot(project_id, actor)
+    if not project:
+        raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
+    name = (body.name if body.name is not None else str(project.get("name") or "")).strip()
+    if not name:
+        raise _problem(400, "El nombre del proyecto es obligatorio", project_id)
+    description = (
+        body.description if body.description is not None else str(project.get("description") or "")
+    )
+    visibility = (
+        (body.visibility if body.visibility is not None else str(project.get("visibility") or "private"))
+        .strip()
+        .lower()
+        or "private"
+    )
+    command = CreateProjectCommand(
+        project_id=project_id,
+        tenant_id=str(project.get("tenant_id") or "default"),
+        actor_email=effective_actor_email(actor),
+        name=name,
+        description=str(description or ""),
+        visibility=visibility,
+    )
+    try:
+        task_id = _enqueue_workspace_project_command(command)
+    except ValueError as exc:
+        raise _problem(400, str(exc), project_id) from exc
+    updated = {
+        **project,
+        "name": name,
+        "description": str(description or ""),
+        "visibility": visibility,
+    }
+    return {"ok": True, "task_id": task_id, "project": updated}
+
+
 @router.delete("/workspace/projects/{project_id}", dependencies=[Depends(require_admin_key)])
 async def delete_workspace_project(
     project_id: str,

@@ -1,4 +1,4 @@
-"""Resolución SLM (MLX-Inference PM2) para admin playground."""
+"""Resolución SLM (inferencia local / OpenAI-compatible) para admin playground."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
 
 
 def slm_base_url() -> str:
-    """URL OpenAI-compat del SLM (Mac mini MLX-Inference vía Tailscale o local)."""
+    """URL OpenAI-compat del SLM (runtime local o remoto vía Tailscale)."""
     explicit = (os.environ.get("DUCKCLAW_SLM_BASE_URL") or "").strip().rstrip("/")
     if explicit:
         return explicit if explicit.endswith("/v1") else f"{explicit}/v1"
@@ -163,7 +163,7 @@ def resolved_slm_for_playground(
     tenant_id: str,
     repo_root: Path,
 ) -> dict[str, Any]:
-    """SLM efectivo para una conversación admin (MLX-Inference)."""
+    """SLM efectivo para una conversación admin (inferencia local)."""
     base = slm_base_url()
     model = slm_env_model()
     env_adapter = slm_env_adapter()
@@ -208,12 +208,14 @@ def resolved_slm_for_playground(
         "adapter_path": adapter_path,
         "base_url": base,
         "mlx_status": "unknown",
-        "pm2_name": "MLX-Inference",
+        "pm2_name": (os.environ.get("DUCKCLAW_SLM_RUNTIME_NAME") or "local-inference").strip()
+        or "local-inference",
         "adapters": adapters,
         "scope": scope,
         "hint": (
-            "MLX-Inference carga un adapter vía MLX_ADAPTER_PATH en PM2. "
-            "Cambiar adapter en sesión requiere pm2 restart MLX-Inference."
+            "El runtime de inferencia local carga el adapter configurado (p. ej. vía variable "
+            "de entorno del proceso PM2). Cambiar adapter en sesión puede requerir reiniciar "
+            "ese proceso de inferencia local."
         ),
     }
 

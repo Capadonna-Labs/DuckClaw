@@ -186,6 +186,11 @@ export function parseManifestSkills(yamlText: string): ParsedManifestSkills {
   for (const item of skillsList) {
     parseSkillItem(item, skillNames, bindings);
   }
+  for (const exposed of parseToolSurfaceExposed(yamlText)) {
+    if (PRIVILEGED_MUTATION_SKILLS.has(exposed) && !skillNames.includes(exposed)) {
+      skillNames.push(exposed);
+    }
+  }
   const optionalSkillNames = skillNames.filter((name) => !isFrameworkBaseline(name));
   return { skillNames, optionalSkillNames, bindings };
 }

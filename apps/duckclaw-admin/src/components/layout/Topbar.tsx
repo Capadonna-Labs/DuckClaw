@@ -13,6 +13,11 @@ import { PlatformStatusStrip } from '@/components/admin/GatewayStatusBadge';
 import { UpdateBanner } from '@/components/layout/UpdateBanner';
 import { markStackReloadPending } from '@/lib/playgroundLastSelection';
 import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
+import { writeAuthSnapshot } from '@/lib/authSessionCache';
+import {
+  isUnauthorizedDetail,
+  redirectToLoginOnUnauthorized,
+} from '@/lib/sessionExpired';
 
 interface TopbarProps {
   onMenuClick?: () => void;
@@ -41,10 +46,31 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
   useEffect(() => {
     if (!stackRestartMessage?.startsWith('Stack recuperado')) return;
     markStackReloadPending();
+    // Lite/desktop: el store en memoria se vacía al reiniciar. No reusar snapshot.
+    writeAuthSnapshot(null);
+    let cancelled = false;
     const timer = window.setTimeout(() => {
-      window.location.reload();
-    }, 3000);
-    return () => window.clearTimeout(timer);
+      void (async () => {
+        try {
+          const res = await fetch('/api/admin/auth/me', {
+            credentials: 'include',
+            cache: 'no-store',
+          });
+          if (cancelled) return;
+          if (!res.ok) {
+            redirectToLoginOnUnauthorized();
+            return;
+          }
+          window.location.reload();
+        } catch {
+          if (!cancelled) redirectToLoginOnUnauthorized();
+        }
+      })();
+    }, 1500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [stackRestartMessage]);
 
   const handleMenuToggle = () => {
@@ -79,11 +105,15 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       const healthy = await waitForGatewayHealth();
       setStackRestartMessage(
         healthy
-          ? 'Stack recuperado: migraciones + PM2. Recargando consola…'
+          ? 'Stack recuperado: migraciones + PM2. Comprobando sesión…'
           : 'Migraciones y PM2 OK, pero /health no respondió aún. Espera 30s y recarga manualmente.'
       );
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo reiniciar el stack';
+      if (isUnauthorizedDetail(msg)) {
+        redirectToLoginOnUnauthorized();
+        return;
+      }
       setStackRestartMessage(msg);
     } finally {
       useGatewayHealthStore.getState().endRecovery();

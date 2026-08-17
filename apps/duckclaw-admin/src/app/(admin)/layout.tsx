@@ -36,7 +36,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   if (!isAuthenticated) {
-    if (authError) {
+    // Errores de gateway (503) sí muestran pantalla de reintento; 401 ya limpia sesión → login.
+    if (authError && !/no autenticado|unauthorized/i.test(authError)) {
       return <AdminAuthError message={authError} />;
     }
     return <AdminLoading message="Redirigiendo al login…" />;

@@ -187,7 +187,17 @@ async def ainvoke_manager_ephemeral(
     from duckclaw.manager.graph import trim_worker_graph_cache
 
     _ensure_llm_config()
-    graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, chat_id, vault_db_path)
+    from functools import partial
+
+    graph, db = await asyncio.to_thread(
+        partial(
+            _invoke_ephemeral_gateway_graph,
+            chat_id,
+            vault_db_path,
+            tenant_id=tenant_id,
+            actor_email=(user_id or username or ""),
+        )
+    )
     try:
         return await _ainvoke(
             graph,

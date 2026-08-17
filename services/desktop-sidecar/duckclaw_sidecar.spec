@@ -43,6 +43,14 @@ seeds_src = repo / "packages" / "shared" / "src" / "duckclaw" / "seeds"
 if seeds_src.is_dir():
     datas.append((str(seeds_src), "duckclaw" + os.sep + "seeds"))
 
+# Magika (MarkItDown file-type detection) — models not picked up without explicit datas.
+try:
+    from PyInstaller.utils.hooks import collect_data_files as _collect_data_files
+
+    datas.extend(_collect_data_files("magika"))
+except Exception:
+    pass
+
 # ponytail: namespace duckclaw — PyInstaller misses agents portion; ship src + rth path hook
 for _site, _src in (
     ("agents_site", agents_src),

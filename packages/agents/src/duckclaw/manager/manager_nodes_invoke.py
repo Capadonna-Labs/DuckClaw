@@ -417,12 +417,21 @@ def build_invoke_worker_node(
                     )
                 )
             ):
-                msg = (
-                    "El backend de inferencia (p. ej. MLX en :8080) no está disponible o se reinició; "
-                    "suele ir ligado a OOM en Metal. Revisa `pm2 logs MLX-Inference` y, si usas resúmenes largos "
-                    "de contexto, reduce `DUCKCLAW_SEMANTIC_SUMMARY_MAX_CHARS`.\n\n"
-                    f"Detalle: {str(e)[:400]}"
-                )
+                _prov = (llm_provider or "").strip().lower()
+                if _prov in ("openrouter", "or", "router", "deepseek", "groq", "openai", "anthropic", "gemini"):
+                    msg = (
+                        f"No se pudo conectar al proveedor LLM «{_prov or 'cloud'}». "
+                        "Comprueba red, API key en Integraciones y que el modelo sea el slug correcto "
+                        "(en OpenRouter: `deepseek/deepseek-v4-flash`, no la API directa de DeepSeek).\n\n"
+                        f"Detalle: {str(e)[:400]}"
+                    )
+                else:
+                    msg = (
+                        "El backend de inferencia local no está disponible o se reinició "
+                        "(p. ej. MLX en :8080). Si usas OpenRouter u otra API cloud, elige ese proveedor "
+                        "en el selector de modelos; no hace falta MLX.\n\n"
+                        f"Detalle: {str(e)[:400]}"
+                    )
             reply = format_worker_reply(
                 raw_worker_reply=msg,
                 assigned=assigned,

@@ -256,12 +256,13 @@ async def run_chat_graph(
             try:
                 result = await ainvoke_manager_ephemeral(
                     graph_message,
-                    prepared.history_for_model,
+                    prepared.history_for_graph,
                     session_id,
                     tenant_id=prepared.tenant_id,
                     user_id=prepared.vault_user_id,
                     username=prepared.username,
-                    user_incoming=prepared.user_incoming,
+                    user_incoming=getattr(prepared.payload, "graph_user_incoming", None)
+                    or prepared.user_incoming,
                     vault_db_path=prepared.vault_db_path,
                     shared_db_path=prepared.shared_db_path,
                     is_system_prompt=prepared.is_system_prompt

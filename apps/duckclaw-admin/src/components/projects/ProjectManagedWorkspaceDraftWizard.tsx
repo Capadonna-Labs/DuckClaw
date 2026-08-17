@@ -2,11 +2,19 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, CheckCircle2, Database, Sparkles } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, Database, Sparkles, Upload, X } from 'lucide-react';
 import { adminService } from '@/services/adminService';
-import type { ManagedWorkspaceDraft } from '@/services/adminService';
+import type { ManagedWorkspaceDraft, SpawnPackagePreview } from '@/services/adminService';
+import { ImportSpawnPackageDialog } from '@/components/templates/ImportSpawnPackageDialog';
 
 type WizardStep = 1 | 2 | 3 | 4;
+
+type PendingPackage = {
+  id: string;
+  file: File;
+  preview: SpawnPackagePreview;
+  confirmHighRisk: boolean;
+};
 
 const steps: { id: WizardStep; label: string }[] = [
   { id: 1, label: 'Objetivo' },
@@ -25,6 +33,8 @@ export function ProjectManagedWorkspaceDraftWizard() {
   const [prompt, setPrompt] = useState('');
   const [draft, setDraft] = useState<ManagedWorkspaceDraft | null>(null);
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
+  const [pendingPackages, setPendingPackages] = useState<PendingPackage[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,6 +55,7 @@ export function ProjectManagedWorkspaceDraftWizard() {
       const nextDraft = await adminService.createManagedWorkspaceDraft({ prompt: prompt.trim() });
       setDraft(nextDraft);
       setQuestionAnswers({});
+      setPendingPackages([]);
       setStep(2);
     } catch (e) {
       setError(errorMessage(e, 'No se pudo generar el borrador'));
@@ -58,13 +69,34 @@ export function ProjectManagedWorkspaceDraftWizard() {
     setBusy(true);
     setError(null);
     try {
-      await adminService.confirmManagedWorkspaceDraft(draft);
+      if (pendingPackages.length > 0) {
+        await adminService.confirmManagedWorkspaceDraftWithImport(
+          draft,
+          pendingPackages.map((pkg) => ({
+            file: pkg.file,
+            confirm_high_risk: pkg.confirmHighRisk,
+            role: 'member',
+          }))
+        );
+      } else {
+        await adminService.confirmManagedWorkspaceDraft(draft);
+      }
       router.push('/projects');
     } catch (e) {
       setError(errorMessage(e, 'No se pudo confirmar el borrador'));
     } finally {
       setBusy(false);
     }
+  };
+
+  const removePendingPackage = (id: string) => {
+    setPendingPackages((current) => current.filter((pkg) => pkg.id !== id));
+  };
+
+  const togglePendingHighRisk = (id: string, value: boolean) => {
+    setPendingPackages((current) =>
+      current.map((pkg) => (pkg.id === id ? { ...pkg, confirmHighRisk: value } : pkg))
+    );
   };
 
   return (
@@ -268,10 +300,24 @@ export function ProjectManagedWorkspaceDraftWizard() {
             </div>
             <div className="grid gap-3 lg:grid-cols-2">
               <div className="rounded-2xl bg-gov-gray-50 p-4 dark:bg-dark-bg">
-                <p className="text-xs font-black uppercase tracking-wide text-gov-gray-500 dark:text-dark-muted">
-                  Workers nuevos o reutilizados
-                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-black uppercase tracking-wide text-gov-gray-500 dark:text-dark-muted">
+                    Workers nuevos o reutilizados
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setImportOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-gov-blue-100 px-2 py-1 text-[11px] font-bold text-gov-blue-800 dark:border-dark-border dark:text-dark-cyan"
+                  >
+                    <Upload size={12} /> Importar .zip
+                  </button>
+                </div>
                 <div className="mt-3 grid gap-2">
+                  {draft.workers.length === 0 && pendingPackages.length === 0 ? (
+                    <p className="rounded-xl bg-white p-3 text-sm text-gov-gray-500 dark:bg-dark-surface dark:text-dark-muted">
+                      Sin workers en el borrador. Adjunta un .zip o regenera el análisis.
+                    </p>
+                  ) : null}
                   {draft.workers.map((worker) => (
                     <div key={worker.worker_id} className="rounded-xl bg-white p-3 text-sm dark:bg-dark-surface">
                       <strong className="text-gov-gray-900 dark:text-dark-text">{worker.display_name}</strong>
@@ -281,6 +327,46 @@ export function ProjectManagedWorkspaceDraftWizard() {
                       <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">{worker.role}</p>
                     </div>
                   ))}
+                  {pendingPackages.map((pkg) => (
+                    <div
+                      key={pkg.id}
+                      className="rounded-xl border border-dashed border-gov-blue-200 bg-white p-3 text-sm dark:border-dark-border dark:bg-dark-surface"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <strong className="text-gov-gray-900 dark:text-dark-text">{pkg.preview.worker_id}</strong>
+                          <p className="mt-1 text-[10px] font-black uppercase tracking-wide text-gov-blue-700 dark:text-dark-cyan">
+                            Adjunto .zip (preview)
+                          </p>
+                          <p className="mt-1 truncate text-xs text-gov-gray-500 dark:text-dark-muted">{pkg.file.name}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removePendingPackage(pkg.id)}
+                          className="rounded-lg p-1 text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+                          aria-label={`Quitar ${pkg.preview.worker_id}`}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                      {pkg.preview.missing_tools.length > 0 ? (
+                        <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+                          Tools ausentes: {pkg.preview.missing_tools.join(', ')}
+                        </p>
+                      ) : null}
+                      {pkg.preview.import_blocked_until_confirm ? (
+                        <label className="mt-2 flex items-start gap-2 text-xs text-red-800 dark:text-red-200">
+                          <input
+                            type="checkbox"
+                            checked={pkg.confirmHighRisk}
+                            onChange={(event) => togglePendingHighRisk(pkg.id, event.target.checked)}
+                            className="mt-0.5"
+                          />
+                          <span>Confirmo tools de alto riesgo (import read-only al confirmar).</span>
+                        </label>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
               </div>
               <div className="rounded-2xl bg-gov-gray-50 p-4 dark:bg-dark-bg">
@@ -288,15 +374,22 @@ export function ProjectManagedWorkspaceDraftWizard() {
                   Skills sugeridas
                 </p>
                 <div className="mt-3 grid gap-2">
-                  {draft.suggested_skills.map((skill) => (
-                    <div key={skill.name} className="rounded-xl bg-white p-3 text-sm dark:bg-dark-surface">
-                      <strong className="text-gov-gray-900 dark:text-dark-text">{skill.name}</strong>
-                      <span className="ml-2 rounded-full bg-gov-blue-50 px-2 py-0.5 text-[10px] font-black uppercase text-gov-blue-800 dark:bg-dark-bg dark:text-dark-cyan">
-                        {skill.available ? 'Disponible' : 'Sugerida'}
-                      </span>
-                      <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">{skill.reason}</p>
-                    </div>
-                  ))}
+                  {draft.suggested_skills.length === 0 ? (
+                    <p className="rounded-xl bg-white p-3 text-sm text-gov-gray-500 dark:bg-dark-surface dark:text-dark-muted">
+                      No hay skills sugeridas para este objetivo. Puedes añadirlas después en Agentes o regenerar el
+                      borrador con más detalle.
+                    </p>
+                  ) : (
+                    draft.suggested_skills.map((skill) => (
+                      <div key={skill.name} className="rounded-xl bg-white p-3 text-sm dark:bg-dark-surface">
+                        <strong className="text-gov-gray-900 dark:text-dark-text">{skill.name}</strong>
+                        <span className="ml-2 rounded-full bg-gov-blue-50 px-2 py-0.5 text-[10px] font-black uppercase text-gov-blue-800 dark:bg-dark-bg dark:text-dark-cyan">
+                          {skill.available ? 'Disponible' : 'Sugerida'}
+                        </span>
+                        <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">{skill.reason}</p>
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             </div>
@@ -319,7 +412,10 @@ export function ProjectManagedWorkspaceDraftWizard() {
               <button
                 type="button"
                 onClick={() => setStep(4)}
-                className="rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900"
+                disabled={pendingPackages.some(
+                  (pkg) => pkg.preview.import_blocked_until_confirm && !pkg.confirmHighRisk
+                )}
+                className="rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-black text-white hover:bg-gov-blue-900 disabled:opacity-50"
               >
                 Revisar confirmacion
               </button>
@@ -342,7 +438,11 @@ export function ProjectManagedWorkspaceDraftWizard() {
                 Crear fila en <code>main.admin_projects</code>: {draft.project.name}
               </li>
               <li className="rounded-2xl bg-gov-gray-50 p-3 dark:bg-dark-bg">
-                Crear o reutilizar {draft.workers.length} worker(s) del borrador.
+                Crear o reutilizar {draft.workers.length} worker(s) del borrador
+                {pendingPackages.length > 0
+                  ? ` e importar ${pendingPackages.length} paquete(s) .zip en la misma transacción`
+                  : ''}
+                .
               </li>
               <li className="rounded-2xl bg-gov-gray-50 p-3 dark:bg-dark-bg">
                 Crear asignaciones en <code>main.admin_project_agents</code>.
@@ -374,6 +474,24 @@ export function ProjectManagedWorkspaceDraftWizard() {
           </div>
         )}
       </div>
+
+      <ImportSpawnPackageDialog
+        open={importOpen}
+        previewOnly
+        onClose={() => setImportOpen(false)}
+        onPreviewAttached={({ file, preview, confirmHighRisk }) => {
+          setPendingPackages((current) => [
+            ...current,
+            {
+              id: `${preview.worker_id}-${file.name}-${file.size}-${Date.now()}`,
+              file,
+              preview,
+              confirmHighRisk,
+            },
+          ]);
+          setImportOpen(false);
+        }}
+      />
     </section>
   );
 }

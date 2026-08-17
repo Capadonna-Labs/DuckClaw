@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, ShieldCheck, Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
 import { adminPostAuthPath, useAuthStore } from '@/store/authStore';
@@ -206,6 +207,12 @@ function LoginForm() {
             {isSubmitting ? 'Entrando…' : bootstrap.canAttemptLogin ? 'Entrar' : 'Esperando Gateway…'}
           </button>
         </form>
+        <p className="mt-6 text-center text-sm text-slate-500">
+          ¿Es la primera vez que usas DuckClaw?{' '}
+          <Link href="/register" className="font-bold text-gov-blue-700 hover:underline">
+            Crear cuenta inicial
+          </Link>
+        </p>
       </div>
 
       {DEV_LOGIN_HINT_ENABLED && DEV_HINT_EMAIL && (

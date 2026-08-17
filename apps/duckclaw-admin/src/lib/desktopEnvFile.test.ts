@@ -1,4 +1,10 @@
-import { desktopAdminApiKey, isDesktopLiteMode, readDesktopEnvFile } from '@/lib/desktopEnvFile';
+import {
+  desktopAdminApiKey,
+  isDesktopLiteMode,
+  readDesktopEnvFile,
+  updateDesktopAdminCredentials,
+} from '@/lib/desktopEnvFile';
+import { describe, expect, it } from 'vitest';
 
 describe('desktopEnvFile', () => {
   it('prefers desktop.env over process env', () => {
@@ -37,5 +43,25 @@ describe('desktopEnvFile', () => {
     Object.defineProperty(process, 'platform', { value: prevPlatform });
     process.env.LOCALAPPDATA = prevLocal;
     process.env.DUCKCLAW_GATEWAY_URL = prevGw;
+  });
+
+  it('updates only the desktop bootstrap credentials', () => {
+    const prev = process.env.LOCALAPPDATA;
+    const tmp = require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'dc-register-'));
+    process.env.LOCALAPPDATA = tmp;
+    require('fs').mkdirSync(`${tmp}\\DuckClaw`, { recursive: true });
+    require('fs').writeFileSync(
+      `${tmp}\\DuckClaw\\desktop.env`,
+      'DUCKCLAW_ADMIN_API_KEY=keep-this\nDUCKCLAW_ADMIN_EMAIL=old@example.com\n',
+      'utf8'
+    );
+
+    expect(updateDesktopAdminCredentials('new@example.com', 'new-password')).toBe(true);
+    expect(readDesktopEnvFile()).toMatchObject({
+      DUCKCLAW_ADMIN_API_KEY: 'keep-this',
+      DUCKCLAW_ADMIN_EMAIL: 'new@example.com',
+      DUCKCLAW_ADMIN_PASSWORD: 'new-password',
+    });
+    process.env.LOCALAPPDATA = prev;
   });
 });

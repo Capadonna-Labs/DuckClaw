@@ -470,7 +470,7 @@ async def playground_set_slm(
     body: PlaygroundSlmBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    """Persiste SLM opcional (MLX-Inference) por conversación."""
+    """Persiste SLM por conversación (runtime de inferencia local)."""
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         raise problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")

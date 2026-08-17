@@ -6,6 +6,7 @@ import { LiveVoiceBar } from '@/components/chat/LiveVoiceBar';
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
 import type { useChatImageAttachments } from '@/components/chat/useChatImageAttachments';
 import type { useChatDocumentAttachments } from '@/components/chat/useChatDocumentAttachments';
+import { useChatFileDrop } from '@/components/chat/useChatFileDrop';
 import { CHAT_DOCUMENT_ACCEPT } from '@/lib/chatDocumentAttachments';
 import type {
   LiveVoiceSpeakingPhase,
@@ -117,9 +118,20 @@ export function AdminChatComposeFooter({
   liveVoice,
 }: AdminChatComposeFooterProps) {
   const attachError = imageAttachments.attachError || documentAttachments.attachError;
+  const dropEnabled = canSend && !loading && !voice.recording && !liveVoice.isActive;
+  const { dragActive, dropProps } = useChatFileDrop({
+    enabled: dropEnabled,
+    ingestImages: imageAttachments.ingestFiles,
+    ingestDocuments: documentAttachments.ingestFiles,
+    setAttachError: (message) => {
+      imageAttachments.setAttachError(message);
+      documentAttachments.setAttachError(message);
+    },
+  });
 
   return (
       <footer
+        {...dropProps}
         className={`p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shrink-0 relative z-20 ${
           isStudioCompose
             ? 'bg-white dark:bg-dark-surface border-t dark:border-dark-border'
@@ -152,6 +164,18 @@ export function AdminChatComposeFooter({
           className="hidden"
           onChange={(e) => void documentAttachments.onPickFiles(e.target.files)}
         />
+        {dragActive ? (
+          <div
+            className="absolute inset-2 z-30 flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gov-blue-500 bg-gov-blue-50/95 px-4 text-center text-sm font-semibold text-gov-blue-900 shadow-sm dark:border-dark-cyan dark:bg-dark-surface/95 dark:text-dark-cyan"
+            aria-live="polite"
+          >
+            <FileText size={22} aria-hidden />
+            <span className="mt-1">Suelta archivos para adjuntarlos</span>
+            <span className="mt-0.5 text-xs font-normal">
+              Detecta imágenes, PDF, Word, Excel, CSV, texto, PowerPoint y HTML.
+            </span>
+          </div>
+        ) : null}
 
         {isStudioCompose ? (
           <div className="rounded-2xl border border-gov-gray-200 bg-gov-gray-50/80 dark:border-dark-border dark:bg-dark-bg/60 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow">

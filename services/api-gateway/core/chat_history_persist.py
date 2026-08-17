@@ -22,7 +22,7 @@ async def persist_chat_history(
     message: str,
     username: str,
 ) -> None:
-    if redis_client is None or not gateway_chat_history_enabled() or not (reply_plain_for_storage or "").strip():
+    if not gateway_chat_history_enabled() or not (reply_plain_for_storage or "").strip():
         return
     tenant_id = prepared.tenant_id
     session_id = prepared.session_id

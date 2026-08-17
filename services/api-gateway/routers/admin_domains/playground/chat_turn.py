@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -27,6 +28,8 @@ from routers.admin_domains.playground.team_context import (
 )
 from routers.admin_domains.playground.tenant_resolution import gateway_effective_tenant_id
 from routers.admin_domains.playground.vault_access import resolved_vault_for_admin_chat
+
+_log = logging.getLogger("duckclaw.gateway.playground")
 
 
 @dataclass
@@ -225,13 +228,24 @@ def _document_bytes_to_text(*, data: bytes, filename: str) -> str:
 def enrich_message_with_playground_documents(
     msg: str,
     documents: list[PlaygroundDocumentIn],
+    *,
+    tenant_id: str = "",
 ) -> tuple[str, list[str]]:
-    """Extrae texto de documentos del turno y lo antepone al mensaje (request-scoped)."""
+    """Extrae texto, guarda copia en inbound/ y antepone bloque al mensaje.
+
+    La copia en vault es independiente del archivo original del usuario.
+    La extracción siempre usa temp (document_toolbox); el original del usuario
+    nunca se abre en escritura.
+    """
     if not documents:
         return msg, []
 
+    from core.comfyui_inbound import save_inbound_bytes_for_tenant
+
+    tid = (tenant_id or "").strip()
     blocks: list[str] = []
     names: list[str] = []
+    saved_paths: list[str] = []
     total_chars = 0
     for doc in documents:
         name = (doc.filename or "").replace("\\", "/").split("/")[-1].strip() or "documento"
@@ -242,17 +256,51 @@ def enrich_message_with_playground_documents(
         text = _document_bytes_to_text(data=raw, filename=name)
         if not text:
             raise ValueError(f"{name}: no se extrajo texto")
+        saved_path = ""
+        if tid:
+            try:
+                saved = save_inbound_bytes_for_tenant(
+                    raw,
+                    tid,
+                    mime_type=(doc.mime_type or "").strip() or "application/octet-stream",
+                    filename=name,
+                )
+                saved_path = str(saved)
+                saved_paths.append(saved_path)
+            except Exception as exc:
+                _log.warning("playground doc inbound copy failed for %s: %s", name, exc)
+                saved_path = ""
         remaining = _CHAT_DOC_MAX_CHARS_TOTAL - total_chars
         if remaining <= 0:
-            blocks.append(f"[Documento adjunto: {name}]\n(omitido: límite total de contexto)")
+            line = f"[Documento adjunto: {name}]"
+            if saved_path:
+                line += f"\npath={saved_path}\n(omitido: límite total de contexto; usa extract_document_text con este path)"
+            else:
+                line += "\n(omitido: límite total de contexto)"
+            blocks.append(line)
             continue
         clipped = text[: min(_CHAT_DOC_MAX_CHARS_PER_FILE, remaining)]
         if len(text) > len(clipped):
             clipped = f"{clipped}\n…[truncado]"
         total_chars += len(clipped)
-        blocks.append(f"[Documento adjunto: {name}]\n{clipped}")
+        header = f"[Documento adjunto: {name}]"
+        if saved_path:
+            header += (
+                f"\npath={saved_path}\n"
+                "(Copia en vault inbound; el archivo original del usuario no se modifica. "
+                "Si necesitas re-leer o el texto está truncado, usa extract_document_text con este path.)"
+            )
+        blocks.append(f"{header}\n{clipped}")
 
     prefix = "\n\n".join(blocks)
+    header = (
+        "[DOCUMENTOS_ADJUNTOS] El usuario adjuntó "
+        f"{len(names)} archivo(s); su contenido extraído va a continuación."
+    )
+    if saved_paths:
+        listing = "\n".join(f"documento_{i} → {p}" for i, p in enumerate(saved_paths, start=1))
+        header = f"{header}\nCopias en el vault inbound (no son el archivo original).\n{listing}"
+    prefix = f"{header}\n\n{prefix}"
     body = (msg or "").strip()
     if body:
         return f"{prefix}\n\n--- Mensaje del usuario ---\n{body}", names
@@ -303,7 +351,11 @@ async def prepare_playground_chat_turn(
     doc_names: list[str] = []
     if body.documents and not is_fly:
         try:
-            msg, doc_names = enrich_message_with_playground_documents(msg, body.documents)
+            msg, doc_names = enrich_message_with_playground_documents(
+                msg,
+                body.documents,
+                tenant_id=turn.eff_tenant,
+            )
         except ValueError as exc:
             raise problem(400, str(exc), "documents") from exc
         except Exception as exc:
@@ -371,6 +423,12 @@ async def prepare_playground_chat_turn(
     chat = ChatRequest(
         message=msg,
         user_incoming=original_user_message or None,
+        # El texto original se persiste en historial; el grafo recibe el adjunto
+        # extraído para que un handoff al worker no lo descarte.
+        graph_user_incoming=msg if doc_names else None,
+        # Aísla el análisis actual de respuestas anteriores que pueden haber
+        # derivado a un menú de herramientas/DB.
+        document_turn=bool(doc_names),
         chat_id=session_id,
         user_id=guard_user_id,
         username=actor or guard_user_id,

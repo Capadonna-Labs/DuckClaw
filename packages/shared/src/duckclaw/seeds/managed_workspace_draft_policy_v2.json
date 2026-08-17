@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "policy_type": "manager_task",
+    "policy_name": "admin_workspace_managed_draft",
+    "seed": "managed_workspace_draft_policy_v2",
+    "scope": "admin_workspace"
+  },
+  "policy": {
+    "draft_prompt_template": "Responde SOLO JSON válido, sin markdown envolvente, sin texto extra antes ni después.\nNo inventes secretos ni credenciales. No escribas en DB. Solo prepara un borrador revisable y accionable.\n\nSchema exacto:\n{{\"project\":{{\"name\":\"string\",\"description\":\"string\"}},\"workers\":[{{\"worker_id\":\"string\",\"display_name\":\"string\",\"role\":\"member\",\"system_prompt\":\"string\"}}],\"shared_context\":\"markdown string\",\"suggested_skills\":[{{\"name\":\"string\",\"reason\":\"string\",\"available\":true}}],\"questions\":[\"string\"]}}\n\nRequisitos de calidad:\n- shared_context: markdown en español, mínimo 450 caracteres, con estas secciones exactas:\n  ## Objetivo\n  ## Alcance\n  ## Datos y fuentes\n  ## Workers y roles\n  ## Skills sugeridas\n  ## Riesgos y límites\n  ## Primeros pasos\n  En cada sección escribe 2–4 frases concretas ligadas al objetivo del usuario (no rellenes con plantillas genéricas).\n- system_prompt de cada worker: markdown en español, mínimo 220 caracteres, con ## Rol, ## Flujo de trabajo y ## Reglas; indica qué preguntar antes de actuar.\n- suggested_skills: propone 2–4 skills útiles. Si una skill aparece en Skills detectadas, marca available=true; si no, available=false con reason clara.\n- questions: 0–3 preguntas concretas solo si faltan datos críticos.\n\nSkills detectadas o sugeridas del catálogo: {suggested_skills_json}\nObjetivo del usuario:\n{prompt}",
+    "fallback": {
+      "project_name_template": "{title}",
+      "project_description_template": "Proyecto orientado a convertir el objetivo {goal} en un flujo DB-first con contexto operativo, workers sugeridos y validación humana antes de persistir cambios.",
+      "worker_id_template": "{slug}-agent",
+      "worker_display_name_template": "Asistente {project_name}",
+      "worker_role": "member",
+      "system_prompt_template": "## Rol\nEres el asistente principal del proyecto {project_name}. Traduce el objetivo «{goal}» en pasos verificables.\n\n## Flujo de trabajo\n1. Aclara datos faltantes con preguntas concretas.\n2. Propón un plan corto (ingresos, egresos, prioridades o el dominio del objetivo).\n3. Usa solo herramientas y datos autorizados; pide confirmación antes de acciones irreversibles.\n\n## Reglas\n- No inventes cifras ni fuentes.\n- Resume supuestos al inicio de cada respuesta importante.\n- Prioriza claridad y siguientes pasos accionables.",
+      "shared_context_template": "# Análisis del proyecto\n\n## Objetivo\n{prompt}\n\n## Alcance\nCubrir el objetivo «{goal}» con un flujo administrado: contexto compartido, al menos un worker revisable y confirmación DB-first antes de guardar.\n\n## Datos y fuentes\nIdentificar qué datos aporta el usuario (archivos, tablas, notas) y qué falta. No asumir conectores ni secretos no confirmados.\n\n## Workers y roles\nWorker principal: Asistente {title}. Debe pedir datos faltantes, proponer un plan y operar con el contexto compartido.\n\n## Skills sugeridas\n{suggested_skills_json}\n\n## Riesgos y límites\n- No persistir cambios hasta la confirmación final.\n- No inventar credenciales ni datos financieros/sensibles.\n- Pedir aprobación humana antes de acciones irreversibles.\n\n## Primeros pasos\n1. Confirmar fuentes de datos y frecuencia de actualización.\n2. Definir el resultado esperado del worker (reporte, alerta, checklist).\n3. Revisar skills sugeridas y asignarlas en Agentes si hace falta.",
+      "model_error_note_template": "> Nota: no se pudo invocar el modelo configurado; se usó análisis local estructurado.",
+      "questions": [
+        "¿Qué fuentes de datos debe usar este proyecto?",
+        "¿Qué resultado concreto esperas del worker principal?",
+        "¿Hay restricciones de tono, seguridad o aprobación humana?"
+      ]
+    },
+    "confirm": {
+      "source_kind": "managed_draft",
+      "context_title": "Contexto compartido",
+      "change_note": "Creado desde flujo administrado DB-first"
+    }
+  }
+}

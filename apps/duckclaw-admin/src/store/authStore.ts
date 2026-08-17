@@ -111,6 +111,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       /* ignore */
     }
+    writeAuthSnapshot(null);
     set({
       usuario: null,
       isAuthenticated: false,

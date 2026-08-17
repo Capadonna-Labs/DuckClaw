@@ -50,10 +50,10 @@ export const MORE_NAV_GROUP: AdminNavGroup = {
   hint: 'Sandbox, plataforma y operación avanzada',
   collapsible: true,
   items: [
-    { href: '/train', label: 'Train', section: 'core', audience: 'admin' },
-    { href: '/sandbox', label: 'Sandbox', section: 'core', audience: 'all' },
     { href: '/plataforma', label: 'Plataforma', section: 'core', audience: 'admin' },
     { href: '/integraciones', label: 'Integraciones', section: 'integrations', audience: 'admin' },
+    { href: '/sandbox', label: 'Sandbox', section: 'core', audience: 'all' },
+    { href: '/train', label: 'Train', section: 'core', audience: 'admin' },
     {
       href: '/administracion',
       label: 'Administración',

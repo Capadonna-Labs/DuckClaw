@@ -237,7 +237,8 @@ def overview_usage_metrics(
 
 @router.get("/health", dependencies=[Depends(require_admin_key)])
 async def admin_health(request: Request) -> dict[str, Any]:
-    workers: list[str] = []
+    worker_ids: list[str] = []
+    worker_labels: list[str] = []
     try:
         from core.admin_identity import open_gateway_db
         from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
@@ -246,15 +247,23 @@ async def admin_health(request: Request) -> dict[str, Any]:
         with open_gateway_db(read_only=True) as db:
             actor = (request.headers.get("x-duckclaw-actor") or "").strip().lower()
             if actor and "@" in actor:
-                workers = [
-                    str(item.get("id") or item.get("worker_id") or "").strip()
-                    for item in list_visible_workers_for_actor(db, actor_email=actor)
-                    if str(item.get("id") or item.get("worker_id") or "").strip()
-                ]
+                for item in list_visible_workers_for_actor(db, actor_email=actor):
+                    wid = str(item.get("id") or item.get("worker_id") or "").strip()
+                    if not wid:
+                        continue
+                    label = str(item.get("display_name") or item.get("name") or wid).strip() or wid
+                    worker_ids.append(wid)
+                    worker_labels.append(label)
             else:
-                workers = list_workers(db=db)
+                for wid in list_workers(db=db):
+                    wid_s = str(wid or "").strip()
+                    if not wid_s:
+                        continue
+                    worker_ids.append(wid_s)
+                    worker_labels.append(wid_s)
     except Exception:
-        workers = []
+        worker_ids = []
+        worker_labels = []
     redis_ok = False
     try:
         r = getattr(request.app.state, "redis", None)
@@ -272,10 +281,12 @@ async def admin_health(request: Request) -> dict[str, Any]:
     except Exception:
         gateway_metrics = {}
 
+    # ``workers`` = nombres visibles (tooltip Topbar). ``worker_ids`` = ids técnicos.
     return {
         "status": "ok",
-        "workers_count": len(workers),
-        "workers": workers[:20],
+        "workers_count": len(worker_ids),
+        "workers": worker_labels[:20],
+        "worker_ids": worker_ids[:20],
         "redis": redis_ok,
         "templates_dir": str(_templates_dir()),
         "api_revision": 2,

@@ -346,8 +346,53 @@ def _apply_confirm_workspace_managed_draft(conn: Any, payload: dict) -> None:
     shared_context = str(payload.get("shared_context") or "")
     skill_names = _managed_draft_available_skill_names(payload.get("suggested_skills"))
     _ensure_managed_draft_project(conn, payload, actor=actor, tenant_id=tenant_id)
+
     seen_workers: set[str] = set()
-    for index, worker in enumerate(payload.get("workers") or []):
+    sort_order = 0
+
+    for package in payload.get("spawn_imports") or []:
+        if not isinstance(package, dict):
+            continue
+        manifest = package.get("manifest")
+        files = package.get("files")
+        if not isinstance(manifest, dict) or not isinstance(files, dict):
+            raise ValueError("spawn_imports entries require manifest and files objects")
+        from duckclaw.spawn_package_import import import_spawn_package_to_catalog
+
+        imported = import_spawn_package_to_catalog(
+            conn,
+            owner_email=actor,
+            manifest=manifest,
+            files={str(k): str(v) for k, v in files.items()},
+            worker_id_override=(
+                str(package.get("worker_id_override") or "").strip() or None
+            ),
+            force_read_only=True,
+        )
+        worker_id = str(imported.get("worker_id") or "").strip()
+        worker_uid = str(imported.get("worker_uid") or "").strip()
+        if not worker_id or not worker_uid:
+            raise ValueError("spawn package import did not return worker identity")
+        if worker_id in seen_workers:
+            continue
+        seen_workers.add(worker_id)
+        if shared_context.strip():
+            _ensure_managed_draft_context(
+                conn,
+                worker_uid=worker_uid,
+                title=context_title,
+                content_md=shared_context,
+            )
+        _assign_managed_draft_agent(
+            conn,
+            project_id=project_id,
+            worker_uid=worker_uid,
+            role=str(package.get("role") or "member").strip()[:64] or "member",
+            sort_order=sort_order,
+        )
+        sort_order += 1
+
+    for worker in payload.get("workers") or []:
         if not isinstance(worker, dict):
             continue
         worker_id = _managed_draft_worker_id(worker.get("worker_id"))
@@ -392,8 +437,9 @@ def _apply_confirm_workspace_managed_draft(conn: Any, payload: dict) -> None:
             project_id=project_id,
             worker_uid=worker_uid,
             role=str(worker.get("role") or "member").strip()[:64] or "member",
-            sort_order=index,
+            sort_order=sort_order,
         )
+        sort_order += 1
 
 
 def _apply_add_project_member(conn: Any, payload: dict) -> None:

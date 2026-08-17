@@ -23,6 +23,18 @@ export type SkillCategory = {
 /** Fallback when gateway catalog is unavailable (matches framework_skill_categories_v1 seed). */
 export const FALLBACK_PLATFORM_CATEGORIES: SkillCategory[] = [
   {
+    id: 'duckdb_write',
+    title: 'DuckDB (escritura)',
+    description: 'Mutaciones SQL privilegiadas (opt-in vía tool_surface).',
+    skills: [
+      {
+        id: 'admin_sql',
+        label: 'admin_sql',
+        hint: 'SQL de escritura/admin en DuckDB (privilegiado)',
+      },
+    ],
+  },
+  {
     id: 'web',
     title: 'Web e investigación',
     skills: [
@@ -39,6 +51,18 @@ export const FALLBACK_PLATFORM_CATEGORIES: SkillCategory[] = [
       { id: 'publish_custom_report', label: 'publish_custom_report' },
       { id: 'update_custom_report_title', label: 'update_custom_report_title' },
       { id: 'read_llm_usage_summary', label: 'read_llm_usage_summary' },
+    ],
+  },
+  {
+    id: 'agent_prompt',
+    title: 'Prompt del agente',
+    description: 'Automodificación persistente del system prompt del worker.',
+    skills: [
+      {
+        id: 'update_system_prompt',
+        label: 'update_system_prompt',
+        hint: 'Persiste cambios en el system prompt (append o replace)',
+      },
     ],
   },
   {
@@ -225,8 +249,9 @@ export function buildSkillCategories(
   const quick = parseManifestQuick(manifestYaml);
   const profiles =
     Object.keys(baselineProfiles).length > 0 ? baselineProfiles : FALLBACK_BASELINE_PROFILES;
-  const staticPacks =
-    platformCategories.length > 0 ? platformCategories : FALLBACK_PLATFORM_CATEGORIES;
+  const staticPacks = ensurePrivilegedSkillsInPlatformCategories(
+    platformCategories.length > 0 ? platformCategories : FALLBACK_PLATFORM_CATEGORIES
+  );
   const knownIds = knownSkillIdsFromPacks(staticPacks, profiles);
   const baseline = baselineCategoryForProfile(quick.toolProfile, profiles);
   for (const skill of baseline.skills) {
@@ -249,4 +274,40 @@ export function buildSkillCategories(
   }
 
   return categories;
+}
+
+const ENSURED_PLATFORM_CATEGORY_IDS = ['duckdb_write', 'agent_prompt'] as const;
+
+/** Garantiza skills de plataforma (admin_sql, update_system_prompt) si el catálogo del gateway está desfasado. */
+function ensurePrivilegedSkillsInPlatformCategories(categories: SkillCategory[]): SkillCategory[] {
+  let next = categories;
+  const known = () => {
+    const ids = new Set<string>();
+    for (const category of next) {
+      for (const skill of category.skills) {
+        ids.add(normalizeSkillId(skill.id));
+      }
+    }
+    return ids;
+  };
+
+  for (const categoryId of ENSURED_PLATFORM_CATEGORY_IDS) {
+    const fallback = FALLBACK_PLATFORM_CATEGORIES.find((c) => c.id === categoryId);
+    if (!fallback) continue;
+    const missing = fallback.skills.filter((s) => !known().has(normalizeSkillId(s.id)));
+    if (missing.length === 0) continue;
+
+    const existing = next.find((c) => c.id === categoryId);
+    if (existing) {
+      next = next.map((category) =>
+        category.id === categoryId
+          ? { ...category, skills: [...category.skills, ...missing] }
+          : category
+      );
+    } else {
+      next = [{ ...fallback, skills: missing }, ...next];
+    }
+  }
+
+  return next;
 }

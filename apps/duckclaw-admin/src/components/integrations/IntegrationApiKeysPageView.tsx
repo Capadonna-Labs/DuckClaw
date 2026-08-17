@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { KeyRound, Loader2 } from 'lucide-react';
+import { ExternalLink, KeyRound, Loader2 } from 'lucide-react';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
 import { adminService, type IntegrationCatalogItem } from '@/services/adminService';
 import { pollWriteTask } from '@/lib/pollWriteTask';
@@ -9,6 +9,8 @@ import {
   integrationScopeLabel,
   type IntegrationCatalogScope,
 } from '@/lib/integrationApiKeys';
+import { resolveIntegrationDocsUrl } from '@/lib/integrationDocsUrls';
+import { openExternalUrl } from '@/lib/openExternalUrl';
 import { useIntegrationCatalog } from '@/components/integrations/useIntegrationCatalog';
 import { useAuthStore } from '@/store/authStore';
 
@@ -29,6 +31,19 @@ function IntegrationKeyRow({
   onSave: () => void;
   busy: boolean;
 }) {
+  const docsUrl = resolveIntegrationDocsUrl(item);
+  const [docsError, setDocsError] = useState<string | null>(null);
+
+  const openDocs = async () => {
+    if (!docsUrl) return;
+    setDocsError(null);
+    try {
+      await openExternalUrl(docsUrl);
+    } catch (e) {
+      setDocsError(e instanceof Error ? e.message : 'No se pudo abrir la documentación');
+    }
+  };
+
   return (
     <li className="rounded-lg border border-gov-gray-200 bg-white p-4 dark:border-dark-border dark:bg-dark-surface">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -76,20 +91,21 @@ function IntegrationKeyRow({
           >
             {busy ? 'Guardando…' : `Guardar (${integrationScopeLabel(scope)})`}
           </button>
-          {item.docs_url ? (
-            <a
-              href={item.docs_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs font-semibold text-gov-blue-700 hover:underline dark:text-dark-cyan"
+          {docsUrl ? (
+            <button
+              type="button"
+              onClick={() => void openDocs()}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-gov-blue-700 hover:underline dark:text-dark-cyan"
             >
               Obtener clave
-            </a>
+              <ExternalLink size={12} aria-hidden />
+            </button>
           ) : null}
         </div>
       ) : (
         <p className="mt-2 text-xs text-gov-gray-500">Solo administradores pueden guardar claves.</p>
       )}
+      {docsError ? <p className="mt-2 text-xs text-red-600">{docsError}</p> : null}
     </li>
   );
 }

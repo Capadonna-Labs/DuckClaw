@@ -105,27 +105,33 @@ def sse_terminal_done() -> str:
 
 
 def friendly_chat_error_message(exc: BaseException) -> str:
-    """Mensaje legible para la UI admin cuando falla inferencia local."""
+    """Mensaje legible para la UI admin cuando falla inferencia (local o cloud)."""
     msg = str(exc).strip() or exc.__class__.__name__
     low = msg.lower()
+    if "openrouter" in low and ("api_key" in low or "no está configurado" in low):
+        return (
+            f"{msg}\n\n"
+            "OpenRouter: guarda la key en Admin → Integraciones. "
+            "El modelo debe ser un slug OpenRouter (p. ej. deepseek/deepseek-v4-flash), "
+            "no hace falta MLX ni la API directa de DeepSeek."
+        )
     if "connection refused" in low or "errno 61" in low:
         if "8080" in msg or ":8080" in low:
             return (
                 f"{msg}\n\n"
-                "MLX texto (puerto 8080) no responde. En PM2 suele faltar «MLX-Inference»; "
-                "solo «MLX-Vision» escucha en 8081. Arranca el servidor mlx_lm en 8080 "
-                "(p. ej. `pm2 start` del ecosystem MLX) o usa `/model provider=deepseek`."
+                "Nadie escucha en el puerto 8080 (motor local). "
+                "Si usas OpenRouter u otra API cloud, elige ese proveedor en el selector de modelos."
             )
         return (
             f"{msg}\n\n"
             "No hay servidor de inferencia en la URL configurada. "
-            "Revisa MLX_PORT / OPENAI_API_BASE en .env del gateway o cambia de proveedor con /model."
+            "Revisa el proveedor/URL en el selector de modelos o en Integraciones."
         )
     if "apiconnectionerror" in low or "connecterror" in low:
         return (
             f"{msg}\n\n"
-            "Error de conexión al proveedor LLM. Comprueba que el servicio esté en marcha "
-            "o cambia proveedor con `/model`."
+            "Error de conexión al proveedor LLM. Comprueba red y API key "
+            "o cambia proveedor con el selector de modelos."
         )
     return msg
 

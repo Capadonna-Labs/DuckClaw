@@ -81,20 +81,36 @@ def normalize_history_list(raw: list[Any]) -> list[dict[str, str]]:
 async def redis_load_chat_history(
     redis_client: Any, tenant_id: str, session_id: str
 ) -> list[dict[str, str]]:
-    if redis_client is None or not gateway_chat_history_enabled():
+    if not gateway_chat_history_enabled():
         return []
     key = _redis_key(tenant_id, session_id)
+    cached: list[dict[str, str]] = []
+    if redis_client is not None:
+        try:
+            raw = await redis_client.get(key)
+            if raw:
+                data = json.loads(raw)
+                if isinstance(data, list):
+                    cached = normalize_history_list(data)
+                else:
+                    _log.warning("chat_history: JSON en %s no es lista; se ignora", key)
+        except Exception as exc:
+            _log.warning("chat_history: fallo al leer %s: %s", key, exc)
+    if cached:
+        return cached
+    # DuckDB durable fallback (desktop Lite / Redis miss).
     try:
-        raw = await redis_client.get(key)
-        if not raw:
-            return []
-        data = json.loads(raw)
-        if not isinstance(data, list):
-            _log.warning("chat_history: JSON en %s no es lista; se ignora", key)
-            return []
-        return normalize_history_list(data)
+        from core.admin_conversations_db import db_load_messages
+
+        durable = db_load_messages(tenant_id, session_id)
+        if durable and redis_client is not None:
+            try:
+                await redis_save_chat_history(redis_client, tenant_id, session_id, durable)
+            except Exception:
+                pass
+        return durable
     except Exception as exc:
-        _log.warning("chat_history: fallo al leer %s: %s", key, exc)
+        _log.debug("chat_history: duckdb fallback skip: %s", exc)
         return []
 
 
@@ -104,10 +120,19 @@ async def redis_save_chat_history(
     session_id: str,
     items: list[dict[str, str]],
 ) -> None:
-    if redis_client is None or not gateway_chat_history_enabled():
+    if not gateway_chat_history_enabled():
+        return
+    norm = normalize_history_list(items)
+    # Durable write first.
+    try:
+        from core.admin_conversations_db import db_save_messages
+
+        db_save_messages(tenant_id, session_id, norm)
+    except Exception as exc:
+        _log.warning("chat_history: duckdb save failed: %s", exc)
+    if redis_client is None:
         return
     try:
-        norm = normalize_history_list(items)
         ttl = int(os.environ.get("DUCKCLAW_CHAT_HISTORY_TTL_SEC", "604800"))
         await redis_client.set(
             _redis_key(tenant_id, session_id),

@@ -5,6 +5,7 @@ import { Pencil, Check, X } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import { pollWriteTask } from '@/lib/pollWriteTask';
 import { clampInput, LIMITS } from '@/lib/validation';
+import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 
 type WorkerDisplayNameEditorProps = {
   workerId: string;
@@ -67,6 +68,7 @@ export function WorkerDisplayNameEditor({
       }
       onSaved(result.display_name || next);
       setEditing(false);
+      void useGatewayHealthStore.getState().refresh(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo guardar el nombre');
     } finally {
@@ -126,11 +128,11 @@ export function WorkerDisplayNameEditor({
       <button
         type="button"
         onClick={startEdit}
-        className="inline-flex items-center gap-1 rounded-lg border border-gov-blue-100 px-2 py-1 text-xs font-bold text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
+        className="inline-flex items-center rounded-lg border border-gov-blue-100 p-1.5 text-gov-blue-800 hover:bg-gov-blue-50 dark:border-dark-border dark:text-dark-cyan"
         title="Editar nombre visible"
+        aria-label="Editar nombre visible"
       >
-        <Pencil size={12} />
-        Renombrar
+        <Pencil size={14} />
       </button>
     </div>
   );

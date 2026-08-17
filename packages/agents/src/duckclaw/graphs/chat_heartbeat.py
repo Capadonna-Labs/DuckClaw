@@ -341,12 +341,18 @@ def publish_admin_chat_heartbeat(
     Publica heartbeat para la UI admin (playground / widget flotante).
     Fire-and-forget; no lanza al llamante.
     """
-    url = _redis_url()
-    if not url:
-        return
     cid = str(chat_id or "").strip()
     msg = (text or "").strip()
     if not cid or not msg:
+        return
+    url = _redis_url()
+    try:
+        from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+        lite_ok = spawn_inline_writes_enabled()
+    except Exception:
+        lite_ok = False
+    if not url and not lite_ok:
         return
     wid = (worker_id or "").strip()
     slot = swarm_slot
@@ -389,11 +395,26 @@ def publish_admin_chat_heartbeat(
     sync_tool_phase = bool(tn and tp in ("start", "done", "error"))
 
     def _run() -> None:
+        channel = admin_heartbeat_channel(cid)
+        try:
+            from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+            # Desktop lite: same in-process store the SSE listener uses (no Redis).
+            if spawn_inline_writes_enabled():
+                from duckclaw.lite_session_store import LITE_SESSION_STORE
+
+                LITE_SESSION_STORE.publish(channel, payload)
+                return
+        except Exception as exc:
+            _log.debug("admin chat heartbeat lite publish failed chat_id=%r: %s", cid, exc)
+            return
+        if not url:
+            return
         try:
             import redis as redis_sync  # noqa: PLC0415
 
             client = redis_sync.Redis.from_url(url, decode_responses=True)
-            client.publish(admin_heartbeat_channel(cid), payload)
+            client.publish(channel, payload)
         except Exception as exc:
             _log.debug("admin chat heartbeat publish failed chat_id=%r: %s", cid, exc)
 

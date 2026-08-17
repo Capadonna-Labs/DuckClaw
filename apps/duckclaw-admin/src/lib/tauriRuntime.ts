@@ -1,7 +1,6 @@
-/** True when admin runs inside Tauri desktop webview (localhost:3000 with IPC). */
+/** True when admin runs inside the Tauri desktop webview. */
 export function isTauriDesktop(): boolean {
   if (typeof window === 'undefined') return false;
-  if ((process.env.NEXT_PUBLIC_DUCKCLAW_DESKTOP || '').trim() !== '1') return false;
   const w = window as Window & { __TAURI_INTERNALS__?: unknown; __TAURI__?: unknown };
   return Boolean(w.__TAURI_INTERNALS__ ?? w.__TAURI__);
 }

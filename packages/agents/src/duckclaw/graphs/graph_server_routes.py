@@ -76,8 +76,16 @@ def register_graph_server_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
         from duckclaw.manager.graph import trim_worker_graph_cache
+        from functools import partial
 
-        graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
+        graph, db = await asyncio.to_thread(
+            partial(
+                _invoke_ephemeral_gateway_graph,
+                req.chat_id,
+                tenant_id=req.tenant_id,
+                actor_email=(req.user_id or req.username or ""),
+            )
+        )
         history = req.history or []
 
         t0 = time.monotonic()
@@ -125,8 +133,16 @@ def register_graph_server_routes(app: FastAPI) -> None:
             raise HTTPException(status_code=503, detail=f"Error inicializando el grafo: {exc}")
 
         from duckclaw.manager.graph import trim_worker_graph_cache
+        from functools import partial
 
-        graph, db = await asyncio.to_thread(_invoke_ephemeral_gateway_graph, req.chat_id)
+        graph, db = await asyncio.to_thread(
+            partial(
+                _invoke_ephemeral_gateway_graph,
+                req.chat_id,
+                tenant_id=req.tenant_id,
+                actor_email=(req.user_id or req.username or ""),
+            )
+        )
 
         async def event_generator() -> AsyncGenerator[str, None]:
             try:

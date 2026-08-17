@@ -9,10 +9,15 @@ import {
   Cpu,
   FileText,
   Terminal,
+  Wrench,
 } from 'lucide-react';
 
 import { PlaygroundWorkerCapabilitiesPanel } from '@/components/playground/PlaygroundWorkerCapabilitiesPanel';
 import { LlmSecretsBanner } from '@/components/integrations/LlmSecretsBanner';
+import {
+  effectiveLlmModelId,
+  modelLabelForOption,
+} from '@/lib/llmModelPresets';
 import { adminService } from '@/services/adminService';
 
 type PlaygroundConfig = {
@@ -49,6 +54,8 @@ export type PlaygroundRunSettingsPanelProps = {
   invalidWorkers: string[];
   logsPanelOpen: boolean;
   onLogsToggle: () => void;
+  toolUsageEnabled: boolean;
+  onToolUsageToggle: () => void;
   logsControls?: React.ReactNode;
   logsViewport?: React.ReactNode;
   /** Activa/desactiva sandbox de sesión (sin poll de policy en el footer). */
@@ -80,6 +87,8 @@ export function PlaygroundRunSettingsPanel({
   invalidWorkers,
   logsPanelOpen,
   onLogsToggle,
+  toolUsageEnabled,
+  onToolUsageToggle,
   logsControls,
   logsViewport,
   onSandboxToggle,
@@ -89,8 +98,8 @@ export function PlaygroundRunSettingsPanel({
   onOpen,
 }: PlaygroundRunSettingsPanelProps) {
   const [contextOpen, setContextOpen] = useState(true);
-  /** Cerrado por defecto: capabilities no se piden hasta expandir (lazy). */
-  const [toolsOpen, setToolsOpen] = useState(false);
+  /** Abierto por defecto: Tool Usage / Sandbox visibles sin un clic extra. */
+  const [toolsOpen, setToolsOpen] = useState(true);
   /** Estado local + sync one-shot al abrir sesión (sin poll). */
   const [sandboxOn, setSandboxOn] = useState(false);
   const [sandboxSyncedFor, setSandboxSyncedFor] = useState('');
@@ -129,11 +138,19 @@ export function PlaygroundRunSettingsPanel({
     workerId,
   ]);
 
-  const model = config?.llm?.model || '—';
-  const provider = config?.llm?.provider || 'Proveedor LLM';
+  const provider = (config?.llm?.provider || '').trim() || 'Proveedor LLM';
+  const effectiveModel = effectiveLlmModelId(
+    config?.llm?.provider || '',
+    config?.llm?.model || '',
+    undefined,
+    config?.slm
+  );
+  const model = effectiveModel
+    ? modelLabelForOption(config?.llm?.provider || '', effectiveModel, config?.slm)
+    : '—';
   const slmEnabled = Boolean(config?.slm?.enabled);
   const slmLabel = slmEnabled
-    ? `${config?.slm?.model_short || 'MLX'} · ${config?.slm?.mlx_status || '—'}`
+    ? `${config?.slm?.model_short || 'local'} · ${config?.slm?.mlx_status || '—'}`
     : 'Ninguno';
   const vaultLabel = basenamePath(activeVaultPath);
   const vaultScope =
@@ -163,11 +180,11 @@ export function PlaygroundRunSettingsPanel({
                 {provider}
               </p>
               <p className="mt-2 text-[10px] font-black uppercase tracking-wider text-gov-gray-400 dark:text-dark-muted">
-                SLM (opcional)
+                SLM
               </p>
               <p className="text-xs font-semibold text-gov-gray-800 dark:text-dark-text">{slmLabel}</p>
               <p className="mt-2 text-[11px] leading-relaxed text-gov-gray-500 dark:text-dark-muted">
-                LLM remoto + SLM local MLX-Inference. Clic para cambiar.
+                LLM remoto + SLM de inferencia local. Clic para cambiar.
               </p>
             </div>
             <div className="flex flex-col gap-1 shrink-0">
@@ -267,6 +284,17 @@ export function PlaygroundRunSettingsPanel({
               icon={<Box size={14} aria-hidden />}
             />
           ) : null}
+          <StudioToggleRow
+            label="Tool Usage"
+            hint={
+              toolUsageEnabled
+                ? 'Visible en el chat (bloques de herramientas)'
+                : 'Oculto en el chat'
+            }
+            checked={toolUsageEnabled}
+            onChange={onToolUsageToggle}
+            icon={<Wrench size={14} aria-hidden />}
+          />
           <StudioToggleRow
             label="Logs PM2"
             hint={logsPanelOpen ? 'Consola abajo' : 'Mostrar consola de logs'}

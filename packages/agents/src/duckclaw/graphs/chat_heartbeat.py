@@ -309,6 +309,23 @@ def publish_admin_tool_event(
     if ph not in ("start", "done", "error"):
         return
     name = (tool_name or "").strip() or "tool"
+    # El playground completo recibe estos eventos vía SSE. En desktop lite la
+    # consola sigue gateway.log, por lo que hay que registrar el mismo ciclo de
+    # vida allí. No incluir detail: puede traer SQL, rutas o resultados.
+    worker_label = (worker_id or "").strip() or "unknown"
+    duration_suffix = ""
+    if elapsed_ms is not None and ph in ("done", "error"):
+        try:
+            duration_suffix = f" | elapsed_ms={float(elapsed_ms):.0f}"
+        except (TypeError, ValueError):
+            pass
+    _log.info(
+        "tool_usage: worker=%s | tool=%s | phase=%s%s",
+        worker_label,
+        name,
+        ph,
+        duration_suffix,
+    )
     text = f"🔄 Usando: {name}"
     publish_admin_chat_heartbeat(
         chat_id,

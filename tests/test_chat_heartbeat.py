@@ -445,11 +445,22 @@ def test_publish_admin_tool_event_start_and_done_with_duration(
 
     from duckclaw.graphs.chat_heartbeat import publish_admin_tool_event
 
-    publish_admin_tool_event("admin-playground", "read_sql", "start")
+    log_lines: list[str] = []
+    monkeypatch.setattr(
+        "duckclaw.graphs.chat_heartbeat._log.info",
+        lambda template, *args: log_lines.append(template % args),
+    )
+    publish_admin_tool_event(
+        "admin-playground",
+        "read_sql",
+        "start",
+        worker_id="finanz-expert",
+    )
     publish_admin_tool_event(
         "admin-playground",
         "read_sql",
         "done",
+        worker_id="finanz-expert",
         detail='SELECT 1 {"rows":[{"x":1}]}',
         elapsed_ms=95.4,
     )
@@ -464,6 +475,9 @@ def test_publish_admin_tool_event_start_and_done_with_duration(
     assert start["tool_phase"] == "start"
     assert done["tool_phase"] == "done"
     assert done["elapsed_ms"] == 95.4
+    assert "tool_usage: worker=finanz-expert | tool=read_sql | phase=start" in log_lines
+    assert "tool_usage: worker=finanz-expert | tool=read_sql | phase=done | elapsed_ms=95" in log_lines
+    assert all('SELECT 1 {"rows"' not in line for line in log_lines)
 
 
 def test_publish_admin_chat_heartbeat_includes_worker_and_slot(monkeypatch: pytest.MonkeyPatch) -> None:

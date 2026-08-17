@@ -310,11 +310,77 @@ def enforce_visual_evidence_rule(
     return (_VISUAL_EVIDENCE_USER_ERROR, VISUAL_EVIDENCE_RETRY_REASON)
 
 
+def _spec_has_position_metrics(spec: Any) -> bool:
+    if spec is None:
+        return False
+    configs = getattr(spec, "skill_configs", None) or {}
+    if isinstance(configs, dict) and "position_metrics" in configs:
+        cfg = configs.get("position_metrics")
+        if isinstance(cfg, dict) and cfg.get("enabled") is False:
+            return False
+        return True
+    skills = getattr(spec, "skills_list", None) or []
+    return any(str(s).strip().lower().replace("-", "_") == "position_metrics" for s in skills)
+
+
+def position_metrics_retry_system_message() -> SystemMessage:
+    from duckclaw.position_metrics import POSITION_METRICS_RETRY_DIRECTIVE
+
+    return SystemMessage(content=POSITION_METRICS_RETRY_DIRECTIVE)
+
+
+def _position_metrics_enforcement_enabled(
+    spec: Any,
+    messages: Optional[list[Any]] = None,
+) -> bool:
+    """
+    Guard/rewrite active when skill declared OR same-turn homeostasis/levels tools
+    ran OR always-pack tool is relevant (default on for claim enforcement).
+
+    Skill-only gating was insufficient: calculate_tp_sl_distance already ships in
+    the always pack even when the admin skill checkbox is off.
+    """
+    if _spec_has_position_metrics(spec):
+        return True
+    for m in messages or []:
+        name = str(getattr(m, "name", "") or "").strip()
+        if name in {
+            "evaluate_homeostasis",
+            "evaluate_tp_sl_monitor",
+            "read_tp_sl_levels",
+            "calculate_tp_sl_distance",
+        }:
+            return True
+    # ponytail: always-pack ships calculate_tp_sl_distance; claim guard must not
+    # depend on admin skill checkbox. Ceiling: workers without levels may see rare
+    # false-positive % claims → one graph retry then strip.
+    return True
+
+
+def enforce_position_metrics_evidence_rule(
+    *,
+    reply: str,
+    messages: Optional[list[Any]] = None,
+    spec: Any = None,
+) -> Tuple[str, Optional[str]]:
+    """Require tool/levels evidence when reply claims SL/TP % (not skill-only)."""
+    from duckclaw.position_metrics import enforce_position_metrics_rule
+
+    text, reason = enforce_position_metrics_rule(
+        reply=reply,
+        messages=list(messages or []),
+        enabled=_position_metrics_enforcement_enabled(spec, messages),
+    )
+    return text, reason
+
+
 __all__ = [
     "VISUAL_EVIDENCE_RETRY_REASON",
     "bracket_citation_audit",
+    "enforce_position_metrics_evidence_rule",
     "enforce_visual_evidence_rule",
     "market_price_consistency_audit",
+    "position_metrics_retry_system_message",
     "spec_requires_bracket_citations",
     "visual_evidence_retry_system_message",
 ]

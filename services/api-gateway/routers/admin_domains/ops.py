@@ -53,6 +53,7 @@ _OPS_ALLOWLIST: dict[str, list[str]] = {
 
 class OpsRunBody(BaseModel):
     op_id: str
+    params: dict[str, Any] | None = None
 
 
 def require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
@@ -180,11 +181,15 @@ async def run_ops_command(
     if op_id in ("android_adb_status", "android_adb_connect"):
         from duckclaw.mcp_android_adb import android_adb_connect, android_device_status
 
-        payload = (
-            android_device_status()
-            if op_id == "android_adb_status"
-            else android_adb_connect()
-        )
+        if op_id == "android_adb_status":
+            payload = android_device_status()
+        else:
+            params = body.params or {}
+            host = str(params.get("host") or "").strip() or None
+            debug_port = params.get("debug_port")
+            if debug_port is not None:
+                debug_port = str(debug_port).strip() or None
+            payload = android_adb_connect(host=host, debug_port=debug_port)
         ok = bool(payload.get("ok"))
         result = {
             "exit_code": 0 if ok else 1,

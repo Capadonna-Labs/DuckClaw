@@ -269,7 +269,9 @@ def build_invoke_worker_node(
             except Exception:
                 _vis_prov = "local"
             worker_cache_key = f"{worker_cache_key}::visprov_{_vis_prov}"
+            _t_graph = time.monotonic()
             worker_graph = _worker_cache_mod.worker_graph_cache_get(worker_cache_key)
+            _cache_hit = worker_graph is not None
             if worker_graph is None:
                 worker_graph = _build_worker_graph(
                     assigned,
@@ -297,6 +299,14 @@ def build_invoke_worker_node(
                     open_vault_read_only=_summarize_vault_ro,
                 )
                 _worker_cache_mod.remember_worker_graph_cache(worker_cache_key, worker_graph)
+            _graph_elapsed_ms = int((time.monotonic() - _t_graph) * 1000)
+            _log.info(
+                "worker_graph %s worker=%s elapsed_ms=%d key_tail=%s",
+                "cache_hit" if _cache_hit else "cold_build",
+                assigned,
+                _graph_elapsed_ms,
+                worker_cache_key[-72:],
+            )
             set_log_context(
                 tenant_id=tenant_id,
                 worker_id=assigned,

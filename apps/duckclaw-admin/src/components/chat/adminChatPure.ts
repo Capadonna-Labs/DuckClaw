@@ -68,14 +68,18 @@ export function stripThinkingStatusHeartbeats(messages: ChatMsg[]): ChatMsg[] {
 }
 
 /** Server history includes loop system user turn plus assistant reply. */
+export function isLoopSystemUserMessage(text: string): boolean {
+  const t = (text || '').trim();
+  if (!t) return false;
+  if (t.includes('[Ciclo loop]') || t.includes('[Ciclo meditate]')) return true;
+  if (!t.includes('[SYSTEM_EVENT')) return false;
+  return /\/(loop|meditate)\b/i.test(t);
+}
+
 export function conversationHasLoopResult(messages: ChatMsg[]): boolean {
   return (
-    messages.some(
-      (m) =>
-        m.role === 'user' &&
-        ((m.text || '').includes('[Ciclo loop]') ||
-          (m.text || '').includes('[Ciclo meditate]'))
-    ) && messages.some((m) => m.role === 'assistant')
+    messages.some((m) => m.role === 'user' && isLoopSystemUserMessage(m.text || '')) &&
+    messages.some((m) => m.role === 'assistant')
   );
 }
 

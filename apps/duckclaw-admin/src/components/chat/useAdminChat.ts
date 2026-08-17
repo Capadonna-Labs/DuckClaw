@@ -43,6 +43,7 @@ export {
   isThinkingStatusHeartbeat,
   stripThinkingStatusHeartbeats,
   conversationHasLoopResult,
+  isLoopSystemUserMessage,
   isLoopProgressHeartbeat,
   conversationIndicatesLoopScheduling,
 } from './adminChatPure';

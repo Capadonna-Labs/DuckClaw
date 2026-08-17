@@ -9,7 +9,8 @@
 
 version: 1
 orphan_policy: exclude
-max_bound_tools: 16
+# core(~9) + homeostasis(~10) always; leave room for 1 demand pack
+max_bound_tools: 24
 
 packs:
   - id: core
@@ -28,6 +29,33 @@ packs:
         - update_my_system_prompt
       prefixes: []
     activation_signals: []
+
+  # Always-on: /loop SYSTEM_EVENT exige estas tools sin unlock previo.
+  - id: homeostasis
+    always: true
+    description: "Alineación /goals + HITL /loop (auto-mejora cognitiva)."
+    members:
+      exact:
+        - assess_crons_alignment
+        - manage_homeostasis_goals
+        - request_homeostasis_validation
+        - homeostasis_check
+        - evaluate_homeostasis
+        - configure_loop_homeostasis
+        - get_loop_homeostasis_status
+        - calculate_tp_sl_distance
+        - calculate_pnl_contribution
+        - calculate_deleveraging_tranche
+      prefixes: []
+    activation_signals:
+      - /loop
+      - homeostasis
+      - assess_crons_alignment
+      - request_homeostasis_validation
+      - manage_homeostasis_goals
+      - calculate_tp_sl_distance
+      - auto-mejora
+      - ciclo loop
 
   - id: mcp
     always: false

@@ -25,6 +25,7 @@ import {
   isLoopProgressHeartbeat,
   mergeHistoryWithEphemeral,
 } from './adminChatPure';
+import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 
 type PlaygroundConfig = Awaited<ReturnType<typeof adminService.getPlaygroundConfig>>;
 
@@ -96,13 +97,13 @@ export function useAdminChatHistory({
 
   const reloadHistory = useCallback((opts?: { force?: boolean }) => {
     if (!enabled || !chatId || configRef.current === null) return;
-    const force = Boolean(opts?.force);
-    if (!force && loadingRef.current) return;
+    // Nunca mezclar Redis + ephemeral mientras hay turno SSE activo (evita cuadros duplicados).
+    if (loadingRef.current) return;
     setHistoryLoading(true);
     adminService
       .getConversation(chatId, historyTenantId)
       .then((data) => {
-        if (!force && loadingRef.current) return;
+        if (loadingRef.current) return;
         const fromServer = historyToChatMessages(data.messages, historyTenantId);
         const hasLoopResult = conversationHasLoopResult(fromServer);
         if (hasLoopResult) {
@@ -127,7 +128,9 @@ export function useAdminChatHistory({
             );
           }
           const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
-          return mergeHistoryWithEphemeral(withImages, ephemeral);
+          return finalizeRunningToolHeartbeats(
+            mergeHistoryWithEphemeral(withImages, ephemeral)
+          );
         });
       })
       .catch(() => {
@@ -153,7 +156,7 @@ export function useAdminChatHistory({
   useVisibilityAwareInterval(() => {
     if (!enabled || !chatId || loadingRef.current || configRef.current === null) return;
     reloadHistory({ force: true });
-  }, loopPollingActive && enabled ? 12_000 : null);
+  }, loopPollingActive && enabled ? 30_000 : null);
 
   useEffect(() => {
     return () => {
@@ -165,7 +168,7 @@ export function useAdminChatHistory({
   const scheduleLoopHistoryReload = useCallback(() => {
     clearLoopHistoryReload();
     reloadHistory({ force: true });
-    const delays = [2_000, 4_000, 6_000, 10_000, 15_000, 20_000, 30_000, 45_000, 60_000, 90_000, 120_000];
+    const delays = [3_000, 8_000, 15_000, 30_000, 60_000];
     loopHistoryReloadRef.current = delays.map((ms) =>
       window.setTimeout(() => {
         reloadHistory({ force: true });
@@ -219,7 +222,9 @@ export function useAdminChatHistory({
             );
           }
           const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
-          return mergeHistoryWithEphemeral(withImages, ephemeral);
+          return finalizeRunningToolHeartbeats(
+            mergeHistoryWithEphemeral(withImages, ephemeral)
+          );
         });
         const convWorker = (
           data.preferred_worker_id ||

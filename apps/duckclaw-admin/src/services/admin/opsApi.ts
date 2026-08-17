@@ -11,7 +11,7 @@ export interface OpsCommand {
 
 export const opsApi = {
   listOpsCommands: () => adminFetch<{ commands: OpsCommand[] }>('/ops/commands'),
-  runOps: (opId: string) =>
+  runOps: (opId: string, params?: Record<string, unknown>) =>
     adminFetch<{
       ok: boolean;
       op_id: string;
@@ -19,7 +19,10 @@ export const opsApi = {
       stdout: string;
       stderr: string;
       executed_via?: 'local' | string;
-    }>('/ops/run', { method: 'POST', body: JSON.stringify({ op_id: opId }) }),
+    }>('/ops/run', {
+      method: 'POST',
+      body: JSON.stringify({ op_id: opId, ...(params ? { params } : {}) }),
+    }),
   getComfyuiStatus: () =>
     adminFetch<{
       ok: boolean;

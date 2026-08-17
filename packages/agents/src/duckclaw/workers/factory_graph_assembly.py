@@ -133,4 +133,5 @@ def build_worker_graph(
     compiled = graph.compile()
     compiled._worker_spec = spec
     compiled._worker_db = db
+    compiled._worker_ctx = ctx
     return compiled

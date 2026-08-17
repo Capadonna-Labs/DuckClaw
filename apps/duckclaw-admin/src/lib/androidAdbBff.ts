@@ -8,6 +8,7 @@ export type AndroidDeviceStatus = {
   adb_available: boolean;
   adb_connected: boolean;
   adb_host: string;
+  adb_debug_port?: string;
   mcp_url: string;
   mcp_reachable: boolean;
   mcp_error?: string;
@@ -17,6 +18,10 @@ export type AndroidDeviceStatus = {
   read_at: string;
   adb_stderr?: string;
 };
+
+function androidAdbDebugPort(): string {
+  return (process.env.ANDROID_ADB_DEBUG_PORT || '5555').trim();
+}
 
 function androidMcpPort(): number {
   const raw = (process.env.ANDROID_MCP_PORT || '8080').trim();
@@ -83,22 +88,28 @@ async function probeMcp(url: string): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
-export async function androidAdbConnectLocal(): Promise<{
+export async function androidAdbConnectLocal(debugPort?: string | number): Promise<{
   ok: boolean;
   host?: string;
+  debug_port?: string;
   error?: string;
   stdout?: string;
   stderr?: string;
 }> {
   let target = (process.env.ANDROID_ADB_HOST || '').trim();
   if (!target) return { ok: false, error: 'ANDROID_ADB_HOST no configurado' };
-  if (!/:\d+$/.test(target)) target = `${target}:5555`;
+  const port =
+    debugPort != null && String(debugPort).trim()
+      ? String(debugPort).trim()
+      : androidAdbDebugPort();
+  if (!/:\d+$/.test(target)) target = `${target}:${port}`;
   const out = await runAdb(['connect', target]);
   const merged = `${out.stdout}\n${out.stderr}`.toLowerCase();
   const ok = out.code === 0 && (merged.includes('connected') || merged.includes('already connected'));
   return {
     ok,
     host: target,
+    debug_port: port,
     stdout: out.stdout.trim(),
     stderr: out.stderr.trim(),
     error: ok ? undefined : out.stderr.trim() || 'adb connect failed',
@@ -108,6 +119,7 @@ export async function androidAdbConnectLocal(): Promise<{
 export async function androidDeviceStatusLocal(): Promise<AndroidDeviceStatus> {
   const read_at = new Date().toISOString();
   const adb_host = (process.env.ANDROID_ADB_HOST || '').trim();
+  const adb_debug_port = androidAdbDebugPort();
   const mcp_url = `http://127.0.0.1:${androidMcpPort()}/mcp`;
   const mcp = await probeMcp(mcp_url);
 
@@ -129,6 +141,7 @@ export async function androidDeviceStatusLocal(): Promise<AndroidDeviceStatus> {
     adb_available,
     adb_connected,
     adb_host,
+    adb_debug_port,
     mcp_url,
     mcp_reachable: mcp.ok,
     mcp_error: mcp.ok ? '' : mcp.error,

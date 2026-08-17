@@ -63,6 +63,7 @@ def test_release_worker_db_handle_retains_graph_when_cache_enabled(
     mwc.remember_worker_graph_cache(key, graph)
     assert mwc._release_worker_db_handle(graph, cache_key=key) is True
     assert wdb._con is None
+    assert graph._worker_db is wdb
     assert mwc.worker_graph_cache_entry_count() == 1
 
 

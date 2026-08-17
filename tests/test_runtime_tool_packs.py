@@ -30,11 +30,14 @@ def test_default_catalog_is_multi_agent_sota() -> None:
     catalog = load_default_runtime_tool_pack_catalog()
     ids = {p.pack_id for p in catalog.packs}
     assert catalog.orphan_policy == "exclude"
-    assert catalog.max_bound_tools <= 16
+    assert catalog.max_bound_tools <= 24
     assert "core" in ids
+    assert "homeostasis" in ids
     assert "mcp" in ids
     assert "knowledge" in ids
     assert "sandbox" in ids
+    assert catalog.packs_for_tool("assess_crons_alignment") == frozenset({"homeostasis"})
+    assert catalog.packs_for_tool("request_homeostasis_validation") == frozenset({"homeostasis"})
     # Umbrella mcp no posee members: la membresía es por conector (dinámica).
     assert catalog.packs_for_tool("mcp__github__list_issues") == frozenset()
     enriched = enrich_catalog_with_mcp_connectors(
@@ -72,6 +75,54 @@ def test_update_system_prompt_always_bound_in_core() -> None:
     assert "admin_sql" in result.bound_names
     assert "core" in result.active_packs
     assert "prompt_meta" not in result.active_packs
+
+
+def test_homeostasis_loop_tools_always_bound() -> None:
+    """ /loop SYSTEM_EVENT must see alignment + HITL tools without unlock."""
+    from duckclaw.workers.tool_pack_catalog import load_default_runtime_tool_pack_catalog
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    catalog = load_default_runtime_tool_pack_catalog()
+    assert "homeostasis" in {p.pack_id for p in catalog.packs}
+    for name in (
+        "assess_crons_alignment",
+        "manage_homeostasis_goals",
+        "request_homeostasis_validation",
+        "homeostasis_check",
+        "evaluate_homeostasis",
+        "configure_loop_homeostasis",
+        "get_loop_homeostasis_status",
+        "calculate_tp_sl_distance",
+    ):
+        assert catalog.packs_for_tool(name) == frozenset({"homeostasis"})
+
+    tools = [
+        _tool("read_sql"),
+        _tool("list_tool_packs"),
+        _tool("assess_crons_alignment"),
+        _tool("request_homeostasis_validation"),
+        _tool("manage_homeostasis_goals"),
+        _tool("homeostasis_check"),
+        _tool("evaluate_homeostasis"),
+        _tool("configure_loop_homeostasis"),
+        _tool("get_loop_homeostasis_status"),
+        _tool("calculate_tp_sl_distance"),
+        _tool("calculate_pnl_contribution"),
+        _tool("external_orphan_tool"),  # orphan unless some pack claims it
+    ]
+    result = apply_runtime_tool_packs(
+        tools,
+        spec=_spec(enabled=True),
+        intent_text="hello",
+        messages=[],
+    )
+    assert "homeostasis" in result.active_packs
+    assert "assess_crons_alignment" in result.bound_names
+    assert "request_homeostasis_validation" in result.bound_names
+    assert "manage_homeostasis_goals" in result.bound_names
+    assert "evaluate_homeostasis" in result.bound_names
+    assert "calculate_tp_sl_distance" in result.bound_names
+    assert "external_orphan_tool" not in result.bound_names
 
 
 def test_exclude_orphans_hides_unmanaged_mcp_noise() -> None:

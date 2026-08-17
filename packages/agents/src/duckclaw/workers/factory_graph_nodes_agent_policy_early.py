@@ -68,6 +68,8 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                 _raise_if_chat_cancelled_from_state(state)
                 if state.get("visual_evidence_graph_retry"):
                     state = {**state, "visual_evidence_graph_retry": False}
+                if state.get("position_metrics_graph_retry"):
+                    state = {**state, "position_metrics_graph_retry": False}
                 _chat_ctx = state.get("chat_id") or state.get("session_id") or "default"
                 _tenant_ctx = (state.get("tenant_id") or "").strip() or "default"
                 _log_chat = format_chat_log_identity(str(_chat_ctx).strip() or "default", state.get("username"))

@@ -106,6 +106,12 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         empty_config_registers=True,
         keyword_context={"db": "db"},
     ),
+    SkillToolRegistrar(
+        skill_name="position_metrics",
+        phase="pre_llm",
+        registrar_path="duckclaw.forge.skills.position_metrics_bridge:register_position_metrics_skill",
+        empty_config_registers=True,
+    ),
 )
 
 VISUAL_ARTIFACT_READER_PATH = "duckclaw.forge.skills.comfyui_bridge:read_artifact_image_as_b64"

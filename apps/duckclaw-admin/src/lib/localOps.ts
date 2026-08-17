@@ -268,7 +268,10 @@ export function listOpsCommands() {
   };
 }
 
-export async function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult> {
+export async function runOpsLocal(
+  opId: string,
+  params?: Record<string, unknown>,
+): Promise<NormalizedOpsRunResult> {
   if (opId === 'start_stack') {
     return runStackStartLocal();
   }
@@ -292,7 +295,10 @@ export async function runOpsLocal(opId: string): Promise<NormalizedOpsRunResult>
     });
   }
   if (opId === 'android_adb_connect') {
-    const payload = await androidAdbConnectLocal();
+    const rawPort = params?.debug_port;
+    const debugPort =
+      rawPort != null && String(rawPort).trim() ? String(rawPort).trim() : undefined;
+    const payload = await androidAdbConnectLocal(debugPort);
     return normalizeOpsResult({
       op_id: opId,
       exit_code: payload.ok ? 0 : 1,

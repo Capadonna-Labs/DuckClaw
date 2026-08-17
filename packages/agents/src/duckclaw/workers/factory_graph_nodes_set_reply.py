@@ -270,10 +270,13 @@ def make_set_reply_node(ctx: WorkerGraphContext):
         try:
             from duckclaw.egress.evidence_validator import (
                 VISUAL_EVIDENCE_RETRY_REASON,
+                enforce_position_metrics_evidence_rule,
                 enforce_visual_evidence_rule,
                 market_price_consistency_audit,
+                position_metrics_retry_system_message,
                 visual_evidence_retry_system_message,
             )
+            from duckclaw.position_metrics import POSITION_METRICS_RETRY_REASON
 
             # Turnos /context (SUMMARIZE_*): sin auditorías cuánticas/VLM que puedan sustituir el resumen.
             if reply and not incoming_has_context_summarize_directive(_rescind_incoming):
@@ -334,6 +337,61 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                 elif vreason:
                     _log.warning("Visual evidence audit: %s", vreason)
                     reply = new_v
+
+                # Mechanical TP/SL: strip LLM % claims + inject calculate_tp_sl_distance
+                # from evaluate_homeostasis levels — do not wait for optional tool call.
+                try:
+                    from duckclaw.position_metrics import apply_deterministic_tp_sl_rewrite
+
+                    _rewritten, _pm_meta = apply_deterministic_tp_sl_rewrite(reply or "", msgs)
+                    if _pm_meta.get("rewrote"):
+                        _log.info(
+                            "Position metrics rewrite: levels=%s claims_before=%s",
+                            _pm_meta.get("levels_found"),
+                            _pm_meta.get("claims_before"),
+                        )
+                        reply = _rewritten
+                except Exception:
+                    pass
+
+                pm_reply, pm_reason = enforce_position_metrics_evidence_rule(
+                    reply=reply,
+                    messages=msgs,
+                    spec=spec,
+                )
+                if pm_reason == POSITION_METRICS_RETRY_REASON:
+                    _pm_count = int(state.get("position_metrics_retry_count") or 0)
+                    if _pm_count < 1:
+                        _log.warning(
+                            "Position metrics audit: %s — in-graph retry",
+                            pm_reason,
+                        )
+                        _msgs_pm = list(msgs) + [position_metrics_retry_system_message()]
+                        out_pm: dict = {
+                            **state,
+                            "messages": _msgs_pm,
+                            "reply": "",
+                            "internal_reply": "",
+                            "position_metrics_retry_count": _pm_count + 1,
+                            "position_metrics_graph_retry": True,
+                            # Keep draft so empty retry does not collapse to "Operación completada."
+                            "position_metrics_draft_reply": (reply or "").strip(),
+                        }
+                        out_pm.update(_identity_fields(state))
+                        return out_pm
+                    _log.warning("Position metrics audit: %s — retries exhausted", pm_reason)
+                    from duckclaw.position_metrics import (
+                        apply_deterministic_tp_sl_rewrite,
+                        strip_tp_sl_pct_claims,
+                    )
+
+                    _draft = (state.get("position_metrics_draft_reply") or reply or "").strip()
+                    _stripped = strip_tp_sl_pct_claims(_draft)
+                    _rewritten2, _ = apply_deterministic_tp_sl_rewrite(_stripped or pm_reply, msgs)
+                    reply = _rewritten2 or _stripped or pm_reply
+                elif pm_reason:
+                    reply = pm_reply
+
                 new_r, price_reason = market_price_consistency_audit(db, spec, reply, messages=msgs)
                 if price_reason:
                     _log.warning("Market price audit: %s", price_reason)
@@ -341,6 +399,18 @@ def make_set_reply_node(ctx: WorkerGraphContext):
         except Exception:
             pass
         reply = sanitize_worker_reply_text(reply or "")
+        # Empty after PM retry: restore draft (minus TP/SL % claims) instead of stub summary.
+        if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) and msgs:
+            _draft_pm = (state.get("position_metrics_draft_reply") or "").strip()
+            if _draft_pm and int(state.get("position_metrics_retry_count") or 0) >= 1:
+                try:
+                    from duckclaw.position_metrics import strip_tp_sl_pct_claims
+
+                    _restored = strip_tp_sl_pct_claims(_draft_pm)
+                    if _restored:
+                        reply = sanitize_worker_reply_text(_restored)
+                except Exception:
+                    pass
         if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) and msgs:
             _spec_lid_fb = _spec_logical_worker_id(spec)
             _lh_fb = _last_human_message_index(list(msgs))

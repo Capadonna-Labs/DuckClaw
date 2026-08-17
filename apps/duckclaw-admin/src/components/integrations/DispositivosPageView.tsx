@@ -1,13 +1,22 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { ExternalLink, Smartphone, Server } from 'lucide-react';
+import { ExternalLink, Plug, Smartphone, Server } from 'lucide-react';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
 import { DeviceStatusCard, type DeviceStatusTone } from '@/components/integrations/DeviceStatusCard';
 import type { AndroidDeviceStatus } from '@/lib/androidAdbBff';
 import { isGatewayHealthy } from '@/lib/healthLabels';
+import { adminService } from '@/services/adminService';
 import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
+
+const ADB_DEBUG_PORT_KEY = 'duckclaw:android-adb-debug-port';
+
+function parseDebugPort(raw: string): number | null {
+  const n = parseInt(raw.trim(), 10);
+  if (!Number.isFinite(n) || n < 1 || n > 65535) return null;
+  return n;
+}
 
 function androidTone(status: AndroidDeviceStatus | null): DeviceStatusTone {
   if (!status) return 'neutral';
@@ -35,6 +44,9 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
   const [android, setAndroid] = useState<AndroidDeviceStatus | null>(null);
   const [androidError, setAndroidError] = useState<string | null>(null);
   const [androidLoading, setAndroidLoading] = useState(true);
+  const debugPortRef = useRef<HTMLInputElement>(null);
+  const [connectBusy, setConnectBusy] = useState(false);
+  const [connectMessage, setConnectMessage] = useState<string | null>(null);
   const { data: health, error: healthError, recovering, refresh: refreshHealth } =
     useGatewayHealthStore();
 
@@ -60,6 +72,38 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
     void refreshHealth();
   }, [loadAndroid, refreshHealth]);
 
+  const connectAdb = useCallback(async () => {
+    const port = parseDebugPort(debugPortRef.current?.value ?? '');
+    if (port == null) {
+      setConnectMessage('Puerto inválido (1–65535)');
+      return;
+    }
+    setConnectBusy(true);
+    setConnectMessage(null);
+    try {
+      sessionStorage.setItem(ADB_DEBUG_PORT_KEY, String(port));
+      const out = await adminService.runOps('android_adb_connect', { debug_port: port });
+      let detail = out.stderr?.trim() || '';
+      if (out.stdout) {
+        try {
+          const parsed = JSON.parse(out.stdout) as { host?: string; stdout?: string; stderr?: string };
+          detail = parsed.stdout || parsed.stderr || parsed.host || detail;
+        } catch {
+          detail = out.stdout.trim() || detail;
+        }
+      }
+      if (!out.ok) {
+        throw new Error(detail || 'adb connect falló');
+      }
+      setConnectMessage(detail ? `Conectado: ${detail}` : 'ADB conectado');
+      await loadAndroid();
+    } catch (e) {
+      setConnectMessage(e instanceof Error ? e.message : 'No se pudo conectar ADB');
+    } finally {
+      setConnectBusy(false);
+    }
+  }, [loadAndroid]);
+
   const gatewayOk = isGatewayHealthy(health);
   const pm2Rows = useMemo(() => {
     const names = ['DuckClaw-Gateway', 'DuckClaw-DB-Writer', 'DuckClaw-Heartbeat'];
@@ -74,6 +118,7 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
         MCP → conector Android Agent
       </Link>
       . Env: <code className="font-mono">ANDROID_ADB_HOST</code>,{' '}
+      <code className="font-mono">ANDROID_ADB_DEBUG_PORT</code>,{' '}
       <code className="font-mono">ANDROID_MCP_PORT</code>,{' '}
       <code className="font-mono">ANDROID_MCP_COMMAND</code>.
     </>
@@ -111,14 +156,63 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             statusLabel={androidLoading ? 'Comprobando…' : androidStatusLabel(android)}
             onRefresh={() => void loadAndroid()}
             refreshing={androidLoading}
+            actions={
+              <div className="flex w-full flex-wrap items-end gap-2">
+                <label className="flex min-w-[8rem] flex-col gap-0.5 text-xs">
+                  <span className="font-semibold text-gov-gray-500 dark:text-dark-muted">
+                    Puerto debug inalámbrico
+                  </span>
+                  <input
+                    ref={debugPortRef}
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    name="adb-wireless-debug-port"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    placeholder="Puerto del teléfono"
+                    defaultValue=""
+                    onInput={(e) => {
+                      e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '');
+                    }}
+                    className="rounded-lg border border-gov-gray-200 px-2 py-1.5 font-mono text-sm dark:border-dark-border dark:bg-dark-bg"
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={connectBusy || androidLoading}
+                  onClick={() => void connectAdb()}
+                  className="inline-flex items-center gap-1 rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
+                >
+                  <Plug size={12} className={connectBusy ? 'animate-pulse' : ''} />
+                  {connectBusy ? 'Conectando…' : 'Conectar ADB'}
+                </button>
+              </div>
+            }
             footer={androidFooter}
           >
+            {connectMessage ? (
+              <p
+                className={`rounded-lg px-3 py-2 text-xs ${
+                  connectMessage.startsWith('Conectado')
+                    ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
+                    : 'bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100'
+                }`}
+              >
+                {connectMessage}
+              </p>
+            ) : null}
             <div className="flex items-start gap-3 text-sm text-gov-gray-700 dark:text-dark-muted">
               <Smartphone size={18} className="mt-0.5 shrink-0 opacity-70" />
               <dl className="grid gap-1 text-xs sm:text-sm">
                 <div className="flex gap-2">
                   <dt className="font-semibold text-gov-gray-500">ADB host</dt>
                   <dd>{android?.adb_host || '—'}</dd>
+                </div>
+                <div className="flex gap-2">
+                  <dt className="font-semibold text-gov-gray-500">Puerto debug (servidor)</dt>
+                  <dd>{android?.adb_debug_port || '—'}</dd>
                 </div>
                 <div className="flex gap-2">
                   <dt className="font-semibold text-gov-gray-500">Dispositivo</dt>

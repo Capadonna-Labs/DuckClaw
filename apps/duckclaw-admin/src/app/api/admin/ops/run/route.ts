@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAdminRouteAuth(req, { roles: ['admin'] });
   if (!auth.ok) return auth.response;
 
-  let body: { op_id?: string };
+  let body: { op_id?: string; params?: Record<string, unknown> };
   try {
     body = await req.json();
   } catch {
@@ -30,6 +30,7 @@ export async function POST(req: NextRequest) {
   }
 
   const opId = (body.op_id || '').trim();
+  const params = body.params;
   if (!opId) {
     return NextResponse.json({ detail: 'op_id requerido' }, { status: 400 });
   }
@@ -39,7 +40,7 @@ export async function POST(req: NextRequest) {
 
   if (HOST_ONLY_OPS.has(opId)) {
     try {
-      const result = await runOpsLocal(opId);
+      const result = await runOpsLocal(opId, params);
       return NextResponse.json(result, {
         headers: { 'X-Duckclaw-Ops-Via': 'local-host-only' },
       });
@@ -61,7 +62,7 @@ export async function POST(req: NextRequest) {
       const res = await fetch(`${base}/api/v1/admin/ops/run`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ op_id: opId }),
+        body: JSON.stringify({ op_id: opId, ...(params ? { params } : {}) }),
         cache: 'no-store',
       });
 
@@ -83,7 +84,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const result = await runOpsLocal(opId);
+    const result = await runOpsLocal(opId, params);
     return NextResponse.json(result, {
       headers: { 'X-Duckclaw-Ops-Via': 'local' },
     });

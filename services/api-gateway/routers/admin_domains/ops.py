@@ -180,6 +180,7 @@ async def run_ops_command(
 
     if op_id in ("android_adb_status", "android_adb_connect"):
         from duckclaw.mcp_android_adb import android_adb_connect, android_device_status
+        from routers.admin_domains.env_config import merge_env_lines
 
         if op_id == "android_adb_status":
             payload = android_device_status()
@@ -189,7 +190,26 @@ async def run_ops_command(
             debug_port = params.get("debug_port")
             if debug_port is not None:
                 debug_port = str(debug_port).strip() or None
-            payload = android_adb_connect(host=host, debug_port=debug_port)
+            env_updates: dict[str, str] = {}
+            if debug_port:
+                env_updates["ANDROID_ADB_DEBUG_PORT"] = debug_port
+            pair_port = str(params.get("pair_port") or "").strip()
+            pair_code = str(params.get("pair_code") or "").strip()
+            if pair_port:
+                env_updates["ANDROID_ADB_PAIR_PORT"] = pair_port
+            # ponytail: pair codes expire ~60s; never persist to .env
+            if env_updates:
+                merge_env_lines(env_updates)
+            if pair_code:
+                os.environ["ANDROID_ADB_PAIR_CODE"] = pair_code
+            payload = android_adb_connect(
+                host=host,
+                debug_port=debug_port,
+                pair_port=pair_port or None,
+                pair_code=pair_code or None,
+            )
+            if env_updates:
+                payload["env_updated"] = sorted(env_updates.keys())
         ok = bool(payload.get("ok"))
         result = {
             "exit_code": 0 if ok else 1,

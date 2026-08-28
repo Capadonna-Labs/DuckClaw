@@ -122,6 +122,8 @@ def _rehydrate_graph_worker_db(graph: Any) -> bool:
     wdb = getattr(graph, "_worker_db", None)
     if wdb is None:
         return False
+    if getattr(wdb, "_ephemeral_ro", False):
+        return True
     if getattr(wdb, "_con", None) is not None:
         return True
     resume = getattr(wdb, "resume_file_handle", None)
@@ -141,7 +143,9 @@ def worker_graph_cache_get(cache_key: str) -> Any | None:
     if graph is None:
         return None
     wdb = getattr(graph, "_worker_db", None)
-    if wdb is not None and getattr(wdb, "_con", None) is not None:
+    if wdb is not None and (
+        getattr(wdb, "_ephemeral_ro", False) or getattr(wdb, "_con", None) is not None
+    ):
         touch_worker_graph_cache(cache_key)
         setattr(graph, "_cache_last_used", time.monotonic())
         return graph

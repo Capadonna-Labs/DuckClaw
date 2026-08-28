@@ -53,17 +53,41 @@ def test_resolve_connector_endpoint_url_uses_live_mcp_port(
 def test_android_adb_connect_uses_debug_port_override(monkeypatch: pytest.MonkeyPatch) -> None:
     from duckclaw.mcp_android_adb import android_adb_connect
 
-    monkeypatch.setenv("ANDROID_ADB_HOST", "100.70.128.56")
+    monkeypatch.setenv("ANDROID_ADB_HOST", "192.0.2.1")
     monkeypatch.setenv("ANDROID_ADB_DEBUG_PORT", "5555")
     with patch(
         "duckclaw.mcp_android_adb._run_adb",
-        return_value=(0, "connected to 100.70.128.56:39069", ""),
+        return_value=(0, "connected to 192.0.2.1:39069", ""),
     ) as run:
         out = android_adb_connect(debug_port="39069")
     assert out["ok"] is True
-    assert out["host"] == "100.70.128.56:39069"
+    assert out["host"] == "192.0.2.1:39069"
     assert out["debug_port"] == "39069"
-    run.assert_called_once_with(["connect", "100.70.128.56:39069"])
+    run.assert_called_once_with(["connect", "192.0.2.1:39069"])
+
+
+def test_android_adb_connect_pairs_before_connect(monkeypatch: pytest.MonkeyPatch) -> None:
+    from duckclaw.mcp_android_adb import android_adb_connect
+
+    monkeypatch.setenv("ANDROID_ADB_HOST", "192.0.2.1")
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], *, timeout: float = 15.0):
+        calls.append(args)
+        if args[0] == "pair":
+            return 0, "Successfully paired to 192.0.2.1:38417", ""
+        return 0, "connected to 192.0.2.1:42961", ""
+
+    with patch("duckclaw.mcp_android_adb._run_adb", side_effect=fake_run):
+        out = android_adb_connect(
+            debug_port="42961",
+            pair_port="38417",
+            pair_code="123456",
+        )
+    assert out["ok"] is True
+    assert out["paired"] is True
+    assert calls[0] == ["pair", "192.0.2.1:38417", "123456"]
+    assert calls[1] == ["connect", "192.0.2.1:42961"]
 
 
 def test_android_adb_connect_requires_host(monkeypatch: pytest.MonkeyPatch) -> None:

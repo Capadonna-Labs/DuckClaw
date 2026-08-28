@@ -28,7 +28,7 @@ export function writeAuthSnapshot(user: AdminUser | null): void {
   }
 }
 
-export const AUTH_ME_TIMEOUT_MS = 8_000;
+export const AUTH_ME_TIMEOUT_MS = 45_000;
 
 export async function fetchAuthMeWithTimeout(timeoutMs = AUTH_ME_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();

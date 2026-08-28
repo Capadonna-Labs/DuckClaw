@@ -181,24 +181,31 @@ def android_adb_connect(
     host: str | None = None,
     *,
     debug_port: str | int | None = None,
+    pair_port: str | int | None = None,
+    pair_code: str | None = None,
 ) -> dict[str, Any]:
     target = (host or android_adb_host()).strip()
     if not target:
         return {"ok": False, "error": "ANDROID_ADB_HOST no configurado"}
 
-    pair_port = (os.environ.get("ANDROID_ADB_PAIR_PORT") or "").strip()
-    pair_code = (os.environ.get("ANDROID_ADB_PAIR_CODE") or "").strip()
-    if pair_port and pair_code:
-        pair_target = target if re.search(r":\d+$", target) else f"{target}:{pair_port}"
-        pcode, pstdout, pstderr = _run_adb(["pair", pair_target, pair_code])
-        if pcode != 0 and "already paired" not in (pstdout + pstderr).lower():
+    pp = str(pair_port or os.environ.get("ANDROID_ADB_PAIR_PORT") or "").strip()
+    pc = str(pair_code or os.environ.get("ANDROID_ADB_PAIR_CODE") or "").strip()
+    paired = False
+    if pp and pc:
+        pair_target = target if re.search(r":\d+$", target) else f"{target}:{pp}"
+        pcode, pstdout, pstderr = _run_adb(["pair", pair_target, pc])
+        merged_pair = f"{pstdout}\n{pstderr}".lower()
+        paired = pcode == 0 or "already paired" in merged_pair or "successfully paired" in merged_pair
+        if not paired:
             return {
                 "ok": False,
                 "error": "adb pair failed",
                 "host": pair_target,
+                "pair_port": pp,
                 "exit_code": pcode,
                 "stdout": pstdout.strip(),
                 "stderr": pstderr.strip(),
+                "paired": False,
             }
 
     used_port = ""
@@ -211,13 +218,22 @@ def android_adb_connect(
     code, stdout, stderr = _run_adb(["connect", target])
     merged = f"{stdout}\n{stderr}".lower()
     ok = code == 0 and ("connected" in merged or "already connected" in merged)
+    hint = ""
+    if not ok and not paired:
+        hint = (
+            "Si nunca emparejaste este host, usa «Emparejar con código» en el teléfono "
+            "y rellena puerto pair + código antes de conectar."
+        )
     return {
         "ok": ok,
         "host": target,
         "debug_port": used_port,
+        "pair_port": pp or None,
+        "paired": paired,
         "exit_code": code,
         "stdout": stdout.strip(),
         "stderr": stderr.strip(),
+        "hint": hint,
     }
 
 

@@ -35,6 +35,8 @@ module.exports = {
         PYTHONPATH: root,
         PYTHONUNBUFFERED: "1",
         "DUCKCLAW_PM2_PROCESS_NAME": "DuckClaw-Gateway",
+        DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS: "8",
+        DUCKCLAW_GATEWAY_RO_LOCK_BASE_SLEEP_S: "0.15",
       },
     },
   ],

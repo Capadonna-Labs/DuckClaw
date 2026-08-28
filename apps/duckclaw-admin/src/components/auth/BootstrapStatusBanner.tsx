@@ -1,15 +1,48 @@
 'use client';
 
-import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { useState } from 'react';
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw } from 'lucide-react';
 import type { AdminBootstrapStatus } from '@/lib/adminBootstrapStatus';
 
 export function BootstrapStatusBanner({
   status,
   loading,
+  onRestartDone,
 }: {
   status: AdminBootstrapStatus | null;
   loading: boolean;
+  onRestartDone?: () => void;
 }) {
+  const [restarting, setRestarting] = useState(false);
+  const [restartMsg, setRestartMsg] = useState<string | null>(null);
+
+  const runEmergencyRestart = async () => {
+    setRestarting(true);
+    setRestartMsg('Reiniciando Gateway (PM2)… puede tardar ~30s.');
+    try {
+      const res = await fetch('/api/admin/bootstrap/restart-stack', {
+        method: 'POST',
+        credentials: 'include',
+        cache: 'no-store',
+        signal: AbortSignal.timeout(120_000),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        detail?: string;
+        stdout?: string;
+      };
+      if (!res.ok || !data.ok) {
+        setRestartMsg(data.detail || `Reinicio falló (HTTP ${res.status})`);
+        return;
+      }
+      setRestartMsg('Gateway reiniciado. Comprobando disponibilidad…');
+      onRestartDone?.();
+    } catch (err) {
+      setRestartMsg(err instanceof Error ? err.message : 'No se pudo reiniciar el stack');
+    } finally {
+      setRestarting(false);
+    }
+  };
   if (loading && !status) {
     return (
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
@@ -69,6 +102,18 @@ export function BootstrapStatusBanner({
           </code>
         </p>
       )}
+      {isGatewayStarting && (
+        <button
+          type="button"
+          disabled={restarting}
+          onClick={() => void runEmergencyRestart()}
+          className="mt-3 inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-bold text-amber-900 hover:bg-amber-100 disabled:opacity-60"
+        >
+          <RefreshCw size={14} className={restarting ? 'animate-spin' : ''} />
+          {restarting ? 'Reiniciando Gateway…' : 'Reiniciar Gateway (PM2)'}
+        </button>
+      )}
+      {restartMsg && <p className="mt-2 text-xs text-amber-900 whitespace-pre-wrap">{restartMsg}</p>}
       {status.gatewayHint && (
         <p className="mt-2 font-mono text-[11px] text-amber-700">{status.gatewayHint}</p>
       )}

@@ -3,10 +3,10 @@ from __future__ import annotations
 """
 DuckClaw Heartbeat Daemon
 
-Bucle asíncrono que evalúa homeostasis periódicamente y, cuando detecta anomalías,
+Bucle asÃ­ncrono que evalÃºa homeostasis periÃ³dicamente y, cuando detecta anomalÃ­as,
 inyecta un pensamiento interno ([SYSTEM_EVENT]) en el API Gateway.
 
-Incluye un ticker de revisión /crons --delta (intervalo corto, independiente del
+Incluye un ticker de revisiÃ³n /crons --delta (intervalo corto, independiente del
 ciclo largo de homeostasis).
 """
 
@@ -75,7 +75,7 @@ _GOALS_WAL_WARNED_PATHS: set[str] = set()
 
 
 def _short_duckdb_exception_message(exc: BaseException) -> str:
-    """Una línea útil; DuckDB adjunta párrafos de ayuda y stack al mensaje."""
+    """Una lÃ­nea Ãºtil; DuckDB adjunta pÃ¡rrafos de ayuda y stack al mensaje."""
     s = str(exc)
     for sep in (
         "Stack Trace:",
@@ -91,7 +91,7 @@ def _short_duckdb_exception_message(exc: BaseException) -> str:
 
 
 def _goals_proactive_db_wal_or_corruption(exc: BaseException) -> bool:
-    """WAL dañado o estado interno DuckDB al abrir (no es 'tabla ausente' ni lock)."""
+    """WAL daÃ±ado o estado interno DuckDB al abrir (no es 'tabla ausente' ni lock)."""
     m = str(exc).lower()
     if "failure while replaying" in m:
         return True
@@ -198,7 +198,7 @@ async def check_alignment_nudge_cooldown(
     chat_id: str,
     delta_s: int,
 ) -> bool:
-    """True si se puede enviar nudge de alineación; si ok, fija cooldown."""
+    """True si se puede enviar nudge de alineaciÃ³n; si ok, fija cooldown."""
     if r is None:
         return True
     key = f"cooldown:{tenant_id}:{chat_id}:alignment_nudge"
@@ -211,58 +211,58 @@ async def check_alignment_nudge_cooldown(
 
 async def _evaluate_homeostasis() -> List[Dict[str, Any]]:
     """
-    Recorre workers con homeostasis_config y evalúa sus beliefs.
+    Recorre workers con homeostasis_config y evalÃºa sus beliefs.
 
     Devuelve una lista de dicts con:
     - tenant_id: normalmente el schema/worker_id configurado en DB
     - belief_key
-    - observed_value (target como proxy cuando no hay observación externa)
-    - admin_chat_id: chat al que notificar (por ahora, configurado vía env)
+    - observed_value (target como proxy cuando no hay observaciÃ³n externa)
+    - admin_chat_id: chat al que notificar (por ahora, configurado vÃ­a env)
     """
     db_path = get_gateway_db_path()
     db = DuckClaw(db_path)
-
     anomalies: List[Dict[str, Any]] = []
-
-    # ADMIN_CHAT_ID global por ahora; a futuro podría venir de una tabla de configuración por tenant.
     default_admin_chat_id = os.getenv("DUCKCLAW_ADMIN_CHAT_ID", "").strip()
+    try:
+        for wid in list_workers():
+            try:
+                spec = load_manifest(wid)
+                config = getattr(spec, "homeostasis_config", None) or {}
+                registry = BeliefRegistry.from_config(config)
+                if not registry.beliefs:
+                    continue
+                schema = spec.schema_name
+                manager = HomeostasisManager(db=db, schema=schema, registry=registry)
 
-    for wid in list_workers():
-        try:
-            spec = load_manifest(wid)
-            config = getattr(spec, "homeostasis_config", None) or {}
-            registry = BeliefRegistry.from_config(config)
-            if not registry.beliefs:
-                continue
-            schema = spec.schema_name
-            manager = HomeostasisManager(db=db, schema=schema, registry=registry)
-
-            # Por simplicidad inicial, usamos target como observed_value para forzar evaluación.
-            for belief in registry.beliefs:
-                observed_value = belief.target
-                plan = manager.check(
-                    belief.key,
-                    observed_value,
-                    auto_update=True,
-                    invoke_restoration=False,
-                )
-                if plan.get("action") == "restore":
-                    anomalies.append(
-                        {
-                            "tenant_id": schema,
-                            "belief_key": plan.get("belief_key", belief.key),
-                            "observed_value": plan.get("observed", observed_value),
-                            "admin_chat_id": default_admin_chat_id,
-                        }
+                for belief in registry.beliefs:
+                    observed_value = belief.target
+                    plan = manager.check(
+                        belief.key,
+                        observed_value,
+                        auto_update=True,
+                        invoke_restoration=False,
                     )
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Error evaluando homeostasis para worker %s: %s", wid, e)
-
-    return anomalies
+                    if plan.get("action") == "restore":
+                        anomalies.append(
+                            {
+                                "tenant_id": schema,
+                                "belief_key": plan.get("belief_key", belief.key),
+                                "observed_value": plan.get("observed", observed_value),
+                                "admin_chat_id": default_admin_chat_id,
+                            }
+                        )
+            except Exception as e:  # noqa: BLE001
+                logger.exception("Error evaluando homeostasis para worker %s: %s", wid, e)
+        return anomalies
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
 
 
 async def _run_goals_proactive_tick() -> None:
-    """Escanea agent_config y dispara SYSTEM_EVENT de revisión /crons cuando toca."""
+    """Escanea agent_config y dispara SYSTEM_EVENT de revisiÃ³n /crons cuando toca."""
     now = time.time()
     scan_paths = _goals_ticker_scan_db_paths()
     headers: Dict[str, str] = {}
@@ -313,7 +313,7 @@ async def _run_goals_proactive_tick_one_db(
             if path_key not in _GOALS_WAL_WARNED_PATHS:
                 _GOALS_WAL_WARNED_PATHS.add(path_key)
                 logger.warning(
-                    "goals_proactive: bóveda ilegible (WAL/corrupción); se omite goals ticker para %s. "
+                    "goals_proactive: bÃ³veda ilegible (WAL/corrupciÃ³n); se omite goals ticker para %s. "
                     "Detener servicios que usen el archivo, respaldar .duckdb y .wal, reparar o regenerar (p. ej. bootstrap). %s",
                     db_path,
                     _short_duckdb_exception_message(exc),
@@ -444,7 +444,7 @@ async def _run_goals_proactive_tick_one_db(
             if "mode" in meta and str(meta.get("mode") or "").strip():
                 proactive_mode = normalize_proactive_mode(str(meta.get("mode")))
             else:
-                # Schedules legacy (pre GOALS_ALIGNMENT) y tests sin meta.mode: tick periódico.
+                # Schedules legacy (pre GOALS_ALIGNMENT) y tests sin meta.mode: tick periÃ³dico.
                 proactive_mode = "always"
             report = assess_goals_alignment(db, chat_id, worker_id=_wid_pre)
             notify_channel = normalize_notify_channel(
@@ -462,7 +462,7 @@ async def _run_goals_proactive_tick_one_db(
                     redis_client, tenant_id or "default", str(chat_id), delta_s
                 ):
                     logger.debug(
-                        "goals_proactive: cooldown alineación chat=%s",
+                        "goals_proactive: cooldown alineaciÃ³n chat=%s",
                         chat_id,
                     )
                     continue
@@ -767,7 +767,24 @@ async def _run_loop_proactive_tick_one_db(
             if not worker_id:
                 worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
             if not tenant_id:
-                tenant_id = (get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
+                tenant_id = (get_chat_state(db, chat_id, "tenant_id") or "").strip()
+            if not tenant_id:
+                # /loop off deja loop_tenant vacÃ­o; Integraciones guarda API keys
+                # bajo admin_conversations.tenant_id (workspace), no "default".
+                try:
+                    from duckclaw.shared_db_grants import _sql_lit
+
+                    cid = _sql_lit(str(chat_id or ""), 128)
+                    rows = db.execute(
+                        "SELECT tenant_id FROM main.admin_conversations "
+                        f"WHERE conversation_id = '{cid}' LIMIT 1"
+                    )
+                    if rows:
+                        tenant_id = str(rows[0][0] or "").strip()
+                except Exception:
+                    tenant_id = ""
+            if not tenant_id:
+                tenant_id = "default"
             if not worker_id or worker_id.lower() == "manager":
                 logger.debug("meditate_proactive: omitiendo chat=%s sin worker", chat_id)
                 continue
@@ -894,7 +911,7 @@ async def _github_pat_api_user_status(token: str) -> int | None:
 
 
 def _enqueue_github_pat_invalid_task_audit() -> None:
-    """Mejor esfuerzo: registrar en task_audit_log vía singleton writer (401 PAT)."""
+    """Mejor esfuerzo: registrar en task_audit_log vÃ­a singleton writer (401 PAT)."""
     from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
     from duckclaw.write_commands import AppendTaskAuditCommand
 
@@ -907,7 +924,7 @@ def _enqueue_github_pat_invalid_task_audit() -> None:
         return
     db_path = str(Path(dp).expanduser().resolve())
     task_id = f"TASK-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}"
-    qp = "GitHub PAT inválido o expirado (401) — revisa GITHUB_TOKEN en .env"
+    qp = "GitHub PAT invÃ¡lido o expirado (401) â€” revisa GITHUB_TOKEN en .env"
     plan = "github_pat_invalid"
     tenant = (os.environ.get("DUCKCLAW_GITHUB_MCP_HEALTH_AUDIT_TENANT") or "system").strip() or "system"
     cmd = AppendTaskAuditCommand(
@@ -928,7 +945,7 @@ async def _github_mcp_health_tick(r: redis.Redis) -> None:
     docker_ok = await _docker_daemon_reachable()
     if not docker_ok:
         logger.warning(
-            "GitHub MCP health: docker no responde (`docker info`). GitHub MCP desde gateway requerirá Docker."
+            "GitHub MCP health: docker no responde (`docker info`). GitHub MCP desde gateway requerirÃ¡ Docker."
         )
 
     token = (os.environ.get("GITHUB_TOKEN") or "").strip()
@@ -943,7 +960,7 @@ async def _github_mcp_health_tick(r: redis.Redis) -> None:
         logger.debug("GitHub MCP health: PAT OK (api.github.com/user 200)")
         return
     if status == 401:
-        logger.error("GitHub MCP health: GITHUB_TOKEN inválido o expirado (401)")
+        logger.error("GitHub MCP health: GITHUB_TOKEN invÃ¡lido o expirado (401)")
         try:
             set_ok = await r.set(_GITHUB_PAT_401_AUDIT_COOLDOWN_KEY, "1", ex=3600, nx=True)
         except Exception:
@@ -952,7 +969,7 @@ async def _github_mcp_health_tick(r: redis.Redis) -> None:
             await asyncio.to_thread(_enqueue_github_pat_invalid_task_audit)
         return
 
-    logger.warning("GitHub MCP health: api.github.com/user → HTTP %s", status)
+    logger.warning("GitHub MCP health: api.github.com/user â†’ HTTP %s", status)
 
 
 async def run_heartbeat() -> None:
@@ -979,15 +996,15 @@ async def run_heartbeat() -> None:
             try:
                 await _github_mcp_health_tick(r)
             except Exception as exc:  # noqa: BLE001
-                logger.exception("GitHub MCP health: tick falló: %s", exc)
+                logger.exception("GitHub MCP health: tick fallÃ³: %s", exc)
             last_github_health = now_mono
 
         now = time.time()
         if now - last_homeo >= interval:
-            logger.info("Iniciando ciclo de evaluación de Homeostasis...")
+            logger.info("Iniciando ciclo de evaluaciÃ³n de Homeostasis...")
             try:
                 anomalies = await _evaluate_homeostasis()
-                logger.info("Anomalías encontradas: %s", len(anomalies))
+                logger.info("AnomalÃ­as encontradas: %s", len(anomalies))
 
                 for anomaly in anomalies:
                     tenant_id = str(anomaly.get("tenant_id", "")).strip() or "default"
@@ -997,7 +1014,7 @@ async def run_heartbeat() -> None:
 
                     if not admin_chat_id:
                         logger.warning(
-                            "Anomalía sin admin_chat_id (tenant_id=%s, alert_type=%s)",
+                            "AnomalÃ­a sin admin_chat_id (tenant_id=%s, alert_type=%s)",
                             tenant_id,
                             alert_type,
                         )
@@ -1005,22 +1022,22 @@ async def run_heartbeat() -> None:
 
                     if not await check_cooldown(r, tenant_id, alert_type):
                         logger.info(
-                            "Cooldown activo para tenant=%s alert_type=%s; no se envía.",
+                            "Cooldown activo para tenant=%s alert_type=%s; no se envÃ­a.",
                             tenant_id,
                             alert_type,
                         )
                         continue
 
                     logger.info(
-                        "Anomalía detectada en tenant=%s, belief=%s. Inyectando pensamiento...",
+                        "AnomalÃ­a detectada en tenant=%s, belief=%s. Inyectando pensamiento...",
                         tenant_id,
                         alert_type,
                     )
 
                     message = (
-                        "[SYSTEM_EVENT: Anomalía detectada en "
+                        "[SYSTEM_EVENT: AnomalÃ­a detectada en "
                         f"{alert_type}. Valor actual: {observed_value}. "
-                        "Evalúa la situación y notifica al usuario si es crítico.]"
+                        "EvalÃºa la situaciÃ³n y notifica al usuario si es crÃ­tico.]"
                     )
                     payload = {
                         "message": message,

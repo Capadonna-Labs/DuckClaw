@@ -9,8 +9,8 @@
 
 version: 1
 orphan_policy: exclude
-# core(~9) + homeostasis(~10) always; leave room for 1 demand pack
-max_bound_tools: 24
+# core(~9) + homeostasis(~10) always; room for one full Android MCP pack on demand
+max_bound_tools: 36
 
 packs:
   - id: core

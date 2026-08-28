@@ -26,10 +26,18 @@ def check_redis_readiness(redis_url: str, *, timeout_sec: float = 2.0) -> tuple[
 
 
 def check_schema_readiness(gateway_db_path: str) -> tuple[bool, str]:
+    from duckclaw.db_bridge import _is_duckdb_lock_error
     from duckclaw.schema_migrations import verify_schema_integrity
 
-    ok, message = verify_schema_integrity(gateway_db_path)
-    return ok, message
+    try:
+        ok, message = verify_schema_integrity(gateway_db_path)
+        return ok, message
+    except Exception as exc:
+        if _is_duckdb_lock_error(exc):
+            # DB-Writer holds RW; schema already migrated. Failing startup crash-loops PM2
+            # and login stays on "Gateway iniciando" even after Reiniciar Gateway.
+            return True, f"schema check skipped (hub locked by writer): {exc}"
+        return False, str(exc)
 
 
 async def assert_gateway_startup_ready(*, redis_url: str, gateway_db_path: str) -> None:

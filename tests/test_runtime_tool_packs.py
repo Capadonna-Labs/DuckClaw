@@ -30,7 +30,8 @@ def test_default_catalog_is_multi_agent_sota() -> None:
     catalog = load_default_runtime_tool_pack_catalog()
     ids = {p.pack_id for p in catalog.packs}
     assert catalog.orphan_policy == "exclude"
-    assert catalog.max_bound_tools <= 24
+    assert catalog.max_bound_tools <= 64
+    assert catalog.max_bound_tools >= 36
     assert "core" in ids
     assert "homeostasis" in ids
     assert "mcp" in ids
@@ -46,6 +47,16 @@ def test_default_catalog_is_multi_agent_sota() -> None:
     )
     assert enriched.packs_for_tool("mcp__github__list_issues") == frozenset({"mcp_github"})
     assert enriched.packs_for_tool("mcp__notion_ws__query") == frozenset({"mcp_notion_ws"})
+    android_enriched = enrich_catalog_with_mcp_connectors(
+        catalog,
+        ["mcp__android__get_ui_dump", "android_expand_notifications"],
+    )
+    assert android_enriched.packs_for_tool("mcp__android__get_ui_dump") == frozenset(
+        {"mcp_android"}
+    )
+    assert android_enriched.packs_for_tool("android_expand_notifications") == frozenset(
+        {"mcp_android"}
+    )
     assert catalog.packs_for_tool("create_blank_document") == frozenset({"reports"})
     assert catalog.packs_for_tool("list_tool_packs") == frozenset({"core"})
     assert catalog.packs_for_tool("update_system_prompt") == frozenset({"core"})
@@ -369,6 +380,93 @@ def test_truncate_prefers_core_and_active_over_mcp_flood() -> None:
     assert "search_project_knowledge" in result.bound_names
     # Core/knowledge primero; MCP rellena el resto del cupo.
     assert sum(1 for n in result.bound_names if n.startswith("mcp__")) <= 7
+
+
+def test_truncate_prefers_recently_unlocked_mcp_pack() -> None:
+    """Unlock mcp_android must keep android tools even if github flood is also active."""
+    from langchain_core.messages import HumanMessage, ToolMessage
+
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    tools = [
+        _tool("get_project_context"),
+        _tool("read_sql"),
+        _tool("list_tool_packs"),
+        _tool("unlock_tool_pack"),
+        _tool("android_expand_notifications"),
+        _tool("mcp__android__get_ui_dump"),
+        _tool("mcp__android__swipe_screen"),
+    ]
+    tools.extend(_tool(f"mcp__github__t{i}") for i in range(30))
+    messages = [
+        HumanMessage(content="revisa notificaciones android"),
+        ToolMessage(
+            content='{"ok": true, "pack_id": "mcp_android", "unlocked": "mcp_android",'
+            ' "unlocked_packs": ["mcp_android"]}',
+            tool_call_id="1",
+            name="unlock_tool_pack",
+        ),
+    ]
+    result = apply_runtime_tool_packs(
+        tools,
+        spec=_spec(enabled=True, max_bound_tools=10, extra_always=["mcp"]),
+        intent_text="revisa notificaciones android",
+        messages=messages,
+    )
+    assert result.truncated is True
+    assert "mcp__android__get_ui_dump" in result.bound_names
+    assert "android_expand_notifications" in result.bound_names
+    assert "mcp__android__swipe_screen" in result.bound_names
+
+
+def test_android_pack_fits_full_notification_surface() -> None:
+    """core+homeostasis+android MCP+ADB helpers must fit default max_bound."""
+    from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs
+
+    tools = [
+        _tool("get_current_time"),
+        _tool("read_sql"),
+        _tool("admin_sql"),
+        _tool("inspect_schema"),
+        _tool("list_tool_packs"),
+        _tool("unlock_tool_pack"),
+        _tool("get_project_context"),
+        _tool("update_system_prompt"),
+        _tool("update_my_system_prompt"),
+        _tool("homeostasis_check"),
+        _tool("assess_crons_alignment"),
+        _tool("manage_homeostasis_goals"),
+        _tool("configure_loop_homeostasis"),
+        _tool("get_loop_homeostasis_status"),
+        _tool("request_homeostasis_validation"),
+        _tool("android_expand_notifications"),
+        _tool("android_collapse_notifications"),
+    ]
+    for name in (
+        "list_devices",
+        "get_device_status",
+        "clear_device_session",
+        "list_active_sessions",
+        "get_logcat_output",
+        "get_screenshot",
+        "get_ui_dump",
+        "click_ui_element",
+        "tap_screen",
+        "swipe_screen",
+        "send_text",
+        "perform_system_action",
+    ):
+        tools.append(_tool(f"mcp__android__{name}"))
+    result = apply_runtime_tool_packs(
+        tools,
+        spec=_spec(enabled=True),
+        intent_text="revisa notificaciones del android",
+        messages=[],
+    )
+    assert "android_expand_notifications" in result.bound_names
+    assert "mcp__android__get_ui_dump" in result.bound_names
+    assert "mcp__android__swipe_screen" in result.bound_names
+    assert result.truncated is False
 
 
 def test_meta_tools_register_and_unlock() -> None:

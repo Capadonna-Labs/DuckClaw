@@ -85,13 +85,14 @@ describe('shouldRedirectToProjectsForMissingWorkers', () => {
     ).toBe(false);
   });
 
-  it('does not redirect when a real worker exists', () => {
+  it('does not redirect when hub is degraded (DuckDB lock)', () => {
     expect(
       shouldRedirectToProjectsForMissingWorkers({
         configLoading: false,
         configError: null,
         configLoaded: true,
-        workers: [{ id: 'ops', label: 'Ops' }],
+        workers: ['default'],
+        hubDegraded: true,
       })
     ).toBe(false);
   });

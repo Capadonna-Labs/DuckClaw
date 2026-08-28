@@ -110,6 +110,27 @@ def count_console_users(db: Any) -> int:
     return 0
 
 
+def console_user_is_active(row: dict[str, Any] | None) -> bool:
+    """Interpret ``active`` from DuckDB / JSON stringification (ephemeral RO uses str())."""
+    if row is None:
+        return False
+    raw = row.get("active", True)
+    if raw is None:
+        return True
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return raw != 0
+    s = str(raw).strip().lower()
+    if s in ("", "none", "null"):
+        return True
+    if s in ("0", "false", "no", "off"):
+        return False
+    if s in ("1", "true", "yes", "on"):
+        return True
+    return bool(raw)
+
+
 def get_by_email(db: Any, email: str) -> Optional[dict[str, Any]]:
     ensure_admin_console_users_table(db)
     em = _sql_lit(_normalize_email(email), 256)
@@ -194,7 +215,7 @@ def authenticate_console_user(db: Any, *, email: str, password: str) -> Optional
     from duckclaw.admin_auth_crypto import verify_and_migrate
 
     row = get_by_email(db, email)
-    if not row or not row.get("active", True):
+    if not row or not console_user_is_active(row):
         return None
 
     def _db_update(em: str, pwd_hash: str, algo: str, params: dict[str, int]) -> None:
@@ -226,7 +247,7 @@ def authenticate_console_user_readonly(
     from duckclaw.admin_auth_crypto import verify_and_migrate
 
     row = get_by_email(db, email)
-    if not row or not row.get("active", True):
+    if not row or not console_user_is_active(row):
         return None, None
 
     password_update: dict[str, Any] = {}

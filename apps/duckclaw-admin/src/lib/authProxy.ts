@@ -47,7 +47,7 @@ export function applyUpstreamSetCookies(
   }
 }
 
-const AUTH_PROXY_TIMEOUT_MS = 8_000;
+const AUTH_PROXY_TIMEOUT_MS = 20_000;
 
 export async function proxyAuthToGateway(
   req: NextRequest,

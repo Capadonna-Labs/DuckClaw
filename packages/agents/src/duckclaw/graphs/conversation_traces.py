@@ -89,6 +89,76 @@ def get_conversation_traces_dir() -> Path:
     return DEFAULT_CONVERSATION_TRACES_DIR
 
 
+_KNOWLEDGE_SCOPE_CLOSE = "[/KNOWLEDGE_SCOPE]"
+
+
+def _visible_user_content(text: str) -> str:
+    t = (text or "").strip()
+    if _KNOWLEDGE_SCOPE_CLOSE in t:
+        t = t.split(_KNOWLEDGE_SCOPE_CLOSE, 1)[-1].strip()
+    return t
+
+
+def reconstruct_chat_messages_from_traces(session_id: str, *, limit: int = 400) -> list[dict[str, str]]:
+    """Reconstruye user/assistant desde traces.jsonl (último turno por timestamp)."""
+    sid = (session_id or "").strip()
+    if not sid:
+        return []
+    root = get_conversation_traces_dir()
+    if not root.is_dir():
+        return []
+    turns: list[tuple[str, list[dict[str, str]]]] = []
+    try:
+        for fp in sorted(root.rglob("traces.jsonl")):
+            try:
+                with open(fp, encoding="utf-8", errors="replace") as fh:
+                    for line in fh:
+                        if sid not in line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except Exception:
+                            continue
+                        if str(rec.get("session_id") or "").strip() != sid:
+                            continue
+                        raw = rec.get("messages") or rec.get("prompt") or []
+                        if not isinstance(raw, list):
+                            continue
+                        pair: list[dict[str, str]] = []
+                        for item in raw:
+                            if not isinstance(item, dict):
+                                continue
+                            role = str(item.get("role") or "").strip().lower()
+                            if role == "human":
+                                role = "user"
+                            if role == "ai":
+                                role = "assistant"
+                            content = str(item.get("content") or "").strip()
+                            if role == "user":
+                                content = _visible_user_content(content)
+                            if role in ("user", "assistant") and content:
+                                pair.append({"role": role, "content": content})
+                        if pair:
+                            ts = str(rec.get("timestamp") or "")
+                            turns.append((ts, pair))
+            except OSError:
+                continue
+    except OSError:
+        return []
+    turns.sort(key=lambda t: t[0])
+    out: list[dict[str, str]] = []
+    last_key = ""
+    for _ts, pair in turns:
+        key = "\n".join(f"{m['role']}:{m['content']}" for m in pair)
+        if key == last_key:
+            continue
+        last_key = key
+        out.extend(pair)
+        if len(out) >= limit:
+            return out[:limit]
+    return out
+
+
 def _path_for_today_utc() -> Path:
     """Ruta del archivo del día en curso (**UTC**): .../YYYY/MM/DD/traces.jsonl."""
     base = get_conversation_traces_dir()

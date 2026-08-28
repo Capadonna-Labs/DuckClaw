@@ -1,4 +1,4 @@
-import { adminApiKey, gatewayBase, gatewayConnectHint, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { adminApiKey, gatewayBase, gatewayConnectHint } from '@/lib/gatewayProxy';
 import { isDesktopLiteMode } from '@/lib/desktopEnvFile';
 import { GATEWAY_PM2_CANDIDATES } from '@/lib/pm2AppResolve';
 import { gatewayHealthOk } from '@/lib/gatewayHealthCheck';
@@ -19,14 +19,19 @@ export type AdminBootstrapStatus = {
   checkedAt: string;
 };
 
-const GATEWAY_STATUS_TIMEOUT_MS = 8_000;
+const GATEWAY_STATUS_TIMEOUT_MS = 4_000;
 const PM2_CACHE_MS = 30_000;
 
 let pm2Cache: {
   status: AdminBootstrapStatus['pm2Status'];
   restartCount: number | null;
+  unstableRestarts: number | null;
   expiresAt: number;
 } | null = null;
+
+export function resetPm2BootstrapCache(): void {
+  pm2Cache = null;
+}
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   return fetch(url, {
@@ -39,16 +44,21 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
 async function resolvePm2GatewayStatus(): Promise<{
   status: AdminBootstrapStatus['pm2Status'];
   restartCount: number | null;
+  unstableRestarts: number | null;
 }> {
   const now = Date.now();
   if (pm2Cache && now < pm2Cache.expiresAt) {
-    return { status: pm2Cache.status, restartCount: pm2Cache.restartCount };
+    return {
+      status: pm2Cache.status,
+      restartCount: pm2Cache.restartCount,
+      unstableRestarts: pm2Cache.unstableRestarts,
+    };
   }
   try {
     const stdout = await pm2JlistStdout(5_000);
     const rows = parsePm2Jlist(stdout);
     if (!rows.length && !stdout) {
-      const miss = { status: 'unknown' as const, restartCount: null };
+      const miss = { status: 'unknown' as const, restartCount: null, unstableRestarts: null };
       pm2Cache = { ...miss, expiresAt: Date.now() + PM2_CACHE_MS };
       return miss;
     }
@@ -56,36 +66,62 @@ async function resolvePm2GatewayStatus(): Promise<{
       if (!row || typeof row !== 'object') return false;
       const name = (row as { name?: string }).name;
       return Boolean(name && GATEWAY_PM2_CANDIDATES.includes(name as (typeof GATEWAY_PM2_CANDIDATES)[number]));
-    }) as { pm2_env?: { status?: string; restart_time?: number } } | undefined;
+    }) as {
+      pm2_env?: { status?: string; restart_time?: number; unstable_restarts?: number };
+    } | undefined;
     if (!gateway) {
       if (await gatewayHealthOk()) {
-        const systemd = { status: 'online' as const, restartCount: null };
+        const systemd = { status: 'online' as const, restartCount: null, unstableRestarts: null };
         pm2Cache = { ...systemd, expiresAt: Date.now() + PM2_CACHE_MS };
         return systemd;
       }
-      const miss = { status: 'missing' as const, restartCount: null };
+      const miss = { status: 'missing' as const, restartCount: null, unstableRestarts: null };
       pm2Cache = { ...miss, expiresAt: Date.now() + PM2_CACHE_MS };
       return miss;
     }
     const status = gateway.pm2_env?.status;
     const restartCount =
       typeof gateway.pm2_env?.restart_time === 'number' ? gateway.pm2_env.restart_time : null;
+    const unstableRestarts =
+      typeof gateway.pm2_env?.unstable_restarts === 'number'
+        ? gateway.pm2_env.unstable_restarts
+        : null;
     if (status === 'online' || status === 'stopped' || status === 'errored') {
-      const resolved = { status, restartCount } as {
+      const resolved = { status, restartCount, unstableRestarts } as {
         status: AdminBootstrapStatus['pm2Status'];
         restartCount: number | null;
+        unstableRestarts: number | null;
       };
       pm2Cache = { ...resolved, expiresAt: Date.now() + PM2_CACHE_MS };
       return resolved;
     }
-    const unknown = { status: 'unknown' as const, restartCount };
+    const unknown = { status: 'unknown' as const, restartCount, unstableRestarts };
     pm2Cache = { ...unknown, expiresAt: Date.now() + PM2_CACHE_MS };
     return unknown;
   } catch {
-    const fail = { status: 'unknown' as const, restartCount: null };
+    const fail = { status: 'unknown' as const, restartCount: null, unstableRestarts: null };
     pm2Cache = { ...fail, expiresAt: Date.now() + PM2_CACHE_MS };
     return fail;
   }
+}
+
+async function fetchHealthWithRetry(base: string): Promise<Response> {
+  const attempts = 2;
+  const delayMs = 1_000;
+  let lastErr: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const res = await fetchWithTimeout(`${base}/health`);
+      if (res.ok) return res;
+      lastErr = new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      lastErr = err;
+    }
+    if (i < attempts - 1) {
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('fetch failed');
 }
 
 function baseStatusFields(pm2Status: AdminBootstrapStatus['pm2Status']) {
@@ -94,7 +130,7 @@ function baseStatusFields(pm2Status: AdminBootstrapStatus['pm2Status']) {
     pm2Status,
     recoveryCommand: desktop
       ? 'Reiniciar sistema (barra superior) o scripts/desktop_restart.ps1'
-      : 'Reiniciar stack (barra superior: migrate + PM2)',
+      : 'Reiniciar stack (botón abajo o barra superior tras login)',
   };
 }
 
@@ -103,10 +139,15 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
   const key = adminApiKey();
   const checkedAt = new Date().toISOString();
   const gatewayHint = gatewayConnectHint();
-  const pm2 = await resolvePm2GatewayStatus();
-  const pm2Status = pm2.status;
+  // `pm2 jlist` spawns a node process; only pay for it when the gateway looks down.
+  let pm2: Awaited<ReturnType<typeof resolvePm2GatewayStatus>> | null = null;
+  const resolvePm2 = async () => {
+    pm2 = pm2 ?? (await resolvePm2GatewayStatus());
+    return pm2;
+  };
 
   if (!base) {
+    const { status: pm2Status } = await resolvePm2();
     return {
       gatewayConfigured: false,
       gatewayReachable: false,
@@ -122,8 +163,9 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
   }
 
   try {
-    const health = await fetchWithTimeout(`${base}/health`);
+    const health = await fetchHealthWithRetry(base);
     if (!health.ok) {
+      const { status: pm2Status } = await resolvePm2();
       return {
         gatewayConfigured: true,
         gatewayReachable: false,
@@ -139,9 +181,10 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
       };
     }
   } catch (err) {
+    const down = await resolvePm2();
     const detail =
-      pm2.restartCount != null && pm2.restartCount >= 20
-        ? `${err instanceof Error ? err.message : 'fetch failed'} (PM2 reinicios: ${pm2.restartCount}; probable crash loop — usa Reiniciar stack)`
+      down.unstableRestarts != null && down.unstableRestarts > 0
+        ? `${err instanceof Error ? err.message : 'fetch failed'} (PM2 inestable: ${down.unstableRestarts} reinicios recientes)`
         : err instanceof Error
           ? err.message
           : 'fetch failed';
@@ -155,7 +198,7 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
       message: 'Gateway iniciando o sin responder.',
       detail,
       gatewayHint,
-      ...baseStatusFields(pm2Status),
+      ...baseStatusFields(down.status),
       checkedAt,
     };
   }
@@ -170,41 +213,23 @@ export async function resolveAdminBootstrapStatus(): Promise<AdminBootstrapStatu
       code: 'admin_key_missing',
       message: 'DUCKCLAW_ADMIN_API_KEY no está configurada en el BFF.',
       gatewayHint,
-      ...baseStatusFields(pm2Status),
+      ...baseStatusFields('online'),
       checkedAt,
     };
   }
 
-  const adminHealth = await fetchWithTimeout(`${base}/api/v1/admin/health`, {
-    headers: gatewayProxyHeaders({ 'X-Admin-Key': key }),
-  });
-  if (adminHealth.status === 401 || adminHealth.status === 403) {
-    return {
-      gatewayConfigured: true,
-      gatewayReachable: true,
-      adminKeyConfigured: true,
-      adminKeyAccepted: false,
-      canAttemptLogin: false,
-      code: 'admin_key_invalid',
-      message: 'La clave admin del BFF no coincide con la del Gateway.',
-      detail:
-        'Desktop: revisa %LOCALAPPDATA%\\DuckClaw\\desktop.env (misma DUCKCLAW_ADMIN_API_KEY en gateway y consola). Si PM2 usa :8000, ejecuta pm2 stop duckclaw-gateway.',
-      gatewayHint,
-      ...baseStatusFields(pm2Status),
-      checkedAt,
-    };
-  }
-
+  // /health OK is enough for login. admin/health opens DuckDB (~8s under lock) and
+  // starved /auth/login + /auth/me. Key mismatch still surfaces on admin API calls.
   return {
     gatewayConfigured: true,
     gatewayReachable: true,
     adminKeyConfigured: true,
-    adminKeyAccepted: adminHealth.ok,
-    canAttemptLogin: adminHealth.ok,
-    code: adminHealth.ok ? 'ready' : 'gateway_unreachable',
-    message: adminHealth.ok ? 'Gateway listo para login.' : `Gateway respondió HTTP ${adminHealth.status}.`,
+    adminKeyAccepted: true,
+    canAttemptLogin: true,
+    code: 'ready',
+    message: 'Gateway listo para login.',
     gatewayHint,
-    ...baseStatusFields(pm2Status),
+    ...baseStatusFields('online'),
     checkedAt,
   };
 }

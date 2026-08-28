@@ -28,13 +28,11 @@ def _vault_writer_defer_seconds() -> float:
 
 
 def _is_duckdb_lock_error(exc: BaseException) -> bool:
-    """Contención al abrir mismo archivo DuckDB (otro proceso RW, u otra config en mismo PID)."""
+    """Lock de otro proceso RW. No incluye mixed-config del mismo PID (retry + sleep bloquea uvicorn)."""
     msg = str(exc).lower()
-    return (
-        "lock" in msg
-        or "conflicting" in msg
-        or "different configuration" in msg
-    )
+    if "different configuration" in msg:
+        return False
+    return "lock" in msg or "conflicting" in msg
 
 
 def _duckdb_python_connect_with_retry(db_path: str, *, read_only: bool) -> Any:
@@ -45,11 +43,13 @@ def _duckdb_python_connect_with_retry(db_path: str, *, read_only: bool) -> Any:
     from duckclaw.spawn_profile import effective_hub_read_only
 
     read_only = effective_hub_read_only(db_path, read_only)
-    raw_attempts = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS") or "24").strip()
+    # 8 attempts ≈ 5.4s ceiling. Writer RW holds are per-transaction (ms); waiting
+    # longer than the BFF timeout only turns contention into "gateway caído" in the UI.
+    raw_attempts = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS") or "8").strip()
     try:
         attempts = max(1, min(int(raw_attempts), 80))
     except ValueError:
-        attempts = 24
+        attempts = 8
     raw_sleep = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_BASE_SLEEP_S") or "0.15").strip()
     try:
         base_sleep_s = float(raw_sleep)
@@ -57,13 +57,13 @@ def _duckdb_python_connect_with_retry(db_path: str, *, read_only: bool) -> Any:
         base_sleep_s = 0.15
     base_sleep_s = max(0.05, base_sleep_s)
 
-    if not read_only or (db_path or "").strip() in ("", ":memory:"):
+    if (db_path or "").strip() in ("", ":memory:"):
         return _duckdb.connect(db_path, read_only=read_only)
 
     last: BaseException | None = None
     for i in range(attempts):
         try:
-            return _duckdb.connect(db_path, read_only=True)
+            return _duckdb.connect(db_path, read_only=read_only)
         except BaseException as exc:
             last = exc
             if not _is_duckdb_lock_error(exc):
@@ -82,7 +82,14 @@ class DuckClaw:
     se usa siempre duckdb Python para respetar el modo solo lectura.
     """
 
-    __slots__ = ("_path", "_read_only", "_native", "_con", "_external_writer_defer_until")
+    __slots__ = (
+        "_path",
+        "_read_only",
+        "_native",
+        "_con",
+        "_external_writer_defer_until",
+        "_ephemeral_ro",
+    )
 
     def __init__(
         self,
@@ -96,6 +103,9 @@ class DuckClaw:
         self._native: Any = None
         self._con: Any = None
         self._external_writer_defer_until = 0.0
+        # ponytail: DuckDB 1.x — process-A RO file lock blocks process-B RW (db-writer).
+        # Keep no persistent RO handle; open/close per op. Ceiling: connect cost per query.
+        self._ephemeral_ro = bool(self._read_only and self._path not in ("", ":memory:"))
         use_native = (
             engine == "auto"
             and _NativeDuckClaw is not None
@@ -104,6 +114,8 @@ class DuckClaw:
         )
         if use_native:
             self._native = _NativeDuckClaw(self._path)
+        elif self._ephemeral_ro:
+            self._con = None
         else:
             self._con = _duckdb_python_connect_with_retry(
                 self._path,
@@ -127,13 +139,29 @@ class DuckClaw:
         Ephemeral connection avoids re-acquiring the gateway's persistent handle
         between StateDelta LPUSH and the remote writer COMMIT.
         """
-        with _duckdb.connect(self._path, read_only=True) as conn:
-            return self._rows_to_json(conn.execute(sql))
+        con = _duckdb_python_connect_with_retry(self._path, read_only=True)
+        try:
+            return self._rows_to_json(con.execute(sql))
+        finally:
+            con.close()
+
+    def _ephemeral_execute(self, sql: str, params: Optional[Any] = None) -> Any:
+        con = _duckdb_python_connect_with_retry(self._path, read_only=True)
+        try:
+            if params is not None:
+                con.execute(sql, params)
+            else:
+                con.execute(sql)
+            return con.fetchall()
+        finally:
+            con.close()
 
     def _ensure_python_exec_connection(self) -> None:
         """Reabre conexión Python si quedó en None tras liberar el handle para db-writer."""
         if self._native is not None:
             return
+        if getattr(self, "_ephemeral_ro", False):
+            raise RuntimeError("DuckDB: modo RO efímero; use query()/execute() (sin handle persistente).")
         if self._con is not None:
             return
         if self._external_writer_defer_active():
@@ -155,7 +183,9 @@ class DuckClaw:
     def query(self, sql: str) -> str:
         if self._native is not None:
             return self._native.query(sql)
-        if self._con is None and self._external_writer_defer_active():
+        if getattr(self, "_ephemeral_ro", False) or (
+            self._con is None and self._external_writer_defer_active()
+        ):
             return self._ephemeral_read_query(sql)
         self._ensure_python_exec_connection()
         result = self._con.execute(sql)
@@ -166,6 +196,8 @@ class DuckClaw:
             if params is None:
                 return self._native.execute(sql)
             self.release_file_handle_for_external_writer()
+        if getattr(self, "_ephemeral_ro", False):
+            return self._ephemeral_execute(sql, params)
         self._ensure_python_exec_connection()
         if params is not None:
             self._con.execute(sql, params)
@@ -176,6 +208,9 @@ class DuckClaw:
     def get_version(self) -> str:
         if self._native is not None:
             return str(self._native.get_version())
+        if getattr(self, "_ephemeral_ro", False):
+            rows = self._ephemeral_execute("SELECT version()")
+            return str(rows[0][0])
         self._ensure_python_exec_connection()
         return str(self._con.execute("SELECT version()").fetchone()[0])
 
@@ -208,9 +243,12 @@ class DuckClaw:
         """
         Cierra la conexión Python en modo solo lectura para liberar el lock del archivo.
         Otro proceso (p. ej. db-writer) puede abrir el mismo .duckdb en escritura mientras
-        esta instancia no tiene handle abierto. No-op para :memory:, motor nativo RW o read_only=False.
+        esta instancia no tiene handle abierto. No-op para :memory:, motor nativo RW,
+        read_only=False o RO efímero (ya sin handle persistente).
         """
         if self._native is not None or self._path == ":memory:" or not self._read_only:
+            return
+        if getattr(self, "_ephemeral_ro", False):
             return
         if self._con is not None:
             try:
@@ -229,6 +267,9 @@ class DuckClaw:
         if self._native is not None:
             self.close()
             return
+        if getattr(self, "_ephemeral_ro", False):
+            self._external_writer_defer_until = time.monotonic() + _vault_writer_defer_seconds()
+            return
         if self._con is not None:
             if not self._read_only:
                 try:
@@ -246,6 +287,8 @@ class DuckClaw:
         """Reabre la conexión RO tras ``suspend_readonly_file_handle``."""
         if self._native is not None or self._path == ":memory:" or not self._read_only:
             return
+        if getattr(self, "_ephemeral_ro", False):
+            return
         if self._con is None:
             self._con = _duckdb_python_connect_with_retry(self._path, read_only=True)
 
@@ -254,6 +297,8 @@ class DuckClaw:
         if self._native is not None or self._path == ":memory:":
             return
         self._external_writer_defer_until = 0.0
+        if getattr(self, "_ephemeral_ro", False):
+            return
         if self._con is not None:
             return
         self._con = _duckdb_python_connect_with_retry(self._path, read_only=self._read_only)

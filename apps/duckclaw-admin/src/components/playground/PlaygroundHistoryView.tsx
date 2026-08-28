@@ -140,7 +140,9 @@ export function PlaygroundHistoryView({
         {tenantId?.trim() && (loading || (configLoading && !configError)) && (
           <p className="text-sm text-gov-gray-400 text-center py-10">Cargando historial…</p>
         )}
-        {tenantId?.trim() && error && <p className="text-sm text-red-600 text-center py-10">{error}</p>}
+        {tenantId?.trim() && error && error !== configError && (
+          <p className="text-sm text-red-600 text-center py-10">{error}</p>
+        )}
         {tenantId?.trim() && !loading && !error && !(configLoading && !configError) && uniqueConversations.length === 0 && (
           <div className="rounded-3xl border border-dashed dark:border-dark-border p-10 text-center">
             <p className="font-bold dark:text-dark-text">Sin conversaciones</p>

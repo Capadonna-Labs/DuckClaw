@@ -93,6 +93,8 @@ def _category_row_count(db: Any) -> int:
 
 def seed_framework_skill_catalog_if_empty(db: Any) -> int:
     """Insert platform skill categories from the framework seed when tables are empty."""
+    if getattr(db, "_read_only", False):
+        return 0
     ensure_skill_catalog_schema(db)
     if _category_row_count(db) > 0:
         return 0
@@ -167,6 +169,8 @@ def seed_framework_skill_catalog_if_empty(db: Any) -> int:
 
 def sync_framework_skill_catalog_from_pack(db: Any) -> int:
     """Insert missing platform categories and skills from the framework seed (idempotent)."""
+    if getattr(db, "_read_only", False):
+        return 0
     ensure_skill_catalog_schema(db)
     pack = load_skill_categories_pack()
     added = 0

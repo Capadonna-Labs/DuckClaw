@@ -123,12 +123,18 @@ async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response
 
         return enqueue_admin_command(command)
 
-    db = DuckClaw(gw, read_only=True, engine="python")
-    should_seed = False
-    try:
-        should_seed = console_users_seed_required(db)
-    finally:
-        db.close()
+    def _seed_required() -> bool:
+        try:
+            db = DuckClaw(gw, read_only=True, engine="python")
+            try:
+                return console_users_seed_required(db)
+            finally:
+                db.close()
+        except Exception as exc:
+            _log.warning("console seed check skipped: %s", exc)
+            return False
+
+    should_seed = await asyncio.to_thread(_seed_required)
 
     if should_seed:
         for seed_user in default_seed_users():
@@ -145,17 +151,25 @@ async def admin_auth_login_impl(body: AdminLoginBody, request: Request, response
                 )
             )
 
-    db = DuckClaw(gw, read_only=True, engine="python")
-    user: dict[str, Any] | None = None
-    password_update: dict[str, Any] | None = None
+    def _authenticate() -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        db = DuckClaw(gw, read_only=True, engine="python")
+        try:
+            found, pwd_update = authenticate_console_user_readonly(
+                db, email=body.email, password=body.password
+            )
+            if found:
+                found = attach_profile_to_console_user(db, found)
+            return found, pwd_update
+        finally:
+            db.close()
+
     try:
-        user, password_update = authenticate_console_user_readonly(
-            db, email=body.email, password=body.password
-        )
-        if user:
-            user = attach_profile_to_console_user(db, user)
-    finally:
-        db.close()
+        user, password_update = await asyncio.to_thread(_authenticate)
+    except Exception as exc:
+        msg = str(exc).lower()
+        if "lock" in msg or "conflicting" in msg or "different configuration" in msg:
+            raise problem(503, "Gateway ocupado. Reintenta el login.", str(exc)[:200]) from exc
+        raise
 
     if not user:
         try:
@@ -236,9 +250,16 @@ async def admin_auth_me(request: Request) -> dict[str, Any]:
         raise HTTPException(status_code=401, detail="Session user missing")
 
     def _resolve_session_from_db() -> dict[str, Any] | None:
+        from duckclaw.admin_console_users import console_user_is_active
+
         with open_gateway_db(read_only=True) as db:
             user = get_by_email(db, email)
-            if not user or not bool(user.get("active", True)):
+            if not user:
+                # ponytail: _query_all_dicts swallows lock/read errors as [].
+                # Empty lookup is ambiguous (missing vs hub busy) — raise so we
+                # keep Redis session instead of destroying it.
+                raise RuntimeError("auth_me: console user lookup empty")
+            if not console_user_is_active(user):
                 return None
             public_user = {
                 **session,
@@ -249,7 +270,12 @@ async def admin_auth_me(request: Request) -> dict[str, Any]:
             }
             return attach_profile_to_console_user(db, public_user)
 
-    resolved = await asyncio.to_thread(_resolve_session_from_db)
+    try:
+        resolved = await asyncio.to_thread(_resolve_session_from_db)
+    except Exception as exc:
+        _log.warning("auth_me_db_fallback email=%s err=%s", email, exc)
+        session = await refresh_session(session_backend, session_id, session)
+        return {"user": session_user_public(session)}
     if resolved is None:
         await destroy_session(session_backend, session_id)
         raise HTTPException(status_code=401, detail="Session user not active")

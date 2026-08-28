@@ -88,7 +88,7 @@ function runShell(
 
 /**
 
- * Reinicio VPS: DB-Writer + Heartbeat + Gateway (sin Indexer/SYNC_PM2).
+ * Reinicio remoto: DB-Writer + Heartbeat + Gateway (sin Indexer/SYNC_PM2).
 
  * Usa restart/start — nunca `pm2 delete` salvo heal de entrada corrupta.
 
@@ -103,6 +103,10 @@ export async function runStackRestartCoreLocal(): Promise<NormalizedOpsRunResult
 cd "${cwd}"
 
 heal_pm2_corrupt_db_writer
+
+pm2 stop DuckClaw-Heartbeat 2>/dev/null || true
+
+wait_pm2_stopped DuckClaw-Heartbeat 20 || true
 
 ${pm2EnsureRestartDbWriterShell(cwd).trim()}
 
@@ -158,6 +162,39 @@ echo "STACK_RESTART_CORE_OK"
 
   });
 
+}
+
+/** Reinicio rápido solo Gateway (login bootstrap; ~15–30s vs stack completo). */
+export async function runStackRestartGatewayOnlyLocal(): Promise<NormalizedOpsRunResult> {
+  const cwd = repoRoot();
+  const shell = `${pm2WaitShellPreamble()}
+cd "${cwd}"
+if [ -n "\${DUCKCLAW_GATEWAY_SYSTEMD_UNIT:-}" ]; then
+  for n in DuckClaw-Gateway duckclaw-gateway DuckClaw-API; do
+    pm2 delete "\$n" 2>/dev/null || true
+  done
+  systemctl restart "\$DUCKCLAW_GATEWAY_SYSTEMD_UNIT"
+  wait_gateway_health 45 || true
+else
+  ${pm2EnsureRestartGatewayShell(cwd).trim()}
+  wait_pm2_online DuckClaw-Gateway 30 || wait_pm2_online duckclaw-gateway 30 || {
+    echo "PM2_FALLBACK: starting DuckClaw-Gateway"
+    pm2 start config/ecosystem.api.config.cjs --only DuckClaw-Gateway
+    wait_pm2_online DuckClaw-Gateway 25 || exit 1
+  }
+  wait_gateway_health 45 || true
+fi
+pm2 save 2>/dev/null || true
+echo "STACK_RESTART_GATEWAY_ONLY_OK"
+`;
+  const proc = await runShell(cwd, shell, 120_000);
+  return normalizeOpsResult({
+    op_id: 'restart_gateway',
+    exit_code: proc.exit_code,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    executed_via: 'local',
+  });
 }
 
 

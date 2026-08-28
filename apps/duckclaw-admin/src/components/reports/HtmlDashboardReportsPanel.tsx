@@ -1,12 +1,8 @@
 'use client';
 
-import Link from 'next/link';
-import { Maximize2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
-import { useActiveConversation } from '@/components/chat/useActiveConversation';
-import { useAdminChat } from '@/components/chat/useAdminChat';
 import { adminService } from '@/services/adminService';
+import { useActiveConversation } from '@/components/chat/useActiveConversation';
 
 export function HtmlDashboardReportsPanel() {
   const [tenantId, setTenantId] = useState<string | undefined>();
@@ -22,25 +18,9 @@ export function HtmlDashboardReportsPanel() {
   const conv = useActiveConversation(tenantId, 'reports', {
     defaultWorkerId: '',
   });
-  const { createConversation, selectConversation } = conv;
   const reportId = conv.sessionId ?? '';
-  const onReportActivityRef = useRef<() => void>(() => {});
 
-  const chat = useAdminChat({
-    chatId: reportId,
-    initialWorker: '',
-    enabled: Boolean(reportId),
-    onConversationActivity: () => {
-      conv.bumpRefresh();
-      onReportActivityRef.current();
-    },
-    onConversationNotFound: conv.recoverMissingConversation,
-  });
-  const { vaultPath: chatVaultPath } = chat;
-
-  const vaultPath =
-    (chatVaultPath || '').trim() ||
-    (config?.vault?.effective_path || '').trim();
+  const vaultPath = (config?.vault?.effective_path || '').trim();
 
   const reportIframeSrc = useMemo(() => {
     if (!reportId || !vaultPath) return '';
@@ -79,13 +59,6 @@ export function HtmlDashboardReportsPanel() {
       setReportLoading(false);
     }
   }, [reportId, vaultPath]);
-
-  useEffect(() => {
-    onReportActivityRef.current = () => {
-      reloadReportIframe();
-      void verifyReportReachable();
-    };
-  }, [reloadReportIframe, verifyReportReachable]);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,87 +119,35 @@ export function HtmlDashboardReportsPanel() {
     };
   }, [reportId, reloadReportIframe, verifyReportReachable]);
 
-  const headerActions = (
-    <div className="flex items-center justify-end gap-1 shrink-0">
-      <Link
-        href="/playground"
-        className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-slate-200"
-        title="Abrir Playground completo"
-        aria-label="Abrir Playground completo"
-      >
-        <Maximize2 size={16} />
-      </Link>
-    </div>
-  );
-
   return (
-    <div className="flex h-full w-full overflow-hidden">
-      <div className="h-full w-[70%] border-r border-slate-800 bg-slate-900">
-        {reportReady ? (
-          <div className="relative h-full w-full">
-            {reportLoading && !reportHasContent ? (
-              <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/60 text-sm text-slate-300">
-                Cargando reporte…
-              </div>
-            ) : null}
-            {reportLoadError ? (
-              <div className="absolute inset-x-0 top-0 z-20 border-b border-amber-700/50 bg-amber-950/80 px-4 py-2 text-xs text-amber-200">
-                No se pudo cargar el lienzo: {reportLoadError}
-              </div>
-            ) : null}
-            <iframe
-              ref={iframeRef}
-              key={reportIframeSrc}
-              src={reportIframeSrc || undefined}
-              className="h-full w-full bg-white"
-              title="Custom Report Viewer"
-              sandbox="allow-scripts allow-same-origin"
-              onLoad={() => setReportLoading(false)}
-            />
-          </div>
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm text-slate-400">
-            Cargando vault y conversación…
-          </div>
-        )}
-      </div>
-      <div className="flex h-full w-[30%] flex-col bg-slate-950">
-        <div className="border-b border-slate-800 p-4">
-          <h2 className="text-lg font-semibold">Asistente</h2>
-          <p className="text-xs text-slate-400">
-            Elige un agente y publica con{' '}
-            <code className="text-slate-300">publish_custom_report</code> —{' '}
-            <code className="text-slate-300">report_id</code> = id de esta conversación.
-            Dashboards quant → agente <code className="text-slate-300">quant_reporter</code>.
-          </p>
+    <div className="h-full w-full overflow-hidden bg-slate-900">
+      {reportReady ? (
+        <div className="relative h-full w-full">
+          {reportLoading && !reportHasContent ? (
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/60 text-sm text-slate-300">
+              Cargando reporte…
+            </div>
+          ) : null}
+          {reportLoadError ? (
+            <div className="absolute inset-x-0 top-0 z-20 border-b border-amber-700/50 bg-amber-950/80 px-4 py-2 text-xs text-amber-200">
+              No se pudo cargar el lienzo: {reportLoadError}
+            </div>
+          ) : null}
+          <iframe
+            ref={iframeRef}
+            key={reportIframeSrc}
+            src={reportIframeSrc || undefined}
+            className="h-full w-full bg-white"
+            title="Custom Report Viewer"
+            sandbox="allow-scripts allow-same-origin"
+            onLoad={() => setReportLoading(false)}
+          />
         </div>
-        <div className="min-h-0 flex-1">
-          {conv.bootstrapping || !reportId ? (
-            <div className="p-4 text-sm text-slate-500">Iniciando sesión de chat…</div>
-          ) : (
-            <AdminChatPanel
-              key={reportId}
-              chatId={reportId}
-              chat={chat}
-              variant="compact"
-              sectionTitle="Reportes"
-              conversationTitle={conv.conversationTitle}
-              showWorkerLink={false}
-              headerActions={headerActions}
-              onRenameConversation={conv.renameConversation}
-              conversationManage={{
-                tenantId,
-                section: 'reports',
-                refreshToken: conv.refreshToken,
-                onSelect: (id, meta) => selectConversation(id, meta?.title),
-                onCreateNew: () => void createConversation(),
-              }}
-              emptyHint="Pide un dashboard o cambia el diseño del reporte HTML."
-              className="h-full"
-            />
-          )}
+      ) : (
+        <div className="flex h-full items-center justify-center text-sm text-slate-400">
+          Cargando vault y conversación…
         </div>
-      </div>
+      )}
     </div>
   );
 }

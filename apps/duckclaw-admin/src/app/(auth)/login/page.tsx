@@ -21,7 +21,8 @@ function LoginForm() {
   const queryLoginAttempted = useRef(false);
   const { loginWithCredentials, isAuthenticated, isSubmitting, loginError, hasHydrated } =
     useAuthStore();
-  const { status: bootstrapStatus, loading: bootstrapLoading } = useAdminBootstrapStatus();
+  const { status: bootstrapStatus, loading: bootstrapLoading, refresh: refreshBootstrap } =
+    useAdminBootstrapStatus();
   const bootstrap = bootstrapStatus ?? { canAttemptLogin: false };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -40,6 +41,12 @@ function LoginForm() {
   useEffect(() => {
     if (hasHydrated && isAuthenticated) router.replace(adminPostAuthPath(null));
   }, [hasHydrated, isAuthenticated, router]);
+
+  useEffect(() => {
+    if (!bootstrapStatus?.canAttemptLogin) return;
+    if (!loginError?.includes('Gateway no disponible')) return;
+    useAuthStore.setState({ loginError: null });
+  }, [bootstrapStatus?.canAttemptLogin, loginError]);
 
   useEffect(() => {
     const saved = readSavedLoginCredentials();
@@ -80,9 +87,10 @@ function LoginForm() {
       }
       setFieldError(null);
       await loginWithCredentials(em, pw);
-      if (useAuthStore.getState().isAuthenticated) {
-        persistCredentialsIfAllowed(em, pw);
+      const authed = useAuthStore.getState().isAuthenticated;
+      if (authed) {
         redirectIfAuthed();
+        persistCredentialsIfAllowed(em, pw);
       }
     },
     [bootstrap.canAttemptLogin, loginWithCredentials, persistCredentialsIfAllowed, redirectIfAuthed]
@@ -128,7 +136,20 @@ function LoginForm() {
         </header>
 
         <div className="mb-5">
-          <BootstrapStatusBanner status={bootstrapStatus} loading={bootstrapLoading} />
+          <BootstrapStatusBanner
+            status={bootstrapStatus}
+            loading={bootstrapLoading}
+            onRestartDone={() => {
+              let n = 0;
+              const poll = () => void refreshBootstrap({ nocache: true });
+              poll();
+              const id = window.setInterval(() => {
+                n += 1;
+                poll();
+                if (n >= 30) window.clearInterval(id);
+              }, 3000);
+            }}
+          />
         </div>
 
         <form onSubmit={onSubmit} className="space-y-5">

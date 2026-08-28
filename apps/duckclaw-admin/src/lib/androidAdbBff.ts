@@ -1,7 +1,29 @@
 import { execFile } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFile);
+
+function persistRepoEnvKeys(root: string, updates: Record<string, string>): string[] {
+  const envPath = path.join(root, '.env');
+  if (!fs.existsSync(envPath)) return [];
+  let content = fs.readFileSync(envPath, 'utf8');
+  const updated: string[] = [];
+  for (const [key, value] of Object.entries(updates)) {
+    if (!key || /[\r\n]/.test(key + value)) continue;
+    process.env[key] = value;
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const line = `${key}=${value}`;
+    const expression = new RegExp(`^\\s*${escapedKey}\\s*=.*$`, 'm');
+    content = expression.test(content)
+      ? content.replace(expression, line)
+      : `${content}${content && !content.endsWith('\n') ? '\n' : ''}${line}\n`;
+    updated.push(key);
+  }
+  if (updated.length) fs.writeFileSync(envPath, content, 'utf8');
+  return updated;
+}
 
 export type AndroidDeviceStatus = {
   ok: boolean;
@@ -88,13 +110,25 @@ async function probeMcp(url: string): Promise<{ ok: boolean; error?: string }> {
   }
 }
 
-export async function androidAdbConnectLocal(debugPort?: string | number): Promise<{
+export async function androidAdbConnectLocal(
+  debugPort?: string | number,
+  opts?: {
+    repoRoot?: string;
+    envUpdates?: Record<string, string>;
+    pairPort?: string | number;
+    pairCode?: string;
+  },
+): Promise<{
   ok: boolean;
   host?: string;
   debug_port?: string;
+  pair_port?: string;
+  paired?: boolean;
+  hint?: string;
   error?: string;
   stdout?: string;
   stderr?: string;
+  env_updated?: string[];
 }> {
   let target = (process.env.ANDROID_ADB_HOST || '').trim();
   if (!target) return { ok: false, error: 'ANDROID_ADB_HOST no configurado' };
@@ -102,17 +136,57 @@ export async function androidAdbConnectLocal(debugPort?: string | number): Promi
     debugPort != null && String(debugPort).trim()
       ? String(debugPort).trim()
       : androidAdbDebugPort();
+  const pairPort = opts?.pairPort != null ? String(opts.pairPort).trim() : '';
+  const pairCode = (opts?.pairCode || '').trim();
+  const envPatch: Record<string, string> = { ...(opts?.envUpdates ?? {}) };
+  if (port) envPatch.ANDROID_ADB_DEBUG_PORT = port;
+  let envUpdated: string[] = [];
+  if (opts?.repoRoot && Object.keys(envPatch).length) {
+    envUpdated = persistRepoEnvKeys(opts.repoRoot, envPatch);
+  } else if (port) {
+    process.env.ANDROID_ADB_DEBUG_PORT = port;
+  }
+  let paired = false;
+  if (pairPort && pairCode) {
+    const pairTarget = /:\d+$/.test(target) ? target : `${target}:${pairPort}`;
+    const pairOut = await runAdb(['pair', pairTarget, pairCode]);
+    const pairMerged = `${pairOut.stdout}\n${pairOut.stderr}`.toLowerCase();
+    paired =
+      pairOut.code === 0 ||
+      pairMerged.includes('already paired') ||
+      pairMerged.includes('successfully paired');
+    if (!paired) {
+      return {
+        ok: false,
+        host: pairTarget,
+        pair_port: pairPort,
+        paired: false,
+        stdout: pairOut.stdout.trim(),
+        stderr: pairOut.stderr.trim(),
+        error: pairOut.stderr.trim() || 'adb pair failed',
+        env_updated: envUpdated.length ? envUpdated : undefined,
+      };
+    }
+  }
   if (!/:\d+$/.test(target)) target = `${target}:${port}`;
   const out = await runAdb(['connect', target]);
   const merged = `${out.stdout}\n${out.stderr}`.toLowerCase();
   const ok = out.code === 0 && (merged.includes('connected') || merged.includes('already connected'));
+  const hint =
+    !ok && !paired
+      ? 'Si nunca emparejaste este host, usa «Emparejar con código» en el teléfono y rellena puerto pair + código.'
+      : '';
   return {
     ok,
     host: target,
     debug_port: port,
+    pair_port: pairPort || undefined,
+    paired,
+    hint: hint || undefined,
     stdout: out.stdout.trim(),
     stderr: out.stderr.trim(),
-    error: ok ? undefined : out.stderr.trim() || 'adb connect failed',
+    error: ok ? undefined : out.stderr.trim() || out.stdout.trim() || 'adb connect failed',
+    env_updated: envUpdated.length ? envUpdated : undefined,
   };
 }
 

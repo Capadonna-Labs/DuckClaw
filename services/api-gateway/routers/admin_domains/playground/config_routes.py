@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from typing import Any
@@ -44,6 +45,8 @@ from routers.admin_domains.playground.worker_selection import (
     playground_vault_options_for_team,
 )
 
+_log = logging.getLogger(__name__)
+
 
 @router.get("/playground/config", dependencies=[Depends(require_admin_key)])
 async def playground_config(
@@ -70,13 +73,15 @@ async def playground_config(
     }
     workers_list: list[dict[str, str]] = []
     projects: list[dict[str, Any]] = []
+    hub_ok = False
     try:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
             workers_list = playground_workers_for_actor(db, actor_email=actor)
             projects = list_projects_with_agents_for_actor(db, actor_email=actor)
-    except FileNotFoundError:
-        pass
+        hub_ok = True
+    except Exception as exc:
+        _log.warning("playground_config: hub read skipped (%s)", exc)
     team_ctx = playground_team_context(
         telegram_user_id=profile.get("telegram_user_id") or telegram_user_id,
         tenant_id=profile.get("tenant_id"),
@@ -93,7 +98,11 @@ async def playground_config(
         workers_list = [{"id": "default", "label": "default"}, *workers_list]
     workers_payload = {"workers": workers_list, "workers_invalid": [], "team_hint_extra": ""}
     eff_chat = (chat_id or team_ctx.get("team_chat_id") or "admin-playground").strip()
-    eff_tenant = str(profile.get("tenant_id") or "").strip() or gateway_effective_tenant_id("default")
+    # hub skip → fallback tenant is "default"; UI must keep /me profile tenant.
+    eff_tenant = str(profile.get("tenant_id") or "").strip()
+    if hub_ok:
+        eff_tenant = eff_tenant or gateway_effective_tenant_id("default")
+    payload_tenant = eff_tenant if hub_ok else ""
     runtime_defaults = playground_runtime_defaults(eff_tenant, str(profile.get("email") or actor))
     llm = resolved_llm_for_playground(
         chat_id=eff_chat,
@@ -119,7 +128,7 @@ async def playground_config(
                 tenant_id=eff_tenant,
                 actor_email=actor_email,
             )
-    except FileNotFoundError:
+    except Exception:
         catalog = playground_llm_catalog(
             llm.get("provider", ""),
             tenant_id=eff_tenant,
@@ -129,9 +138,12 @@ async def playground_config(
     selected_worker_id = ""
     redis_client = getattr(request.app.state, "redis", None)
     if redis_client is not None and eff_chat:
-        from core.admin_conversations import resolve_conversation_view
+        from core.admin_conversations import get_conversation_meta
 
-        _, conv_meta, _ = await resolve_conversation_view(redis_client, eff_tenant, eff_chat)
+        try:
+            conv_meta = await get_conversation_meta(redis_client, eff_tenant, eff_chat)
+        except Exception:
+            conv_meta = None
         if conv_meta is not None:
             selected_worker_id = (
                 (conv_meta.preferred_worker_id or conv_meta.last_worker_id or "").strip()
@@ -165,14 +177,25 @@ async def playground_config(
                 tenant_id=eff_tenant,
                 project_id="",
             )
-    except FileNotFoundError:
+    except Exception:
         pass
-    slm = await resolved_slm_for_playground_async(
-        chat_id=eff_chat,
-        tenant_id=eff_tenant,
-        repo_root=repo_root(),
-    )
-    return {
+    try:
+        slm = await resolved_slm_for_playground_async(
+            chat_id=eff_chat,
+            tenant_id=eff_tenant,
+            repo_root=repo_root(),
+        )
+    except Exception:
+        slm = {
+            "configured": False,
+            "available": False,
+            "model": "",
+            "base_url": "",
+            "mlx_status": "unknown",
+            "adapters": [],
+            "scope": "env",
+        }
+    payload = {
         "llm": llm,
         "llm_gap": llm_gap,
         "slm": slm,
@@ -182,7 +205,8 @@ async def playground_config(
         "workers": workers_payload["workers"],
         "workers_invalid": workers_payload["workers_invalid"],
         "env_path": str(env_file()),
-        "effective_tenant_id": eff_tenant,
+        "effective_tenant_id": payload_tenant,
+        "hub_degraded": not hub_ok,
         "telegram_user_id": (profile.get("telegram_user_id") or team_ctx.get("telegram_user_id") or ""),
         "team_chat_id": team_ctx.get("team_chat_id"),
         "projects": projects,
@@ -203,6 +227,7 @@ async def playground_config(
             "Sin override de bóveda, usa vault activo del usuario o manifest del worker."
         ),
     }
+    return payload
 
 
 @router.put("/playground/vault", dependencies=[Depends(require_admin_key)])

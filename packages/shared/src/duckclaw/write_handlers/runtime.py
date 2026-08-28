@@ -7,6 +7,16 @@ import uuid
 from typing import Any
 
 
+def _exec_fetchone(conn: Any, sql: str, params: list | None = None) -> Any | None:
+    """DuckClaw.execute() returns fetchall(); raw cursors expose fetchone()."""
+    result = conn.execute(sql, params) if params is not None else conn.execute(sql)
+    if hasattr(result, "fetchone"):
+        return result.fetchone()
+    if isinstance(result, list):
+        return result[0] if result else None
+    return None
+
+
 def _apply_upsert_runtime_setting(conn: Any, payload: dict) -> None:
     domain = str(payload["domain"])
     key = str(payload["key"])
@@ -19,11 +29,12 @@ def _apply_upsert_runtime_setting(conn: Any, payload: dict) -> None:
     actor = str(payload.get("actor_email", "system"))
     updated_by = str(payload.get("updated_by") or actor)
 
-    existing = conn.execute(
+    existing = _exec_fetchone(
+        conn,
         "SELECT setting_id FROM main.admin_runtime_settings "
         "WHERE tenant_id = ? AND actor_email = ? AND domain = ? AND key = ?",
         [tenant_id, actor, domain, key],
-    ).fetchone()
+    )
 
     if existing:
         conn.execute(

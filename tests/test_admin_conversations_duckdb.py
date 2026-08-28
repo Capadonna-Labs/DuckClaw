@@ -165,6 +165,10 @@ def test_redis_only_conversation_hydrates_into_duckdb(gateway_db):
         loaded = await get_conversation_meta(redis, "default", sid)
         assert loaded is not None
         assert loaded.title == "Solo Redis"
+        from core.admin_conversations import list_conversations
+
+        items, _ = await list_conversations(redis, "default")
+        assert any(i.session_id == sid for i in items)
         assert db_get_conversation_meta("default", sid) is not None
         # Messages may be empty if we deleted them; hydrate copies redis history when present.
         msgs = db_load_messages("default", sid)
@@ -199,5 +203,220 @@ def test_patch_title_resolves_legacy_default_tenant(gateway_db):
         assert patched is not None
         assert patched.title == "Renombrada"
         assert patched.tenant_id == "default"
+
+    asyncio.run(_run())
+
+
+def test_chat_upsert_without_title_keeps_custom_name(gateway_db):
+    from core.admin_conversations import (
+        get_conversation_meta,
+        new_admin_conversation_session_id,
+        patch_conversation_title,
+        upsert_conversation_meta,
+    )
+    from tests.test_admin_conversations import build_fake_redis
+
+    redis = build_fake_redis()
+    sid = new_admin_conversation_session_id()
+
+    async def _run():
+        await upsert_conversation_meta(
+            redis,
+            tenant_id="default",
+            session_id=sid,
+            title="Playground session",
+            message_count=2,
+        )
+        await upsert_conversation_meta(
+            redis,
+            tenant_id="default",
+            session_id=sid,
+            user_message="saca insights de las notificaciones del android",
+            assistant_message="ok",
+            message_count=4,
+        )
+        kept = await get_conversation_meta(redis, "default", sid)
+        assert kept is not None
+        assert kept.title == "Playground session"
+
+        await upsert_conversation_meta(
+            redis,
+            tenant_id="default",
+            session_id=sid,
+            user_message="[Ciclo loop]",
+            assistant_message="Diagnóstico homeostasis",
+            message_count=6,
+        )
+        after_loop = await get_conversation_meta(redis, "default", sid)
+        assert after_loop is not None
+        assert after_loop.title == "Playground session"
+
+        patched = await patch_conversation_title(redis, "default", sid, "Playground session")
+        assert patched is not None
+        assert patched.title == "Playground session"
+
+    asyncio.run(_run())
+
+
+def test_get_conversation_meta_prefers_redis_title(gateway_db):
+    from core.admin_conversations import (
+        _cache_upsert_meta,
+        get_conversation_meta,
+        new_admin_conversation_session_id,
+        upsert_conversation_meta,
+    )
+    from tests.test_admin_conversations import build_fake_redis
+
+    redis = build_fake_redis()
+    sid = new_admin_conversation_session_id()
+
+    async def _run():
+        written = await upsert_conversation_meta(
+            redis,
+            tenant_id="default",
+            session_id=sid,
+            title="titulo duckdb",
+            message_count=1,
+        )
+        assert written is not None
+        await _cache_upsert_meta(
+            redis,
+            written.model_copy(update={"title": "Playground session"}),
+        )
+        got = await get_conversation_meta(redis, "default", sid)
+        assert got is not None
+        assert got.title == "Playground session"
+
+    asyncio.run(_run())
+
+
+def test_get_conversation_meta_skips_duckdb_when_redis_has_ciclo_title(gateway_db, monkeypatch):
+    from core import admin_conversations as ac
+    from tests.test_admin_conversations import build_fake_redis
+
+    redis = build_fake_redis()
+    sid = ac.new_admin_conversation_session_id()
+
+    async def _run():
+        written = await ac.upsert_conversation_meta(
+            redis, tenant_id="default", session_id=sid, title="Playground session", message_count=1
+        )
+        assert written is not None
+        await ac._cache_upsert_meta(
+            redis,
+            written.model_copy(update={"title": "[Ciclo loop]"}),
+        )
+
+        def _should_not_open(*_a, **_k):
+            raise AssertionError("db_get_conversation_meta must not run on Redis hit")
+
+        import core.admin_conversations_db as dbmod
+
+        monkeypatch.setattr(dbmod, "db_get_conversation_meta", _should_not_open)
+        got = await ac.get_conversation_meta(redis, "default", sid)
+        assert got is not None
+        assert got.title == "[Ciclo loop]"
+
+    asyncio.run(_run())
+
+
+def test_get_conversation_meta_skips_duckdb_when_redis_hits(gateway_db, monkeypatch):
+    from core import admin_conversations as ac
+    from tests.test_admin_conversations import build_fake_redis
+
+    redis = build_fake_redis()
+    sid = ac.new_admin_conversation_session_id()
+
+    async def _run():
+        written = await ac.upsert_conversation_meta(
+            redis, tenant_id="default", session_id=sid, title="cached", message_count=1
+        )
+        assert written is not None
+
+        def _should_not_open(*_a, **_k):
+            raise AssertionError("db_get_conversation_meta must not run on Redis hit")
+
+        import core.admin_conversations_db as dbmod
+
+        monkeypatch.setattr(dbmod, "db_get_conversation_meta", _should_not_open)
+        got = await ac.get_conversation_meta(redis, "default", sid)
+        assert got is not None
+        assert got.title == "cached"
+
+    asyncio.run(_run())
+
+
+def test_upsert_skips_db_get_when_redis_existing(gateway_db, monkeypatch):
+    from core import admin_conversations as ac
+    from tests.test_admin_conversations import build_fake_redis
+
+    redis = build_fake_redis()
+    sid = ac.new_admin_conversation_session_id()
+
+    async def _run():
+        written = await ac.upsert_conversation_meta(
+            redis, tenant_id="default", session_id=sid, title="Playground session", message_count=2
+        )
+        assert written is not None
+
+        def _should_not_open(*_a, **_k):
+            raise AssertionError("db_get_conversation_meta must not run when Redis existing passed")
+
+        import core.admin_conversations_db as dbmod
+
+        monkeypatch.setattr(dbmod, "db_get_conversation_meta", _should_not_open)
+        again = await ac.upsert_conversation_meta(
+            redis,
+            tenant_id="default",
+            session_id=sid,
+            user_message="hola",
+            assistant_message="ok",
+            message_count=4,
+        )
+        assert again is not None
+        assert again.title == "Playground session"
+
+    asyncio.run(_run())
+
+
+def test_resolve_view_prefers_redis_when_same_length(gateway_db):
+    """Stale DuckDB + live Redis, same count → Redis (keeps /loop --status)."""
+    import json
+
+    from core.admin_conversations import (
+        new_admin_conversation_session_id,
+        resolve_conversation_view,
+        upsert_conversation_meta,
+    )
+    from core.admin_conversations_db import db_save_messages
+    from core.chat_history import history_redis_key
+    from tests.test_admin_conversations import build_fake_redis
+
+    redis = build_fake_redis()
+    sid = new_admin_conversation_session_id()
+
+    async def _run():
+        await upsert_conversation_meta(
+            redis,
+            tenant_id="default",
+            session_id=sid,
+            title="Playground session",
+            message_count=2,
+        )
+        db_save_messages(
+            "default",
+            sid,
+            [
+                {"role": "user", "content": "viejo"},
+                {"role": "assistant", "content": "stale duckdb"},
+            ],
+        )
+        live = [
+            {"role": "user", "content": "/loop --status"},
+            {"role": "assistant", "content": "✅ Estado /loop"},
+        ]
+        await redis.set(history_redis_key("default", sid), json.dumps(live, ensure_ascii=False))
+        _tid, _meta, messages = await resolve_conversation_view(redis, "default", sid)
+        assert [m.get("content") for m in messages] == [m["content"] for m in live]
 
     asyncio.run(_run())

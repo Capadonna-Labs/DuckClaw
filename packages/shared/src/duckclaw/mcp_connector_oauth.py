@@ -22,7 +22,6 @@ def persist_mcp_connector_oauth_tokens(
     """Persist OAuth tokens synchronously; ponytail: async queue alone loses tokens on DuckDB lock."""
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
-    from duckclaw.write_commands import SetMcpConnectorAuthCommand
     from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
 
     payload = {
@@ -52,14 +51,16 @@ def persist_mcp_connector_oauth_tokens(
             time.sleep(0.15 * (attempt + 1))
 
     _log.warning(
-        "OAuth token sync persist failed connector=%s: %s; enqueue fallback",
+        "OAuth token sync persist failed connector=%s: %s",
         connector_id,
         last_exc,
     )
-    from duckclaw.gateway_enqueue import enqueue_admin_command
-
-    task_id = enqueue_admin_command(SetMcpConnectorAuthCommand(**payload))
-    return task_id
+    detail = str(last_exc or "persist failed")[:200]
+    if "lock" in detail.lower():
+        msg = f"No se pudo guardar el token OAuth ({detail}). Reintenta en unos segundos."
+    else:
+        msg = f"No se pudo guardar el token OAuth ({detail})."
+    raise RuntimeError(msg) from last_exc
 
 
 async def start_mcp_connector_oauth(

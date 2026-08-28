@@ -176,7 +176,7 @@ def _apply_upsert_mcp_connector(conn: Any, payload: dict) -> None:
 
 
 def _apply_set_mcp_connector_auth(conn: Any, payload: dict) -> None:
-    from duckclaw.write_handlers.runtime import _apply_upsert_runtime_setting
+    from duckclaw.write_handlers.runtime import _apply_upsert_runtime_setting, _exec_fetchone
 
     connector_id = str(payload.get("connector_id") or "").strip()
     tenant_id = str(payload.get("tenant_id") or "default")
@@ -187,11 +187,12 @@ def _apply_set_mcp_connector_auth(conn: Any, payload: dict) -> None:
     if not bearer:
         raise ValueError("bearer_token required")
 
-    row = conn.execute(
+    row = _exec_fetchone(
+        conn,
         "SELECT auth_secret_key FROM main.admin_mcp_connectors "
         "WHERE connector_id = ? AND tenant_id = ? AND active = true LIMIT 1",
         [connector_id, tenant_id],
-    ).fetchone()
+    )
     if not row:
         raise ValueError(f"connector not found: {connector_id}")
     secret_key = str(row[0] if not isinstance(row, dict) else row.get("auth_secret_key") or "")

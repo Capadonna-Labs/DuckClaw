@@ -97,6 +97,21 @@ def resolve_integration_api_key(
         db_val = _resolve_from_db(db, spec=spec, tenant_id=tenant_id, actor_email=actor_email)
         if db_val:
             return db_val
+        # Integraciones guarda bajo tenant workspace (user-â€¦); callers con
+        # tenant=default (p. ej. /loop) no deben caer a un OPENROUTER_API_KEY
+        # caducado en .env si el actor tiene clave en su workspace.
+        actor = (actor_email or "").strip()
+        if "@" in actor:
+            try:
+                from duckclaw.admin_user_profiles import tenant_id_for_email
+
+                ws = tenant_id_for_email(actor)
+            except Exception:
+                ws = ""
+            if ws and ws != (tenant_id or "").strip():
+                db_val = _resolve_from_db(db, spec=spec, tenant_id=ws, actor_email=actor)
+                if db_val:
+                    return db_val
     return _resolve_from_env(candidates)
 
 

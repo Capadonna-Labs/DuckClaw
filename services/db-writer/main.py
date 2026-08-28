@@ -199,6 +199,24 @@ def _connect_duckdb_writable(
     raise last
 
 
+def _migrate_once(conn: duckdb.DuckDBPyConnection, path: str) -> None:
+    """Migrate a target DB once per writer process.
+
+    Re-checksumming every migration on each task held the exclusive RW lock for
+    ~50ms of pure overhead per write; this writer is the only RW process, so the
+    schema cannot change under us between tasks.
+    """
+    if path in _migrated_paths:
+        return
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    run_pending_migrations(conn)
+    _migrated_paths.add(path)
+
+
+_migrated_paths: set[str] = set()
+
+
 def _run_typed_command_sync(
     task_id: str,
     command_type: str,
@@ -210,9 +228,7 @@ def _run_typed_command_sync(
 
     conn = _connect_duckdb_writable(target_db_path)
     try:
-        from duckclaw.schema_migrations import run_pending_migrations
-
-        run_pending_migrations(conn)
+        _migrate_once(conn, target_db_path)
         conn.execute("BEGIN TRANSACTION")
 
         if _ledger_is_completed(conn, task_id):
@@ -258,9 +274,7 @@ def _run_legacy_sql_sync(
     """Ejecuta SQL legacy con transacción y ledger. Retorna 'completed' o 'already_completed'."""
     conn = _connect_duckdb_writable(target_db_path)
     try:
-        from duckclaw.schema_migrations import run_pending_migrations
-
-        run_pending_migrations(conn)
+        _migrate_once(conn, target_db_path)
         conn.execute("BEGIN TRANSACTION")
 
         if _ledger_is_completed(conn, task_id):

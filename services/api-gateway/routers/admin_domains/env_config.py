@@ -18,7 +18,16 @@ from routers.admin_domains.admin_common import (
 
 router = APIRouter(tags=["admin-env-config"])
 
-_ENV_ALLOW_PREFIXES = ("TELEGRAM_", "DUCKDB_", "DUCKCLAW_", "LANGCHAIN_", "OPENAI_", "GROQ_", "DEEPSEEK_")
+_ENV_ALLOW_PREFIXES = (
+    "ANDROID_",
+    "TELEGRAM_",
+    "DUCKDB_",
+    "DUCKCLAW_",
+    "LANGCHAIN_",
+    "OPENAI_",
+    "GROQ_",
+    "DEEPSEEK_",
+)
 _ENV_ALLOW_EXACT = frozenset({"LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL", "REDIS_URL"})
 
 
@@ -27,6 +36,15 @@ class EnvPatchBody(BaseModel):
 
 
 def env_file() -> Path:
+    raw_root = (os.environ.get("DUCKCLAW_ROOT") or "").strip()
+    if raw_root:
+        candidate = Path(raw_root) / ".env"
+        if candidate.is_file():
+            return candidate
+    code_root = Path(__file__).resolve().parents[4]
+    code_env = code_root / ".env"
+    if code_env.is_file():
+        return code_env
     return repo_root() / ".env"
 
 

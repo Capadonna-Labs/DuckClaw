@@ -376,6 +376,7 @@ export default function PlaygroundPage() {
         configLoaded: Boolean(config),
         workers: config?.workers,
         alreadyRedirected: workerRequiredRedirectedRef.current,
+        hubDegraded: Boolean((config as { hub_degraded?: boolean } | null)?.hub_degraded),
       })
     ) {
       return;

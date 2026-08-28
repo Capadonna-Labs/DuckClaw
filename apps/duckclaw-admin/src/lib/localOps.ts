@@ -9,8 +9,8 @@ import {
   substitutePm2NamesInArgv,
 } from '@/lib/pm2AppResolve';
 import { pm2RecycleDbWriterShell, pm2RecycleGatewayShell } from '@/lib/pm2Recycle';
-import { runStackRecoverLocal } from '@/lib/stackRecover';
 import { runStackRecoverDesktop } from '@/lib/stackRecoverDesktop';
+import { runStackRestartCoreLocal } from '@/lib/stackRestartCore';
 import { isDesktopLiteMode } from '@/lib/desktopEnvFile';
 import { runStackStartLocal } from '@/lib/stackStart';
 import { runTelegramIngressStartLocal } from '@/lib/telegramIngressStart';
@@ -279,7 +279,9 @@ export async function runOpsLocal(
     if (isDesktopLiteMode()) {
       return runStackRecoverDesktop();
     }
-    return runStackRecoverLocal();
+    // Remote deploy: gateway-only restart. Full stack recycle can exceed proxy timeout
+    // and the UI maps the aborted response as «gateway no está en marcha».
+    return runStackRestartCoreLocal();
   }
   if (opId === 'start_telegram_ingress') {
     return runTelegramIngressStartLocal();
@@ -298,7 +300,16 @@ export async function runOpsLocal(
     const rawPort = params?.debug_port;
     const debugPort =
       rawPort != null && String(rawPort).trim() ? String(rawPort).trim() : undefined;
-    const payload = await androidAdbConnectLocal(debugPort);
+    const envUpdates: Record<string, string> = {};
+    const pairPort = params?.pair_port != null ? String(params.pair_port).trim() : '';
+    const pairCode = params?.pair_code != null ? String(params.pair_code).trim() : '';
+    if (pairPort) envUpdates.ANDROID_ADB_PAIR_PORT = pairPort;
+    const payload = await androidAdbConnectLocal(debugPort, {
+      repoRoot: repoRoot(),
+      envUpdates,
+      pairPort: pairPort || undefined,
+      pairCode: pairCode || undefined,
+    });
     return normalizeOpsResult({
       op_id: opId,
       exit_code: payload.ok ? 0 : 1,

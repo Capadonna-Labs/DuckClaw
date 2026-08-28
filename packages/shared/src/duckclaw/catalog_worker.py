@@ -22,6 +22,31 @@ _log = logging.getLogger(__name__)
 _CACHE_ROOT = Path.home() / ".duckclaw" / ".catalog_cache"
 
 
+def _hub_catalog_db_if_different(db: Any) -> Any | None:
+    """Open hub RO when ``db`` is a vault (or other non-hub) handle."""
+    try:
+        from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+    except Exception:
+        return None
+    hub_path = (get_gateway_db_path() or "").strip()
+    if not hub_path or hub_path == ":memory:":
+        return None
+    db_path = str(getattr(db, "_path", "") or "").strip()
+    if db_path and db_path != ":memory:":
+        try:
+            if Path(db_path).expanduser().resolve() == Path(hub_path).expanduser().resolve():
+                return None
+        except OSError:
+            if db_path == hub_path:
+                return None
+    try:
+        # .query JSON Ã¢â€ â€™ _query_all_dicts; execute is no-op (RO DDL skipped).
+        return GatewayDbEphemeralReadonly(hub_path)
+    except Exception as exc:
+        _log.debug("hub catalog open failed: %s", exc)
+        return None
+
+
 def _cache_dir(worker_uid: str, files_digest: str) -> Path:
     return _CACHE_ROOT / f"{worker_uid}_{files_digest}"
 
@@ -53,17 +78,29 @@ def load_manifest_from_catalog(
     Raises ``FileNotFoundError`` if the worker is not found in the catalog
     or has no versions.
     """
+    catalog_db = db
     cat = get_worker_by_tenant_worker_id(
-        db,
+        catalog_db,
         tenant_id=tenant_id,
         worker_id=worker_id,
     )
+    if not cat:
+        # Tenant vault DBs may ship without admin_worker_catalog rows; hub holds catalog.
+        hub = _hub_catalog_db_if_different(catalog_db)
+        if hub is not None:
+            cat = get_worker_by_tenant_worker_id(
+                hub,
+                tenant_id=tenant_id,
+                worker_id=worker_id,
+            )
+            if cat:
+                catalog_db = hub
     if not cat:
         raise FileNotFoundError(
             f"Worker '{worker_id}' not found in catalog for tenant '{tenant_id}'"
         )
 
-    ver = get_latest_worker_version(db, worker_uid=cat["worker_uid"])
+    ver = get_latest_worker_version(catalog_db, worker_uid=cat["worker_uid"])
     if not ver:
         raise FileNotFoundError(
             f"Worker '{worker_id}' has no versions in catalog"

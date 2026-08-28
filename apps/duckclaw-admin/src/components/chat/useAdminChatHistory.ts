@@ -14,6 +14,7 @@ import {
   readEphemeralHeartbeats,
   writeEphemeralHeartbeats,
 } from '@/lib/chatEphemeralStorage';
+import { isConversationNotFoundError } from '@/lib/adminErrors';
 import { writeStoredVaultPath } from '@/lib/conversationVaultStorage';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
 import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
@@ -133,8 +134,8 @@ export function useAdminChatHistory({
           );
         });
       })
-      .catch(() => {
-        notifyConversationMissing(chatId);
+      .catch((err) => {
+        if (isConversationNotFoundError(err)) notifyConversationMissing(chatId);
       })
       .finally(() => setHistoryLoading(false));
   }, [
@@ -249,20 +250,8 @@ export function useAdminChatHistory({
           writeStoredVaultPath(chatId, convVault);
         }
       })
-      .catch(() => {
-        notifyConversationMissing(chatId);
-        if (!cancelled && !loadingRef.current) {
-          const stored = readEphemeralHeartbeats(chatId, workerAtLoad);
-          setMessages((prev) => {
-            const live = filterEphemeralForWorker(
-              collectEphemeralMessages(prev),
-              workerAtLoad
-            );
-            const merged = mergeEphemeralHeartbeats(stored, live);
-            if (merged.length === 0 && prev.length === 0) return prev;
-            return merged.length ? merged : [];
-          });
-        }
+      .catch((err) => {
+        if (isConversationNotFoundError(err)) notifyConversationMissing(chatId);
       })
       .finally(() => {
         if (!cancelled) setHistoryLoading(false);

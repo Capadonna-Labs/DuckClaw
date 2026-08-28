@@ -11,9 +11,13 @@ import { adminService } from '@/services/adminService';
 import { useGatewayHealthStore } from '@/store/gatewayHealthStore';
 
 const ADB_DEBUG_PORT_KEY = 'duckclaw:android-adb-debug-port';
+const ADB_PAIR_PORT_KEY = 'duckclaw:android-adb-pair-port';
 
-function parseDebugPort(raw: string): number | null {
-  const n = parseInt(raw.trim(), 10);
+function parsePort(raw: string): number | null {
+  const text = raw.trim();
+  if (!text) return null;
+  const fromHost = text.match(/:(\d+)\s*$/);
+  const n = parseInt(fromHost ? fromHost[1] : text.replace(/\D/g, ''), 10);
   if (!Number.isFinite(n) || n < 1 || n > 65535) return null;
   return n;
 }
@@ -45,6 +49,8 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
   const [androidError, setAndroidError] = useState<string | null>(null);
   const [androidLoading, setAndroidLoading] = useState(true);
   const debugPortRef = useRef<HTMLInputElement>(null);
+  const pairPortRef = useRef<HTMLInputElement>(null);
+  const pairCodeRef = useRef<HTMLInputElement>(null);
   const [connectBusy, setConnectBusy] = useState(false);
   const [connectMessage, setConnectMessage] = useState<string | null>(null);
   const { data: health, error: healthError, recovering, refresh: refreshHealth } =
@@ -72,37 +78,97 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
     void refreshHealth();
   }, [loadAndroid, refreshHealth]);
 
+  useEffect(() => {
+    const input = debugPortRef.current;
+    if (!input || input.value.trim()) return;
+    const stored = sessionStorage.getItem(ADB_DEBUG_PORT_KEY);
+    if (stored) input.value = stored;
+    const pairStored = sessionStorage.getItem(ADB_PAIR_PORT_KEY);
+    if (pairStored && pairPortRef.current && !pairPortRef.current.value.trim()) {
+      pairPortRef.current.value = pairStored;
+    }
+  }, []);
+
+  useEffect(() => {
+    const input = debugPortRef.current;
+    if (!input || input.value.trim()) return;
+    const fromServer = android?.adb_debug_port?.trim();
+    if (fromServer) input.value = fromServer;
+  }, [android?.adb_debug_port]);
+
   const connectAdb = useCallback(async () => {
-    const port = parseDebugPort(debugPortRef.current?.value ?? '');
+    const port =
+      parsePort(debugPortRef.current?.value ?? '') ??
+      parsePort(android?.adb_debug_port ?? '');
     if (port == null) {
-      setConnectMessage('Puerto inválido (1–65535)');
+      setConnectMessage(
+        'Falta puerto debug: en el teléfono cierra el diálogo de pair y copia el número después de los dos puntos (ej. 42961).',
+      );
+      return;
+    }
+    const pairPortRaw = pairPortRef.current?.value ?? '';
+    const pairCodeRaw = (pairCodeRef.current?.value ?? '').trim();
+    const pairPort = pairPortRaw.trim() ? parsePort(pairPortRaw) : null;
+    if (pairPortRaw.trim() && pairPort == null) {
+      setConnectMessage('Puerto pair inválido (1–65535)');
+      return;
+    }
+    if ((pairPort != null && !pairCodeRaw) || (pairCodeRaw && pairPort == null)) {
+      setConnectMessage('Emparejamiento requiere puerto pair y código de 6 dígitos');
       return;
     }
     setConnectBusy(true);
     setConnectMessage(null);
     try {
       sessionStorage.setItem(ADB_DEBUG_PORT_KEY, String(port));
-      const out = await adminService.runOps('android_adb_connect', { debug_port: port });
+      if (pairPort != null) sessionStorage.setItem(ADB_PAIR_PORT_KEY, String(pairPort));
+      const params: Record<string, string | number> = { debug_port: port };
+      if (pairPort != null) params.pair_port = pairPort;
+      if (pairCodeRaw) params.pair_code = pairCodeRaw;
+      const out = await adminService.runOps('android_adb_connect', params);
       let detail = out.stderr?.trim() || '';
+      let envUpdated: string[] | undefined;
+      let hint = '';
       if (out.stdout) {
         try {
-          const parsed = JSON.parse(out.stdout) as { host?: string; stdout?: string; stderr?: string };
+          const parsed = JSON.parse(out.stdout) as {
+            host?: string;
+            stdout?: string;
+            stderr?: string;
+            hint?: string;
+            paired?: boolean;
+            env_updated?: string[];
+          };
           detail = parsed.stdout || parsed.stderr || parsed.host || detail;
+          envUpdated = parsed.env_updated;
+          hint = parsed.hint || '';
+          if (parsed.paired) {
+            detail = `Emparejado. ${detail}`.trim();
+            if (pairCodeRef.current) pairCodeRef.current.value = '';
+          }
         } catch {
           detail = out.stdout.trim() || detail;
         }
       }
       if (!out.ok) {
-        throw new Error(detail || 'adb connect falló');
+        await loadAndroid();
+        throw new Error(
+          [detail || 'adb connect falló', hint, envUpdated?.length ? `(env: ${envUpdated.join(', ')})` : '']
+            .filter(Boolean)
+            .join(' '),
+        );
       }
-      setConnectMessage(detail ? `Conectado: ${detail}` : 'ADB conectado');
+      const savedKeys = envUpdated?.length
+        ? ` · .env: ${envUpdated.join(', ')}`
+        : ' · .env actualizado';
+      setConnectMessage(detail ? `${detail}${savedKeys}` : `ADB conectado${savedKeys}`);
       await loadAndroid();
     } catch (e) {
       setConnectMessage(e instanceof Error ? e.message : 'No se pudo conectar ADB');
     } finally {
       setConnectBusy(false);
     }
-  }, [loadAndroid]);
+  }, [android?.adb_debug_port, loadAndroid]);
 
   const gatewayOk = isGatewayHealthy(health);
   const pm2Rows = useMemo(() => {
@@ -157,37 +223,75 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             onRefresh={() => void loadAndroid()}
             refreshing={androidLoading}
             actions={
-              <div className="flex w-full flex-wrap items-end gap-2">
-                <label className="flex min-w-[8rem] flex-col gap-0.5 text-xs">
-                  <span className="font-semibold text-gov-gray-500 dark:text-dark-muted">
-                    Puerto debug inalámbrico
-                  </span>
-                  <input
-                    ref={debugPortRef}
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    name="adb-wireless-debug-port"
-                    autoComplete="off"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    placeholder="Puerto del teléfono"
-                    defaultValue=""
-                    onInput={(e) => {
-                      e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '');
-                    }}
-                    className="rounded-lg border border-gov-gray-200 px-2 py-1.5 font-mono text-sm dark:border-dark-border dark:bg-dark-bg"
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={connectBusy || androidLoading}
-                  onClick={() => void connectAdb()}
-                  className="inline-flex items-center gap-1 rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
-                >
-                  <Plug size={12} className={connectBusy ? 'animate-pulse' : ''} />
-                  {connectBusy ? 'Conectando…' : 'Conectar ADB'}
-                </button>
+              <div className="flex w-full flex-col gap-2">
+                <p className="text-[11px] text-gov-gray-500 dark:text-dark-muted">
+                  1) Teléfono → Depuración inalámbrica → <strong>Emparejar con código</strong> (puerto
+                  pair + 6 dígitos, caduca rápido). 2) Pantalla principal → copia{' '}
+                  <strong>puerto debug</strong> → Conectar.
+                </p>
+                <div className="flex w-full flex-wrap items-end gap-2">
+                  <label className="flex min-w-[7rem] flex-col gap-0.5 text-xs">
+                    <span className="font-semibold text-gov-gray-500 dark:text-dark-muted">
+                      Puerto pair
+                    </span>
+                    <input
+                      ref={pairPortRef}
+                      type="text"
+                      inputMode="numeric"
+                      name="adb-wireless-pair-port"
+                      autoComplete="off"
+                      placeholder="ej. 42871"
+                      defaultValue=""
+                      className="rounded-lg border border-gov-gray-200 px-2 py-1.5 font-mono text-sm dark:border-dark-border dark:bg-dark-bg"
+                    />
+                  </label>
+                  <label className="flex min-w-[7rem] flex-col gap-0.5 text-xs">
+                    <span className="font-semibold text-gov-gray-500 dark:text-dark-muted">
+                      Código pair
+                    </span>
+                    <input
+                      ref={pairCodeRef}
+                      type="text"
+                      inputMode="numeric"
+                      name="adb-wireless-pair-code"
+                      autoComplete="off"
+                      placeholder="6 dígitos"
+                      maxLength={6}
+                      defaultValue=""
+                      onInput={(e) => {
+                        e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '').slice(0, 6);
+                      }}
+                      className="rounded-lg border border-gov-gray-200 px-2 py-1.5 font-mono text-sm tracking-widest dark:border-dark-border dark:bg-dark-bg"
+                    />
+                  </label>
+                  <label className="flex min-w-[7rem] flex-col gap-0.5 text-xs">
+                    <span className="font-semibold text-gov-gray-500 dark:text-dark-muted">
+                      Puerto debug
+                    </span>
+                    <input
+                      ref={debugPortRef}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      name="adb-wireless-debug-port"
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder="ej. 42961"
+                      defaultValue=""
+                      className="rounded-lg border border-gov-gray-200 px-2 py-1.5 font-mono text-sm dark:border-dark-border dark:bg-dark-bg"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={connectBusy || androidLoading}
+                    onClick={() => void connectAdb()}
+                    className="inline-flex items-center gap-1 rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
+                  >
+                    <Plug size={12} className={connectBusy ? 'animate-pulse' : ''} />
+                    {connectBusy ? 'Conectando…' : 'Emparejar y conectar'}
+                  </button>
+                </div>
               </div>
             }
             footer={androidFooter}
@@ -195,7 +299,10 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             {connectMessage ? (
               <p
                 className={`rounded-lg px-3 py-2 text-xs ${
-                  connectMessage.startsWith('Conectado')
+                  /^(already )?connected to\b/i.test(connectMessage.trim()) ||
+                  connectMessage.startsWith('Conectado') ||
+                  connectMessage.startsWith('Emparejado') ||
+                  connectMessage.startsWith('ADB conectado')
                     ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
                     : 'bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100'
                 }`}

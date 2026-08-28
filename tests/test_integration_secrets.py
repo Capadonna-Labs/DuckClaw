@@ -67,6 +67,39 @@ def test_resolve_tavily_db_over_env(gateway_db: Path, monkeypatch: pytest.Monkey
         con.close()
 
 
+def test_resolve_workspace_key_when_caller_tenant_default(
+    gateway_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """UI guarda en tenant workspace; /loop a menudo invoca con tenant=default."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-env-stale")
+    con = duckdb.connect(str(gateway_db))
+    try:
+        adapter = _Adapter(con)
+        bootstrap_core_schema(adapter, seed_admin=False)
+        profile = ensure_profile_for_user(adapter, email="or-ws@test.local")
+        upsert_runtime_setting(
+            adapter,
+            tenant_id=profile["tenant_id"],
+            actor_email="",
+            domain="integrations",
+            key="openrouter.api_key",
+            value_text="sk-or-workspace-good",
+            secret=True,
+            updated_by="or-ws@test.local",
+        )
+        assert (
+            resolve_integration_api_key(
+                "openrouter",
+                db=adapter,
+                tenant_id="default",
+                actor_email="or-ws@test.local",
+            )
+            == "sk-or-workspace-good"
+        )
+    finally:
+        con.close()
+
+
 def test_runtime_setting_lists_integrations_configured_from_env(
     gateway_db: Path,
     monkeypatch: pytest.MonkeyPatch,

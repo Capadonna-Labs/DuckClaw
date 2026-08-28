@@ -52,6 +52,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (id !== runId.current) return;
 
       if (!res.ok) {
+        const live = useAuthStore.getState();
+        // Stale /me (started before Entrar) must not wipe a login that already succeeded.
+        if (live.isSubmitting || live.isAuthenticated) {
+          return;
+        }
         setUser(null);
         writeAuthSnapshot(null);
         if (res.status === 503) {
@@ -73,6 +78,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       if (id !== runId.current) return;
       const timedOut = err instanceof DOMException && err.name === 'AbortError';
+      const live = useAuthStore.getState();
+      if (live.isSubmitting || live.isAuthenticated) {
+        return;
+      }
       if (!cached) {
         setUser(null);
         writeAuthSnapshot(null);

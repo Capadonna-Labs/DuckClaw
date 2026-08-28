@@ -239,11 +239,14 @@ def overview_usage_metrics(
 async def admin_health(request: Request) -> dict[str, Any]:
     worker_ids: list[str] = []
     worker_labels: list[str] = []
-    try:
+
+    def _load_workers() -> tuple[list[str], list[str]]:
         from core.admin_identity import open_gateway_db
         from duckclaw.admin_worker_catalog import list_visible_workers_for_actor
         from duckclaw.workers.factory import list_workers
 
+        ids: list[str] = []
+        labels: list[str] = []
         with open_gateway_db(read_only=True) as db:
             actor = (request.headers.get("x-duckclaw-actor") or "").strip().lower()
             if actor and "@" in actor:
@@ -252,15 +255,21 @@ async def admin_health(request: Request) -> dict[str, Any]:
                     if not wid:
                         continue
                     label = str(item.get("display_name") or item.get("name") or wid).strip() or wid
-                    worker_ids.append(wid)
-                    worker_labels.append(label)
+                    ids.append(wid)
+                    labels.append(label)
             else:
                 for wid in list_workers(db=db):
                     wid_s = str(wid or "").strip()
                     if not wid_s:
                         continue
-                    worker_ids.append(wid_s)
-                    worker_labels.append(wid_s)
+                    ids.append(wid_s)
+                    labels.append(wid_s)
+        return ids, labels
+
+    try:
+        import asyncio
+
+        worker_ids, worker_labels = await asyncio.to_thread(_load_workers)
     except Exception:
         worker_ids = []
         worker_labels = []

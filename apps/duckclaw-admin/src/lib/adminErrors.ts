@@ -15,18 +15,24 @@ function hostGatewayDownMessage(): string {
   return 'El API Gateway no está en marcha en este equipo. Usa «Iniciar stack» para levantar DuckClaw-DB-Writer y DuckClaw-Gateway (PM2).';
 }
 
+export function isConversationNotFoundError(err: unknown): boolean {
+  const m = (err instanceof Error ? err.message : String(err || '')).toLowerCase();
+  return m.includes('conversación no encontrada') || m.includes('conversacion no encontrada');
+}
+
 export function isGatewayUnreachableMessage(message: string): boolean {
   const m = message.toLowerCase();
   if (
     m.includes('timeout') ||
     m.includes('timed out') ||
     m.includes('tardó demasiado') ||
-    m.includes('aborted due to timeout')
+    m.includes('aborted due to timeout') ||
+    m.includes('no respondió') ||
+    m.includes('no respondio')
   ) {
     return false;
   }
   return (
-    m.includes('internal server error') ||
     m.includes('fetch failed') ||
     m.includes('econnrefused') ||
     m.includes('failed to fetch') ||
@@ -67,9 +73,14 @@ export function friendlyGatewayError(raw: string): string {
   if (
     m.includes('timeout') ||
     m.includes('timed out') ||
-    m.includes('aborted due to timeout')
+    m.includes('aborted due to timeout') ||
+    m.includes('no respondió') ||
+    m.includes('no respondio')
   ) {
-    return 'La respuesta de voz tardó más de lo que el proxy admite. El agente puede haber terminado en el servidor; recarga el chat o reintenta con una pregunta más corta.';
+    if (m.includes('voz') || m.includes('voice')) {
+      return 'La respuesta de voz tardó más de lo que el proxy admite. El agente puede haber terminado en el servidor; recarga el chat o reintenta con una pregunta más corta.';
+    }
+    return 'El gateway tardó demasiado. Recarga el historial; el stack ya está en marcha.';
   }
   if (isGatewayUnreachableMessage(raw)) {
     return isDesktopRuntime() ? desktopGatewayDownMessage() : hostGatewayDownMessage();

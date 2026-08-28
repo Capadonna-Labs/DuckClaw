@@ -33,6 +33,7 @@ export default defineConfig({
       'src/lib/integrationDocsUrls.test.ts',
       'src/lib/chatDocumentAttachments.test.ts',
       'src/lib/desktopLocalFiles.test.ts',
+      'src/lib/adminErrors.test.ts',
     ],
   },
   resolve: {

@@ -22,6 +22,13 @@ UNLOCK_TOOL_NAME = "unlock_tool_pack"
 LIST_PACKS_TOOL_NAME = "list_tool_packs"
 MCP_UMBRELLA_PACK_ID = "mcp"
 _MCP_CONNECTOR_PACK_PREFIX = "mcp_"
+# ADB helpers live outside mcp__* namespace but belong to Android MCP pack.
+_ANDROID_ADB_HELPER_TOOLS = frozenset(
+    {
+        "android_expand_notifications",
+        "android_collapse_notifications",
+    }
+)
 
 
 def apply_runtime_tool_packs(
@@ -48,17 +55,20 @@ def apply_runtime_tool_packs(
         )
 
     cfg = with_mcp_connector_packs(cfg, tool_names)
+    msgs = messages or ()
     active = resolve_active_pack_ids(
         cfg,
         intent_text=intent_text,
-        messages=messages or (),
+        messages=msgs,
         available_tool_names=tool_names,
     )
+    unlock_priority = tuple(unlocked_packs_from_messages(msgs))
     return filter_tools_by_packs(
         tool_list,
         cfg=cfg,
         active_packs=active,
         connector_ids=connector_ids,
+        unlock_priority=unlock_priority,
     )
 
 
@@ -86,17 +96,24 @@ def enrich_catalog_with_mcp_connectors(
     """Añade un pack por conector MCP presente en ``tool_names`` (idempotente)."""
     existing = {p.pack_id for p in catalog.packs}
     extra: list[ToolPackSpec] = []
-    for connector_id in sorted(mcp_connector_ids_from_tool_names(tool_names)):
+    # Helpers may appear without mcp__android__* yet; still seed android pack.
+    connector_ids = set(mcp_connector_ids_from_tool_names(tool_names))
+    if _ANDROID_ADB_HELPER_TOOLS.intersection(str(n or "") for n in tool_names):
+        connector_ids.add("android")
+    for connector_id in sorted(connector_ids):
         pack_id = mcp_pack_id_for_connector(connector_id)
         if pack_id in existing:
             continue
+        exact = (
+            _ANDROID_ADB_HELPER_TOOLS if connector_id == "android" else frozenset()
+        )
         extra.append(
             ToolPackSpec(
                 pack_id=pack_id,
                 description=f"Tools MCP del conector «{connector_id}».",
                 always=False,
                 members=ToolPackMembers(
-                    exact=frozenset(),
+                    exact=exact,
                     prefixes=(f"mcp__{connector_id}__",),
                 ),
                 activation_signals=(connector_id,),
@@ -183,6 +200,7 @@ def filter_tools_by_packs(
     cfg: RuntimePacksConfig,
     active_packs: frozenset[str],
     connector_ids: frozenset[str] | None = None,
+    unlock_priority: Iterable[str] = (),
 ) -> PackFilterResult:
     catalog = cfg.catalog
     kept: list[Any] = []
@@ -215,7 +233,13 @@ def filter_tools_by_packs(
     truncated = False
     max_bound = catalog.max_bound_tools
     if len(kept) > max_bound:
-        kept = _truncate_preferring_always(kept, catalog, active_packs, max_bound)
+        kept = _truncate_preferring_always(
+            kept,
+            catalog,
+            active_packs,
+            max_bound,
+            unlock_priority=tuple(unlock_priority),
+        )
         truncated = True
 
     names = tuple(_tool_name(t) for t in kept if _tool_name(t))
@@ -375,10 +399,17 @@ def _truncate_preferring_always(
     catalog: RuntimeToolPackCatalog,
     active_packs: frozenset[str],
     max_bound: int,
+    *,
+    unlock_priority: tuple[str, ...] = (),
 ) -> list[Any]:
-    """Preferir tools de packs activos; los huérfanos van al final (no comen cupo)."""
+    """Preferir always-on, luego packs recién unlock, luego resto; huérfanos al final."""
     always_ids = {p.pack_id for p in catalog.packs if p.always and p.pack_id in active_packs}
+    # Último unlock gana (agent pidió ese pack → no truncar a favor de otro MCP).
+    unlock_rank = {
+        pid: idx for idx, pid in enumerate(reversed(tuple(unlock_priority)))
+    }
     primary: list[Any] = []
+    unlocked_secondary: list[tuple[int, Any]] = []
     secondary: list[Any] = []
     orphans: list[Any] = []
     for tool in tools:
@@ -389,12 +420,24 @@ def _truncate_preferring_always(
             continue
         if packs & always_ids:
             primary.append(tool)
-        elif packs & active_packs:
-            secondary.append(tool)
-        else:
-            # No debería llegar aquí (ya filtrado), pero no inventar prioridad.
-            orphans.append(tool)
-    ordered = primary + secondary + orphans
+            continue
+        if packs & active_packs:
+            hit = packs & unlock_rank.keys()
+            if hit:
+                # Mejor (más reciente) rank entre packs de la tool.
+                rank = max(unlock_rank[p] for p in hit)
+                unlocked_secondary.append((rank, tool))
+            else:
+                secondary.append(tool)
+            continue
+        orphans.append(tool)
+    unlocked_secondary.sort(key=lambda item: (-item[0],))
+    ordered = (
+        primary
+        + [t for _, t in unlocked_secondary]
+        + secondary
+        + orphans
+    )
     return ordered[:max_bound]
 
 

@@ -12,10 +12,16 @@ import logging
 import os
 import re
 import uuid
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+from core.admin_conversations_db import (
+    _is_generic_conversation_title,
+    _title_from_first_message,
+)
 
 _log = logging.getLogger(__name__)
 
@@ -197,19 +203,6 @@ def _preview_text(text: str) -> str:
     return t
 
 
-def _title_from_first_message(text: str) -> str:
-    t = " ".join((text or "").split())
-    if not t:
-        return ""
-    if len(t) > _TITLE_MAX:
-        return t[: _TITLE_MAX - 1].rstrip() + "…"
-    return t
-
-
-def _is_generic_conversation_title(title: str) -> bool:
-    return bool(re.fullmatch(r"Conversación \d{4}-\d{2}-\d{2}", (title or "").strip()))
-
-
 def new_admin_conversation_session_id() -> str:
     return f"{_ADMIN_CONV_PREFIX}{uuid.uuid4().hex}"
 
@@ -225,14 +218,16 @@ async def get_conversation_meta(
     sid = (session_id or "").strip()
     if not sid:
         return None
-    meta = db_get_conversation_meta(tid, sid)
-    if meta is not None:
-        await _cache_upsert_meta(redis_client, meta)
-        return meta
     redis_meta = await _redis_get_meta(redis_client, tid, sid)
-    if redis_meta is None:
-        return None
-    return await _hydrate_db_from_redis_meta(redis_client, redis_meta)
+    if redis_meta is not None:
+        # Any Redis hit: skip hub. Generic-title DuckDB repair fought db-writer
+        # RW lock on every playground poll (get meta log spam).
+        return redis_meta
+    db_meta = db_get_conversation_meta(tid, sid)
+    if db_meta is not None:
+        await _cache_upsert_meta(redis_client, db_meta)
+        return db_meta
+    return None
 
 
 async def upsert_conversation_meta(
@@ -279,6 +274,7 @@ async def upsert_conversation_meta(
         title=title,
         vault_db_path=vault,
         origin=origin,
+        existing=existing,
     )
     if meta is None:
         # Fallback in-memory shape when DuckDB unavailable (tests / misconfig).
@@ -334,6 +330,13 @@ async def upsert_conversation_meta(
                 else (2 if user_message and assistant_message else 0),
                 origin="admin_ui",
             )
+    if (
+        meta is not None
+        and not (title and str(title).strip())
+        and existing is not None
+        and not _is_generic_conversation_title(existing.title)
+    ):
+        meta = meta.model_copy(update={"title": existing.title})
     await _cache_upsert_meta(redis_client, meta)
     return meta
 
@@ -355,19 +358,66 @@ async def resolve_conversation_view(
     resolved_tid = (primary_tenant_id or "default").strip() or "default"
     for try_tid in admin_conversation_tenant_candidates(resolved_tid):
         meta = await get_conversation_meta(redis_client, try_tid, sid)
-        messages = db_load_messages(try_tid, sid)
-        if not messages:
-            messages = await redis_load_chat_history(redis_client, try_tid, sid)
-            if messages and meta is not None:
-                try:
-                    from core.admin_conversations_db import db_save_messages
+        redis_messages = await redis_load_chat_history(redis_client, try_tid, sid)
+        # Redis hit: skip hub RO. Poll + db_load vs db-writer RW = lock spam.
+        # Don't db_save on this path (empty db_messages would enqueue a full rewrite).
+        if redis_messages:
+            messages = redis_messages
+        else:
+            messages = db_load_messages(try_tid, sid)
+        try:
+            from duckclaw.graphs.conversation_traces import reconstruct_chat_messages_from_traces
 
-                    db_save_messages(try_tid, sid, messages)
+            # Scanning traces.jsonl walks the whole traces tree; only worth it when
+            # DuckDB and Redis both came up empty for this session.
+            need_traces = not messages
+            traced: list[dict[str, str]] = []
+            if need_traces:
+                traced = await asyncio.to_thread(reconstruct_chat_messages_from_traces, sid)
+        except Exception:
+            traced = []
+        if traced and len(traced) > len(messages):
+            messages = traced
+            try:
+                from core.admin_conversations_db import db_save_messages
+
+                db_save_messages(try_tid, sid, messages)
+            except Exception:
+                pass
+            if redis_client is not None:
+                try:
+                    await redis_save_chat_history(redis_client, try_tid, sid, messages)
                 except Exception:
                     pass
+        # Sin meta conocido no se puede refrescar el contador sin inventar un título:
+        # el upsert trataría el hilo como nuevo y lo renombraría con el último mensaje.
+        if messages and meta is not None and int(meta.message_count or 0) < len(messages):
+            last_user = next((m["content"] for m in reversed(messages) if m.get("role") == "user"), "")
+            last_asst = next((m["content"] for m in reversed(messages) if m.get("role") == "assistant"), "")
+            keep_title = (
+                meta.title
+                if meta.title and not _is_generic_conversation_title(meta.title)
+                else None
+            )
+            try:
+                hydrated_meta = await upsert_conversation_meta(
+                    redis_client,
+                    tenant_id=try_tid,
+                    session_id=sid,
+                    actor=meta.actor,
+                    last_worker_id=meta.last_worker_id,
+                    user_message=last_user,
+                    assistant_message=last_asst,
+                    message_count=len(messages),
+                    title=keep_title,
+                )
+                if hydrated_meta is not None:
+                    meta = hydrated_meta
+            except Exception:
+                pass
         if meta is None and not messages:
             continue
-        if messages and redis_client is not None:
+        if len(messages) > len(redis_messages) and redis_client is not None:
             try:
                 await redis_save_chat_history(redis_client, try_tid, sid, messages)
             except Exception:
@@ -441,18 +491,25 @@ async def list_conversations(
     # Merge Redis-only entries and hydrate into DuckDB.
     if redis_client is not None:
         try:
-            session_ids = await redis_client.zrevrange(_zset_key(tid), 0, -1)
+            try:
+                session_rows = await redis_client.zrevrange(_zset_key(tid), 0, -1, withscores=True)
+            except TypeError:
+                ids = await redis_client.zrevrange(_zset_key(tid), 0, -1)
+                session_rows = [(i, 0) for i in (ids or [])]
         except Exception:
-            session_ids = []
-        for sid in session_ids or []:
+            session_rows = []
+        for row in session_rows or []:
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                sid, score = row[0], row[1]
+            else:
+                sid, score = row, 0
             sid_s = sid.decode("utf-8") if isinstance(sid, bytes) else str(sid)
             if sid_s in seen:
                 continue
             redis_meta = await _redis_get_meta(redis_client, tid, sid_s)
-            if redis_meta is None:
-                continue
-            hydrated = await _hydrate_db_from_redis_meta(redis_client, redis_meta)
-            seen[sid_s] = hydrated
+            if redis_meta is not None:
+                hydrated = await _hydrate_db_from_redis_meta(redis_client, redis_meta)
+                seen[sid_s] = hydrated
 
     items = list(seen.values())
     sec_f = (section or "").strip().lower()
@@ -476,8 +533,6 @@ async def list_conversations(
     filtered.sort(key=lambda m: m.updated_at or "", reverse=True)
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
-    for meta in filtered:
-        await _cache_upsert_meta(redis_client, meta)
     return filtered[offset : offset + limit], len(filtered)
 
 
@@ -494,11 +549,12 @@ async def patch_conversation_title(
         meta = await get_conversation_meta(redis_client, try_tid, sid)
         if meta is None:
             continue
-        patched = db_patch_conversation_title(meta.tenant_id, sid, title)
+        wanted = (title or "").strip() or meta.title
+        patched = db_patch_conversation_title(meta.tenant_id, sid, wanted)
         if patched is None:
-            meta.title = (title or "").strip() or meta.title
-            meta.updated_at = _now_iso()
-            patched = meta
+            patched = meta.model_copy(update={"title": wanted, "updated_at": _now_iso()})
+        elif wanted and patched.title != wanted:
+            patched = patched.model_copy(update={"title": wanted, "updated_at": _now_iso()})
         await _cache_upsert_meta(redis_client, patched)
         return patched
     return None

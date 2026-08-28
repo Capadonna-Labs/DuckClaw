@@ -9,7 +9,7 @@ type BootstrapState = {
   loading: boolean;
 };
 
-const POLL_UNHEALTHY_MS = 15_000;
+const POLL_UNHEALTHY_MS = 5_000;
 const POLL_HEALTHY_MS = 60_000;
 
 function pollIntervalMs(status: AdminBootstrapStatus | null): number {
@@ -20,9 +20,10 @@ function pollIntervalMs(status: AdminBootstrapStatus | null): number {
 export function useAdminBootstrapStatus(): BootstrapState {
   const [state, setState] = useState<BootstrapState>({ status: null, loading: true });
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (opts?: { nocache?: boolean }) => {
     try {
-      const res = await fetch('/api/admin/bootstrap/status', {
+      const qs = opts?.nocache ? '?nocache=1' : '';
+      const res = await fetch(`/api/admin/bootstrap/status${qs}`, {
         credentials: 'include',
         cache: 'no-store',
       });
@@ -58,5 +59,5 @@ export function useAdminBootstrapStatus(): BootstrapState {
   const intervalMs = useMemo(() => pollIntervalMs(state.status), [state.status]);
   useVisibilityAwareInterval(() => void refresh(), intervalMs);
 
-  return state;
+  return { status: state.status, loading: state.loading, refresh };
 }

@@ -143,10 +143,17 @@ async def upsert_conversation_meta(
     message_count: int,
 ) -> None:
     try:
-        from core.admin_conversations import get_conversation_meta, upsert_conversation_meta as _upsert
+        from core.admin_conversations import (
+            get_conversation_meta,
+            upsert_conversation_meta as _upsert,
+        )
+        from core.admin_conversations_db import _is_generic_conversation_title
 
         existing_conv = await get_conversation_meta(redis_client, tenant_id, session_id)
         conv_section = existing_conv.section if existing_conv else None
+        keep_title = None
+        if existing_conv and not _is_generic_conversation_title(existing_conv.title):
+            keep_title = existing_conv.title
         await _upsert(
             redis_client,
             tenant_id=tenant_id,
@@ -157,6 +164,7 @@ async def upsert_conversation_meta(
             user_message=user_message,
             assistant_message=assistant_message,
             message_count=message_count,
+            title=keep_title,
         )
     except Exception:
         pass

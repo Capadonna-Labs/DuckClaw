@@ -35,11 +35,18 @@ export function useActiveConversation(
     async (title: string) => {
       if (!sessionId) return;
       const tid = tenantId || 'default';
-      const meta = await adminService.patchConversation(sessionId, title, tid);
-      setConversationTitle(meta.title || title);
-      bumpRefresh();
+      const previous = conversationTitle;
+      setConversationTitle(title);
+      try {
+        const meta = await adminService.patchConversation(sessionId, title, tid);
+        setConversationTitle((meta.title || title).trim() || title);
+        bumpRefresh();
+      } catch (err) {
+        setConversationTitle(previous);
+        throw err;
+      }
     },
-    [sessionId, tenantId, bumpRefresh]
+    [sessionId, tenantId, conversationTitle, bumpRefresh]
   );
 
   const selectConversation = useCallback((id: string, title?: string) => {

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -33,9 +35,22 @@ def _preview_text(text: str) -> str:
     return t
 
 
-def _title_from_first_message(text: str) -> str:
+def _is_system_turn_title(text: str) -> bool:
+    """True si el texto es turno sistema /loop, no un título de hilo."""
     t = " ".join((text or "").split())
     if not t:
+        return False
+    low = t.lower()
+    if low.startswith("[ciclo loop]") or low.startswith("[ciclo meditate]"):
+        return True
+    if t.startswith("[SYSTEM_EVENT"):
+        return True
+    return False
+
+
+def _title_from_first_message(text: str) -> str:
+    t = " ".join((text or "").split())
+    if not t or _is_system_turn_title(t):
         return ""
     if len(t) > _TITLE_MAX:
         return t[: _TITLE_MAX - 1].rstrip() + "…"
@@ -45,7 +60,10 @@ def _title_from_first_message(text: str) -> str:
 def _is_generic_conversation_title(title: str) -> bool:
     import re
 
-    return bool(re.fullmatch(r"Conversación \d{4}-\d{2}-\d{2}", (title or "").strip()))
+    t = (title or "").strip()
+    if _is_system_turn_title(t):
+        return True
+    return bool(re.fullmatch(r"Conversación \d{4}-\d{2}-\d{2}", t))
 
 
 def _fetch_dicts(db: Any, sql: str) -> list[dict[str, Any]]:
@@ -62,6 +80,48 @@ def _open_db(*, read_only: bool = False):
     from core.admin_identity import open_gateway_db
 
     return open_gateway_db(read_only=read_only)
+
+
+def _hub_db_path() -> str:
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    gw = (get_gateway_db_path() or "").strip()
+    if not gw or not os.path.isfile(gw):
+        raise FileNotFoundError("Gateway DuckDB no disponible")
+    return gw
+
+
+def _writes_via_db_writer() -> bool:
+    from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+    return not spawn_inline_writes_enabled()
+
+
+def _execute_hub_write(sql: str | Sequence[str]) -> None:
+    """Hub writes via db-writer when Gateway is RO-only (avoids mixed RO/RW in one PID).
+
+    Statements are sent as a single task: the writer wraps them in one transaction
+    and one RW connection. Splitting them costs an exclusive DuckDB lock per row and
+    lets a DELETE commit without its INSERTs.
+    """
+    statements = [sql] if isinstance(sql, str) else list(sql)
+    statements = [s.strip().rstrip(";") for s in statements if (s or "").strip()]
+    if not statements:
+        return
+    if _writes_via_db_writer():
+        from duckclaw.db_write_queue import enqueue_duckdb_write_sync
+
+        enqueue_duckdb_write_sync(
+            db_path=_hub_db_path(),
+            query=";\n".join(statements),
+            user_id="default",
+            tenant_id="default",
+        )
+        return
+    with _open_db(read_only=False) as db:
+        ensure_admin_conversation_columns(db)
+        for statement in statements:
+            db.execute(statement)
 
 
 def ensure_admin_conversation_columns(db: Any) -> None:
@@ -162,6 +222,7 @@ def db_upsert_conversation_meta(
     title: str | None = None,
     vault_db_path: str | None = None,
     origin: str = "admin_ui",
+    existing: Any = None,
 ):
     from core.admin_conversations import derive_section_from_session_id, should_index_admin_conversation
 
@@ -172,7 +233,8 @@ def db_upsert_conversation_meta(
     if not sid:
         return None
     now = _now_iso()
-    existing = db_get_conversation_meta(tid, sid)
+    if existing is None:
+        existing = db_get_conversation_meta(tid, sid)
     sec = derive_section_from_session_id(sid, origin_section=section)
     lw = (last_worker_id or "").strip()
     worker_list = list(workers) if workers is not None else (list(existing.workers) if existing else [])
@@ -187,14 +249,19 @@ def db_upsert_conversation_meta(
     preview_src = (assistant_message or user_message or "").strip()
     preview = _preview_text(preview_src)
 
+    # If the row exists but this process failed to read it (hub lock), INSERT
+    # ON CONFLICT must not replace a custom title with the last user message.
+    update_title_on_conflict = False
     if existing:
         next_title = existing.title
         if title and title.strip():
             next_title = title.strip()
+            update_title_on_conflict = True
         elif _is_generic_conversation_title(existing.title):
             auto = _title_from_first_message(user_message)
             if auto:
                 next_title = auto
+                update_title_on_conflict = True
         next_count = (
             message_count
             if message_count is not None
@@ -219,10 +286,12 @@ def db_upsert_conversation_meta(
         explicit = (title or "").strip()
         if explicit and not _is_generic_conversation_title(explicit):
             next_title = explicit
+            update_title_on_conflict = True
         elif _title_from_first_message(user_message):
             next_title = _title_from_first_message(user_message)
         else:
             next_title = explicit or auto_title
+            update_title_on_conflict = bool(explicit)
         next_count = message_count if message_count is not None else (2 if user_message and assistant_message else 0)
         next_preview = preview
         next_vault = (vault_db_path or "").strip()
@@ -232,11 +301,11 @@ def db_upsert_conversation_meta(
         created_at = now
 
     workers_json = json.dumps(worker_list, ensure_ascii=False)
+    title_conflict_sql = (
+        "excluded.title" if update_title_on_conflict else "main.admin_conversations.title"
+    )
     try:
-        with _open_db(read_only=False) as db:
-            ensure_admin_conversation_columns(db)
-            db.execute(
-                f"""
+        sql = f"""
                 INSERT INTO main.admin_conversations (
                     conversation_id, tenant_id, actor_email, title, worker_id, vault_path,
                     created_at, updated_at, section, last_worker_id, preferred_worker_id,
@@ -261,7 +330,7 @@ def db_upsert_conversation_meta(
                 ON CONFLICT (conversation_id) DO UPDATE SET
                     tenant_id = excluded.tenant_id,
                     actor_email = excluded.actor_email,
-                    title = excluded.title,
+                    title = {title_conflict_sql},
                     worker_id = excluded.worker_id,
                     vault_path = excluded.vault_path,
                     updated_at = excluded.updated_at,
@@ -273,8 +342,28 @@ def db_upsert_conversation_meta(
                     message_count = excluded.message_count,
                     origin = excluded.origin
                 """
-            )
-        return db_get_conversation_meta(tid, sid)
+        _execute_hub_write(sql)
+        # db-writer is async: a hub read here returns the pre-enqueue row and the
+        # PATCH API would echo the old title back into the editor.
+        return _row_to_meta(
+            {
+                "conversation_id": sid,
+                "tenant_id": tid,
+                "actor_email": next_actor,
+                "title": next_title,
+                "worker_id": next_last or preferred,
+                "vault_path": next_vault or "",
+                "created_at": created_at,
+                "updated_at": now,
+                "section": next_section,
+                "last_worker_id": next_last,
+                "preferred_worker_id": preferred,
+                "workers_json": workers_json,
+                "last_message_preview": next_preview,
+                "message_count": int(next_count),
+                "origin": origin or "admin_ui",
+            }
+        )
     except FileNotFoundError:
         return None
     except Exception as exc:
@@ -403,21 +492,17 @@ def db_delete_conversation(tenant_id: str, session_id: str) -> bool:
     if not sid:
         return False
     try:
-        with _open_db(read_only=False) as db:
-            ensure_admin_conversation_columns(db)
-            db.execute(
+        _execute_hub_write(
+            [
                 "DELETE FROM main.admin_conversation_messages "
-                f"WHERE conversation_id = '{_sql_lit(sid, 128)}'"
-            )
-            db.execute(
+                f"WHERE conversation_id = '{_sql_lit(sid, 128)}'",
                 "DELETE FROM main.admin_conversation_artifacts "
-                f"WHERE conversation_id = '{_sql_lit(sid, 128)}'"
-            )
-            db.execute(
+                f"WHERE conversation_id = '{_sql_lit(sid, 128)}'",
                 "DELETE FROM main.admin_conversations "
                 f"WHERE tenant_id = '{_sql_lit(tid, 128)}' "
-                f"AND conversation_id = '{_sql_lit(sid, 128)}'"
-            )
+                f"AND conversation_id = '{_sql_lit(sid, 128)}'",
+            ]
+        )
         return True
     except FileNotFoundError:
         return False
@@ -459,53 +544,49 @@ def db_save_messages(tenant_id: str, session_id: str, items: list[dict[str, str]
     if not sid:
         return
     tid = (tenant_id or "default").strip() or "default"
+    rows: list[dict[str, str]] = []
+    for item in items:
+        role = str(item.get("role") or "").strip().lower()
+        content = str(item.get("content") or "").strip()
+        if role in ("user", "assistant") and content:
+            rows.append({"role": role, "content": content})
+    if not rows:
+        return
     try:
-        with _open_db(read_only=False) as db:
-            ensure_admin_conversation_columns(db)
-            db.execute(
-                "DELETE FROM main.admin_conversation_messages "
-                f"WHERE conversation_id = '{_sql_lit(sid, 128)}'"
-            )
-            now = _now_iso()
-            for idx, item in enumerate(items):
-                role = str(item.get("role") or "").strip().lower()
-                content = str(item.get("content") or "").strip()
-                if role not in ("user", "assistant") or not content:
-                    continue
-                mid = f"msg_{uuid.uuid4().hex}"
-                # Stable ordering via created_at + message_id; bump seconds lightly with idx micros.
+        now = _now_iso()
+        statements = [
+            "DELETE FROM main.admin_conversation_messages "
+            f"WHERE conversation_id = '{_sql_lit(sid, 128)}'"
+        ]
+        for idx, item in enumerate(rows):
+            mid = f"msg_{uuid.uuid4().hex}"
+            stamp = now
+            try:
+                base = datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+                stamp = (base.replace(microsecond=min(idx, 999999))).strftime(
+                    "%Y-%m-%dT%H:%M:%S.%fZ"
+                )
+            except Exception:
                 stamp = now
-                try:
-                    base = datetime.strptime(now, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
-                    stamp = (base.replace(microsecond=min(idx, 999999))).strftime(
-                        "%Y-%m-%dT%H:%M:%S.%fZ"
-                    )
-                except Exception:
-                    stamp = now
-                db.execute(
-                    f"""
-                    INSERT INTO main.admin_conversation_messages (
-                        message_id, conversation_id, role, content, artifact_json, created_at
-                    ) VALUES (
-                        '{_sql_lit(mid, 64)}',
-                        '{_sql_lit(sid, 128)}',
-                        '{_sql_lit(role, 32)}',
-                        '{_sql_lit(content, 100000)}',
-                        '',
-                        '{_sql_lit(stamp, 64)}'
-                    )
-                    """
-                )
-            # Keep meta message_count in sync when meta exists.
-            meta = db_get_conversation_meta(tid, sid)
-            if meta is not None:
-                db.execute(
-                    "UPDATE main.admin_conversations SET "
-                    f"message_count = {len(items)}, "
-                    f"updated_at = '{_sql_lit(now, 64)}' "
-                    f"WHERE conversation_id = '{_sql_lit(sid, 128)}' "
-                    f"AND tenant_id = '{_sql_lit(tid, 128)}'"
-                )
+            statements.append(
+                "INSERT INTO main.admin_conversation_messages ("
+                "message_id, conversation_id, role, content, artifact_json, created_at"
+                ") VALUES ("
+                f"'{_sql_lit(mid, 64)}', "
+                f"'{_sql_lit(sid, 128)}', "
+                f"'{_sql_lit(item['role'], 32)}', "
+                f"'{_sql_lit(item['content'], 100000)}', "
+                "'', "
+                f"'{_sql_lit(stamp, 64)}')"
+            )
+        statements.append(
+            "UPDATE main.admin_conversations SET "
+            f"message_count = {len(rows)}, "
+            f"updated_at = '{_sql_lit(now, 64)}' "
+            f"WHERE conversation_id = '{_sql_lit(sid, 128)}' "
+            f"AND tenant_id = '{_sql_lit(tid, 128)}'"
+        )
+        _execute_hub_write(statements)
     except FileNotFoundError:
         return
     except Exception as exc:

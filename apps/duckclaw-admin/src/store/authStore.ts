@@ -5,6 +5,7 @@ import { writeAuthSnapshot } from '@/lib/authSessionCache';
 
 function parseLoginError(status: number, data: unknown): string {
   if (status === 429) return 'Demasiados intentos. Espera un momento.';
+  if (status >= 500) return 'Error interno del servidor. Reintenta en unos segundos.';
   if (data && typeof data === 'object') {
     const root = data as Record<string, unknown>;
     if (root.code === 'gateway_unreachable') {
@@ -89,6 +90,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         initials: String(raw.initials ?? String(raw.email).slice(0, 2).toUpperCase()),
         profile: tenantId ? { tenant_id: tenantId } : undefined,
       };
+      writeAuthSnapshot(user);
       set({
         usuario: user,
         isAuthenticated: true,

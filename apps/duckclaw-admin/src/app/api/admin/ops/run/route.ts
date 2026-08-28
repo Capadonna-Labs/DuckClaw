@@ -5,6 +5,8 @@ import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
 applyDesktopEnvToProcessEnv();
 
+export const maxDuration = 300;
+
 function gatewayBase(): string | null {
   const raw =
     process.env.DUCKCLAW_GATEWAY_URL?.trim() ||

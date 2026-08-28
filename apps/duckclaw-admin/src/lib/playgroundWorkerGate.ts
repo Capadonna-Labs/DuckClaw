@@ -34,10 +34,12 @@ export function shouldRedirectToProjectsForMissingWorkers(input: {
   configLoaded: boolean;
   workers: WorkerOption[] | undefined | null;
   alreadyRedirected?: boolean;
+  hubDegraded?: boolean;
 }): boolean {
   if (input.alreadyRedirected) return false;
   if (input.configLoading) return false;
   if (input.configError) return false;
   if (!input.configLoaded) return false;
+  if (input.hubDegraded) return false;
   return !hasVisiblePlaygroundWorkers(input.workers);
 }

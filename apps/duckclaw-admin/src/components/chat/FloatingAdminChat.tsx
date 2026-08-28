@@ -95,7 +95,12 @@ export function FloatingAdminChat() {
       .catch(() => undefined);
   }, [onPlayground]);
 
-  if (onPlayground) {
+  const embeddedHtmlDashboard =
+    (pathname?.includes('/productividad') ?? false) &&
+    searchParams.get('view') === 'entregables' &&
+    searchParams.get('deliverable') === 'html';
+
+  if (onPlayground || embeddedHtmlDashboard) {
     return null;
   }
 

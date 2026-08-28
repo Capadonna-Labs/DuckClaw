@@ -1,13 +1,32 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useMemo } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { DocumentReportsPanel } from '@/components/reports/DocumentReportsPanel';
 import { HtmlDashboardReportsPanel } from '@/components/reports/HtmlDashboardReportsPanel';
+import { parseDeliverable, type ReportsTab } from '@/components/reports/reportsPageViewUtils';
 
-type ReportsTab = 'word' | 'html';
+export type { ReportsTab } from '@/components/reports/reportsPageViewUtils';
 
 export default function ReportsPageView() {
-  const [tab, setTab] = useState<ReportsTab>('word');
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const tab = useMemo(() => parseDeliverable(searchParams.get('deliverable')), [searchParams]);
+
+  const setTab = useCallback(
+    (next: ReportsTab) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (next === 'html') {
+        params.set('deliverable', 'html');
+      } else {
+        params.delete('deliverable');
+      }
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams]
+  );
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden bg-slate-950 text-slate-100">

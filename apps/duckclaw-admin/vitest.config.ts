@@ -34,6 +34,7 @@ export default defineConfig({
       'src/lib/chatDocumentAttachments.test.ts',
       'src/lib/desktopLocalFiles.test.ts',
       'src/lib/adminErrors.test.ts',
+      'src/components/reports/reportsPageView.test.ts',
     ],
   },
   resolve: {

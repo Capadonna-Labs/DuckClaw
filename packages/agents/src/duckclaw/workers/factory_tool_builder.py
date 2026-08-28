@@ -318,4 +318,10 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         )
     except Exception:
         _log.warning("MCP connector tools registration skipped", exc_info=True)
+    try:
+        from duckclaw.forge.skills.worker_delegate_bridge import register_worker_delegate_tools
+
+        register_worker_delegate_tools(tools, db=db, spec=spec, tenant_id=str(tenant_id or "default"))
+    except Exception:
+        _log.warning("worker delegate tools registration skipped", exc_info=True)
     return tools

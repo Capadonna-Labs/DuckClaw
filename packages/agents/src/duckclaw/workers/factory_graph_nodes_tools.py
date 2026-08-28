@@ -115,6 +115,32 @@ def make_tools_node(ctx: WorkerGraphContext):
             )
         except Exception:
             _log.debug("bind_agent_turn_tool_context in tools_node skipped", exc_info=True)
+        try:
+            from duckclaw.workers.worker_delegate_runtime import (
+                WorkerDelegateRuntime,
+                clear_worker_delegate_runtime,
+                set_worker_delegate_runtime,
+            )
+
+            if tuple(getattr(spec, "allowed_delegates", None) or ()):
+                set_worker_delegate_runtime(
+                    WorkerDelegateRuntime(
+                        db=db,
+                        llm=ctx.llm,
+                        path=str(path),
+                        spec=spec,
+                        templates_root=ctx.templates_root,
+                        tenant_id=_tenant_ctx,
+                        state=state,
+                        llm_provider=str(getattr(ctx, "provider", "") or ""),
+                        llm_model=str(getattr(ctx, "model", "") or ""),
+                        llm_base_url=str(getattr(ctx, "base_url", "") or ""),
+                    )
+                )
+            else:
+                clear_worker_delegate_runtime()
+        except Exception:
+            _log.debug("worker delegate runtime bind skipped", exc_info=True)
         messages = state["messages"]
         last = messages[-1]
         tool_calls = getattr(last, "tool_calls", None) or []

@@ -272,6 +272,8 @@ def build_spec_from_manifest(
     if isinstance(data.get("tool_surface"), dict):
         tool_surface_config = data["tool_surface"]
 
+    allowed_delegates = _parse_allowed_delegates(data)
+
     return WorkerSpec(
         worker_id=worker_id,
         logical_worker_id=logical_worker_id,
@@ -303,7 +305,32 @@ def build_spec_from_manifest(
         egress_natural_language_synthesis=egress_natural_language_synthesis,
         tool_orchestration_config=tool_orchestration_config,
         tool_surface_config=tool_surface_config,
+        allowed_delegates=allowed_delegates,
     )
+
+
+def _parse_allowed_delegates(
+    data: dict,
+    templates_root: Optional[Path] = None,
+) -> tuple[str, ...]:
+    """Normalize manifest ``allowed_delegates`` to canonical worker ids."""
+    raw = data.get("allowed_delegates")
+    if not raw:
+        return ()
+    if isinstance(raw, str):
+        raw = [s.strip() for s in raw.split(",") if s.strip()]
+    if not isinstance(raw, (list, tuple)):
+        return ()
+    from duckclaw.workers.template_registry import resolve_template_id_global
+
+    out: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            continue
+        resolved = resolve_template_id_global(item.strip(), templates_root) or item.strip()
+        if resolved not in out:
+            out.append(resolved)
+    return tuple(out)
 
 
 def _load_homeostasis_config(worker_dir: Path, manifest_data: dict) -> Optional[dict]:
@@ -371,6 +398,7 @@ class WorkerSpec:
         "egress_natural_language_synthesis",
         "tool_orchestration_config",
         "tool_surface_config",
+        "allowed_delegates",
         "runtime_policy",
     )
 
@@ -406,6 +434,7 @@ class WorkerSpec:
         egress_natural_language_synthesis: bool = True,
         tool_orchestration_config: Optional[dict] = None,
         tool_surface_config: Optional[dict] = None,
+        allowed_delegates: tuple[str, ...] = (),
         runtime_policy: Any = None,
     ):
         self.worker_id = worker_id
@@ -442,4 +471,5 @@ class WorkerSpec:
         self.egress_natural_language_synthesis = bool(egress_natural_language_synthesis)
         self.tool_orchestration_config = tool_orchestration_config
         self.tool_surface_config = tool_surface_config
+        self.allowed_delegates = tuple(allowed_delegates or ())
         self.runtime_policy = runtime_policy

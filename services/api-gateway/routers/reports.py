@@ -22,7 +22,7 @@ _PLACEHOLDER_HTML = """<!DOCTYPE html>
 <head><meta charset="utf-8"><title>Reporte</title></head>
 <body style="font-family:system-ui;padding:2rem;color:#334155">
 <h3>Ningún reporte generado aún</h3>
-<p>Instruye al agente <strong>ui_designer</strong> en el panel de chat para crear el dashboard.</p>
+<p>Abre el asistente (arriba a la derecha) y pide un dashboard con <strong>ui_designer</strong> o datos quant con <strong>quant_reporter</strong>. Publica con <code>publish_custom_report</code>.</p>
 </body></html>"""
 
 _CSP = (

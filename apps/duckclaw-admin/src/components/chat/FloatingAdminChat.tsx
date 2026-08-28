@@ -95,12 +95,12 @@ export function FloatingAdminChat() {
       .catch(() => undefined);
   }, [onPlayground]);
 
-  const embeddedHtmlDashboard =
+  const htmlDashboardDeliverable =
     (pathname?.includes('/productividad') ?? false) &&
     searchParams.get('view') === 'entregables' &&
     searchParams.get('deliverable') === 'html';
 
-  if (onPlayground || embeddedHtmlDashboard) {
+  if (onPlayground) {
     return null;
   }
 
@@ -139,7 +139,11 @@ export function FloatingAdminChat() {
         variant="compact"
         sectionTitle={sectionTitle}
         conversationTitle={conv.conversationTitle}
-        emptyHint={`Pregunta sobre ${sectionTitle}…`}
+        emptyHint={
+          htmlDashboardDeliverable
+            ? 'Pide un dashboard HTML o publica con publish_custom_report (report_id = id de esta conversación). Quant → quant_reporter.'
+            : `Pregunta sobre ${sectionTitle}…`
+        }
         showWorkerLink={false}
         headerActions={headerActions}
         onRenameConversation={conv.renameConversation}

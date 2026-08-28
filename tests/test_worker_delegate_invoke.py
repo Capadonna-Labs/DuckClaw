@@ -116,3 +116,44 @@ def test_invoke_delegated_worker_success_with_report_id(mock_build_graph: MagicM
     assert result.status == "success"
     assert result.report_id == "chat-abc"
     assert "Dashboard" in result.reply
+
+
+def test_build_worker_tools_omits_write_output_when_allowed_delegates() -> None:
+    from duckclaw.workers.factory_tool_builder import _build_worker_tools
+
+    spec = WorkerSpec(
+        worker_id="quant_trader",
+        logical_worker_id="quant_trader",
+        name="qt",
+        schema_name="finance_worker",
+        llm_required=None,
+        temperature=0.1,
+        topology="general",
+        skills_list=["read_sql"],
+        allowed_tables=[],
+        read_only=True,
+        worker_dir=Path("/tmp"),
+        allowed_delegates=("quant_reporter",),
+    )
+    tools = _build_worker_tools(MagicMock(), spec)  # type: ignore[arg-type]
+    names = {t.name for t in tools}
+    assert "invoke_worker" in names
+    assert "write_output_document" not in names
+
+
+def test_dashboard_html_intent_forces_invoke_worker() -> None:
+    from duckclaw.workers.tool_orchestration import match_intent, parse_tool_orchestration
+
+    spec = SimpleNamespace(
+        tool_orchestration_config={
+            "intents": {
+                "dashboard_html": {
+                    "patterns": ["(?i)dashboard.*html"],
+                    "force_first_tool": "invoke_worker",
+                }
+            }
+        }
+    )
+    orch = parse_tool_orchestration(spec)
+    assert orch is not None
+    assert match_intent("Generá y publicá un dashboard HTML con métricas", orch) == "dashboard_html"

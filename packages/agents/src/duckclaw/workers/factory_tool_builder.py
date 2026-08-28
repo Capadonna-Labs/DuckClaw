@@ -258,7 +258,9 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
     except Exception:
         pass
     register_extract_document_text_tool(tools)
-    register_write_output_document_tool(tools)
+    # Workers with allowed_delegates publish HTML via invoke_worker, not vault write_output_document.
+    if not tuple(getattr(spec, "allowed_delegates", None) or ()):
+        register_write_output_document_tool(tools)
     register_render_docx_template_tool(tools)
     from duckclaw.forge.skills.export_docx_to_pdf_bridge import register_export_docx_to_pdf_tool
 

@@ -73,6 +73,7 @@ def initialize_worker_graph_context(
         tenant_id=tenant_id,
         instance_name=instance_name,
         llm=llm,
+        templates_root=templates_root,
     )
     spec = load_manifest(worker_id, templates_root, db=db, tenant_id=tenant_id)
     ctx.spec = spec

@@ -355,7 +355,17 @@ def build_invoke_worker_node(
             )
             try:
                 raise_if_chat_cancelled(str(chat_id or "").strip())
-                worker_invoke = worker_graph.invoke(worker_state, trace_cfg)
+                from duckclaw.workers.worker_invoke import (
+                    extract_worker_invoke_reply,
+                    invoke_worker_graph,
+                )
+
+                worker_invoke = invoke_worker_graph(
+                    worker_graph,
+                    worker_state,
+                    trace_cfg=trace_cfg,
+                    chat_id=str(chat_id or ""),
+                )
             except ChatCancelledError:
                 set_idle(chat_id)
                 return {
@@ -368,12 +378,7 @@ def build_invoke_worker_node(
                 _peek_rw = not bool(getattr(_wdb_peek, "_read_only", False))
                 if _suspend_for_rw_worker or _peek_rw:
                     _worker_cache_mod._release_worker_db_handle(worker_graph, cache_key=worker_cache_key)
-            raw_worker_reply = str(
-                worker_invoke.get("internal_reply")
-                or worker_invoke.get("reply")
-                or worker_invoke.get("output")
-                or "Sin respuesta."
-            )
+            raw_worker_reply = extract_worker_invoke_reply(worker_invoke)
             reply = format_worker_reply(
                 raw_worker_reply=raw_worker_reply,
                 assigned=assigned,

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import re
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, StreamingResponse
+from pydantic import BaseModel
 
 from core.report_updates import iter_report_reload_events
 from core.sse_stream import SSE_HEADERS
@@ -17,12 +20,14 @@ _log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["admin-reports"])
 
-_PLACEHOLDER_HTML = """<!DOCTYPE html>
+PLACEHOLDER_MARKER = "Ningún reporte generado aún"
+
+_PLACEHOLDER_HTML = f"""<!DOCTYPE html>
 <html lang="es">
 <head><meta charset="utf-8"><title>Reporte</title></head>
 <body style="font-family:system-ui;padding:2rem;color:#334155">
-<h3>Ningún reporte generado aún</h3>
-<p>Abre el asistente (arriba a la derecha) y pide un dashboard con <strong>ui_designer</strong> o datos quant con <strong>quant_reporter</strong>. Publica con <code>publish_custom_report</code>.</p>
+<h3>{PLACEHOLDER_MARKER}</h3>
+<p>Abre el asistente (arriba a la derecha) y pide un dashboard con <strong>ui_designer</strong> o datos quant con <strong>quant_reporter</strong>, o sube un archivo <strong>.html</strong> desde esta pantalla.</p>
 </body></html>"""
 
 _CSP = (
@@ -101,6 +106,81 @@ async def get_rendered_report(
     if not html:
         return HTMLResponse(content=_PLACEHOLDER_HTML, headers={"Content-Security-Policy": _CSP})
     return HTMLResponse(content=html, headers={"Content-Security-Policy": _CSP})
+
+
+def _title_from_upload_filename(filename: str | None) -> str:
+    base = (filename or "Reporte").rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    stem = re.sub(r"\.(html?|htm)$", "", base, flags=re.IGNORECASE).strip()
+    return (stem or "Reporte")[:200]
+
+
+class UploadCustomReportResponse(BaseModel):
+    status: str
+    report_id: str
+    message: str = ""
+
+
+@router.post(
+    "/reports/{report_id}/upload",
+    response_model=UploadCustomReportResponse,
+    dependencies=[Depends(_require_admin_key)],
+)
+async def upload_custom_report(
+    report_id: str,
+    vault: str = Form(..., description="Ruta absoluta del vault .duckdb"),
+    title: str = Form(""),
+    file: UploadFile = File(...),
+):
+    """Publica HTML subido por admin vía CUSTOM_REPORT_UPSERT (mismo camino que publish_custom_report)."""
+    rid = (report_id or "").strip()
+    vp = (vault or "").strip()
+    if not rid or not vp:
+        raise HTTPException(status_code=400, detail="report_id y vault requeridos")
+
+    fname = (file.filename or "").strip().lower()
+    if not fname.endswith((".html", ".htm")):
+        raise HTTPException(status_code=400, detail="Solo archivos .html o .htm")
+
+    raw = await file.read()
+    if len(raw) > 512 * 1024:
+        raise HTTPException(status_code=400, detail="HTML excede 512KB")
+
+    try:
+        html_content = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="El archivo debe estar en UTF-8") from exc
+
+    try:
+        _open_vault(vp, read_only=True)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="vault no encontrado") from None
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    from duckclaw.forge.skills.custom_reports_bridge import _publish_custom_report_impl
+
+    db_stub = type("_VaultRef", (), {"_path": vp})()
+    resolved_title = (title or "").strip() or _title_from_upload_filename(file.filename)
+    result_raw = _publish_custom_report_impl(
+        db_stub,
+        report_id=rid,
+        html_content=html_content,
+        title=resolved_title,
+        created_by="admin-ui-upload",
+    )
+    try:
+        payload = json.loads(result_raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail="Respuesta inválida al encolar reporte") from exc
+
+    if payload.get("status") != "success":
+        raise HTTPException(status_code=400, detail=str(payload.get("message") or "No se pudo publicar"))
+
+    return UploadCustomReportResponse(
+        status="success",
+        report_id=rid,
+        message=str(payload.get("message") or "Reporte encolado para publicación"),
+    )
 
 
 @router.get("/reports/{report_id}/stream", dependencies=[Depends(_require_admin_key)])

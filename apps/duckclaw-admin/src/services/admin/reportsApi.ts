@@ -1,5 +1,5 @@
 import type { KnowledgeBrowseResponse } from './knowledgeApi';
-import { adminFetch } from './http';
+import { adminFetch, adminFormFetch } from './http';
 
 export interface ReportSectionProgress {
   id: string;
@@ -203,5 +203,19 @@ export const reportsApi = {
     adminFetch<{ ok: boolean; task_id: string; template_id: string; status: string }>(
       `/report-templates/${encodeURIComponent(templateId)}`,
       { method: 'DELETE' }
-    )
+    ),
+
+  uploadCustomReportHtml: (
+    reportId: string,
+    body: { vault: string; file: File; title?: string }
+  ) => {
+    const form = new FormData();
+    form.append('file', body.file);
+    form.append('vault', body.vault.trim());
+    if (body.title?.trim()) form.append('title', body.title.trim());
+    return adminFormFetch<{ status: string; report_id: string; message?: string }>(
+      `/reports/${encodeURIComponent(reportId)}/upload`,
+      form
+    );
+  },
 };

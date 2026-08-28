@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { adminService } from '@/services/adminService';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
+import { HtmlDashboardUploadZone } from '@/components/reports/HtmlDashboardUploadZone';
+import { isHtmlReportPlaceholder } from '@/lib/htmlDashboardUpload';
 
 export function HtmlDashboardReportsPanel() {
   const [tenantId, setTenantId] = useState<string | undefined>();
@@ -12,7 +14,8 @@ export function HtmlDashboardReportsPanel() {
   const [reportReloadToken, setReportReloadToken] = useState(0);
   const [reportLoadError, setReportLoadError] = useState('');
   const [reportLoading, setReportLoading] = useState(false);
-  const [reportHasContent, setReportHasContent] = useState(false);
+  const [reportIsPlaceholder, setReportIsPlaceholder] = useState(true);
+  const [uploadPending, setUploadPending] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const conv = useActiveConversation(tenantId, 'reports', {
@@ -33,12 +36,11 @@ export function HtmlDashboardReportsPanel() {
   const reloadReportIframe = useCallback(() => {
     setReportLoadError('');
     setReportLoading(true);
-    setReportHasContent(false);
     setReportReloadToken(Date.now());
   }, []);
 
-  const verifyReportReachable = useCallback(async () => {
-    if (!reportId || !vaultPath) return;
+  const verifyReportReachable = useCallback(async (): Promise<boolean> => {
+    if (!reportId || !vaultPath) return true;
     const url = `/api/admin/reports/${encodeURIComponent(reportId)}?vault=${encodeURIComponent(
       vaultPath.trim()
     )}&_t=${Date.now()}`;
@@ -50,11 +52,14 @@ export function HtmlDashboardReportsPanel() {
       if (!res.ok) {
         throw new Error(text.slice(0, 200) || `HTTP ${res.status}`);
       }
-      setReportHasContent(text.length > 0);
+      const placeholder = isHtmlReportPlaceholder(text);
+      setReportIsPlaceholder(placeholder);
+      return placeholder;
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Error cargando reporte';
       setReportLoadError(msg);
-      setReportHasContent(false);
+      setReportIsPlaceholder(true);
+      return true;
     } finally {
       setReportLoading(false);
     }
@@ -119,11 +124,43 @@ export function HtmlDashboardReportsPanel() {
     };
   }, [reportId, reloadReportIframe, verifyReportReachable]);
 
+  const handleUpload = useCallback(
+    async (file: File, title: string) => {
+      if (!reportId || !vaultPath) return;
+      setUploadPending(true);
+      setReportLoadError('');
+      try {
+        await adminService.uploadCustomReportHtml(reportId, {
+          vault: vaultPath,
+          file,
+          title,
+        });
+        reloadReportIframe();
+        const deadline = Date.now() + 20_000;
+        let stillPlaceholder = true;
+        while (Date.now() < deadline && stillPlaceholder) {
+          stillPlaceholder = await verifyReportReachable();
+          if (stillPlaceholder) {
+            await new Promise((resolve) => setTimeout(resolve, 500));
+          }
+        }
+        if (stillPlaceholder) {
+          setReportLoadError('Publicación encolada; recarga en unos segundos si no aparece.');
+        }
+      } finally {
+        setUploadPending(false);
+      }
+    },
+    [reportId, vaultPath, reloadReportIframe, verifyReportReachable]
+  );
+
+  const showUploadZone = reportReady && reportIsPlaceholder;
+
   return (
     <div className="h-full w-full overflow-hidden bg-slate-900">
       {reportReady ? (
         <div className="relative h-full w-full">
-          {reportLoading && !reportHasContent ? (
+          {reportLoading && reportIsPlaceholder ? (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/60 text-sm text-slate-300">
               Cargando reporte…
             </div>
@@ -132,6 +169,9 @@ export function HtmlDashboardReportsPanel() {
             <div className="absolute inset-x-0 top-0 z-20 border-b border-amber-700/50 bg-amber-950/80 px-4 py-2 text-xs text-amber-200">
               No se pudo cargar el lienzo: {reportLoadError}
             </div>
+          ) : null}
+          {showUploadZone ? (
+            <HtmlDashboardUploadZone disabled={uploadPending} onUpload={handleUpload} />
           ) : null}
           <iframe
             ref={iframeRef}

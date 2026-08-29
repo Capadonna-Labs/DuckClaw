@@ -13,6 +13,8 @@ from duckclaw.workers.tool_pack_policy import (
     UNLOCK_TOOL_NAME,
     catalog_public_summary,
     expand_unlock_pack_ids,
+    is_pack_restricted_for_worker,
+    runtime_worker_id_from_spec,
     with_mcp_connector_packs,
 )
 
@@ -46,6 +48,7 @@ def register_tool_pack_meta_tools(tools_list: list[Any], *, spec: Any = None) ->
 
     def list_tool_packs() -> str:
         cfg = resolve_runtime_packs_config(spec)
+        worker_id = runtime_worker_id_from_spec(spec)
         if not cfg.enabled:
             return json.dumps(
                 {
@@ -66,7 +69,7 @@ def register_tool_pack_meta_tools(tools_list: list[Any], *, spec: Any = None) ->
                 "enabled": True,
                 "orphan_policy": cfg.catalog.orphan_policy,
                 "max_bound_tools": cfg.catalog.max_bound_tools,
-                "packs": catalog_public_summary(cfg, tool_names=names),
+                "packs": catalog_public_summary(cfg, tool_names=names, worker_id=worker_id),
                 "hint": (
                     "Para activar: unlock_tool_pack(pack_id). "
                     "MCP fino: mcp_{connector}; umbrella: mcp."
@@ -77,6 +80,16 @@ def register_tool_pack_meta_tools(tools_list: list[Any], *, spec: Any = None) ->
 
     def unlock_tool_pack(pack_id: str = "") -> str:
         cleaned = (pack_id or "").strip()
+        worker_id = runtime_worker_id_from_spec(spec)
+        if is_pack_restricted_for_worker(cleaned, worker_id):
+            return json.dumps(
+                {
+                    "ok": False,
+                    "error": f"pack_id no permitido para worker «{worker_id or 'default'}»: {cleaned}",
+                    "hint": "Usa un agente de catálogo con permisos explícitos para este pack.",
+                },
+                ensure_ascii=False,
+            )
         cfg = resolve_runtime_packs_config(spec)
         if not cleaned:
             return json.dumps(
@@ -111,7 +124,7 @@ def register_tool_pack_meta_tools(tools_list: list[Any], *, spec: Any = None) ->
                 },
                 ensure_ascii=False,
             )
-        unlocked = expand_unlock_pack_ids(cleaned, cfg, tool_names=names)
+        unlocked = expand_unlock_pack_ids(cleaned, cfg, tool_names=names, worker_id=worker_id)
         return json.dumps(
             {
                 "ok": True,

@@ -284,8 +284,6 @@ def worker_allowed_for_actor(db: Any, *, actor_email: str, worker_id: str) -> bo
     wid = (worker_id or "").strip()
     if not wid:
         return False
-    if wid == "default":
-        return True
     return bool(get_visible_worker_for_actor(db, actor_email=actor_email, worker_id=wid))
 
 

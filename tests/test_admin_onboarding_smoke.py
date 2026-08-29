@@ -26,6 +26,21 @@ def test_onboarding_happy_path_login_config_chat(
     gateway_admin_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker
+    from duckclaw.gateway_db import get_gateway_db_path
+
+    db = DuckClaw(get_gateway_db_path(), read_only=False, engine="python")
+    try:
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id="dev-coder",
+            display_name="Dev Coder",
+        )
+    finally:
+        db.close()
+
     gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
     if str(gw_dir) not in sys.path:
         sys.path.insert(0, str(gw_dir))
@@ -39,7 +54,7 @@ def test_onboarding_happy_path_login_config_chat(
     monkeypatch.setattr(
         playground_chat_router,
         "_playground_team_context",
-        lambda **_: _mock_playground_team(workers=["default"]),
+        lambda **_: _mock_playground_team(workers=["dev-coder"]),
     )
     monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
 
@@ -64,7 +79,7 @@ def test_onboarding_happy_path_login_config_chat(
     chat = gateway_admin_client.post(
         "/api/v1/admin/playground/chat",
         headers=headers,
-        json={"worker_id": "default", "message": "smoke ping"},
+        json={"worker_id": "dev-coder", "message": "smoke ping"},
     )
     assert chat.status_code == 200
     data = chat.json()

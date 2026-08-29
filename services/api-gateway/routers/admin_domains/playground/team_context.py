@@ -118,8 +118,8 @@ def playground_worker_allowed_in_team(team_ctx: dict[str, Any], worker_id: str) 
     from duckclaw.workers.template_registry import resolve_template_id_global
 
     wid = normalize_worker_id(worker_id)
-    if not wid or wid == "default":
-        return True
+    if not wid:
+        return False
     if (team_ctx.get("team_source") or "") == "all":
         return True
     aliases: set[str] = set()
@@ -138,8 +138,8 @@ def playground_worker_explicitly_in_team(team_ctx: dict[str, Any], worker_id: st
     from duckclaw.workers.template_registry import resolve_template_id_global
 
     wid = normalize_worker_id(worker_id)
-    if not wid or wid == "default":
-        return True
+    if not wid:
+        return False
     aliases: set[str] = set()
     for raw in team_ctx.get("workers") or []:
         label = str(raw or "").strip()

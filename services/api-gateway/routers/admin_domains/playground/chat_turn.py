@@ -21,11 +21,7 @@ from routers.admin_domains.playground.schemas import (
     PlaygroundDocumentIn,
     PlaygroundImageIn,
 )
-from routers.admin_domains.playground.team_context import (
-    playground_team_context,
-    playground_worker_allowed_in_team,
-    playground_worker_explicitly_in_team,
-)
+from routers.admin_domains.playground.team_context import playground_team_context
 from routers.admin_domains.playground.tenant_resolution import gateway_effective_tenant_id
 from routers.admin_domains.playground.vault_access import resolved_vault_for_admin_chat
 
@@ -60,7 +56,9 @@ def resolve_playground_actor_turn(
     from duckclaw.admin_user_profiles import ensure_profile_for_user
 
     project_id_clean = (project_id or "").strip()
-    wid = re.sub(r"[^a-zA-Z0-9_-]", "", worker_id.strip()) or "default"
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", worker_id.strip())
+    if not wid:
+        raise problem(400, "worker_id requerido", worker_id or "")
     profile: dict[str, Any] = {
         "email": actor,
         "tenant_id": gateway_effective_tenant_id("default"),
@@ -71,7 +69,7 @@ def resolve_playground_actor_turn(
     try:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
-            if wid == "default" or get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
+            if get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
                 catalog_allowed = True
                 try:
                     wid, project_id_clean = resolve_playground_worker_for_project(
@@ -131,23 +129,9 @@ def enforce_playground_worker_access(
     actor: str,
     request: Request,
 ) -> None:
-    console_actor = (request.headers.get("x-duckclaw-actor") or "").strip()
-    db_first_console = bool(
-        (actor or "").strip().lower() not in ("", "admin-ui")
-        or (console_actor and console_actor.lower() not in ("admin-ui", ""))
-    )
-    explicit_team = playground_worker_explicitly_in_team(team_ctx, wid)
-    team_allowed = playground_worker_allowed_in_team(team_ctx, wid)
-    if wid != "default" and not catalog_allowed:
-        raise problem(403, "Worker no asignado al catálogo del actor", wid)
+    del team_ctx, actor, request
     if not catalog_allowed:
-        if db_first_console:
-            if (team_ctx.get("team_source") or "") == "all":
-                raise problem(403, "Worker no asignado al catálogo del actor", wid)
-            if not explicit_team:
-                raise problem(403, "Worker no asignado al catálogo del actor", wid)
-        elif not team_allowed:
-            raise problem(403, "Worker no asignado al catálogo del actor", wid)
+        raise problem(403, "Worker no asignado al catálogo del actor", wid)
 
 
 def _playground_message_is_fly_command(*, user_incoming: str, message: str) -> bool:
@@ -419,6 +403,13 @@ async def prepare_playground_chat_turn(
         project_id=turn.project_id,
         knowledge_scope=turn.knowledge_scope,
     )
+    from routers.admin_domains.playground.canvas_context import enrich_message_with_canvas_context
+
+    msg = enrich_message_with_canvas_context(
+        msg=msg,
+        chat_id=session_id,
+        vault_path=vault_path,
+    )
 
     chat = ChatRequest(
         message=msg,
@@ -472,7 +463,7 @@ async def prepare_playground_voice_turn(
         chat_id=chat_id,
     )
     team_ctx = playground_team_context(tenant_id=turn.eff_tenant, chat_id=chat_id)
-    if turn.wid != "default" and not turn.catalog_allowed:
+    if not turn.catalog_allowed:
         raise problem(403, "Worker no asignado al catálogo del actor", turn.wid)
 
     session_id = (chat_id or "admin-playground").strip() or "admin-playground"

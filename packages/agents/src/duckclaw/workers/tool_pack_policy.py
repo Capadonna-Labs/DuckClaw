@@ -22,6 +22,20 @@ UNLOCK_TOOL_NAME = "unlock_tool_pack"
 LIST_PACKS_TOOL_NAME = "list_tool_packs"
 MCP_UMBRELLA_PACK_ID = "mcp"
 _MCP_CONNECTOR_PACK_PREFIX = "mcp_"
+_DEFAULT_WORKER_ID = "default"
+# Internal scaffold worker: no on-demand packs that write, execute, or reach external systems.
+_DEFAULT_WORKER_RESTRICTED_PACK_IDS = frozenset(
+    {
+        "docs_output",
+        "sandbox",
+        "reports",
+        "mcp",
+        "visual",
+        "integrations",
+        "research",
+        "knowledge",
+    }
+)
 # ADB helpers live outside mcp__* namespace but belong to Android MCP pack.
 _ANDROID_ADB_HELPER_TOOLS = frozenset(
     {
@@ -61,6 +75,10 @@ def apply_runtime_tool_packs(
         intent_text=intent_text,
         messages=msgs,
         available_tool_names=tool_names,
+    )
+    active = filter_active_packs_for_worker(
+        active,
+        worker_id=runtime_worker_id_from_spec(spec),
     )
     unlock_priority = tuple(unlocked_packs_from_messages(msgs))
     return filter_tools_by_packs(
@@ -178,6 +196,41 @@ def resolve_active_pack_ids(
     if MCP_UMBRELLA_PACK_ID in active and MCP_UMBRELLA_PACK_ID not in disabled:
         active |= connector_pack_ids
     return frozenset(active)
+
+
+def runtime_worker_id_from_spec(spec: Any | None) -> str:
+    if spec is None:
+        return ""
+    for attr in ("worker_id", "logical_worker_id"):
+        raw = str(getattr(spec, attr, "") or "").strip()
+        if raw:
+            return raw
+    return ""
+
+
+def is_default_runtime_worker(worker_id: str | None) -> bool:
+    return (worker_id or "").strip().lower().replace("_", "-") == _DEFAULT_WORKER_ID
+
+
+def is_pack_restricted_for_worker(pack_id: str, worker_id: str | None) -> bool:
+    if not is_default_runtime_worker(worker_id):
+        return False
+    pid = (pack_id or "").strip().lower()
+    if not pid:
+        return False
+    if pid in _DEFAULT_WORKER_RESTRICTED_PACK_IDS:
+        return True
+    return pid.startswith(_MCP_CONNECTOR_PACK_PREFIX)
+
+
+def filter_active_packs_for_worker(
+    active: Iterable[str],
+    *,
+    worker_id: str | None,
+) -> frozenset[str]:
+    return frozenset(
+        pid for pid in active if not is_pack_restricted_for_worker(pid, worker_id)
+    )
 
 
 def mcp_connector_ids_from_tool_names(tool_names: Iterable[str]) -> frozenset[str]:
@@ -309,11 +362,14 @@ def catalog_public_summary(
     cfg: RuntimePacksConfig,
     *,
     tool_names: Iterable[str] = (),
+    worker_id: str | None = None,
 ) -> list[dict[str, Any]]:
     enriched = with_mcp_connector_packs(cfg, tool_names)
     rows: list[dict[str, Any]] = []
     for pack in enriched.catalog.packs:
         if pack.pack_id in enriched.disabled_packs:
+            continue
+        if is_pack_restricted_for_worker(pack.pack_id, worker_id):
             continue
         member_count = (
             len(pack.members.exact)
@@ -341,10 +397,13 @@ def expand_unlock_pack_ids(
     cfg: RuntimePacksConfig,
     *,
     tool_names: Iterable[str] = (),
+    worker_id: str | None = None,
 ) -> list[str]:
     """Si unlock es umbrella ``mcp``, expande a packs por conector presentes."""
     cleaned = (pack_id or "").strip()
     if not cleaned:
+        return []
+    if is_pack_restricted_for_worker(cleaned, worker_id):
         return []
     enriched = with_mcp_connector_packs(cfg, tool_names)
     known = {p.pack_id for p in enriched.catalog.packs} - set(enriched.disabled_packs)

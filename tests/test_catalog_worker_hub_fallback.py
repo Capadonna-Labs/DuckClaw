@@ -30,6 +30,46 @@ class _Adapter:
         return self._con.execute(sql)
 
 
+def test_catalog_worker_id_variants_hyphen_underscore() -> None:
+    from duckclaw.admin_worker_catalog import catalog_worker_id_variants
+
+    assert catalog_worker_id_variants("quant_reporter") == (
+        "quant_reporter",
+        "quant-reporter",
+    )
+    assert catalog_worker_id_variants("quant-reporter") == (
+        "quant-reporter",
+        "quant_reporter",
+    )
+
+
+def test_get_worker_by_tenant_worker_id_resolves_underscore_alias(
+    tmp_path: Path,
+) -> None:
+    from duckclaw.admin_worker_catalog import create_worker, get_worker_by_tenant_worker_id
+
+    db_path = tmp_path / "hub.duckdb"
+    con = duckdb.connect(str(db_path))
+    try:
+        bootstrap_core_schema(con)
+        ensure_admin_worker_catalog_schema(con)
+        profile = ensure_profile_for_user(con, email="owner@test.com")
+        create_worker(
+            con,
+            owner_email="owner@test.com",
+            worker_id="quant-reporter",
+            display_name="Quant Reporter",
+            source_kind="template_import",
+        )
+        row = get_worker_by_tenant_worker_id(
+            con, tenant_id=profile["tenant_id"], worker_id="quant_reporter"
+        )
+        assert row is not None
+        assert row["worker_id"] == "quant-reporter"
+    finally:
+        con.close()
+
+
 def test_load_manifest_falls_back_to_hub_when_vault_catalog_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

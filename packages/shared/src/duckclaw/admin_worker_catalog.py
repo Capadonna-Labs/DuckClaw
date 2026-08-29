@@ -199,6 +199,16 @@ def sanitize_catalog_worker_id(worker_id: str) -> str:
     return wid[:64]
 
 
+def catalog_worker_id_variants(worker_id: str) -> tuple[str, ...]:
+    """Hyphen/underscore aliases (``quant_reporter`` ↔ ``quant-reporter``)."""
+    base = sanitize_catalog_worker_id(worker_id)
+    out: list[str] = []
+    for candidate in (base, base.replace("_", "-"), base.replace("-", "_")):
+        if candidate and candidate not in out:
+            out.append(candidate)
+    return tuple(out)
+
+
 def _json(value: Any) -> str:
     return json.dumps(value or {}, ensure_ascii=False, sort_keys=True)
 
@@ -256,16 +266,20 @@ def get_worker_by_uid(db: Any, worker_uid: str) -> dict[str, str] | None:
 
 def get_worker_by_tenant_worker_id(db: Any, *, tenant_id: str, worker_id: str) -> dict[str, str] | None:
     ensure_admin_worker_catalog_schema(db)
-    row = _first_row(
-        db,
-        "SELECT worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, "
-        "source_template_id, visibility, a2a_discoverable, status, active, created_at, updated_at "
-        "FROM main.admin_worker_catalog "
-        f"WHERE tenant_id = '{_sql_lit(tenant_id, 128)}' "
-        f"AND worker_id = '{_sql_lit(sanitize_catalog_worker_id(worker_id), 64)}' "
-        "LIMIT 1",
-    )
-    return _worker_row_to_public(row) if row else None
+    tid = _sql_lit(tenant_id, 128)
+    for wid in catalog_worker_id_variants(worker_id):
+        row = _first_row(
+            db,
+            "SELECT worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, "
+            "source_template_id, visibility, a2a_discoverable, status, active, created_at, updated_at "
+            "FROM main.admin_worker_catalog "
+            f"WHERE tenant_id = '{tid}' "
+            f"AND worker_id = '{_sql_lit(wid, 64)}' "
+            "LIMIT 1",
+        )
+        if row:
+            return _worker_row_to_public(row)
+    return None
 
 
 def create_worker(

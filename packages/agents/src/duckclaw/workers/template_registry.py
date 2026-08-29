@@ -81,6 +81,18 @@ def build_alias_index(templates_root: Path | None = None) -> dict[str, str]:
     return dict(_alias_index_cached(str(_templates_dir(templates_root).resolve())))
 
 
+def template_id_match_variants(user_input: str) -> tuple[str, ...]:
+    """Hyphen/underscore aliases (``quant_trader`` ↔ ``quant-trader``)."""
+    base = (user_input or "").strip().lower()
+    if not base:
+        return ()
+    out: list[str] = []
+    for candidate in (base, base.replace("_", "-"), base.replace("-", "_")):
+        if candidate and candidate not in out:
+            out.append(candidate)
+    return tuple(out)
+
+
 def resolve_template_id(
     available: list[str],
     user_input: str,
@@ -88,22 +100,22 @@ def resolve_template_id(
 ) -> Optional[str]:
     """
     Resuelve input del usuario al id canónico (nombre de carpeta).
-    1) Coincidencia en ``available`` (case-insensitive).
+    1) Coincidencia en ``available`` (case-insensitive, alias ``_``/``-``).
     2) Alias global del registry (p. ej. maestro → team-lead).
     """
     if not (user_input or "").strip():
         return None
-    key = (user_input or "").strip().lower()
-    for a in available or []:
-        if (a or "").strip().lower() == key:
-            return (a or "").strip()
-    canonical = build_alias_index(templates_root).get(key)
-    if canonical and (not available or canonical in available):
-        return canonical
-    if canonical and available:
-        # Alias válido pero no en available: devolver si existe en disco
-        if canonical in list_template_ids(templates_root):
+    alias_index = build_alias_index(templates_root)
+    for key in template_id_match_variants(user_input):
+        for a in available or []:
+            if (a or "").strip().lower() == key:
+                return (a or "").strip()
+        canonical = alias_index.get(key)
+        if canonical and (not available or canonical in available):
             return canonical
+        if canonical and available:
+            if canonical in list_template_ids(templates_root):
+                return canonical
     return None
 
 

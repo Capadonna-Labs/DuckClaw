@@ -24,6 +24,7 @@ export default defineConfig({
       'src/lib/playgroundLastSelection.test.ts',
       'src/lib/playgroundWorkerGate.test.ts',
       'src/components/chat/useAdminChatLoopPolling.test.ts',
+      'src/components/chat/chatSuggestionsGating.test.ts',
       'src/components/chat/chatMarkdownMermaid.test.ts',
       'src/components/chat/chatMarkdown.test.ts',
       'src/lib/toolUsageGroup.test.ts',

@@ -114,6 +114,8 @@ export function AdminChatPanel({
     scrollToBottom,
     onScroll,
     send,
+    sendSuggestion,
+    suggestions,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,
@@ -538,6 +540,8 @@ export function AdminChatPanel({
         imageAttachments={imageAttachments}
         documentAttachments={documentAttachments}
         send={send}
+        suggestions={suggestions}
+        onPickSuggestion={sendSuggestion}
         cancelGeneration={cancelGeneration}
         onTextareaPaste={onTextareaPaste}
         pasteFromClipboard={pasteFromClipboard}

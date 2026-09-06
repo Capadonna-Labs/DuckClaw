@@ -174,6 +174,7 @@ export function useAdminChat({
   const [vaultPath, setVaultPathState] = useState('');
   const [lastTurnUsage, setLastTurnUsage] = useState<UsageTokenBreakdown | null>(null);
   const [contextEstimatedTokens, setContextEstimatedTokens] = useState<number | null>(null);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
   const thinkingStartedAt = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -225,6 +226,7 @@ export function useAdminChat({
   useEffect(() => {
     setLastTurnUsage(null);
     setContextEstimatedTokens(null);
+    setSuggestions([]);
   }, [chatId]);
 
   const loadConfig = useCallback(() => {
@@ -357,6 +359,7 @@ export function useAdminChat({
         setLastTurnUsage,
         setContextEstimatedTokens,
         setLoopSchedulePolling,
+        setSuggestions,
         finalizeCancelledGeneration,
         clearLoopHistoryReload,
         scheduleLoopHistoryReload,
@@ -401,6 +404,16 @@ export function useAdminChat({
     documentAttachments.clearDocuments();
     await runChatTurn(text, payloadImages, userPreviewImages, payloadDocuments, docNames);
   }, [input, loading, workerId, imageAttachments, documentAttachments, runChatTurn]);
+
+  /** Click en un chip de sugerencia: envía el texto directo, sin pasar por el estado `input`. */
+  const sendSuggestion = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed || loading || !workerId) return;
+      await runChatTurn(trimmed);
+    },
+    [loading, workerId, runChatTurn]
+  );
 
   const retryFromMessage = useCallback(
     async (messageIndex: number) => {
@@ -556,6 +569,8 @@ export function useAdminChat({
     scrollToBottom,
     onScroll,
     send,
+    sendSuggestion,
+    suggestions,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,

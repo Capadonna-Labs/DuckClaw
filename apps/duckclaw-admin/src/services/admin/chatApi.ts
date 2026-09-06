@@ -193,6 +193,17 @@ export const chatApi = {
     );
   },
 
+  getChatSuggestions: (body: {
+    chat_id: string;
+    tenant_id?: string;
+    last_user_message: string;
+    last_assistant_message: string;
+  }) =>
+    adminFetch<{ suggestions: string[] }>('/chat/suggestions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
   setPlaygroundWorker: (body: {
     chat_id: string;
     tenant_id?: string;

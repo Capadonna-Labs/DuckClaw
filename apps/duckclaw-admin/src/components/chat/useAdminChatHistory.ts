@@ -178,10 +178,15 @@ export function useAdminChatHistory({
   }, [clearLoopHistoryReload, reloadHistory]);
 
   // Reset del candado solo cuando cambia el chat (antes del load effect).
+  // ponytail: si no se limpia `messages` aquí, un GET fallido/lento para el chat
+  // nuevo (p. ej. 503 transitorio justo tras crear la conversación, mientras el
+  // write async de creación aún no aterriza) deja visible el historial/heartbeats
+  // del chat ANTERIOR bajo el título del chat nuevo — confirmado en vivo.
   const prevChatIdRef = useRef(chatId);
   if (prevChatIdRef.current !== chatId) {
     prevChatIdRef.current = chatId;
     loadedKeyRef.current = '';
+    setMessages([]);
   }
 
   useEffect(() => {
@@ -251,7 +256,16 @@ export function useAdminChatHistory({
         }
       })
       .catch((err) => {
-        if (isConversationNotFoundError(err)) notifyConversationMissing(chatId);
+        if (isConversationNotFoundError(err)) {
+          notifyConversationMissing(chatId);
+          return;
+        }
+        // ponytail: justo tras crear una conversación, el GET puede llegar antes de
+        // que el write async de creación aterrice (503 transitorio) — un solo
+        // reintento corto cubre esa carrera sin loop de retries.
+        window.setTimeout(() => {
+          if (!cancelled) reloadHistory({ force: true });
+        }, 800);
       })
       .finally(() => {
         if (!cancelled) setHistoryLoading(false);

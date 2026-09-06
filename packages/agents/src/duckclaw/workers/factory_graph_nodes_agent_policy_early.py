@@ -163,7 +163,13 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                             state.get("messages") or [],
                             tools_by_name,
                         )
-                except Exception:
+                except Exception as _orch_exc:
+                    _log.warning(
+                        "[%s] tool_orchestration resolve failed, forcing disabled this turn: %s",
+                        _wl,
+                        _orch_exc,
+                        exc_info=True,
+                    )
                     _orch = None
                     _orch_forced = None
 

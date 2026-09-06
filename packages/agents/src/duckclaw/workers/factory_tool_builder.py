@@ -19,6 +19,31 @@ from duckclaw.workers.tool_surface_policy import expose_privileged_mutation_tool
 
 _log = logging.getLogger(__name__)
 
+# ponytail: admin_sql let raw INSERT/UPDATE/DELETE reach main.custom_reports directly,
+# bypassing publish_custom_report entirely (its own description calls itself the "ÚNICA
+# herramienta de escritura para main.custom_reports") — confirmed live 2026-09-06, a model
+# told not to use its usual tools wrote a valid-looking row straight through admin_sql instead.
+_ADMIN_SQL_WRITE_RE = re.compile(r"\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER)\b", re.IGNORECASE)
+_ADMIN_SQL_CUSTOM_REPORTS_RE = re.compile(r"\bcustom_reports\b", re.IGNORECASE)
+
+
+def _admin_sql_custom_reports_bypass_error(q_upper_or_query: str) -> Optional[str]:
+    """Block admin_sql writes to custom_reports; publish_custom_report is the only writer."""
+    if _ADMIN_SQL_WRITE_RE.search(q_upper_or_query) and _ADMIN_SQL_CUSTOM_REPORTS_RE.search(
+        q_upper_or_query
+    ):
+        return json.dumps(
+            {
+                "error": (
+                    "Escrituras a custom_reports no están permitidas vía admin_sql. "
+                    "Usa la tool publish_custom_report (o update_custom_report_title) — "
+                    "es la única vía de escritura soportada para esa tabla."
+                )
+            },
+            ensure_ascii=False,
+        )
+    return None
+
 
 def _admin_sql_privileged_exposed(spec: WorkerSpec) -> bool:
     """True when manifest opts admin_sql into read_only workers via tool_surface."""
@@ -122,6 +147,10 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         allowed_tables_error = _enforce_allowed_tables(upper)
         if allowed_tables_error:
             return allowed_tables_error
+
+        bypass_error = _admin_sql_custom_reports_bypass_error(upper)
+        if bypass_error:
+            return bypass_error
 
         # Respetar read_only salvo admin_sql expuesto en tool_surface del manifest.
         if (
@@ -258,8 +287,13 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
     except Exception:
         pass
     register_extract_document_text_tool(tools)
-    # Workers with allowed_delegates publish HTML via invoke_worker, not vault write_output_document.
-    if not tuple(getattr(spec, "allowed_delegates", None) or ()):
+    skills_list_norm = [
+        str(skill).strip().lower().replace("-", "_")
+        for skill in (getattr(spec, "skills_list", None) or [])
+    ]
+    _publish_html_worker = "publish_custom_report" in skills_list_norm
+    # Reporters publish via custom_reports iframe — not vault disk or sandbox codegen.
+    if not tuple(getattr(spec, "allowed_delegates", None) or ()) and not _publish_html_worker:
         register_write_output_document_tool(tools)
     register_render_docx_template_tool(tools)
     from duckclaw.forge.skills.export_docx_to_pdf_bridge import register_export_docx_to_pdf_tool

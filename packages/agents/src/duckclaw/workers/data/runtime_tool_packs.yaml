@@ -57,6 +57,24 @@ packs:
       - auto-mejora
       - ciclo loop
 
+  # Opt-in por manifest (skills: infra_freshness); registrado solo para workers que
+  # lo declaran, así que always:true aquí no infla el resto — evita fricción de unlock
+  # dentro de un tick /loop.
+  - id: infra_freshness
+    always: true
+    description: "Salud de infraestructura genérica: cron PM2 registrado, antigüedad de una tabla."
+    members:
+      exact:
+        - assess_cron_registered
+        - assess_table_freshness
+      prefixes: []
+    activation_signals:
+      - infra_freshness
+      - assess_cron_registered
+      - assess_table_freshness
+      - cron perdido
+      - datos desactualizados
+
   - id: mcp
     always: false
     description: >

@@ -95,7 +95,37 @@ def test_report_update_channel() -> None:
 
 
 def test_validate_html_content_rejects_incomplete() -> None:
-    from duckclaw.forge.skills.custom_reports_bridge import _validate_html_content
+    from duckclaw.forge.skills.custom_reports_bridge import (
+        _coerce_publishable_html,
+        _validate_html_content,
+    )
 
     assert _validate_html_content("<div>sin html</div>") is not None
+    assert _validate_html_content("<!DOCTYPE html><style>body{background:#000}</style>") is not None
     assert _validate_html_content("<!DOCTYPE html><html><body></body></html>") is None
+    coerced = _coerce_publishable_html(
+        "<!DOCTYPE html><html><head></head><body><h1>OK</h1>"
+    )
+    assert _validate_html_content(coerced) is None
+
+
+def test_inspect_custom_report_flags_truncated() -> None:
+    from duckclaw.forge.skills.custom_reports_bridge import _inspect_custom_report_impl
+
+    class _Db:
+        def execute(self, sql, params=None):
+            return [
+                (
+                    "admin-conv-test",
+                    "T",
+                    "<!DOCTYPE html><style>body{background:#000}</style>",
+                    1,
+                    "now",
+                )
+            ]
+
+    raw = _inspect_custom_report_impl(_Db(), report_id="admin-conv-test")
+    data = json.loads(raw)
+    assert data["status"] == "invalid"
+    assert data["validation_error"]
+    assert "publish_custom_report" in data["fix"]

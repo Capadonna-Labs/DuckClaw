@@ -5,6 +5,7 @@
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 import { adminService } from '@/services/adminService';
+import { friendlyGatewayError } from '@/lib/adminErrors';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import { userPreviewsFromPayload } from '@/lib/chatMessageImages';
 import { requestNotificationPermission } from '@/lib/chatNotifications';
@@ -481,13 +482,13 @@ try {
     finalizeCancelledGeneration();
     return;
   }
-  const msg = e instanceof Error ? e.message : 'Error';
+  const msg = friendlyGatewayError(e instanceof Error ? e.message : 'Error');
   setMessages((m) => {
     const trimmed =
       m.length > 0 && m[m.length - 1]?.role === 'assistant' && m[m.length - 1]?.streaming
         ? m.slice(0, -1)
         : m;
-    return stripThinkingStatusHeartbeats([...trimmed, { role: 'error', text: msg }]);
+    return finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats([...trimmed, { role: 'error', text: msg }]));
   });
   setError(msg);
 } finally {

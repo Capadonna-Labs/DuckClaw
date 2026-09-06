@@ -16,6 +16,11 @@ def sse_data(payload: str | dict[str, Any]) -> str:
     return f"data: {body}\n\n"
 
 
+def sse_comment(text: str = "keepalive") -> str:
+    """SSE comment — proxies stay alive; client parser ignores non-data lines."""
+    return f": {text}\n\n"
+
+
 def sse_token(content: str) -> str:
     return sse_data({"type": "token", "content": content})
 
@@ -50,6 +55,7 @@ def sse_heartbeat(
     artifact_tenant_id: str | None = None,
     tool_name: str | None = None,
     tool_phase: str | None = None,
+    tool_detail: str | None = None,
     elapsed_ms: float | None = None,
 ) -> str:
     meta: dict[str, Any] = {"type": "heartbeat", "text": text, "kind": kind}
@@ -70,6 +76,9 @@ def sse_heartbeat(
     tp = (tool_phase or "").strip().lower()
     if tp in ("start", "done", "error"):
         meta["tool_phase"] = tp
+    td = (tool_detail or "").strip()
+    if td and tp == "error":
+        meta["tool_detail"] = td
     if elapsed_ms is not None:
         try:
             meta["elapsed_ms"] = max(0.0, float(elapsed_ms))

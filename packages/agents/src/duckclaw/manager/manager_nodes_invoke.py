@@ -231,11 +231,15 @@ def build_invoke_worker_node(
             # Serializa acceso al .duckdb: dos webhooks concurrentes no deben abrir dos DuckClaw RW.
             _vk = _worker_cache_mod._vault_lock_key(worker_resolved)
             if _vk:
-                with _worker_cache_mod._vault_invoke_guard:
-                    if _vk not in _worker_cache_mod._vault_invoke_locks:
-                        _worker_cache_mod._vault_invoke_locks[_vk] = threading.Lock()
-                    _vault_lock_obj = _worker_cache_mod._vault_invoke_locks[_vk]
-                _vault_lock_obj.acquire()
+                _vault_lock_obj = _worker_cache_mod.get_vault_invoke_lock(worker_resolved)
+                if _vault_lock_obj is not None:
+                    _vault_lock_obj.acquire()
+                    try:
+                        from duckclaw.workers.worker_invoke import set_parent_vault_invoke_lock
+
+                        set_parent_vault_invoke_lock(_vault_lock_obj)
+                    except Exception:
+                        pass
             _cfg_db = _agent_config_db_for_vault(db, vault_db_path or None)
             from duckclaw.runtime_session_settings import resolve_session_runtime_setting
 

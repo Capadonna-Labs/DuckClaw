@@ -143,7 +143,8 @@ def import_templates_to_catalog(
     ):
         manifest = _load_manifest(template_dir)
         files = _read_relevant_files(template_dir)
-        worker_id = sanitize_catalog_worker_id(template_dir.name)
+        manifest_id = str(manifest.get("id") or "").strip()
+        worker_id = sanitize_catalog_worker_id(manifest_id or template_dir.name)
         display_name = str(manifest.get("display_name") or template_dir.name).strip()
         existing = get_worker_by_tenant_worker_id(
             db,

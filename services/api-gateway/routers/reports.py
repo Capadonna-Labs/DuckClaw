@@ -27,7 +27,7 @@ _PLACEHOLDER_HTML = f"""<!DOCTYPE html>
 <head><meta charset="utf-8"><title>Reporte</title></head>
 <body style="font-family:system-ui;padding:2rem;color:#334155">
 <h3>{PLACEHOLDER_MARKER}</h3>
-<p>Abre el asistente (arriba a la derecha) y pide un dashboard con <strong>ui_designer</strong> o datos quant con <strong>quant_reporter</strong>, o sube un archivo <strong>.html</strong> desde esta pantalla.</p>
+<p>Abre el asistente (arriba a la derecha) y pide un dashboard con <strong>ui_designer</strong> o el worker de reporting que tengas configurado, o sube un archivo <strong>.html</strong> desde esta pantalla.</p>
 </body></html>"""
 
 _CSP = (
@@ -94,7 +94,13 @@ async def get_rendered_report(
                 "SELECT html_content FROM main.custom_reports WHERE report_id = ?",
                 [rid],
             )
-        except Exception:
+        except Exception as exc:
+            _log.info(
+                "get_rendered_report placeholder report_id=%s vault=%s reason=query_error err=%s",
+                rid,
+                vp,
+                exc,
+            )
             return HTMLResponse(content=_PLACEHOLDER_HTML, headers={"Content-Security-Policy": _CSP})
     finally:
         try:
@@ -104,6 +110,11 @@ async def get_rendered_report(
 
     html = _html_from_custom_report_rows(rows)
     if not html:
+        _log.info(
+            "get_rendered_report placeholder report_id=%s vault=%s reason=empty_row",
+            rid,
+            vp,
+        )
         return HTMLResponse(content=_PLACEHOLDER_HTML, headers={"Content-Security-Policy": _CSP})
     return HTMLResponse(content=html, headers={"Content-Security-Policy": _CSP})
 

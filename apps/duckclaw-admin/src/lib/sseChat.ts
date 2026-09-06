@@ -29,6 +29,7 @@ export type SseChatEvent =
       artifact_ids?: string[];
       tool_name?: string;
       tool_phase?: 'start' | 'done' | 'error';
+      tool_detail?: string;
       elapsed_ms?: number;
     }
   | {
@@ -132,6 +133,7 @@ function parseDataLine(data: string): SseChatEvent | null {
           : undefined,
         tool_name: typeof j.tool_name === 'string' ? j.tool_name : undefined,
         tool_phase,
+        tool_detail: typeof j.tool_detail === 'string' ? j.tool_detail : undefined,
         elapsed_ms: Number.isFinite(elapsed_ms) ? elapsed_ms : undefined,
       };
     }

@@ -18,6 +18,15 @@ def make_should_continue(ctx: WorkerGraphContext):
     def should_continue(state: dict) -> str:
         if int(state.get("_tool_round") or 0) >= max_rounds:
             return "end"
+        try:
+            from duckclaw.forge.skills.custom_reports_bridge import (
+                _turn_already_published_custom_report,
+            )
+
+            if _turn_already_published_custom_report(state.get("messages")):
+                return "end"
+        except Exception:
+            pass
         last = state["messages"][-1]
         _has_tools = bool(getattr(last, "tool_calls", None))
         return "tools" if _has_tools else "end"

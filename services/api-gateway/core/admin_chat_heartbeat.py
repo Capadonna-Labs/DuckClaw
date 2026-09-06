@@ -51,6 +51,9 @@ def parse_admin_heartbeat_payload(raw: str) -> dict[str, Any] | None:
     tp = str(data.get("tool_phase") or "").strip().lower()
     if tp in ("start", "done", "error"):
         out["tool_phase"] = tp
+    td = str(data.get("tool_detail") or "").strip()
+    if td:
+        out["tool_detail"] = td
     em = data.get("elapsed_ms")
     if em is not None:
         try:

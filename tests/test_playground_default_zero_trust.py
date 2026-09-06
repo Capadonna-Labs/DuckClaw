@@ -57,7 +57,7 @@ def test_default_worker_filters_docs_output_tools_from_runtime_packs() -> None:
 
 def test_is_pack_restricted_only_for_default_worker() -> None:
     assert is_pack_restricted_for_worker("docs_output", "default") is True
-    assert is_pack_restricted_for_worker("docs_output", "quant-trader") is False
+    assert is_pack_restricted_for_worker("docs_output", "some-worker") is False
     assert is_pack_restricted_for_worker("core", "default") is False
 
 

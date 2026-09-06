@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { GATEWAY_CHAT_SSE_TIMEOUT_MS } from '@/lib/bffChatTimeout';
 import { adminApiKey, gatewayBase, gatewayLongFetch, gatewayProxyHeaders } from '@/lib/gatewayProxy';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 
-/** ComfyUI (~3–4 min) + cold start worker; margen para MCP omitido en visual_generation */
-export const maxDuration = 600;
+/** Next requires a literal (not imported) for route segment config. */
+export const maxDuration = 3600;
 export const dynamic = 'force-dynamic';
-
-const GATEWAY_CHAT_TIMEOUT_MS = 590_000;
 
 /** Proxy al chat admin del gateway (JSON o SSE si stream=true). */
 export async function POST(req: NextRequest) {
@@ -42,7 +41,7 @@ export async function POST(req: NextRequest) {
 
   const target = `${base}/api/v1/admin/playground/chat`;
 
-  const timeoutSignal = AbortSignal.timeout(GATEWAY_CHAT_TIMEOUT_MS);
+  const timeoutSignal = AbortSignal.timeout(GATEWAY_CHAT_SSE_TIMEOUT_MS);
   const upstreamSignal =
     typeof AbortSignal.any === 'function'
       ? AbortSignal.any([req.signal, timeoutSignal])
@@ -85,7 +84,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         detail: isTimeout
-          ? 'El chat superó el tiempo máximo del proxy (generación de imagen puede tardar ~4 min). Reintenta o usa /gen/image.'
+          ? 'El chat superó el tiempo máximo del proxy (~30 min). Recarga el historial; el turno puede haber terminado en el servidor.'
           : msg,
         hint: '¿Está corriendo DuckClaw-Gateway? Tras actualizar código, reinicia gateway y admin (pnpm dev).',
         code: isTimeout ? 'proxy_timeout' : 'gateway_unreachable',

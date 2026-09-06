@@ -4,6 +4,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Maximize2, X } from 'lucide-react';
+import {
+  Pm2LiveLogsControls,
+  Pm2LiveLogsProvider,
+  Pm2LiveLogsViewport,
+} from '@/components/admin/Pm2LiveLogsPanel';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
@@ -35,6 +40,7 @@ export function FloatingAdminChat() {
   const onPlayground =
     pathname === '/playground' || (pathname?.startsWith('/playground/') ?? false);
   const [tenantId, setTenantId] = useState<string | undefined>();
+  const [logsSplitOpen, setLogsSplitOpen] = useState(false);
   const projectId = useMemo(() => {
     const fromUrl = (searchParams.get('project') || '').trim();
     if (fromUrl) return fromUrl;
@@ -141,7 +147,7 @@ export function FloatingAdminChat() {
         conversationTitle={conv.conversationTitle}
         emptyHint={
           htmlDashboardDeliverable
-            ? 'Pide un dashboard HTML o publica con publish_custom_report (report_id = id de esta conversación). Quant → quant_reporter.'
+            ? 'Pide un dashboard HTML o publica con publish_custom_report (report_id = id de esta conversación).'
             : `Pregunta sobre ${sectionTitle}…`
         }
         showWorkerLink={false}
@@ -164,9 +170,38 @@ export function FloatingAdminChat() {
         open ? 'w-[420px]' : 'w-0 border-l-0'
       }`}
     >
-      <div className="flex flex-col h-full w-[420px] min-w-[420px]">
-        {chatPanel}
-      </div>
+      <Pm2LiveLogsProvider autoStart={logsSplitOpen}>
+        <div className="flex h-full min-h-0 w-[420px] min-w-[420px] flex-col">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{chatPanel}</div>
+            {logsSplitOpen ? (
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-gov-gray-200 bg-white text-gov-gray-800 dark:border-dark-border dark:bg-slate-950 dark:text-slate-200">
+                <Pm2LiveLogsControls variant="studio" />
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                  <Pm2LiveLogsViewport className="h-full min-h-0" />
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <div className="shrink-0 border-t border-gov-gray-200 dark:border-dark-border">
+            <button
+              type="button"
+              onClick={() => setLogsSplitOpen((v) => !v)}
+              aria-pressed={logsSplitOpen}
+              aria-label="Mostrar u ocultar logs PM2"
+              title={logsSplitOpen ? 'Ocultar consola de logs' : 'Mostrar consola de logs'}
+              data-testid="floating-chat-logs-toggle"
+              className={`flex h-9 w-full items-center justify-center font-mono text-xs font-bold transition-colors ${
+                logsSplitOpen
+                  ? 'bg-gov-blue-700 text-white hover:bg-gov-blue-800 dark:bg-gov-blue-600'
+                  : 'bg-gov-gray-50 text-gov-gray-600 hover:bg-gov-gray-100 dark:bg-dark-bg dark:text-dark-muted dark:hover:bg-dark-surface'
+              }`}
+            >
+              {'</>'}
+            </button>
+          </div>
+        </div>
+      </Pm2LiveLogsProvider>
     </div>
   );
 }

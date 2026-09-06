@@ -135,6 +135,7 @@ packs:
         - render_docx_template
         - export_docx_to_pdf
         - publish_custom_report
+        - inspect_custom_report
         - update_custom_report_title
         - read_llm_usage_summary
       prefixes: []

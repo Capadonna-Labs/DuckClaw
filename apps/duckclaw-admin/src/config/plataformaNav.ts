@@ -7,6 +7,7 @@ export const PLATAFORMA_TABS = [
   { id: 'imagenes', label: 'Imágenes', hint: 'Generación visual ComfyUI' },
   { id: 'duckdb', label: 'Base de Datos', hint: 'Explorador de datos' },
   { id: 'runtime', label: 'Runtime', hint: 'Overrides agent_config por bóveda y chat' },
+  { id: 'crons', label: 'Crons', hint: 'Procesos PM2 con horario cron — estado, disparo manual, logs' },
 ] as const;
 
 export type PlataformaTabId = (typeof PLATAFORMA_TABS)[number]['id'];

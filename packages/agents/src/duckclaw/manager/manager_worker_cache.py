@@ -14,7 +14,8 @@ _log = logging.getLogger(__name__)
 
 _worker_graph_cache: OrderedDict[str, Any] = OrderedDict()
 _vault_invoke_guard = threading.Lock()
-_vault_invoke_locks: dict[str, threading.Lock] = {}
+# RLock: manager holds vault during worker invoke; allowed_delegates re-enter same vault.
+_vault_invoke_locks: dict[str, threading.RLock] = {}
 
 
 def worker_graph_cache_enabled() -> bool:
@@ -167,6 +168,19 @@ def _vault_lock_key(path: str) -> str:
         return str(Path(p).expanduser())
 
 
+def get_vault_invoke_lock(path: str) -> threading.RLock | None:
+    """Per-vault invoke lock (reentrant for worker-to-worker delegation)."""
+    vk = _vault_lock_key(path)
+    if not vk:
+        return None
+    with _vault_invoke_guard:
+        lock = _vault_invoke_locks.get(vk)
+        if lock is None:
+            lock = threading.RLock()
+            _vault_invoke_locks[vk] = lock
+        return lock
+
+
 def _release_worker_db_handle(worker_graph: Any | None, *, cache_key: str = "") -> bool:
     """
     Cierra ``_worker_db`` del grafo cacheado y opcionalmente lo saca de la caché.
@@ -223,6 +237,7 @@ __all__ = [
     "_vault_invoke_guard",
     "_vault_invoke_locks",
     "_vault_lock_key",
+    "get_vault_invoke_lock",
     "_worker_graph_cache",
     "clear_worker_graph_cache",
     "remember_worker_graph_cache",

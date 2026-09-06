@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -11,6 +12,8 @@ from fastapi import Request
 
 from routers.admin_domains.admin_common import repo_root
 from routers.admin_domains.playground.tenant_resolution import playground_telegram_user_id
+
+_log = logging.getLogger(__name__)
 
 
 def duckdb_paths_same(a: str, b: str) -> bool:
@@ -33,28 +36,54 @@ def _playground_vault_user_id(team_ctx: dict[str, Any]) -> str:
     return uid
 
 
+def _playground_worker_vault_path(worker_id: str, uid: str, tenant_id: str) -> str | None:
+    from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
+    from duckclaw.vaults import resolve_template_vault_path
+    from duckclaw.workers.manifest import load_manifest
+
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
+    if not wid:
+        return None
+    try:
+        gw = resolve_env_duckdb_path(get_gateway_db_path())
+        if gw and os.path.isfile(gw):
+            db = open_playground_vault_db(gw, read_only=True)
+            try:
+                spec = load_manifest(wid, db=db, tenant_id=tenant_id)
+            finally:
+                try:
+                    db.close()
+                except Exception:
+                    pass
+            tpl = resolve_template_vault_path(spec.forge_vault_binding, uid)
+            if tpl:
+                return resolve_env_duckdb_path(str(tpl).strip())
+    except Exception:
+        pass
+    return None
+
+
 def playground_vault_db_path(
     team_ctx: dict[str, Any],
     worker_id: str | None = None,
 ) -> str:
-    """Ruta .duckdb del playground: hub gateway (RAG/SQL) salvo binding de worker o vault activo."""
+    """Ruta .duckdb del playground: binding de worker / activa; hub solo sin worker."""
     from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
-    from duckclaw.vaults import resolve_active_vault, resolve_template_vault_path, vault_scope_id_for_tenant
-    from duckclaw.workers.manifest import load_manifest
+    from duckclaw.vaults import resolve_active_vault, vault_scope_id_for_tenant
 
     tid = str(team_ctx.get("tenant_id") or "default").strip() or "default"
     uid = _playground_vault_user_id(team_ctx)
     scope = vault_scope_id_for_tenant(tid)
 
     wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
-    if wid:
-        try:
-            spec = load_manifest(wid)
-            tpl = resolve_template_vault_path(spec.forge_vault_binding, uid)
-            if tpl:
-                return resolve_env_duckdb_path(str(tpl).strip())
-        except Exception:
-            pass
+    if wid and wid != "default":
+        worker_vault = _playground_worker_vault_path(wid, uid, tid)
+        if worker_vault:
+            return worker_vault
+        _, vault_path = resolve_active_vault(uid, scope)
+        active = resolve_env_duckdb_path(str(vault_path or "").strip())
+        if active and os.path.isfile(active):
+            return active
 
     gateway_path = resolve_env_duckdb_path(get_gateway_db_path())
     if gateway_path and os.path.isfile(gateway_path):
@@ -94,7 +123,7 @@ async def resolved_vault_for_admin_chat(
     request: Request | None = None,
     runtime_default_vault: str | None = None,
 ) -> dict[str, Any]:
-    """Bóveda efectiva: body > meta conversación > runtime DB-first > worker/activa."""
+    """Bóveda efectiva: body > meta conversación > worker binding > runtime default > activa."""
     from duckclaw.gateway_db import resolve_env_duckdb_path
 
     cid = (chat_id or "").strip()
@@ -118,9 +147,19 @@ async def resolved_vault_for_admin_chat(
         default_path = ""
     default_effective = resolve_env_duckdb_path(default_path) if default_path else ""
     runtime_default = (runtime_default_vault or "").strip()
-    if not override and runtime_default:
+    wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
+    worker_vault_ready = bool(
+        wid and wid != "default" and default_effective and os.path.isfile(default_effective)
+    )
+    if not override and runtime_default and not worker_vault_ready:
         runtime_effective = resolve_env_duckdb_path(runtime_default)
         if os.path.isfile(runtime_effective):
+            _log.info(
+                "resolved_vault chat=%s scope=runtime worker=%s effective=%s",
+                cid,
+                wid or "(none)",
+                runtime_effective,
+            )
             return {
                 "effective_path": runtime_effective,
                 "scope": "runtime",
@@ -128,6 +167,13 @@ async def resolved_vault_for_admin_chat(
                 "default_path": default_effective or runtime_effective,
             }
     effective = resolve_env_duckdb_path(override or default_path)
+    _log.info(
+        "resolved_vault chat=%s scope=%s worker=%s effective=%s",
+        cid,
+        scope,
+        wid or "(none)",
+        effective,
+    )
     return {
         "effective_path": effective,
         "scope": scope,

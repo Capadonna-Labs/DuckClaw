@@ -257,9 +257,16 @@ def initialize_worker_graph_context(
     except Exception:
         pass
 
-    # Strix Sandbox: `run_sandbox` con LLM (política zero-trust si falta YAML); browser opt-in en manifest.
+    # Strix Sandbox: coding agents only — skip for HTML reporters (publish_custom_report).
+    _skills_norm = [
+        str(s).strip().lower().replace("-", "_")
+        for s in (getattr(spec, "skills_list", None) or [])
+    ]
+    _skip_sandbox = "publish_custom_report" in _skills_norm and not getattr(
+        spec, "browser_sandbox", False
+    )
     try:
-        if llm is not None:
+        if llm is not None and not _skip_sandbox:
             from duckclaw.framework_tool_pack import ensure_baseline_worker_files
 
             ensure_baseline_worker_files(spec.worker_dir)

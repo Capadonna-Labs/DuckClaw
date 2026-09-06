@@ -1,12 +1,15 @@
 import { Agent, fetch as undiciFetch, type RequestInit as UndiciRequestInit } from 'undici';
+import { GATEWAY_CHAT_SSE_TIMEOUT_MS } from '@/lib/bffChatTimeout';
+import { desktopAdminApiKey, applyDesktopEnvToProcessEnv } from '@/lib/desktopEnvFile';
 
 /**
  * Undici corta el body a los 300s por defecto (UND_ERR_BODY_TIMEOUT).
- * SSE del playground, ComfyUI y /playground/voice (STT+agente+TTS batch) pueden superar 120s.
+ * SSE del playground puede superar 10 min (invoke_worker + MCP).
  */
+
 const LONG_GATEWAY_DISPATCHER = new Agent({
   bodyTimeout: 0,
-  headersTimeout: 600_000,
+  headersTimeout: GATEWAY_CHAT_SSE_TIMEOUT_MS,
   connectTimeout: 30_000,
 });
 
@@ -17,8 +20,6 @@ export function gatewayLongFetch(input: string | URL, init?: RequestInit): Promi
     dispatcher: LONG_GATEWAY_DISPATCHER,
   }) as unknown as Promise<Response>;
 }
-
-import { desktopAdminApiKey, applyDesktopEnvToProcessEnv } from '@/lib/desktopEnvFile';
 
 applyDesktopEnvToProcessEnv();
 

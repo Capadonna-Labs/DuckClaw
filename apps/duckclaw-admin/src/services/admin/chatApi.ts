@@ -1,4 +1,5 @@
 import { readSseChatStream } from '@/lib/sseChat';
+import { friendlyGatewayError } from '@/lib/adminErrors';
 
 import { adminFetch, coalesceAdminGet, sessionHeaders } from './http';
 
@@ -377,17 +378,26 @@ export const chatApi = {
     },
     options?: { signal?: AbortSignal }
   ) => {
-    const res = await fetch('/api/admin/playground/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...sessionHeaders('POST'),
-      },
-      credentials: 'include',
-      body: JSON.stringify({ ...body, stream: true }),
-      cache: 'no-store',
-      signal: options?.signal,
-    });
+    let res: Response;
+    try {
+      res = await fetch('/api/admin/playground/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...sessionHeaders('POST'),
+        },
+        credentials: 'include',
+        body: JSON.stringify({ ...body, stream: true }),
+        cache: 'no-store',
+        signal: options?.signal,
+      });
+    } catch (err) {
+      if (options?.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        return '';
+      }
+      const raw = err instanceof Error ? err.message : 'Error de red';
+      throw new Error(friendlyGatewayError(raw));
+    }
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       const detail =
@@ -445,7 +455,8 @@ export const chatApi = {
       if (options?.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
         return full;
       }
-      throw err;
+      const raw = err instanceof Error ? err.message : 'Error';
+      throw new Error(friendlyGatewayError(raw));
     }
     if (options?.signal?.aborted) return full;
     return full;

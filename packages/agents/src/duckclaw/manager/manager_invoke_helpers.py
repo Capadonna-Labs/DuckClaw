@@ -17,6 +17,7 @@ from duckclaw.manager.manager_worker_cache import (
     _vault_invoke_guard,
     _vault_invoke_locks,
     _vault_lock_key,
+    get_vault_invoke_lock,
 )
 from duckclaw.manager.routing import _worker_matches_id
 from duckclaw.manager.task_activity import _worker_tool_names_from_messages
@@ -119,14 +120,12 @@ def compute_invoke_suspend_flags(
     suspend_for_rw_worker = bool(mgr_read_only and needs_rw_vault and hub_same_as_worker)
     suspend_hub_for_visual_delta = bool(mgr_read_only and visual_lite_mcp and mgr_path)
     will_suspend_ro = suspend_for_rw_worker or suspend_hub_for_visual_delta
-    vault_lock_obj: threading.Lock | None = None
+    vault_lock_obj: threading.RLock | None = None
     vk = _vault_lock_key(worker_resolved)
     if vk:
-        with _vault_invoke_guard:
-            if vk not in _vault_invoke_locks:
-                _vault_invoke_locks[vk] = threading.Lock()
-            vault_lock_obj = _vault_invoke_locks[vk]
-        vault_lock_obj.acquire()
+        vault_lock_obj = get_vault_invoke_lock(worker_resolved)
+        if vault_lock_obj is not None:
+            vault_lock_obj.acquire()
     return InvokeSuspendFlags(
         suspend_for_rw_worker=suspend_for_rw_worker,
         suspend_hub_for_visual_delta=suspend_hub_for_visual_delta,
@@ -443,6 +442,12 @@ def finalize_invoke_worker_cleanup(
             vault_lock_obj.release()
         except Exception:
             pass
+    try:
+        from duckclaw.workers.worker_invoke import set_parent_vault_invoke_lock
+
+        set_parent_vault_invoke_lock(None)
+    except Exception:
+        pass
 
 
 __all__ = [

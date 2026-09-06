@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 from fastapi import HTTPException, Request
@@ -15,6 +16,7 @@ from core.sse_stream import (
     emit_chat_reply_sse,
     friendly_chat_error_message,
     sse_audio,
+    sse_comment,
     sse_error,
     sse_heartbeat,
     sse_terminal_done,
@@ -63,12 +65,23 @@ async def invoke_chat_sse_body(
             **invoke_kwargs,
         )
     )
+    client_detached = False
+    last_sse_at = time.monotonic()
+    keepalive_s = 25.0
 
     try:
         from duckclaw.graphs.chat_cancel import is_chat_cancel_requested
 
         while not invoke_task.done():
             if http_request is not None and await http_request.is_disconnected():
+                if admin_session:
+                    # ponytail: no cancelar invoke_worker anidado si el proxy SSE corta; el cliente recarga historial.
+                    client_detached = True
+                    _gateway_log.info(
+                        "admin SSE client disconnected chat_id=%r; invoke continues detached",
+                        session_id,
+                    )
+                    break
                 await abort_chat_invoke_task(session_id, invoke_task)
                 yield sse_error("Interrumpido por el usuario.")
                 yield sse_terminal_done()
@@ -89,10 +102,18 @@ async def invoke_chat_sse_body(
                     artifact_tenant_id=str(hb.get("artifact_tenant_id") or "").strip() or None,
                     tool_name=str(hb.get("tool_name") or "").strip() or None,
                     tool_phase=str(hb.get("tool_phase") or "").strip().lower() or None,
+                    tool_detail=str(hb.get("tool_detail") or "").strip() or None,
                     elapsed_ms=hb.get("elapsed_ms"),
                 )
+                last_sse_at = time.monotonic()
             except asyncio.TimeoutError:
+                if time.monotonic() - last_sse_at >= keepalive_s:
+                    yield sse_comment("keepalive")
+                    last_sse_at = time.monotonic()
                 continue
+
+        if client_detached:
+            return
 
         while not heartbeat_queue.empty():
             hb = heartbeat_queue.get_nowait()
@@ -105,6 +126,7 @@ async def invoke_chat_sse_body(
                 artifact_tenant_id=str(hb.get("artifact_tenant_id") or "").strip() or None,
                 tool_name=str(hb.get("tool_name") or "").strip() or None,
                 tool_phase=str(hb.get("tool_phase") or "").strip().lower() or None,
+                tool_detail=str(hb.get("tool_detail") or "").strip() or None,
                 elapsed_ms=hb.get("elapsed_ms"),
             )
 
@@ -202,5 +224,5 @@ async def invoke_chat_sse_body(
                 pass
             except Exception:
                 pass
-        if not invoke_task.done():
+        if not invoke_task.done() and not client_detached:
             await abort_chat_invoke_task(session_id, invoke_task)

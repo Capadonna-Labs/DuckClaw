@@ -304,11 +304,14 @@ def publish_admin_tool_event(
     Heartbeat admin por herramienta (SSE). Un solo bloque por tool en la UI:
     ``start`` abre cronómetro; ``done``/``error`` actualiza el mismo bloque con ``elapsed_ms``.
   """
-    _ = detail
     ph = (phase or "start").strip().lower()
     if ph not in ("start", "done", "error"):
         return
     name = (tool_name or "").strip() or "tool"
+    tool_detail = ""
+    if ph == "error" and (detail or "").strip():
+        s = re.sub(r"\s+", " ", (detail or "").strip())
+        tool_detail = s[:319] + "…" if len(s) > 320 else s
     # El playground completo recibe estos eventos vía SSE. En desktop lite la
     # consola sigue gateway.log, por lo que hay que registrar el mismo ciclo de
     # vida allí. No incluir detail: puede traer SQL, rutas o resultados.
@@ -334,6 +337,7 @@ def publish_admin_tool_event(
         worker_id=worker_id,
         tool_name=name,
         tool_phase=ph,
+        tool_detail=tool_detail or None,
         elapsed_ms=elapsed_ms if ph in ("done", "error") else None,
     )
 
@@ -352,6 +356,7 @@ def publish_admin_chat_heartbeat(
     sandbox_run_id: str | None = None,
     tool_name: str | None = None,
     tool_phase: str | None = None,
+    tool_detail: str | None = None,
     elapsed_ms: float | int | None = None,
 ) -> None:
     """
@@ -402,6 +407,9 @@ def publish_admin_chat_heartbeat(
     tp = (tool_phase or "").strip().lower()
     if tp in ("start", "done", "error"):
         body["tool_phase"] = tp
+    td = (tool_detail or "").strip()
+    if td and tp == "error":
+        body["tool_detail"] = td
     if elapsed_ms is not None:
         try:
             body["elapsed_ms"] = max(0.0, float(elapsed_ms))

@@ -82,13 +82,22 @@ export function friendlyGatewayError(raw: string): string {
     }
     return 'El gateway tardó demasiado. Recarga el historial; el stack ya está en marcha.';
   }
+  if (/fetch failed|failed to fetch|network error|econnreset|socket hang up/i.test(m)) {
+    return (
+      'Conexión SSE cortada (gateway sigue vivo). Recarga el historial; turno largo pudo seguir en servidor. ' +
+      'Para publicar HTML usa publish_custom_report directo en vez de delegar con invoke_worker.'
+    );
+  }
   if (isGatewayUnreachableMessage(raw)) {
     return isDesktopRuntime() ? desktopGatewayDownMessage() : hostGatewayDownMessage();
   }
   if (raw === 'Internal Server Error') {
     return isDesktopRuntime()
       ? desktopGatewayDownMessage()
-      : 'No se pudo contactar el gateway. Comprueba PM2 o inicia el stack desde el botón de abajo.';
+      : 'Conexión SSE cortada (gateway sigue vivo). Recarga chat; turno largo invoke_worker puede tardar >9 min.';
+  }
+  if (/proxy_timeout|504|superó el tiempo máximo del proxy/i.test(m)) {
+    return 'Turno chat superó ~30 min en proxy. Gateway sigue; recarga historial — el agente pudo terminar en el servidor.';
   }
   if (/stt inference failed|stt no disponible/i.test(raw)) {
     return 'No se pudo transcribir el audio. El nodo sensory no decodificó el formato; reintenta tras actualizar.';

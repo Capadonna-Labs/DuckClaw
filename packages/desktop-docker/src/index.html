@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DuckClaw Full</title>
+    <style>
+      :root {
+        --bg: #0b0f14;
+        --fg: #e6edf3;
+        --muted: #8b949e;
+        --accent: #3b82f6;
+        --warn: #d29922;
+        --ok: #3fb950;
+        --card: #161b22;
+        --border: #30363d;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+        font-family: "Segoe UI", system-ui, sans-serif; }
+      .wrap { max-width: 640px; margin: 0 auto; padding: 2rem 1.5rem; }
+      h1 { font-size: 1.5rem; margin: 0 0 0.35rem; font-weight: 600; }
+      .sub { color: var(--muted); margin: 0 0 1.5rem; font-size: 0.95rem; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+        padding: 1rem 1.15rem; margin-bottom: 1rem; }
+      .status { font-size: 0.95rem; line-height: 1.45; white-space: pre-wrap; }
+      .phase { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em;
+        color: var(--muted); margin-bottom: 0.35rem; }
+      .phase.need_docker { color: var(--warn); }
+      .phase.ready { color: var(--ok); }
+      .actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-top: 1rem; }
+      button { border: 0; border-radius: 8px; padding: 0.65rem 1rem; font-size: 0.9rem;
+        cursor: pointer; font-weight: 600; }
+      button.primary { background: var(--accent); color: #fff; }
+      button.secondary { background: #21262d; color: var(--fg); border: 1px solid var(--border); }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .creds dt { color: var(--muted); font-size: 0.8rem; }
+      .creds dd { margin: 0 0 0.6rem; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; }
+      a { color: var(--accent); }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>DuckClaw Full</h1>
+      <p class="sub">Launcher Docker — Gateway, Redis, DB-Writer, Knowledge-Indexer y Admin.</p>
+
+      <div class="card">
+        <div id="phase" class="phase">…</div>
+        <div id="status" class="status">Comprobando…</div>
+        <div class="actions">
+          <button id="btnStart" class="primary">Iniciar stack</button>
+          <button id="btnAdmin" class="secondary" disabled>Abrir Admin</button>
+          <button id="btnStop" class="secondary">Detener</button>
+          <button id="btnDocker" class="secondary" hidden>Descargar Docker Desktop</button>
+        </div>
+      </div>
+
+      <div class="card" id="credsCard" hidden>
+        <div class="phase">Credenciales admin (este PC)</div>
+        <dl class="creds">
+          <dt>Email</dt><dd id="credEmail">—</dd>
+          <dt>Password</dt><dd id="credPassword">—</dd>
+          <dt>API key</dt><dd id="credKey">—</dd>
+        </dl>
+      </div>
+    </div>
+
+    <script>
+      const { invoke } = window.__TAURI__.core;
+      const phaseEl = document.getElementById("phase");
+      const statusEl = document.getElementById("status");
+      const btnStart = document.getElementById("btnStart");
+      const btnAdmin = document.getElementById("btnAdmin");
+      const btnStop = document.getElementById("btnStop");
+      const btnDocker = document.getElementById("btnDocker");
+      const credsCard = document.getElementById("credsCard");
+
+      async function refresh() {
+        try {
+          const s = await invoke("get_status");
+          phaseEl.textContent = s.phase;
+          phaseEl.className = "phase " + s.phase;
+          statusEl.textContent = s.detail || "";
+          btnDocker.hidden = s.docker_ok;
+          btnAdmin.disabled = !s.ready;
+          if (s.credentials) {
+            credsCard.hidden = false;
+            document.getElementById("credEmail").textContent = s.credentials.email;
+            document.getElementById("credPassword").textContent = s.credentials.password;
+            document.getElementById("credKey").textContent = s.credentials.api_key;
+          }
+        } catch (e) {
+          statusEl.textContent = String(e);
+        }
+      }
+
+      btnStart.onclick = async () => {
+        btnStart.disabled = true;
+        try {
+          await invoke("start_stack");
+        } catch (e) {
+          statusEl.textContent = String(e);
+        }
+        btnStart.disabled = false;
+        refresh();
+      };
+      btnStop.onclick = async () => {
+        try { await invoke("stop_stack"); } catch (e) { statusEl.textContent = String(e); }
+        refresh();
+      };
+      btnAdmin.onclick = async () => {
+        try { await invoke("open_admin"); } catch (e) { statusEl.textContent = String(e); }
+      };
+      btnDocker.onclick = async () => {
+        try { await invoke("open_docker_download"); } catch (e) { statusEl.textContent = String(e); }
+      };
+
+      refresh();
+      setInterval(refresh, 2000);
+    </script>
+  </body>
+</html>

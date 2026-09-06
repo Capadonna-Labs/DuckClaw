@@ -1,0 +1,21 @@
+# Slim sandbox image for DuckClaw Full Docker (platform smoke / friend PC).
+# Full analytics+Playwright image: docker/sandbox/Dockerfile → same tag when needed.
+#
+# Build: docker build -t duckclaw/sandbox:latest -f docker/sandbox/Dockerfile.slim docker/sandbox/
+
+FROM python:3.12-slim-bookworm
+
+RUN pip install --no-cache-dir \
+        pandas==2.2.3 \
+        matplotlib==3.9.4 \
+        duckdb==1.2.0 \
+        numpy==2.1.3 \
+        requests==2.32.3 \
+    && rm -rf /root/.cache/pip \
+    && mkdir -p /workspace/data /workspace/output \
+    && useradd -m sandbox \
+    && chown -R sandbox:sandbox /workspace
+
+WORKDIR /workspace
+USER sandbox
+CMD ["tail", "-f", "/dev/null"]

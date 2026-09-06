@@ -10,6 +10,7 @@ import { McpUnifiedView } from '@/components/mcp/McpUnifiedView';
 import GenImagePageView from '@/components/gen/GenImagePageView';
 import DuckDbPageView from '@/components/duckdb/DuckDbPageView';
 import RuntimePageView from '@/components/runtime/RuntimePageView';
+import CronsPageView from '@/components/crons/CronsPageView';
 import {
   PLATAFORMA_TABS,
   parsePlataformaTab,
@@ -43,6 +44,7 @@ function PlataformaHubContent() {
       {tab === 'imagenes' && <GenImagePageView embedded />}
       {tab === 'duckdb' && <DuckDbPageView embedded />}
       {tab === 'runtime' && <RuntimePageView embedded />}
+      {tab === 'crons' && <CronsPageView embedded />}
     </PageShell>
   );
 }

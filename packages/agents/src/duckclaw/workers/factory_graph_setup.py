@@ -256,6 +256,20 @@ def initialize_worker_graph_context(
         register_loop_skill(tools, db)
     except Exception:
         pass
+    _skills_norm_early = [
+        str(s).strip().lower().replace("-", "_")
+        for s in (getattr(spec, "skills_list", None) or [])
+    ]
+    if "infra_freshness" in _skills_norm_early:
+        try:
+            from duckclaw.forge.skills.infra_freshness_bridge import (
+                register_infra_freshness_skill,
+            )
+
+            register_infra_freshness_skill(tools, db)
+            tools_by_name = {t.name: t for t in tools}
+        except Exception:
+            pass
 
     # Strix Sandbox: coding agents only — skip for HTML reporters (publish_custom_report).
     _skills_norm = [

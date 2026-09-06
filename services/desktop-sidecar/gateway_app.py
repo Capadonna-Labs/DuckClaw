@@ -14,11 +14,14 @@ def _repo_root() -> Path:
 
 
 def _ensure_gateway_path(repo: Path) -> None:
+    # Desktop/Lite runs one process with inline writes (no db-writer) — services/db-writer
+    # must NOT be added here: it has its own core.config with an unrelated Settings class,
+    # and both dirs define a top-level `core` package, so whichever lands first in sys.path
+    # wins for every `core.*` import project-wide (this shadowed api-gateway's own
+    # core.config.settings.VERSION with db-writer's Settings, which has no such field).
     gateway_dir = repo / "services" / "api-gateway"
-    writer_dir = repo / "services" / "db-writer"
-    for p in (str(gateway_dir), str(writer_dir)):
-        if p not in sys.path:
-            sys.path.insert(0, p)
+    if str(gateway_dir) not in sys.path:
+        sys.path.insert(0, str(gateway_dir))
 
 
 _repo = _repo_root()

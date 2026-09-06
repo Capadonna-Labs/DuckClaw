@@ -110,11 +110,17 @@ async def _call_connector_tool(
             call_google_gmail_rest,
             uses_google_gmail_rest_fallback,
         )
+        from duckclaw.forge.skills.youtube_analytics_rest import (
+            call_youtube_analytics_rest,
+            uses_youtube_analytics_rest_fallback,
+        )
 
         if uses_google_calendar_rest_fallback(connector):
             return await call_google_calendar_rest(tool_name, arguments, headers=headers)
         if uses_google_gmail_rest_fallback(connector):
             return await call_google_gmail_rest(tool_name, arguments, headers=headers)
+        if uses_youtube_analytics_rest_fallback(connector):
+            return await call_youtube_analytics_rest(tool_name, arguments, headers=headers)
 
         return await mcp_http_call_tool(
             url,
@@ -196,6 +202,19 @@ def _gmail_rest_fallback_specs_if_ready(db: Any, connector: dict[str, Any]) -> l
     return gmail_rest_fallback_tool_specs()
 
 
+def _youtube_analytics_rest_fallback_specs_if_ready(db: Any, connector: dict[str, Any]) -> list[Any]:
+    from duckclaw.forge.skills.youtube_analytics_rest import (
+        uses_youtube_analytics_rest_fallback,
+        youtube_analytics_rest_fallback_tool_specs,
+    )
+
+    if not uses_youtube_analytics_rest_fallback(connector):
+        return []
+    if not resolve_connector_bearer_token(db, connector):
+        return []
+    return youtube_analytics_rest_fallback_tool_specs()
+
+
 async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: str = "default") -> list[Any]:
     if not _mcp_available():
         return []
@@ -215,6 +234,15 @@ async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: 
                 added = _register_connector_tool_specs(db, connector, fallback, tools)
                 _log.info(
                     "Gmail REST fallback registered %d tools connector=%s",
+                    added,
+                    connector.get("connector_id"),
+                )
+                continue
+            fallback = _youtube_analytics_rest_fallback_specs_if_ready(db, connector)
+            if fallback:
+                added = _register_connector_tool_specs(db, connector, fallback, tools)
+                _log.info(
+                    "YouTube Analytics REST fallback registered %d tools connector=%s",
                     added,
                     connector.get("connector_id"),
                 )

@@ -3,6 +3,26 @@ import { artifactPreviewApiPath } from '@/lib/artifactPreview';
 import { interleaveEphemeralIntoHistory } from '@/lib/chatEphemeralMerge';
 import { normalizeUsageTokens, type UsageTokenBreakdown } from '@/lib/formatTokenCount';
 
+/** True si, tras un turno, corresponde pedir sugerencias de continuación al backend. */
+export function shouldFetchChatSuggestions(
+  userText: string,
+  assistantResponse: string,
+  aborted: boolean
+): boolean {
+  if (aborted) return false;
+  if (userText.trim().startsWith('/')) return false;
+  return assistantResponse.trim().length > 0;
+}
+
+/** True si corresponde mostrar los chips (se ocultan mientras el usuario tipea). */
+export function shouldShowSuggestionChips(
+  suggestions: string[],
+  loading: boolean,
+  input: string
+): boolean {
+  return suggestions.length > 0 && !loading && input.trim() === '';
+}
+
 export function artifactImagePreview(
   tenantId: string,
   artifactId: string

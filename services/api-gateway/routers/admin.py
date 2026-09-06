@@ -19,6 +19,7 @@ from routers.admin_domains.audit import router as audit_router
 from routers.admin_domains.auth import router as auth_router
 from routers.admin_domains.catalog_meta import router as catalog_meta_router
 from routers.admin_domains.catalog_skills import router as catalog_skills_router
+from routers.admin_domains.chat_suggestions import router as chat_suggestions_router
 from routers.admin_domains.crons import router as crons_router
 from routers.admin_domains.devices import router as devices_router
 from routers.admin_domains.duckdb_explorer import router as duckdb_explorer_router
@@ -90,6 +91,7 @@ router.include_router(audit_router)
 router.include_router(auth_router)
 router.include_router(catalog_meta_router)
 router.include_router(catalog_skills_router)
+router.include_router(chat_suggestions_router)
 router.include_router(crons_router)
 router.include_router(duckdb_explorer_router)
 router.include_router(devices_router)

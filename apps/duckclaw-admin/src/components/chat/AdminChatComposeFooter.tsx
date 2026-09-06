@@ -2,8 +2,10 @@
 
 import type { ClipboardEvent, Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import { FileText, Send, X } from 'lucide-react';
+import { AdminChatSuggestionChips } from '@/components/chat/AdminChatSuggestionChips';
 import { LiveVoiceBar } from '@/components/chat/LiveVoiceBar';
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
+import { shouldShowSuggestionChips } from '@/components/chat/adminChatPure';
 import type { useChatImageAttachments } from '@/components/chat/useChatImageAttachments';
 import type { useChatDocumentAttachments } from '@/components/chat/useChatDocumentAttachments';
 import { useChatFileDrop } from '@/components/chat/useChatFileDrop';
@@ -20,6 +22,8 @@ export type AdminChatComposeFooterProps = {
   isStudioCompose: boolean;
   isCompact: boolean;
   composeChips?: ReactNode;
+  suggestions?: string[];
+  onPickSuggestion?: (text: string) => void | Promise<void>;
   input: string;
   setInput: (value: string) => void;
   inputRef: RefObject<HTMLTextAreaElement>;
@@ -93,6 +97,8 @@ export function AdminChatComposeFooter({
   isStudioCompose,
   isCompact,
   composeChips,
+  suggestions = [],
+  onPickSuggestion,
   input,
   setInput,
   inputRef,
@@ -117,6 +123,7 @@ export function AdminChatComposeFooter({
   voice,
   liveVoice,
 }: AdminChatComposeFooterProps) {
+  const showSuggestions = shouldShowSuggestionChips(suggestions, loading, input);
   const attachError = imageAttachments.attachError || documentAttachments.attachError;
   const dropEnabled = canSend && !loading && !voice.recording && !liveVoice.isActive;
   const { dragActive, dropProps } = useChatFileDrop({
@@ -178,6 +185,15 @@ export function AdminChatComposeFooter({
         ) : null}
 
         {isStudioCompose ? (
+          <>
+          {showSuggestions ? (
+            <div className="mb-2">
+              <AdminChatSuggestionChips
+                suggestions={suggestions}
+                onPick={(text) => void onPickSuggestion?.(text)}
+              />
+            </div>
+          ) : null}
           <div className="rounded-2xl border border-gov-gray-200 bg-gov-gray-50/80 dark:border-dark-border dark:bg-dark-bg/60 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow">
             {(imageAttachments.pendingImages.length > 0 ||
               documentAttachments.pendingDocuments.length > 0) && (
@@ -270,8 +286,17 @@ export function AdminChatComposeFooter({
               </div>
             </div>
           </div>
+          </>
         ) : (
           <>
+            {showSuggestions ? (
+              <div className="mb-2">
+                <AdminChatSuggestionChips
+                  suggestions={suggestions}
+                  onPick={(text) => void onPickSuggestion?.(text)}
+                />
+              </div>
+            ) : null}
             {composeChips ? (
               <div className="mb-2 flex flex-wrap items-center gap-1.5">{composeChips}</div>
             ) : null}

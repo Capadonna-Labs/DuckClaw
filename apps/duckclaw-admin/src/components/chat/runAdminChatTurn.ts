@@ -23,6 +23,7 @@ import {
   applyLastTurnTokenDisplay,
   artifactImagePreview,
   isLoopProgressHeartbeat,
+  shouldFetchChatSuggestions,
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
 import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
@@ -53,6 +54,7 @@ export type RunAdminChatTurnParams = {
   setLastTurnUsage: Dispatch<SetStateAction<UsageTokenBreakdown | null>>;
   setContextEstimatedTokens: Dispatch<SetStateAction<number | null>>;
   setLoopSchedulePolling: Dispatch<SetStateAction<boolean>>;
+  setSuggestions: Dispatch<SetStateAction<string[]>>;
   finalizeCancelledGeneration: () => void;
   clearLoopHistoryReload: () => void;
   scheduleLoopHistoryReload: () => void;
@@ -88,6 +90,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setLastTurnUsage,
     setContextEstimatedTokens,
     setLoopSchedulePolling,
+    setSuggestions,
     finalizeCancelledGeneration,
     clearLoopHistoryReload,
     scheduleLoopHistoryReload,
@@ -120,6 +123,7 @@ thinkingStartedAt.current = Date.now();
 setThinkingIdentity({ workerId, swarmSlot: 1 });
 setThinking(true);
 setError(null);
+setSuggestions([]);
 setMessages((m) => [
   ...m,
   {
@@ -310,10 +314,10 @@ const appendHeartbeat = (payload: {
 };
 
 primeAudioPlayback();
+let authoritativeResponse = '';
 try {
   let assignedSuffix = '';
   let elapsedFooter = '';
-  let authoritativeResponse = '';
   const streamAudioRef: {
     current: {
       audioBase64?: string;
@@ -499,6 +503,17 @@ try {
   setThinking(false);
   if (loopFollowUp && !abortController.signal.aborted) {
     scheduleLoopHistoryReload();
+  }
+  if (shouldFetchChatSuggestions(text, authoritativeResponse, abortController.signal.aborted)) {
+    void adminService
+      .getChatSuggestions({
+        chat_id: chatId,
+        tenant_id: effectiveTenantId,
+        last_user_message: text,
+        last_assistant_message: authoritativeResponse,
+      })
+      .then((r) => setSuggestions(r.suggestions ?? []))
+      .catch(() => {});
   }
   onConversationActivity?.();
 }

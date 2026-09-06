@@ -115,6 +115,27 @@ presets:
         - https://www.googleapis.com/auth/gmail.compose
         - https://www.googleapis.com/auth/gmail.modify
 
+  google_youtube_analytics:
+    display_name: YouTube Analytics
+    transport: streamable_http
+    endpoint_url: https://youtubeanalytics.googleapis.com/v2/reports
+    auth_kind: bearer
+    read_only: true
+    egress_hosts: [youtubeanalytics.googleapis.com, www.googleapis.com, oauth2.googleapis.com, accounts.google.com]
+    metadata:
+      oauth_pkce: true
+      oauth_provider: google_youtube_analytics
+      manifest_skill_id: google_youtube_analytics
+      admin_label: REST directo · OAuth PKCE (sin MCP hosteado por Google)
+      docs_url: https://developers.google.com/youtube/analytics/reference/reports/query
+      # YouTube Data/Analytics API no tiene MCP hosteado por Google (sin PRM) — endpoint_url
+      # solo dispara el intento de tools/list, que falla y cae al fallback REST (mismo patrón
+      # que google_gmail_rest.py/google_calendar_rest.py). Scopes solo-lectura del propio canal.
+      google_oauth_scopes:
+        - openid
+        - https://www.googleapis.com/auth/youtube.readonly
+        - https://www.googleapis.com/auth/yt-analytics.readonly
+
   google_maps:
     display_name: Google Maps
     transport: streamable_http

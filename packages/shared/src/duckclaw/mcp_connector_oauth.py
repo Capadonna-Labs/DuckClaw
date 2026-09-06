@@ -99,6 +99,17 @@ async def start_mcp_connector_oauth(
             actor_email=actor_email,
             redirect_uri=redirect_uri,
         )
+    if preset_id == "google_youtube_analytics":
+        # No Google-hosted MCP/PRM exists for YouTube — hardcoded endpoints, not discovery.
+        from duckclaw.mcp_youtube_oauth import start_youtube_oauth
+
+        return await start_youtube_oauth(
+            db,
+            connector_id=connector_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            redirect_uri=redirect_uri,
+        )
     if is_google_workspace_preset(preset_id):
         from duckclaw.mcp_google_workspace_oauth import start_google_workspace_oauth
 
@@ -132,6 +143,10 @@ async def exchange_mcp_oauth_code_for_token(*, code: str, pending: dict[str, Any
         from duckclaw.mcp_spotify_oauth import exchange_spotify_code_for_token
 
         return await exchange_spotify_code_for_token(code=code, pending=pending)
+    if preset_id == "google_youtube_analytics":
+        from duckclaw.mcp_youtube_oauth import exchange_youtube_code_for_token
+
+        return await exchange_youtube_code_for_token(code=code, pending=pending)
     if is_google_workspace_preset(preset_id):
         from duckclaw.mcp_google_workspace_oauth import exchange_google_code_for_token
 

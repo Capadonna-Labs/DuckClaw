@@ -1,0 +1,5 @@
+# DuckClaw Full Docker launcher
+node_modules/
+src-tauri/target/
+dist/
+*.log

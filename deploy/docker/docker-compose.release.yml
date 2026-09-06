@@ -1,0 +1,182 @@
+# DuckClaw Full — release compose (no local build contexts).
+# Requires images: duckclaw/gateway:latest, duckclaw/admin:latest, duckclaw/sandbox:latest
+# Load offline: docker load -i duckclaw-full-images.tar
+# Or build from repo: docker compose -f deploy/docker/docker-compose.yml build
+
+name: duckclaw-full
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - duckclaw-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - duckclaw
+
+  sandbox:
+    image: duckclaw/sandbox:latest
+    command: ["true"]
+    restart: "no"
+    networks:
+      - duckclaw
+
+  gateway:
+    image: duckclaw/gateway:latest
+    restart: unless-stopped
+    command:
+      [
+        "python",
+        "services/api-gateway/uvicorn_pm2.py",
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--app-dir",
+        "services/api-gateway",
+      ]
+    env_file:
+      - .env
+    environment:
+      DUCKCLAW_GATEWAY_DB_PATH: /data/duckclaw.duckdb
+      REDIS_URL: redis://redis:6379/0
+      DUCKCLAW_REPO_ROOT: /app
+      GATEWAY_INTERNAL_URL: http://gateway:8000
+      STRIX_SANDBOX_IMAGE: duckclaw/sandbox:latest
+      DOCKER_HOST: unix:///var/run/docker.sock
+    volumes:
+      - duckclaw-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "8000:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      sandbox:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    networks:
+      - duckclaw
+
+  db-writer:
+    image: duckclaw/gateway:latest
+    restart: unless-stopped
+    working_dir: /app
+    command: ["python", "services/db-writer/main.py"]
+    env_file:
+      - .env
+    environment:
+      DUCKCLAW_GATEWAY_DB_PATH: /data/duckclaw.duckdb
+      REDIS_URL: redis://redis:6379/0
+      DUCKCLAW_REPO_ROOT: /app
+      PYTHONPATH: /app
+      DUCKCLAW_SKIP_MIGRATE: "1"
+    volumes:
+      - duckclaw-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    networks:
+      - duckclaw
+
+  knowledge-indexer:
+    image: duckclaw/gateway:latest
+    restart: unless-stopped
+    working_dir: /app
+    command: ["python", "services/knowledge-indexer/main.py"]
+    env_file:
+      - .env
+    environment:
+      DUCKCLAW_GATEWAY_DB_PATH: /data/duckclaw.duckdb
+      REDIS_URL: redis://redis:6379/0
+      DUCKCLAW_REPO_ROOT: /app
+      DUCKCLAW_PROCESS_ROLE: knowledge-indexer
+      PYTHONPATH: /app
+      DUCKCLAW_SKIP_MIGRATE: "1"
+    volumes:
+      - duckclaw-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+    networks:
+      - duckclaw
+
+  admin:
+    image: duckclaw/admin:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3001"
+      HOSTNAME: 0.0.0.0
+      DUCKCLAW_GATEWAY_URL: http://gateway:8000
+      GATEWAY_INTERNAL_URL: http://gateway:8000
+      ENV: production
+    ports:
+      - "3001:3001"
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3001/login').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    networks:
+      - duckclaw
+
+  tailscale:
+    profiles: ["tailscale"]
+    image: tailscale/tailscale:latest
+    hostname: ${TS_HOSTNAME:-duckclaw-full}
+    environment:
+      TS_AUTHKEY: ${TS_AUTHKEY:-}
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_USERSPACE: "true"
+      TS_SERVE_CONFIG: /config/serve.json
+    volumes:
+      - duckclaw-tailscale:/var/lib/tailscale
+      - ./tailscale-serve.json:/config/serve.json:ro
+    network_mode: host
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+
+volumes:
+  duckclaw-data:
+  duckclaw-redis:
+  duckclaw-tailscale:
+
+networks:
+  duckclaw:
+    driver: bridge

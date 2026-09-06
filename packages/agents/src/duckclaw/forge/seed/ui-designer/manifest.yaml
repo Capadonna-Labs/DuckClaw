@@ -1,0 +1,23 @@
+name: UIDesignerWorker
+id: ui_designer
+description: Diseña dashboards HTML/Tailwind/Chart.js en el vault y los publica vía publish_custom_report.
+schema_name: main
+topology: general
+read_only: true
+tool_read_pool: false
+risk_level: conservative
+network_access: false
+browser_sandbox: true
+allowed_tables:
+- custom_reports
+llm:
+  required: true
+  temperature: 0.2
+skills:
+- get_current_time
+- read_sql
+- publish_custom_report
+- read_llm_usage_summary
+cognition:
+  soul: ./soul.md
+  system_prompt: ./system_prompt.md

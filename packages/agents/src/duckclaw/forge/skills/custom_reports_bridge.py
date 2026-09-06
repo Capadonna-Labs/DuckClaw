@@ -20,18 +20,122 @@ _ALLOWED_SCRIPT_CDN = (
 )
 
 
+def _coerce_publishable_html(html: str) -> str:
+    """Extrae documento y cierra tags si el modelo olvidó </body></html> (no repara CSS a medias)."""
+    raw = extract_html_document_from_text(html) or str(html or "").strip()
+    if not raw:
+        return raw
+    low = raw.lower()
+    if "</html>" in low:
+        return raw
+    if "<body" not in low and "<html" not in low and "<!doctype" not in low:
+        return raw
+    out = raw.rstrip()
+    if "</body>" not in low:
+        out += "\n</body>"
+    return out + "\n</html>"
+
+
 def _validate_html_content(html: str) -> str | None:
     raw = str(html or "")
     if len(raw.encode("utf-8")) > _MAX_HTML_BYTES:
         return f"HTML excede { _MAX_HTML_BYTES // 1024 }KB"
     low = raw.lower()
-    if "</html>" not in low and "<!doctype" not in low:
-        return "Estructura HTML inválida: falta </html> o <!DOCTYPE>"
+    if "</html>" not in low:
+        return "Estructura HTML inválida: falta </html>"
+    if "<body" not in low:
+        return "Estructura HTML inválida: falta <body>"
     for m in re.finditer(r'<script[^>]+src=["\']([^"\']+)["\']', raw, re.IGNORECASE):
         src = m.group(1).lower()
         if not any(cdn in src for cdn in _ALLOWED_SCRIPT_CDN):
             return f"script src no permitido: {m.group(1)}"
     return None
+
+
+def _obs_logger():
+    from duckclaw.utils.logger import get_obs_logger
+
+    return get_obs_logger()
+
+
+def _expected_session_report_id() -> str:
+    """chat_id activo de sesión admin/delegación (normalizado para report_id)."""
+    from duckclaw.forge.skills.knowledge_tool_context import get_session_chat_id
+    from duckclaw.graphs.chat_heartbeat import admin_report_chat_id
+
+    cid = get_session_chat_id()
+    if not cid:
+        try:
+            from duckclaw.workers.worker_delegate_runtime import get_worker_delegate_runtime
+
+            rt = get_worker_delegate_runtime()
+            if rt and isinstance(rt.state, dict):
+                cid = str(rt.state.get("chat_id") or rt.state.get("session_id") or "").strip()
+        except Exception:
+            pass
+    normalized = admin_report_chat_id(cid) or (cid or "").strip()
+    return normalized
+
+
+def _audit_publish_report_id_rejected(
+    db: Any,
+    *,
+    report_id: str,
+    expected_chat_id: str,
+) -> None:
+    """Mismo criterio de auditoría que worker_invoke (log_sys + append_task_audit)."""
+    worker_id = "unknown"
+    tenant_s = "default"
+    try:
+        from duckclaw.forge.skills.knowledge_tool_context import (
+            get_knowledge_tool_tenant_id,
+            get_knowledge_tool_worker_uid,
+        )
+
+        tenant_s = get_knowledge_tool_tenant_id()
+        worker_id = get_knowledge_tool_worker_uid() or worker_id
+    except Exception:
+        pass
+    try:
+        from duckclaw.workers.worker_delegate_runtime import get_worker_delegate_runtime
+
+        rt = get_worker_delegate_runtime()
+        if rt:
+            tenant_s = str(rt.tenant_id or tenant_s).strip() or tenant_s
+            worker_id = str(
+                getattr(rt.spec, "worker_id", "")
+                or getattr(rt.spec, "logical_worker_id", "")
+                or worker_id
+            ).strip() or worker_id
+    except Exception:
+        pass
+    try:
+        from duckclaw.utils.logger import log_sys
+
+        log_sys(
+            _obs_logger(),
+            "publish_custom_report rejected report_id=%s expected_chat_id=%s worker=%s tenant=%s",
+            report_id,
+            expected_chat_id,
+            worker_id,
+            tenant_s,
+        )
+    except Exception:
+        pass
+    try:
+        from duckclaw.commands.history import append_task_audit
+
+        append_task_audit(
+            db,
+            tenant_s,
+            worker_id,
+            query_prefix=f"publish_custom_report:report_id_mismatch:{report_id}!={expected_chat_id}",
+            status="ERROR",
+            duration_ms=0,
+            plan_title="publish_custom_report_rejected",
+        )
+    except Exception:
+        pass
 
 
 def _reports_state_delta_base(db: Any) -> dict[str, str]:
@@ -85,9 +189,42 @@ def _publish_custom_report_impl(
     if not rid:
         return json.dumps({"status": "error", "message": "report_id requerido"}, ensure_ascii=False)
 
+    expected_chat_id = _expected_session_report_id()
+    if expected_chat_id and rid != expected_chat_id:
+        _audit_publish_report_id_rejected(db, report_id=rid, expected_chat_id=expected_chat_id)
+        return json.dumps(
+            {
+                "status": "error",
+                "error": "report_id_mismatch",
+                "message": (
+                    f"report_id={rid!r} no coincide con el chat_id de la sesión activa "
+                    f"({expected_chat_id!r}). No se publicó."
+                ),
+                "expected_report_id": expected_chat_id,
+                "fix": (
+                    f"Vuelve a llamar publish_custom_report con report_id={expected_chat_id!r} "
+                    "(el chat_id admin de esta delegación/sesión)."
+                ),
+            },
+            ensure_ascii=False,
+        )
+
+    html_content = _coerce_publishable_html(html_content)
     err = _validate_html_content(html_content)
     if err:
-        return json.dumps({"status": "error", "message": err}, ensure_ascii=False)
+        preview = str(html_content or "")
+        return json.dumps(
+            {
+                "status": "error",
+                "message": err,
+                "html_bytes": len(preview.encode("utf-8")),
+                "has_body": "<body" in preview.lower(),
+                "has_html_close": "</html>" in preview.lower(),
+                "tail_preview": preview[-160:] if preview else "",
+                "fix": "Regenera HTML COMPLETO con </html> y <body>. Si el tool arg se truncó, usa HTML más corto o una plantilla Chart.js mínima.",
+            },
+            ensure_ascii=False,
+        )
 
     base = _reports_state_delta_base(db)
     if not base.get("target_db_path"):
@@ -332,6 +469,49 @@ def _custom_report_row(db: Any, report_id: str) -> dict[str, Any] | None:
             "updated_at": row[4] if len(row) > 4 else None,
         }
     return None
+
+
+@log_tool_execution_sync(name="inspect_custom_report")
+def _inspect_custom_report_impl(db: Any, *, report_id: str) -> str:
+    """Diagnóstico del HTML en main.custom_reports para depurar iframe vacío/truncado."""
+    rid = (report_id or "").strip()
+    if not rid:
+        return json.dumps({"status": "error", "message": "report_id requerido"}, ensure_ascii=False)
+    row = _custom_report_row(db, rid)
+    if not row:
+        return json.dumps(
+            {
+                "status": "missing",
+                "report_id": rid,
+                "message": "Sin fila en main.custom_reports para este report_id/chat_id.",
+                "fix": "Publica con publish_custom_report (HTML completo con </html> y <body>).",
+            },
+            ensure_ascii=False,
+        )
+    html = str(row.get("html_content") or "")
+    low = html.lower()
+    validation = _validate_html_content(html)
+    payload: dict[str, Any] = {
+        "status": "valid" if validation is None else "invalid",
+        "report_id": rid,
+        "title": row.get("title"),
+        "html_bytes": len(html.encode("utf-8")),
+        "has_body": "<body" in low,
+        "has_html_close": "</html>" in low,
+        "validation_error": validation,
+        "version": row.get("version"),
+        "updated_at": str(row.get("updated_at") or ""),
+        "head_preview": html[:240],
+        "tail_preview": html[-240:] if html else "",
+    }
+    if validation:
+        payload["fix"] = (
+            "HTML incompleto o inválido. Republica documento COMPLETO vía publish_custom_report "
+            "(no execute_sandbox_script). Debe incluir </html> y <body>."
+        )
+    else:
+        payload["fix"] = "HTML válido; si iframe vacío, revisar vault del playground vs target_db_path del publish."
+    return json.dumps(payload, ensure_ascii=False)
 
 
 @log_tool_execution_sync(name="update_custom_report_title")
@@ -600,20 +780,45 @@ def register_custom_reports_skill(
     existing = {getattr(t, "name", "") for t in tools_list}
 
     if ("publish_custom_report" in skills or force_publish) and "publish_custom_report" not in existing:
+        # ponytail: type hints matter here, not just style — an untyped lambda made LangChain
+        # emit `{}` (no "type") for report_id/html_content in the OpenAI tool schema, and a
+        # forced tool_choice call for this tool (large required HTML string, zero schema
+        # guidance) was reliably refused by the model even after a retry (confirmed live,
+        # 2026-09-06). read_sql/admin_sql are typed the same way and force fine.
+        def _publish_custom_report_worker(
+            report_id: str,
+            html_content: str,
+            title: str = "Reporte",
+            created_by: str = "",
+        ) -> str:
+            return _publish_custom_report_impl(
+                db,
+                report_id=report_id,
+                html_content=html_content,
+                title=title,
+                created_by=created_by,
+            )
+
         tools_list.append(
             StructuredTool.from_function(
-                lambda report_id, html_content, title="Reporte", created_by="": _publish_custom_report_impl(
-                    db,
-                    report_id=report_id,
-                    html_content=html_content,
-                    title=title,
-                    created_by=created_by,
-                ),
+                _publish_custom_report_worker,
                 name="publish_custom_report",
                 description=(
                     "ÚNICA herramienta de escritura para main.custom_reports (UPSERT vía StateDelta). "
                     "Reemplaza INSERT/UPDATE SQL. Republica html_content completo; actualiza title. "
                     "report_id debe ser el chat_id de la sesión admin."
+                ),
+            )
+        )
+
+    if "inspect_custom_report" not in existing:
+        tools_list.append(
+            StructuredTool.from_function(
+                lambda report_id: _inspect_custom_report_impl(db, report_id=report_id),
+                name="inspect_custom_report",
+                description=(
+                    "Diagnóstico del dashboard HTML en main.custom_reports: bytes, validación, "
+                    "previews head/tail y fix sugerido. Usar cuando iframe vacío/negro o publicación falla."
                 ),
             )
         )

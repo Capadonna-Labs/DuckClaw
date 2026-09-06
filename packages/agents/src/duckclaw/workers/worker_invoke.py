@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import contextvars
 import json
 import logging
+import os
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,7 +18,24 @@ _log = logging.getLogger(__name__)
 _obs = None
 
 _delegate_depth: ContextVar[int] = ContextVar("duckclaw_worker_delegate_depth", default=0)
+_parent_vault_lock: ContextVar[threading.RLock | None] = ContextVar(
+    "duckclaw_parent_vault_invoke_lock",
+    default=None,
+)
 _MAX_DELEGATE_DEPTH = 1
+_DELEGATE_INVOKE_TIMEOUT_SEC = max(
+    60.0,
+    float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "900"),
+)
+
+
+def set_parent_vault_invoke_lock(lock: threading.RLock | None) -> None:
+    """Manager holds per-vault lock for whole worker turn; nested delegate reads this."""
+    _parent_vault_lock.set(lock)
+
+
+def get_parent_vault_invoke_lock() -> threading.RLock | None:
+    return _parent_vault_lock.get()
 
 
 def _obs_logger():
@@ -91,13 +111,35 @@ def invoke_worker_graph(
     *,
     trace_cfg: Any = None,
     chat_id: str = "",
+    timeout_sec: float | None = None,
 ) -> dict[str, Any]:
     from duckclaw.graphs.chat_cancel import raise_if_chat_cancelled
 
     raise_if_chat_cancelled(str(chat_id or "").strip())
-    if trace_cfg is not None:
-        return worker_graph.invoke(worker_state, trace_cfg)
-    return worker_graph.invoke(worker_state)
+
+    def _run() -> dict[str, Any]:
+        if trace_cfg is not None:
+            return worker_graph.invoke(worker_state, trace_cfg)
+        return worker_graph.invoke(worker_state)
+
+    limit = timeout_sec if timeout_sec is not None else _DELEGATE_INVOKE_TIMEOUT_SEC
+    if limit <= 0:
+        return _run()
+    # ponytail: orphan thread may keep running after timeout; upgrade = cancel token in graph
+    # contextvars don't cross ThreadPoolExecutor.submit() on their own (unlike asyncio tasks) —
+    # copy the caller's context explicitly so _parent_vault_lock/_delegate_depth reach the pool
+    # thread. Without this, a delegate targeting the same vault as its caller deadlocks: the
+    # pool thread can't see the RLock its ancestor already holds, tries to re-acquire it, and
+    # blocks forever (an RLock is only reentrant for the thread that owns it).
+    ctx = contextvars.copy_context()
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="delegate-invoke") as pool:
+        fut = pool.submit(ctx.run, _run)
+        try:
+            return fut.result(timeout=limit)
+        except FuturesTimeoutError as exc:
+            raise TimeoutError(
+                f"delegate worker graph exceeded {limit:.0f}s (chat_id={chat_id or '?'})"
+            ) from exc
 
 
 def extract_worker_invoke_reply(worker_invoke: dict[str, Any]) -> str:
@@ -128,7 +170,10 @@ def invoke_delegated_worker(
 ) -> WorkerInvokeResult:
     from duckclaw.commands.history import append_task_audit
     from duckclaw.manager import manager_worker_cache as worker_cache_mod
-    from duckclaw.manager.manager_invoke_helpers import prepare_worker_invoke_state
+    from duckclaw.manager.manager_invoke_helpers import (
+        build_worker_cache_key,
+        prepare_worker_invoke_state,
+    )
     from duckclaw.utils.logger import log_sys
     from duckclaw.workers.factory import build_worker_graph as _build_worker_graph
 
@@ -142,6 +187,7 @@ def invoke_delegated_worker(
     t0 = time.monotonic()
     status = "SUCCESS"
     vault_lock_obj: threading.Lock | None = None
+    lock_owned_by_ancestor = False
 
     if _delegate_depth.get() >= _MAX_DELEGATE_DEPTH:
         return WorkerInvokeResult(
@@ -173,6 +219,9 @@ def invoke_delegated_worker(
             error="missing_task",
         )
 
+    if chat_id and "report_id" not in task_s.lower():
+        task_s = f"report_id={chat_id}. {task_s}"
+
     depth_prev = _delegate_depth.get()
     _delegate_depth.set(depth_prev + 1)
     try:
@@ -198,12 +247,19 @@ def invoke_delegated_worker(
             pass
 
         _vk = worker_cache_mod._vault_lock_key(worker_resolved)
+        parent_lock = get_parent_vault_invoke_lock()
         if _vk:
-            with worker_cache_mod._vault_invoke_guard:
-                if _vk not in worker_cache_mod._vault_invoke_locks:
-                    worker_cache_mod._vault_invoke_locks[_vk] = threading.Lock()
-                vault_lock_obj = worker_cache_mod._vault_invoke_locks[_vk]
-            vault_lock_obj.acquire()
+            vault_lock_obj = worker_cache_mod.get_vault_invoke_lock(worker_resolved)
+            # Delegate targets the same vault an ancestor call already locked (any caller/target
+            # pair whose manifests share a vault_id). Re-acquiring here would deadlock once
+            # invoke_worker_graph's context propagation makes the ancestor's lock visible on
+            # this (pool) thread: an RLock is only reentrant for the thread that owns it, and the
+            # ancestor is blocked on this call's result, so it can never release first. The
+            # ancestor's held lock already serializes access for the whole nested call chain, so
+            # skip acquiring — and skip releasing in `finally` too, since we never took it.
+            lock_owned_by_ancestor = vault_lock_obj is not None and parent_lock is vault_lock_obj
+            if vault_lock_obj is not None and not lock_owned_by_ancestor:
+                vault_lock_obj.acquire()
 
         try:
             from duckclaw.forge.skills.report_engine_hub_context import set_report_engine_hub_db
@@ -212,22 +268,41 @@ def invoke_delegated_worker(
         except Exception:
             pass
 
-        worker_graph = _build_worker_graph(
-            target,
-            vault_db_path or None,
-            llm,
-            templates_root=templates_root,
-            llm_provider=llm_provider or "",
-            llm_model=llm_model or "",
-            llm_base_url=llm_base_url or "",
-            instance_name=tenant_s,
-            shared_db_path=shared_db_path or None,
-            reuse_db=db,
-            db=db,
+        worker_cache_key = build_worker_cache_key(
             tenant_id=tenant_s,
-            tool_surface="full",
-            incoming_hint=task_s,
+            assigned=target,
+            vault_db_path=vault_db_path or worker_resolved,
+            db_path=worker_resolved,
+            shared_db_path=shared_db_path,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_base_url=llm_base_url,
+            combined=task_s,
+            visual_lite_mcp=False,
+            lite_stdio_mcp=False,
+            url_research_mcp=False,
+            summarize_vault_ro=False,
+            vis_prov="local",
         )
+        worker_graph = worker_cache_mod.worker_graph_cache_get(worker_cache_key)
+        if worker_graph is None:
+            worker_graph = _build_worker_graph(
+                target,
+                vault_db_path or None,
+                llm,
+                templates_root=templates_root,
+                llm_provider=llm_provider or "",
+                llm_model=llm_model or "",
+                llm_base_url=llm_base_url or "",
+                instance_name=tenant_s,
+                shared_db_path=shared_db_path or None,
+                reuse_db=db,
+                db=db,
+                tenant_id=tenant_s,
+                tool_surface="full",
+                incoming_hint=task_s,
+            )
+            worker_cache_mod.remember_worker_graph_cache(worker_cache_key, worker_graph)
 
         agent_label = f"{caller}->{target}".strip()
         worker_state = prepare_worker_invoke_state(
@@ -253,7 +328,7 @@ def invoke_delegated_worker(
         messages = worker_invoke.get("messages")
         if isinstance(messages, tuple):
             messages = list(messages)
-        report_id = _extract_report_id_from_messages(messages)
+        report_id = _extract_report_id_from_messages(messages) or chat_id or None
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         log_sys(
             _obs_logger(),
@@ -322,7 +397,7 @@ def invoke_delegated_worker(
         )
     finally:
         _delegate_depth.set(depth_prev)
-        if vault_lock_obj is not None:
+        if vault_lock_obj is not None and not lock_owned_by_ancestor:
             try:
                 vault_lock_obj.release()
             except Exception:
@@ -338,6 +413,8 @@ def invoke_delegated_worker(
 __all__ = [
     "WorkerInvokeResult",
     "extract_worker_invoke_reply",
+    "get_parent_vault_invoke_lock",
     "invoke_delegated_worker",
     "invoke_worker_graph",
+    "set_parent_vault_invoke_lock",
 ]

@@ -470,6 +470,25 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                         _wl,
                         force_orch_tool,
                     )
+            else:
+                # ponytail: mirrors the sandbox repair above for any other manifest-forced
+                # tool (e.g. publish_custom_report) — see orchestration_force_repair.py.
+                from duckclaw.workers.orchestration_force_repair import retry_forced_tool_once
+
+                _retry_resp, _retry_calls = retry_forced_tool_once(
+                    _invoked_llm,
+                    _groq_msgs,
+                    str(force_orch_tool),
+                    worker_log_label=_wl,
+                    log=_log,
+                )
+                if _retry_calls:
+                    resp = _retry_resp
+                    tool_calls = _retry_calls
+                    try:
+                        _resp_content = (lc_message_content_to_text(resp) or "").strip()
+                    except Exception:
+                        _resp_content = str(getattr(resp, "content", "") or "").strip()
         out = {**state, "messages": state["messages"] + [resp]}
         if _llm_invoke_exc is not None:
             from duckclaw.integrations.llm_providers import is_transient_inference_connection_error

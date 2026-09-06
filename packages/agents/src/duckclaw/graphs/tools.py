@@ -19,6 +19,12 @@ _BLOCKED = re.compile(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", re.IGNORECASE)
 # (Aquí solo mantenemos el regex para compatibilidad interna si existiera.)
 _ALTER_BLOCKED = re.compile(r"^\s*ALTER\s", re.IGNORECASE)
 
+# ponytail: publish_custom_report se autodescribe como "ÚNICA herramienta de escritura para
+# main.custom_reports" — admin_sql dejaba escribir ahí directo con SQL crudo, bypasseando esa
+# tool por completo (confirmado en vivo 2026-09-06).
+_ADMIN_SQL_WRITE_RE = re.compile(r"\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER)\b", re.IGNORECASE)
+_ADMIN_SQL_CUSTOM_REPORTS_RE = re.compile(r"\bcustom_reports\b", re.IGNORECASE)
+
 _MEMORY_TABLE = "agent_memory"
 
 
@@ -72,6 +78,17 @@ def admin_sql(db: Any, query: str) -> str:
         blocked = re.search(r"\b(ATTACH|DETACH|COPY|EXPORT|IMPORT)\b", q, re.IGNORECASE)
         cmd = blocked.group(0).upper() if blocked else "comando"
         return json.dumps({"error": f"{cmd} no está permitido por política de seguridad."})
+    if _ADMIN_SQL_WRITE_RE.search(q) and _ADMIN_SQL_CUSTOM_REPORTS_RE.search(q):
+        return json.dumps(
+            {
+                "error": (
+                    "Escrituras a custom_reports no están permitidas vía admin_sql. "
+                    "Usa la tool publish_custom_report (o update_custom_report_title) — "
+                    "es la única vía de escritura soportada para esa tabla."
+                )
+            },
+            ensure_ascii=False,
+        )
     try:
         if _READ_ONLY.search(q):
             raw = db.query(q)

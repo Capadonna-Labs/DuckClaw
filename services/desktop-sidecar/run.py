@@ -126,9 +126,12 @@ def bootstrap_desktop_db(db_path: Path) -> None:
 
 
 def _prepare_import_paths(repo_root: Path) -> Path:
+    # No db-writer dir here (see module docstring: "one process, Spawn inline writes,
+    # no db-writer") — it defines its own core.config.Settings, and both dirs share the
+    # top-level `core` package name, so adding it shadows api-gateway's real core.config
+    # (settings.VERSION) with db-writer's unrelated Settings class.
     gateway_dir = repo_root / "services" / "api-gateway"
-    writer_dir = repo_root / "services" / "db-writer"
-    for p in (str(gateway_dir), str(writer_dir), str(repo_root)):
+    for p in (str(gateway_dir), str(repo_root)):
         if p not in sys.path:
             sys.path.insert(0, p)
     return gateway_dir

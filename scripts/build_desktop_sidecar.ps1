@@ -42,6 +42,23 @@ function Test-PortInUse {
     }
 }
 
+function Test-PortBindable {
+    # ponytail: connect-test alone misses Windows-excluded ranges (Hyper-V/Docker NAT
+    # reserve chunks of the ephemeral range, often starting at 49152) — nothing answers
+    # there so Test-PortInUse says "free", but binding fails with WinError 10013.
+    param([int]$P)
+    $listener = $null
+    try {
+        $listener = New-Object System.Net.Sockets.TcpListener ([System.Net.IPAddress]::Loopback, $P)
+        $listener.Start()
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if ($listener) { $listener.Stop() }
+    }
+}
+
 function Invoke-SidecarSmoke {
     param(
         [string]$BaseUrl = "http://127.0.0.1:$Port"
@@ -62,9 +79,12 @@ function Invoke-SidecarSmoke {
 }
 
 function Get-FreeLoopbackPort {
-    param([int]$Start = 49152, [int]$Attempts = 200)
+    # ponytail: Hyper-V/Docker NAT can reserve several back-to-back chunks starting right
+    # at 49152 (seen: 49152-49351 as two consecutive 100-port blocks on one dev machine) —
+    # 2000 attempts gives enough runway to walk past multiple such blocks.
+    param([int]$Start = 49152, [int]$Attempts = 2000)
     for ($p = $Start; $p -lt ($Start + $Attempts); $p++) {
-        if (-not (Test-PortInUse -P $p)) { return $p }
+        if (Test-PortBindable -P $p) { return $p }
     }
     throw "No free loopback port for isolated smoke (tried $Start..$($Start + $Attempts - 1))"
 }

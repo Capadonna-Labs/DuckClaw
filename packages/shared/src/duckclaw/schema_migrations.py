@@ -1590,6 +1590,49 @@ _M038_ADMIN_CONVERSATIONS_META_V2: list[str] = [
     """,
 ]
 
+# IBKR Bracket Orders — tracking de órdenes enviadas al broker
+_M039_IBKR_ORDERS: list[str] = [
+    """
+    CREATE SCHEMA IF NOT EXISTS quant_core
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant_core.ibkr_orders (
+        order_id INTEGER PRIMARY KEY,
+        ticker VARCHAR NOT NULL,
+        side VARCHAR NOT NULL,
+        quantity INTEGER NOT NULL,
+        order_type VARCHAR NOT NULL,
+        limit_price DOUBLE,
+        stop_price DOUBLE,
+        parent_order_id INTEGER,
+        status VARCHAR NOT NULL DEFAULT 'submitted',
+        filled_qty INTEGER DEFAULT 0,
+        filled_price DOUBLE,
+        submitted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        filled_at TIMESTAMP,
+        cancelled_at TIMESTAMP,
+        trade_signal_id VARCHAR,
+        notes TEXT
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_ibkr_orders_ticker
+        ON quant_core.ibkr_orders(ticker)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_ibkr_orders_status
+        ON quant_core.ibkr_orders(status)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_ibkr_orders_parent
+        ON quant_core.ibkr_orders(parent_order_id)
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_ibkr_orders_submitted
+        ON quant_core.ibkr_orders(submitted_at DESC)
+    """,
+]
+
 
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
@@ -1597,4 +1640,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (36, "worker_a2a_discoverable", _M004_A2A_DISCOVERABLE),
     (37, "managed_workspace_draft_policy_v2", _M037_MANAGED_WORKSPACE_DRAFT_POLICY_V2),
     (38, "admin_conversations_meta_v2", _M038_ADMIN_CONVERSATIONS_META_V2),
+    (39, "ibkr_orders_v1", _M039_IBKR_ORDERS),
 ]

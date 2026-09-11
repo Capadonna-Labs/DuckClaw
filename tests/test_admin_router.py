@@ -685,53 +685,85 @@ def test_invoke_chat_admin_console_delivery_bypasses_telegram_guard(monkeypatch:
 def test_template_vault_options_and_put(
     admin_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
-    import sys
-
-    if str(gw_dir) not in sys.path:
-        sys.path.insert(0, str(gw_dir))
-    import routers.admin as admin_router
-
-    templates_root = tmp_path / "forge" / "templates"
-    wid = "VaultTestWorker"
-    worker_dir = templates_root / wid
-    worker_dir.mkdir(parents=True)
-    (worker_dir / "manifest.yaml").write_text(
-        "name: VaultTest\nid: vault_test\nschema_name: main\n",
-        encoding="utf-8",
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import (
+        add_worker_version,
+        create_worker,
+        ensure_admin_worker_catalog_schema,
+        get_latest_worker_version,
+        update_catalog_worker_file,
     )
-    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
-    monkeypatch.setattr(admin_router, "_templates_dir", lambda: templates_root)
-    try:
-        from duckclaw.forge import WORKERS_TEMPLATES_DIR as _wtd
+    from core.admin_identity import open_gateway_db
 
-        monkeypatch.setattr("duckclaw.forge.WORKERS_TEMPLATES_DIR", templates_root)
-        monkeypatch.setattr("duckclaw.workers.manifest.WORKERS_TEMPLATES_DIR", templates_root, raising=False)
-    except ImportError:
-        pass
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    wid = "vault-bind-worker"
     priv = tmp_path / "db" / "private" / "alice"
     priv.mkdir(parents=True)
     (priv / "custom.duckdb").write_bytes(b"x" * 8)
 
+    with open_gateway_db(read_only=False) as db:
+        ensure_profile_for_user(db, email="admin@test.local")
+        ensure_admin_worker_catalog_schema(db)
+        worker = create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id=wid,
+            display_name="Vault Bind Worker",
+        )
+        worker_uid = str(worker["worker_uid"])
+        add_worker_version(
+            db,
+            worker_uid=worker_uid,
+            created_by="admin@test.local",
+            manifest_snapshot={"id": wid, "name": "Vault Bind"},
+            files_snapshot={"manifest.yaml": f"id: {wid}\nname: Vault Bind\n"},
+        )
+
+    captured: list[object] = []
+
+    def fake_enqueue(command, *, user_id="default"):
+        captured.append(command)
+        with open_gateway_db(read_only=False) as db:
+            update_catalog_worker_file(
+                db,
+                worker_uid=worker_uid,
+                file_path=command.file_path,
+                content=command.content,
+                actor_email="admin@test.local",
+            )
+        return "task-vault-bind-1"
+
+    monkeypatch.setattr("duckclaw.gateway_enqueue.enqueue_admin_command", fake_enqueue)
+
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
     r = admin_client.get(
         f"/api/v1/admin/templates/{wid}/vault-options",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=headers,
         params={"vault_user_id": "alice"},
     )
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
     opts = r.json().get("options") or []
     assert any(o.get("vault_id") == "custom" for o in opts)
 
     r2 = admin_client.put(
         f"/api/v1/admin/templates/{wid}/vault-binding",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=headers,
         json={"scope": "private", "vault_id": "custom"},
     )
-    assert r2.status_code == 410
+    assert r2.status_code == 200, r2.text
+    body = r2.json()
+    assert body.get("ok") is True
+    assert body.get("task_id") == "task-vault-bind-1"
+    assert (body.get("binding") or {}).get("vault_id") == "custom"
+    assert captured, "expected enqueue"
 
-    manifest_text = (worker_dir / "manifest.yaml").read_text(encoding="utf-8")
-    assert "vault_binding" not in manifest_text
-    assert "custom" not in manifest_text
+    with open_gateway_db(read_only=True) as db:
+        latest = get_latest_worker_version(db, worker_uid=worker_uid) or {}
+        files = latest.get("files_snapshot") or {}
+        manifest_text = files.get("manifest.yaml") or ""
+    assert "vault_binding" in manifest_text
+    assert "custom" in manifest_text
+
 
 
 def test_catalog_topologies(admin_client: TestClient):

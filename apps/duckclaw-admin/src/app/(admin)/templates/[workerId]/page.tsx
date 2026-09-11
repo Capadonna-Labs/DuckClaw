@@ -13,6 +13,7 @@ import { WorkerCapabilitiesCard } from '@/components/templates/WorkerCapabilitie
 import { ManifestGuidedPanel } from '@/components/templates/ManifestGuidedPanel';
 import { WorkerSkillPickerPanel } from '@/components/templates/WorkerSkillPickerPanel';
 import { WorkerMcpGrantsPanel } from '@/components/templates/WorkerMcpGrantsPanel';
+import { TemplateVaultPanel } from '@/components/templates/TemplateVaultPanel';
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 import { SecurityPolicyInfoPanel } from '@/components/templates/SecurityPolicyInfoPanel';
 import { AgentOnboardingBanner } from '@/components/templates/AgentOnboardingBanner';
@@ -479,6 +480,7 @@ export default function TemplateEditorPage() {
                   localSkills={localSkills}
                 />
                 <WorkerMcpGrantsPanel workerId={workerId} canWrite={canEditFiles} disabled={!canEditFiles} />
+                <TemplateVaultPanel workerId={workerId} canWrite={canEditFiles && isCatalogWorker} />
               </div>
             )}
 

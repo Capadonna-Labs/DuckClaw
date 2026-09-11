@@ -176,6 +176,8 @@ export const templatesApi = {
       worker_id: string;
       binding: VaultBinding | null;
       resolved_path: string | null;
+      task_id?: string;
+      accepted?: boolean;
     }>(`/templates/${encodeURIComponent(workerId)}/vault-binding`, {
       method: 'PUT',
       body: JSON.stringify(body),

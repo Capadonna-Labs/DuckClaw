@@ -112,6 +112,13 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         registrar_path="duckclaw.forge.skills.position_metrics_bridge:register_position_metrics_skill",
         empty_config_registers=True,
     ),
+    SkillToolRegistrar(
+        skill_name="ibkr_bracket_orders",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.ibkr_bracket_orders_bridge:register_ibkr_bracket_orders_skill",
+        empty_config_registers=True,
+        keyword_context={"vault_db_path": "vault_db_path"},
+    ),
 )
 
 VISUAL_ARTIFACT_READER_PATH = "duckclaw.forge.skills.comfyui_bridge:read_artifact_image_as_b64"

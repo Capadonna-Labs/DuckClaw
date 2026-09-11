@@ -118,8 +118,12 @@ async def execute_signal_with_bracket(
     """
     import duckdb
 
-    from duckclaw.db_write_queue import enqueue_write_command
+    from duckclaw.db_write_queue import enqueue_typed_command
     from duckclaw.ibkr_bracket_orders import connect_ibkr, submit_bracket_order
+    from duckclaw.write_commands import (
+        InsertIbkrOrderCommand,
+        UpdateTradeSignalExecutedCommand,
+    )
 
     timestamp = datetime.now(timezone.utc)
 
@@ -218,68 +222,60 @@ async def execute_signal_with_bracket(
     )
 
     # Main order
-    enqueue_write_command(
-        "insert_ibkr_order",
-        {
-            "order_id": result["main_order_id"],
-            "ticker": ticker,
-            "side": side,
-            "quantity": quantity,
-            "order_type": "MARKET",
-            "status": "submitted",
-            "submitted_at": timestamp.isoformat(),
-            "trade_signal_id": signal_id,
-        },
+    main_cmd = InsertIbkrOrderCommand(
+        order_id=result["main_order_id"],
+        ticker=ticker,
+        side=side,
+        quantity=quantity,
+        order_type="MARKET",
+        status="submitted",
+        submitted_at=timestamp.isoformat(),
+        trade_signal_id=signal_id,
     )
+    enqueue_typed_command(main_cmd)
 
     # TP order
     if result["tp_order_id"]:
         close_action = "SELL" if side == "BUY" else "BUY"
-        enqueue_write_command(
-            "insert_ibkr_order",
-            {
-                "order_id": result["tp_order_id"],
-                "ticker": ticker,
-                "side": close_action,
-                "quantity": quantity,
-                "order_type": "LIMIT",
-                "limit_price": tp_price,
-                "parent_order_id": result["main_order_id"],
-                "status": "submitted",
-                "submitted_at": timestamp.isoformat(),
-                "trade_signal_id": signal_id,
-                "notes": "Take Profit (GTC)",
-            },
+        tp_cmd = InsertIbkrOrderCommand(
+            order_id=result["tp_order_id"],
+            ticker=ticker,
+            side=close_action,
+            quantity=quantity,
+            order_type="LIMIT",
+            limit_price=tp_price,
+            parent_order_id=result["main_order_id"],
+            status="submitted",
+            submitted_at=timestamp.isoformat(),
+            trade_signal_id=signal_id,
+            notes="Take Profit (GTC)",
         )
+        enqueue_typed_command(tp_cmd)
 
     # SL order
     if result["sl_order_id"]:
         close_action = "SELL" if side == "BUY" else "BUY"
-        enqueue_write_command(
-            "insert_ibkr_order",
-            {
-                "order_id": result["sl_order_id"],
-                "ticker": ticker,
-                "side": close_action,
-                "quantity": quantity,
-                "order_type": "STOP",
-                "stop_price": sl_price,
-                "parent_order_id": result["main_order_id"],
-                "status": "submitted",
-                "submitted_at": timestamp.isoformat(),
-                "trade_signal_id": signal_id,
-                "notes": "Stop Loss (GTC)",
-            },
+        sl_cmd = InsertIbkrOrderCommand(
+            order_id=result["sl_order_id"],
+            ticker=ticker,
+            side=close_action,
+            quantity=quantity,
+            order_type="STOP",
+            stop_price=sl_price,
+            parent_order_id=result["main_order_id"],
+            status="submitted",
+            submitted_at=timestamp.isoformat(),
+            trade_signal_id=signal_id,
+            notes="Stop Loss (GTC)",
         )
+        enqueue_typed_command(sl_cmd)
 
     # 5. Actualizar trade_signals.executed_at
-    enqueue_write_command(
-        "update_trade_signal_executed",
-        {
-            "signal_id": signal_id,
-            "executed_at": timestamp.isoformat(),
-        },
+    exec_cmd = UpdateTradeSignalExecutedCommand(
+        signal_id=signal_id,
+        executed_at=timestamp.isoformat(),
     )
+    enqueue_typed_command(exec_cmd)
 
     _log.info(
         f"✅ Signal {signal_id} ejecutado: {side} {quantity} {ticker} "

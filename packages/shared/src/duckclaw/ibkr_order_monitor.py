@@ -87,8 +87,9 @@ async def sync_order_status(
     """
     import duckdb
 
-    from duckclaw.db_write_queue import enqueue_write_command
+    from duckclaw.db_write_queue import enqueue_typed_command
     from duckclaw.ibkr_bracket_orders import connect_ibkr
+    from duckclaw.write_commands import UpdateIbkrOrderStatusCommand
 
     _log.info(f"Iniciando sincronización de órdenes: {vault_db_path}")
 
@@ -177,21 +178,15 @@ async def sync_order_status(
             )
 
             # Actualizar en DB via write queue
-            update_data: dict[str, Any] = {
-                "order_id": order_id,
-                "status": db_status,
-                "filled_qty": filled_qty,
-            }
-
-            if filled_price > 0:
-                update_data["filled_price"] = filled_price
-
-            if db_status == "filled":
-                update_data["filled_at"] = datetime.now(timezone.utc).isoformat()
-            elif db_status == "cancelled":
-                update_data["cancelled_at"] = datetime.now(timezone.utc).isoformat()
-
-            enqueue_write_command("update_ibkr_order_status", update_data)
+            update_cmd = UpdateIbkrOrderStatusCommand(
+                order_id=order_id,
+                status=db_status,
+                filled_qty=filled_qty,
+                filled_price=filled_price if filled_price > 0 else None,
+                filled_at=datetime.now(timezone.utc).isoformat() if db_status == "filled" else "",
+                cancelled_at=datetime.now(timezone.utc).isoformat() if db_status == "cancelled" else "",
+            )
+            enqueue_typed_command(update_cmd)
 
             updates.append(
                 {

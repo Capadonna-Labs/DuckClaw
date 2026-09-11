@@ -44,6 +44,7 @@ from duckclaw.write_handlers import (  # noqa: F401
     admin_auth,
     duckdb_maintenance,
     hitl,
+    ibkr_orders,
     kanban,
     knowledge,
     prompt_policies,

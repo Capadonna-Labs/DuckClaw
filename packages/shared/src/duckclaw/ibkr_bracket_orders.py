@@ -85,7 +85,7 @@ async def connect_ibkr(
     Args:
         host: IP/hostname (default: IBKR_HOST env var o 127.0.0.1)
         port: Puerto (default: IBKR_PORT env var o 4002 paper)
-        client_id: Client ID único (default: IBKR_CLIENT_ID env var o 1)
+        client_id: Client ID único (default: IBKR_CLIENT_ID env var o 1; monitor usa IBKR_MONITOR_CLIENT_ID)
 
     Returns:
         IB: Cliente conectado de ib_insync
@@ -166,13 +166,29 @@ def create_bracket_order(
     if not ticker or not ticker.strip():
         raise ValueError("ticker no puede estar vacío")
 
+    if tp_price is not None and tp_price <= 0:
+        raise ValueError(f"tp_price debe ser > 0, got: {tp_price}")
+    if sl_price is not None and sl_price <= 0:
+        raise ValueError(f"sl_price debe ser > 0, got: {sl_price}")
+
+    # Dirección: BUY => TP > SL; SELL => TP < SL (cuando ambos presentes)
+    if tp_price is not None and sl_price is not None:
+        if side == "BUY" and not (tp_price > sl_price):
+            raise ValueError(
+                f"BUY requiere tp_price > sl_price, got tp={tp_price} sl={sl_price}"
+            )
+        if side == "SELL" and not (tp_price < sl_price):
+            raise ValueError(
+                f"SELL requiere tp_price < sl_price, got tp={tp_price} sl={sl_price}"
+            )
+
     # Main order (market)
     main = MarketOrder(side, quantity)
     main.outsideRth = True  # Permite ejecución fuera de horario regular
     main.transmit = False  # No enviar aún (primero crear TP/SL)
 
     # Si no hay TP/SL, solo retornar main order
-    if not tp_price and not sl_price:
+    if tp_price is None and sl_price is None:
         main.transmit = True
         return (main, None, None)
 
@@ -181,10 +197,7 @@ def create_bracket_order(
 
     # Take Profit (limit order)
     tp_order = None
-    if tp_price:
-        if tp_price <= 0:
-            raise ValueError(f"tp_price debe ser > 0, got: {tp_price}")
-
+    if tp_price is not None:
         tp_order = LimitOrder(close_action, quantity, tp_price)
         tp_order.parentId = main.orderId
         tp_order.transmit = False  # Parte del grupo OCA
@@ -193,10 +206,7 @@ def create_bracket_order(
 
     # Stop Loss (stop order)
     sl_order = None
-    if sl_price:
-        if sl_price <= 0:
-            raise ValueError(f"sl_price debe ser > 0, got: {sl_price}")
-
+    if sl_price is not None:
         sl_order = StopOrder(close_action, quantity, sl_price)
         sl_order.parentId = main.orderId
         # Solo el último en el grupo tiene transmit=True para enviar todo junto
@@ -211,6 +221,12 @@ def create_bracket_order(
     # Si hay ambos, SL es el último y debe tener transmit=True
     if tp_order and sl_order:
         sl_order.transmit = True
+        # OCA: si llena TP cancela SL y viceversa (belt-and-suspenders con parentId)
+        oca = f"BRACKET_{ticker.strip().upper()}"
+        tp_order.ocaGroup = oca
+        tp_order.ocaType = 1  # Cancel with block
+        sl_order.ocaGroup = oca
+        sl_order.ocaType = 1
 
     return (main, tp_order, sl_order)
 
@@ -295,6 +311,10 @@ async def submit_bracket_order(
     if tp:
         try:
             tp.parentId = main_trade.order.orderId
+            if sl is not None:
+                oca = f"BRACKET_{ticker.strip().upper()}_{main_trade.order.orderId}"
+                tp.ocaGroup = oca
+                tp.ocaType = 1
             tp_trade = ib.placeOrder(contract, tp)
             _log.info(
                 f"Orden TP enviada: {tp.action} {quantity} {ticker} @ limit {tp_price} "
@@ -315,6 +335,10 @@ async def submit_bracket_order(
     if sl:
         try:
             sl.parentId = main_trade.order.orderId
+            if tp is not None:
+                oca = f"BRACKET_{ticker.strip().upper()}_{main_trade.order.orderId}"
+                sl.ocaGroup = oca
+                sl.ocaType = 1
             sl_trade = ib.placeOrder(contract, sl)
             _log.info(
                 f"Orden SL enviada: {sl.action} {quantity} {ticker} @ stop {sl_price} "

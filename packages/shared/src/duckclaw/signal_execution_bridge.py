@@ -34,8 +34,8 @@ Usage::
     # }
 
 ponytail: Solo envía a IBKR si hay al menos un TP o SL configurado. Si ambos
-son None, solo envía market order sin bracket. Write commands van a la queue
-(fire-and-forget) — no espera confirmación de DB-Writer.
+son None, solo envía market order sin bracket. Write commands van a la queue del vault (db_path=vault_db_path),
+fire-and-forget — no espera confirmación de DB-Writer.
 """
 
 from __future__ import annotations
@@ -232,7 +232,7 @@ async def execute_signal_with_bracket(
         submitted_at=timestamp.isoformat(),
         trade_signal_id=signal_id,
     )
-    enqueue_typed_command(main_cmd)
+    enqueue_typed_command(main_cmd, db_path=vault_db_path)
 
     # TP order
     if result["tp_order_id"]:
@@ -250,7 +250,7 @@ async def execute_signal_with_bracket(
             trade_signal_id=signal_id,
             notes="Take Profit (GTC)",
         )
-        enqueue_typed_command(tp_cmd)
+        enqueue_typed_command(tp_cmd, db_path=vault_db_path)
 
     # SL order
     if result["sl_order_id"]:
@@ -268,14 +268,14 @@ async def execute_signal_with_bracket(
             trade_signal_id=signal_id,
             notes="Stop Loss (GTC)",
         )
-        enqueue_typed_command(sl_cmd)
+        enqueue_typed_command(sl_cmd, db_path=vault_db_path)
 
     # 5. Actualizar trade_signals.executed_at
     exec_cmd = UpdateTradeSignalExecutedCommand(
         signal_id=signal_id,
         executed_at=timestamp.isoformat(),
     )
-    enqueue_typed_command(exec_cmd)
+    enqueue_typed_command(exec_cmd, db_path=vault_db_path)
 
     _log.info(
         f"✅ Signal {signal_id} ejecutado: {side} {quantity} {ticker} "

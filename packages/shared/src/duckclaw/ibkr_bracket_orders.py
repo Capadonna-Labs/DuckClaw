@@ -382,6 +382,169 @@ async def submit_bracket_order(
 
 
 # ---------------------------------------------------------------------------
+# Protective TP/SL for EXISTING positions (no new entry)
+# ---------------------------------------------------------------------------
+
+
+def create_protective_oca_orders(
+    *,
+    ticker: str,
+    position_side: str,
+    quantity: int,
+    tp_price: Optional[float] = None,
+    sl_price: Optional[float] = None,
+) -> tuple[Optional["LimitOrder"], Optional["StopOrder"]]:
+    """Crea TP/SL GTC en OCA para una posición ya abierta (sin market entry).
+
+    Args:
+        position_side: "BUY" (long) o "SELL" (short) — dirección de la posición abierta.
+    """
+    if not _IB_INSYNC_AVAILABLE:
+        raise ImportError(
+            "ib_insync no disponible — instalar con: uv pip install ib-insync"
+        )
+    side = (position_side or "").strip().upper()
+    if side not in ("BUY", "SELL"):
+        raise ValueError(f"position_side debe ser 'BUY' o 'SELL', got: {position_side}")
+    if quantity <= 0:
+        raise ValueError(f"quantity debe ser > 0, got: {quantity}")
+    if tp_price is None and sl_price is None:
+        raise ValueError("se requiere al menos tp_price o sl_price")
+    if tp_price is not None and tp_price <= 0:
+        raise ValueError(f"tp_price debe ser > 0, got: {tp_price}")
+    if sl_price is not None and sl_price <= 0:
+        raise ValueError(f"sl_price debe ser > 0, got: {sl_price}")
+    if tp_price is not None and sl_price is not None:
+        if side == "BUY" and not (tp_price > sl_price):
+            raise ValueError(
+                f"long requiere tp_price > sl_price, got tp={tp_price} sl={sl_price}"
+            )
+        if side == "SELL" and not (tp_price < sl_price):
+            raise ValueError(
+                f"short requiere tp_price < sl_price, got tp={tp_price} sl={sl_price}"
+            )
+
+    close_action = "SELL" if side == "BUY" else "BUY"
+    oca = f"PROTECT_{ticker.strip().upper()}"
+
+    tp_order = None
+    if tp_price is not None:
+        tp_order = LimitOrder(close_action, quantity, tp_price)
+        tp_order.tif = "GTC"
+        tp_order.outsideRth = True
+        tp_order.transmit = False
+        tp_order.ocaGroup = oca
+        tp_order.ocaType = 1
+
+    sl_order = None
+    if sl_price is not None:
+        sl_order = StopOrder(close_action, quantity, sl_price)
+        sl_order.tif = "GTC"
+        sl_order.outsideRth = True
+        sl_order.transmit = False
+        sl_order.ocaGroup = oca
+        sl_order.ocaType = 1
+
+    # Última orden del grupo transmite ambas (OCA)
+    if sl_order is not None:
+        sl_order.transmit = True
+    elif tp_order is not None:
+        tp_order.transmit = True
+
+    return (tp_order, sl_order)
+
+
+async def submit_protective_oca_orders(
+    ib: "IB",
+    ticker: str,
+    position_side: str,
+    quantity: int,
+    tp_price: Optional[float] = None,
+    sl_price: Optional[float] = None,
+    exchange: str = "SMART",
+    currency: str = "USD",
+) -> dict:
+    """Coloca TP/SL GTC protectivos para una posición existente (sin nueva entrada)."""
+    if not _IB_INSYNC_AVAILABLE:
+        raise ImportError(
+            "ib_insync no disponible — instalar con: uv pip install ib-insync"
+        )
+
+    contract = Stock(ticker, exchange, currency)
+    tp, sl = create_protective_oca_orders(
+        ticker=ticker,
+        position_side=position_side,
+        quantity=quantity,
+        tp_price=tp_price,
+        sl_price=sl_price,
+    )
+
+    # Qualify contract so SMART resolves before placeOrder
+    try:
+        await ib.qualifyContractsAsync(contract)
+    except Exception as exc:
+        _log.warning("qualifyContracts %s: %s (continuando)", ticker, exc)
+
+    oca = f"PROTECT_{ticker.strip().upper()}"
+    tp_trade = None
+    sl_trade = None
+    try:
+        if tp is not None:
+            tp.ocaGroup = oca
+            tp_trade = ib.placeOrder(contract, tp)
+            _log.info(
+                "Protective TP: %s %s %s @ LMT %s (id=%s)",
+                tp.action,
+                quantity,
+                ticker,
+                tp_price,
+                tp_trade.order.orderId,
+            )
+        if sl is not None:
+            sl.ocaGroup = oca
+            sl_trade = ib.placeOrder(contract, sl)
+            _log.info(
+                "Protective SL: %s %s %s @ STP %s (id=%s)",
+                sl.action,
+                quantity,
+                ticker,
+                sl_price,
+                sl_trade.order.orderId,
+            )
+    except Exception as exc:
+        for trade in (tp_trade, sl_trade):
+            if trade is not None:
+                try:
+                    ib.cancelOrder(trade.order)
+                except Exception:
+                    pass
+        raise RuntimeError(f"Error enviando protective OCA {ticker}: {exc}") from exc
+
+    await ib.sleep(1)
+    result = {
+        "main_order_id": None,
+        "tp_order_id": tp_trade.order.orderId if tp_trade else None,
+        "sl_order_id": sl_trade.order.orderId if sl_trade else None,
+        "status": "submitted",
+        "timestamp": datetime.now(timezone.utc),
+        "ticker": ticker,
+        "side": position_side.strip().upper(),
+        "quantity": quantity,
+        "oca_group": oca,
+        "tp_price": tp_price,
+        "sl_price": sl_price,
+    }
+    _log.info(
+        "Protective OCA enviado: %s qty=%s tp=%s sl=%s",
+        ticker,
+        quantity,
+        result["tp_order_id"],
+        result["sl_order_id"],
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Order Status Query (helper)
 # ---------------------------------------------------------------------------
 

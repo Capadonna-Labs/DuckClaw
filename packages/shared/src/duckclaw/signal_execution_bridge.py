@@ -134,7 +134,7 @@ async def execute_signal_with_bracket(
         con = duckdb.connect(vault_db_path, read_only=True)
         tp_sl = con.execute(
             """
-            SELECT tp, sl
+            SELECT take_profit, stop_loss
             FROM quant_core.tp_sl_levels
             WHERE ticker = ? AND status = 'ACTIVE'
             ORDER BY created_at DESC
@@ -160,8 +160,8 @@ async def execute_signal_with_bracket(
             "error": f"Error leyendo TP/SL levels: {exc}",
         }
 
-    tp_price = tp_sl[0] if tp_sl else None
-    sl_price = tp_sl[1] if tp_sl else None
+    tp_price = float(tp_sl[0]) if tp_sl and tp_sl[0] is not None else None
+    sl_price = float(tp_sl[1]) if tp_sl and tp_sl[1] is not None else None
 
     _log.info(
         f"Niveles TP/SL para {ticker}: TP={tp_price}, SL={sl_price} "

@@ -84,6 +84,38 @@ def test_create_bracket_order_only_sl():
     assert sl.transmit is True
 
 
+def test_create_protective_oca_orders_long():
+    from duckclaw.ibkr_bracket_orders import create_protective_oca_orders
+
+    tp, sl = create_protective_oca_orders(
+        ticker="CEG",
+        position_side="BUY",
+        quantity=994,
+        tp_price=300.0,
+        sl_price=245.0,
+    )
+    assert tp is not None and sl is not None
+    assert tp.action == "SELL" and sl.action == "SELL"
+    assert tp.orderType == "LMT" and tp.lmtPrice == 300.0 and tp.tif == "GTC"
+    assert sl.orderType == "STP" and sl.auxPrice == 245.0 and sl.tif == "GTC"
+    assert tp.ocaGroup == sl.ocaGroup == "PROTECT_CEG"
+    assert sl.transmit is True
+    assert tp.transmit is False
+
+
+def test_create_protective_oca_rejects_bad_rr_long():
+    from duckclaw.ibkr_bracket_orders import create_protective_oca_orders
+
+    with pytest.raises(ValueError, match="tp_price > sl_price"):
+        create_protective_oca_orders(
+            ticker="CEG",
+            position_side="BUY",
+            quantity=10,
+            tp_price=200.0,
+            sl_price=250.0,
+        )
+
+
 def test_create_bracket_order_no_tp_sl():
     """Sin TP ni SL, solo devuelve main order."""
     main, tp, sl = create_bracket_order("TSLA", "BUY", 10, tp_price=None, sl_price=None)

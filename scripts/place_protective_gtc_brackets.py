@@ -16,6 +16,20 @@ import os
 import sys
 from pathlib import Path
 
+# ib_insync + nest_asyncio: avoid "This event loop is already running"
+try:
+    import nest_asyncio
+
+    nest_asyncio.apply()
+except Exception:
+    pass
+try:
+    from ib_insync import util as ib_util
+
+    ib_util.patchAsyncio()
+except Exception:
+    pass
+
 
 def _load_dotenv(path: Path) -> None:
     if not path.is_file():

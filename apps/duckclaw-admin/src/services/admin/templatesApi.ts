@@ -182,6 +182,17 @@ export const templatesApi = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
+  deleteTemplateVaultBinding: (workerId: string) =>
+    adminFetch<{
+      ok: boolean;
+      worker_id: string;
+      binding: VaultBinding | null;
+      resolved_path: string | null;
+      task_id?: string;
+      accepted?: boolean;
+    }>(`/templates/${encodeURIComponent(workerId)}/vault-binding`, {
+      method: 'DELETE',
+    }),
   createTemplate: (id: string, sourceTemplate?: string) =>
     adminFetch<{ ok: boolean; id: string }>('/templates', {
       method: 'POST',

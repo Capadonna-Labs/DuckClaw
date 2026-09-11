@@ -766,6 +766,78 @@ def test_template_vault_options_and_put(
 
 
 
+def test_template_vault_binding_delete_clears_binding(
+    admin_client: TestClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from duckclaw.admin_user_profiles import ensure_profile_for_user
+    from duckclaw.admin_worker_catalog import (
+        add_worker_version,
+        create_worker,
+        ensure_admin_worker_catalog_schema,
+        get_latest_worker_version,
+        update_catalog_worker_file,
+    )
+    from core.admin_identity import open_gateway_db
+
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
+    wid = "vault-unbind-worker"
+    with open_gateway_db(read_only=False) as db:
+        ensure_profile_for_user(db, email="admin@test.local")
+        ensure_admin_worker_catalog_schema(db)
+        worker = create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id=wid,
+            display_name="Vault Unbind Worker",
+        )
+        worker_uid = str(worker["worker_uid"])
+        add_worker_version(
+            db,
+            worker_uid=worker_uid,
+            created_by="admin@test.local",
+            manifest_snapshot={
+                "id": wid,
+                "forge_context": {"vault_binding": {"scope": "private", "vault_id": "custom"}},
+            },
+            files_snapshot={
+                "manifest.yaml": (
+                    f"id: {wid}\n"
+                    "forge_context:\n"
+                    "  vault_binding:\n"
+                    "    scope: private\n"
+                    "    vault_id: custom\n"
+                )
+            },
+        )
+
+    def fake_enqueue(command, *, user_id="default"):
+        with open_gateway_db(read_only=False) as db:
+            update_catalog_worker_file(
+                db,
+                worker_uid=worker_uid,
+                file_path=command.file_path,
+                content=command.content,
+                actor_email="admin@test.local",
+            )
+        return "task-vault-unbind-1"
+
+    monkeypatch.setattr("duckclaw.gateway_enqueue.enqueue_admin_command", fake_enqueue)
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+    r = admin_client.delete(
+        f"/api/v1/admin/templates/{wid}/vault-binding",
+        headers=headers,
+    )
+    assert r.status_code == 200, r.text
+    assert r.json().get("task_id") == "task-vault-unbind-1"
+    assert r.json().get("binding") is None
+    with open_gateway_db(read_only=True) as db:
+        latest = get_latest_worker_version(db, worker_uid=worker_uid) or {}
+        files = latest.get("files_snapshot") or {}
+        manifest_text = files.get("manifest.yaml") or ""
+    assert "vault_binding" not in manifest_text
+
+
+
 def test_catalog_topologies(admin_client: TestClient):
     r = admin_client.get(
         "/api/v1/admin/catalog/topologies",

@@ -157,7 +157,7 @@ async def create_vault_endpoint(
         path or vault_id,
         name,
         actor=actor,
-        meta={"vault_id": vault_id, "vault_user_id": uid},
+        meta={"vault_id": vault_id, "vault_user_id": uid, "description": (body.description or "").strip() or None},
     )
     return {
         "ok": True,

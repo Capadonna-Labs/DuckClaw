@@ -67,7 +67,7 @@ async def sync_order_status(
         vault_db_path: Path al DuckDB vault (lectura de órdenes pending)
         host: IBKR Gateway host (default: IBKR_HOST env var)
         port: IBKR Gateway port (default: IBKR_PORT env var)
-        client_id: Client ID (default: IBKR_CLIENT_ID env var)
+        client_id: Client ID (default: IBKR_MONITOR_CLIENT_ID, else IBKR_CLIENT_ID+1, else 2)
 
     Returns:
         {
@@ -127,6 +127,17 @@ async def sync_order_status(
     _log.info(f"Encontradas {len(pending)} órdenes pending")
 
     # 2. Conectar a IBKR
+    # Client ID distinto del execution path para evitar colisión de sesión IBKR
+    if client_id is None:
+        import os
+
+        monitor_raw = os.getenv("IBKR_MONITOR_CLIENT_ID")
+        if monitor_raw:
+            client_id = int(monitor_raw)
+        else:
+            base = int(os.getenv("IBKR_CLIENT_ID", "1"))
+            client_id = base + 1
+
     try:
         ib = await connect_ibkr(host=host, port=port, client_id=client_id)
     except Exception as exc:
@@ -152,7 +163,8 @@ async def sync_order_status(
         "PreSubmitted": "submitted",
         "Submitted": "submitted",
         "Inactive": "inactive",
-        "PartialFilled": "partial",
+        # PartialFilled no es status IBKR real — se deriva abajo
+
     }
 
     for order_id, ticker, side, quantity, order_type in pending:
@@ -171,6 +183,9 @@ async def sync_order_status(
             remaining = trade.orderStatus.remaining
 
             db_status = status_map.get(order_status, "unknown")
+            # IBKR no emite "PartialFilled": parcial = Submitted/PreSubmitted con fill incompleto
+            if db_status == "submitted" and float(filled_qty or 0) > 0 and float(remaining or 0) > 0:
+                db_status = "partial"
 
             _log.info(
                 f"Orden {order_id} ({ticker}): {order_status} → {db_status}, "
@@ -181,12 +196,12 @@ async def sync_order_status(
             update_cmd = UpdateIbkrOrderStatusCommand(
                 order_id=order_id,
                 status=db_status,
-                filled_qty=filled_qty,
+                filled_qty=int(filled_qty or 0),
                 filled_price=filled_price if filled_price > 0 else None,
                 filled_at=datetime.now(timezone.utc).isoformat() if db_status == "filled" else "",
                 cancelled_at=datetime.now(timezone.utc).isoformat() if db_status == "cancelled" else "",
             )
-            enqueue_typed_command(update_cmd)
+            enqueue_typed_command(update_cmd, db_path=vault_db_path)
 
             updates.append(
                 {

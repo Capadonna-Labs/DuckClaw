@@ -1634,6 +1634,29 @@ _M039_IBKR_ORDERS: list[str] = [
 ]
 
 
+
+
+def ensure_ibkr_orders_schema(db_path: str) -> None:
+    """Apply only IBKR orders DDL (M039) to a vault or hub DuckDB.
+
+    Hub ``duckclaw-migrate`` does not touch per-user vaults. Call this against
+    the Quant-Trader vault path before paper trading so ``quant_core.ibkr_orders``
+    exists where signal_execution_bridge / ibkr_order_monitor read+write.
+    """
+    from pathlib import Path as _Path
+
+    import duckdb
+
+    path = _Path(db_path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(path))
+    try:
+        for stmt in _M039_IBKR_ORDERS:
+            con.execute(stmt)
+    finally:
+        con.close()
+
+
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
     (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),

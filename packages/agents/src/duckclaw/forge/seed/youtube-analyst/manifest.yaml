@@ -1,0 +1,25 @@
+name: YouTubeAnalystWorker
+id: youtube-analyst
+display_name: YouTube Analyst
+description: >
+  Analiza contenido de YouTube (transcripciones y metadata) en modo solo lectura.
+  Opt-in a youtube_transcript vía MCP; sin mutaciones ni publicación.
+schema_name: main
+topology: general
+read_only: true
+tool_read_pool: false
+risk_level: conservative
+network_access: true
+browser_sandbox: false
+allowed_tables: []
+llm:
+  required: true
+  temperature: 0.2
+skills:
+- get_current_time
+- youtube_transcript:
+    response_limit: 15000
+- read_llm_usage_summary
+cognition:
+  soul: ./soul.md
+  system_prompt: ./system_prompt.md

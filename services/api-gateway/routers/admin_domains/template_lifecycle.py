@@ -515,6 +515,16 @@ async def put_template_vault_binding_impl(
     }
 
 
+
+async def delete_template_vault_binding_impl(
+    worker_id: str,
+    actor: str,
+) -> dict[str, Any]:
+    """Clear forge_context.vault_binding via the same catalog manifest write path as PUT."""
+    body = VaultBindingPutBody(scope="", vault_id=None, path=None)
+    return await put_template_vault_binding_impl(worker_id=worker_id, body=body, actor=actor)
+
+
 async def create_template_impl(
     body: TemplateCreateBody,
     actor: str = Depends(actor_from_header),

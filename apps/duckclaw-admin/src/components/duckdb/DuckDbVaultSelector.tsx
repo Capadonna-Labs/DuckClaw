@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Database, Plus } from 'lucide-react';
 import { adminService } from '@/services/adminService';
+import { browserVaultUiCopy } from '@/lib/vaultUiCopy';
 
 type Props = {
   value: string;
@@ -18,6 +19,7 @@ type VaultOption = {
 };
 
 export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Props) {
+  const copy = useMemo(() => browserVaultUiCopy(), []);
   const [vaults, setVaults] = useState<VaultOption[]>([]);
   const [creating, setCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -42,7 +44,7 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
   const createVault = async () => {
     const name = newName.trim();
     if (!name) {
-      setCreateError('Indica un nombre para la bóveda');
+      setCreateError(copy.nameRequired);
       return;
     }
     setCreating(true);
@@ -56,12 +58,12 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
       await reload();
       const path = res.vault?.path;
       if (path) onChange(path);
-      setCreateMsg(`Bóveda creada: ${res.vault?.vault_id || name}`);
+      setCreateMsg(`${copy.createdPrefix} ${res.vault?.vault_id || name}`);
       setNewName('');
       setNewDescription('');
       setShowForm(false);
     } catch (e) {
-      setCreateError(e instanceof Error ? e.message : 'No se pudo crear la bóveda');
+      setCreateError(e instanceof Error ? e.message : copy.createFailed);
     } finally {
       setCreating(false);
     }
@@ -77,11 +79,11 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
           : 'mt-1.5 w-full rounded-lg border border-gov-gray-200 bg-white px-3 py-2 font-mono text-xs dark:border-dark-border dark:bg-dark-bg'
       }
     >
-      {vaults.length === 0 && <option value="">(sin bóvedas)</option>}
+      {vaults.length === 0 && <option value="">{copy.noVaults}</option>}
       {vaults.map((v) => (
         <option key={v.path} value={v.path}>
           [{v.scope}
-          {v.active ? ' activa' : ''}] {v.path}
+          {v.active ? copy.activeSuffix : ''}] {v.path}
         </option>
       ))}
     </select>
@@ -99,12 +101,12 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
           }}
           className="inline-flex items-center gap-1 rounded-lg border border-gov-gray-200 px-2 py-1 text-[11px] font-medium text-gov-gray-700 dark:border-dark-border dark:text-dark-text"
         >
-          <Plus size={12} /> Nueva bóveda
+          <Plus size={12} /> {copy.newVault}
         </button>
       ) : (
         <div className="space-y-1.5 rounded-lg border border-gov-gray-200 p-2 dark:border-dark-border">
           <label className="block text-[10px] font-bold text-gov-gray-500">
-            Nombre
+            {copy.name}
             <input
               type="text"
               value={newName}
@@ -115,7 +117,7 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
             />
           </label>
           <label className="block text-[10px] font-bold text-gov-gray-500">
-            Descripción (opcional)
+            {copy.descriptionOptional}
             <input
               type="text"
               value={newDescription}
@@ -131,7 +133,7 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
               disabled={creating}
               className="rounded-lg bg-gov-blue-700 px-2 py-1 text-[10px] text-white disabled:opacity-50"
             >
-              {creating ? 'Creando…' : 'Crear'}
+              {creating ? copy.creating : copy.create}
             </button>
             <button
               type="button"
@@ -139,7 +141,7 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
               disabled={creating}
               className="rounded-lg border px-2 py-1 text-[10px] dark:border-dark-border"
             >
-              Cancelar
+              {copy.cancel}
             </button>
           </div>
         </div>
@@ -154,7 +156,7 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
       <div className="space-y-1">
         <label className="flex items-center gap-2 text-sm">
           <Database size={16} className="shrink-0 text-gov-blue-600 dark:text-dark-cyan" />
-          <span className="shrink-0 text-gov-gray-500 dark:text-dark-muted">Bóveda</span>
+          <span className="shrink-0 text-gov-gray-500 dark:text-dark-muted">{copy.vault}</span>
           {selectEl}
         </label>
         {createBlock}
@@ -167,7 +169,7 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
       <label className="block text-sm">
         <span className="inline-flex items-center gap-1.5 font-medium text-gov-gray-800 dark:text-dark-text">
           <Database size={14} className="text-gov-blue-600 dark:text-dark-cyan" />
-          Bóveda
+          {copy.vault}
         </span>
         {selectEl}
       </label>

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Database, Save } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import { formatWriteTaskPollNotice, pollWriteTask } from '@/lib/pollWriteTask';
+import { browserVaultUiCopy } from '@/lib/vaultUiCopy';
 import type { VaultBinding, VaultOption } from '@/types/admin';
 
 function optionKey(o: VaultOption): string {
@@ -22,6 +23,7 @@ type TemplateVaultPanelProps = {
 };
 
 export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelProps) {
+  const copy = browserVaultUiCopy();
   const [vaultUserId, setVaultUserId] = useState('');
   const [options, setOptions] = useState<VaultOption[]>([]);
   const [selected, setSelected] = useState('');
@@ -71,10 +73,10 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
     setErr(null);
     try {
       let res;
-      let successMsg = 'Bóveda guardada en manifest.yaml';
+      let successMsg = copy.savedManifest;
       if (!selected) {
         res = await adminService.putTemplateVaultBinding(workerId, { scope: '' });
-        successMsg = 'Bóveda desvinculada (hub / registry por defecto)';
+        successMsg = copy.unbound;
       } else {
         const [scope, rest] = selected.split(':', 2);
         if (scope === 'private') {
@@ -90,31 +92,30 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
         }
       }
       if (res?.task_id) {
-        setMsg('Guardando bóveda…');
+        setMsg(copy.savingVault);
         const polled = await pollWriteTask(res.task_id, { intervalMs: 400, maxAttempts: 60 });
         if (polled.state !== 'success') {
-          setErr(formatWriteTaskPollNotice(polled, 'Guardar bóveda'));
+          setErr(formatWriteTaskPollNotice(polled, copy.saveVault));
           return;
         }
       }
       setMsg(successMsg);
       reload();
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Error al guardar');
+      setErr(e instanceof Error ? e.message : copy.saveFailed);
     }
   };
 
   return (
     <div className="mb-4 p-3 rounded-xl border dark:border-dark-border bg-white dark:bg-dark-surface space-y-2">
       <div className="flex items-center gap-2 text-xs font-bold text-gov-gray-700 dark:text-dark-text">
-        <Database size={14} /> Bóveda DuckDB (/vault)
+        <Database size={14} /> {copy.panelTitle}
       </div>
       <p className="text-[10px] text-gov-gray-500 leading-snug">
-        Archivos en <span className="font-mono">db/private/&lt;tu id&gt;/</span> y{' '}
-        <span className="font-mono">db/shared/</span>. Afecta /vault y el sandbox de esta plantilla.
+        {copy.panelHelp}
       </p>
       <label className="block text-[10px] font-bold text-gov-gray-500">
-        ID bóveda (usuario)
+        {copy.vaultUserId}
         <input
           type="text"
           value={vaultUserId}
@@ -124,16 +125,16 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
         />
       </label>
       <label className="block text-[10px] font-bold text-gov-gray-500">
-        Archivo .duckdb
+        {copy.duckdbFile}
         <select
           value={selected}
           onChange={(e) => setSelected(e.target.value)}
           disabled={loading || !canWrite}
           className="mt-0.5 w-full font-mono text-xs px-2 py-1.5 rounded-lg border dark:border-dark-border dark:bg-dark-bg"
         >
-          <option value="">— Sin binding (hub / registry) —</option>
+          <option value="">{copy.noBinding}</option>
           {grouped.priv.length > 0 && (
-            <optgroup label="Privadas (tu usuario)">
+            <optgroup label={copy.privateGroup}>
               {grouped.priv.map((o) => (
                 <option key={optionKey(o)} value={optionKey(o)}>
                   {o.label} ({o.vault_id})
@@ -142,7 +143,7 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
             </optgroup>
           )}
           {grouped.shared.length > 0 && (
-            <optgroup label="Compartidas">
+            <optgroup label={copy.sharedGroup}>
               {grouped.shared.map((o) => (
                 <option key={optionKey(o)} value={optionKey(o)}>
                   {o.label} — {o.path}
@@ -154,7 +155,7 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
       </label>
       {resolvedPath && (
         <p className="text-[10px] font-mono text-gov-gray-500 break-all">
-          Ruta resuelta: {resolvedPath}
+          {copy.resolvedPath} {resolvedPath}
         </p>
       )}
       {msg && <p className="text-[10px] text-green-700">{msg}</p>}
@@ -166,7 +167,7 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
           disabled={loading}
           className="px-2 py-1 text-[10px] border rounded-lg dark:border-dark-border"
         >
-          Actualizar lista
+          {copy.refreshList}
         </button>
         {canWrite && (
           <button
@@ -174,7 +175,7 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
             onClick={save}
             className="px-2 py-1 text-[10px] bg-gov-blue-700 text-white rounded-lg flex items-center gap-1"
           >
-            <Save size={12} /> Guardar bóveda
+            <Save size={12} /> {copy.saveVaultAction}
           </button>
         )}
       </div>

@@ -31,6 +31,7 @@ from routers.admin_domains.template_lifecycle import (
     get_template_vault_binding_impl,
     list_templates_impl,
     put_template_vault_binding_impl,
+    delete_template_vault_binding_impl,
     template_vault_options_impl,
     validate_template_impl,
 )
@@ -251,6 +252,17 @@ async def put_template_vault_binding(
     return await put_template_vault_binding_impl(
         worker_id=worker_id,
         body=body,
+        actor=actor,
+    )
+
+
+@router.delete("/{worker_id}/vault-binding", dependencies=[Depends(require_admin_key)])
+async def delete_template_vault_binding(
+    worker_id: str,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    return await delete_template_vault_binding_impl(
+        worker_id=worker_id,
         actor=actor,
     )
 

@@ -51,6 +51,7 @@ manejar timeout/reconnect). Bracket order validation es basic (price sanity)
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -520,7 +521,7 @@ async def submit_protective_oca_orders(
                     pass
         raise RuntimeError(f"Error enviando protective OCA {ticker}: {exc}") from exc
 
-    await ib.sleep(1)
+    await asyncio.sleep(1)
     result = {
         "main_order_id": None,
         "tp_order_id": tp_trade.order.orderId if tp_trade else None,

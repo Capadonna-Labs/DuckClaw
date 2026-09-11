@@ -727,6 +727,7 @@ async def _run_loop_proactive_tick_one_db(
     )
     from duckclaw.commands.loop_state_keys import (
         LOOP_AWAITING_USER_KEY,
+        LOOP_LAST_ACTIVITY_KEY,
         LOOP_PENDING_TICK_KEY,
         get_loop_chat_state,
     )
@@ -826,6 +827,18 @@ async def _run_loop_proactive_tick_one_db(
             except Exception:
                 pass
 
+        # In-flight guard for concurrent Heartbeat/Gateway pollers. Cleared on
+        # success/failure below — never leave pending=1 after a completed tick
+        # (that forced silence >= 2× interval while the footer promised 1×).
+        if idle_mode:
+            await _enqueue_chat_state_write(
+                db_path=db_path,
+                chat_id=chat_id,
+                tenant_id=tenant_id,
+                key=LOOP_PENDING_TICK_KEY,
+                value="1",
+            )
+
         try:
             result = await post_loop_self_tick_async(
                 chat_id=chat_id,
@@ -842,15 +855,31 @@ async def _run_loop_proactive_tick_one_db(
                     result.get("status_code"),
                     result.get("error") or result.get("body"),
                 )
+                if idle_mode:
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id,
+                        key=LOOP_PENDING_TICK_KEY,
+                        value="0",
+                    )
                 continue
             logger.info("meditate_proactive: tick OK chat=%s worker=%s", chat_id, worker_id)
             if idle_mode:
+                # Re-anchor even when gateway skip persist/touch (Telegram SYSTEM_EVENT).
+                await _enqueue_chat_state_write(
+                    db_path=db_path,
+                    chat_id=chat_id,
+                    tenant_id=tenant_id,
+                    key=LOOP_LAST_ACTIVITY_KEY,
+                    value=str(time.time()),
+                )
                 await _enqueue_chat_state_write(
                     db_path=db_path,
                     chat_id=chat_id,
                     tenant_id=tenant_id,
                     key=LOOP_PENDING_TICK_KEY,
-                    value="1",
+                    value="0",
                 )
                 if active_mode:
                     await _enqueue_chat_state_write(
@@ -869,6 +898,17 @@ async def _run_loop_proactive_tick_one_db(
                     value=str(now),
                 )
         except Exception as exc:  # noqa: BLE001
+            if idle_mode:
+                try:
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id,
+                        key=LOOP_PENDING_TICK_KEY,
+                        value="0",
+                    )
+                except Exception:  # noqa: BLE001
+                    pass
             logger.exception("meditate_proactive: invoke failed chat=%s: %s", chat_id, exc)
 
 

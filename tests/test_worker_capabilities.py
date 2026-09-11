@@ -113,6 +113,49 @@ def test_worker_capabilities_gaps_sandbox_alias_and_mcp_github() -> None:
     assert isinstance(integration, list)
 
 
+def test_worker_capabilities_understands_runtime_skill_aliases() -> None:
+    from routers.admin_domains.worker_capabilities import _compute_gaps
+
+    gaps, _ = _compute_gaps(
+        skills_effective=[
+            "infra_freshness",
+            "ibkr",
+            "fmp",
+            "macro_pgq_context",
+            "quant_schema_reference",
+            "position_metrics",
+            "slm_eval",
+        ],
+        tools_runtime=[
+            "read_sql",
+            "inspect_schema",
+            "get_db_path",
+            "list_project_knowledge",
+            "read_project_knowledge",
+            "search_project_knowledge",
+            "extract_document_text",
+            "render_docx_template",
+            "export_docx_to_pdf",
+            "assess_cron_registered",
+            "assess_table_freshness",
+            "get_ibkr_portfolio",
+            "fetch_market_data",
+            "describe_pgq_macro_schema",
+            "inspect_macro_pgq",
+            "describe_quant_schema",
+            "calculate_tp_sl_distance",
+            "execute_slm",
+            "record_slm_eval_lesson",
+        ],
+        sandbox_registered=False,
+        docker_ok=True,
+        manifest_data={"allowed_delegates": ["quant_reporter"]},
+        optional={},
+    )
+
+    assert gaps == []
+
+
 def test_worker_capabilities_gaps_docker_only_when_sandbox_skill_on() -> None:
     from routers.admin_domains.worker_capabilities import _compute_gaps
 

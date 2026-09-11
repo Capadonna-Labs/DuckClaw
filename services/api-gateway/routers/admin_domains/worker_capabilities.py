@@ -106,6 +106,9 @@ _REPORT_ENGINE_TOOLS: frozenset[str] = frozenset(
 _SKILL_RUNTIME_TOOLS: dict[str, frozenset[str]] = {
     "report_engine": _REPORT_ENGINE_TOOLS,
     "reports": _REPORT_ENGINE_TOOLS,
+    "infra_freshness": frozenset({"assess_cron_registered", "assess_table_freshness"}),
+    "macro_pgq_context": frozenset({"describe_pgq_macro_schema", "inspect_macro_pgq"}),
+    "slm_eval": frozenset({"execute_slm", "record_slm_eval_lesson"}),
 }
 
 # Alias skill → cualquier tool de este set satisface (p. ej. sandbox).
@@ -113,6 +116,10 @@ _SKILL_SATISFIED_BY_TOOLS: dict[str, frozenset[str]] = {
     "execute_sandbox_script": frozenset({"run_sandbox", "execute_sandbox_script"}),
     "run_sandbox": frozenset({"run_sandbox", "execute_sandbox_script"}),
     "openweather": frozenset({"openweather_current_city", "openweather"}),
+    "ibkr": frozenset({"get_ibkr_portfolio", "get_ibkr_order_history"}),
+    "fmp": frozenset({"fetch_market_data"}),
+    "quant_schema_reference": frozenset({"describe_quant_schema"}),
+    "position_metrics": frozenset({"calculate_tp_sl_distance"}),
 }
 
 # Skill → prefijos de tools MCP en runtime (mcp__{id}__).
@@ -164,6 +171,18 @@ def _normalized_skill_names(skills: list[str] | None) -> set[str]:
 
 def _sandbox_exec_skill_opted_in(skills_effective: list[str] | None) -> bool:
     return bool(_normalized_skill_names(skills_effective) & _SANDBOX_EXEC_SKILLS)
+
+
+def _expected_framework_tools(manifest_data: dict[str, Any]) -> set[str]:
+    """Mirror the worker builder's deliberate document-output exclusion."""
+
+    pack = load_framework_tool_pack()
+    expected = set(pack.get("framework_tools", {}).get("always_registered") or [])
+    skills = _normalized_skill_names(_declared_skills(manifest_data))
+    delegates = manifest_data.get("allowed_delegates") or ()
+    if delegates or "publish_custom_report" in skills:
+        expected -= {"write_output_document", "delete_output_document"}
+    return expected
 
 
 # Skills declarables pero retiradas a propósito del bind.
@@ -300,7 +319,7 @@ def _compute_gaps(
 
     pack = load_framework_tool_pack()
     framework_tools = pack.get("framework_tools") or {}
-    expected_framework = set(framework_tools.get("always_registered") or [])
+    expected_framework = _expected_framework_tools(manifest_data)
     if should_apply_framework_baseline(manifest_data):
         missing_framework = sorted(expected_framework - runtime_set)
         if missing_framework:

@@ -64,6 +64,17 @@ def make_prepare_node(ctx: WorkerGraphContext):
         if integration_prefix:
             messages.append(SystemMessage(content=integration_prefix))
         messages.append(SystemMessage(content=prompt))
+        operational_lessons = str(state.get("operational_lessons") or "").strip()
+        if operational_lessons:
+            messages.append(
+                SystemMessage(
+                    content=(
+                        "Lecciones operativas persistidas para este ciclo. Úsalas como "
+                        "guardrails; no sustituyen la verificación con datos actuales.\n\n"
+                        + operational_lessons
+                    )
+                )
+            )
         for h in (state.get("history") or []):
             role = (h.get("role") or "").lower()
             content = h.get("content") or ""

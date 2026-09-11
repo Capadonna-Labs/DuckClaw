@@ -82,9 +82,23 @@ def make_route_after_set_reply(ctx: WorkerGraphContext):
 
 
 def make_homeostasis_node(ctx: WorkerGraphContext):
+    db = ctx.db
+
     def homeostasis_node(state: dict, config: Optional[RunnableConfig] = None) -> dict:
-        """HomeostasisNode: Percepción-Sorpresa-Restauración-Actualización. Fase 1: pass-through (tabla ya creada en run_schema).
-        IMPORTANTE: retornar state para preservar input/incoming; retornar {} vacío hace que LangGraph pierda el estado."""
-        return state
+        """Attach durable operational lessons to proactive homeostasis ticks."""
+        incoming = str(state.get("incoming") or state.get("input") or "")
+        if not incoming.startswith("[SYSTEM_EVENT:"):
+            return state
+        from duckclaw.graphs.proactive_review_markers import proactive_review_event_phrase_in_text
+
+        if not proactive_review_event_phrase_in_text(incoming):
+            return state
+        from duckclaw.memory.operational_lessons import fetch_operational_lessons
+
+        lessons = fetch_operational_lessons(
+            db,
+            tenant_id=str(state.get("tenant_id") or "default"),
+        )
+        return {**state, "operational_lessons": lessons} if lessons else state
 
     return homeostasis_node

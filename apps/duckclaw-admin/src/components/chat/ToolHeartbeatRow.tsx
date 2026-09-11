@@ -37,7 +37,7 @@ export function ToolHeartbeatRow({ message: m }: { message: ChatMsg }) {
   return (
     <li className="px-3 py-1.5 text-sm text-sky-950 dark:text-sky-100">
       <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-        {`Usando: ${toolName}`}
+        {toolName}
         {isError ? ' · error' : ''}
         {dur ? ` · ${dur}` : running ? ' · en curso' : ''}
       </span>

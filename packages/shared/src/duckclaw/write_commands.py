@@ -645,6 +645,48 @@ class RevokeWorkerMcpConnectorCommand(WriteCommand):
 
 
 # ---------------------------------------------------------------------------
+# IBKR Trading commands
+# ---------------------------------------------------------------------------
+
+class InsertIbkrOrderCommand(WriteCommand):
+    """Insert new IBKR order record into quant_core.ibkr_orders."""
+
+    command_type: Literal["insert_ibkr_order"] = "insert_ibkr_order"
+    order_id: int
+    ticker: str
+    side: Literal["BUY", "SELL"]
+    quantity: int
+    order_type: Literal["MARKET", "LIMIT", "STOP"]
+    limit_price: float | None = None
+    stop_price: float | None = None
+    parent_order_id: int | None = None
+    status: str = "submitted"
+    submitted_at: str = ""  # ISO datetime
+    trade_signal_id: str = ""
+    notes: str = ""
+
+
+class UpdateIbkrOrderStatusCommand(WriteCommand):
+    """Update IBKR order status (filled, cancelled, etc) from order monitor."""
+
+    command_type: Literal["update_ibkr_order_status"] = "update_ibkr_order_status"
+    order_id: int
+    status: Literal["submitted", "partial", "filled", "cancelled", "inactive", "unknown"]
+    filled_qty: int = 0
+    filled_price: float | None = None
+    filled_at: str = ""  # ISO datetime (only if status=filled)
+    cancelled_at: str = ""  # ISO datetime (only if status=cancelled)
+
+
+class UpdateTradeSignalExecutedCommand(WriteCommand):
+    """Mark trade signal as executed with timestamp."""
+
+    command_type: Literal["update_trade_signal_executed"] = "update_trade_signal_executed"
+    signal_id: str
+    executed_at: str = ""  # ISO datetime
+
+
+# ---------------------------------------------------------------------------
 # Raw SQL (legacy — keep for admin_sql tool)
 # ---------------------------------------------------------------------------
 

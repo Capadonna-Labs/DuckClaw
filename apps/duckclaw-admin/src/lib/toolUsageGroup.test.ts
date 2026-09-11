@@ -7,14 +7,15 @@ import {
   toolGroupHasRunning,
   toolGroupStableKey,
   toolGroupTotalElapsedMs,
+  groupToolInvocationsByName,
 } from './toolUsageGroup';
 
-const tool = (name: string, phase: ChatMsg['toolPhase'] = 'done'): ChatMsg => ({
+const tool = (name: string, phase: ChatMsg['toolPhase'] = 'done', elapsedMs?: number): ChatMsg => ({
   role: 'heartbeat',
   heartbeatKind: 'tool',
   toolName: name,
   toolPhase: phase,
-  toolElapsedMs: phase === 'done' ? 10 : undefined,
+  toolElapsedMs: elapsedMs ?? (phase === 'done' ? 10 : undefined),
   text: `Usando: ${name}`,
 });
 
@@ -92,5 +93,76 @@ describe('toolUsageGroup', () => {
     done[2].toolElapsedMs = 7;
     const g2 = groupMessagesForDisplay(done);
     expect(toolGroupTotalElapsedMs(done, (g2[1] as { indices: number[] }).indices)).toBe(12);
+  });
+
+  describe('groupToolInvocationsByName', () => {
+    it('groups repeated tool invocations with count and averages', () => {
+      const messages = [
+        user,
+        tool('read_sql', 'done', 100),
+        tool('read_sql', 'done', 200),
+        tool('read_sql', 'done', 150),
+        tool('get_current_time', 'done', 50),
+        assistant,
+      ];
+      const grouped = groupToolInvocationsByName(messages, [1, 2, 3, 4]);
+
+      expect(grouped).toHaveLength(2);
+
+      const readSqlGroup = grouped.find((g) => g.toolName === 'read_sql');
+      expect(readSqlGroup).toBeDefined();
+      expect(readSqlGroup?.count).toBe(3);
+      expect(readSqlGroup?.latestMs).toBe(150);
+      expect(readSqlGroup?.averageMs).toBe(150); // (100 + 200 + 150) / 3
+      expect(readSqlGroup?.isRunning).toBe(false);
+      expect(readSqlGroup?.isError).toBe(false);
+
+      const timeGroup = grouped.find((g) => g.toolName === 'get_current_time');
+      expect(timeGroup).toBeDefined();
+      expect(timeGroup?.count).toBe(1);
+      expect(timeGroup?.latestMs).toBe(50);
+      expect(timeGroup?.averageMs).toBe(50);
+    });
+
+    it('handles running tools', () => {
+      const messages = [
+        user,
+        tool('read_sql', 'done', 100),
+        tool('read_sql', 'running'),
+        assistant,
+      ];
+      const grouped = groupToolInvocationsByName(messages, [1, 2]);
+
+      expect(grouped).toHaveLength(1);
+      expect(grouped[0].count).toBe(2);
+      expect(grouped[0].isRunning).toBe(true);
+      expect(grouped[0].latestMs).toBe(100); // Solo cuenta el completado
+      expect(grouped[0].averageMs).toBe(100);
+    });
+
+    it('detects errors in group', () => {
+      const messages = [
+        user,
+        tool('read_sql', 'done', 100),
+        tool('read_sql', 'error', 50),
+        assistant,
+      ];
+      const grouped = groupToolInvocationsByName(messages, [1, 2]);
+
+      expect(grouped).toHaveLength(1);
+      expect(grouped[0].count).toBe(2);
+      expect(grouped[0].isError).toBe(true);
+    });
+
+    it('handles single tool invocation', () => {
+      const messages = [user, tool('read_sql', 'done', 100), assistant];
+      const grouped = groupToolInvocationsByName(messages, [1]);
+
+      expect(grouped).toHaveLength(1);
+      expect(grouped[0].count).toBe(1);
+      expect(grouped[0].toolName).toBe('read_sql');
+      expect(grouped[0].latestMs).toBe(100);
+      expect(grouped[0].averageMs).toBe(100);
+    });
   });
 });

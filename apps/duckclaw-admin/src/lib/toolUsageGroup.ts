@@ -88,3 +88,72 @@ export function toolGroupCurrentToolName(messages: ChatMsg[], indices: number[])
   const target = newestByStartedAt(running.length ? running : items);
   return target ? toolDisplayName(target) : '';
 }
+
+export interface GroupedToolInvocation {
+  toolName: string;
+  count: number;
+  latestMs: number | null;
+  averageMs: number | null;
+  isRunning: boolean;
+  isError: boolean;
+  messages: ChatMsg[];
+}
+
+/** Agrupa herramientas repetidas del mismo tipo, mostrando contador y promedios. */
+export function groupToolInvocationsByName(
+  messages: ChatMsg[],
+  indices: number[]
+): GroupedToolInvocation[] {
+  const items = indices.map((i) => messages[i]).filter(isToolHeartbeatMessage);
+  
+  // Agrupar por nombre de herramienta
+  const grouped = new Map<string, ChatMsg[]>();
+  for (const msg of items) {
+    const name = toolDisplayName(msg);
+    const existing = grouped.get(name) || [];
+    existing.push(msg);
+    grouped.set(name, existing);
+  }
+  
+  // Convertir a formato de salida con estadísticas
+  const result: GroupedToolInvocation[] = [];
+  for (const [toolName, toolMessages] of grouped.entries()) {
+    const count = toolMessages.length;
+    const hasRunning = toolMessages.some((m) => isToolHeartbeatRunning(m));
+    const hasError = toolMessages.some((m) => m.toolPhase === 'error');
+    
+    // Calcular tiempos solo de mensajes completados
+    const completedMessages = toolMessages.filter((m) => !isToolHeartbeatRunning(m));
+    const times = completedMessages
+      .map((m) => {
+        const ms =
+          m.toolElapsedMs ??
+          (m.toolStartedAt != null ? Math.max(0, Date.now() - m.toolStartedAt) : undefined);
+        return ms != null && Number.isFinite(ms) ? ms : null;
+      })
+      .filter((t): t is number => t !== null);
+    
+    // Último tiempo (del mensaje más reciente)
+    const newestCompleted = newestByStartedAt(completedMessages);
+    const latestMs =
+      newestCompleted?.toolElapsedMs ??
+      (newestCompleted?.toolStartedAt != null
+        ? Math.max(0, Date.now() - newestCompleted.toolStartedAt)
+        : null);
+    
+    // Tiempo promedio
+    const averageMs = times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : null;
+    
+    result.push({
+      toolName,
+      count,
+      latestMs,
+      averageMs,
+      isRunning: hasRunning,
+      isError: hasError,
+      messages: toolMessages,
+    });
+  }
+  
+  return result;
+}

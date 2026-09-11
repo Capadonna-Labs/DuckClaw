@@ -81,35 +81,42 @@ log_info "Instalando dependencias (ib-insync)..."
 run_remote "cd $REPO_PATH && uv sync --extra trading"
 
 # =============================================================================
-# 4. Correr migraciones
+# 4. Correr migraciones (hub + vault)
 # =============================================================================
 
-log_info "Corriendo migraciones DuckDB (v39: ibkr_orders)..."
+log_info "Corriendo migraciones DuckDB hub (duckclaw-migrate)..."
 run_remote "cd $REPO_PATH && uv run duckclaw-migrate"
 
-# Verificar que tabla se creó
-log_info "Verificando tabla quant_core.ibkr_orders..."
+log_info "Aplicando schema IBKR (v39) en el vault Quant-Trader..."
+# duckclaw-migrate solo toca el hub; el bridge/monitor leen/escriben el vault.
+run_remote "cd $REPO_PATH && uv run python -c \"
+from duckclaw.schema_migrations import ensure_ibkr_orders_schema
+ensure_ibkr_orders_schema('$VAULT_DB')
+print('VAULT_IBKR_SCHEMA_OK')
+\""
+
+# Verificar que tabla se creó EN EL VAULT
+log_info "Verificando tabla quant_core.ibkr_orders en vault..."
 if ! $DRY_RUN; then
     TABLE_EXISTS=$(ssh "$VPS_HOST" "cd $REPO_PATH && uv run python -c \"
 import duckdb
 con = duckdb.connect('$VAULT_DB', read_only=True)
 try:
-    result = con.execute('SELECT COUNT(*) FROM quant_core.ibkr_orders').fetchone()
+    con.execute('SELECT COUNT(*) FROM quant_core.ibkr_orders').fetchone()
     print('EXISTS')
-except Exception:
-    print('NOT_FOUND')
+except Exception as e:
+    print(f'NOT_FOUND: {e}')
 finally:
     con.close()
 \"")
 
     if [[ "$TABLE_EXISTS" == "EXISTS" ]]; then
-        log_info "✓ Tabla quant_core.ibkr_orders verificada"
+        log_info "✓ Tabla quant_core.ibkr_orders verificada en vault"
     else
-        log_error "Tabla quant_core.ibkr_orders no encontrada"
+        log_error "Tabla quant_core.ibkr_orders no encontrada en vault: $TABLE_EXISTS"
         exit 1
     fi
 fi
-
 # =============================================================================
 # 5. Verificar IBKR Gateway
 # =============================================================================
@@ -126,7 +133,8 @@ if ! $DRY_RUN; then
         echo ""
         echo "IBKR_HOST=127.0.0.1"
         echo "IBKR_PORT=4002  # 4002=paper, 4001=live"
-        echo "IBKR_CLIENT_ID=1"
+        echo "IBKR_CLIENT_ID=1          # execution path"
+        echo "IBKR_MONITOR_CLIENT_ID=2  # order monitor (must differ)"
         echo ""
         log_warn "Agregar a $REPO_PATH/.env antes de continuar"
     else
@@ -249,8 +257,15 @@ echo "   ...     vault_db_path='$VAULT_DB'"
 echo "   ... ))"
 echo "   >>> print(result)"
 echo ""
-echo "4. Habilitar skill en Quant-Trader manifest:"
-echo "   - Agregar 'ibkr_bracket_orders' a skills list"
-echo "   - Reimportar worker template"
+echo "4. Habilitar skill en Quant-Trader (manifest del worker):"
+echo "   skills:"
+echo "     - ibkr_bracket_orders"
+echo "   Luego reimportar/actualizar el worker en Admin → Workers."
+echo ""
+echo "5. Paper test checklist:"
+echo "   - connect_ibkr() OK"
+echo "   - execute_signal_with_bracket(...) crea 3 órdenes en IBKR"
+echo "   - filas en quant_core.ibkr_orders (vault)"
+echo "   - ibkr_order_monitor sincroniza filled/cancelled"
 echo ""
 log_info "Deployment script completado."

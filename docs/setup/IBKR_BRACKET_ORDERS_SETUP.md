@@ -7,6 +7,40 @@
 
 ---
 
+
+
+## Vault schema (crítico)
+
+`duckclaw-migrate` aplica migraciones al **hub**, no al vault Quant-Trader.
+Antes de paper trading, materializa `quant_core.ibkr_orders` en el vault:
+
+```bash
+uv run python -c "from duckclaw.schema_migrations import ensure_ibkr_orders_schema; ensure_ibkr_orders_schema('/path/to/quant_traderdb1.duckdb')"
+```
+
+El script `scripts/deploy_ibkr_bracket_orders.sh` ya hace esto.
+
+## Client IDs
+
+Usa client IDs distintos para no colisionar sesiones IBKR:
+
+```bash
+IBKR_CLIENT_ID=1          # execution / bracket submit
+IBKR_MONITOR_CLIENT_ID=2  # ibkr_order_monitor
+```
+
+## Habilitar skill en Quant-Trader
+
+En el manifest del worker:
+
+```yaml
+skills:
+  - ibkr_bracket_orders
+```
+
+Reimporta/actualiza el worker en Admin → Workers.
+
+
 ## 📦 Instalación
 
 ### Opción 1: Instalar con uv (recomendado)

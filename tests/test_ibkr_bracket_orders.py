@@ -171,6 +171,28 @@ def test_bracket_order_parent_id_set():
     assert sl.parentId == main.orderId
 
 
+
+
+def test_create_bracket_order_rejects_bad_buy_direction():
+    """BUY exige tp_price > sl_price."""
+    with pytest.raises(ValueError, match="tp_price > sl_price"):
+        create_bracket_order("CEG", "BUY", 100, tp_price=200.0, sl_price=250.0)
+
+
+def test_create_bracket_order_rejects_bad_sell_direction():
+    """SELL exige tp_price < sl_price."""
+    with pytest.raises(ValueError, match="tp_price < sl_price"):
+        create_bracket_order("SPY", "SELL", 100, tp_price=600.0, sl_price=550.0)
+
+
+def test_create_bracket_order_sets_oca_group_when_tp_and_sl():
+    """TP y SL comparten ocaGroup/ocaType cuando ambos existen."""
+    main, tp, sl = create_bracket_order("CEG", "BUY", 100, 300.0, 245.0)
+    assert tp.ocaGroup == sl.ocaGroup
+    assert tp.ocaGroup.startswith("BRACKET_CEG")
+    assert tp.ocaType == 1
+    assert sl.ocaType == 1
+
 # ---------------------------------------------------------------------------
 # Integration tests (requieren conexión a IBKR paper account)
 # ---------------------------------------------------------------------------

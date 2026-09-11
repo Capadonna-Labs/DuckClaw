@@ -42,10 +42,10 @@ def _apply_insert_ibkr_order(conn: Any, payload: dict) -> None:
     trade_signal_id = str(payload.get("trade_signal_id", ""))
     notes = str(payload.get("notes", ""))
 
-    # INSERT OR REPLACE for idempotency (order_id is PK)
+    # INSERT OR IGNORE for idempotency (order_id is PK; no pisa fills existentes)
     conn.execute(
         """
-        INSERT OR REPLACE INTO quant_core.ibkr_orders (
+        INSERT OR IGNORE INTO quant_core.ibkr_orders (
             order_id,
             ticker,
             side,

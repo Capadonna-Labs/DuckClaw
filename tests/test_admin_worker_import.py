@@ -253,6 +253,32 @@ def test_gateway_template_detail_reads_imported_catalog_snapshot_without_templat
     assert any(item["path"] == "system_prompt.md" for item in data["files"])
 
 
+def test_gateway_imported_template_has_no_runtime_tool_gaps(
+    gateway_admin_client,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CI guard: an imported DB-first manifest must reach the graph's tool bind."""
+    monkeypatch.setattr("duckclaw.db_write_queue.spawn_inline_writes_enabled", lambda: True)
+    templates_root = tmp_path / "templates"
+    _write_template(templates_root, "Selected-Agent", display_name="Selected Agent")
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+
+    imported = gateway_admin_client.post(
+        "/api/v1/admin/templates/import",
+        headers=headers,
+        json={"templates_root": str(templates_root), "include_prefixes": ["Selected-"]},
+    )
+    assert imported.status_code == 200
+
+    capabilities = gateway_admin_client.get(
+        "/api/v1/admin/workers/selected-agent/capabilities",
+        headers=headers,
+    )
+    assert capabilities.status_code == 200
+    assert capabilities.json()["gaps"] == []
+
+
 def test_gateway_template_file_save_updates_catalog_context_and_version_without_touching_folder(
     gateway_admin_client,
     tmp_path: Path,

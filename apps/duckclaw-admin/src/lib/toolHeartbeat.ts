@@ -25,10 +25,20 @@ export function toolHeartbeatInvocationKey(m: ChatMsg): string | null {
 export function parseToolNameFromHeartbeatText(text: string): string | null {
   const raw = (text || '').trim();
   if (!raw) return null;
+  
+  // Nuevo formato sin "Usando:"
+  const simple = raw.match(/^([A-Za-z0-9_.-]+)(?:\s*·|$)/);
+  if (simple && !raw.includes('Usando:')) return simple[1].trim();
+  
+  // Formato anterior con emoji
   const using = raw.match(/\uD83D\uDD04\s*Usando:\s*(.+?)(?:\s*·|$)/);
   if (using) return using[1].trim();
+  
+  // Formato anterior sin emoji
   const plain = raw.match(/Usando:\s*(.+?)(?:\s*·|$)/);
   if (plain) return plain[1].trim();
+  
+  // Legacy
   const legacy = raw.match(/herramienta\s+([A-Za-z0-9_.-]+)/i);
   return legacy ? legacy[1].trim() : null;
 }
@@ -57,7 +67,7 @@ export function toolHeartbeatDisplayText(
   elapsedMs: number | null | undefined
 ): string {
   const name = formatToolDisplayName(toolName || 'tool');
-  const base = `Usando: ${name}`;
+  const base = name;
   if (phase === 'error') {
     const dur = formatToolDurationMs(elapsedMs);
     return dur ? `${base} · error · ${dur}` : `${base} · error`;

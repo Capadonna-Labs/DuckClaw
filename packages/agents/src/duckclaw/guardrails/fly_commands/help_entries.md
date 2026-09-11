@@ -5,7 +5,7 @@
 /roles|Ver todos los trabajadores virtuales (templates)
 /tasks|Estado actual: BUSY/IDLE, subagente, tarea
 /history|Historial de tareas (quién hizo qué)
-/goals|Manifiesto homeostasis: metas de dominio + umbrales infra (--set, --rm, --priority, --monitor, --task, --migrate, --reset)
+/goals|Manifiesto homeostasis: metas de dominio + umbrales infra (--worker, --owner, --set, --rm, --priority, --monitor, --task, --migrate, --reset)
 /crons|Solo programación proactiva: --delta / --timestamp; --rm delta|wall (metas en /goals)
 /loop|Auto-mejora: bare, on, on --delta, --delta (silencio), --status, on 4h (reloj), off
 /loop-approve [uuid]|HITL: confirma homeostasis tras validación de /goals; alias /loop_approve

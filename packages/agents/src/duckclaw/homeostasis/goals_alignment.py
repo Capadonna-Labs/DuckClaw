@@ -265,7 +265,9 @@ def assess_goals_list_alignment(
 ) -> AlignmentReport:
     from duckclaw.commands.goals import _get_goals_registry_for_chat
     from harness_core.goal_priority import parse_goal_priority, sort_goals_by_priority
+    from harness_core.targets import filter_goals_for_worker
 
+    goals = filter_goals_for_worker(goals, worker_id, include_shared=True)
     goals = sort_goals_by_priority(
         refresh_goals_list_observations(
             db,

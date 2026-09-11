@@ -120,3 +120,51 @@ def test_patch_runtime_settings_returns_task_id(
     assert response.json()["task_id"] == "task-runtime-1"
     assert response.json()["updated"] == ["duckdb.legacy_schemas"]
     assert captured
+
+
+def test_runtime_create_vault(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(repo_root))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+
+    response = gateway_admin_client.post(
+        "/api/v1/admin/runtime/vaults",
+        headers=_ADMIN_HEADERS,
+        json={"name": "youtube-data", "description": "YT analyst vault"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()
+    assert data["ok"] is True
+    assert data["vault"]["vault_id"] == "youtube-data"
+    assert data["vault"]["scope"] == "private"
+    assert "youtube-data.duckdb" in data["vault"]["path"]
+    assert data["vault_user_id"] == "owner123"
+
+    listed = gateway_admin_client.get(
+        "/api/v1/admin/runtime/vaults",
+        headers=_ADMIN_HEADERS,
+    )
+    assert listed.status_code == 200
+    paths = [item["path"] for item in listed.json()["vaults"]]
+    assert any(path.endswith("db/private/owner123/youtube-data.duckdb") for path in paths)
+
+
+def test_runtime_create_vault_requires_name(
+    gateway_admin_client: TestClient,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path / "repo"))
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "owner@example.com")
+    monkeypatch.setenv("DUCKCLAW_OWNER_ID", "owner123")
+    response = gateway_admin_client.post(
+        "/api/v1/admin/runtime/vaults",
+        headers=_ADMIN_HEADERS,
+        json={"name": "  "},
+    )
+    assert response.status_code == 400

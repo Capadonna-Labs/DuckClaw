@@ -39,6 +39,15 @@ export const runtimeApi = {
       body: JSON.stringify({ settings }),
     }),
   listVaults: () => adminFetch<{ vaults: { path: string; scope: string }[] }>('/runtime/vaults'),
+  createVault: (body: { name: string; description?: string }) =>
+    adminFetch<{
+      ok: boolean;
+      vault: { vault_id: string; vault_name: string; path: string; scope: string; db_path?: string };
+      vault_user_id: string;
+    }>('/runtime/vaults', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   getRuntimeConfig: (vaultPath: string, chatId: string) =>
     adminFetch<{
       rows: { key: string; value: string; scope?: string }[];

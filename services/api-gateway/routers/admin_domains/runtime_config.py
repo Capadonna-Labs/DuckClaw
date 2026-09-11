@@ -19,6 +19,11 @@ class RuntimeConfigPutBody(BaseModel):
     value: str
 
 
+class CreateVaultBody(BaseModel):
+    name: str
+    description: str | None = None
+
+
 def require_admin_key(x_admin_key: str | None = Header(None, alias="X-Admin-Key")) -> None:
     expected = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
     if not expected:
@@ -128,6 +133,43 @@ async def list_vaults(
     options = list_vault_options_for_user(uid)
     vaults = [{"path": o["path"], "scope": o["scope"], "vault_id": o.get("vault_id") or ""} for o in options]
     return {"vaults": vaults, "vault_user_id": uid}
+
+
+@router.post("/vaults", dependencies=[Depends(require_admin_key)])
+async def create_vault_endpoint(
+    body: CreateVaultBody,
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    from core.admin_identity import vault_user_id_for_actor
+    from duckclaw.vaults import create_vault, list_vault_options_for_user
+
+    name = (body.name or "").strip()
+    if not name:
+        raise _problem(400, "Nombre requerido", "name")
+    uid = vault_user_id_for_actor(actor)
+    created = create_vault(uid, name)
+    vault_id = str(created.get("vault_id") or "")
+    options = list_vault_options_for_user(uid)
+    match = next((o for o in options if (o.get("vault_id") or "") == vault_id), None)
+    path = str((match or {}).get("path") or created.get("db_path") or "")
+    _admin_audit(
+        "runtime.vaults.create",
+        path or vault_id,
+        name,
+        actor=actor,
+        meta={"vault_id": vault_id, "vault_user_id": uid, "description": (body.description or "").strip() or None},
+    )
+    return {
+        "ok": True,
+        "vault": {
+            "vault_id": vault_id,
+            "vault_name": created.get("vault_name") or name,
+            "path": path,
+            "scope": "private",
+            "db_path": created.get("db_path"),
+        },
+        "vault_user_id": uid,
+    }
 
 
 @router.get("/config", dependencies=[Depends(require_admin_key)])

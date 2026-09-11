@@ -79,13 +79,38 @@ async def _run(*, vault: str, dry_run: bool, tickers: list[str] | None) -> int:
             print(f"SKIP {t}: zero qty")
             continue
         side = "BUY" if qty > 0 else "SELL"
+        tp_f = float(tp) if tp is not None else None
+        sl_f = float(sl) if sl is not None else None
+        # avg_entry used as ref to avoid immediate stop triggers (IEF incident).
+        try:
+            ref = float(
+                con.execute(
+                    "SELECT avg_entry_price FROM quant_core.portfolio_positions WHERE ticker = ?",
+                    [t],
+                ).fetchone()[0]
+            )
+        except Exception:
+            ref = None
+        if ref is not None and tp_f is not None and sl_f is not None:
+            if side == "BUY" and not (sl_f < ref < tp_f):
+                print(
+                    f"SKIP {t}: ref/avg={ref} not between SL={sl_f} and TP={tp_f} "
+                    "(stop would fire immediately or RR invalid)"
+                )
+                continue
+            if side == "SELL" and not (tp_f < ref < sl_f):
+                print(
+                    f"SKIP {t}: ref/avg={ref} not between TP={tp_f} and SL={sl_f} "
+                    "(stop would fire immediately or RR invalid)"
+                )
+                continue
         plan.append(
             {
                 "ticker": t,
                 "side": side,
                 "quantity": int(abs(qty)),
-                "tp_price": float(tp) if tp is not None else None,
-                "sl_price": float(sl) if sl is not None else None,
+                "tp_price": tp_f,
+                "sl_price": sl_f,
             }
         )
 

@@ -60,7 +60,6 @@ export function ToolUsageGroup({
   const totalMs = toolGroupTotalElapsedMs(messages, indices);
   const [isOpen, setIsOpen] = useState(false);
 
-  const identityPrefix = formatChatIdentityPrefix(identityLabel);
   const count = items.length;
   const totalLabel = totalMs != null ? formatToolDurationMs(totalMs) : '';
   const currentTool = !isOpen ? toolGroupCurrentToolName(messages, indices) : '';

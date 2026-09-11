@@ -1300,7 +1300,8 @@ def test_gateway_filesystem_template_actions_are_retired(gateway_admin_client) -
     )
 
     assert created.status_code == 410
-    assert vault_binding.status_code == 410
+    # Vault binding is DB-first against catalog; default not visible -> 404 (no longer FS 410).
+    assert vault_binding.status_code == 404
     assert validated.status_code == 410
 
 

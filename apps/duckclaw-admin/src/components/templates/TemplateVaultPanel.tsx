@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Database, Save } from 'lucide-react';
 import { adminService } from '@/services/adminService';
+import { formatWriteTaskPollNotice, pollWriteTask } from '@/lib/pollWriteTask';
 import type { VaultBinding, VaultOption } from '@/types/admin';
 
 function optionKey(o: VaultOption): string {
@@ -69,24 +70,34 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
     setMsg(null);
     setErr(null);
     try {
+      let res;
+      let successMsg = 'Bóveda guardada en manifest.yaml';
       if (!selected) {
-        await adminService.putTemplateVaultBinding(workerId, { scope: '' });
-        setMsg('Bóveda desvinculada (hub / registry por defecto)');
+        res = await adminService.putTemplateVaultBinding(workerId, { scope: '' });
+        successMsg = 'Bóveda desvinculada (hub / registry por defecto)';
       } else {
         const [scope, rest] = selected.split(':', 2);
         if (scope === 'private') {
-          await adminService.putTemplateVaultBinding(workerId, {
+          res = await adminService.putTemplateVaultBinding(workerId, {
             scope: 'private',
             vault_id: rest,
           });
         } else {
-          await adminService.putTemplateVaultBinding(workerId, {
+          res = await adminService.putTemplateVaultBinding(workerId, {
             scope: 'shared',
             path: rest,
           });
         }
-        setMsg('Bóveda guardada en manifest.yaml');
       }
+      if (res?.task_id) {
+        setMsg('Guardando bóveda…');
+        const polled = await pollWriteTask(res.task_id, { intervalMs: 400, maxAttempts: 60 });
+        if (polled.state !== 'success') {
+          setErr(formatWriteTaskPollNotice(polled, 'Guardar bóveda'));
+          return;
+        }
+      }
+      setMsg(successMsg);
       reload();
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Error al guardar');

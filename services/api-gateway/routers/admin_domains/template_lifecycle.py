@@ -312,6 +312,103 @@ async def put_template_file_impl(
     )
 
 
+
+
+def _worker_known(worker_id: str) -> bool:
+    wid = (worker_id or "").strip()
+    if not wid:
+        return False
+    if (templates_dir() / wid).is_dir():
+        return True
+    try:
+        from core.admin_identity import open_gateway_db
+        from duckclaw.admin_worker_catalog import (
+            catalog_worker_id_variants,
+            ensure_admin_worker_catalog_schema,
+            _first_row,
+        )
+
+        with open_gateway_db(read_only=True) as db:
+            ensure_admin_worker_catalog_schema(db)
+            for candidate in catalog_worker_id_variants(wid):
+                row = _first_row(
+                    db,
+                    "SELECT 1 AS ok FROM main.admin_worker_catalog "
+                    f"WHERE worker_id = '{candidate}' LIMIT 1",
+                )
+                if row:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+
+def _catalog_manifest_dict(worker_id: str, *, actor: str | None = None) -> dict:
+    """Load manifest mapping from catalog snapshot (files or manifest_snapshot)."""
+    import yaml
+    from core.admin_identity import effective_actor_email, open_gateway_db
+    from duckclaw.admin_worker_catalog import (
+        _first_row,
+        catalog_worker_id_variants,
+        ensure_admin_worker_catalog_schema,
+        get_latest_worker_version,
+        get_visible_worker_for_actor,
+    )
+
+    wid = (worker_id or "").strip()
+    with open_gateway_db(read_only=True) as db:
+        ensure_admin_worker_catalog_schema(db)
+        worker = None
+        if actor:
+            worker = get_visible_worker_for_actor(
+                db, actor_email=effective_actor_email(actor), worker_id=wid
+            )
+        if not worker:
+            for candidate in catalog_worker_id_variants(wid):
+                row = _first_row(
+                    db,
+                    "SELECT worker_uid, tenant_id, worker_id "
+                    "FROM main.admin_worker_catalog "
+                    f"WHERE worker_id = '{candidate}' LIMIT 1",
+                )
+                if row:
+                    worker = {
+                        "worker_uid": str(row.get("worker_uid") or ""),
+                        "worker_id": str(row.get("worker_id") or candidate),
+                        "tenant_id": str(row.get("tenant_id") or ""),
+                    }
+                    break
+        if not worker:
+            return {}
+        latest = get_latest_worker_version(db, worker_uid=str(worker.get("worker_uid") or "")) or {}
+        files = latest.get("files_snapshot") or {}
+        content = files.get("manifest.yaml") or files.get("manifest.yml") or ""
+        if isinstance(content, str) and content.strip():
+            loaded = yaml.safe_load(content)
+            return loaded if isinstance(loaded, dict) else {}
+        snap = latest.get("manifest_snapshot") or {}
+        return dict(snap) if isinstance(snap, dict) else {}
+
+
+def _apply_vault_binding_to_manifest(raw: dict, binding: dict[str, str] | None) -> dict:
+    data = dict(raw)
+    fc = data.get("forge_context")
+    if not isinstance(fc, dict):
+        fc = {}
+    else:
+        fc = dict(fc)
+    if binding:
+        fc["vault_binding"] = dict(binding)
+    else:
+        fc.pop("vault_binding", None)
+    if fc:
+        data["forge_context"] = fc
+    else:
+        data.pop("forge_context", None)
+    return data
+
+
 async def template_vault_options_impl(
     worker_id: str,
     vault_user_id: str | None = Query(None, description="ID dueño de db/private/ (default: DUCKCLAW_OWNER_ID)"),
@@ -319,7 +416,7 @@ async def template_vault_options_impl(
     from duckclaw.vaults import list_vault_options_for_user
 
     wid = worker_id.strip()
-    if not (templates_dir() / wid).is_dir():
+    if not _worker_known(wid):
         raise problem(404, "Plantilla no encontrada", wid)
     uid = default_vault_user_id(vault_user_id)
     options = list_vault_options_for_user(uid)
@@ -330,17 +427,24 @@ async def get_template_vault_binding_impl(
     worker_id: str,
     vault_user_id: str | None = Query(None),
 ) -> dict[str, Any]:
-    from duckclaw.vaults import resolve_template_vault_path
+    from duckclaw.vaults import normalize_vault_binding, resolve_template_vault_path
 
     wid = worker_id.strip()
-    try:
-        from duckclaw.workers.manifest import load_manifest
-
-        spec = load_manifest(wid)
-    except Exception as exc:
-        raise problem(404, "Plantilla no encontrada o manifest inválido", str(exc)) from exc
     uid = default_vault_user_id(vault_user_id)
-    binding = spec.forge_vault_binding
+    binding = None
+    catalog_raw = _catalog_manifest_dict(wid)
+    if catalog_raw:
+        fc = catalog_raw.get("forge_context")
+        if isinstance(fc, dict):
+            binding = normalize_vault_binding(fc.get("vault_binding"))
+    else:
+        try:
+            from duckclaw.workers.manifest import load_manifest
+
+            spec = load_manifest(wid)
+            binding = spec.forge_vault_binding
+        except Exception as exc:
+            raise problem(404, "Plantilla no encontrada o manifest inválido", str(exc)) from exc
     resolved = resolve_template_vault_path(binding, uid, require_exists=False)
     return {
         "worker_id": wid,
@@ -353,13 +457,62 @@ async def get_template_vault_binding_impl(
 async def put_template_vault_binding_impl(
     worker_id: str,
     body: VaultBindingPutBody,
-    actor: str = Depends(actor_from_header),
+    actor: str,
 ) -> dict[str, Any]:
-    raise problem(
-        410,
-        "Vault binding filesystem retirado",
-        "Importa el worker al catálogo DB-first y administra contexto desde DuckDB.",
+    import yaml
+    from duckclaw.vaults import normalize_vault_binding, resolve_template_vault_path
+    from duckclaw.write_commands import UpdateCatalogWorkerFileCommand
+    from duckclaw.gateway_enqueue import enqueue_admin_command
+    from core.admin_identity import effective_actor_email, open_gateway_db
+    from duckclaw.admin_worker_catalog import get_visible_worker_for_actor
+
+    wid = (worker_id or "").strip()
+    if not wid:
+        raise problem(400, "worker_id requerido", wid)
+    actor_email = effective_actor_email(actor)
+    with open_gateway_db(read_only=True) as db:
+        worker = get_visible_worker_for_actor(db, actor_email=actor_email, worker_id=wid)
+    if not worker:
+        raise problem(404, "Worker no visible en catálogo", wid)
+
+    scope = (body.scope or "").strip().lower()
+    if not scope:
+        binding = None
+    elif scope == "private":
+        binding = normalize_vault_binding({"scope": "private", "vault_id": body.vault_id or ""})
+        if not binding:
+            raise problem(400, "vault_id requerido para scope private", wid)
+    elif scope == "shared":
+        binding = normalize_vault_binding({"scope": "shared", "path": body.path or ""})
+        if not binding:
+            raise problem(400, "path requerido para scope shared", wid)
+    else:
+        raise problem(400, "scope inválido", scope)
+
+    raw = _catalog_manifest_dict(wid, actor=actor_email)
+    if not raw:
+        raw = {"id": wid}
+    updated = _apply_vault_binding_to_manifest(raw, binding)
+    content = yaml.safe_dump(
+        updated, allow_unicode=True, sort_keys=False, default_flow_style=False
     )
+    command = UpdateCatalogWorkerFileCommand(
+        actor_email=actor_email,
+        worker_id=wid,
+        file_path="manifest.yaml",
+        content=content,
+    )
+    task_id = enqueue_admin_command(command)
+    uid = default_vault_user_id(None)
+    resolved = resolve_template_vault_path(binding, uid, require_exists=False)
+    return {
+        "ok": True,
+        "worker_id": wid,
+        "binding": binding,
+        "resolved_path": resolved,
+        "task_id": task_id,
+        "accepted": True,
+    }
 
 
 async def create_template_impl(

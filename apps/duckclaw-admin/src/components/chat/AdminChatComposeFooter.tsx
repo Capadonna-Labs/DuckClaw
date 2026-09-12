@@ -139,10 +139,10 @@ export function AdminChatComposeFooter({
   return (
       <footer
         {...dropProps}
-        className={`p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shrink-0 relative z-20 ${
+        className={`shrink-0 relative z-20 ${
           isStudioCompose
-            ? 'studio-glass-chrome border-t'
-            : 'border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50'
+            ? 'studio-glass-chrome border-t px-2.5 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]'
+            : 'p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50'
         }`}
       >
         <LiveVoiceBar
@@ -194,10 +194,10 @@ export function AdminChatComposeFooter({
               />
             </div>
           ) : null}
-          <div className="rounded-3xl border border-gov-gray-200 bg-gov-gray-50/90 dark:border-dark-border dark:bg-dark-bg/70 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow">
+          <div className="rounded-2xl border border-gov-gray-200 bg-gov-gray-50/90 dark:border-dark-border dark:bg-dark-bg/70 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow">
             {(imageAttachments.pendingImages.length > 0 ||
               documentAttachments.pendingDocuments.length > 0) && (
-              <div className="flex flex-col gap-2 px-3.5 pt-3.5">
+              <div className="flex flex-col gap-2 px-3 pt-2.5">
                 {imageAttachments.pendingImages.length > 0 && (
                   <div className="flex flex-wrap gap-2">
                     {imageAttachments.pendingImages.map((img) => (
@@ -206,7 +206,7 @@ export function AdminChatComposeFooter({
                         <img
                           src={img.previewUrl}
                           alt={img.name}
-                          className="h-14 w-14 object-cover rounded-lg border dark:border-dark-border"
+                          className="h-12 w-12 object-cover rounded-lg border dark:border-dark-border"
                         />
                         <button
                           type="button"
@@ -234,14 +234,14 @@ export function AdminChatComposeFooter({
                   void send();
                 }
               }}
-              rows={3}
+              rows={1}
               placeholder="Escribe un mensaje…"
-              className="w-full min-h-[4.5rem] max-h-52 resize-none bg-transparent px-4 pt-3.5 pb-2 text-[15px] leading-relaxed text-gov-gray-900 placeholder:text-gov-gray-400 focus:outline-none dark:text-dark-text dark:placeholder:text-dark-muted"
+              className="w-full min-h-[2.25rem] max-h-28 resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-sm leading-snug text-gov-gray-900 placeholder:text-gov-gray-400 focus:outline-none dark:text-dark-text dark:placeholder:text-dark-muted"
               disabled={!canSend || liveVoice.isActive}
             />
-            <div className="flex items-end justify-between gap-2 px-2.5 pb-2.5 pt-1">
+            <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-0.5">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">{composeChips}</div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex shrink-0 items-center gap-0.5">
                 <MediaAttachMenu
                   variant="minimal"
                   canSend={canSend && Boolean(workerId)}
@@ -265,18 +265,18 @@ export function AdminChatComposeFooter({
                   <button
                     type="button"
                     onClick={cancelGeneration}
-                    className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-red-200 text-red-700 dark:border-red-900/60 dark:text-red-400"
+                    className="flex h-9 w-9 items-center justify-center rounded-full border-2 border-red-200 text-red-700 dark:border-red-900/60 dark:text-red-400"
                     aria-label="Cancelar"
                     title="Cancelar"
                   >
-                    <X size={18} aria-hidden />
+                    <X size={16} aria-hidden />
                   </button>
                 ) : (
                   <button
                     type="button"
                     onClick={() => void send()}
                     disabled={!canSubmit}
-                    className="flex h-10 min-w-[2.5rem] items-center justify-center gap-1 rounded-full bg-gov-blue-700 px-3.5 text-white disabled:opacity-40 hover:bg-gov-blue-800 dark:bg-gov-blue-600"
+                    className="flex h-9 min-w-[2.25rem] items-center justify-center gap-1 rounded-full bg-gov-blue-700 px-3 text-white disabled:opacity-40 hover:bg-gov-blue-800 dark:bg-gov-blue-600"
                     aria-label="Enviar"
                     title="Enviar"
                   >

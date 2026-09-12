@@ -11,6 +11,28 @@ const envFile = path.join(root, ".env");
 const adminDir = path.join(root, "apps/duckclaw-admin");
 const nextBin = path.join(adminDir, "node_modules", "next", "dist", "bin", "next");
 
+function readEnvFile(filePath) {
+  const out = {};
+  if (!fs.existsSync(filePath)) return out;
+  for (const line of fs.readFileSync(filePath, "utf8").split(/\r?\n/)) {
+    const t = line.trim();
+    if (!t || t.startsWith("#") || !t.includes("=")) continue;
+    const i = t.indexOf("=");
+    const k = t.slice(0, i).trim();
+    let v = t.slice(i + 1).trim();
+    if (
+      (v.startsWith('"') && v.endsWith('"')) ||
+      (v.startsWith("'") && v.endsWith("'"))
+    ) {
+      v = v.slice(1, -1);
+    }
+    out[k] = v;
+  }
+  return out;
+}
+const rootEnv = readEnvFile(envFile);
+
+
 /** ponytail: on Windows PM2 wraps pnpm in CMD.EXE (visible black windows on crash-loop). */
 function adminUiPm2App() {
   if (process.platform === "win32" && fs.existsSync(nextBin)) {
@@ -30,6 +52,15 @@ function adminUiPm2App() {
         PORT: "3000",
         NODE_ENV: "production",
         DUCKCLAW_REPO_ROOT: root,
+        DUCKCLAW_ADMIN_API_KEY: rootEnv.DUCKCLAW_ADMIN_API_KEY || "",
+        DUCKCLAW_GATEWAY_URL:
+          rootEnv.DUCKCLAW_GATEWAY_URL ||
+          process.env.DUCKCLAW_GATEWAY_URL ||
+          "http://127.0.0.1:8000",
+        GATEWAY_INTERNAL_URL:
+          rootEnv.GATEWAY_INTERNAL_URL ||
+          rootEnv.DUCKCLAW_GATEWAY_URL ||
+          "http://127.0.0.1:8000",
       },
     };
   }
@@ -49,6 +80,15 @@ function adminUiPm2App() {
       PORT: "3000",
       NODE_ENV: "production",
       DUCKCLAW_REPO_ROOT: root,
+      DUCKCLAW_ADMIN_API_KEY: rootEnv.DUCKCLAW_ADMIN_API_KEY || "",
+      DUCKCLAW_GATEWAY_URL:
+        rootEnv.DUCKCLAW_GATEWAY_URL ||
+        process.env.DUCKCLAW_GATEWAY_URL ||
+        "http://127.0.0.1:8000",
+      GATEWAY_INTERNAL_URL:
+        rootEnv.GATEWAY_INTERNAL_URL ||
+        rootEnv.DUCKCLAW_GATEWAY_URL ||
+        "http://127.0.0.1:8000",
     },
   };
 }

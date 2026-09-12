@@ -48,7 +48,7 @@ def test_get_video_analytics_passes_video_filter_and_returns_json() -> None:
     async def fake_get(self, url, params=None):
         captured["url"] = url
         captured["params"] = params
-        return _FakeResp(payload={"rows": [[100, 50.0, 30.0, 10, 5.0, 2]]})
+        return _FakeResp(payload={"rows": [[100, 50.0, 30.0, 10, 5.0, 2, 1, 3]]})
 
     with patch("httpx.AsyncClient.get", new=fake_get):
         out = asyncio.run(
@@ -61,8 +61,11 @@ def test_get_video_analytics_passes_video_filter_and_returns_json() -> None:
 
     assert captured["params"]["filters"] == "video==vid123"
     assert captured["params"]["ids"] == "channel==MINE"
+    assert "impressions" not in captured["params"]["metrics"]
+    assert "views" in captured["params"]["metrics"]
+    assert "estimatedMinutesWatched" in captured["params"]["metrics"]
     parsed = json.loads(out)
-    assert parsed["rows"] == [[100, 50.0, 30.0, 10, 5.0, 2]]
+    assert parsed["rows"] == [[100, 50.0, 30.0, 10, 5.0, 2, 1, 3]]
 
 
 def test_get_video_analytics_requires_video_id() -> None:
@@ -72,6 +75,57 @@ def test_get_video_analytics_requires_video_id() -> None:
         )
     )
     assert "video_id required" in out
+
+
+def test_get_channel_daily_metrics_uses_day_dimension() -> None:
+    captured: dict = {}
+
+    async def fake_get(self, url, params=None):
+        captured["params"] = params
+        return _FakeResp(payload={"columnHeaders": [], "rows": []})
+
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        out = asyncio.run(
+            call_youtube_analytics_rest(
+                "get_channel_daily_metrics",
+                {"start_date": "2026-01-01", "end_date": "2026-01-31"},
+                headers={"Authorization": "Bearer tok"},
+            )
+        )
+
+    assert captured["params"]["dimensions"] == "day"
+    assert captured["params"]["sort"] == "day"
+    assert json.loads(out)["rows"] == []
+
+
+def test_get_top_videos_sorts_by_views_desc() -> None:
+    captured: dict = {}
+
+    async def fake_get(self, url, params=None):
+        captured["params"] = params
+        return _FakeResp(payload={"rows": [["vid1", 99]]})
+
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        asyncio.run(
+            call_youtube_analytics_rest(
+                "get_top_videos",
+                {"max_results": 5, "start_date": "2026-01-01", "end_date": "2026-01-31"},
+                headers={"Authorization": "Bearer tok"},
+            )
+        )
+
+    assert captured["params"]["dimensions"] == "video"
+    assert captured["params"]["sort"] == "-views"
+    assert captured["params"]["maxResults"] == 5
+
+
+def test_query_analytics_report_requires_metrics() -> None:
+    out = asyncio.run(
+        call_youtube_analytics_rest(
+            "query_analytics_report", {}, headers={"Authorization": "Bearer tok"}
+        )
+    )
+    assert "metrics required" in out
 
 
 def test_401_response_gives_reconnect_hint() -> None:
@@ -104,4 +158,7 @@ def test_fallback_tool_specs_cover_expected_tools() -> None:
         "get_video_analytics",
         "get_traffic_sources",
         "get_audience_retention",
+        "get_channel_daily_metrics",
+        "get_top_videos",
+        "query_analytics_report",
     }

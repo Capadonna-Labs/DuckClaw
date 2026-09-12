@@ -547,7 +547,7 @@ export function AdminChatPanel({
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}
-          className="absolute bottom-[7.25rem] right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface sm:bottom-32"
+          className="absolute bottom-[4.75rem] right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface sm:bottom-24"
           aria-label="Ir al final de la conversación"
           title="Ir abajo"
         >

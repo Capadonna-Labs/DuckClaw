@@ -366,7 +366,23 @@ def register_worker_mcp_connector_tools(
 
 
 async def test_mcp_connector(db: Any, connector: dict[str, Any]) -> dict[str, Any]:
-    specs = await _list_connector_tools(db, connector)
+    # YouTube Analytics/Data has no hosted MCP — never open a session against the
+    # placeholder reports URL (MCP SDK maps HTTP 404 → "Session terminated").
+    from duckclaw.forge.skills.youtube_analytics_rest import uses_youtube_analytics_rest_fallback
+    from duckclaw.forge.skills.youtube_data_rest import uses_youtube_data_rest_fallback
+
+    if uses_youtube_analytics_rest_fallback(connector) or uses_youtube_data_rest_fallback(connector):
+        yt_analytics = _youtube_analytics_rest_fallback_specs_if_ready(db, connector)
+        yt_data = _youtube_data_rest_fallback_specs_if_ready(db, connector)
+        specs = [*yt_analytics, *yt_data]
+        if not specs:
+            raise ValueError(
+                "YouTube OAuth no listo o refresh revocado (invalid_grant). "
+                "Pulsa Reconectar OAuth — list_tools usa REST Analytics+Data, no hay MCP hosteado."
+            )
+    else:
+        specs = await _list_connector_tools(db, connector)
+
     tools: list[dict[str, str]] = []
     for spec in specs:
         name = str(getattr(spec, "name", "") or spec)

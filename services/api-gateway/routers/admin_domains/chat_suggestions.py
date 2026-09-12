@@ -18,8 +18,6 @@ class ChatSuggestionsBody(BaseModel):
     tenant_id: str = Field(default="default", max_length=64)
     last_user_message: str = Field(default="", max_length=8000)
     last_assistant_message: str = Field(default="", max_length=16000)
-    # Al regenerar, el cliente manda las sugerencias actuales para pedir otras distintas.
-    exclude_suggestions: list[str] = Field(default_factory=list, max_length=12)
 
 
 @router.post("/chat/suggestions", dependencies=[Depends(require_admin_key)])
@@ -39,7 +37,6 @@ async def post_chat_suggestions(body: ChatSuggestionsBody) -> dict[str, Any]:
             tenant_id=body.tenant_id,
             last_user_text=body.last_user_message,
             last_assistant_text=body.last_assistant_message,
-            exclude_suggestions=body.exclude_suggestions,
         )
     finally:
         db.close()

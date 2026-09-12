@@ -123,8 +123,6 @@ export function AdminChatPanel({
     send,
     sendSuggestion,
     suggestions,
-    refreshSuggestions,
-    suggestionsRefreshing,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,
@@ -588,8 +586,6 @@ export function AdminChatPanel({
             send={send}
             suggestions={suggestions}
             onPickSuggestion={sendSuggestion}
-            onRefreshSuggestions={refreshSuggestions}
-            suggestionsRefreshing={suggestionsRefreshing}
             cancelGeneration={cancelGeneration}
             onTextareaPaste={onTextareaPaste}
             pasteFromClipboard={pasteFromClipboard}

@@ -92,7 +92,10 @@ export function toolGroupCurrentToolName(messages: ChatMsg[], indices: number[])
 export interface GroupedToolInvocation {
   toolName: string;
   count: number;
+  /** Tiempo de la invocación más reciente (completada). */
   latestMs: number | null;
+  /** Máximo entre invocaciones completadas del mismo tool. */
+  maxMs: number | null;
   averageMs: number | null;
   isRunning: boolean;
   isError: boolean;
@@ -141,13 +144,15 @@ export function groupToolInvocationsByName(
         ? Math.max(0, Date.now() - newestCompleted.toolStartedAt)
         : null);
     
-    // Tiempo promedio
+    // Tiempo promedio y máximo
     const averageMs = times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : null;
+    const maxMs = times.length > 0 ? Math.max(...times) : null;
     
     result.push({
       toolName,
       count,
       latestMs,
+      maxMs,
       averageMs,
       isRunning: hasRunning,
       isError: hasError,

@@ -59,6 +59,7 @@ def generate_followup_suggestions(
     tenant_id: str = "default",
     last_user_text: str = "",
     last_assistant_text: str = "",
+    exclude_suggestions: list[str] | None = None,
 ) -> list[str]:
     """Sugerencias cortas de continuación via LLM. Nunca levanta — degrada a ``[]``."""
     if not _suggestions_globally_enabled():
@@ -78,11 +79,22 @@ def generate_followup_suggestions(
         human_content = (
             f"Usuario: {(last_user_text or '').strip()}\n\nAsistente: {assistant_text}"
         )
+        avoid = [s.strip() for s in (exclude_suggestions or []) if isinstance(s, str) and s.strip()]
+        if avoid:
+            avoided = ", ".join(json.dumps(s, ensure_ascii=False) for s in avoid[:12])
+            human_content += (
+                "\n\nNo repitas ni parafrasees estas sugerencias ya mostradas; "
+                f"propón {_MAX_SUGGESTIONS} alternativas distintas: [{avoided}]"
+            )
         reply = llm.invoke(
             [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_content)]
         )
         raw = str(getattr(reply, "content", "") or "")
-        return _parse_suggestions(raw)
+        parsed = _parse_suggestions(raw)
+        if avoid:
+            avoid_l = {a.casefold() for a in avoid}
+            parsed = [s for s in parsed if s.casefold() not in avoid_l]
+        return parsed
     except Exception as exc:
         _log.warning("chat_suggestions: generation failed: %s", exc)
         return []

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -78,60 +79,68 @@ async def catalog_skills(actor: str = Depends(actor_from_header)) -> dict[str, A
     if "@" not in actor_email:
         return {"global": [], "template_local": []}
 
-    global_skills: list[dict[str, str]] = []
-    template_skills: list[dict[str, str]] = []
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor_email)
-        rows = _fetchall(
-            db.execute(
-                """
-                SELECT name, implementation_ref
-                FROM main.admin_skills
-                WHERE active = true
-                  AND tenant_id = ?
-                  AND (owner_email = ? OR visibility = 'public')
-                ORDER BY name
-                """,
-                [str(profile.get("tenant_id") or "default"), str(profile.get("email") or actor_email)],
-            )
-        )
-        global_skills = [
-            _skill_dto(str(name or ""), str(implementation_ref or ""))
-            for name, implementation_ref in rows
-            if str(name or "").strip()
-        ]
-        workers = list_visible_workers_for_actor(db, actor_email=actor_email)
-        for worker in workers:
-            worker_uid = str(worker.get("worker_uid") or "").strip()
-            worker_id = str(worker.get("worker_id") or worker.get("id") or "").strip()
-            if not worker_uid or worker_id == "default":
-                continue
-            latest = get_latest_worker_version(db, worker_uid=worker_uid) or {}
-            files = latest.get("files_snapshot") if isinstance(latest, dict) else {}
-            if not isinstance(files, dict):
-                continue
-            for rel in sorted(str(path).replace("\\", "/").lstrip("/") for path in files):
-                if not rel.startswith("skills/") or not rel.endswith(".py"):
-                    continue
-                name = Path(rel).name
-                if name.startswith("_"):
-                    continue
-                template_skills.append(
-                    {
-                        "id": Path(name).stem,
-                        "worker_id": worker_id,
-                        "path": f"db://admin_worker_catalog/{worker_uid}/{rel}",
-                        "scope": "catalog",
-                    }
+    def _sync_load_catalog_skills() -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+        global_skills: list[dict[str, str]] = []
+        template_skills: list[dict[str, str]] = []
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor_email)
+            rows = _fetchall(
+                db.execute(
+                    """
+                    SELECT name, implementation_ref
+                    FROM main.admin_skills
+                    WHERE active = true
+                      AND tenant_id = ?
+                      AND (owner_email = ? OR visibility = 'public')
+                    ORDER BY name
+                    """,
+                    [str(profile.get("tenant_id") or "default"), str(profile.get("email") or actor_email)],
                 )
+            )
+            global_skills = [
+                _skill_dto(str(name or ""), str(implementation_ref or ""))
+                for name, implementation_ref in rows
+                if str(name or "").strip()
+            ]
+            workers = list_visible_workers_for_actor(db, actor_email=actor_email)
+            for worker in workers:
+                worker_uid = str(worker.get("worker_uid") or "").strip()
+                worker_id = str(worker.get("worker_id") or worker.get("id") or "").strip()
+                if not worker_uid or worker_id == "default":
+                    continue
+                latest = get_latest_worker_version(db, worker_uid=worker_uid) or {}
+                files = latest.get("files_snapshot") if isinstance(latest, dict) else {}
+                if not isinstance(files, dict):
+                    continue
+                for rel in sorted(str(path).replace("\\", "/").lstrip("/") for path in files):
+                    if not rel.startswith("skills/") or not rel.endswith(".py"):
+                        continue
+                    name = Path(rel).name
+                    if name.startswith("_"):
+                        continue
+                    template_skills.append(
+                        {
+                            "id": Path(name).stem,
+                            "worker_id": worker_id,
+                            "path": f"db://admin_worker_catalog/{worker_uid}/{rel}",
+                            "scope": "catalog",
+                        }
+                    )
+        return global_skills, template_skills
+
+    global_skills, template_skills = await asyncio.to_thread(_sync_load_catalog_skills)
     return {"global": global_skills, "template_local": template_skills}
 
 
 @router.get("/skill-categories", dependencies=[Depends(require_admin_key)])
 async def catalog_skill_categories() -> dict[str, Any]:
     """Platform skill categories and baseline profiles (DB-first catalog)."""
-    with open_gateway_db(read_only=True) as db:
-        return skill_categories_api_payload(db)
+
+    def _sync_load_skill_categories() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return skill_categories_api_payload(db)
+
+    return await asyncio.to_thread(_sync_load_skill_categories)
 
 
 @router.post("/skills", dependencies=[Depends(require_admin_key)])
@@ -139,7 +148,7 @@ async def create_catalog_skill(
     body: CatalogSkillCreateBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    profile = _actor_profile(actor)
+    profile = await asyncio.to_thread(_actor_profile, actor)
     command = UpsertCatalogSkillCommand(
         tenant_id=str(profile.get("tenant_id") or "default"),
         actor_email=str(profile.get("email") or effective_actor_email(actor)),
@@ -163,7 +172,7 @@ async def deactivate_catalog_skill(
     name: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    profile = _actor_profile(actor)
+    profile = await asyncio.to_thread(_actor_profile, actor)
     command = DeactivateCatalogSkillCommand(
         tenant_id=str(profile.get("tenant_id") or "default"),
         actor_email=str(profile.get("email") or effective_actor_email(actor)),
@@ -182,7 +191,7 @@ async def hard_delete_catalog_skill(
     name: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    profile = _actor_profile(actor)
+    profile = await asyncio.to_thread(_actor_profile, actor)
     command = HardDeleteCatalogSkillCommand(
         tenant_id=str(profile.get("tenant_id") or "default"),
         actor_email=str(profile.get("email") or effective_actor_email(actor)),

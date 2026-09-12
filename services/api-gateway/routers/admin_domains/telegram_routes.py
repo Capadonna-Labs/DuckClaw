@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -90,7 +91,7 @@ async def get_telegram_routes() -> dict[str, Any]:
         parse_compact_telegram_webhook_routes,
     )
 
-    resolved = telegram_webhook_routes_runtime_setting()
+    resolved = await asyncio.to_thread(telegram_webhook_routes_runtime_setting)
     raw = str(resolved.get("value") or "").strip()
     routes: list[dict[str, str]] = []
     fmt = "empty"
@@ -145,7 +146,7 @@ async def put_telegram_routes(
         serialize_compact_telegram_webhook_routes,
     )
 
-    current = telegram_webhook_routes_runtime_setting()
+    current = await asyncio.to_thread(telegram_webhook_routes_runtime_setting)
     current_raw = str(current.get("value") or "").strip()
     current_by_bot = {
         r.bot_name: r for r in parse_compact_telegram_webhook_routes(current_raw)

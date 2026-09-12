@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
@@ -437,7 +438,7 @@ async def _spawn_imports_from_uploads(
         raise _problem(400, "Archivos requeridos", "confirm-with-import")
     if not mapping:
         raise _problem(400, "mapping_json requerido", "confirm-with-import")
-    available_tools = _runtime_tool_names()
+    available_tools = await asyncio.to_thread(_runtime_tool_names)
     spawn_imports: list[dict[str, Any]] = []
     for entry in mapping:
         idx = int(entry["file_index"])
@@ -560,21 +561,28 @@ async def workspace_managed_draft_compat_alias(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     prompt = body.prompt.strip()
-    tenant_id = "default"
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=effective_actor_email(actor))
-        tenant_id = str(profile.get("tenant_id") or "default").strip() or "default"
-        suggested_skills = _workspace_managed_skill_suggestions(db, actor_email=effective_actor_email(actor), prompt=prompt)
-        try:
-            policy = _workspace_managed_draft_policy(db)
-        except (FileNotFoundError, RuntimeError) as exc:
-            raise _workspace_policy_error(exc) from exc
+
+    def _sync_load_draft_context() -> tuple[str, list[Any], Any]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=effective_actor_email(actor))
+            tenant_id = str(profile.get("tenant_id") or "default").strip() or "default"
+            suggested_skills = _workspace_managed_skill_suggestions(db, actor_email=effective_actor_email(actor), prompt=prompt)
+            try:
+                policy = _workspace_managed_draft_policy(db)
+            except (FileNotFoundError, RuntimeError) as exc:
+                raise _workspace_policy_error(exc) from exc
+        return tenant_id, suggested_skills, policy
+
+    tenant_id, suggested_skills, policy = await asyncio.to_thread(_sync_load_draft_context)
     fallback = _workspace_managed_fallback_draft(
         prompt=prompt,
         suggested_skills=suggested_skills,
         policy=policy,
     )
-    if not _workspace_managed_has_configured_llm(tenant_id=tenant_id, actor=effective_actor_email(actor)):
+    has_llm = await asyncio.to_thread(
+        _workspace_managed_has_configured_llm, tenant_id=tenant_id, actor=effective_actor_email(actor)
+    )
+    if not has_llm:
         return fallback
     return await _workspace_managed_model_draft_or_fallback(
         actor=effective_actor_email(actor),
@@ -592,14 +600,18 @@ async def workspace_managed_draft_confirm_compat_alias(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     draft = body.draft
-    profile = _actor_profile(actor)
+    profile = await asyncio.to_thread(_actor_profile, actor)
     actor_email = str(profile.get("email") or effective_actor_email(actor))
     tenant_id = str(profile.get("tenant_id") or "default")
-    with open_gateway_db(read_only=True) as db:
-        try:
-            policy = _workspace_managed_draft_policy(db)
-        except (FileNotFoundError, RuntimeError) as exc:
-            raise _workspace_policy_error(exc) from exc
+
+    def _sync_load_confirm_policy() -> Any:
+        with open_gateway_db(read_only=True) as db:
+            try:
+                return _workspace_managed_draft_policy(db)
+            except (FileNotFoundError, RuntimeError) as exc:
+                raise _workspace_policy_error(exc) from exc
+
+    policy = await asyncio.to_thread(_sync_load_confirm_policy)
     project_id = f"prj_{uuid.uuid4().hex}"
     workers = [worker.model_dump() for worker in draft.workers]
     command = ConfirmWorkspaceManagedDraftCommand(
@@ -672,14 +684,18 @@ async def workspace_managed_draft_confirm_with_import(
         raise _problem(400, "Archivos requeridos", "confirm-with-import")
     spawn_imports = await _spawn_imports_from_uploads(files, mapping) if mapping else []
 
-    profile = _actor_profile(actor)
+    profile = await asyncio.to_thread(_actor_profile, actor)
     actor_email = str(profile.get("email") or effective_actor_email(actor))
     tenant_id = str(profile.get("tenant_id") or "default")
-    with open_gateway_db(read_only=True) as db:
-        try:
-            policy = _workspace_managed_draft_policy(db)
-        except (FileNotFoundError, RuntimeError) as exc:
-            raise _workspace_policy_error(exc) from exc
+
+    def _sync_load_confirm_import_policy() -> Any:
+        with open_gateway_db(read_only=True) as db:
+            try:
+                return _workspace_managed_draft_policy(db)
+            except (FileNotFoundError, RuntimeError) as exc:
+                raise _workspace_policy_error(exc) from exc
+
+    policy = await asyncio.to_thread(_sync_load_confirm_import_policy)
 
     project_id = f"prj_{uuid.uuid4().hex}"
     workers = [worker.model_dump() for worker in draft.workers]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
@@ -58,13 +59,17 @@ async def list_report_templates_route(
     from duckclaw.report_engine.admin_report_read import list_report_templates
 
     profile = _actor_profile(actor)
-    with open_gateway_db(read_only=True) as db:
-        templates = list_report_templates(
-            db,
-            tenant_id=profile["tenant_id"],
-            actor_email=profile["email"],
-            limit=limit,
-        )
+
+    def _sync_list_report_templates() -> list[dict[str, Any]]:
+        with open_gateway_db(read_only=True) as db:
+            return list_report_templates(
+                db,
+                tenant_id=profile["tenant_id"],
+                actor_email=profile["email"],
+                limit=limit,
+            )
+
+    templates = await asyncio.to_thread(_sync_list_report_templates)
     return {"templates": templates, "count": len(templates)}
 
 
@@ -159,14 +164,18 @@ async def list_report_instances_route(
     from duckclaw.report_engine.admin_report_read import list_report_instances
 
     profile = _actor_profile(actor)
-    with open_gateway_db(read_only=True) as db:
-        instances = list_report_instances(
-            db,
-            tenant_id=profile["tenant_id"],
-            actor_email=profile["email"],
-            project_id=project_id,
-            limit=limit,
-        )
+
+    def _sync_list_report_instances() -> list[dict[str, Any]]:
+        with open_gateway_db(read_only=True) as db:
+            return list_report_instances(
+                db,
+                tenant_id=profile["tenant_id"],
+                actor_email=profile["email"],
+                project_id=project_id,
+                limit=limit,
+            )
+
+    instances = await asyncio.to_thread(_sync_list_report_instances)
     return {"instances": instances, "count": len(instances)}
 
 
@@ -189,17 +198,21 @@ async def get_report_instance_route(
 
     from core.admin_identity import open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        instance = get_report_instance(db, instance_id=iid, tenant_id=profile["tenant_id"])
-        if not instance:
-            raise problem(404, "Instancia no encontrada", "report_instance")
-        if not actor_can_access_instance(db, instance=instance, actor_email=profile["email"]):
-            raise HTTPException(status_code=403, detail="Acceso denegado")
-        template = get_report_template(
-            db, template_id=str(instance["template_id"]), tenant_id=profile["tenant_id"]
-        )
-        schema = (template or {}).get("section_schema") or []
-        progress = summarize_status(instance["state"], schema)
+    def _sync_load_instance_progress() -> tuple[dict[str, Any], dict[str, Any] | None, Any]:
+        with open_gateway_db(read_only=True) as db:
+            instance = get_report_instance(db, instance_id=iid, tenant_id=profile["tenant_id"])
+            if not instance:
+                raise problem(404, "Instancia no encontrada", "report_instance")
+            if not actor_can_access_instance(db, instance=instance, actor_email=profile["email"]):
+                raise HTTPException(status_code=403, detail="Acceso denegado")
+            template = get_report_template(
+                db, template_id=str(instance["template_id"]), tenant_id=profile["tenant_id"]
+            )
+            schema = (template or {}).get("section_schema") or []
+            progress = summarize_status(instance["state"], schema)
+        return instance, template, progress
+
+    instance, template, progress = await asyncio.to_thread(_sync_load_instance_progress)
 
     return {
         "instance": instance,
@@ -225,12 +238,15 @@ async def soft_delete_report_instance_route(
 
     from core.admin_identity import open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        instance = get_report_instance(db, instance_id=iid, tenant_id=profile["tenant_id"])
-        if not instance:
-            raise problem(404, "Instancia no encontrada", "report_instance")
-        if not actor_can_access_instance(db, instance=instance, actor_email=profile["email"]):
-            raise HTTPException(status_code=403, detail="Acceso denegado")
+    def _sync_check_instance_access() -> None:
+        with open_gateway_db(read_only=True) as db:
+            instance = get_report_instance(db, instance_id=iid, tenant_id=profile["tenant_id"])
+            if not instance:
+                raise problem(404, "Instancia no encontrada", "report_instance")
+            if not actor_can_access_instance(db, instance=instance, actor_email=profile["email"]):
+                raise HTTPException(status_code=403, detail="Acceso denegado")
+
+    await asyncio.to_thread(_sync_check_instance_access)
 
     task_id = _enqueue_report_command(
         {
@@ -258,13 +274,16 @@ async def soft_delete_report_template_route(
 
     from core.admin_identity import open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        template = get_report_template(db, template_id=tid, tenant_id=profile["tenant_id"])
-        if not template:
-            raise problem(404, "Plantilla no encontrada", "report_template")
-        owner = str(template.get("owner_email") or "").strip().lower()
-        if owner != profile["email"].strip().lower():
-            raise HTTPException(status_code=403, detail="Solo el propietario puede eliminar la plantilla")
+    def _sync_check_template_owner() -> None:
+        with open_gateway_db(read_only=True) as db:
+            template = get_report_template(db, template_id=tid, tenant_id=profile["tenant_id"])
+            if not template:
+                raise problem(404, "Plantilla no encontrada", "report_template")
+            owner = str(template.get("owner_email") or "").strip().lower()
+            if owner != profile["email"].strip().lower():
+                raise HTTPException(status_code=403, detail="Solo el propietario puede eliminar la plantilla")
+
+    await asyncio.to_thread(_sync_check_template_owner)
 
     task_id = _enqueue_report_command(
         {
@@ -299,13 +318,16 @@ async def report_instance_preview_route(
 
     from core.admin_identity import open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        instance = get_report_instance(db, instance_id=iid, tenant_id=profile["tenant_id"])
-        if not instance:
-            raise problem(404, "Instancia no encontrada", "report_instance")
-        if not actor_can_access_instance(db, instance=instance, actor_email=profile["email"]):
-            raise HTTPException(status_code=403, detail="Acceso denegado")
-        html = str(instance.get("preview_html") or "").strip()
+    def _sync_load_preview_html() -> str:
+        with open_gateway_db(read_only=True) as db:
+            instance = get_report_instance(db, instance_id=iid, tenant_id=profile["tenant_id"])
+            if not instance:
+                raise problem(404, "Instancia no encontrada", "report_instance")
+            if not actor_can_access_instance(db, instance=instance, actor_email=profile["email"]):
+                raise HTTPException(status_code=403, detail="Acceso denegado")
+            return str(instance.get("preview_html") or "").strip()
+
+    html = await asyncio.to_thread(_sync_load_preview_html)
 
     if not html:
         html = """<!DOCTYPE html><html><body style="font-family:system-ui;padding:2rem;color:#64748b">

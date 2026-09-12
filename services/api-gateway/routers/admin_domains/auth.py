@@ -48,11 +48,14 @@ async def admin_auth_register_impl(body: AdminRegisterBody) -> dict[str, Any]:
     if not gw or not os.path.isfile(gw):
         raise problem(503, "Gateway DuckDB no disponible", gw)
 
-    db = DuckClaw(gw, read_only=True, engine="python")
-    try:
-        has_users = count_console_users(db) > 0
-    finally:
-        db.close()
+    def _has_users() -> bool:
+        db = DuckClaw(gw, read_only=True, engine="python")
+        try:
+            return count_console_users(db) > 0
+        finally:
+            db.close()
+
+    has_users = await asyncio.to_thread(_has_users)
     if has_users:
         raise HTTPException(
             status_code=409,

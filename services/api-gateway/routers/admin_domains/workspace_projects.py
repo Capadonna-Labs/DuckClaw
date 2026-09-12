@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from typing import Any
@@ -117,17 +118,20 @@ async def list_workspace_projects(
     offset: int = 0,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    with open_gateway_db(read_only=True) as db:
-        return list_workspace_projects_page_for_actor(
-            db,
-            actor_email=actor,
-            q=q,
-            status=status,
-            sort=sort,
-            direction=direction,
-            limit=limit,
-            offset=offset,
-        )
+    def _sync_list_workspace_projects() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return list_workspace_projects_page_for_actor(
+                db,
+                actor_email=actor,
+                q=q,
+                status=status,
+                sort=sort,
+                direction=direction,
+                limit=limit,
+                offset=offset,
+            )
+
+    return await asyncio.to_thread(_sync_list_workspace_projects)
 
 
 @router.post("/workspace/projects", dependencies=[Depends(require_admin_key)])
@@ -135,7 +139,7 @@ async def create_workspace_project(
     body: WorkspaceProjectBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    profile = _actor_profile(actor)
+    profile = await asyncio.to_thread(_actor_profile, actor)
     project_id = f"prj_{uuid.uuid4().hex}"
     command = CreateProjectCommand(
         project_id=project_id,
@@ -170,7 +174,7 @@ async def get_workspace_project(
     project_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    project = _project_snapshot(project_id, actor, include_inactive=False)
+    project = await asyncio.to_thread(_project_snapshot, project_id, actor, include_inactive=False)
     if not project:
         raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
     agents = list(project.get("agents") or [])
@@ -190,7 +194,7 @@ async def update_workspace_project(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     """Actualiza nombre / descripción / visibilidad (upsert vía create_project)."""
-    project = _project_snapshot(project_id, actor)
+    project = await asyncio.to_thread(_project_snapshot, project_id, actor)
     if not project:
         raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
     name = (body.name if body.name is not None else str(project.get("name") or "")).strip()
@@ -231,7 +235,7 @@ async def delete_workspace_project(
     project_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    project = _project_snapshot(project_id, actor)
+    project = await asyncio.to_thread(_project_snapshot, project_id, actor)
     if not project:
         raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
     command = DeleteProjectCommand(
@@ -251,7 +255,7 @@ async def deactivate_workspace_project(
     project_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    return _set_workspace_project_status(project_id, actor, status_value="inactive")
+    return await asyncio.to_thread(_set_workspace_project_status, project_id, actor, status_value="inactive")
 
 
 @router.post("/workspace/projects/{project_id}/reactivate", dependencies=[Depends(require_admin_key)])
@@ -259,7 +263,7 @@ async def reactivate_workspace_project(
     project_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    return _set_workspace_project_status(project_id, actor, status_value="active")
+    return await asyncio.to_thread(_set_workspace_project_status, project_id, actor, status_value="active")
 
 
 def _set_workspace_project_status(project_id: str, actor: str, *, status_value: str) -> dict[str, Any]:
@@ -285,7 +289,7 @@ async def list_workspace_project_agents(
     project_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    project = _project_snapshot(project_id, actor)
+    project = await asyncio.to_thread(_project_snapshot, project_id, actor)
     if not project:
         raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
     return {"agents": list(project.get("agents") or [])}
@@ -297,10 +301,10 @@ async def attach_workspace_project_agent(
     body: ProjectAgentBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    project = _project_snapshot(project_id, actor)
+    project = await asyncio.to_thread(_project_snapshot, project_id, actor)
     if not project:
         raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
-    worker = _visible_worker_snapshot(body.worker_id, actor)
+    worker = await asyncio.to_thread(_visible_worker_snapshot, body.worker_id, actor)
     command = AssignAgentToProjectCommand(
         project_id=project_id,
         tenant_id=str(project.get("tenant_id") or "default"),
@@ -330,10 +334,10 @@ async def detach_workspace_project_agent(
     worker_id: str,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    project = _project_snapshot(project_id, actor)
+    project = await asyncio.to_thread(_project_snapshot, project_id, actor)
     if not project:
         raise _problem(404, "Proyecto no encontrado o no pertenece al actor", project_id)
-    worker = _visible_worker_snapshot(worker_id, actor)
+    worker = await asyncio.to_thread(_visible_worker_snapshot, worker_id, actor)
     command = DetachAgentFromProjectCommand(
         project_id=project_id,
         tenant_id=str(project.get("tenant_id") or "default"),

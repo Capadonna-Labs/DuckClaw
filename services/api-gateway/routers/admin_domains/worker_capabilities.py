@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -522,7 +523,7 @@ async def get_worker_capabilities(
     cached = get_cached_worker_capabilities(cache_key)
     if cached is not None:
         return cached
-    payload = build_worker_capabilities_payload(worker_id, actor=actor)
+    payload = await asyncio.to_thread(build_worker_capabilities_payload, worker_id, actor=actor)
     remember_worker_capabilities(cache_key, payload)
     return payload
 
@@ -533,4 +534,4 @@ async def get_worker_mcp_grants(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     """Conectores MCP del tenant con estado de grant para el worker."""
-    return build_worker_mcp_grants_payload(worker_id, actor=actor)
+    return await asyncio.to_thread(build_worker_mcp_grants_payload, worker_id, actor=actor)

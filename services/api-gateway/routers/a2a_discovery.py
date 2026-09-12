@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 from fastapi import APIRouter, HTTPException
@@ -25,12 +26,16 @@ def _sanitize_worker_id(worker_id: str) -> str:
 async def public_agent_card(worker_id: str) -> JSONResponse:
     wid = _sanitize_worker_id(worker_id)
     tenant_id = "default"
-    with open_gateway_db(read_only=True) as db:
-        cat = get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=wid)
-        if not worker_is_a2a_public(cat, worker_id=wid):
-            raise HTTPException(status_code=404, detail="Agent card not discoverable")
-        try:
-            card = build_a2a_agent_card_from_db(db, wid, tenant_id=tenant_id)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    def _sync_build_agent_card() -> dict:
+        with open_gateway_db(read_only=True) as db:
+            cat = get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=wid)
+            if not worker_is_a2a_public(cat, worker_id=wid):
+                raise HTTPException(status_code=404, detail="Agent card not discoverable")
+            try:
+                return build_a2a_agent_card_from_db(db, wid, tenant_id=tenant_id)
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    card = await asyncio.to_thread(_sync_build_agent_card)
     return JSONResponse(content=card, headers={"Cache-Control": "public, max-age=300"})

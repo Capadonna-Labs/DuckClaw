@@ -63,12 +63,15 @@ async def llm_usage_summary(days: int = Query(7, ge=1, le=90)):
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path, resolve_env_duckdb_path
 
-    path = resolve_env_duckdb_path(get_gateway_db_path())
-    db = DuckClaw(path, read_only=True)
-    try:
-        return _overview_usage_metrics(db, days=days, group_by="worker")
-    finally:
-        db.close()
+    def _load_summary():
+        path = resolve_env_duckdb_path(get_gateway_db_path())
+        db = DuckClaw(path, read_only=True)
+        try:
+            return _overview_usage_metrics(db, days=days, group_by="worker")
+        finally:
+            db.close()
+
+    return await asyncio.to_thread(_load_summary)
 
 
 @router.get("/reports/{report_id}", response_class=HTMLResponse, dependencies=[Depends(_require_admin_key)])

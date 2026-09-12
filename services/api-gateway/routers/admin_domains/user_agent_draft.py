@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from typing import Any
@@ -290,19 +291,22 @@ async def create_user_agent_draft(
     prompt = body.prompt.strip()
     display_name_hint = body.display_name.strip()
     worker_id_hint = body.worker_id.strip()
-    tenant_id = "default"
-    with open_gateway_db(read_only=True) as db:
-        from duckclaw.admin_user_profiles import ensure_profile_for_user
+    def _sync_load_draft_context() -> tuple[str, list[Any], Any]:
+        with open_gateway_db(read_only=True) as db:
+            from duckclaw.admin_user_profiles import ensure_profile_for_user
 
-        profile = ensure_profile_for_user(db, email=effective_actor_email(actor))
-        tenant_id = str(profile.get("tenant_id") or "default").strip() or "default"
-        suggested_skills = _workspace_managed_skill_suggestions(
-            db, actor_email=effective_actor_email(actor), prompt=prompt
-        )
-        try:
-            policy = _user_agent_draft_policy(db)
-        except (FileNotFoundError, RuntimeError) as exc:
-            raise _user_agent_policy_error(exc) from exc
+            profile = ensure_profile_for_user(db, email=effective_actor_email(actor))
+            tenant_id = str(profile.get("tenant_id") or "default").strip() or "default"
+            suggested_skills = _workspace_managed_skill_suggestions(
+                db, actor_email=effective_actor_email(actor), prompt=prompt
+            )
+            try:
+                policy = _user_agent_draft_policy(db)
+            except (FileNotFoundError, RuntimeError) as exc:
+                raise _user_agent_policy_error(exc) from exc
+        return tenant_id, suggested_skills, policy
+
+    tenant_id, suggested_skills, policy = await asyncio.to_thread(_sync_load_draft_context)
 
     fallback = _user_agent_fallback_draft(
         prompt=prompt,
@@ -311,7 +315,10 @@ async def create_user_agent_draft(
         display_name_hint=display_name_hint,
         worker_id_hint=worker_id_hint,
     )
-    if not _workspace_managed_has_configured_llm(tenant_id=tenant_id, actor=effective_actor_email(actor)):
+    has_llm = await asyncio.to_thread(
+        _workspace_managed_has_configured_llm, tenant_id=tenant_id, actor=effective_actor_email(actor)
+    )
+    if not has_llm:
         return fallback
     return await _user_agent_model_draft_or_fallback(
         actor=effective_actor_email(actor),
@@ -347,7 +354,7 @@ async def confirm_user_agent_draft(
             f"soul debe tener al menos {_MIN_SOUL_LEN} caracteres. "
             "Regenera el borrador o edita la personalidad antes de crear el agente.",
         )
-    profile = _actor_profile(actor)
+    profile = await asyncio.to_thread(_actor_profile, actor)
     worker_uid = f"wrk_{uuid.uuid4().hex}"
     worker_id = _workspace_managed_worker_id(draft.worker_id)
     display_name = (draft.display_name or worker_id).strip()[:128]
@@ -372,7 +379,9 @@ async def confirm_user_agent_draft(
     except ValueError as exc:
         raise _problem(400, str(exc), worker_id) from exc
 
-    agent = _public_agent_from_db(str(profile.get("email") or actor), worker_id) or _fallback_agent(
+    agent = await asyncio.to_thread(
+        _public_agent_from_db, str(profile.get("email") or actor), worker_id
+    ) or _fallback_agent(
         profile,
         worker_id=worker_id,
         display_name=display_name,

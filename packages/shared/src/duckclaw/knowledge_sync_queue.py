@@ -86,7 +86,11 @@ def _redis_client():
 
     from duckclaw.runtime_env import resolve_redis_url
 
-    return redis.from_url(resolve_redis_url(), decode_responses=True)
+    # ponytail: only bound the connect handshake — brpop() below relies on its own
+    # explicit `timeout=` for the long blocking wait; a socket_timeout here would cut
+    # that short. An unreachable/firewalled Redis can hang the TCP connect indefinitely
+    # otherwise (refused connections fail fast; that case doesn't).
+    return redis.from_url(resolve_redis_url(), decode_responses=True, socket_connect_timeout=2)
 
 
 def _status_key(job_id: str) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -116,9 +117,14 @@ async def patch_template(
 ) -> dict[str, Any]:
     wid = _template_worker_id(worker_id)
     actor_email = effective_actor_email(actor)
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor_email)
-        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+
+    def _sync_load_profile_and_worker() -> tuple[dict[str, Any], dict[str, Any] | None]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor_email)
+            worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+        return profile, worker
+
+    profile, worker = await asyncio.to_thread(_sync_load_profile_and_worker)
     if not worker:
         raise _problem(404, "Worker no visible en catálogo", wid)
     display_name = body.display_name.strip()
@@ -159,11 +165,15 @@ async def rename_template(
     if new_wid == wid:
         return {"ok": True, "worker_id": wid, "previous_worker_id": wid, "task_id": None}
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor_email)
-        worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
-        tenant_id = str(profile.get("tenant_id") or (worker or {}).get("tenant_id") or "default")
-        conflict = get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=new_wid)
+    def _sync_load_rename_context() -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor_email)
+            worker = get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid)
+            tenant_id = str(profile.get("tenant_id") or (worker or {}).get("tenant_id") or "default")
+            conflict = get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=new_wid)
+        return profile, worker, conflict
+
+    profile, worker, conflict = await asyncio.to_thread(_sync_load_rename_context)
     if not worker:
         raise _problem(404, "Worker no visible en catálogo", wid)
     if conflict and str(conflict.get("worker_uid") or "") != str(worker.get("worker_uid") or ""):

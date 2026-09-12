@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -111,8 +112,12 @@ def _enqueue(command: Any) -> str:
 async def list_connectors(actor: str = Depends(actor_from_header)) -> dict[str, Any]:
     profile = _actor_profile(actor)
     tenant_id = str(profile.get("tenant_id") or "default")
-    with open_gateway_db(read_only=True) as db:
-        connectors = list_mcp_connectors(db, tenant_id=tenant_id)
+
+    def _sync_list_connectors() -> list[Any]:
+        with open_gateway_db(read_only=True) as db:
+            return list_mcp_connectors(db, tenant_id=tenant_id)
+
+    connectors = await asyncio.to_thread(_sync_list_connectors)
     return {"connectors": connectors}
 
 
@@ -149,11 +154,16 @@ async def create_connector(body: McpConnectorCreateBody, actor: str = Depends(ac
     except ValueError as exc:
         raise _problem(400, str(exc), body.preset_id or body.connector_id) from exc
     connector_id = body.connector_id.strip() or (f"mcp_{body.preset_id.strip()}" if body.preset_id.strip() else "")
-    with open_gateway_db(read_only=True) as db:
-        connector = get_mcp_connector(db, connector_id=connector_id, tenant_id=tenant_id)
-        if connector is None:
-            rows = list_mcp_connectors(db, tenant_id=tenant_id)
-            connector = rows[-1] if rows else None
+
+    def _sync_load_created_connector() -> dict[str, Any] | None:
+        with open_gateway_db(read_only=True) as db:
+            connector = get_mcp_connector(db, connector_id=connector_id, tenant_id=tenant_id)
+            if connector is None:
+                rows = list_mcp_connectors(db, tenant_id=tenant_id)
+                connector = rows[-1] if rows else None
+            return connector
+
+    connector = await asyncio.to_thread(_sync_load_created_connector)
     return {"ok": True, "task_id": task_id, "connector": connector}
 
 
@@ -165,8 +175,12 @@ async def patch_connector(
 ) -> dict[str, Any]:
     profile = _actor_profile(actor)
     tenant_id = str(profile.get("tenant_id") or "default")
-    with open_gateway_db(read_only=True) as db:
-        existing = get_mcp_connector_runtime(db, connector_id=connector_id, tenant_id=tenant_id)
+
+    def _sync_load_existing_connector() -> dict[str, Any] | None:
+        with open_gateway_db(read_only=True) as db:
+            return get_mcp_connector_runtime(db, connector_id=connector_id, tenant_id=tenant_id)
+
+    existing = await asyncio.to_thread(_sync_load_existing_connector)
     if not existing:
         raise _problem(404, "Conector no encontrado", connector_id)
     command = UpsertMcpConnectorCommand(
@@ -191,8 +205,12 @@ async def patch_connector(
         task_id = _enqueue(command)
     except ValueError as exc:
         raise _problem(400, str(exc), connector_id) from exc
-    with open_gateway_db(read_only=True) as db:
-        connector = get_mcp_connector(db, connector_id=connector_id, tenant_id=tenant_id)
+
+    def _sync_load_patched_connector() -> dict[str, Any] | None:
+        with open_gateway_db(read_only=True) as db:
+            return get_mcp_connector(db, connector_id=connector_id, tenant_id=tenant_id)
+
+    connector = await asyncio.to_thread(_sync_load_patched_connector)
     return {"ok": True, "task_id": task_id, "connector": connector}
 
 
@@ -229,7 +247,12 @@ async def start_connector_oauth(
     try:
         from duckclaw.mcp_connector_oauth import start_mcp_connector_oauth
 
-        with open_gateway_db(read_only=True) as db:
+        # ponytail: open/close can block on a lock (db_bridge retry-with-sleep) — offload
+        # those two steps so the `await start_mcp_connector_oauth(...)` network call in
+        # between doesn't hold the event loop hostage the whole time.
+        cm = open_gateway_db(read_only=True)
+        db = await asyncio.to_thread(cm.__enter__)
+        try:
             result = await start_mcp_connector_oauth(
                 db,
                 connector_id=connector_id,
@@ -237,6 +260,8 @@ async def start_connector_oauth(
                 actor_email=actor_email,
                 redirect_uri=body.redirect_uri.strip() or None,
             )
+        finally:
+            await asyncio.to_thread(cm.__exit__, None, None, None)
         return {"ok": True, **result}
     except ValueError as exc:
         raise _problem(400, "OAuth start failed", str(exc)) from exc
@@ -346,17 +371,28 @@ async def oauth_callback_public(
 async def test_connector(connector_id: str, actor: str = Depends(actor_from_header)) -> dict[str, Any]:
     profile = _actor_profile(actor)
     tenant_id = str(profile.get("tenant_id") or "default")
-    with open_gateway_db(read_only=True) as db:
-        connector = get_mcp_connector_runtime(db, connector_id=connector_id, tenant_id=tenant_id)
-        if not connector:
-            raise _problem(404, "Conector no encontrado", connector_id)
-        try:
-            from duckclaw.forge.skills.mcp_connector_bridge import test_mcp_connector
 
-            result = await test_mcp_connector(db, connector)
-            return result
-        except Exception as exc:
-            raise _problem(502, "Test MCP falló", str(exc)) from exc
+    def _sync_load_connector() -> dict[str, Any] | None:
+        with open_gateway_db(read_only=True) as db:
+            return get_mcp_connector_runtime(db, connector_id=connector_id, tenant_id=tenant_id)
+
+    connector = await asyncio.to_thread(_sync_load_connector)
+    if not connector:
+        raise _problem(404, "Conector no encontrado", connector_id)
+
+    # ponytail: reopen only for the (network-bound) test call, offloading open/close so
+    # `await test_mcp_connector(...)` doesn't hold the event loop hostage meanwhile.
+    cm = open_gateway_db(read_only=True)
+    db = await asyncio.to_thread(cm.__enter__)
+    try:
+        from duckclaw.forge.skills.mcp_connector_bridge import test_mcp_connector
+
+        result = await test_mcp_connector(db, connector)
+        return result
+    except Exception as exc:
+        raise _problem(502, "Test MCP falló", str(exc)) from exc
+    finally:
+        await asyncio.to_thread(cm.__exit__, None, None, None)
 
 
 @router.post("/{connector_id}/grants", dependencies=[Depends(require_admin_key)])
@@ -367,8 +403,12 @@ async def grant_connector(
 ) -> dict[str, Any]:
     profile = _actor_profile(actor)
     tenant_id = str(profile.get("tenant_id") or "default")
-    with open_gateway_db(read_only=True) as db:
-        worker_uid = resolve_worker_uid(db, worker_id=body.worker_id.strip(), tenant_id=tenant_id)
+
+    def _sync_resolve_worker_uid() -> str | None:
+        with open_gateway_db(read_only=True) as db:
+            return resolve_worker_uid(db, worker_id=body.worker_id.strip(), tenant_id=tenant_id)
+
+    worker_uid = await asyncio.to_thread(_sync_resolve_worker_uid)
     if not worker_uid:
         raise _problem(404, "Worker no encontrado", body.worker_id)
     command = GrantWorkerMcpConnectorCommand(
@@ -392,8 +432,12 @@ async def revoke_connector_grant(
 ) -> dict[str, Any]:
     profile = _actor_profile(actor)
     tenant_id = str(profile.get("tenant_id") or "default")
-    with open_gateway_db(read_only=True) as db:
-        worker_uid = resolve_worker_uid(db, worker_id=worker_id.strip(), tenant_id=tenant_id)
+
+    def _sync_resolve_worker_uid() -> str | None:
+        with open_gateway_db(read_only=True) as db:
+            return resolve_worker_uid(db, worker_id=worker_id.strip(), tenant_id=tenant_id)
+
+    worker_uid = await asyncio.to_thread(_sync_resolve_worker_uid)
     if not worker_uid:
         raise _problem(404, "Worker no encontrado", worker_id)
     command = RevokeWorkerMcpConnectorCommand(

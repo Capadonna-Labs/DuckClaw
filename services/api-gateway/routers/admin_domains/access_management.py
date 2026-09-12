@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -182,18 +183,20 @@ async def get_access_overview(tenant_id: str = Query("default")) -> dict[str, An
 
     tid = _gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
     gw = (get_gateway_db_path() or "").strip()
-    console_count = 0
-    telegram_count = 0
-    shared_count = 0
-    if gw and os.path.isfile(gw):
+
+    def _load_counts() -> tuple[int, int, int]:
+        if not (gw and os.path.isfile(gw)):
+            return 0, 0, 0
         db = DuckClaw(gw, read_only=True, engine="python")
         try:
-            console_count = count_console_users(db)
+            console = count_console_users(db)
             users = _list_authorized_users(db, tenant_id=tid)
-            telegram_count = len(users)
-            shared_count = len(list_shared_grants_for_tenant(db, tenant_id=tid))
+            shared = len(list_shared_grants_for_tenant(db, tenant_id=tid))
+            return console, len(users), shared
         finally:
             db.close()
+
+    console_count, telegram_count, shared_count = await asyncio.to_thread(_load_counts)
     return {
         "tenant_id": tid,
         "console_users": console_count,
@@ -218,11 +221,15 @@ async def list_admin_console_users() -> dict[str, Any]:
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         return {"users": [], "db_path": gw, "warning": "Gateway DuckDB no encontrada"}
-    db = DuckClaw(gw, read_only=True, engine="python")
-    try:
-        users = list_console_users(db)
-    finally:
-        db.close()
+
+    def _load_users():
+        db = DuckClaw(gw, read_only=True, engine="python")
+        try:
+            return list_console_users(db)
+        finally:
+            db.close()
+
+    users = await asyncio.to_thread(_load_users)
     return {"users": users, "db_path": gw}
 
 
@@ -275,7 +282,7 @@ async def patch_admin_console_user(
     em = (email or "").strip()
     if not em:
         raise _problem(400, "email requerido", "")
-    existing, gw = _get_console_user_readonly(em)
+    existing, gw = await asyncio.to_thread(_get_console_user_readonly, em)
     if not existing:
         raise _problem(404, "Usuario no encontrado", em)
     nombre = body.nombre if body.nombre is not None else str(existing.get("nombre") or "")
@@ -320,7 +327,7 @@ async def delete_admin_console_user(
     em = (email or "").strip()
     if not em:
         raise _problem(400, "email requerido", "")
-    existing, gw = _get_console_user_readonly(em)
+    existing, gw = await asyncio.to_thread(_get_console_user_readonly, em)
     if not existing:
         raise _problem(404, "Usuario no encontrado", em)
     try:
@@ -343,11 +350,15 @@ async def get_shared_grants(tenant_id: str = Query("default")) -> dict[str, Any]
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         return {"tenant_id": tid, "grants": [], "db_path": gw, "warning": "Gateway DuckDB no encontrada"}
-    db = DuckClaw(gw, read_only=True, engine="python")
-    try:
-        grants = list_shared_grants_for_tenant(db, tenant_id=tid)
-    finally:
-        db.close()
+
+    def _load_grants():
+        db = DuckClaw(gw, read_only=True, engine="python")
+        try:
+            return list_shared_grants_for_tenant(db, tenant_id=tid)
+        finally:
+            db.close()
+
+    grants = await asyncio.to_thread(_load_grants)
     return {"tenant_id": tid, "grants": grants, "db_path": gw}
 
 
@@ -433,12 +444,15 @@ async def get_telegram_whitelist(tenant_id: str = Query("default")) -> dict[str,
             "db_path": gw,
             "warning": "Gateway DuckDB no encontrada",
         }
-    db = DuckClaw(gw, read_only=True, engine="python")
-    try:
-        _ensure_authorized_users_table(db)
-        users = _list_whitelist_users_merged(db, tenant_id=tid)
-    finally:
-        db.close()
+    def _load_whitelist():
+        db = DuckClaw(gw, read_only=True, engine="python")
+        try:
+            _ensure_authorized_users_table(db)
+            return _list_whitelist_users_merged(db, tenant_id=tid)
+        finally:
+            db.close()
+
+    users = await asyncio.to_thread(_load_whitelist)
     hint = None
     if requested.lower() == "default" and tid.lower() != "default":
         hint = (

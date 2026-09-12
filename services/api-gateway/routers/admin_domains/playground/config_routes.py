@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
@@ -74,11 +75,15 @@ async def playground_config(
     workers_list: list[dict[str, str]] = []
     projects: list[dict[str, Any]] = []
     hub_ok = False
-    try:
+    def _sync_load_playground_profile() -> tuple[dict[str, Any], list[dict[str, str]], list[dict[str, Any]]]:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
             workers_list = playground_workers_for_actor(db, actor_email=actor)
             projects = list_projects_with_agents_for_actor(db, actor_email=actor)
+        return profile, workers_list, projects
+
+    try:
+        profile, workers_list, projects = await asyncio.to_thread(_sync_load_playground_profile)
         hub_ok = True
     except Exception as exc:
         _log.warning("playground_config: hub read skipped (%s)", exc)
@@ -100,8 +105,11 @@ async def playground_config(
     if hub_ok:
         eff_tenant = eff_tenant or gateway_effective_tenant_id("default")
     payload_tenant = eff_tenant if hub_ok else ""
-    runtime_defaults = playground_runtime_defaults(eff_tenant, str(profile.get("email") or actor))
-    llm = resolved_llm_for_playground(
+    runtime_defaults = await asyncio.to_thread(
+        playground_runtime_defaults, eff_tenant, str(profile.get("email") or actor)
+    )
+    llm = await asyncio.to_thread(
+        resolved_llm_for_playground,
         chat_id=eff_chat,
         tenant_id=eff_tenant,
         actor_email=str(profile.get("email") or actor),
@@ -109,7 +117,7 @@ async def playground_config(
     catalog: list[dict[str, Any]] = []
     llm_gap: dict[str, str] | None = None
     actor_email = str(profile.get("email") or actor)
-    try:
+    def _sync_load_llm_catalog() -> tuple[list[dict[str, Any]], dict[str, str] | None]:
         with open_gateway_db(read_only=True) as db:
             from duckclaw.llm_bootstrap import build_llm_gap
 
@@ -125,6 +133,10 @@ async def playground_config(
                 tenant_id=eff_tenant,
                 actor_email=actor_email,
             )
+        return catalog, llm_gap
+
+    try:
+        catalog, llm_gap = await asyncio.to_thread(_sync_load_llm_catalog)
     except Exception:
         catalog = playground_llm_catalog(
             llm.get("provider", ""),
@@ -162,18 +174,22 @@ async def playground_config(
     voice = await playground_voice_status()
     realtime_voice = await playground_realtime_voice_status()
     knowledge_scope = "platform"
-    try:
+
+    def _sync_resolve_playground_knowledge_scope() -> str:
         with open_gateway_db(read_only=True) as db:
             from routers.admin_domains.playground.knowledge_scope_resolution import (
                 resolve_playground_knowledge_scope,
             )
 
-            knowledge_scope = resolve_playground_knowledge_scope(
+            return resolve_playground_knowledge_scope(
                 db,
                 chat_id=eff_chat,
                 tenant_id=eff_tenant,
                 project_id="",
             )
+
+    try:
+        knowledge_scope = await asyncio.to_thread(_sync_resolve_playground_knowledge_scope)
     except Exception:
         pass
     try:
@@ -240,10 +256,13 @@ async def playground_set_vault(
 
     chat_id = body.chat_id.strip()
     tenant_id = gateway_effective_tenant_id((body.tenant_id or "default").strip() or "default")
-    try:
+    def _sync_resolve_vault_tenant_id() -> str:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
-            tenant_id = str(profile.get("tenant_id") or "").strip() or tenant_id
+            return str(profile.get("tenant_id") or "").strip() or tenant_id
+
+    try:
+        tenant_id = await asyncio.to_thread(_sync_resolve_vault_tenant_id)
     except FileNotFoundError:
         pass
     raw_path = (body.vault_db_path or "").strip()
@@ -358,9 +377,13 @@ async def playground_set_knowledge_scope(
         raise problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
 
     effective = normalize_knowledge_scope(raw_scope, project_id=project_id)
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        tenant_id = str(profile.get("tenant_id") or "").strip() or tenant_id
+
+    def _sync_resolve_scope_tenant_id() -> str:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            return str(profile.get("tenant_id") or "").strip() or tenant_id
+
+    tenant_id = await asyncio.to_thread(_sync_resolve_scope_tenant_id)
 
     command = UpsertRuntimeSettingCommand(
         tenant_id=tenant_id,
@@ -378,14 +401,17 @@ async def playground_set_knowledge_scope(
     except Exception as exc:
         raise problem(400, "No se pudo actualizar el alcance RAG", str(exc)) from exc
 
-    with open_gateway_db(read_only=True) as db:
-        resolved = resolve_playground_knowledge_scope(
-            db,
-            chat_id=chat_id,
-            tenant_id=tenant_id,
-            project_id=project_id,
-            body_scope=effective,
-        )
+    def _sync_resolve_final_knowledge_scope() -> str:
+        with open_gateway_db(read_only=True) as db:
+            return resolve_playground_knowledge_scope(
+                db,
+                chat_id=chat_id,
+                tenant_id=tenant_id,
+                project_id=project_id,
+                body_scope=effective,
+            )
+
+    resolved = await asyncio.to_thread(_sync_resolve_final_knowledge_scope)
     return {
         "ok": True,
         "queued": True,
@@ -459,19 +485,23 @@ async def playground_set_model(
         from core.admin_identity import open_gateway_db
         from duckclaw.llm_bootstrap import build_llm_gap
 
-        with open_gateway_db(read_only=True) as db:
-            catalog = playground_llm_catalog(
-                llm.get("provider", ""),
-                db=db,
-                tenant_id="default",
-                actor_email=runtime_session_actor(chat_id),
-            )
-            llm_gap = build_llm_gap(
-                db,
-                provider=llm.get("provider", ""),
-                tenant_id="default",
-                actor_email=runtime_session_actor(chat_id),
-            )
+        def _sync_load_model_llm_catalog() -> tuple[list[dict[str, Any]], dict[str, str] | None]:
+            with open_gateway_db(read_only=True) as db:
+                catalog = playground_llm_catalog(
+                    llm.get("provider", ""),
+                    db=db,
+                    tenant_id="default",
+                    actor_email=runtime_session_actor(chat_id),
+                )
+                llm_gap = build_llm_gap(
+                    db,
+                    provider=llm.get("provider", ""),
+                    tenant_id="default",
+                    actor_email=runtime_session_actor(chat_id),
+                )
+            return catalog, llm_gap
+
+        catalog, llm_gap = await asyncio.to_thread(_sync_load_model_llm_catalog)
     except FileNotFoundError:
         catalog = playground_llm_catalog(llm.get("provider", ""))
     return {

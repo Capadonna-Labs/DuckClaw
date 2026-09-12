@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -101,7 +102,7 @@ async def create_template_context(
 ) -> dict[str, Any]:
     from duckclaw.write_commands import UpsertWorkerContextCommand
 
-    worker = _visible_worker(worker_id, actor)
+    worker = await asyncio.to_thread(_visible_worker, worker_id, actor)
     try:
         command = UpsertWorkerContextCommand(
             actor_email=actor,
@@ -125,7 +126,7 @@ async def reorder_template_contexts(
 ) -> dict[str, Any]:
     from duckclaw.write_commands import ReorderWorkerContextsCommand
 
-    worker = _visible_worker(worker_id, actor)
+    worker = await asyncio.to_thread(_visible_worker, worker_id, actor)
     try:
         command = ReorderWorkerContextsCommand(
             actor_email=actor,
@@ -147,7 +148,7 @@ async def delete_template_context(
 ) -> dict[str, Any]:
     from duckclaw.write_commands import DeactivateWorkerContextCommand
 
-    worker = _visible_worker(worker_id, actor)
+    worker = await asyncio.to_thread(_visible_worker, worker_id, actor)
     try:
         command = DeactivateWorkerContextCommand(
             actor_email=actor,

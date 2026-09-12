@@ -45,18 +45,24 @@ async def list_runtime_settings(
     domain: list[str] | None = Query(None),
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
+    import asyncio
+
     from core.admin_identity import open_gateway_db
     from duckclaw.admin_runtime_settings import list_runtime_settings_effective
     from duckclaw.admin_user_profiles import ensure_profile_for_user
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        settings = list_runtime_settings_effective(
-            db,
-            tenant_id=profile["tenant_id"],
-            actor_email=profile["email"],
-            domains=domain or None,
-        )
+    def _sync_list_runtime_settings() -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            settings = list_runtime_settings_effective(
+                db,
+                tenant_id=profile["tenant_id"],
+                actor_email=profile["email"],
+                domains=domain or None,
+            )
+        return profile, settings
+
+    profile, settings = await asyncio.to_thread(_sync_list_runtime_settings)
     return {
         "tenant_id": profile["tenant_id"],
         "actor_email": profile["email"],
@@ -69,6 +75,8 @@ async def patch_runtime_settings(
     body: RuntimeSettingsPatchBody,
     actor: str = Depends(_actor_from_header),
 ) -> dict[str, Any]:
+    import asyncio
+
     from core.admin_identity import open_gateway_db
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.gateway_enqueue import enqueue_admin_command
@@ -76,8 +84,12 @@ async def patch_runtime_settings(
 
     updated: list[str] = []
     task_ids: list[str] = []
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
+
+    def _sync_ensure_profile() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return ensure_profile_for_user(db, email=actor)
+
+    profile = await asyncio.to_thread(_sync_ensure_profile)
     for item in body.settings:
         tenant_id, scoped_actor = _runtime_setting_scope(
             item,

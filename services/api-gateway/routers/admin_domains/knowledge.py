@@ -6,6 +6,7 @@ Spec: docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -138,9 +139,13 @@ async def get_knowledge_source_indexing_progress(
     from duckclaw.knowledge_sync_queue import get_job_status
 
     sid = source_id.strip()
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        source = get_knowledge_source(db, tenant_id=profile["tenant_id"], source_id=sid)
+
+    def _sync_load_source() -> dict[str, Any] | None:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            return get_knowledge_source(db, tenant_id=profile["tenant_id"], source_id=sid)
+
+    source = await asyncio.to_thread(_sync_load_source)
 
     if not source:
         raise problem(404, f"Fuente RAG no encontrada: {sid}", sid)
@@ -284,10 +289,9 @@ async def list_knowledge_sources(
     from duckclaw.admin_knowledge_read import list_knowledge_sources as _list_sources
     from duckclaw.admin_user_profiles import ensure_profile_for_user
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-
-        def _list() -> list[dict[str, Any]]:
+    def _sync_list_sources() -> list[dict[str, Any]]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
             return _list_sources(
                 db,
                 tenant_id=profile["tenant_id"],
@@ -295,7 +299,7 @@ async def list_knowledge_sources(
                 worker_uid=worker_uid,
             )
 
-        sources = await run_heavy_work(_list)
+    sources = await run_heavy_work(_sync_list_sources)
     return {"sources": sources}
 
 
@@ -338,8 +342,11 @@ async def create_knowledge_source(
     from duckclaw.knowledge_sync_queue import enqueue_knowledge_sync_job
     from duckclaw.write_commands import CreateKnowledgeSourceCommand
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
+    def _sync_ensure_profile() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return ensure_profile_for_user(db, email=actor)
+
+    profile = await asyncio.to_thread(_sync_ensure_profile)
 
     try:
         source_id = f"ksrc_{uuid.uuid4().hex[:16]}"
@@ -455,8 +462,11 @@ async def upload_knowledge_files(
     if len(files) > _KNOWLEDGE_UPLOAD_MAX_FILES:
         raise problem(400, f"Máximo {_KNOWLEDGE_UPLOAD_MAX_FILES} archivos por carga", "knowledge_upload")
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
+    def _sync_ensure_profile() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return ensure_profile_for_user(db, email=actor)
+
+    profile = await asyncio.to_thread(_sync_ensure_profile)
 
     file_payloads: list[tuple[str, bytes]] = []
     for upload in files:
@@ -556,16 +566,20 @@ async def sync_knowledge_source(
     from duckclaw.knowledge_sync_queue import enqueue_knowledge_sync_job
     from duckclaw.write_commands import CreateKnowledgeSourceCommand
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        source = get_knowledge_source(db, tenant_id=profile["tenant_id"], source_id=source_id)
-        if not source:
-            raise problem(404, f"Fuente RAG no encontrada: {source_id}", source_id)
-        if str(source.get("source_kind") or "") != "folder":
-            raise problem(400, "Solo fuentes tipo carpeta admiten sync incremental", source_id)
-        source_uri = str(source.get("source_uri") or "").strip()
-        if not source_uri or source_uri.startswith("upload://"):
-            raise problem(400, "Esta fuente no tiene ruta de servidor para sincronizar", source_id)
+    def _sync_load_sync_source() -> tuple[dict[str, Any], dict[str, Any], str]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            source = get_knowledge_source(db, tenant_id=profile["tenant_id"], source_id=source_id)
+            if not source:
+                raise problem(404, f"Fuente RAG no encontrada: {source_id}", source_id)
+            if str(source.get("source_kind") or "") != "folder":
+                raise problem(400, "Solo fuentes tipo carpeta admiten sync incremental", source_id)
+            source_uri = str(source.get("source_uri") or "").strip()
+            if not source_uri or source_uri.startswith("upload://"):
+                raise problem(400, "Esta fuente no tiene ruta de servidor para sincronizar", source_id)
+        return profile, source, source_uri
+
+    profile, source, source_uri = await asyncio.to_thread(_sync_load_sync_source)
 
     try:
         file_count = _folder_file_count(source_uri)
@@ -618,8 +632,11 @@ async def deactivate_knowledge_source(
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.write_commands import DeactivateKnowledgeSourceCommand
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
+    def _sync_ensure_profile() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return ensure_profile_for_user(db, email=actor)
+
+    profile = await asyncio.to_thread(_sync_ensure_profile)
     try:
         command = DeactivateKnowledgeSourceCommand(
             tenant_id=profile["tenant_id"],
@@ -642,10 +659,9 @@ async def search_knowledge(
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.forge.rag.knowledge_core import search_knowledge as _search
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-
-        def _search_rows() -> list[dict[str, Any]]:
+    def _sync_search_rows() -> list[dict[str, Any]]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
             return _search(
                 db,
                 query=body.query,
@@ -656,5 +672,5 @@ async def search_knowledge(
                 limit=body.limit,
             )
 
-        rows = await run_heavy_work(_search_rows)
+    rows = await run_heavy_work(_sync_search_rows)
     return {"results": rows, "count": len(rows)}

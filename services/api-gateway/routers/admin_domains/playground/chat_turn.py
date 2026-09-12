@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from dataclasses import dataclass
@@ -319,7 +320,8 @@ async def prepare_playground_chat_turn(
     request: Request,
     telegram_user_id_override: str | None = None,
 ) -> PlaygroundPreparedChat:
-    turn = resolve_playground_actor_turn(
+    turn = await asyncio.to_thread(
+        resolve_playground_actor_turn,
         actor,
         worker_id=body.worker_id,
         project_id=body.project_id,
@@ -397,7 +399,8 @@ async def prepare_playground_chat_turn(
     )
     vault_path = vault_info.get("effective_path") or ""
     rag_context_count = 0
-    msg, rag_context_count = project_context_message(
+    msg, rag_context_count = await asyncio.to_thread(
+        project_context_message,
         msg=msg,
         project_context=turn.project_context,
         worker_id=turn.wid,
@@ -457,7 +460,8 @@ async def prepare_playground_voice_turn(
     msg: str,
     request: Request,
 ) -> PlaygroundPreparedChat:
-    turn = resolve_playground_actor_turn(
+    turn = await asyncio.to_thread(
+        resolve_playground_actor_turn,
         actor,
         worker_id=worker_id,
         project_id=project_id,
@@ -474,7 +478,8 @@ async def prepare_playground_voice_turn(
 
     vault_info = await resolved_vault_for_admin_chat(session_id, team_ctx, turn.wid, request=request)
     vault_path = vault_info.get("effective_path") or ""
-    msg, rag_context_count = project_context_message(
+    msg, rag_context_count = await asyncio.to_thread(
+        project_context_message,
         msg=msg,
         project_context=turn.project_context,
         worker_id=turn.wid,

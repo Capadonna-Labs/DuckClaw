@@ -55,6 +55,13 @@ def _worker_capabilities_catalog_cache_stats() -> dict[str, Any]:
 
 def _knowledge_queue_depth() -> int | None:
     try:
+        from duckclaw.spawn_profile import is_lite_mode
+
+        # Desktop Lite has no Knowledge-Indexer / Redis — same reasoning as
+        # _db_write_queue_depth above.
+        if is_lite_mode():
+            return None
+
         from duckclaw.knowledge_sync_queue import knowledge_sync_queue_depth
 
         return knowledge_sync_queue_depth()
@@ -68,9 +75,18 @@ def _cached_pm2_stack_health() -> list[dict[str, Any]]:
         rows = _pm2_metrics_cache["rows"]
         return rows if isinstance(rows, list) else []
     try:
-        from duckclaw.ops.pm2_stack_health import collect_pm2_stack_health
+        from duckclaw.spawn_profile import is_lite_mode
 
-        rows = collect_pm2_stack_health()
+        # Desktop Lite never runs PM2 — resolving the pm2 executable to then get an
+        # empty/N-A result can itself take several seconds on some hosts (PATH/npm
+        # global lookup), which is wasted time on this /health hot path every time the
+        # 30s cache expires. Same reasoning as the Redis skips above.
+        if is_lite_mode():
+            rows = []
+        else:
+            from duckclaw.ops.pm2_stack_health import collect_pm2_stack_health
+
+            rows = collect_pm2_stack_health()
     except Exception:
         rows = []
     _pm2_metrics_cache["expires_at"] = now + PM2_METRICS_CACHE_SEC
@@ -80,12 +96,28 @@ def _cached_pm2_stack_health() -> list[dict[str, Any]]:
 
 def _db_write_queue_depth() -> int | None:
     try:
+        from duckclaw.spawn_profile import is_lite_mode
+
+        # Desktop Lite has no Redis/db-writer at all (inline writes) — skip the probe
+        # entirely instead of risking a hung connect (see socket_connect_timeout below
+        # for the non-lite case: a refused connection fails fast, but on some hosts an
+        # unreachable/firewalled Redis just hangs the TCP handshake indefinitely, and
+        # this runs inside /health's asyncio.to_thread — a stuck call there starves the
+        # thread pool for every other request until the connect finally gives up).
+        if is_lite_mode():
+            return None
+
         import redis
 
         from duckclaw.db_write_queue import DEFAULT_WRITE_QUEUE_NAME
         from duckclaw.runtime_env import resolve_redis_url
 
-        client = redis.from_url(resolve_redis_url(), decode_responses=True)
+        client = redis.from_url(
+            resolve_redis_url(),
+            decode_responses=True,
+            socket_connect_timeout=1,
+            socket_timeout=1,
+        )
         return int(client.llen(DEFAULT_WRITE_QUEUE_NAME))
     except Exception:
         return None

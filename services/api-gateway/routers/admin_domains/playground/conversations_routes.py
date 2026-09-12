@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -55,7 +56,7 @@ async def admin_list_conversations(
         limit=limit,
         offset=offset,
     )
-    items = enrich_conversations_worker_display_names(items, tenant_id=tid)
+    items = await asyncio.to_thread(enrich_conversations_worker_display_names, items, tenant_id=tid)
     return {
         "tenant_id": tid,
         "conversations": [m.model_dump() for m in items],

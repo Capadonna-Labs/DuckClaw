@@ -57,6 +57,38 @@ function bucketEphemeralByTurn(
   return buckets;
 }
 
+/** Inserta tools del turno N tras el user N (antes del assistant si existe). */
+function spliceToolsForTurn(out: ChatMsg[], turn: number, tools: ChatMsg[]): void {
+  if (!tools.length) return;
+  let userCount = 0;
+  let userIdx = -1;
+  for (let i = 0; i < out.length; i++) {
+    if (out[i]?.role === 'user') {
+      userCount += 1;
+      if (userCount === turn) {
+        userIdx = i;
+        break;
+      }
+    }
+  }
+  if (userIdx < 0) {
+    let insertAt = out.length;
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i]?.role === 'assistant') {
+        insertAt = i;
+        break;
+      }
+    }
+    out.splice(insertAt, 0, ...tools);
+    return;
+  }
+  let insertAt = userIdx + 1;
+  while (insertAt < out.length && out[insertAt]?.role === 'heartbeat') {
+    insertAt += 1;
+  }
+  out.splice(insertAt, 0, ...tools);
+}
+
 export function interleaveEphemeralIntoHistory(
   server: ChatMsg[],
   ephemeral: ChatMsg[]
@@ -83,6 +115,19 @@ export function interleaveEphemeralIntoHistory(
     out.push(m);
   }
 
-  out.push(...[...buckets.values()].flat(), ...orphan);
+  // Turnos sin assistant en Redis (respuesta aún no persistida): no empujar al final.
+  for (const [turn, tools] of [...buckets.entries()].sort((a, b) => a[0] - b[0])) {
+    spliceToolsForTurn(out, turn, tools);
+  }
+  if (orphan.length) {
+    let insertAt = out.length;
+    for (let i = out.length - 1; i >= 0; i--) {
+      if (out[i]?.role === 'assistant') {
+        insertAt = i;
+        break;
+      }
+    }
+    out.splice(insertAt, 0, ...orphan);
+  }
   return out;
 }

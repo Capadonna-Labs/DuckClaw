@@ -3,6 +3,7 @@ import {
   lastUserAssistantExchange,
   shouldFetchChatSuggestions,
   shouldShowSuggestionChips,
+  suggestionsExchangeKey,
 } from './adminChatPure';
 import type { ChatMsg } from './types';
 
@@ -41,7 +42,7 @@ describe('shouldShowSuggestionChips', () => {
     expect(shouldShowSuggestionChips([], false, '')).toBe(false);
   });
 
-  it('persiste durante loading (hasta que lleguen nuevas)', () => {
+  it('true aunque loading (el caller limpia chips al iniciar el turno)', () => {
     expect(shouldShowSuggestionChips(['a'], true, '')).toBe(true);
   });
 
@@ -78,5 +79,20 @@ describe('lastUserAssistantExchange', () => {
       { role: 'assistant', text: 'Modo activo' },
     ];
     expect(lastUserAssistantExchange(messages)).toBeNull();
+  });
+});
+
+
+describe('suggestionsExchangeKey', () => {
+  it('cambia cuando cambia el texto del assistant', () => {
+    const a = suggestionsExchangeKey('c1', 'hola', 'respuesta A');
+    const b = suggestionsExchangeKey('c1', 'hola', 'respuesta B');
+    expect(a).not.toBe(b);
+  });
+
+  it('es estable para el mismo intercambio', () => {
+    const a = suggestionsExchangeKey('c1', 'hola', 'misma');
+    const b = suggestionsExchangeKey('c1', 'hola', 'misma');
+    expect(a).toBe(b);
   });
 });

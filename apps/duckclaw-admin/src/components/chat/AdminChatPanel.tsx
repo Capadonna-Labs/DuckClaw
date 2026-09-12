@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   Bot,
   Brain,
+  ChevronDown,
   ChevronRight,
   Cpu,
   MessageSquarePlus,
@@ -533,6 +534,18 @@ export function AdminChatPanel({
         retryFromMessage={retryFromMessage}
         editFromMessage={editFromMessage}
       />
+
+      {showScrollButton && isStudioCompose && showStudioHeader && !showHeader ? (
+        <button
+          type="button"
+          onClick={() => scrollToBottom('smooth')}
+          className="absolute bottom-[6.75rem] right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface sm:bottom-[7.5rem]"
+          aria-label="Ir al final de la conversación"
+          title="Ir abajo"
+        >
+          <ChevronDown size={20} aria-hidden />
+        </button>
+      ) : null}
 
       <div
         className={

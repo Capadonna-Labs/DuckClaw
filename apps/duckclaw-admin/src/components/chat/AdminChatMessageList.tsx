@@ -123,7 +123,7 @@ export function AdminChatMessageList({
             isCompact ? '' : 'min-h-[320px]'
           } ${
             studioChromePad
-              ? 'pt-[3.75rem] pb-[8.5rem] sm:pt-16 sm:pb-36'
+              ? 'pt-[3.75rem] pb-[11rem] sm:pt-16 sm:pb-44'
               : ''
           }`}
         >
@@ -182,21 +182,18 @@ export function AdminChatMessageList({
           return renderMessageBubble(messages, i, bubbleOpts);
         })}
         </div>
-        {showScrollButton && (
+        {/* En studio el FAB vive en AdminChatPanel (z-30) para no quedar bajo el composer glass. */}
+        {showScrollButton && !studioChromePad ? (
           <button
             type="button"
             onClick={() => scrollToBottom('smooth')}
-            className={`absolute right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface ${
-              studioChromePad
-                ? 'bottom-[7.25rem] sm:bottom-32'
-                : 'bottom-3 max-lg:bottom-16'
-            }`}
+            className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface max-lg:bottom-16"
             aria-label="Ir al final de la conversación"
             title="Ir abajo"
           >
             <ChevronDown size={20} aria-hidden />
           </button>
-        )}
+        ) : null}
       </div>
   );
 }

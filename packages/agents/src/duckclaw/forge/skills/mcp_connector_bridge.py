@@ -221,6 +221,17 @@ async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: 
     connectors = list_worker_mcp_connectors(db, worker_uid=worker_uid, tenant_id=tenant_id)
     tools: list[Any] = []
     for connector in connectors:
+        # YouTube Data/Analytics has no hosted MCP — register REST tools directly when OAuth is ready.
+        # Do not wait for tools/list against the placeholder reports URL (may return empty without raising).
+        yt_rest = _youtube_analytics_rest_fallback_specs_if_ready(db, connector)
+        if yt_rest:
+            added = _register_connector_tool_specs(db, connector, yt_rest, tools)
+            _log.info(
+                "YouTube Analytics REST registered %d tools connector=%s",
+                added,
+                connector.get("connector_id"),
+            )
+            continue
         try:
             specs = await _list_connector_tools(db, connector)
         except Exception as exc:
@@ -234,15 +245,6 @@ async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: 
                 added = _register_connector_tool_specs(db, connector, fallback, tools)
                 _log.info(
                     "Gmail REST fallback registered %d tools connector=%s",
-                    added,
-                    connector.get("connector_id"),
-                )
-                continue
-            fallback = _youtube_analytics_rest_fallback_specs_if_ready(db, connector)
-            if fallback:
-                added = _register_connector_tool_specs(db, connector, fallback, tools)
-                _log.info(
-                    "YouTube Analytics REST fallback registered %d tools connector=%s",
                     added,
                     connector.get("connector_id"),
                 )

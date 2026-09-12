@@ -97,6 +97,7 @@ from duckclaw.commands.loop import (
     apply_loop_idle_schedule as apply_loop_idle_schedule,
     apply_loop_schedule as apply_loop_schedule,
     chat_id_from_loop_delta_config_key as chat_id_from_loop_delta_config_key,
+    chat_id_from_meditate_delta_config_key as chat_id_from_meditate_delta_config_key,
     clear_loop_schedule as clear_loop_schedule,
     configure_loop_tick_heartbeat_publisher as _configure_loop_tick_heartbeat_publisher,
     execute_meditate as execute_meditate,

@@ -1485,7 +1485,15 @@ _MEDITATE_TENANT_KEY = LOOP_TENANT_KEY
 _MEDITATE_WORKER_KEY = LOOP_WORKER_KEY
 MEDITATE_SYSTEM_USER_LABEL = LOOP_SYSTEM_USER_LABEL
 parse_meditate_delta_arg = parse_loop_delta_arg
-chat_id_from_meditate_delta_config_key = chat_id_from_loop_delta_config_key
+def chat_id_from_meditate_delta_config_key(key: str) -> Optional[str]:
+    """Compat: accept legacy ``_meditate_delta_seconds`` or current ``_loop_delta_seconds``."""
+    chat_id = chat_id_from_loop_delta_config_key(key)
+    if chat_id is not None:
+        return chat_id
+    legacy_suf = "_meditate_delta_seconds"
+    if key.startswith(_PREFIX) and key.endswith(legacy_suf):
+        return key[len(_PREFIX) : -len(legacy_suf)] or None
+    return None
 clear_meditate_schedule = clear_loop_schedule
 get_meditate_schedule_status = get_loop_schedule_status
 apply_meditate_schedule = apply_loop_schedule

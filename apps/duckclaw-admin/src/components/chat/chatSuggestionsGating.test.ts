@@ -22,7 +22,7 @@ describe('shouldFetchChatSuggestions', () => {
 });
 
 describe('shouldShowSuggestionChips', () => {
-  it('true con sugerencias, sin loading, e input vacío', () => {
+  it('true con sugerencias', () => {
     expect(shouldShowSuggestionChips(['a', 'b'], false, '')).toBe(true);
   });
 
@@ -30,11 +30,11 @@ describe('shouldShowSuggestionChips', () => {
     expect(shouldShowSuggestionChips([], false, '')).toBe(false);
   });
 
-  it('false mientras carga', () => {
-    expect(shouldShowSuggestionChips(['a'], true, '')).toBe(false);
+  it('persiste durante loading (hasta que lleguen nuevas)', () => {
+    expect(shouldShowSuggestionChips(['a'], true, '')).toBe(true);
   });
 
-  it('false si el usuario ya está escribiendo', () => {
-    expect(shouldShowSuggestionChips(['a'], false, 'algo')).toBe(false);
+  it('persiste aunque el usuario esté escribiendo', () => {
+    expect(shouldShowSuggestionChips(['a'], false, 'algo')).toBe(true);
   });
 });

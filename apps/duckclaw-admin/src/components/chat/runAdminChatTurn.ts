@@ -123,7 +123,6 @@ thinkingStartedAt.current = Date.now();
 setThinkingIdentity({ workerId, swarmSlot: 1 });
 setThinking(true);
 setError(null);
-setSuggestions([]);
 setMessages((m) => [
   ...m,
   {

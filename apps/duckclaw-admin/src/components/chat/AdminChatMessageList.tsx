@@ -25,6 +25,8 @@ export type AdminChatMessageListProps = {
   /** Muestra u oculta el detalle de invocaciones de herramientas del chat. */
   showToolUsage?: boolean;
   isCompact: boolean;
+  /** Padding extra cuando header/composer son overlays glass (studio). */
+  studioChromePad?: boolean;
   scrollRef: RefObject<HTMLDivElement>;
   showScrollButton: boolean;
   onScroll: () => void;
@@ -95,6 +97,7 @@ export function AdminChatMessageList({
   loading,
   showToolUsage = true,
   isCompact,
+  studioChromePad = false,
   scrollRef,
   showScrollButton,
   onScroll,
@@ -112,12 +115,16 @@ export function AdminChatMessageList({
   };
 
   return (
-      <div className="relative flex-1 min-h-0 min-w-0 flex flex-col w-full">
+      <div className="relative z-[1] flex-1 min-h-0 min-w-0 flex flex-col w-full">
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className={`scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-h-0 w-full ${
+          className={`scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3 space-y-3 min-h-0 w-full ${
             isCompact ? '' : 'min-h-[320px]'
+          } ${
+            studioChromePad
+              ? 'pt-[3.75rem] pb-[8.5rem] sm:pt-16 sm:pb-36'
+              : ''
           }`}
         >
         {messages.length === 0 && (
@@ -179,7 +186,11 @@ export function AdminChatMessageList({
           <button
             type="button"
             onClick={() => scrollToBottom('smooth')}
-            className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface max-lg:bottom-16"
+            className={`absolute right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface ${
+              studioChromePad
+                ? 'bottom-[7.25rem] sm:bottom-32'
+                : 'bottom-3 max-lg:bottom-16'
+            }`}
             aria-label="Ir al final de la conversación"
             title="Ir abajo"
           >

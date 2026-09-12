@@ -141,7 +141,7 @@ export function AdminChatComposeFooter({
         {...dropProps}
         className={`p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shrink-0 relative z-20 ${
           isStudioCompose
-            ? 'bg-white dark:bg-dark-surface border-t dark:border-dark-border'
+            ? 'studio-glass-chrome border-t'
             : 'border-t dark:border-dark-border bg-gov-gray-50/50 dark:bg-dark-bg/50'
         }`}
       >

@@ -127,7 +127,7 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       <UpdateBanner />
       <header
       role="banner"
-      className="h-16 bg-white border-b border-gov-gray-100 shadow-sm px-4 md:px-6 flex items-center justify-between shrink-0 dark:bg-dark-surface dark:border-dark-border"
+      className="h-16 shrink-0 border-b border-white/40 bg-white/80 px-4 md:px-6 flex items-center justify-between backdrop-blur-xl backdrop-saturate-150 dark:border-white/10 dark:bg-dark-surface/80 supports-[backdrop-filter]:bg-white/65 dark:supports-[backdrop-filter]:bg-dark-surface/65"
     >
       <TopbarLeft
         onMenuClick={handleMenuToggle}

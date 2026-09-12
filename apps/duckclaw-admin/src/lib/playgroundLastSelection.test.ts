@@ -9,23 +9,35 @@ import {
 describe('resolvePlaygroundWorkerId', () => {
   const ids = ['default', 'worker-alpha', 'analytics-worker'];
 
-  it('prefers tenant last worker over server default', () => {
-    expect(
-      resolvePlaygroundWorkerId({
-        initialWorker: '',
-        fromServer: 'default',
-        lastWorker: 'worker-alpha',
-        storedWorker: null,
-        validIds: ids,
-      })
-    ).toBe('worker-alpha');
-  });
-
-  it('prefers tenant last worker over server non-default', () => {
+  it('prefers per-chat server worker over tenant last choice', () => {
     expect(
       resolvePlaygroundWorkerId({
         initialWorker: '',
         fromServer: 'analytics-worker',
+        lastWorker: 'worker-alpha',
+        storedWorker: null,
+        validIds: ids,
+      })
+    ).toBe('analytics-worker');
+  });
+
+  it('prefers per-chat stored worker over tenant last choice', () => {
+    expect(
+      resolvePlaygroundWorkerId({
+        initialWorker: '',
+        fromServer: '',
+        lastWorker: 'worker-alpha',
+        storedWorker: 'analytics-worker',
+        validIds: ids,
+      })
+    ).toBe('analytics-worker');
+  });
+
+  it('seeds from tenant last worker when chat has no preference', () => {
+    expect(
+      resolvePlaygroundWorkerId({
+        initialWorker: '',
+        fromServer: 'default',
         lastWorker: 'worker-alpha',
         storedWorker: null,
         validIds: ids,
@@ -43,6 +55,18 @@ describe('resolvePlaygroundWorkerId', () => {
         validIds: ids,
       })
     ).toBe('analytics-worker');
+  });
+
+  it('URL initialWorker still wins for deep links', () => {
+    expect(
+      resolvePlaygroundWorkerId({
+        initialWorker: 'worker-alpha',
+        fromServer: 'analytics-worker',
+        lastWorker: null,
+        storedWorker: 'analytics-worker',
+        validIds: ids,
+      })
+    ).toBe('worker-alpha');
   });
 });
 

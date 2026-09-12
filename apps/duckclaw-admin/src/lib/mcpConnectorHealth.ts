@@ -28,8 +28,11 @@ export function interpretMcpTestFailure(error: unknown): {
     msg.includes('403') ||
     msg.includes('unauthorized') ||
     msg.includes('invalid token') ||
+    msg.includes('invalid_grant') ||
     msg.includes('expired') ||
-    msg.includes('oauth')
+    msg.includes('oauth') ||
+    msg.includes('session terminated') ||
+    msg.includes('reconectar')
   ) {
     return {
       isAuthFailure: true,

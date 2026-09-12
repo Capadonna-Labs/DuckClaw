@@ -29,6 +29,12 @@ describe('interpretMcpTestFailure', () => {
     const out = interpretMcpTestFailure('HTTP 401 Unauthorized');
     expect(out.isAuthFailure).toBe(true);
   });
+
+  it('treats Session terminated as auth failure (YouTube placeholder MCP)', () => {
+    const out = interpretMcpTestFailure('Session terminated');
+    expect(out.isAuthFailure).toBe(true);
+  });
+
 });
 
 describe('mcpConnectorRowHint', () => {

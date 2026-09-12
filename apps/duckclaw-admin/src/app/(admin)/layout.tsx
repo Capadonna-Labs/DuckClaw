@@ -67,7 +67,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           className={cn(
             'flex-1 max-lg:overscroll-none',
             isWorkspaceRoute
-              ? 'overflow-hidden overscroll-none p-2 lg:p-3'
+              ? 'overflow-hidden overscroll-none p-2 pt-0 lg:p-3 lg:pt-3'
               : 'scrollbar-thin overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-10'
           )}
         >

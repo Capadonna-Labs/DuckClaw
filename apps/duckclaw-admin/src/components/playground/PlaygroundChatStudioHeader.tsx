@@ -31,23 +31,23 @@ export function PlaygroundChatStudioHeader({
       : null;
 
   return (
-    <header className="flex shrink-0 items-center gap-3 border-b border-gov-gray-100 py-3 pl-12 pr-4 sm:pl-14 dark:border-dark-border">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
+    <header className="flex shrink-0 items-center gap-2 border-b border-gov-gray-100 py-2.5 pl-12 pr-[7.5rem] sm:gap-3 sm:py-3 sm:pl-14 sm:pr-4 dark:border-dark-border">
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-center sm:gap-2">
         {onRenameConversation ? (
           <EditableConversationTitle
             value={displayTitle}
             onSave={onRenameConversation}
             variant="studio"
-            className="min-w-0 flex-1"
+            className="min-w-0 w-full sm:flex-1"
           />
         ) : (
-          <h2 className="min-w-0 flex-1 truncate text-base font-medium text-gov-gray-900 dark:text-dark-text">
+          <h2 className="min-w-0 truncate text-sm font-medium text-gov-gray-900 sm:flex-1 sm:text-base dark:text-dark-text">
             {displayTitle}
           </h2>
         )}
         {tokenLabel ? (
           <span
-            className="shrink-0 text-xs tabular-nums text-gov-gray-500 dark:text-dark-muted"
+            className="max-w-full truncate text-[10px] tabular-nums text-gov-gray-500 sm:shrink-0 sm:text-xs dark:text-dark-muted"
             title={
               tokenUsage
                 ? 'Tokens del último turno (igual que gateway logs: Total [P:prompt, C:completion])'

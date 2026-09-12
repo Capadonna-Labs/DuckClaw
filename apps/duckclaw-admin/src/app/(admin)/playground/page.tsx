@@ -805,18 +805,18 @@ export default function PlaygroundPage() {
         >
           <ArrowLeft size={14} />
         </button>
-        <div className="lg:hidden absolute right-3 top-3 z-20 flex items-center gap-2">
+        <div className="lg:hidden absolute right-2 top-2.5 z-20 flex items-center gap-1">
           <Link
             href={
               conv.sessionId
                 ? `/sandbox?tab=files&chat=${encodeURIComponent(conv.sessionId)}`
                 : '/sandbox'
             }
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-2 text-[11px] font-black shadow-sm backdrop-blur border-gov-blue-100 bg-white/90 text-gov-blue-800 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan`}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-gov-blue-100 bg-white/90 text-gov-blue-800 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan"
             aria-label="Abrir sandbox"
+            title="Sandbox"
           >
             <FolderOpen size={14} />
-            <span className="sr-only sm:not-sr-only">Sandbox</span>
           </Link>
           <button
             type="button"
@@ -827,26 +827,26 @@ export default function PlaygroundPage() {
                 return next;
               });
             }}
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-2 text-[11px] font-black shadow-sm backdrop-blur ${
+            className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-sm backdrop-blur ${
               logsPanelOpen
                 ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
                 : 'border-gov-blue-100 bg-white/90 text-gov-blue-800 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan'
             }`}
             aria-pressed={logsPanelOpen}
             aria-label="Logs PM2"
+            title="Logs PM2"
           >
             <Terminal size={14} />
-            <span className="sr-only sm:not-sr-only">Logs</span>
           </button>
           <button
             type="button"
             onClick={() => setPanelOpen((open) => !open)}
-            className="flex items-center gap-1.5 rounded-full border border-gov-blue-100 bg-white/90 px-2.5 py-2 text-[11px] font-black text-gov-blue-800 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan"
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-gov-blue-100 bg-white/90 text-gov-blue-800 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan"
             aria-expanded={panelOpen}
             aria-label={panelToggleTitle}
+            title={panelToggleTitle}
           >
             <Settings2 size={15} aria-hidden />
-            <span className="sr-only sm:not-sr-only">Run settings</span>
           </button>
         </div>
         {conv.bootstrapping || !conv.sessionId ? (

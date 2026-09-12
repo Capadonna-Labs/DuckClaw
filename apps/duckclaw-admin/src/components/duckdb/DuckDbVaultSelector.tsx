@@ -111,7 +111,7 @@ export function DuckDbVaultSelector({ value, onChange, layout = 'stacked' }: Pro
               type="text"
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              placeholder="youtube-data"
+              placeholder="my-data"
               className="mt-0.5 w-full rounded-lg border px-2 py-1 font-mono text-xs dark:border-dark-border dark:bg-dark-bg"
               disabled={creating}
             />

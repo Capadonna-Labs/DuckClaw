@@ -17,7 +17,7 @@ export function shouldFetchChatSuggestions(
 
 /**
  * True si hay sugerencias que mostrar en el dropdown fijo encima del input.
- * Persisten al escribir y durante el siguiente turno hasta que lleguen otras.
+ * Se limpian al enviar un mensaje y se regeneran al terminar la respuesta del worker.
  */
 export function shouldShowSuggestionChips(
   suggestions: string[],
@@ -25,6 +25,15 @@ export function shouldShowSuggestionChips(
   _input?: string
 ): boolean {
   return suggestions.length > 0;
+}
+
+/** Clave estable del último intercambio para saber cuándo regenerar chips. */
+export function suggestionsExchangeKey(
+  chatId: string,
+  userText: string,
+  assistantText: string
+): string {
+  return `${chatId}:${userText}\0${assistantText.slice(0, 500)}`;
 }
 
 /** Último par user→assistant usable para regenerar chips (historial o post-turno). */

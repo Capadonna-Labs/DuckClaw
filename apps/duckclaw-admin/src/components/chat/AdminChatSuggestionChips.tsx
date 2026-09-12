@@ -10,7 +10,7 @@ type AdminChatSuggestionChipsProps = {
   defaultOpen?: boolean;
 };
 
-/** Dropdown fijo "Sugerencias" encima del composer; las tarjetas persisten hasta el próximo turno. */
+/** Dropdown fijo "Sugerencias" encima del composer; se regeneran tras cada respuesta del worker. */
 export function AdminChatSuggestionChips({
   suggestions,
   onPick,

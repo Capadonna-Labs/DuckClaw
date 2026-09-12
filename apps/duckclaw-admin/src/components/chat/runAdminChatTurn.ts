@@ -24,6 +24,7 @@ import {
   artifactImagePreview,
   isLoopProgressHeartbeat,
   shouldFetchChatSuggestions,
+  suggestionsExchangeKey,
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
 import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
@@ -55,6 +56,8 @@ export type RunAdminChatTurnParams = {
   setContextEstimatedTokens: Dispatch<SetStateAction<number | null>>;
   setLoopSchedulePolling: Dispatch<SetStateAction<boolean>>;
   setSuggestions: Dispatch<SetStateAction<string[]>>;
+  /** Ref compartida con el efecto de historial: evita refetch duplicado tras el turno. */
+  suggestionsExchangeKeyRef?: MutableRefObject<string>;
   finalizeCancelledGeneration: () => void;
   clearLoopHistoryReload: () => void;
   scheduleLoopHistoryReload: () => void;
@@ -91,6 +94,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setContextEstimatedTokens,
     setLoopSchedulePolling,
     setSuggestions,
+    suggestionsExchangeKeyRef,
     finalizeCancelledGeneration,
     clearLoopHistoryReload,
     scheduleLoopHistoryReload,
@@ -123,6 +127,8 @@ thinkingStartedAt.current = Date.now();
 setThinkingIdentity({ workerId, swarmSlot: 1 });
 setThinking(true);
 setError(null);
+setSuggestions([]);
+if (suggestionsExchangeKeyRef) suggestionsExchangeKeyRef.current = '';
 setMessages((m) => [
   ...m,
   {
@@ -520,9 +526,18 @@ try {
       })
       .then((r) => {
         const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
-        if (next.length > 0) setSuggestions(next);
+        // Siempre reemplazar: chips nuevas alineadas al turno, o vacío si el LLM falló.
+        setSuggestions(next);
+        if (suggestionsExchangeKeyRef) {
+          suggestionsExchangeKeyRef.current = next.length > 0
+            ? suggestionsExchangeKey(chatId, text, assistantForSuggestions)
+            : '';
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        setSuggestions([]);
+        if (suggestionsExchangeKeyRef) suggestionsExchangeKeyRef.current = '';
+      });
   }
   onConversationActivity?.();
 }

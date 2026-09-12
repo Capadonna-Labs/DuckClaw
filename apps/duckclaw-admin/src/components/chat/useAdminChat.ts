@@ -31,6 +31,7 @@ import {
   readStoredWorker,
   revokeMessageImagePreviews,
   stripThinkingStatusHeartbeats,
+  suggestionsExchangeKey,
   workerStorageKey,
 } from './adminChatPure';
 import { runAdminChatTurn } from './runAdminChatTurn';
@@ -234,16 +235,15 @@ export function useAdminChat({
   }, [chatId]);
 
   /**
-   * Al abrir un chat (o tras reload de historial), pedir chips para el último
-   * intercambio user→assistant. Sin esto, las sugerencias solo existían en la
-   * sesión del turno recién enviado y al reentrar al hilo desaparecían.
+   * Regenerar chips cuando cambia el último intercambio user→assistant
+   * (abrir chat, reload de historial, o turno que no actualizó la ref).
+   * La clave evita refetch duplicado tras un turno live que ya regeneró.
    */
   useEffect(() => {
     if (!enabled || !chatId || loading || historyLoading || thinking) return;
-    if (suggestions.length > 0) return;
     const exchange = lastUserAssistantExchange(messages);
     if (!exchange) return;
-    const key = `${chatId}:${exchange.userText}\0${exchange.assistantText.slice(0, 500)}`;
+    const key = suggestionsExchangeKey(chatId, exchange.userText, exchange.assistantText);
     if (suggestionsExchangeKeyRef.current === key) return;
     suggestionsExchangeKeyRef.current = key;
     let cancelled = false;
@@ -257,10 +257,12 @@ export function useAdminChat({
       .then((r) => {
         if (cancelled) return;
         const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
-        if (next.length > 0) setSuggestions(next);
-        else suggestionsExchangeKeyRef.current = '';
+        setSuggestions(next);
+        if (next.length === 0) suggestionsExchangeKeyRef.current = '';
       })
       .catch(() => {
+        if (cancelled) return;
+        setSuggestions([]);
         suggestionsExchangeKeyRef.current = '';
       });
     return () => {
@@ -273,7 +275,6 @@ export function useAdminChat({
     historyLoading,
     thinking,
     messages,
-    suggestions.length,
     config?.effective_tenant_id,
   ]);
 
@@ -420,6 +421,7 @@ export function useAdminChat({
         setContextEstimatedTokens,
         setLoopSchedulePolling,
         setSuggestions,
+        suggestionsExchangeKeyRef,
         finalizeCancelledGeneration,
         clearLoopHistoryReload,
         scheduleLoopHistoryReload,

@@ -1,4 +1,5 @@
-# CI: tests unitarios, smoke y pipeline singleton (sin deploy)
+# CI (+ CD opcional a VPS cuando hay secrets VPS_*)
+# Docs: docs/deploy/GITHUB_ACTIONS_CD.md
 
 name: CI
 
@@ -57,3 +58,84 @@ jobs:
           DUCKCLAW_DEV_MODE: "1"
           RUN_SINGLETON_PIPELINE_INTEGRATION: "1"
         run: uv run pytest tests/run_singleton_writer_pipeline.py -v -m integration --capture=no
+
+  deploy-vps:
+    name: deploy-vps
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check VPS deploy secrets
+        id: gate
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          if [ -z "${VPS_HOST}" ] || [ -z "${VPS_SSH_KEY}" ]; then
+            echo "::warning::Secrets VPS_HOST / VPS_SSH_KEY no configurados — skip deploy (ver docs/deploy/GITHUB_ACTIONS_CD.md)"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node
+        if: steps.gate.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Enable pnpm
+        if: steps.gate.outputs.skip != 'true'
+        run: corepack enable && corepack prepare pnpm@9.15.0 --activate
+
+      - name: Install admin deps
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: apps/duckclaw-admin
+        run: pnpm install --frozen-lockfile
+
+      - name: Build admin (standalone)
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: apps/duckclaw-admin
+        env:
+          DUCKCLAW_ADMIN_RELAX_BUILD: "1"
+          NEXT_TELEMETRY_DISABLED: "1"
+          NODE_OPTIONS: "--max-old-space-size=4096"
+        run: pnpm run build
+
+      - name: Package standalone tarball
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          chmod +x scripts/ci/package-admin-standalone.sh scripts/ci/deploy-vps.sh
+          bash scripts/ci/package-admin-standalone.sh dist/admin-standalone.tgz
+          ls -lh dist/admin-standalone.tgz
+
+      - name: Write SSH key
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          umask 077
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/vps_deploy
+          # Accept keys that were pasted without trailing newline
+          chmod 600 ~/.ssh/vps_deploy
+          ssh-keygen -y -f ~/.ssh/vps_deploy >/dev/null
+
+      - name: Deploy to VPS
+        if: steps.gate.outputs.skip != 'true'
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PATH: ${{ secrets.VPS_PATH }}
+          VPS_SSH_KEY_FILE: ${{ runner.temp }}/unused
+        run: |
+          export VPS_USER="${VPS_USER:-root}"
+          export VPS_PATH="${VPS_PATH:-/root/duckclaw}"
+          export VPS_SSH_KEY_FILE="$HOME/.ssh/vps_deploy"
+          export ADMIN_STANDALONE_TGZ="$GITHUB_WORKSPACE/dist/admin-standalone.tgz"
+          bash scripts/ci/deploy-vps.sh

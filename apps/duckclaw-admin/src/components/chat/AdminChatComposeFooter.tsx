@@ -24,8 +24,6 @@ export type AdminChatComposeFooterProps = {
   composeChips?: ReactNode;
   suggestions?: string[];
   onPickSuggestion?: (text: string) => void | Promise<void>;
-  onRefreshSuggestions?: () => void | Promise<void>;
-  suggestionsRefreshing?: boolean;
   input: string;
   setInput: (value: string) => void;
   inputRef: RefObject<HTMLTextAreaElement>;
@@ -101,8 +99,6 @@ export function AdminChatComposeFooter({
   composeChips,
   suggestions = [],
   onPickSuggestion,
-  onRefreshSuggestions,
-  suggestionsRefreshing = false,
   input,
   setInput,
   inputRef,
@@ -195,8 +191,6 @@ export function AdminChatComposeFooter({
               <AdminChatSuggestionChips
                 suggestions={suggestions}
                 onPick={(text) => void onPickSuggestion?.(text)}
-                onRefresh={onRefreshSuggestions}
-                refreshBusy={suggestionsRefreshing}
               />
             </div>
           ) : null}
@@ -300,8 +294,6 @@ export function AdminChatComposeFooter({
                 <AdminChatSuggestionChips
                   suggestions={suggestions}
                   onPick={(text) => void onPickSuggestion?.(text)}
-                  onRefresh={onRefreshSuggestions}
-                  refreshBusy={suggestionsRefreshing}
                 />
               </div>
             ) : null}

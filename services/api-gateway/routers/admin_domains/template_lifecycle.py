@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 import shutil
 from pathlib import Path
@@ -278,8 +279,11 @@ async def list_templates_impl(
 ) -> dict[str, Any]:
     from core.admin_identity import list_templates_payload, open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        items = list_templates_payload(db, actor_email=actor, include_inactive=include_inactive)
+    def _sync_list_templates() -> list[dict[str, Any]]:
+        with open_gateway_db(read_only=True) as db:
+            return list_templates_payload(db, actor_email=actor, include_inactive=include_inactive)
+
+    items = await asyncio.to_thread(_sync_list_templates)
     return {"templates": items}
 
 
@@ -290,8 +294,11 @@ async def get_template_impl(
 ) -> dict[str, Any]:
     from core.admin_identity import catalog_template_detail, open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        detail = catalog_template_detail(db, actor_email=actor, worker_id=worker_id)
+    def _sync_load_template_detail() -> dict[str, Any] | None:
+        with open_gateway_db(read_only=True) as db:
+            return catalog_template_detail(db, actor_email=actor, worker_id=worker_id)
+
+    detail = await asyncio.to_thread(_sync_load_template_detail)
     if detail is None:
         raise problem(404, "Plantilla no encontrada o no asignada al catálogo", worker_id)
     if not include_content:

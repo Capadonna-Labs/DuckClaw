@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import re
@@ -79,15 +80,19 @@ async def admin_agent_card(
     worker_id: str,
     actor: str = Depends(actor_from_header),
 ) -> JSONResponse:
-    tenant_id, _cat = _resolve_worker_access(worker_id, actor)
+    tenant_id, _cat = await asyncio.to_thread(_resolve_worker_access, worker_id, actor)
     wid = _sanitize_worker_id(worker_id)
-    with open_gateway_db(read_only=True) as db:
-        try:
-            card = build_a2a_agent_card_from_db(db, wid, tenant_id=tenant_id)
-        except FileNotFoundError as exc:
-            raise problem(404, "Worker no encontrado", str(exc)) from exc
-        except ValueError as exc:
-            raise problem(400, "Agent card inválida", str(exc)) from exc
+
+    def _sync_build_agent_card() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            try:
+                return build_a2a_agent_card_from_db(db, wid, tenant_id=tenant_id)
+            except FileNotFoundError as exc:
+                raise problem(404, "Worker no encontrado", str(exc)) from exc
+            except ValueError as exc:
+                raise problem(400, "Agent card inválida", str(exc)) from exc
+
+    card = await asyncio.to_thread(_sync_build_agent_card)
     return JSONResponse(
         content=card,
         headers={
@@ -102,15 +107,19 @@ async def download_spawn_package(
     worker_id: str,
     actor: str = Depends(actor_from_header),
 ) -> StreamingResponse:
-    tenant_id, _cat = _resolve_worker_access(worker_id, actor)
+    tenant_id, _cat = await asyncio.to_thread(_resolve_worker_access, worker_id, actor)
     wid = _sanitize_worker_id(worker_id)
-    with open_gateway_db(read_only=True) as db:
-        try:
-            data = build_spawn_package_bytes(db, wid, tenant_id=tenant_id)
-        except ValueError as exc:
-            raise problem(403, "Export bloqueado", str(exc)) from exc
-        except FileNotFoundError as exc:
-            raise problem(404, "Worker no encontrado", str(exc)) from exc
+
+    def _sync_build_spawn_package() -> bytes:
+        with open_gateway_db(read_only=True) as db:
+            try:
+                return build_spawn_package_bytes(db, wid, tenant_id=tenant_id)
+            except ValueError as exc:
+                raise problem(403, "Export bloqueado", str(exc)) from exc
+            except FileNotFoundError as exc:
+                raise problem(404, "Worker no encontrado", str(exc)) from exc
+
+    data = await asyncio.to_thread(_sync_build_spawn_package)
     _admin_audit("spawn_export", wid, "spawn package downloaded", actor=actor)
     return StreamingResponse(
         io.BytesIO(data),
@@ -128,17 +137,21 @@ async def patch_a2a_discoverable(
     body: A2aDiscoverableBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    tenant_id, cat = _resolve_worker_access(worker_id, actor)
+    tenant_id, cat = await asyncio.to_thread(_resolve_worker_access, worker_id, actor)
     wid = _sanitize_worker_id(worker_id)
     if not cat and wid == "default":
         raise problem(400, "default worker no está en catálogo", wid)
-    with open_gateway_db(read_only=False) as db:
-        cat = get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=wid)
-        if not cat:
-            raise problem(404, "Worker no encontrado", wid)
-        set_worker_a2a_discoverable(
-            db, worker_uid=str(cat["worker_uid"]), discoverable=body.discoverable
-        )
+
+    def _sync_set_a2a_discoverable() -> None:
+        with open_gateway_db(read_only=False) as db:
+            cat = get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=wid)
+            if not cat:
+                raise problem(404, "Worker no encontrado", wid)
+            set_worker_a2a_discoverable(
+                db, worker_uid=str(cat["worker_uid"]), discoverable=body.discoverable
+            )
+
+    await asyncio.to_thread(_sync_set_a2a_discoverable)
     _admin_audit(
         "a2a_discoverable",
         wid,
@@ -158,8 +171,9 @@ async def preview_spawn_package(
     if not raw:
         raise problem(400, "Archivo vacío", "spawn-package")
     try:
+        available_tools = await asyncio.to_thread(_runtime_tool_names)
         analysis, manifest, _files = analyze_spawn_package_from_bytes(
-            raw, available_tools=_runtime_tool_names()
+            raw, available_tools=available_tools
         )
     except ValueError as exc:
         raise problem(400, "Paquete inválido", str(exc)) from exc
@@ -183,8 +197,9 @@ async def import_spawn_package(
         raise problem(400, "options_json inválido", str(exc)) from exc
 
     try:
+        available_tools = await asyncio.to_thread(_runtime_tool_names)
         analysis, manifest, files = analyze_spawn_package_from_bytes(
-            raw, available_tools=_runtime_tool_names()
+            raw, available_tools=available_tools
         )
     except ValueError as exc:
         raise problem(400, "Paquete inválido", str(exc)) from exc
@@ -205,16 +220,20 @@ async def import_spawn_package(
         )
 
     actor_email = effective_actor_email(actor)
-    with open_gateway_db(read_only=False) as db:
-        profile = ensure_profile_for_user(db, email=actor_email)
-        result = import_spawn_package_to_catalog(
-            db,
-            owner_email=profile["email"],
-            manifest=manifest,
-            files=files,
-            worker_id_override=opts.worker_id_override,
-            force_read_only=True,
-        )
+
+    def _sync_import_spawn_package() -> dict[str, Any]:
+        with open_gateway_db(read_only=False) as db:
+            profile = ensure_profile_for_user(db, email=actor_email)
+            return import_spawn_package_to_catalog(
+                db,
+                owner_email=profile["email"],
+                manifest=manifest,
+                files=files,
+                worker_id_override=opts.worker_id_override,
+                force_read_only=True,
+            )
+
+    result = await asyncio.to_thread(_sync_import_spawn_package)
 
     _admin_audit(
         "spawn_import",

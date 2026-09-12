@@ -284,6 +284,80 @@ fn dev_sidecar_enabled() -> bool {
 
 
 
+#[cfg(windows)]
+
+fn backend_process_running() -> bool {
+
+    use std::os::windows::process::CommandExt;
+
+    let Ok(out) = Command::new("tasklist")
+
+        .args(["/FI", "IMAGENAME eq duckclaw_backend.exe", "/FO", "CSV", "/NH"])
+
+        .creation_flags(CREATE_NO_WINDOW)
+
+        .output()
+
+    else {
+
+        return false;
+
+    };
+
+    String::from_utf8_lossy(&out.stdout)
+
+        .to_lowercase()
+
+        .contains("duckclaw_backend.exe")
+
+}
+
+
+
+// ponytail: a stale sidecar from a previous app instance (still holding the DuckDB
+
+// write lock in single-process/inline-writes mode) makes the freshly spawned one hang
+
+// forever trying to open the same file — kill and wait for it to actually exit first.
+
+#[cfg(windows)]
+
+fn kill_stray_backend_before_spawn() {
+
+    use std::os::windows::process::CommandExt;
+
+    if !backend_process_running() {
+
+        return;
+
+    }
+
+    let _ = Command::new("taskkill")
+
+        .args(["/F", "/IM", "duckclaw_backend.exe"])
+
+        .creation_flags(CREATE_NO_WINDOW)
+
+        .status();
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+
+    while Instant::now() < deadline && backend_process_running() {
+
+        std::thread::sleep(Duration::from_millis(300));
+
+    }
+
+}
+
+
+
+#[cfg(not(windows))]
+
+fn kill_stray_backend_before_spawn() {}
+
+
+
 fn kill_desktop_processes(state: &DesktopState) {
 
     if let Ok(mut guard) = state.0.lock() {
@@ -529,6 +603,8 @@ pub fn run() {
             {
 
                 let desktop_env = read_desktop_env(Duration::from_secs(30));
+
+                kill_stray_backend_before_spawn();
 
                 let backend_child = spawn_backend(app.handle(), &desktop_env)?;
 

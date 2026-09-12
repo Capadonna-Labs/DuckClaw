@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -165,16 +166,20 @@ async def list_prompt_policies(
             clauses.append("active = true")
             clauses.append("status = 'active'")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-        with open_gateway_db(read_only=True) as db:
-            rows = _fetchall(
-                db.execute(
-                    "SELECT policy_id, policy_type, policy_name, version, status, content, checksum, "
-                    "metadata_json, active, created_at, updated_at "
-                    f"FROM main.prompt_policy_registry {where} "
-                    "ORDER BY policy_type ASC, policy_name ASC, version DESC",
-                    params,
+
+        def _sync_list_prompt_policies() -> list[Any]:
+            with open_gateway_db(read_only=True) as db:
+                return _fetchall(
+                    db.execute(
+                        "SELECT policy_id, policy_type, policy_name, version, status, content, checksum, "
+                        "metadata_json, active, created_at, updated_at "
+                        f"FROM main.prompt_policy_registry {where} "
+                        "ORDER BY policy_type ASC, policy_name ASC, version DESC",
+                        params,
+                    )
                 )
-            )
+
+        rows = await asyncio.to_thread(_sync_list_prompt_policies)
     except ValueError as exc:
         raise _problem(400, str(exc), "prompt_policy") from exc
     except Exception as exc:
@@ -209,27 +214,32 @@ async def prompt_policy_health(
     from duckclaw.workers.factory import list_workers
 
     try:
-        with open_gateway_db(read_only=True) as db:
-            requested_workers = [
-                str(item or "").strip()
-                for item in (worker_id or [])
-                if str(item or "").strip()
-            ]
-            if requested_workers:
-                workers = requested_workers
-            elif actor and "@" in actor:
-                workers = [
-                    str(item.get("id") or item.get("worker_id") or "").strip()
-                    for item in list_visible_workers_for_actor(db, actor_email=actor)
-                    if str(item.get("id") or item.get("worker_id") or "").strip()
+
+        def _sync_load_prompt_policy_health() -> tuple[list[Any], Any]:
+            with open_gateway_db(read_only=True) as db:
+                requested_workers = [
+                    str(item or "").strip()
+                    for item in (worker_id or [])
+                    if str(item or "").strip()
                 ]
-            else:
-                workers = list_workers(db=db)
-            requirements = prompt_policy_requirements_for_workers(
-                workers,
-                include_framework=include_framework,
-            )
-            classification = classify_prompt_policy_health(db, requirements)
+                if requested_workers:
+                    workers = requested_workers
+                elif actor and "@" in actor:
+                    workers = [
+                        str(item.get("id") or item.get("worker_id") or "").strip()
+                        for item in list_visible_workers_for_actor(db, actor_email=actor)
+                        if str(item.get("id") or item.get("worker_id") or "").strip()
+                    ]
+                else:
+                    workers = list_workers(db=db)
+                requirements = prompt_policy_requirements_for_workers(
+                    workers,
+                    include_framework=include_framework,
+                )
+                classification = classify_prompt_policy_health(db, requirements)
+                return requirements, classification
+
+        requirements, classification = await asyncio.to_thread(_sync_load_prompt_policy_health)
     except Exception as exc:
         raise _problem(
             400,

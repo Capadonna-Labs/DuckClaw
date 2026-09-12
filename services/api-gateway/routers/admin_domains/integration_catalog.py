@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -17,10 +18,14 @@ router = APIRouter(prefix="/integrations", tags=["admin-integrations"])
 @router.get("/catalog", dependencies=[Depends(require_admin_key)])
 async def get_integration_catalog(actor: str = Depends(actor_from_header)) -> dict[str, Any]:
     """Integration secrets catalog with effective configured status for the actor tenant."""
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        return integration_catalog_api_payload(
-            db,
-            tenant_id=str(profile.get("tenant_id") or "default"),
-            actor_email=str(profile.get("email") or actor),
-        )
+
+    def _sync_load_integration_catalog() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            return integration_catalog_api_payload(
+                db,
+                tenant_id=str(profile.get("tenant_id") or "default"),
+                actor_email=str(profile.get("email") or actor),
+            )
+
+    return await asyncio.to_thread(_sync_load_integration_catalog)

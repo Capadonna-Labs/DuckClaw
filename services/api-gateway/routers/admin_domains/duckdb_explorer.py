@@ -248,7 +248,7 @@ async def duckdb_list_tables(
     from core.admin_duckdb_readonly import fetch_table_catalog
 
     try:
-        con, resolved, scope = _duckdb_readonly_session(vault_path, actor=actor)
+        con, resolved, scope = await asyncio.to_thread(_duckdb_readonly_session, vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
@@ -286,7 +286,7 @@ async def duckdb_run_query(
         raise _problem(400, "Consulta no permitida", str(exc)) from exc
 
     try:
-        con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+        con, resolved, scope = await asyncio.to_thread(_duckdb_readonly_session, body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
@@ -338,7 +338,7 @@ async def duckdb_legacy_schemas(
     from core.admin_duckdb_readonly import fetch_table_catalog
 
     try:
-        con, resolved, scope = _duckdb_readonly_session(vault_path, actor=actor)
+        con, resolved, scope = await asyncio.to_thread(_duckdb_readonly_session, vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
@@ -346,11 +346,13 @@ async def duckdb_legacy_schemas(
     try:
         catalog = fetch_table_catalog(con)
         schemas = catalog.get("schemas") or {}
-        candidates = _duckdb_explorer_legacy_schema_names(
+        candidates = await asyncio.to_thread(
+            _duckdb_explorer_legacy_schema_names,
             tenant_id=scope["tenant_id"],
             actor_email=scope["actor_email"],
         )
-        main_table_candidates = _duckdb_explorer_legacy_main_table_names(
+        main_table_candidates = await asyncio.to_thread(
+            _duckdb_explorer_legacy_main_table_names,
             tenant_id=scope["tenant_id"],
             actor_email=scope["actor_email"],
         )
@@ -389,17 +391,19 @@ async def duckdb_drop_legacy_schemas(
     if body.confirm != _DROP_LEGACY_SCHEMAS_CONFIRM:
         raise _problem(400, "Confirmación requerida", _DROP_LEGACY_SCHEMAS_CONFIRM)
     try:
-        con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+        con, resolved, scope = await asyncio.to_thread(_duckdb_readonly_session, body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
         raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
-        candidates = _duckdb_explorer_legacy_schema_names(
+        candidates = await asyncio.to_thread(
+            _duckdb_explorer_legacy_schema_names,
             tenant_id=scope["tenant_id"],
             actor_email=scope["actor_email"],
         )
-        main_table_candidates = _duckdb_explorer_legacy_main_table_names(
+        main_table_candidates = await asyncio.to_thread(
+            _duckdb_explorer_legacy_main_table_names,
             tenant_id=scope["tenant_id"],
             actor_email=scope["actor_email"],
         )
@@ -481,7 +485,7 @@ async def duckdb_pgq_graph(
     from core.admin_duckdb_readonly import fetch_pgq_graph
 
     try:
-        con, resolved, _scope = _duckdb_readonly_session(vault_path, actor=actor)
+        con, resolved, _scope = await asyncio.to_thread(_duckdb_readonly_session, vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
@@ -502,7 +506,7 @@ async def duckdb_pgq_bootstrap(
     from duckclaw.graphs.graph_rag import ensure_graph_rag_schema
 
     try:
-        db, resolved, scope = _duckdb_writable_session(body.vault_path, actor=actor)
+        db, resolved, scope = await asyncio.to_thread(_duckdb_writable_session, body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
@@ -554,7 +558,7 @@ async def duckdb_pgq_rebuild(
     )
 
     try:
-        _con, resolved, scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+        _con, resolved, scope = await asyncio.to_thread(_duckdb_readonly_session, body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
@@ -624,7 +628,7 @@ async def duckdb_pgq_graph_html(
     from core.pgq_graph_cache import memory_graph_html_path
 
     try:
-        _con, resolved, _scope = _duckdb_readonly_session(vault_path, actor=actor)
+        _con, resolved, _scope = await asyncio.to_thread(_duckdb_readonly_session, vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
@@ -655,7 +659,7 @@ async def duckdb_vector_search(
     )
 
     try:
-        con, resolved, _scope = _duckdb_readonly_session(body.vault_path, actor=actor)
+        con, resolved, _scope = await asyncio.to_thread(_duckdb_readonly_session, body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:

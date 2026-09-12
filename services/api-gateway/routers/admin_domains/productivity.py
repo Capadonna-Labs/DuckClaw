@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -53,89 +54,92 @@ async def list_productivity_artifacts(
 
     cap = max(1, min(int(limit), 200))
     lane_f = (lane or "").strip().lower()
-    items: list[dict[str, Any]] = []
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        tid = str(profile["tenant_id"])
-        email = str(profile["email"])
-        try:
-            params: list[Any] = [tid, email]
-            lane_clause = ""
-            if lane_f in ("storage", "vault", "report"):
-                lane_clause = " AND lane = ?"
-                params.append(lane_f)
-            params.append(cap)
-            rows = _sql_fetchall(
-                db,
-                f"""
-                SELECT artifact_id, lane, title, filename, uri, source_kind, source_ref,
-                       mime, byte_size, updated_at
-                FROM main.admin_productivity_artifacts
-                WHERE tenant_id = ?
-                  AND active = true
-                  AND (
-                    lower(owner_email) = lower(?)
-                    OR lower(owner_email) = 'system'
-                  )
-                  {lane_clause}
-                ORDER BY updated_at DESC
-                LIMIT ?
-                """,
-                params,
-            )
-            for row in rows:
-                items.append(
-                    {
-                        "artifact_id": str(row[0]),
-                        "lane": str(row[1]),
-                        "title": str(row[2]),
-                        "filename": str(row[3] or ""),
-                        "uri": str(row[4] or ""),
-                        "source_kind": str(row[5] or ""),
-                        "source_ref": str(row[6] or ""),
-                        "mime": str(row[7] or ""),
-                        "byte_size": int(row[8] or 0),
-                        "updated_at": str(row[9] or ""),
-                    }
-                )
-        except Exception:
-            # Migración aún no aplicada
-            items = []
-
-        # Informes activos sin fila en índice (legacy) — lean: sin preview_html
-        if lane_f in ("", "report"):
-            known_refs = {i["source_ref"] for i in items if i["lane"] == "report"}
+    def _sync_load_productivity_artifacts() -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            tid = str(profile["tenant_id"])
+            email = str(profile["email"])
             try:
-                from duckclaw.report_engine.admin_report_read import list_report_instances
-
-                reports = list_report_instances(
-                    db, tenant_id=tid, actor_email=email, limit=cap, lean=True
+                params: list[Any] = [tid, email]
+                lane_clause = ""
+                if lane_f in ("storage", "vault", "report"):
+                    lane_clause = " AND lane = ?"
+                    params.append(lane_f)
+                params.append(cap)
+                rows = _sql_fetchall(
+                    db,
+                    f"""
+                    SELECT artifact_id, lane, title, filename, uri, source_kind, source_ref,
+                           mime, byte_size, updated_at
+                    FROM main.admin_productivity_artifacts
+                    WHERE tenant_id = ?
+                      AND active = true
+                      AND (
+                        lower(owner_email) = lower(?)
+                        OR lower(owner_email) = 'system'
+                      )
+                      {lane_clause}
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    params,
                 )
-                for r in reports:
-                    iid = str(r.get("instance_id") or "")
-                    if not iid or iid in known_refs:
-                        continue
+                for row in rows:
                     items.append(
                         {
-                            "artifact_id": f"prep_{iid}",
-                            "lane": "report",
-                            "title": str(r.get("title") or iid),
-                            "filename": "",
-                            "uri": str(r.get("rendered_docx_uri") or ""),
-                            "source_kind": "report_engine",
-                            "source_ref": iid,
-                            "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                            "byte_size": 0,
-                            "updated_at": str(r.get("updated_at") or ""),
-                            "progress_percent": (r.get("progress") or {}).get(
-                                "completion_percent"
-                            ),
+                            "artifact_id": str(row[0]),
+                            "lane": str(row[1]),
+                            "title": str(row[2]),
+                            "filename": str(row[3] or ""),
+                            "uri": str(row[4] or ""),
+                            "source_kind": str(row[5] or ""),
+                            "source_ref": str(row[6] or ""),
+                            "mime": str(row[7] or ""),
+                            "byte_size": int(row[8] or 0),
+                            "updated_at": str(row[9] or ""),
                         }
                     )
             except Exception:
-                pass
+                # Migración aún no aplicada
+                items = []
 
+            # Informes activos sin fila en índice (legacy) — lean: sin preview_html
+            if lane_f in ("", "report"):
+                known_refs = {i["source_ref"] for i in items if i["lane"] == "report"}
+                try:
+                    from duckclaw.report_engine.admin_report_read import list_report_instances
+
+                    reports = list_report_instances(
+                        db, tenant_id=tid, actor_email=email, limit=cap, lean=True
+                    )
+                    for r in reports:
+                        iid = str(r.get("instance_id") or "")
+                        if not iid or iid in known_refs:
+                            continue
+                        items.append(
+                            {
+                                "artifact_id": f"prep_{iid}",
+                                "lane": "report",
+                                "title": str(r.get("title") or iid),
+                                "filename": "",
+                                "uri": str(r.get("rendered_docx_uri") or ""),
+                                "source_kind": "report_engine",
+                                "source_ref": iid,
+                                "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                                "byte_size": 0,
+                                "updated_at": str(r.get("updated_at") or ""),
+                                "progress_percent": (r.get("progress") or {}).get(
+                                    "completion_percent"
+                                ),
+                            }
+                        )
+                except Exception:
+                    pass
+        return items
+
+    items = await asyncio.to_thread(_sync_load_productivity_artifacts)
     items.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
     return {"artifacts": items[:cap], "count": len(items[:cap])}
 
@@ -162,16 +166,19 @@ async def delete_productivity_artifact(
         )
         from core.admin_identity import open_gateway_db
 
-        with open_gateway_db(read_only=True) as db:
-            instance = get_report_instance(
-                db, instance_id=instance_id, tenant_id=profile["tenant_id"]
-            )
-            if not instance:
-                raise problem(404, "Informe no encontrado", "report_instance")
-            if not actor_can_access_instance(
-                db, instance=instance, actor_email=profile["email"]
-            ):
-                raise HTTPException(status_code=403, detail="Acceso denegado")
+        def _sync_check_report_access() -> None:
+            with open_gateway_db(read_only=True) as db:
+                instance = get_report_instance(
+                    db, instance_id=instance_id, tenant_id=profile["tenant_id"]
+                )
+                if not instance:
+                    raise problem(404, "Informe no encontrado", "report_instance")
+                if not actor_can_access_instance(
+                    db, instance=instance, actor_email=profile["email"]
+                ):
+                    raise HTTPException(status_code=403, detail="Acceso denegado")
+
+        await asyncio.to_thread(_sync_check_report_access)
         task_id = _enqueue(
             {
                 "command_type": "soft_delete_report_instance",
@@ -185,23 +192,26 @@ async def delete_productivity_artifact(
 
     from core.admin_identity import open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        rows = _sql_fetchall(
-            db,
-            """
-            SELECT artifact_id, owner_email, lane
-            FROM main.admin_productivity_artifacts
-            WHERE artifact_id = ? AND tenant_id = ? AND active = true
-            LIMIT 1
-            """,
-            [aid, profile["tenant_id"]],
-        )
-        if not rows:
-            raise problem(404, "Artefacto no encontrado", "productivity_artifact")
-        owner = str(rows[0][1] or "").strip().lower()
-        if owner not in (profile["email"].strip().lower(), "system", ""):
-            raise HTTPException(status_code=403, detail="Solo el propietario puede eliminar")
-        lane = str(rows[0][2] or "storage")
+    def _sync_check_artifact_owner() -> str:
+        with open_gateway_db(read_only=True) as db:
+            rows = _sql_fetchall(
+                db,
+                """
+                SELECT artifact_id, owner_email, lane
+                FROM main.admin_productivity_artifacts
+                WHERE artifact_id = ? AND tenant_id = ? AND active = true
+                LIMIT 1
+                """,
+                [aid, profile["tenant_id"]],
+            )
+            if not rows:
+                raise problem(404, "Artefacto no encontrado", "productivity_artifact")
+            owner = str(rows[0][1] or "").strip().lower()
+            if owner not in (profile["email"].strip().lower(), "system", ""):
+                raise HTTPException(status_code=403, detail="Solo el propietario puede eliminar")
+            return str(rows[0][2] or "storage")
+
+    lane = await asyncio.to_thread(_sync_check_artifact_owner)
 
     task_id = _enqueue(
         {
@@ -239,28 +249,32 @@ async def promote_artifact_to_vault(
 
     from core.admin_identity import open_gateway_db
 
-    with open_gateway_db(read_only=True) as db:
-        rows = _sql_fetchall(
-            db,
-            """
-            SELECT artifact_id, owner_email, lane, uri, title, filename
-            FROM main.admin_productivity_artifacts
-            WHERE artifact_id = ? AND tenant_id = ? AND active = true
-            LIMIT 1
-            """,
-            [aid, profile["tenant_id"]],
-        )
-        if not rows:
-            raise problem(404, "Artefacto no encontrado", "productivity_artifact")
-        owner = str(rows[0][1] or "").strip().lower()
-        if owner not in (profile["email"].strip().lower(), "system", ""):
-            raise HTTPException(status_code=403, detail="Solo el propietario puede promover")
-        lane = str(rows[0][2] or "")
-        if lane != "storage":
-            raise problem(400, "Solo se pueden promover artefactos lane=storage", "productivity_artifact")
-        uri = str(rows[0][3] or "")
-        title = str(rows[0][4] or "")
-        filename = str(rows[0][5] or "")
+    def _sync_check_promote_owner() -> tuple[str, str, str]:
+        with open_gateway_db(read_only=True) as db:
+            rows = _sql_fetchall(
+                db,
+                """
+                SELECT artifact_id, owner_email, lane, uri, title, filename
+                FROM main.admin_productivity_artifacts
+                WHERE artifact_id = ? AND tenant_id = ? AND active = true
+                LIMIT 1
+                """,
+                [aid, profile["tenant_id"]],
+            )
+            if not rows:
+                raise problem(404, "Artefacto no encontrado", "productivity_artifact")
+            owner = str(rows[0][1] or "").strip().lower()
+            if owner not in (profile["email"].strip().lower(), "system", ""):
+                raise HTTPException(status_code=403, detail="Solo el propietario puede promover")
+            lane = str(rows[0][2] or "")
+            if lane != "storage":
+                raise problem(400, "Solo se pueden promover artefactos lane=storage", "productivity_artifact")
+            uri = str(rows[0][3] or "")
+            title = str(rows[0][4] or "")
+            filename = str(rows[0][5] or "")
+        return uri, title, filename
+
+    uri, title, filename = await asyncio.to_thread(_sync_check_promote_owner)
 
     try:
         result = promote_storage_file_to_vault(

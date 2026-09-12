@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from pathlib import Path
@@ -204,10 +205,15 @@ async def catalog_worker_quality_signals(
     wid = str(worker_id or "").strip()
     if not wid:
         raise problem(400, "worker_id requerido", worker_id)
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        tenant_id = str(profile["tenant_id"] or "default").strip() or "default"
-        options = list_worker_quality_signal_options(db, tenant_id=tenant_id, worker_id=wid)
+
+    def _sync_load_quality_signals() -> tuple[str, list[Any]]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            tenant_id = str(profile["tenant_id"] or "default").strip() or "default"
+            options = list_worker_quality_signal_options(db, tenant_id=tenant_id, worker_id=wid)
+        return tenant_id, options
+
+    tenant_id, options = await asyncio.to_thread(_sync_load_quality_signals)
     return {
         "tenant_id": tenant_id,
         "worker_id": wid,
@@ -245,7 +251,7 @@ async def catalog_topologies() -> dict[str, Any]:
 
 @router.get("/mcp", dependencies=[Depends(require_admin_key)])
 async def catalog_mcp() -> dict[str, Any]:
-    mcp_port_setting = mcp_port_runtime_setting()
+    mcp_port_setting = await asyncio.to_thread(mcp_port_runtime_setting)
     mcp_port = mcp_port_setting["value"]
     duckclaw_tools = [
         {

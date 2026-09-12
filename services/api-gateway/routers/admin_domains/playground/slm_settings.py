@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -226,7 +227,8 @@ async def resolved_slm_for_playground_async(
     tenant_id: str,
     repo_root: Path,
 ) -> dict[str, Any]:
-    payload = resolved_slm_for_playground(
+    payload = await asyncio.to_thread(
+        resolved_slm_for_playground,
         chat_id=chat_id,
         tenant_id=tenant_id,
         repo_root=repo_root,

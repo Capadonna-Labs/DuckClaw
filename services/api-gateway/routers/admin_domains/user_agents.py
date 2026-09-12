@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from typing import Any
@@ -107,7 +108,7 @@ async def create_user_agent(
     body: UserAgentCreateBody,
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
-    profile = _actor_profile(actor)
+    profile = await asyncio.to_thread(_actor_profile, actor)
     worker_id = sanitize_catalog_worker_id(sanitize_worker_id(body.worker_id))
     worker_uid = f"wrk_{uuid.uuid4().hex}"
     display_name = (body.display_name or worker_id).strip()
@@ -132,7 +133,9 @@ async def create_user_agent(
     except ValueError as exc:
         raise _problem(400, str(exc), worker_id) from exc
 
-    agent = _public_agent_from_db(str(profile.get("email") or actor), worker_id) or _fallback_agent(
+    agent = await asyncio.to_thread(
+        _public_agent_from_db, str(profile.get("email") or actor), worker_id
+    ) or _fallback_agent(
         profile,
         worker_id=worker_id,
         display_name=display_name,

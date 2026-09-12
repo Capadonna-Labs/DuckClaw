@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -162,17 +163,20 @@ async def list_kanban_cards(
     from core.admin_identity import open_gateway_db
     from duckclaw.admin_user_profiles import ensure_profile_for_user
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        rows = _fetchall(
-            db.execute(
-                "SELECT card_id, title, description, status, assignee_email, tags_json, created_at, updated_at "
-                "FROM main.admin_kanban_cards "
-                "WHERE tenant_id = ? AND actor_email = ? AND status <> 'cancelled' "
-                "ORDER BY sort_order ASC, updated_at DESC",
-                [profile["tenant_id"], profile["email"]],
+    def _sync_list_kanban_cards() -> list[Any]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            return _fetchall(
+                db.execute(
+                    "SELECT card_id, title, description, status, assignee_email, tags_json, created_at, updated_at "
+                    "FROM main.admin_kanban_cards "
+                    "WHERE tenant_id = ? AND actor_email = ? AND status <> 'cancelled' "
+                    "ORDER BY sort_order ASC, updated_at DESC",
+                    [profile["tenant_id"], profile["email"]],
+                )
             )
-        )
+
+    rows = await asyncio.to_thread(_sync_list_kanban_cards)
     return {"cards": [_kanban_card_from_row(row) for row in rows]}
 
 
@@ -185,8 +189,11 @@ async def create_kanban_card(
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.write_commands import UpsertKanbanCardCommand
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
+    def _sync_ensure_profile() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return ensure_profile_for_user(db, email=actor)
+
+    profile = await asyncio.to_thread(_sync_ensure_profile)
 
     try:
         status_value = _kanban_db_status(body.status)
@@ -227,14 +234,18 @@ async def update_kanban_card(
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.write_commands import UpsertKanbanCardCommand
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
-        existing = _kanban_existing_card(
-            db,
-            card_id=body.id,
-            tenant_id=profile["tenant_id"],
-            actor_email=profile["email"],
-        )
+    def _sync_load_profile_and_card() -> tuple[dict[str, Any], dict[str, Any] | None]:
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+            existing = _kanban_existing_card(
+                db,
+                card_id=body.id,
+                tenant_id=profile["tenant_id"],
+                actor_email=profile["email"],
+            )
+        return profile, existing
+
+    profile, existing = await asyncio.to_thread(_sync_load_profile_and_card)
     if not existing:
         raise _problem(404, "Tarjeta no encontrada", body.id)
 
@@ -279,8 +290,11 @@ async def delete_kanban_card(
     from duckclaw.admin_user_profiles import ensure_profile_for_user
     from duckclaw.write_commands import DeleteKanbanCardCommand
 
-    with open_gateway_db(read_only=True) as db:
-        profile = ensure_profile_for_user(db, email=actor)
+    def _sync_ensure_profile() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return ensure_profile_for_user(db, email=actor)
+
+    profile = await asyncio.to_thread(_sync_ensure_profile)
 
     try:
         command = DeleteKanbanCardCommand(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from typing import Any
 
@@ -69,17 +70,21 @@ async def post_chat_suggestions(body: ChatSuggestionsBody) -> dict[str, Any]:
             "recommended_index": 0,
             "suggestions_auto_enabled": auto,
         }
-    db = DuckClaw(gw, read_only=True)
-    try:
-        payload = generate_followup_suggestions(
-            db,
-            body.chat_id,
-            tenant_id=body.tenant_id,
-            last_user_text=body.last_user_message,
-            last_assistant_text=body.last_assistant_message,
-        )
-    finally:
-        db.close()
+
+    def _load_suggestions():
+        db = DuckClaw(gw, read_only=True)
+        try:
+            return generate_followup_suggestions(
+                db,
+                body.chat_id,
+                tenant_id=body.tenant_id,
+                last_user_text=body.last_user_message,
+                last_assistant_text=body.last_assistant_message,
+            )
+        finally:
+            db.close()
+
+    payload = await asyncio.to_thread(_load_suggestions)
     if isinstance(payload, dict):
         suggestions = payload.get("suggestions") if isinstance(payload.get("suggestions"), list) else []
         try:

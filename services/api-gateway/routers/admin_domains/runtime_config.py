@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
@@ -129,7 +130,7 @@ async def list_vaults(
     from core.admin_identity import vault_user_id_for_actor
     from duckclaw.vaults import list_vault_options_for_user
 
-    uid = (vault_user_id or "").strip() or vault_user_id_for_actor(actor)
+    uid = (vault_user_id or "").strip() or await asyncio.to_thread(vault_user_id_for_actor, actor)
     options = list_vault_options_for_user(uid)
     vaults = [{"path": o["path"], "scope": o["scope"], "vault_id": o.get("vault_id") or ""} for o in options]
     return {"vaults": vaults, "vault_user_id": uid}
@@ -183,15 +184,19 @@ async def get_runtime_config(
     abs_path = _absolute_vault_path(vault_path)
     if not os.path.isfile(abs_path):
         raise _problem(404, "Vault no encontrado", vault_path)
-    db = DuckClaw(abs_path, read_only=True, engine="python")
+
+    def _load_config():
+        db = DuckClaw(abs_path, read_only=True, engine="python")
+        try:
+            result = list_agent_config_entries(db)
+            return _parse_agent_config_rows(result.rows, chat_id), result.warning
+        finally:
+            db.close()
+
     try:
-        result = list_agent_config_entries(db)
-        rows = _parse_agent_config_rows(result.rows, chat_id)
-        warning = result.warning
+        rows, warning = await asyncio.to_thread(_load_config)
     except Exception as exc:
         raise _problem(400, "Error leyendo agent_config", str(exc)) from exc
-    finally:
-        db.close()
     out: dict[str, Any] = {"vault_path": vault_path, "chat_id": chat_id, "rows": rows}
     if warning:
         out["warning"] = warning
@@ -212,7 +217,7 @@ async def put_runtime_config(
         actor_email=actor,
         entries={full_key: body.value[:8000]},
     )
-    task_id = _enqueue_runtime_config_command(command, db_path=abs_path, actor=actor)
+    task_id = await asyncio.to_thread(_enqueue_runtime_config_command, command, db_path=abs_path, actor=actor)
     _admin_audit(
         "runtime.config.put",
         body.vault_path,
@@ -239,7 +244,7 @@ async def delete_runtime_config(
         actor_email=actor,
         keys=[full_key],
     )
-    task_id = _enqueue_runtime_config_command(command, db_path=abs_path, actor=actor)
+    task_id = await asyncio.to_thread(_enqueue_runtime_config_command, command, db_path=abs_path, actor=actor)
     _admin_audit(
         "runtime.config.delete",
         vault_path,

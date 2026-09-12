@@ -164,7 +164,7 @@ def _list_comfyui_templates() -> list[dict[str, Any]]:
 async def comfyui_status() -> dict[str, Any]:
     import httpx
 
-    runtime = _comfyui_runtime_settings()
+    runtime = await asyncio.to_thread(_comfyui_runtime_settings)
     base = runtime["api_url"]
     if not base:
         return {"ok": False, "url": "", "error": "COMFYUI_API_URL no configurada"}
@@ -236,7 +236,7 @@ async def comfyui_generate(
         user_id=(actor or "admin-ui").strip() or "admin-ui",
     )
 
-    runtime = _comfyui_runtime_settings()
+    runtime = await asyncio.to_thread(_comfyui_runtime_settings)
     cfg = {
         "enabled": True,
         "template": (body.template or "comfy_default").strip() or "comfy_default",

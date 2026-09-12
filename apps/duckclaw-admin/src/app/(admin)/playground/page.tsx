@@ -257,11 +257,14 @@ export default function PlaygroundPage() {
           validIds: ids,
         });
         setWorkerId(nextWorker);
-        const shouldSyncWorker =
-          chatId &&
-          nextWorker &&
-          fromServer !== nextWorker &&
-          !(nextWorker === 'default' && fromServer && fromServer !== 'default');
+        // Only seed server binding for chats with no real per-conversation worker yet.
+        // Never stamp tenant-global lastWorker onto chats that already have one.
+        const storedTrim = (storedWorker || '').trim();
+        const hasPerChatWorker = Boolean(
+          (fromServer && fromServer !== 'default') ||
+            (storedTrim && storedTrim !== 'default')
+        );
+        const shouldSyncWorker = Boolean(chatId && nextWorker && !hasPerChatWorker);
         if (shouldSyncWorker) {
           void adminService
             .setPlaygroundWorker({
@@ -417,8 +420,13 @@ export default function PlaygroundPage() {
   }, [config?.effective_tenant_id]);
 
   useEffect(() => {
-    if (workerId && chat.workerId !== workerId) {
+    // Seed brand-new chats from the page selection; otherwise the conversation owns the worker.
+    if (workerId && !chat.workerId) {
       chat.setWorkerId(workerId);
+      return;
+    }
+    if (chat.workerId && chat.workerId !== workerId) {
+      setWorkerId(chat.workerId);
     }
     // chat entero cambia cada render; solo sincronizar por workerIds.
   }, [workerId, chat.workerId, chat.setWorkerId]);

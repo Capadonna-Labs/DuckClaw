@@ -248,14 +248,17 @@ export function useAdminChat({
           if (pinnedWorker && (workersInclude(c.workers, pinnedWorker) || pinnedWorker === 'default')) {
             return pinnedWorker;
           }
+          // Per-conversation binding wins over page-level initialWorker / previous chat.
+          const selected = String(c.selected_worker_id || '').trim();
+          if (selected && (workersInclude(c.workers, selected) || selected === 'default')) {
+            return selected;
+          }
+          const stored = readStoredWorker(chatId);
+          if (stored && (workersInclude(c.workers, stored) || stored === 'default')) return stored;
           if (prev && (workersInclude(c.workers, prev) || prev === 'default')) return prev;
           if (initialWorker && (workersInclude(c.workers, initialWorker) || initialWorker === 'default')) {
             return initialWorker;
           }
-          const stored = readStoredWorker(chatId);
-          if (stored && (workersInclude(c.workers, stored) || stored === 'default')) return stored;
-          const selected = String(c.selected_worker_id || '').trim();
-          if (selected) return selected;
           if (workersInclude(c.workers, 'default')) return 'default';
           const ids = workerOptionIds(c.workers);
           return ids[0] ?? 'default';
@@ -282,12 +285,21 @@ export function useAdminChat({
     loadConfig();
   }, [loadConfig]);
 
+  const prevChatIdForWorkerRef = useRef(chatId);
   useEffect(() => {
     if (!chatId) {
       setWorkerId('');
+      prevChatIdForWorkerRef.current = chatId;
       return;
     }
-    const preferred = pinnedWorker || initialWorker || readStoredWorker(chatId) || '';
+    const chatChanged = prevChatIdForWorkerRef.current !== chatId;
+    prevChatIdForWorkerRef.current = chatId;
+    // Only re-resolve on chat switch (or pinned override). Ignoring initialWorker-only
+    // updates avoids stamping the previous conversation's page worker over this chat's
+    // stored binding, and avoids racing selectWorker (page setState before chat persist).
+    if (!chatChanged && !pinnedWorker) return;
+    const preferred =
+      pinnedWorker || readStoredWorker(chatId) || initialWorker || '';
     if (preferred) {
       setWorkerId(preferred);
       return;

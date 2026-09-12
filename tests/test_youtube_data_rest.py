@@ -205,3 +205,61 @@ def test_connect_worker_mcp_registers_youtube_data_and_analytics_rest() -> None:
         youtube_analytics_rest_fallback_tool_specs()
     )
     assert len(tools) == expected
+
+
+def test_mcp_connector_lists_youtube_rest_without_mcp_session() -> None:
+    """Admin Probar list_tools must not open MCP against the reports placeholder."""
+    from unittest.mock import MagicMock, patch
+
+    from duckclaw.forge.skills import mcp_connector_bridge as bridge
+    from duckclaw.forge.skills.youtube_analytics_rest import (
+        youtube_analytics_rest_fallback_tool_specs,
+    )
+
+    connector = {
+        "connector_id": "mcp_google_youtube_analytics",
+        "preset_id": "google_youtube_analytics",
+        "endpoint_url": "https://youtubeanalytics.googleapis.com/v2/reports",
+        "transport": "streamable_http",
+        "auth_kind": "bearer",
+    }
+    db = MagicMock()
+
+    with patch.object(bridge, "resolve_connector_bearer_token", return_value="tok"):
+        with patch.object(bridge, "_list_connector_tools", side_effect=AssertionError("MCP list must not run")):
+            result = asyncio.run(bridge.test_mcp_connector(db, connector))
+
+    assert result["ok"] is True
+    names = {t["name"] for t in result["tools"]}
+    assert "list_trending_videos" in names
+    assert "search_youtube" in names
+    assert "list_my_channel_videos" in names
+    expected = len(youtube_data_rest_fallback_tool_specs()) + len(
+        youtube_analytics_rest_fallback_tool_specs()
+    )
+    assert result["tool_count"] == expected
+
+
+def test_mcp_connector_youtube_without_oauth_gives_clear_error() -> None:
+    from unittest.mock import MagicMock, patch
+
+    from duckclaw.forge.skills import mcp_connector_bridge as bridge
+
+    connector = {
+        "connector_id": "mcp_google_youtube_analytics",
+        "preset_id": "google_youtube_analytics",
+        "endpoint_url": "https://youtubeanalytics.googleapis.com/v2/reports",
+        "transport": "streamable_http",
+        "auth_kind": "bearer",
+    }
+    db = MagicMock()
+
+    with patch.object(bridge, "resolve_connector_bearer_token", return_value=""):
+        with patch.object(bridge, "_list_connector_tools", side_effect=AssertionError("MCP list must not run")):
+            try:
+                asyncio.run(bridge.test_mcp_connector(db, connector))
+                raise AssertionError("expected ValueError")
+            except ValueError as exc:
+                assert "Reconectar OAuth" in str(exc)
+                assert "invalid_grant" in str(exc)
+

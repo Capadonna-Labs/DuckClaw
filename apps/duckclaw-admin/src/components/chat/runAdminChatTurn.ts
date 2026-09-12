@@ -22,6 +22,7 @@ import {
 import {
   applyLastTurnTokenDisplay,
   artifactImagePreview,
+  findHeartbeatInsertIndex,
   isLoopProgressHeartbeat,
   shouldFetchChatSuggestions,
   stripThinkingStatusHeartbeats,
@@ -220,10 +221,7 @@ const appendHeartbeat = (payload: {
     setThinking(false);
   }
   setMessages((m) => {
-    const streamingIdx = m.findIndex(
-      (x, i) => x.role === 'assistant' && x.streaming && i === m.length - 1
-    );
-    const insertAt = streamingIdx >= 0 ? streamingIdx : m.length;
+    const insertAt = findHeartbeatInsertIndex(m);
     const elapsedMs =
       payload.tool_phase === 'done' || payload.tool_phase === 'error'
         ? payload.elapsed_ms
@@ -297,12 +295,9 @@ const appendHeartbeat = (payload: {
       workerId: hbWorker || undefined,
       swarmSlot: hbSlot,
     };
-    if (streamingIdx >= 0) {
-      const next = [...m];
-      next.splice(streamingIdx, 0, hb);
-      return next;
-    }
-    return [...m, hb];
+    const next = [...m];
+    next.splice(insertAt, 0, hb);
+    return next;
   });
   if (
     (effectiveKind === 'status' || payload.kind === 'loop_tick') &&

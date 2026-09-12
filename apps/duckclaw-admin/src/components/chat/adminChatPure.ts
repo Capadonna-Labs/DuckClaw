@@ -49,12 +49,39 @@ export function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
   return messages.filter((m) => m.role === 'heartbeat');
 }
 
+/**
+ * Índice donde insertar heartbeats del turno actual.
+ * Siempre antes del assistant del turno — nunca al final si ya hay respuesta
+ * (si no, Tool Usage queda flotando entre el último mensaje y el composer).
+ */
+export function findHeartbeatInsertIndex(messages: ChatMsg[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant' && messages[i]?.streaming) {
+      return i;
+    }
+  }
+  let lastUser = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') {
+      lastUser = i;
+      break;
+    }
+  }
+  if (lastUser >= 0) {
+    for (let i = lastUser + 1; i < messages.length; i++) {
+      if (messages[i]?.role === 'assistant') return i;
+    }
+  }
+  return messages.length;
+}
+
 /** True si hay heartbeat de herramienta en el turno actual (entre último user y assistant streaming). */
 export function hasToolHeartbeatInCurrentTurn(messages: ChatMsg[]): boolean {
-  const streamIdx = messages.findIndex(
-    (x, i) => x.role === 'assistant' && x.streaming && i === messages.length - 1
-  );
-  const end = streamIdx >= 0 ? streamIdx : messages.length;
+  const insertAt = findHeartbeatInsertIndex(messages);
+  const end =
+    insertAt < messages.length && messages[insertAt]?.role === 'assistant'
+      ? insertAt
+      : messages.length;
   for (let i = end - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role === 'user') break;

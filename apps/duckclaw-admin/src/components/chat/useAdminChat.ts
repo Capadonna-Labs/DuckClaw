@@ -27,6 +27,7 @@ import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 
 import {
+  lastUserAssistantExchange,
   readStoredWorker,
   revokeMessageImagePreviews,
   stripThinkingStatusHeartbeats,
@@ -223,11 +224,58 @@ export function useAdminChat({
     finalizeCancelledGeneration();
   }, [chatId, finalizeCancelledGeneration]);
 
+  const suggestionsExchangeKeyRef = useRef('');
+
   useEffect(() => {
     setLastTurnUsage(null);
     setContextEstimatedTokens(null);
     setSuggestions([]);
+    suggestionsExchangeKeyRef.current = '';
   }, [chatId]);
+
+  /**
+   * Al abrir un chat (o tras reload de historial), pedir chips para el último
+   * intercambio user→assistant. Sin esto, las sugerencias solo existían en la
+   * sesión del turno recién enviado y al reentrar al hilo desaparecían.
+   */
+  useEffect(() => {
+    if (!enabled || !chatId || loading || historyLoading || thinking) return;
+    if (suggestions.length > 0) return;
+    const exchange = lastUserAssistantExchange(messages);
+    if (!exchange) return;
+    const key = `${chatId}:${exchange.userText}\0${exchange.assistantText.slice(0, 500)}`;
+    if (suggestionsExchangeKeyRef.current === key) return;
+    suggestionsExchangeKeyRef.current = key;
+    let cancelled = false;
+    void adminService
+      .getChatSuggestions({
+        chat_id: chatId,
+        tenant_id: config?.effective_tenant_id,
+        last_user_message: exchange.userText.slice(0, 8000),
+        last_assistant_message: exchange.assistantText.slice(0, 16000),
+      })
+      .then((r) => {
+        if (cancelled) return;
+        const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
+        if (next.length > 0) setSuggestions(next);
+        else suggestionsExchangeKeyRef.current = '';
+      })
+      .catch(() => {
+        suggestionsExchangeKeyRef.current = '';
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    enabled,
+    chatId,
+    loading,
+    historyLoading,
+    thinking,
+    messages,
+    suggestions.length,
+    config?.effective_tenant_id,
+  ]);
 
   const loadConfig = useCallback(() => {
     if (!enabled) return;

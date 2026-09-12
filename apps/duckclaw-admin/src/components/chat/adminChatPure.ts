@@ -14,13 +14,16 @@ export function shouldFetchChatSuggestions(
   return assistantResponse.trim().length > 0;
 }
 
-/** True si corresponde mostrar los chips (se ocultan mientras el usuario tipea). */
+/**
+ * True si hay sugerencias que mostrar en el dropdown fijo encima del input.
+ * Persisten al escribir y durante el siguiente turno hasta que lleguen otras.
+ */
 export function shouldShowSuggestionChips(
   suggestions: string[],
-  loading: boolean,
-  input: string
+  _loading?: boolean,
+  _input?: string
 ): boolean {
-  return suggestions.length > 0 && !loading && input.trim() === '';
+  return suggestions.length > 0;
 }
 
 export function artifactImagePreview(

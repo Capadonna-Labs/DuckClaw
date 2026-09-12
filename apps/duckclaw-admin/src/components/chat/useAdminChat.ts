@@ -175,6 +175,7 @@ export function useAdminChat({
   const [lastTurnUsage, setLastTurnUsage] = useState<UsageTokenBreakdown | null>(null);
   const [contextEstimatedTokens, setContextEstimatedTokens] = useState<number | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestionsRefreshing, setSuggestionsRefreshing] = useState(false);
   const thinkingStartedAt = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -227,7 +228,50 @@ export function useAdminChat({
     setLastTurnUsage(null);
     setContextEstimatedTokens(null);
     setSuggestions([]);
+    setSuggestionsRefreshing(false);
   }, [chatId]);
+
+  const refreshSuggestions = useCallback(async () => {
+    if (!chatId || suggestionsRefreshing || loading) return;
+    let lastUser = '';
+    let lastAssistant = '';
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      const m = messages[i];
+      if (!lastAssistant && m.role === 'assistant' && m.text.trim() && !m.streaming) {
+        lastAssistant = m.text.trim();
+      }
+      if (!lastUser && m.role === 'user' && m.text.trim()) {
+        lastUser = m.text.trim();
+      }
+      if (lastUser && lastAssistant) break;
+    }
+    if (!lastUser || !lastAssistant) return;
+
+    const exclude = suggestions.map((s) => s.trim()).filter(Boolean);
+    setSuggestionsRefreshing(true);
+    try {
+      const r = await adminService.getChatSuggestions({
+        chat_id: chatId,
+        tenant_id: config?.effective_tenant_id,
+        last_user_message: lastUser,
+        last_assistant_message: lastAssistant,
+        exclude_suggestions: exclude.length > 0 ? exclude : undefined,
+      });
+      const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
+      if (next.length > 0) setSuggestions(next);
+    } catch {
+      /* silent — UI keeps current chips */
+    } finally {
+      setSuggestionsRefreshing(false);
+    }
+  }, [
+    chatId,
+    config?.effective_tenant_id,
+    loading,
+    messages,
+    suggestions,
+    suggestionsRefreshing,
+  ]);
 
   const loadConfig = useCallback(() => {
     if (!enabled) return;
@@ -583,6 +627,8 @@ export function useAdminChat({
     send,
     sendSuggestion,
     suggestions,
+    refreshSuggestions,
+    suggestionsRefreshing,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,

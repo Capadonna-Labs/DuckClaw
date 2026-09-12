@@ -198,6 +198,8 @@ export const chatApi = {
     tenant_id?: string;
     last_user_message: string;
     last_assistant_message: string;
+    /** Sugerencias actuales a evitar al regenerar. */
+    exclude_suggestions?: string[];
   }) =>
     adminFetch<{ suggestions: string[] }>('/chat/suggestions', {
       method: 'POST',

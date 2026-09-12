@@ -22,6 +22,7 @@ import {
 import {
   applyLastTurnTokenDisplay,
   artifactImagePreview,
+  coalesceTrailingToolHeartbeats,
   findHeartbeatInsertIndex,
   isLoopProgressHeartbeat,
   shouldFetchChatSuggestions,
@@ -243,7 +244,7 @@ const appendHeartbeat = (payload: {
           };
           const next = [...m];
           next[runningIdx] = merged;
-          return next;
+          return coalesceTrailingToolHeartbeats(next);
         }
         const startedAt = Date.now();
         const merged: ChatMsg = {
@@ -259,7 +260,7 @@ const appendHeartbeat = (payload: {
         };
         const next = [...m];
         next.splice(insertAt, 0, merged);
-        return next;
+        return coalesceTrailingToolHeartbeats(next);
       }
 
       const targetIdx = runningIdx;
@@ -281,11 +282,11 @@ const appendHeartbeat = (payload: {
       if (targetIdx >= 0) {
         const next = [...m];
         next[targetIdx] = merged;
-        return next;
+        return coalesceTrailingToolHeartbeats(next);
       }
       const next = [...m];
       next.splice(insertAt, 0, merged);
-      return next;
+      return coalesceTrailingToolHeartbeats(next);
     }
 
     const hb: ChatMsg = {
@@ -297,7 +298,7 @@ const appendHeartbeat = (payload: {
     };
     const next = [...m];
     next.splice(insertAt, 0, hb);
-    return next;
+    return coalesceTrailingToolHeartbeats(next);
   });
   if (
     (effectiveKind === 'status' || payload.kind === 'loop_tick') &&
@@ -454,7 +455,9 @@ try {
         audioUnavailable: capturedStreamAudio?.audioUnavailable,
       };
     }
-    return finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next));
+    return coalesceTrailingToolHeartbeats(
+      finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next))
+    );
   });
   if (capturedStreamAudio?.audioBase64) {
     const playResult = await playTtsAudio(capturedStreamAudio.audioBase64, {
@@ -487,7 +490,7 @@ try {
       m.length > 0 && m[m.length - 1]?.role === 'assistant' && m[m.length - 1]?.streaming
         ? m.slice(0, -1)
         : m;
-    return finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats([...trimmed, { role: 'error', text: msg }]));
+    return coalesceTrailingToolHeartbeats(finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats([...trimmed, { role: 'error', text: msg }])));
   });
   setError(msg);
 } finally {

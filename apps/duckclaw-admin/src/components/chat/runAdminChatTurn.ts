@@ -314,6 +314,7 @@ const appendHeartbeat = (payload: {
 
 primeAudioPlayback();
 let authoritativeResponse = '';
+let streamedFull = '';
 try {
   let assignedSuffix = '';
   let elapsedFooter = '';
@@ -332,7 +333,7 @@ try {
     artifact_id?: string;
     artifact_tenant_id?: string;
   } = {};
-  await adminService.playgroundChatStream(
+  streamedFull = await adminService.playgroundChatStream(
     {
       worker_id: workerId,
       project_id: projectId || undefined,
@@ -503,15 +504,24 @@ try {
   if (loopFollowUp && !abortController.signal.aborted) {
     scheduleLoopHistoryReload();
   }
-  if (shouldFetchChatSuggestions(text, authoritativeResponse, abortController.signal.aborted)) {
+  // Si el evento `done` no trae `response`, usar el texto streameado.
+  const assistantForSuggestions = (
+    authoritativeResponse ||
+    (typeof streamedFull === 'string' ? streamedFull : '') ||
+    ''
+  ).trim();
+  if (shouldFetchChatSuggestions(text, assistantForSuggestions, abortController.signal.aborted)) {
     void adminService
       .getChatSuggestions({
         chat_id: chatId,
         tenant_id: effectiveTenantId,
         last_user_message: text,
-        last_assistant_message: authoritativeResponse,
+        last_assistant_message: assistantForSuggestions,
       })
-      .then((r) => setSuggestions(r.suggestions ?? []))
+      .then((r) => {
+        const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
+        if (next.length > 0) setSuggestions(next);
+      })
       .catch(() => {});
   }
   onConversationActivity?.();

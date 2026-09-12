@@ -11,6 +11,7 @@ export function shouldFetchChatSuggestions(
 ): boolean {
   if (aborted) return false;
   if (userText.trim().startsWith('/')) return false;
+  if (isLoopSystemUserMessage(userText)) return false;
   return assistantResponse.trim().length > 0;
 }
 
@@ -24,6 +25,30 @@ export function shouldShowSuggestionChips(
   _input?: string
 ): boolean {
   return suggestions.length > 0;
+}
+
+/** Último par user→assistant usable para regenerar chips (historial o post-turno). */
+export function lastUserAssistantExchange(
+  messages: ChatMsg[]
+): { userText: string; assistantText: string } | null {
+  let assistantText = '';
+  let userText = '';
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!assistantText && m.role === 'assistant') {
+      const t = (m.text || '').trim();
+      if (t && !m.streaming) assistantText = t;
+      continue;
+    }
+    if (assistantText && !userText && m.role === 'user') {
+      const t = (m.text || '').trim();
+      if (t) userText = t;
+      break;
+    }
+  }
+  if (!userText || !assistantText) return null;
+  if (!shouldFetchChatSuggestions(userText, assistantText, false)) return null;
+  return { userText, assistantText };
 }
 
 export function artifactImagePreview(

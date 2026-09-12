@@ -77,7 +77,11 @@ export function writePlaygroundLastLlm(
   }
 }
 
-/** Resolve worker id: tenant last choice beats server "default"; never overwrite localStorage here. */
+/**
+ * Resolve worker id for a playground chat.
+ * Per-conversation preference (session + server) wins over tenant-global last choice.
+ * URL `?worker=` (initialWorker) still wins for deep links. lastWorker only seeds new chats.
+ */
 export function resolvePlaygroundWorkerId(input: {
   initialWorker: string;
   fromServer: string;
@@ -94,9 +98,10 @@ export function resolvePlaygroundWorkerId(input: {
   const ids = input.validIds;
 
   if (initial && workerOk(initial)) return initial;
-  if (last && workerOk(last)) return last;
   if (stored && workerOk(stored) && stored !== 'default') return stored;
   if (fromServer && workerOk(fromServer) && fromServer !== 'default') return fromServer;
+  // Tenant last seeds new chats / server placeholder "default" only — never beats a real per-chat worker.
+  if (last && workerOk(last)) return last;
   if (stored && workerOk(stored)) return stored;
   if (fromServer && workerOk(fromServer)) return fromServer;
   return ids.includes('default') ? 'default' : ids[0] ?? 'default';

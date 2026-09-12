@@ -50,6 +50,10 @@ export type AdminChatPanelProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
   headerActions?: React.ReactNode;
+  /** Acciones a la izquierda de la cabecera studio (p. ej. volver). */
+  studioHeaderLeading?: React.ReactNode;
+  /** Acciones a la derecha de la cabecera studio (sandbox, logs, settings). */
+  studioHeaderTrailing?: React.ReactNode;
   /** Pills de contexto (BD, sandbox, RAG) encima del textarea — estilo barra de composición. */
   composeChips?: React.ReactNode;
   /** `studio`: caja única redondeada con chips dentro (Playground). */
@@ -82,6 +86,8 @@ export function AdminChatPanel({
   conversationTitle,
   onRenameConversation,
   headerActions,
+  studioHeaderLeading,
+  studioHeaderTrailing,
   composeChips,
   composeLayout = 'default',
   showToolUsage = true,
@@ -491,6 +497,8 @@ export function AdminChatPanel({
               onRenameConversation={onRenameConversation}
               tokenUsage={lastTurnUsage}
               contextEstimatedTokens={contextEstimatedTokens}
+              leading={studioHeaderLeading}
+              trailing={studioHeaderTrailing}
             />
           </div>
           <div className="studio-glass-fade-top" aria-hidden />
@@ -539,7 +547,7 @@ export function AdminChatPanel({
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}
-          className="absolute bottom-[6.75rem] right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface sm:bottom-[7.5rem]"
+          className="absolute bottom-[7.25rem] right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface sm:bottom-32"
           aria-label="Ir al final de la conversación"
           title="Ir abajo"
         >

@@ -127,7 +127,11 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       <UpdateBanner />
       <header
       role="banner"
-      className="h-16 shrink-0 border-b border-white/40 bg-white/80 px-4 md:px-6 flex items-center justify-between backdrop-blur-xl backdrop-saturate-150 dark:border-white/10 dark:bg-dark-surface/80 supports-[backdrop-filter]:bg-white/65 dark:supports-[backdrop-filter]:bg-dark-surface/65"
+      className={`h-16 shrink-0 px-4 md:px-6 flex items-center justify-between backdrop-blur-xl backdrop-saturate-150 ${
+        isChatTab
+          ? 'border-b-0 bg-white/70 dark:bg-dark-surface/70 supports-[backdrop-filter]:bg-white/55 dark:supports-[backdrop-filter]:bg-dark-surface/55'
+          : 'border-b border-white/40 bg-white/80 dark:border-white/10 dark:bg-dark-surface/80 supports-[backdrop-filter]:bg-white/65 dark:supports-[backdrop-filter]:bg-dark-surface/65'
+      }`}
     >
       <TopbarLeft
         onMenuClick={handleMenuToggle}

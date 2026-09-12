@@ -123,7 +123,7 @@ export function AdminChatMessageList({
             isCompact ? '' : 'min-h-[320px]'
           } ${
             studioChromePad
-              ? 'pt-[3.75rem] pb-[11rem] sm:pt-16 sm:pb-44'
+              ? 'pt-16 pb-[12rem] sm:pt-[4.5rem] sm:pb-48'
               : ''
           }`}
         >

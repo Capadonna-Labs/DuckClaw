@@ -114,11 +114,18 @@ async def _call_connector_tool(
             call_youtube_analytics_rest,
             uses_youtube_analytics_rest_fallback,
         )
+        from duckclaw.forge.skills.youtube_data_rest import (
+            YOUTUBE_DATA_REST_TOOL_NAMES,
+            call_youtube_data_rest,
+            uses_youtube_data_rest_fallback,
+        )
 
         if uses_google_calendar_rest_fallback(connector):
             return await call_google_calendar_rest(tool_name, arguments, headers=headers)
         if uses_google_gmail_rest_fallback(connector):
             return await call_google_gmail_rest(tool_name, arguments, headers=headers)
+        if uses_youtube_data_rest_fallback(connector) and tool_name in YOUTUBE_DATA_REST_TOOL_NAMES:
+            return await call_youtube_data_rest(tool_name, arguments, headers=headers)
         if uses_youtube_analytics_rest_fallback(connector):
             return await call_youtube_analytics_rest(tool_name, arguments, headers=headers)
 
@@ -215,6 +222,19 @@ def _youtube_analytics_rest_fallback_specs_if_ready(db: Any, connector: dict[str
     return youtube_analytics_rest_fallback_tool_specs()
 
 
+def _youtube_data_rest_fallback_specs_if_ready(db: Any, connector: dict[str, Any]) -> list[Any]:
+    from duckclaw.forge.skills.youtube_data_rest import (
+        uses_youtube_data_rest_fallback,
+        youtube_data_rest_fallback_tool_specs,
+    )
+
+    if not uses_youtube_data_rest_fallback(connector):
+        return []
+    if not resolve_connector_bearer_token(db, connector):
+        return []
+    return youtube_data_rest_fallback_tool_specs()
+
+
 async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: str = "default") -> list[Any]:
     if not _mcp_available():
         return []
@@ -223,12 +243,16 @@ async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: 
     for connector in connectors:
         # YouTube Data/Analytics has no hosted MCP — register REST tools directly when OAuth is ready.
         # Do not wait for tools/list against the placeholder reports URL (may return empty without raising).
-        yt_rest = _youtube_analytics_rest_fallback_specs_if_ready(db, connector)
+        yt_analytics = _youtube_analytics_rest_fallback_specs_if_ready(db, connector)
+        yt_data = _youtube_data_rest_fallback_specs_if_ready(db, connector)
+        yt_rest = [*yt_analytics, *yt_data]
         if yt_rest:
             added = _register_connector_tool_specs(db, connector, yt_rest, tools)
             _log.info(
-                "YouTube Analytics REST registered %d tools connector=%s",
+                "YouTube REST registered %d tools (analytics=%d data=%d) connector=%s",
                 added,
+                len(yt_analytics),
+                len(yt_data),
                 connector.get("connector_id"),
             )
             continue

@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use std::io::{Read, Write};
+
 use std::path::{Path, PathBuf};
 
 use std::process::{Child, Command};
@@ -79,6 +81,67 @@ fn wait_port(host: &str, port: u16, timeout: Duration) -> bool {
 }
 
 
+fn gateway_health_once() -> bool {
+
+    let Ok(mut stream) = std::net::TcpStream::connect(("127.0.0.1", 8000)) else {
+
+        return false;
+
+    };
+
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
+
+    if stream
+
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+
+        .is_err()
+
+    {
+
+        return false;
+
+    }
+
+    let mut buf = [0_u8; 64];
+
+    let Ok(n) = stream.read(&mut buf) else {
+
+        return false;
+
+    };
+
+    let head = String::from_utf8_lossy(&buf[..n]);
+
+    head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200")
+
+}
+
+
+
+fn wait_gateway_health(timeout: Duration) -> bool {
+
+    let deadline = Instant::now() + timeout;
+
+    while Instant::now() < deadline {
+
+        if gateway_health_once() {
+
+            return true;
+
+        }
+
+        std::thread::sleep(Duration::from_millis(500));
+
+    }
+
+    false
+
+}
+
+
 
 fn navigate_to_login(app: &tauri::AppHandle) {
 
@@ -96,7 +159,7 @@ fn watch_and_open_login(app: tauri::AppHandle) {
 
     std::thread::spawn(move || {
 
-        let backend_up = wait_port("127.0.0.1", 8000, Duration::from_secs(180));
+        let backend_up = wait_gateway_health(Duration::from_secs(180));
 
         let admin_up = wait_port("127.0.0.1", 3000, Duration::from_secs(180));
 
@@ -270,6 +333,36 @@ fn try_free_port(_port: u16) {}
 
 
 
+#[cfg(windows)]
+
+fn kill_windows_sidecars() {
+
+    for image in [
+
+        "duckclaw_backend.exe",
+
+        "duckclaw_backend-x86_64-pc-windows-msvc.exe",
+
+    ] {
+
+        let _ = Command::new("taskkill")
+
+            .args(["/F", "/IM", image])
+
+            .status();
+
+    }
+
+}
+
+
+
+#[cfg(not(windows))]
+
+fn kill_windows_sidecars() {}
+
+
+
 fn dev_sidecar_enabled() -> bool {
 
     matches!(
@@ -306,11 +399,9 @@ fn kill_desktop_processes(state: &DesktopState) {
 
     {
 
-        let _ = Command::new("taskkill")
+        kill_windows_sidecars();
 
-            .args(["/F", "/IM", "duckclaw_backend.exe"])
-
-            .status();
+        try_free_port(8000);
 
         try_free_port(3000);
 
@@ -416,7 +507,14 @@ fn spawn_admin(
 
 #[cfg(not(debug_assertions))]
 
-fn spawn_backend(app: &tauri::AppHandle, desktop_env: &HashMap<String, String>) -> Result<CommandChild, String> {
+fn spawn_backend(
+
+    app: &tauri::AppHandle,
+
+    desktop_env: &HashMap<String, String>,
+
+) -> Result<CommandChild, String> {
+
 
     // ponytail: dev hot-reload only; production uses bundled sidecar (updater replaces install dir).
 
@@ -460,13 +558,29 @@ fn spawn_backend(app: &tauri::AppHandle, desktop_env: &HashMap<String, String>) 
 
 
 
-    let sidecar = app
+    let mut sidecar = app
 
         .shell()
 
         .sidecar("duckclaw_backend")
 
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.to_string())?
+
+        .env("LITE_MODE", "1")
+
+        .env("DUCKCLAW_SPAWN_PROFILE", "1")
+
+        .env("DUCKCLAW_DISABLE_DOTENV", "1");
+
+    for (key, val) in desktop_env {
+
+        if key.starts_with("DUCKCLAW_") || key.starts_with("OPENROUTER_") {
+
+            sidecar = sidecar.env(key, val);
+
+        }
+
+    }
 
     let (_rx, child) = sidecar.spawn().map_err(|e| e.to_string())?;
 
@@ -530,11 +644,21 @@ pub fn run() {
 
                 let desktop_env = read_desktop_env(Duration::from_secs(30));
 
+                #[cfg(windows)]
+
+                {
+
+                    kill_windows_sidecars();
+
+                    try_free_port(8000);
+
+                }
+
                 let backend_child = spawn_backend(app.handle(), &desktop_env)?;
 
 
 
-                if !wait_port("127.0.0.1", 8000, Duration::from_secs(120)) {
+                if !wait_gateway_health(Duration::from_secs(120)) {
 
                     eprintln!("duckclaw_backend did not open port 8000 in time");
 

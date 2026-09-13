@@ -209,10 +209,69 @@ async def exchange_notion_code_for_token(*, code: str, pending: dict[str, Any]) 
     return {"access_token": access_token, "refresh_token": refresh_token}
 
 
+def refresh_notion_access_token(
+    refresh_token: str,
+    *,
+    client_id: str,
+    redirect_uri: str | None = None,
+) -> dict[str, str]:
+    """Exchange Notion refresh_token for a fresh access_token (sync).
+
+    Notion MCP uses public DCR clients (``token_endpoint_auth_method=none``), so
+    refresh only needs ``client_id`` + ``refresh_token`` (no client_secret).
+    """
+    refresh = (refresh_token or "").strip()
+    cid = (client_id or "").strip()
+    if not refresh or not cid:
+        return {}
+    import httpx
+
+    # Sync discovery (token endpoint); keep short timeouts for worker hot path.
+    pr = httpx.get(NOTION_PROTECTED_RESOURCE_URL, timeout=12.0)
+    pr.raise_for_status()
+    pr_data = pr.json()
+    auth_servers = pr_data.get("authorization_servers") if isinstance(pr_data, dict) else None
+    if not isinstance(auth_servers, list) or not auth_servers:
+        raise ValueError("notion protected resource missing authorization_servers")
+    auth_base = str(auth_servers[0]).rstrip("/")
+    meta_resp = httpx.get(f"{auth_base}/.well-known/oauth-authorization-server", timeout=12.0)
+    meta_resp.raise_for_status()
+    meta = meta_resp.json()
+    token_endpoint = str((meta or {}).get("token_endpoint") or "").strip()
+    if not token_endpoint:
+        raise ValueError("Notion OAuth metadata missing token_endpoint")
+
+    payload: dict[str, str] = {
+        "grant_type": "refresh_token",
+        "refresh_token": refresh,
+        "client_id": cid,
+    }
+    # Some AS implementations echo redirect_uri on refresh; harmless when registered.
+    redir = (redirect_uri or resolve_notion_redirect_uri()).strip()
+    if redir:
+        payload["redirect_uri"] = redir
+
+    resp = httpx.post(
+        token_endpoint,
+        data=payload,
+        headers={"Accept": "application/json"},
+        timeout=20.0,
+    )
+    if resp.status_code >= 400:
+        raise ValueError(f"notion refresh failed: {resp.status_code} {resp.text[:300]}")
+    tokens = resp.json() if resp.content else {}
+    access_token = str(tokens.get("access_token") or "").strip()
+    new_refresh = str(tokens.get("refresh_token") or "").strip() or refresh
+    if not access_token:
+        raise ValueError("notion refresh missing access_token")
+    return {"access_token": access_token, "refresh_token": new_refresh}
+
+
 __all__ = [
     "build_oauth_completion_commands",
     "discover_notion_oauth_metadata",
     "exchange_notion_code_for_token",
+    "refresh_notion_access_token",
     "resolve_notion_redirect_uri",
     "start_notion_oauth",
     "_decode_oauth_state",

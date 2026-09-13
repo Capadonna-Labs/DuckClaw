@@ -154,11 +154,17 @@ export function ChatBubble({
               : isInterrupted
                 ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 text-amber-900 dark:text-amber-200'
                 : 'bg-gov-gray-50 dark:bg-dark-bg border dark:border-dark-border'
-      } ${showActions ? 'pr-[4.25rem]' : ''}`}
+      }`}
     >
       {showActions && (
         <div
-          className={`absolute top-2 right-2 flex items-center gap-0.5 transition-opacity ${
+          className={`absolute top-2 right-2 z-10 flex items-center gap-0.5 rounded-lg px-0.5 py-0.5 backdrop-blur-sm transition-opacity ${
+            isUser
+              ? 'bg-gov-blue-700/90'
+              : isError
+                ? 'bg-red-50/90 dark:bg-red-950/80'
+                : 'bg-gov-gray-50/90 dark:bg-dark-bg/90'
+          } ${
             actionsAlwaysVisible
               ? 'opacity-100'
               : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100 max-sm:opacity-100'

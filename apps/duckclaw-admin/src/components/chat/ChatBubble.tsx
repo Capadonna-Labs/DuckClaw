@@ -72,6 +72,12 @@ export function ChatBubble({
   const actionsAlwaysVisible = canCopy && (isAssistant || isError);
   const [copied, setCopied] = useState(false);
   const [lightboxImage, setLightboxImage] = useState<ChatImagePreview | null>(null);
+  const openLightbox = useCallback((img: ChatImagePreview) => {
+    setLightboxImage(img);
+  }, []);
+  const openMarkdownImage = useCallback((img: { url: string; name: string }) => {
+    setLightboxImage({ url: img.url, name: img.name });
+  }, []);
   const heartbeatLabel =
     m.heartbeatKind === 'plan'
       ? 'Plan'
@@ -220,7 +226,7 @@ export function ChatBubble({
             <button
               key={img.url}
               type="button"
-              onClick={() => setLightboxImage(img)}
+              onClick={() => openLightbox(img)}
               className="block p-0 border-0 bg-transparent cursor-zoom-in rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-gov-blue-500"
               aria-label={`Ver imagen ampliada: ${img.name || 'imagen'}`}
             >
@@ -265,7 +271,11 @@ export function ChatBubble({
                   <Mic size={14} aria-hidden />
                 </span>
               ) : null}
-              <ChatMarkdown content={displayText} variant="user" />
+              <ChatMarkdown
+                content={displayText}
+                variant="user"
+                onImageOpen={openMarkdownImage}
+              />
             </div>
           ) : (
             <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
@@ -280,7 +290,7 @@ export function ChatBubble({
         ) : null
       ) : (
         <>
-          <ChatMarkdown content={displayText} />
+          <ChatMarkdown content={displayText} onImageOpen={openMarkdownImage} />
           {isAssistant && m.audioBase64 ? (
             <button
               type="button"

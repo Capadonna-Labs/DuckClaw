@@ -109,6 +109,45 @@ def test_resolve_notion_bearer_refreshes_stale_token_and_persists() -> None:
     assert mock_persist.call_args.kwargs["refresh_token"] == "fresh-refresh"
 
 
+def test_resolve_notion_bearer_prefers_connector_scoped_oauth_client_id() -> None:
+    db = MagicMock()
+    db._read_only = True
+    stale_ts = datetime.now(timezone.utc) - timedelta(hours=2)
+
+    def _resolve_setting(**kwargs):
+        key = kwargs.get("key")
+        if key == "mcp_notion.bearer":
+            return {"value": "stale-access"}
+        if key == "mcp_notion.refresh":
+            return {"value": "live-refresh"}
+        if key == "mcp_notion.oauth_client_id":
+            return {
+                "value": "scoped-client",
+                "value_json": {"redirect_uri": "https://gw.test/api/v1/oauth/callback"},
+            }
+        if key == "notion.client_id":
+            return {"value": "stale-global-client"}
+        return {"value": ""}
+
+    with patch(
+        "duckclaw.admin_mcp_connectors.resolve_runtime_setting",
+        side_effect=lambda *a, **k: _resolve_setting(**k),
+    ):
+        with patch(
+            "duckclaw.admin_mcp_connectors._fetchone",
+            return_value={"value_text": "stale-access", "updated_at": stale_ts},
+        ):
+            with patch(
+                "duckclaw.mcp_notion_oauth.refresh_notion_access_token",
+                return_value={"access_token": "fresh-access", "refresh_token": "fresh-refresh"},
+            ) as mock_refresh:
+                with patch("duckclaw.mcp_connector_oauth.persist_mcp_connector_oauth_tokens"):
+                    assert resolve_connector_bearer_token(db, _notion_connector()) == "fresh-access"
+
+    assert mock_refresh.call_args.kwargs["client_id"] == "scoped-client"
+    assert mock_refresh.call_args.kwargs["redirect_uri"] == "https://gw.test/api/v1/oauth/callback"
+
+
 def test_resolve_notion_bearer_drops_dead_token_when_refresh_fails() -> None:
     db = MagicMock()
     db._read_only = True

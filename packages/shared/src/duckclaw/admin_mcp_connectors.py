@@ -340,35 +340,70 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             )
 
             client_id = ""
-            for actor in (owner, ""):
-                resolved = resolve_runtime_setting(
-                    db,
-                    tenant_id=tenant_id,
-                    actor_email=actor,
-                    domain="mcp_oauth",
-                    key="notion.client_id",
-                )
-                client_id = str(resolved.get("value") or "").strip()
-                if client_id:
-                    break
+            redirect_uri = ""
+            # Prefer the DCR client that minted *these* tokens (connector-scoped).
+            scoped_key = f"{connector_id}.oauth_client_id" if connector_id else ""
+            if scoped_key:
+                for actor in (owner, ""):
+                    resolved = resolve_runtime_setting(
+                        db,
+                        tenant_id=tenant_id,
+                        actor_email=actor,
+                        domain="mcp_connector",
+                        key=scoped_key,
+                    )
+                    client_id = str(resolved.get("value") or "").strip()
+                    meta = resolved.get("value_json")
+                    if isinstance(meta, dict):
+                        redirect_uri = str(meta.get("redirect_uri") or "").strip()
+                    if client_id:
+                        break
+            if not client_id:
+                for actor in (owner, ""):
+                    resolved = resolve_runtime_setting(
+                        db,
+                        tenant_id=tenant_id,
+                        actor_email=actor,
+                        domain="mcp_oauth",
+                        key="notion.client_id",
+                    )
+                    client_id = str(resolved.get("value") or "").strip()
+                    meta = resolved.get("value_json")
+                    if isinstance(meta, dict) and not redirect_uri:
+                        redirect_uri = str(meta.get("redirect_uri") or "").strip()
+                    if client_id:
+                        break
             if not client_id:
                 row = _fetchone(
                     db.execute(
-                        "SELECT value_text FROM main.admin_runtime_settings "
+                        "SELECT value_text, value_json FROM main.admin_runtime_settings "
                         "WHERE active = true AND domain = 'mcp_oauth' AND key = 'notion.client_id' "
-                        "AND tenant_id = ? AND length(trim(coalesce(value_text, ''))) > 0 "
-                        "ORDER BY updated_at DESC LIMIT 1",
-                        [tenant_id],
+                        "AND length(trim(coalesce(value_text, ''))) > 0 "
+                        "ORDER BY updated_at DESC LIMIT 1"
                     )
                 )
                 if row:
-                    client_id = str(
-                        row[0] if not isinstance(row, dict) else row.get("value_text") or ""
-                    ).strip()
+                    if isinstance(row, dict):
+                        client_id = str(row.get("value_text") or "").strip()
+                        meta = row.get("value_json")
+                    else:
+                        client_id = str(row[0] or "").strip()
+                        meta = row[1] if len(row) > 1 else None
+                    if isinstance(meta, dict) and not redirect_uri:
+                        redirect_uri = str(meta.get("redirect_uri") or "").strip()
+                    elif isinstance(meta, str) and meta.strip().startswith("{") and not redirect_uri:
+                        try:
+                            import json
+
+                            parsed = json.loads(meta)
+                            if isinstance(parsed, dict):
+                                redirect_uri = str(parsed.get("redirect_uri") or "").strip()
+                        except Exception:
+                            pass
             tokens = refresh_notion_access_token(
                 refresh,
                 client_id=client_id,
-                redirect_uri=resolve_notion_redirect_uri(),
+                redirect_uri=redirect_uri or resolve_notion_redirect_uri(),
             )
             fresh = str(tokens.get("access_token") or "").strip()
             new_refresh = str(tokens.get("refresh_token") or "").strip() or refresh

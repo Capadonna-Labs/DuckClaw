@@ -314,7 +314,11 @@ const appendHeartbeat = (payload: {
   }
 };
 
-primeAudioPlayback();
+// Solo desbloquear audio si este turno pedirá TTS. Un play() silencioso en
+// cada Enter interrumpe Spotify/Apple Music en iOS (toma la sesión de audio).
+if (voiceResponseMode) {
+  primeAudioPlayback();
+}
 let authoritativeResponse = '';
 let streamedFull = '';
 try {

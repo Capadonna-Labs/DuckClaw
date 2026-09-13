@@ -194,29 +194,34 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       </div>
     </header>
       {portalReady &&
-        stackRestartMessage &&
+        (stackRestartMessage || stackRestarting) &&
         createPortal(
           <div
-            className="pointer-events-none fixed inset-x-0 z-[250] flex justify-center px-3 sm:justify-end sm:px-4"
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/45 px-4"
             style={{
-              top: 'calc(4rem + env(safe-area-inset-top, 0px) + 0.5rem)',
+              paddingTop: 'env(safe-area-inset-top, 0px)',
+              paddingBottom: 'env(safe-area-inset-bottom, 0px)',
             }}
             data-stack-restart-toast="true"
           >
             <div
               role="status"
-              aria-live="polite"
-              className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-2xl border border-gov-blue-100 bg-white/95 p-3 text-xs font-semibold text-gov-gray-700 shadow-lg backdrop-blur-md dark:border-dark-border dark:bg-dark-surface/95 dark:text-dark-text"
+              aria-live="assertive"
+              className="flex w-full max-w-md items-start gap-2 rounded-2xl border-2 border-amber-400 bg-amber-50 p-4 text-sm font-semibold text-amber-950 shadow-2xl dark:border-amber-500 dark:bg-amber-950 dark:text-amber-50"
             >
-              <p className="min-w-0 flex-1 whitespace-pre-wrap">{stackRestartMessage}</p>
-              <button
-                type="button"
-                onClick={() => setStackRestartMessage(null)}
-                className="shrink-0 rounded-lg p-1 text-gov-gray-400 hover:bg-gov-gray-100 hover:text-gov-gray-700 dark:hover:bg-dark-bg dark:hover:text-dark-text"
-                aria-label="Cerrar aviso"
-              >
-                <X size={14} />
-              </button>
+              <p className="min-w-0 flex-1 whitespace-pre-wrap">
+                {stackRestartMessage ?? 'Reiniciando sistema…'}
+              </p>
+              {!stackRestarting && (
+                <button
+                  type="button"
+                  onClick={() => setStackRestartMessage(null)}
+                  className="shrink-0 rounded-lg p-1 text-amber-800/70 hover:bg-amber-200/80 hover:text-amber-950 dark:text-amber-100/80 dark:hover:bg-amber-900 dark:hover:text-amber-50"
+                  aria-label="Cerrar aviso"
+                >
+                  <X size={16} />
+                </button>
+              )}
             </div>
           </div>,
           document.body

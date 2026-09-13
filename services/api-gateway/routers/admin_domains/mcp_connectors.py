@@ -277,6 +277,8 @@ async def complete_connector_oauth(
             connector_id=connector_id,
             bearer_token=tokens["access_token"],
             refresh_token=str(tokens.get("refresh_token") or ""),
+            oauth_client_id=str(pending.get("client_id") or ""),
+            oauth_redirect_uri=str(pending.get("redirect_uri") or ""),
         )
         return {"ok": True, "task_id": task_id, "connector_id": connector_id}
     except ValueError as exc:
@@ -330,6 +332,8 @@ async def oauth_callback_public(
             connector_id=str(pending.get("connector_id") or ""),
             bearer_token=tokens["access_token"],
             refresh_token=str(tokens.get("refresh_token") or ""),
+            oauth_client_id=str(pending.get("client_id") or ""),
+            oauth_redirect_uri=str(pending.get("redirect_uri") or ""),
         )
         return RedirectResponse(url=ok, status_code=302)
     except Exception as exc:

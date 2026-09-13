@@ -154,7 +154,7 @@ export function ChatBubble({
               : isInterrupted
                 ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 text-amber-900 dark:text-amber-200'
                 : 'bg-gov-gray-50 dark:bg-dark-bg border dark:border-dark-border'
-      }`}
+      } ${showActions ? '[&_.chat-markdown>:first-child]:pr-12' : ''}`}
     >
       {showActions && (
         <div

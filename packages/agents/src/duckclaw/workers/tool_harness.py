@@ -67,6 +67,7 @@ _READ_EXACT = frozenset(
         "inspect_schema",
         "get_project_context",
         "get_current_time",
+        "await_interval",
         "list_tool_packs",
         "unlock_tool_pack",
         "search_project_knowledge",

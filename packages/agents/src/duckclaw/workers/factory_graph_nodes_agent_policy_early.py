@@ -432,8 +432,10 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     force_reddit = False
                     force_visual = False
 
-                # Email/Gmail wins over db-first / orch read_sql noise: otherwise a
-                # forced read_sql burns the first hop (META trades SQL on a mail turn).
+                # Email/Gmail wins over db-first / orch read_sql noise on EVERY hop.
+                # Hop 1: force Gmail search. Hop 2+: still clear read_sql — otherwise
+                # orch re-forces SELECT now() AS ahora and set_reply falls back to
+                # "1 registro (ahora…)." after a successful get_message.
                 _email_intent = incoming_has_email_intent(
                     _orch_incoming or _intent_incoming or incoming
                 )
@@ -442,7 +444,6 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                 )
                 if (
                     _gmail_search_tool
-                    and not already_has_tool_result
                     and not telegram_context_summarize_directive
                     and not summarize_stored_directive
                 ):
@@ -452,7 +453,12 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     force_tavily = False
                     force_reddit = False
                     force_visual = False
-                    if _worker_use_heuristic_first_tool(spec):
+                    if force_orch_tool in ("read_sql", "admin_sql", "inspect_schema"):
+                        force_orch_tool = None
+                    if (
+                        not already_has_tool_result
+                        and _worker_use_heuristic_first_tool(spec)
+                    ):
                         force_orch_tool = _gmail_search_tool
 
                 ctx.agent_turn = {'_intent_incoming': _intent_incoming, '_orch': _orch, '_orch_forced': _orch_forced, '_reddit_resolved_comments_url': _reddit_resolved_comments_url, '_reddit_share_mcp_exhausted': _reddit_share_mcp_exhausted, '_visual_tool_already_ok': _visual_tool_already_ok, '_wl': _wl, 'already_has_tool_result': already_has_tool_result, 'force_admin_sql': force_admin_sql, 'force_orch_tool': force_orch_tool, 'force_read_sql': force_read_sql, 'force_reddit': force_reddit, 'force_schema': force_schema, 'force_tavily': force_tavily, 'force_visual': force_visual, 'incoming': incoming, 'incoming_for_reddit': incoming_for_reddit, 'is_latest_game': is_latest_game, 'is_schema': is_schema, 'is_table_content': is_table_content, 'reddit_search_tool_count': reddit_search_tool_count, 'state': state, 'summarize_stored_directive': summarize_stored_directive, 'telegram_context_summarize_directive': telegram_context_summarize_directive}

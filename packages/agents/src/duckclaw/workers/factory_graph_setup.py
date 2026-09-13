@@ -262,6 +262,14 @@ def initialize_worker_graph_context(
         register_await_interval_skill(tools, db)
     except Exception:
         pass
+    try:
+        from duckclaw.forge.skills.summarize_chat_context_bridge import (
+            register_summarize_chat_context_skill,
+        )
+
+        register_summarize_chat_context_skill(tools, db)
+    except Exception:
+        pass
     _skills_norm_early = [
         str(s).strip().lower().replace("-", "_")
         for s in (getattr(spec, "skills_list", None) or [])

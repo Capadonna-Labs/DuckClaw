@@ -113,6 +113,7 @@ describe('toolUsageGroup', () => {
       expect(readSqlGroup).toBeDefined();
       expect(readSqlGroup?.count).toBe(3);
       expect(readSqlGroup?.latestMs).toBe(150);
+      expect(readSqlGroup?.maxMs).toBe(200);
       expect(readSqlGroup?.averageMs).toBe(150); // (100 + 200 + 150) / 3
       expect(readSqlGroup?.isRunning).toBe(false);
       expect(readSqlGroup?.isError).toBe(false);
@@ -121,6 +122,7 @@ describe('toolUsageGroup', () => {
       expect(timeGroup).toBeDefined();
       expect(timeGroup?.count).toBe(1);
       expect(timeGroup?.latestMs).toBe(50);
+      expect(timeGroup?.maxMs).toBe(50);
       expect(timeGroup?.averageMs).toBe(50);
     });
 
@@ -137,6 +139,7 @@ describe('toolUsageGroup', () => {
       expect(grouped[0].count).toBe(2);
       expect(grouped[0].isRunning).toBe(true);
       expect(grouped[0].latestMs).toBe(100); // Solo cuenta el completado
+      expect(grouped[0].maxMs).toBe(100);
       expect(grouped[0].averageMs).toBe(100);
     });
 
@@ -162,6 +165,7 @@ describe('toolUsageGroup', () => {
       expect(grouped[0].count).toBe(1);
       expect(grouped[0].toolName).toBe('read_sql');
       expect(grouped[0].latestMs).toBe(100);
+      expect(grouped[0].maxMs).toBe(100);
       expect(grouped[0].averageMs).toBe(100);
     });
   });

@@ -27,9 +27,11 @@ import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 
 import {
+  lastUserAssistantExchange,
   readStoredWorker,
   revokeMessageImagePreviews,
   stripThinkingStatusHeartbeats,
+  suggestionsExchangeKey,
   workerStorageKey,
 } from './adminChatPure';
 import { runAdminChatTurn } from './runAdminChatTurn';
@@ -223,11 +225,58 @@ export function useAdminChat({
     finalizeCancelledGeneration();
   }, [chatId, finalizeCancelledGeneration]);
 
+  const suggestionsExchangeKeyRef = useRef('');
+
   useEffect(() => {
     setLastTurnUsage(null);
     setContextEstimatedTokens(null);
     setSuggestions([]);
+    suggestionsExchangeKeyRef.current = '';
   }, [chatId]);
+
+  /**
+   * Regenerar chips cuando cambia el último intercambio user→assistant
+   * (abrir chat, reload de historial, o turno que no actualizó la ref).
+   * La clave evita refetch duplicado tras un turno live que ya regeneró.
+   */
+  useEffect(() => {
+    if (!enabled || !chatId || loading || historyLoading || thinking) return;
+    const exchange = lastUserAssistantExchange(messages);
+    if (!exchange) return;
+    const key = suggestionsExchangeKey(chatId, exchange.userText, exchange.assistantText);
+    if (suggestionsExchangeKeyRef.current === key) return;
+    suggestionsExchangeKeyRef.current = key;
+    let cancelled = false;
+    void adminService
+      .getChatSuggestions({
+        chat_id: chatId,
+        tenant_id: config?.effective_tenant_id,
+        last_user_message: exchange.userText.slice(0, 8000),
+        last_assistant_message: exchange.assistantText.slice(0, 16000),
+      })
+      .then((r) => {
+        if (cancelled) return;
+        const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
+        setSuggestions(next);
+        if (next.length === 0) suggestionsExchangeKeyRef.current = '';
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setSuggestions([]);
+        suggestionsExchangeKeyRef.current = '';
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    enabled,
+    chatId,
+    loading,
+    historyLoading,
+    thinking,
+    messages,
+    config?.effective_tenant_id,
+  ]);
 
   const loadConfig = useCallback(() => {
     if (!enabled) return;
@@ -372,6 +421,7 @@ export function useAdminChat({
         setContextEstimatedTokens,
         setLoopSchedulePolling,
         setSuggestions,
+        suggestionsExchangeKeyRef,
         finalizeCancelledGeneration,
         clearLoopHistoryReload,
         scheduleLoopHistoryReload,

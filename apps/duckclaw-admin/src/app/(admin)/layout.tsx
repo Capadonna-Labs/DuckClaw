@@ -44,7 +44,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-gov-gray-50 dark:bg-dark-bg relative">
+    <div className="flex h-dvh max-h-dvh overflow-hidden bg-gov-gray-50 dark:bg-dark-bg relative supports-[height:100dvh]:h-dvh">
       <div
         className={`hidden lg:flex shrink-0 overflow-hidden transition-[width] duration-300 ease-out ${
           sidebarOpen ? 'w-64' : 'w-0'
@@ -67,7 +67,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           className={cn(
             'flex-1 max-lg:overscroll-none',
             isWorkspaceRoute
-              ? 'overflow-hidden p-2 lg:p-3'
+              ? 'overflow-hidden overscroll-none p-2 pt-0 lg:p-3 lg:pt-3'
               : 'scrollbar-thin overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-10'
           )}
         >

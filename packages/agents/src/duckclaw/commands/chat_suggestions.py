@@ -16,10 +16,13 @@ _MAX_SUGGESTIONS = 3
 _MAX_SUGGESTION_CHARS = 80
 
 _SYSTEM_PROMPT = (
-    "Dado el último intercambio de una conversación de chat, propone exactamente "
+    "Dado el ÚLTIMO intercambio de una conversación, propone exactamente "
     f"{_MAX_SUGGESTIONS} mensajes cortos (máximo 8 palabras cada uno) que el usuario "
-    "podría escribir a continuación para seguir la conversación. Usa el mismo idioma "
-    "del último mensaje del usuario. Responde ÚNICAMENTE con un array JSON de "
+    "podría enviar a continuación. "
+    "Obligatorio: cada sugerencia debe referirse SOLO a temas, decisiones o datos "
+    "mencionados en la respuesta más reciente del asistente (no a turnos anteriores). "
+    "Usa el mismo idioma del último mensaje del usuario. "
+    "Responde ÚNICAMENTE con un array JSON de "
     f"{_MAX_SUGGESTIONS} strings, sin explicación ni markdown, por ejemplo: "
     '["...", "...", "..."]'
 )
@@ -76,7 +79,7 @@ def generate_followup_suggestions(
         if llm is None:
             return []
         human_content = (
-            f"Usuario: {(last_user_text or '').strip()}\n\nAsistente: {assistant_text}"
+            f"Último mensaje del usuario: {(last_user_text or '').strip()}\n\nRespuesta más reciente del asistente (alinea las sugerencias a ESTO):\n{assistant_text}"
         )
         reply = llm.invoke(
             [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_content)]

@@ -1,10 +1,10 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { ChatMsg } from '@/components/chat/types';
 import { formatChatIdentityPrefix } from '@/lib/workerOptions';
-import { formatToolDurationMs } from '@/lib/toolHeartbeat';
+import { formatToolDurationMs, isToolHeartbeatRunning } from '@/lib/toolHeartbeat';
 import {
   toolGroupCurrentToolName,
   toolGroupHasRunning,
@@ -13,17 +13,64 @@ import {
   type GroupedToolInvocation,
 } from '@/lib/toolUsageGroup';
 
-function GroupedToolRow({ 
-  grouped, 
-  identityLabel 
-}: { 
+/** Cronómetro en vivo mientras hay tools running (misma idea que ToolHeartbeatRow). */
+function useLiveToolElapsedMs(
+  messages: ChatMsg[],
+  running: boolean,
+  startedAt: number | null | undefined
+): number | null {
+  const [liveMs, setLiveMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!running || startedAt == null) {
+      setLiveMs(null);
+      return;
+    }
+    const tick = () => setLiveMs(Math.max(0, Date.now() - startedAt));
+    tick();
+    const id = window.setInterval(tick, 50);
+    return () => window.clearInterval(id);
+  }, [running, startedAt]);
+
+  return running ? liveMs : null;
+}
+
+function earliestRunningStartedAt(messages: ChatMsg[]): number | null {
+  let min: number | null = null;
+  for (const m of messages) {
+    if (!isToolHeartbeatRunning(m)) continue;
+    const t = m.toolStartedAt;
+    if (t == null) continue;
+    min = min == null ? t : Math.min(min, t);
+  }
+  return min;
+}
+
+function GroupedToolRow({
+  grouped,
+  identityLabel,
+}: {
   grouped: GroupedToolInvocation;
   identityLabel: string;
 }) {
-  const { toolName, count, latestMs, averageMs, isRunning, isError } = grouped;
-  const latest = formatToolDurationMs(latestMs);
+  const { toolName, count, maxMs, averageMs, isRunning, isError, messages } = grouped;
+  const runningStartedAt = earliestRunningStartedAt(messages);
+  const liveMs = useLiveToolElapsedMs(messages, isRunning, runningStartedAt);
+  const max = formatToolDurationMs(maxMs);
   const avg = formatToolDurationMs(averageMs);
+  const live = formatToolDurationMs(liveMs);
   const identityPrefix = formatChatIdentityPrefix(identityLabel);
+
+  let timing = '';
+  if (isRunning && live) {
+    timing = ` · ${live}`;
+  } else if (count > 1 && max) {
+    timing = ` · max: ${max}`;
+  } else if (count === 1 && max) {
+    timing = ` · ${max}`;
+  } else if (isRunning) {
+    timing = ' · en curso';
+  }
 
   return (
     <li className="px-3 py-1.5 text-sm text-sky-950 dark:text-sky-100">
@@ -36,9 +83,11 @@ function GroupedToolRow({
           <span className="font-semibold text-sky-700 dark:text-sky-300"> x{count}</span>
         ) : null}
         {isError ? ' · error' : ''}
-        {latest ? ` · last: ${latest}` : isRunning ? ' · en curso' : ''}
+        {timing ? (
+          <span className="tabular-nums">{timing}</span>
+        ) : null}
         {count > 1 && avg && !isRunning ? (
-          <span className="text-sky-600/80 dark:text-sky-400/80"> · avg: {avg}</span>
+          <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums"> · avg: {avg}</span>
         ) : null}
       </span>
     </li>
@@ -60,11 +109,36 @@ export function ToolUsageGroup({
   const totalMs = toolGroupTotalElapsedMs(messages, indices);
   const [isOpen, setIsOpen] = useState(false);
 
+  const runningStartedAt = earliestRunningStartedAt(items);
+  const liveHeaderMs = useLiveToolElapsedMs(items, anyRunning, runningStartedAt);
+  // Header: suma de completados + live del running más antiguo (aprox. duración del bloque en curso).
+  const completedPartialMs = (() => {
+    let sum = 0;
+    let any = false;
+    for (const m of items) {
+      if (isToolHeartbeatRunning(m)) continue;
+      const ms =
+        m.toolElapsedMs ??
+        (m.toolStartedAt != null ? Math.max(0, Date.now() - m.toolStartedAt) : undefined);
+      if (ms != null && Number.isFinite(ms)) {
+        sum += ms;
+        any = true;
+      }
+    }
+    return any ? sum : 0;
+  })();
+  const headerLiveTotal =
+    anyRunning && liveHeaderMs != null ? completedPartialMs + liveHeaderMs : null;
+
   const count = items.length;
-  const totalLabel = totalMs != null ? formatToolDurationMs(totalMs) : '';
+  const totalLabel =
+    headerLiveTotal != null
+      ? formatToolDurationMs(headerLiveTotal)
+      : totalMs != null
+        ? formatToolDurationMs(totalMs)
+        : '';
   const currentTool = !isOpen ? toolGroupCurrentToolName(messages, indices) : '';
 
-  // Agrupar herramientas repetidas
   const groupedInvocations = groupToolInvocationsByName(messages, indices);
 
   return (
@@ -85,7 +159,7 @@ export function ToolUsageGroup({
             </span>
           ) : null}
           {totalLabel ? (
-            <span className="normal-case font-semibold text-sky-600 dark:text-sky-400">
+            <span className="normal-case font-semibold text-sky-600 dark:text-sky-400 tabular-nums">
               {' '}
               · {totalLabel}
             </span>
@@ -107,9 +181,9 @@ export function ToolUsageGroup({
       {isOpen ? (
         <ul id={panelId} role="list" className="border-t border-sky-200/80 dark:border-sky-800/60">
           {groupedInvocations.map((grouped, idx) => (
-            <GroupedToolRow 
-              key={`${grouped.toolName}-${idx}`} 
-              grouped={grouped} 
+            <GroupedToolRow
+              key={`${grouped.toolName}-${idx}`}
+              grouped={grouped}
               identityLabel={identityLabel}
             />
           ))}

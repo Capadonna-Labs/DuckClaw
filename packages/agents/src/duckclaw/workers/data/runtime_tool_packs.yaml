@@ -20,6 +20,7 @@ packs:
       exact:
         - get_current_time
         - await_interval
+        - summarize_chat_context
         - invoke_worker
         - get_project_context
         - read_sql

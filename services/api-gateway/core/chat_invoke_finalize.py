@@ -150,6 +150,23 @@ async def finalize_chat_response(
     dc = prepared.delivery_context
     is_system_prompt = prepared.is_system_prompt
     history_for_model = prepared.history_for_model
+    # Tras /summarize o tool summarize_chat_context: persistir base compacta,
+    # no el history_for_model gordo (re-inflaba Redis y anulaba el fold).
+    if isinstance(result, dict):
+        compacted = result.get("compacted_history")
+        if isinstance(compacted, list):
+            history_for_model = [item for item in compacted if isinstance(item, dict)]
+    if history_for_model is prepared.history_for_model:
+        try:
+            from duckclaw.forge.skills.chat_history_compact_context import (
+                take_compacted_chat_history,
+            )
+
+            override = take_compacted_chat_history()
+            if override is not None:
+                history_for_model = override
+        except Exception:
+            pass
     username = prepared.username
     chat_ident = prepared.chat_ident
 

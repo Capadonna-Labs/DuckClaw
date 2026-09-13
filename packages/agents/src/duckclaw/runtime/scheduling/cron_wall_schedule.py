@@ -198,7 +198,13 @@ def wall_once_datetime_local(spec: dict[str, Any]) -> Optional[datetime]:
 
 
 def wall_once_expired(spec: dict[str, Any], now_epoch: float) -> bool:
-    """True si el slot ``once`` ya no es disparable (pasó el minuto objetivo sin ser el minuto actual)."""
+    """True si el slot ``once`` ya no es disparable (pasó el minuto objetivo sin ser el minuto actual).
+
+    Solo aplica a ``kind=once``. Los horarios ``every`` (p. ej. cada lunes 08:30) nunca
+    expiran por esta vía — si devolvemos True, el Heartbeat borra el wall en el siguiente poll.
+    """
+    if str(spec.get("kind") or "").strip().lower() != "once":
+        return False
     dt = wall_once_datetime_local(spec)
     if dt is None:
         return True

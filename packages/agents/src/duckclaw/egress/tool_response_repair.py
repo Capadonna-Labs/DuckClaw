@@ -125,6 +125,155 @@ def clock_only_lone_url_no_repair(
     return tools_since == ["get_current_time"]
 
 
+def messages_have_gmail_tools_since(
+    messages: list[Any] | None,
+    last_human_idx: int,
+) -> bool:
+    """True when any Gmail MCP tool ran after the last human turn."""
+    from langchain_core.messages import ToolMessage
+
+    for message in (messages or [])[max(0, last_human_idx + 1) :]:
+        if isinstance(message, ToolMessage) and _is_gmail_mcp_tool_name(
+            str(getattr(message, "name", "") or "")
+        ):
+            return True
+    return False
+
+
+def reply_looks_like_collapsed_stub(text: str) -> bool:
+    """Detect model collapse stubs like ``worker_id 1`` or ``5 registros.``."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    if len(t) < 8:
+        return True
+    if re.fullmatch(r"[\w.-]+\s+\d+", t):
+        return True
+    if re.fullmatch(r"\d+\s*registros?(?:\s*\([^)]*\))?\.?", t, re.I):
+        return True
+    # Stub line + deterministic Gmail snippet dump (no real analysis).
+    if re.match(r"^[\w.-]+\s+\d+\s*\n", t) and "Gmail:" in t and len(t) < 600:
+        return True
+    if t.startswith("Gmail:") and len(t) < 450 and "##" not in t and "**Insight" not in t:
+        return True
+    return False
+
+
+def _b64url_decode(data: str) -> str:
+    import base64
+
+    raw = (data or "").strip().replace("-", "+").replace("_", "/")
+    if not raw:
+        return ""
+    pad = "=" * (-len(raw) % 4)
+    try:
+        return base64.b64decode(raw + pad).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _gmail_payload_plain_text(payload: Any, *, depth: int = 0) -> str:
+    if not isinstance(payload, dict) or depth > 6:
+        return ""
+    mime = str(payload.get("mimeType") or "").lower()
+    body = payload.get("body") if isinstance(payload.get("body"), dict) else {}
+    data = str((body or {}).get("data") or "")
+    if data and mime.startswith("text/plain"):
+        return _b64url_decode(data)
+    parts = payload.get("parts")
+    if isinstance(parts, list):
+        plain_bits: list[str] = []
+        html_bits: list[str] = []
+        for part in parts:
+            if not isinstance(part, dict):
+                continue
+            part_mime = str(part.get("mimeType") or "").lower()
+            nested = _gmail_payload_plain_text(part, depth=depth + 1)
+            if not nested:
+                continue
+            if part_mime.startswith("text/plain"):
+                plain_bits.append(nested)
+            elif part_mime.startswith("text/html"):
+                html_bits.append(nested)
+            else:
+                plain_bits.append(nested)
+        if plain_bits:
+            return "\n".join(plain_bits)
+        if html_bits:
+            # Cheap HTML strip for synthesis evidence.
+            html = "\n".join(html_bits)
+            return re.sub(r"<[^>]+>", " ", html)
+    if data and mime.startswith("text/html"):
+        return re.sub(r"<[^>]+>", " ", _b64url_decode(data))
+    if data and not mime:
+        return _b64url_decode(data)
+    return ""
+
+
+def extract_gmail_evidence_for_synthesis(
+    messages: list[Any] | None,
+    last_human_idx: int,
+    *,
+    max_chars: int = 10000,
+) -> str:
+    """Build plain-text email evidence from Gmail tool results for NL synthesis."""
+    from langchain_core.messages import ToolMessage
+
+    chunks: list[str] = []
+    for message in (messages or [])[max(0, last_human_idx + 1) :]:
+        if not isinstance(message, ToolMessage):
+            continue
+        name = str(getattr(message, "name", "") or "")
+        if not _is_gmail_mcp_tool_name(name):
+            continue
+        raw = str(getattr(message, "content", "") or "").strip()
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw) if raw.startswith("{") else None
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        if not isinstance(parsed, dict):
+            chunks.append(f"### {name}\n{raw[:2000]}")
+            continue
+        subject = str(parsed.get("subject") or "").strip()
+        if not subject:
+            payload = parsed.get("payload")
+            headers = payload.get("headers") if isinstance(payload, dict) else None
+            if isinstance(headers, list):
+                for h in headers:
+                    if isinstance(h, dict) and str(h.get("name") or "").lower() == "subject":
+                        subject = str(h.get("value") or "").strip()
+                        break
+        snip = str(parsed.get("snippet") or "").strip()
+        body = _gmail_payload_plain_text(parsed.get("payload"))
+        if not body and isinstance(parsed.get("messages"), list):
+            # get_thread: concatenate message bodies
+            bodies: list[str] = []
+            for msg in parsed["messages"]:
+                if isinstance(msg, dict):
+                    bit = _gmail_payload_plain_text(msg.get("payload"))
+                    if bit:
+                        bodies.append(bit)
+                    elif msg.get("snippet"):
+                        bodies.append(str(msg.get("snippet")))
+            body = "\n\n---\n\n".join(bodies)
+        parts = [f"### {name}"]
+        if subject:
+            parts.append(f"Asunto: {subject}")
+        if snip:
+            parts.append(f"Snippet: {snip}")
+        if body:
+            parts.append(f"Cuerpo:\n{body.strip()}")
+        elif not snip:
+            parts.append(raw[:2000])
+        chunks.append("\n".join(parts))
+    evidence = "\n\n".join(chunks).strip()
+    if len(evidence) > max_chars:
+        return evidence[:max_chars] + "\n\n…[correo truncado para síntesis]"
+    return evidence
+
+
 def tool_response_needs_egress_repair(
     messages: list[Any] | None,
     incoming: str,
@@ -133,22 +282,28 @@ def tool_response_needs_egress_repair(
     last_human_idx: int,
     repair_enabled: bool = False,
 ) -> bool:
-    """True when an enabled worker returned empty text or raw tool JSON."""
+    """True when an enabled worker returned empty text, raw tool JSON, or a collapse stub."""
     if not repair_enabled:
         return False
     if clock_only_lone_url_no_repair(incoming, messages, last_human_idx=last_human_idx):
         return False
     if reply_is_tool_json_echo(reply or ""):
         return True
-    if not (reply or "").strip():
-        from langchain_core.messages import ToolMessage
+    has_tools = False
+    has_gmail = messages_have_gmail_tools_since(messages, last_human_idx)
+    from langchain_core.messages import ToolMessage
 
-        tools_since = [
-            str(getattr(message, "name", "") or "")
-            for message in (messages or [])[max(0, last_human_idx + 1) :]
-            if isinstance(message, ToolMessage)
-        ]
-        return bool(tools_since)
+    tools_since = [
+        str(getattr(message, "name", "") or "")
+        for message in (messages or [])[max(0, last_human_idx + 1) :]
+        if isinstance(message, ToolMessage)
+    ]
+    has_tools = bool(tools_since)
+    if not (reply or "").strip():
+        return has_tools
+    # Gmail turns: model often collapses to ``worker N`` / snippet dump after get_message.
+    if has_gmail and reply_looks_like_collapsed_stub(reply):
+        return True
     return False
 
 
@@ -384,13 +539,14 @@ def repair_tool_response_egress_reply(
     from langchain_core.messages import ToolMessage
 
     human_idx = last_human_index(messages)
+    gmail_evidence = extract_gmail_evidence_for_synthesis(messages, human_idx)
     tool_parts: list[str] = []
     clock_data = parse_get_current_time_json(reply) or {}
     for message in messages[max(0, human_idx + 1) :]:
         if isinstance(message, ToolMessage):
             tool_name = str(getattr(message, "name", "") or "")
             tool_content = str(getattr(message, "content", "") or "").strip()
-            if tool_content:
+            if tool_content and not _is_gmail_mcp_tool_name(tool_name):
                 tool_parts.append(f"### {tool_name}\n{tool_content}")
             if tool_name == "get_current_time" and not clock_data:
                 clock_data = latest_tool_json_since(messages, human_idx, "get_current_time") or {}
@@ -410,11 +566,26 @@ def repair_tool_response_egress_reply(
     evidence_parts: list[str] = []
     if header:
         evidence_parts.append(header)
+    if gmail_evidence:
+        evidence_parts.append(
+            "Correo recuperado via Gmail (usa esto para un análisis completo; "
+            "no te limites al snippet):\n" + gmail_evidence
+        )
     if tool_parts:
         evidence_parts.append("Resultados de herramientas:\n" + "\n\n".join(tool_parts))
-    if (reply or "").strip() and reply_is_tool_json_echo(reply):
+    if (reply or "").strip() and (
+        reply_is_tool_json_echo(reply) or reply_looks_like_collapsed_stub(reply)
+    ):
         evidence_parts.append(f"Respuesta cruda rechazada:\n{reply.strip()}")
-    evidence_parts.append(f"Contexto del usuario:\n{(incoming or '').strip()}")
+    ask = (incoming or "").strip()
+    if gmail_evidence:
+        ask = (
+            f"{ask}\n\n"
+            "Entrega un análisis completo del correo en español: resumen ejecutivo, "
+            "insights accionables (viñetas), implicaciones (p. ej. mercado/producto si aplica) "
+            "y siguientes pasos. No devuelvas solo el snippet ni stubs numéricos."
+        )
+    evidence_parts.append(f"Contexto del usuario:\n{ask}")
     evidence = "\n\n".join(evidence_parts)
 
     worker_id = str(getattr(spec, "worker_id", "") or "").strip() or "worker"
@@ -434,12 +605,17 @@ def repair_tool_response_egress_reply(
         return deterministic if deterministic else reply
     synthesized = synthesize_user_visible_reply(
         llm,
-        user_ask=(incoming or "").strip(),
+        user_ask=ask,
         raw_evidence=evidence,
         worker_id=worker_id,
+        for_admin_console=bool(gmail_evidence),
     )
     synthesized_text = (synthesized or "").strip()
-    if synthesized_text and not reply_is_tool_json_echo(synthesized_text):
+    if (
+        synthesized_text
+        and not reply_is_tool_json_echo(synthesized_text)
+        and not reply_looks_like_collapsed_stub(synthesized_text)
+    ):
         return synthesized_text
     deterministic = deterministic_fallback()
     return deterministic if deterministic else reply
@@ -448,8 +624,10 @@ def repair_tool_response_egress_reply(
 __all__ = [
     "clock_only_lone_url_no_repair",
     "deterministic_tool_response_summary",
+    "extract_gmail_evidence_for_synthesis",
     "last_human_index",
     "latest_tool_json_since",
+    "messages_have_gmail_tools_since",
     "parse_get_current_time_json",
     "post_tools_synthesis_needed",
     "repair_tool_response_egress_reply",
@@ -457,6 +635,7 @@ __all__ = [
     "reply_is_json_only",
     "reply_is_tool_json_echo",
     "reply_is_tool_label_json_echo",
+    "reply_looks_like_collapsed_stub",
     "strip_tool_label_prefix",
     "tool_response_needs_egress_repair",
 ]

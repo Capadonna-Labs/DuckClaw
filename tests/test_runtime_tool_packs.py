@@ -103,6 +103,8 @@ def test_homeostasis_loop_tools_always_bound() -> None:
         "evaluate_homeostasis",
         "configure_loop_homeostasis",
         "get_loop_homeostasis_status",
+        "configure_crons_schedule",
+        "get_crons_schedule_status",
         "calculate_tp_sl_distance",
     ):
         assert catalog.packs_for_tool(name) == frozenset({"homeostasis"})
@@ -117,6 +119,8 @@ def test_homeostasis_loop_tools_always_bound() -> None:
         _tool("evaluate_homeostasis"),
         _tool("configure_loop_homeostasis"),
         _tool("get_loop_homeostasis_status"),
+        _tool("configure_crons_schedule"),
+        _tool("get_crons_schedule_status"),
         _tool("calculate_tp_sl_distance"),
         _tool("calculate_pnl_contribution"),
         _tool("external_orphan_tool"),  # orphan unless some pack claims it
@@ -132,6 +136,8 @@ def test_homeostasis_loop_tools_always_bound() -> None:
     assert "request_homeostasis_validation" in result.bound_names
     assert "manage_homeostasis_goals" in result.bound_names
     assert "evaluate_homeostasis" in result.bound_names
+    assert "configure_crons_schedule" in result.bound_names
+    assert "get_crons_schedule_status" in result.bound_names
     assert "calculate_tp_sl_distance" in result.bound_names
     assert "external_orphan_tool" not in result.bound_names
 

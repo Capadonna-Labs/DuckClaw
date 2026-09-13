@@ -69,7 +69,12 @@ export function splitPlaygroundWorkerSuffix(text: string): { body: string; worke
 
 type MarkdownVariant = 'assistant' | 'user';
 
-function buildMarkdownComponents(variant: MarkdownVariant): Components {
+export type MarkdownImageOpenHandler = (image: { url: string; name: string }) => void;
+
+function buildMarkdownComponents(
+  variant: MarkdownVariant,
+  onImageOpen?: MarkdownImageOpenHandler
+): Components {
   const isUser = variant === 'user';
   const heading = isUser ? 'text-white' : 'text-gov-gray-900 dark:text-dark-text';
   const headingMuted = isUser ? 'text-white/95' : 'text-gov-gray-800 dark:text-dark-text';
@@ -95,6 +100,9 @@ function buildMarkdownComponents(variant: MarkdownVariant): Components {
   const inlineCode = isUser
     ? 'px-1.5 py-0.5 rounded-md bg-white/15 text-[0.85em] font-mono text-white'
     : 'px-1.5 py-0.5 rounded-md bg-gov-gray-200/90 dark:bg-dark-border text-[0.85em] font-mono text-gov-blue-900 dark:text-dark-cyan';
+  const imgBorder = isUser
+    ? 'border-white/20'
+    : 'border-gov-gray-200 dark:border-dark-border';
 
   return {
     p: ({ children }) => <p className="mb-3 last:mb-0 leading-relaxed">{children}</p>,
@@ -134,6 +142,35 @@ function buildMarkdownComponents(variant: MarkdownVariant): Components {
         {children}
       </a>
     ),
+    img: ({ src, alt }) => {
+      const url = typeof src === 'string' ? src.trim() : '';
+      if (!url) return null;
+      const name = (typeof alt === 'string' && alt.trim()) || 'Imagen';
+      const imgEl = (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={url}
+          alt={name}
+          className={`my-2 max-h-64 max-w-full rounded-lg border ${imgBorder} object-contain`}
+        />
+      );
+      if (!onImageOpen) return imgEl;
+      return (
+        <button
+          type="button"
+          onClick={() => onImageOpen({ url, name })}
+          className="my-2 block max-w-full cursor-zoom-in border-0 bg-transparent p-0 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-gov-blue-500"
+          aria-label={`Ver imagen ampliada: ${name}`}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={name}
+            className={`max-h-64 max-w-full rounded-lg border ${imgBorder} object-contain hover:opacity-90 transition-opacity`}
+          />
+        </button>
+      );
+    },
     table: ({ children }) => (
       <div className={tableWrap}>
         <table className="w-max min-w-full text-xs border-collapse">{children}</table>
@@ -178,25 +215,30 @@ function buildMarkdownComponents(variant: MarkdownVariant): Components {
   };
 }
 
-const markdownComponents = buildMarkdownComponents('assistant');
-
 type ChatMarkdownProps = {
   content: string;
   className?: string;
   /** Burbuja de usuario (fondo azul): paleta clara sobre gov-blue. */
   variant?: MarkdownVariant;
+  /** Abre lightbox al tocar imágenes markdown (p. ej. newsletters / `![](...)`). */
+  onImageOpen?: MarkdownImageOpenHandler;
 };
 
 /**
  * Renderiza Markdown (GFM: tablas, listas, código, enlaces) para burbujas del chat.
  * Seguro por defecto: sin HTML crudo (react-markdown).
  */
-export function ChatMarkdown({ content, className = '', variant = 'assistant' }: ChatMarkdownProps) {
+export function ChatMarkdown({
+  content,
+  className = '',
+  variant = 'assistant',
+  onImageOpen,
+}: ChatMarkdownProps) {
   const { body: rawBody, workerNote } = splitPlaygroundWorkerSuffix(content);
   const normalized =
     variant === 'assistant' ? dedupeAssistantWorkerHeaders(rawBody) : rawBody.trim();
   const body = preprocessBareMermaidBlocks(normalized);
-  const components = variant === 'user' ? buildMarkdownComponents('user') : markdownComponents;
+  const components = buildMarkdownComponents(variant, onImageOpen);
 
   if (!body.trim() && !workerNote) {
     return null;

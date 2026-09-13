@@ -96,7 +96,11 @@ def post_tools_synthesis_needed(
     ]
     if not tools_since:
         return False
-    substantive_tools = [tool_name for tool_name in tools_since if tool_name != "get_current_time"]
+    substantive_tools = [
+        tool_name
+        for tool_name in tools_since
+        if tool_name not in {"get_current_time", "await_interval"}
+    ]
     if substantive_tools:
         return True
     return _incoming_has_vlm_context(incoming)

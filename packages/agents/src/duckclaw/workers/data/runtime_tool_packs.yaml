@@ -19,6 +19,7 @@ packs:
     members:
       exact:
         - get_current_time
+        - await_interval
         - get_project_context
         - read_sql
         - admin_sql

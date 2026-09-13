@@ -256,6 +256,12 @@ def initialize_worker_graph_context(
         register_loop_skill(tools, db)
     except Exception:
         pass
+    try:
+        from duckclaw.forge.skills.await_interval_bridge import register_await_interval_skill
+
+        register_await_interval_skill(tools, db)
+    except Exception:
+        pass
     _skills_norm_early = [
         str(s).strip().lower().replace("-", "_")
         for s in (getattr(spec, "skills_list", None) or [])

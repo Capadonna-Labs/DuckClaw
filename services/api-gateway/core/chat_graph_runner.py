@@ -73,16 +73,24 @@ async def _run_context_fold_fly_command(
             tenant_id=prepared.tenant_id,
         )
     kept_history = fold_meta.get("kept_history")
-    if redis_client is not None and isinstance(kept_history, list) and kept_history:
+    fold_ok = bool(vault_summary) and not str(cmd_reply).startswith("⚠️")
+    compacted_history = (
+        [item for item in kept_history if isinstance(item, dict)]
+        if fold_ok and isinstance(kept_history, list)
+        else None
+    )
+    # Escribe la base compacta ya; finalize añadirá el turno /summarize
+    # usando compacted_history (no history_for_model gordo).
+    if redis_client is not None and compacted_history is not None:
         await redis_save_chat_history(
             redis_client,
             prepared.tenant_id,
             session_id,
-            kept_history,
+            compacted_history,
         )
     elapsed_ms = int((time.monotonic() - t0) * 1000)
     ctx_tokens = fold_meta.get("context_estimated_tokens")
-    trace_status = "SUCCESS" if not str(cmd_reply).startswith("⚠️") else "FAILED"
+    trace_status = "SUCCESS" if fold_ok else "FAILED"
     try:
         append_context_fold_conversation_trace(
             session_id,
@@ -95,24 +103,25 @@ async def _run_context_fold_fly_command(
             if isinstance(ctx_tokens, (int, float))
             else None,
             messages_before=len(prepared.history_for_model or []),
-            kept_history=kept_history if isinstance(kept_history, list) else None,
+            kept_history=compacted_history,
             summary_chars=len(vault_summary) if vault_summary else None,
             vault_saved=vault_saved if vault_summary else None,
         )
     except Exception:
         pass
-    return (
-        {
-            "response": cmd_reply,
-            "session_id": session_id,
-            "worker_id": worker_id,
-            "elapsed_ms": elapsed_ms,
-            "context_estimated_tokens": int(ctx_tokens)
-            if isinstance(ctx_tokens, (int, float))
-            else None,
-        },
-        time.monotonic(),
-    )
+    result_payload: dict[str, Any] = {
+        "response": cmd_reply,
+        "session_id": session_id,
+        "worker_id": worker_id,
+        "elapsed_ms": elapsed_ms,
+        "context_estimated_tokens": int(ctx_tokens)
+        if isinstance(ctx_tokens, (int, float))
+        else None,
+    }
+    if compacted_history is not None:
+        # Evita que finalize re-infle Redis con prepared.history_for_model.
+        result_payload["compacted_history"] = compacted_history
+    return (result_payload, time.monotonic())
 
 
 async def run_chat_graph(

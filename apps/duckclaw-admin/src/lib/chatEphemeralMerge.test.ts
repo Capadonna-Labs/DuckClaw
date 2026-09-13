@@ -45,4 +45,23 @@ describe('chatEphemeralMerge', () => {
     );
     expect(merged[merged.length - 1]?.role).toBe('assistant');
   });
+
+  it('places tools for in-flight turn (user without assistant) after that user', () => {
+    const merged = interleaveEphemeralIntoHistory(
+      [user('a'), assistant('A'), user('b')],
+      [tool('read_sql', 2)]
+    );
+    expect(
+      merged.map((m) => `${m.role}${m.toolName ? `:${m.toolName}` : ''}`)
+    ).toEqual(['user', 'assistant', 'user', 'heartbeat:read_sql']);
+    expect(merged[merged.length - 1]?.role).toBe('heartbeat');
+  });
+
+  it('does not append orphan tools after the last assistant', () => {
+    const merged = interleaveEphemeralIntoHistory(
+      [user('a'), assistant('A')],
+      [tool('orphan')]
+    );
+    expect(merged.map((m) => m.role)).toEqual(['user', 'heartbeat', 'assistant']);
+  });
 });

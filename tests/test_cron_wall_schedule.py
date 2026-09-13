@@ -66,6 +66,22 @@ def test_wall_once_expired_after_slot() -> None:
     assert wall_once_expired(spec, after)
 
 
+def test_wall_once_expired_false_for_every_schedule() -> None:
+    """Regression: Heartbeat used to wipe weekly wall crons because every→once_dt=None→expired."""
+    tz = "America/Bogota"
+    spec = {
+        "v": 1,
+        "tz": tz,
+        "kind": "every",
+        "every_h": 8,
+        "every_mi": 30,
+        "weekdays": [0],
+    }
+    zi = ZoneInfo(tz)
+    now = datetime(2026, 9, 13, 2, 40, 0, tzinfo=zi).timestamp()
+    assert wall_once_expired(spec, now) is False
+
+
 def test_execute_goals_timestamp_every_writes_spec(tmp_path: Path) -> None:
     import duckdb
 

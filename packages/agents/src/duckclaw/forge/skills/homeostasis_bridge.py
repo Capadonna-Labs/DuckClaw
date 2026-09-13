@@ -138,9 +138,11 @@ def register_goals_alignment_skill(
                 description=(
                     "Lista/añade/borra metas homeostasis (/goals). "
                     "command='' lista el manifiesto DB; 'rm all' o 'rm <belief_key>'; '--reset'; "
-                    "texto libre añade meta; '--set error_rate_pct 2'; '--priority <goal_id> <n>'. "
-                    "Un comando por invocación (no repitas list tras cada rm: confía en el ✅). "
-                    "Metas legacy en agent_config solo con '--migrate'. "
+                    "texto libre añade meta; '--set error_rate_pct 2'; '--priority <goal_id> <n>'; "
+                    "'--task <goal_id>' / '--monitor <goal_id>' cambian el kind. "
+                    "Para recordatorio a hora fija (lunes 08:30 COT): añade la meta y luego "
+                    "configure_crons_schedule('--timestamp every 08:30 lun'). "
+                    "Un comando por invocación. Metas legacy en agent_config solo con '--migrate'. "
                     "No llames este tool varias veces en paralelo en el mismo turno."
                 ),
             )

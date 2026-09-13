@@ -558,7 +558,10 @@ async def _run_goals_proactive_tick_one_db(
         if ds_chk > 0:
             continue
 
-        if wall_once_expired(wall_spec, now):
+        # Solo limpiar one-shots vencidos. ``every`` no expira (wall_once_expired=False).
+        if str(wall_spec.get("kind") or "").strip().lower() == "once" and wall_once_expired(
+            wall_spec, now
+        ):
             try:
                 await _enqueue_chat_state_write(
                     db_path=db_path,

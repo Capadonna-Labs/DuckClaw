@@ -249,9 +249,10 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 configure_loop_homeostasis,
                 name="configure_loop_homeostasis",
                 description=(
-                    "Programa auto-mejora /loop (evalúa /goals periódicamente). "
-                    "interval='off' o '10min'/'4h'. mode='clock' (reloj) o 'idle' (silencio desde último mensaje). "
-                    "Revisión ligera al usuario: /crons --delta."
+                    "Programa auto-mejora cognitiva /loop (evalúa /goals periódicamente). "
+                    "interval='off' o '10min'/'4h'. mode='clock' (reloj Heartbeat) o 'idle' (silencio desde último mensaje). "
+                    "NO es un calendario: para recordatorios a hora exacta (ej. lunes 08:30 COT) usa "
+                    "configure_crons_schedule con '--timestamp every 08:30 lun'."
                 ),
             )
         )

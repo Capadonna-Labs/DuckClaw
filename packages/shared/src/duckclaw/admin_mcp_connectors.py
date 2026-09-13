@@ -255,10 +255,11 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
                 token = str(row[0] or "").strip()
                 updated_at = row[1] if len(row) > 1 else None
 
-    preset_id = str(connector.get("preset_id") or "").strip()
+    preset_id = str(connector.get("preset_id") or "").strip().lower()
     from duckclaw.mcp_connector_presets import is_google_workspace_preset
 
-    if not is_google_workspace_preset(preset_id):
+    needs_oauth_refresh = is_google_workspace_preset(preset_id) or preset_id == "notion"
+    if not needs_oauth_refresh:
         return token
 
     connector_id = str(connector.get("connector_id") or "").strip()
@@ -289,7 +290,7 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             if row:
                 refresh = str(row[0] if not isinstance(row, dict) else row.get("value_text") or "").strip()
 
-    # ponytail: Google access tokens ~1h; refresh if missing/stale without tokeninfo roundtrip.
+    # ponytail: Google (~1h) and Notion access tokens expire; refresh when stale.
     stale = True
     if token and updated_at is not None:
         try:
@@ -299,12 +300,14 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             if hasattr(ts, "tzinfo") and ts.tzinfo is None:
                 ts = ts.replace(tzinfo=timezone.utc)
             age_s = (datetime.now(timezone.utc) - ts).total_seconds()
-            stale = age_s > 3000
+            # Notion tokens are short-lived; refresh earlier than Google's ~1h window.
+            stale_after = 1800 if preset_id == "notion" else 3000
+            stale = age_s > stale_after
         except Exception:
             stale = True
     elif not token:
         stale = True
-    else:
+    elif is_google_workspace_preset(preset_id):
         try:
             import httpx
 
@@ -316,37 +319,95 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             stale = info.status_code >= 400
         except Exception:
             stale = True
+    else:
+        # Notion: no cheap introspection; age-based above. If no updated_at, force refresh.
+        stale = True
 
     if not stale:
         return token
 
     if not refresh:
+        # Stale access without refresh must not leak a dead bearer (401 loop).
         return ""
 
+    fresh = ""
+    new_refresh = refresh
     try:
-        from duckclaw.mcp_google_workspace_oauth import refresh_google_access_token
+        if preset_id == "notion":
+            from duckclaw.mcp_notion_oauth import (
+                refresh_notion_access_token,
+                resolve_notion_redirect_uri,
+            )
 
-        fresh = refresh_google_access_token(refresh)
+            client_id = ""
+            for actor in (owner, ""):
+                resolved = resolve_runtime_setting(
+                    db,
+                    tenant_id=tenant_id,
+                    actor_email=actor,
+                    domain="mcp_oauth",
+                    key="notion.client_id",
+                )
+                client_id = str(resolved.get("value") or "").strip()
+                if client_id:
+                    break
+            if not client_id:
+                row = _fetchone(
+                    db.execute(
+                        "SELECT value_text FROM main.admin_runtime_settings "
+                        "WHERE active = true AND domain = 'mcp_oauth' AND key = 'notion.client_id' "
+                        "AND tenant_id = ? AND length(trim(coalesce(value_text, ''))) > 0 "
+                        "ORDER BY updated_at DESC LIMIT 1",
+                        [tenant_id],
+                    )
+                )
+                if row:
+                    client_id = str(
+                        row[0] if not isinstance(row, dict) else row.get("value_text") or ""
+                    ).strip()
+            tokens = refresh_notion_access_token(
+                refresh,
+                client_id=client_id,
+                redirect_uri=resolve_notion_redirect_uri(),
+            )
+            fresh = str(tokens.get("access_token") or "").strip()
+            new_refresh = str(tokens.get("refresh_token") or "").strip() or refresh
+        else:
+            from duckclaw.mcp_google_workspace_oauth import refresh_google_access_token
+
+            fresh = refresh_google_access_token(refresh)
     except Exception:
         fresh = ""
     if not fresh:
-        # ponytail: stale/revoked refresh must not leak dead bearer to Gmail REST (401 loop).
+        # ponytail: stale/revoked refresh must not leak dead bearer (401 loop).
         return ""
-    if not getattr(db, "_read_only", False):
-        try:
-            from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
+    try:
+        from duckclaw.mcp_connector_oauth import persist_mcp_connector_oauth_tokens
 
-            _apply_set_mcp_connector_auth(
-                db,
-                {
-                    "tenant_id": tenant_id,
-                    "actor_email": owner or "system",
-                    "connector_id": connector_id,
-                    "bearer_token": fresh,
-                },
-            )
-        except Exception:
-            pass
+        persist_mcp_connector_oauth_tokens(
+            tenant_id=tenant_id,
+            actor_email=owner or "system",
+            connector_id=connector_id,
+            bearer_token=fresh,
+            refresh_token=new_refresh,
+        )
+    except Exception:
+        if not getattr(db, "_read_only", False):
+            try:
+                from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
+
+                _apply_set_mcp_connector_auth(
+                    db,
+                    {
+                        "tenant_id": tenant_id,
+                        "actor_email": owner or "system",
+                        "connector_id": connector_id,
+                        "bearer_token": fresh,
+                        "refresh_token": new_refresh,
+                    },
+                )
+            except Exception:
+                pass
     return fresh
 
 

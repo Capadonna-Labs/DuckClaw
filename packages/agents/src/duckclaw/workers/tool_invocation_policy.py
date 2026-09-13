@@ -59,6 +59,8 @@ def _looks_like_system_or_non_data_turn(text: str) -> bool:
         return True
     if "[vlm_context" in value or "contexto visual adjunto:" in value:
         return True
+    if "[email_screenshot]" in value or "[directiva_correo]" in value:
+        return True
     if re.search(r"https?://", value) or "reddit.com" in value:
         return True
     return False
@@ -176,6 +178,15 @@ def decide_db_first_tool_invocation(
         or not _has_local_ledger_capability(spec)
     ):
         return _no_tool_invocation()
+
+    # Gmail/email turns must not burn the first hop on read_sql.
+    try:
+        from duckclaw.workers.tool_orchestration import incoming_has_email_intent
+
+        if incoming_has_email_intent(incoming):
+            return _no_tool_invocation()
+    except Exception:
+        pass
 
     if "admin_sql" in tool_names and _local_record_write_intent(incoming):
         return ToolInvocationDecision(

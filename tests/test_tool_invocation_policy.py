@@ -97,6 +97,28 @@ def test_local_ledger_current_time_decision_is_direct_tool_call_once_per_turn() 
     assert not already_called.should_force
 
 
+def test_email_intent_skips_db_first_read_sql() -> None:
+    policy = importlib.import_module("duckclaw.workers.tool_invocation_policy")
+
+    decision = policy.decide_db_first_tool_invocation(
+        spec=_spec_with_capabilities("local_ledger"),
+        incoming=(
+            "busca el correo y saca insights\n\n"
+            "[EMAIL_SCREENSHOT] Usuario adjuntó captura de UN correo.\n"
+            "Contexto visual adjunto: Remitente: Data Points."
+        ),
+        available_tools={"read_sql", "admin_sql"},
+    )
+    assert not decision.should_force
+
+    marker_only = policy.decide_db_first_tool_invocation(
+        spec=_spec_with_capabilities("local_ledger"),
+        incoming="[DIRECTIVA_CORREO] Pide correo concreto. Usa Gmail MCP.",
+        available_tools={"read_sql", "admin_sql"},
+    )
+    assert not marker_only.should_force
+
+
 def test_update_system_prompt_forced_on_persist_request() -> None:
     policy = importlib.import_module("duckclaw.workers.tool_invocation_policy")
 

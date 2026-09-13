@@ -5,6 +5,7 @@ import Link from 'next/link';
 import {
   Bot,
   Brain,
+  ChevronDown,
   ChevronRight,
   Cpu,
   MessageSquarePlus,
@@ -49,6 +50,10 @@ export type AdminChatPanelProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
   headerActions?: React.ReactNode;
+  /** Acciones a la izquierda de la cabecera studio (p. ej. volver). */
+  studioHeaderLeading?: React.ReactNode;
+  /** Acciones a la derecha de la cabecera studio (sandbox, logs, settings). */
+  studioHeaderTrailing?: React.ReactNode;
   /** Pills de contexto (BD, sandbox, RAG) encima del textarea — estilo barra de composición. */
   composeChips?: React.ReactNode;
   /** `studio`: caja única redondeada con chips dentro (Playground). */
@@ -81,6 +86,8 @@ export function AdminChatPanel({
   conversationTitle,
   onRenameConversation,
   headerActions,
+  studioHeaderLeading,
+  studioHeaderTrailing,
   composeChips,
   composeLayout = 'default',
   showToolUsage = true,
@@ -230,13 +237,21 @@ export function AdminChatPanel({
 
   return (
     <section
-      className={`flex flex-col min-w-0 min-h-0 bg-white dark:bg-dark-surface border dark:border-dark-border overflow-hidden ${
-        isCompact ? 'rounded-2xl shadow-xl h-full' : 'flex-1 rounded-3xl shadow-sm'
+      className={`relative flex flex-col min-w-0 min-h-0 overflow-hidden bg-white dark:bg-dark-surface ${
+        isStudioCompose ? 'isolate' : 'border dark:border-dark-border'
+      } ${
+        isCompact ? 'rounded-2xl shadow-xl h-full border dark:border-dark-border' : 'flex-1 rounded-3xl shadow-sm'
       } ${className}`}
     >
+      {isStudioCompose ? (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(59,130,246,0.14),transparent_55%)] dark:bg-[radial-gradient(120%_80%_at_50%_-10%,rgba(34,211,238,0.1),transparent_55%)]"
+        />
+      ) : null}
       {showHeader && (
         <header
-          className={`border-b dark:border-dark-border shrink-0 ${
+          className={`relative z-[1] border-b dark:border-dark-border shrink-0 ${
             isCompact ? 'p-3 space-y-2' : 'flex flex-wrap items-center justify-between gap-2 p-3'
           }`}
         >
@@ -475,12 +490,19 @@ export function AdminChatPanel({
       )}
 
       {showStudioHeader && !showHeader ? (
-        <PlaygroundChatStudioHeader
-          conversationTitle={conversationTitle}
-          onRenameConversation={onRenameConversation}
-          tokenUsage={lastTurnUsage}
-          contextEstimatedTokens={contextEstimatedTokens}
-        />
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
+          <div className="pointer-events-auto">
+            <PlaygroundChatStudioHeader
+              conversationTitle={conversationTitle}
+              onRenameConversation={onRenameConversation}
+              tokenUsage={lastTurnUsage}
+              contextEstimatedTokens={contextEstimatedTokens}
+              leading={studioHeaderLeading}
+              trailing={studioHeaderTrailing}
+            />
+          </div>
+          <div className="studio-glass-fade-top" aria-hidden />
+        </div>
       ) : null}
 
       {config?.team_hint && showHeader && !isCompact && (
@@ -512,6 +534,7 @@ export function AdminChatPanel({
         loading={loading}
         showToolUsage={showToolUsage}
         isCompact={isCompact}
+        studioChromePad={isStudioCompose && showStudioHeader && !showHeader}
         scrollRef={scrollRef}
         showScrollButton={showScrollButton}
         onScroll={onScroll}
@@ -520,36 +543,59 @@ export function AdminChatPanel({
         editFromMessage={editFromMessage}
       />
 
-      <AdminChatComposeFooter
-        isStudioCompose={isStudioCompose}
-        isCompact={isCompact}
-        composeChips={composeChips}
-        input={input}
-        setInput={setInput}
-        inputRef={inputRef}
-        canSend={canSend}
-        canSubmit={canSubmit}
-        loading={loading}
-        workerId={workerId}
-        workerDisplayName={workerDisplayName}
-        error={error}
-        voiceResponseMode={voiceResponseMode}
-        voiceResponseAvailable={voiceResponseAvailable}
-        liveVoiceAvailable={liveVoiceAvailable}
-        setVoiceResponseMode={setVoiceResponseMode}
-        imageAttachments={imageAttachments}
-        documentAttachments={documentAttachments}
-        send={send}
-        suggestions={suggestions}
-        onPickSuggestion={sendSuggestion}
-        cancelGeneration={cancelGeneration}
-        onTextareaPaste={onTextareaPaste}
-        pasteFromClipboard={pasteFromClipboard}
-        handleVoiceClick={handleVoiceClick}
-        handleLiveVoiceClick={handleLiveVoiceClick}
-        voice={voice}
-        liveVoice={liveVoice}
-      />
+      {showScrollButton && isStudioCompose && showStudioHeader && !showHeader ? (
+        <button
+          type="button"
+          onClick={() => scrollToBottom('smooth')}
+          className="absolute bottom-[4.75rem] right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface sm:bottom-24"
+          aria-label="Ir al final de la conversación"
+          title="Ir abajo"
+        >
+          <ChevronDown size={20} aria-hidden />
+        </button>
+      ) : null}
+
+      <div
+        className={
+          isStudioCompose
+            ? 'pointer-events-none absolute inset-x-0 bottom-0 z-20'
+            : undefined
+        }
+      >
+        {isStudioCompose ? <div className="studio-glass-fade-bottom" aria-hidden /> : null}
+        <div className={isStudioCompose ? 'pointer-events-auto' : undefined}>
+          <AdminChatComposeFooter
+            isStudioCompose={isStudioCompose}
+            isCompact={isCompact}
+            composeChips={composeChips}
+            input={input}
+            setInput={setInput}
+            inputRef={inputRef}
+            canSend={canSend}
+            canSubmit={canSubmit}
+            loading={loading}
+            workerId={workerId}
+            workerDisplayName={workerDisplayName}
+            error={error}
+            voiceResponseMode={voiceResponseMode}
+            voiceResponseAvailable={voiceResponseAvailable}
+            liveVoiceAvailable={liveVoiceAvailable}
+            setVoiceResponseMode={setVoiceResponseMode}
+            imageAttachments={imageAttachments}
+            documentAttachments={documentAttachments}
+            send={send}
+            suggestions={suggestions}
+            onPickSuggestion={sendSuggestion}
+            cancelGeneration={cancelGeneration}
+            onTextareaPaste={onTextareaPaste}
+            pasteFromClipboard={pasteFromClipboard}
+            handleVoiceClick={handleVoiceClick}
+            handleLiveVoiceClick={handleLiveVoiceClick}
+            voice={voice}
+            liveVoice={liveVoice}
+          />
+        </div>
+      </div>
     </section>
   );
 }

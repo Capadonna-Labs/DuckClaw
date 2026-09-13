@@ -2,6 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  /* Chrome fijo del playground: frosted glass sobre el hilo de mensajes. */
+  .studio-glass-chrome {
+    @apply border-white/40 bg-white/70 backdrop-blur-xl backdrop-saturate-150
+      dark:border-white/10 dark:bg-dark-surface/70
+      supports-[backdrop-filter]:bg-white/55
+      dark:supports-[backdrop-filter]:bg-dark-surface/55;
+  }
+
+  .studio-glass-fade-top {
+    @apply pointer-events-none h-8 bg-gradient-to-b from-white/65 to-transparent
+      dark:from-dark-surface/65;
+  }
+
+  .studio-glass-fade-bottom {
+    @apply pointer-events-none h-10 bg-gradient-to-t from-white/70 to-transparent
+      dark:from-dark-surface/70;
+  }
+}
+
 @layer utilities {
   .scrollbar-hide {
     -ms-overflow-style: none;

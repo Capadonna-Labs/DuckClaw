@@ -772,7 +772,7 @@ export default function PlaygroundPage() {
   );
 
   return (
-    <div className="flex flex-col lg:flex-row gap-3 min-h-0 h-full max-lg:h-[calc(100dvh-4rem)] max-lg:overflow-hidden w-full relative">
+    <div className="flex flex-col lg:flex-row gap-3 min-h-0 h-full max-lg:overflow-hidden w-full relative">
       <ScrollFabPair
         showScrollTop={pageScroll.showScrollTop}
         showScrollBottom={pageScroll.showScrollBottom}
@@ -803,60 +803,11 @@ export default function PlaygroundPage() {
         />
       ) : (
         <>
-      <div className="relative flex flex-1 flex-col min-w-0 min-h-0 h-[calc(100dvh-5.5rem)] max-h-[calc(100dvh-5.5rem)] lg:h-full lg:max-h-none bg-white dark:bg-dark-surface rounded-3xl border dark:border-dark-border shadow-sm overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setShowHistory(true)}
-          className="absolute left-3 top-3 z-20 flex items-center justify-center rounded-full border border-gov-blue-100 bg-white/90 p-2 text-gov-blue-800 shadow-sm backdrop-blur hover:bg-gov-blue-50 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan dark:hover:bg-dark-bg"
-          aria-label="Volver al historial"
-          title="Volver al historial"
-        >
-          <ArrowLeft size={14} />
-        </button>
-        <div className="lg:hidden absolute right-2 top-2.5 z-20 flex items-center gap-1">
-          <Link
-            href={
-              conv.sessionId
-                ? `/sandbox?tab=files&chat=${encodeURIComponent(conv.sessionId)}`
-                : '/sandbox'
-            }
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-gov-blue-100 bg-white/90 text-gov-blue-800 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan"
-            aria-label="Abrir sandbox"
-            title="Sandbox"
-          >
-            <FolderOpen size={14} />
-          </Link>
-          <button
-            type="button"
-            onClick={() => {
-              setLogsPanelOpen((open) => {
-                const next = !open;
-                if (next) setPanelOpen(true);
-                return next;
-              });
-            }}
-            className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-sm backdrop-blur ${
-              logsPanelOpen
-                ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
-                : 'border-gov-blue-100 bg-white/90 text-gov-blue-800 dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan'
-            }`}
-            aria-pressed={logsPanelOpen}
-            aria-label="Logs PM2"
-            title="Logs PM2"
-          >
-            <Terminal size={14} />
-          </button>
-          <button
-            type="button"
-            onClick={() => setPanelOpen((open) => !open)}
-            className="flex h-9 w-9 items-center justify-center rounded-full border border-gov-blue-100 bg-white/90 text-gov-blue-800 shadow-sm backdrop-blur dark:border-dark-border dark:bg-dark-surface/90 dark:text-dark-cyan"
-            aria-expanded={panelOpen}
-            aria-label={panelToggleTitle}
-            title={panelToggleTitle}
-          >
-            <Settings2 size={15} aria-hidden />
-          </button>
-        </div>
+      <div className="relative flex flex-1 flex-col min-w-0 min-h-0 h-full max-lg:rounded-b-2xl max-lg:rounded-t-none lg:rounded-3xl border border-t-0 max-lg:border-x-0 bg-white dark:border-dark-border dark:bg-dark-surface shadow-sm overflow-hidden lg:border">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(140%_90%_at_50%_-20%,rgba(59,130,246,0.14),transparent_50%)] dark:bg-[radial-gradient(140%_90%_at_50%_-20%,rgba(34,211,238,0.1),transparent_50%)]"
+        />
         {conv.bootstrapping || !conv.sessionId ? (
           <p className="flex-1 flex items-center justify-center text-sm text-gov-gray-400 p-8">
             Cargando conversación…
@@ -877,6 +828,63 @@ export default function PlaygroundPage() {
             composeChips={playgroundComposeChips}
             conversationTitle={conv.conversationTitle}
             onRenameConversation={conv.renameConversation}
+            studioHeaderLeading={
+              <button
+                type="button"
+                onClick={() => setShowHistory(true)}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gov-blue-800 shadow-sm backdrop-blur-md hover:bg-white/90 dark:border-white/10 dark:bg-dark-surface/70 dark:text-dark-cyan dark:hover:bg-dark-surface/90"
+                aria-label="Volver al historial"
+                title="Volver al historial"
+              >
+                <ArrowLeft size={16} />
+              </button>
+            }
+            studioHeaderTrailing={
+              <div className="flex items-center gap-1 lg:hidden">
+                <Link
+                  href={
+                    conv.sessionId
+                      ? `/sandbox?tab=files&chat=${encodeURIComponent(conv.sessionId)}`
+                      : '/sandbox'
+                  }
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gov-blue-800 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-dark-surface/70 dark:text-dark-cyan"
+                  aria-label="Abrir sandbox"
+                  title="Sandbox"
+                >
+                  <FolderOpen size={15} />
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLogsPanelOpen((open) => {
+                      const next = !open;
+                      if (next) setPanelOpen(true);
+                      return next;
+                    });
+                  }}
+                  className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-sm backdrop-blur-md ${
+                    logsPanelOpen
+                      ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
+                      : 'border-white/50 bg-white/70 text-gov-blue-800 dark:border-white/10 dark:bg-dark-surface/70 dark:text-dark-cyan'
+                  }`}
+                  aria-pressed={logsPanelOpen}
+                  aria-label="Logs PM2"
+                  title="Logs PM2"
+                >
+                  <Terminal size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPanelOpen((open) => !open)}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gov-blue-800 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-dark-surface/70 dark:text-dark-cyan"
+                  aria-expanded={panelOpen}
+                  aria-label={panelToggleTitle}
+                  title={panelToggleTitle}
+                >
+                  <Settings2 size={15} aria-hidden />
+                </button>
+              </div>
+            }
             emptyHint={
               workerId
                 ? `Escribe un mensaje para hablar con ${workerId}`

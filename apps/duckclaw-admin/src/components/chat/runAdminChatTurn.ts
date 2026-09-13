@@ -24,6 +24,7 @@ import {
   artifactImagePreview,
   isLoopProgressHeartbeat,
   shouldFetchChatSuggestions,
+  suggestionsExchangeKey,
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
 import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
@@ -55,6 +56,8 @@ export type RunAdminChatTurnParams = {
   setContextEstimatedTokens: Dispatch<SetStateAction<number | null>>;
   setLoopSchedulePolling: Dispatch<SetStateAction<boolean>>;
   setSuggestions: Dispatch<SetStateAction<string[]>>;
+  /** Ref compartida con el efecto de historial: evita refetch duplicado tras el turno. */
+  suggestionsExchangeKeyRef?: MutableRefObject<string>;
   finalizeCancelledGeneration: () => void;
   clearLoopHistoryReload: () => void;
   scheduleLoopHistoryReload: () => void;
@@ -91,6 +94,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setContextEstimatedTokens,
     setLoopSchedulePolling,
     setSuggestions,
+    suggestionsExchangeKeyRef,
     finalizeCancelledGeneration,
     clearLoopHistoryReload,
     scheduleLoopHistoryReload,
@@ -124,6 +128,7 @@ setThinkingIdentity({ workerId, swarmSlot: 1 });
 setThinking(true);
 setError(null);
 setSuggestions([]);
+if (suggestionsExchangeKeyRef) suggestionsExchangeKeyRef.current = '';
 setMessages((m) => [
   ...m,
   {
@@ -315,6 +320,7 @@ const appendHeartbeat = (payload: {
 
 primeAudioPlayback();
 let authoritativeResponse = '';
+let streamedFull = '';
 try {
   let assignedSuffix = '';
   let elapsedFooter = '';
@@ -333,7 +339,7 @@ try {
     artifact_id?: string;
     artifact_tenant_id?: string;
   } = {};
-  await adminService.playgroundChatStream(
+  streamedFull = await adminService.playgroundChatStream(
     {
       worker_id: workerId,
       project_id: projectId || undefined,
@@ -504,16 +510,34 @@ try {
   if (loopFollowUp && !abortController.signal.aborted) {
     scheduleLoopHistoryReload();
   }
-  if (shouldFetchChatSuggestions(text, authoritativeResponse, abortController.signal.aborted)) {
+  // Si el evento `done` no trae `response`, usar el texto streameado.
+  const assistantForSuggestions = (
+    authoritativeResponse ||
+    (typeof streamedFull === 'string' ? streamedFull : '') ||
+    ''
+  ).trim();
+  if (shouldFetchChatSuggestions(text, assistantForSuggestions, abortController.signal.aborted)) {
     void adminService
       .getChatSuggestions({
         chat_id: chatId,
         tenant_id: effectiveTenantId,
         last_user_message: text,
-        last_assistant_message: authoritativeResponse,
+        last_assistant_message: assistantForSuggestions,
       })
-      .then((r) => setSuggestions(r.suggestions ?? []))
-      .catch(() => {});
+      .then((r) => {
+        const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
+        // Siempre reemplazar: chips nuevas alineadas al turno, o vacío si el LLM falló.
+        setSuggestions(next);
+        if (suggestionsExchangeKeyRef) {
+          suggestionsExchangeKeyRef.current = next.length > 0
+            ? suggestionsExchangeKey(chatId, text, assistantForSuggestions)
+            : '';
+        }
+      })
+      .catch(() => {
+        setSuggestions([]);
+        if (suggestionsExchangeKeyRef) suggestionsExchangeKeyRef.current = '';
+      });
   }
   onConversationActivity?.();
 }

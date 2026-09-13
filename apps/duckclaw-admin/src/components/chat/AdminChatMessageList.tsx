@@ -25,6 +25,8 @@ export type AdminChatMessageListProps = {
   /** Muestra u oculta el detalle de invocaciones de herramientas del chat. */
   showToolUsage?: boolean;
   isCompact: boolean;
+  /** Padding extra cuando header/composer son overlays glass (studio). */
+  studioChromePad?: boolean;
   scrollRef: RefObject<HTMLDivElement>;
   showScrollButton: boolean;
   onScroll: () => void;
@@ -95,6 +97,7 @@ export function AdminChatMessageList({
   loading,
   showToolUsage = true,
   isCompact,
+  studioChromePad = false,
   scrollRef,
   showScrollButton,
   onScroll,
@@ -112,12 +115,16 @@ export function AdminChatMessageList({
   };
 
   return (
-      <div className="relative flex-1 min-h-0 min-w-0 flex flex-col w-full">
+      <div className="relative z-[1] flex-1 min-h-0 min-w-0 flex flex-col w-full">
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className={`scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden p-3 space-y-3 min-h-0 w-full ${
+          className={`scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3 space-y-3 min-h-0 w-full ${
             isCompact ? '' : 'min-h-[320px]'
+          } ${
+            studioChromePad
+              ? 'pt-16 pb-[8.5rem] sm:pt-[4.5rem] sm:pb-36'
+              : ''
           }`}
         >
         {messages.length === 0 && (
@@ -175,7 +182,8 @@ export function AdminChatMessageList({
           return renderMessageBubble(messages, i, bubbleOpts);
         })}
         </div>
-        {showScrollButton && (
+        {/* En studio el FAB vive en AdminChatPanel (z-30) para no quedar bajo el composer glass. */}
+        {showScrollButton && !studioChromePad ? (
           <button
             type="button"
             onClick={() => scrollToBottom('smooth')}
@@ -185,7 +193,7 @@ export function AdminChatMessageList({
           >
             <ChevronDown size={20} aria-hidden />
           </button>
-        )}
+        ) : null}
       </div>
   );
 }

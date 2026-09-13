@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { shouldFetchChatSuggestions, shouldShowSuggestionChips } from './adminChatPure';
+import {
+  lastUserAssistantExchange,
+  shouldFetchChatSuggestions,
+  shouldShowSuggestionChips,
+  suggestionsExchangeKey,
+} from './adminChatPure';
+import type { ChatMsg } from './types';
 
 describe('shouldFetchChatSuggestions', () => {
   it('true tras una respuesta normal no abortada', () => {
@@ -15,6 +21,12 @@ describe('shouldFetchChatSuggestions', () => {
     expect(shouldFetchChatSuggestions('  /summarize', 'Resumen listo', false)).toBe(false);
   });
 
+  it('false para mensajes de sistema de loop', () => {
+    expect(
+      shouldFetchChatSuggestions('[Ciclo loop] tick', 'Resumen del ciclo', false)
+    ).toBe(false);
+  });
+
   it('false si no hay respuesta del asistente', () => {
     expect(shouldFetchChatSuggestions('hola', '', false)).toBe(false);
     expect(shouldFetchChatSuggestions('hola', '   ', false)).toBe(false);
@@ -22,7 +34,7 @@ describe('shouldFetchChatSuggestions', () => {
 });
 
 describe('shouldShowSuggestionChips', () => {
-  it('true con sugerencias, sin loading, e input vacío', () => {
+  it('true con sugerencias', () => {
     expect(shouldShowSuggestionChips(['a', 'b'], false, '')).toBe(true);
   });
 
@@ -30,11 +42,57 @@ describe('shouldShowSuggestionChips', () => {
     expect(shouldShowSuggestionChips([], false, '')).toBe(false);
   });
 
-  it('false mientras carga', () => {
-    expect(shouldShowSuggestionChips(['a'], true, '')).toBe(false);
+  it('true aunque loading (el caller limpia chips al iniciar el turno)', () => {
+    expect(shouldShowSuggestionChips(['a'], true, '')).toBe(true);
   });
 
-  it('false si el usuario ya está escribiendo', () => {
-    expect(shouldShowSuggestionChips(['a'], false, 'algo')).toBe(false);
+  it('persiste aunque el usuario esté escribiendo', () => {
+    expect(shouldShowSuggestionChips(['a'], false, 'algo')).toBe(true);
+  });
+});
+
+describe('lastUserAssistantExchange', () => {
+  it('devuelve el último par user→assistant', () => {
+    const messages: ChatMsg[] = [
+      { role: 'user', text: 'antes' },
+      { role: 'assistant', text: 'vieja' },
+      { role: 'user', text: '¿Qué sigue?' },
+      { role: 'assistant', text: 'La protección está completa.' },
+    ];
+    expect(lastUserAssistantExchange(messages)).toEqual({
+      userText: '¿Qué sigue?',
+      assistantText: 'La protección está completa.',
+    });
+  });
+
+  it('ignora assistant aún streaming', () => {
+    const messages: ChatMsg[] = [
+      { role: 'user', text: 'hola' },
+      { role: 'assistant', text: 'parcial', streaming: true },
+    ];
+    expect(lastUserAssistantExchange(messages)).toBeNull();
+  });
+
+  it('null si el último user es comando slash', () => {
+    const messages: ChatMsg[] = [
+      { role: 'user', text: '/loop on' },
+      { role: 'assistant', text: 'Modo activo' },
+    ];
+    expect(lastUserAssistantExchange(messages)).toBeNull();
+  });
+});
+
+
+describe('suggestionsExchangeKey', () => {
+  it('cambia cuando cambia el texto del assistant', () => {
+    const a = suggestionsExchangeKey('c1', 'hola', 'respuesta A');
+    const b = suggestionsExchangeKey('c1', 'hola', 'respuesta B');
+    expect(a).not.toBe(b);
+  });
+
+  it('es estable para el mismo intercambio', () => {
+    const a = suggestionsExchangeKey('c1', 'hola', 'misma');
+    const b = suggestionsExchangeKey('c1', 'hola', 'misma');
+    expect(a).toBe(b);
   });
 });

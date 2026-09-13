@@ -11,16 +11,53 @@ export function shouldFetchChatSuggestions(
 ): boolean {
   if (aborted) return false;
   if (userText.trim().startsWith('/')) return false;
+  if (isLoopSystemUserMessage(userText)) return false;
   return assistantResponse.trim().length > 0;
 }
 
-/** True si corresponde mostrar los chips (se ocultan mientras el usuario tipea). */
+/**
+ * True si hay sugerencias que mostrar en el dropdown fijo encima del input.
+ * Se limpian al enviar un mensaje y se regeneran al terminar la respuesta del worker.
+ */
 export function shouldShowSuggestionChips(
   suggestions: string[],
-  loading: boolean,
-  input: string
+  _loading?: boolean,
+  _input?: string
 ): boolean {
-  return suggestions.length > 0 && !loading && input.trim() === '';
+  return suggestions.length > 0;
+}
+
+/** Clave estable del último intercambio para saber cuándo regenerar chips. */
+export function suggestionsExchangeKey(
+  chatId: string,
+  userText: string,
+  assistantText: string
+): string {
+  return `${chatId}:${userText}\0${assistantText.slice(0, 500)}`;
+}
+
+/** Último par user→assistant usable para regenerar chips (historial o post-turno). */
+export function lastUserAssistantExchange(
+  messages: ChatMsg[]
+): { userText: string; assistantText: string } | null {
+  let assistantText = '';
+  let userText = '';
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (!assistantText && m.role === 'assistant') {
+      const t = (m.text || '').trim();
+      if (t && !m.streaming) assistantText = t;
+      continue;
+    }
+    if (assistantText && !userText && m.role === 'user') {
+      const t = (m.text || '').trim();
+      if (t) userText = t;
+      break;
+    }
+  }
+  if (!userText || !assistantText) return null;
+  if (!shouldFetchChatSuggestions(userText, assistantText, false)) return null;
+  return { userText, assistantText };
 }
 
 export function artifactImagePreview(

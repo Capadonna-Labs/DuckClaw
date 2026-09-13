@@ -67,6 +67,22 @@ def _normalize_delegate_id(worker_id: str, templates_root: Path | None) -> str:
     return resolve_template_id_global(wid, templates_root) or wid
 
 
+def _delegate_id_match_keys(worker_id: str, templates_root: Path | None) -> set[str]:
+    """Match keys for allowlists: template resolve + hyphen/underscore aliases.
+
+    Catalog workers often live as ``quant-trader`` while manifests/prompts still
+    say ``quant_trader``. When filesystem templates are absent, resolve returns
+    None and exact-string allowlist checks falsely reject the alias.
+    """
+    from duckclaw.workers.template_registry import template_id_match_variants
+
+    normalized = _normalize_delegate_id(worker_id, templates_root)
+    keys: set[str] = set()
+    for candidate in (worker_id, normalized):
+        keys.update(template_id_match_variants(candidate))
+    return keys
+
+
 def _is_target_allowed(
     caller_spec: Any,
     target_worker_id: str,
@@ -75,9 +91,11 @@ def _is_target_allowed(
     allowed = tuple(getattr(caller_spec, "allowed_delegates", None) or ())
     if not allowed:
         return False
-    target = _normalize_delegate_id(target_worker_id, templates_root)
-    normalized_allowed = {_normalize_delegate_id(w, templates_root) for w in allowed}
-    return target in normalized_allowed
+    target_keys = _delegate_id_match_keys(target_worker_id, templates_root)
+    for allowed_id in allowed:
+        if target_keys & _delegate_id_match_keys(str(allowed_id), templates_root):
+            return True
+    return False
 
 
 def _extract_report_id_from_messages(messages: Any) -> str | None:

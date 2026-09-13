@@ -1,12 +1,13 @@
 'use client';
 
-import { Menu, Moon, RefreshCw, Sparkles, Sun } from 'lucide-react';
+import { Menu, Moon, RefreshCw, Sparkles, Sun, X } from 'lucide-react';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
 import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { adminService } from '@/services/adminService';
 import { formatOpsOutput } from '@/lib/formatOpsOutput';
 import { PlatformStatusStrip } from '@/components/admin/GatewayStatusBadge';
@@ -42,6 +43,11 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
   const canRunOps = usuario?.rol === 'admin';
   const [stackRestarting, setStackRestarting] = useState(false);
   const [stackRestartMessage, setStackRestartMessage] = useState<string | null>(null);
+  const [portalReady, setPortalReady] = useState(false);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   useEffect(() => {
     if (!stackRestartMessage?.startsWith('Stack recuperado')) return;
@@ -141,26 +147,19 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
         <div className="flex items-center gap-2">
           <PlatformStatusStrip />
           {canRunOps && (
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => void restartStack()}
-                disabled={stackRestarting}
-                className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-gov-blue-100 px-2.5 py-2 text-xs font-bold text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
-                title="Detiene PM2, libera locks DuckDB, migra y relanza gateway/db-writer/heartbeat"
-                aria-label={stackRestarting ? 'Reiniciando sistema' : 'Reiniciar sistema'}
-              >
-                <RefreshCw size={17} className={stackRestarting ? 'animate-spin' : ''} />
-                <span className="hidden sm:inline whitespace-nowrap">
-                  {stackRestarting ? 'Reiniciando…' : 'Reiniciar sistema'}
-                </span>
-              </button>
-              {stackRestartMessage && (
-                <div className="absolute right-0 top-full z-50 mt-2 w-80 max-w-[calc(100vw-2rem)] rounded-2xl border bg-white p-3 text-xs font-semibold text-gov-gray-700 shadow-lg dark:border-dark-border dark:bg-dark-surface dark:text-dark-text whitespace-pre-wrap">
-                  {stackRestartMessage}
-                </div>
-              )}
-            </div>
+            <button
+              type="button"
+              onClick={() => void restartStack()}
+              disabled={stackRestarting}
+              className="inline-flex min-h-[36px] items-center gap-1.5 rounded-xl border border-gov-blue-100 px-2.5 py-2 text-xs font-bold text-gov-blue-800 hover:bg-gov-blue-50 disabled:opacity-50 dark:border-dark-border dark:text-dark-cyan dark:hover:bg-dark-bg"
+              title="Detiene PM2, libera locks DuckDB, migra y relanza gateway/db-writer/heartbeat"
+              aria-label={stackRestarting ? 'Reiniciando sistema' : 'Reiniciar sistema'}
+            >
+              <RefreshCw size={17} className={stackRestarting ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline whitespace-nowrap">
+                {stackRestarting ? 'Reiniciando…' : 'Reiniciar sistema'}
+              </span>
+            </button>
           )}
         </div>
         <button
@@ -194,6 +193,34 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
         )}
       </div>
     </header>
+      {portalReady &&
+        stackRestartMessage &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed inset-x-0 z-[250] flex justify-center px-3 sm:justify-end sm:px-4"
+            style={{
+              top: 'calc(4rem + env(safe-area-inset-top, 0px) + 0.5rem)',
+            }}
+            data-stack-restart-toast="true"
+          >
+            <div
+              role="status"
+              aria-live="polite"
+              className="pointer-events-auto flex w-full max-w-md items-start gap-2 rounded-2xl border border-gov-blue-100 bg-white/95 p-3 text-xs font-semibold text-gov-gray-700 shadow-lg backdrop-blur-md dark:border-dark-border dark:bg-dark-surface/95 dark:text-dark-text"
+            >
+              <p className="min-w-0 flex-1 whitespace-pre-wrap">{stackRestartMessage}</p>
+              <button
+                type="button"
+                onClick={() => setStackRestartMessage(null)}
+                className="shrink-0 rounded-lg p-1 text-gov-gray-400 hover:bg-gov-gray-100 hover:text-gov-gray-700 dark:hover:bg-dark-bg dark:hover:text-dark-text"
+                aria-label="Cerrar aviso"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          </div>,
+          document.body
+        )}
     </>
   );
 }

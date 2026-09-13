@@ -148,3 +148,47 @@ def test_tool_label_json_echo_triggers_repair_and_uses_tool_evidence() -> None:
 
     assert "Operación completada" in out or "SPY" in out
     assert "fetch_external_data:" not in out
+
+
+def test_gmail_turn_summary_skips_read_sql_noise() -> None:
+    """When Gmail tools ran, ignore local read_sql SELECT now() stubs in the fallback."""
+    mod = _repair_module()
+    messages = [
+        HumanMessage(content="Busca el correo y saca insights"),
+        _tool_message(
+            "mcp__google_gmail__search_threads",
+            '{"threads":[{"id":"abc","snippet":"Shopify buys Tailwind"}]}',
+        ),
+        _tool_message("read_sql", '[{"ahora":"2026-09-13 18:16:13+00:00"}]'),
+        _tool_message(
+            "mcp__google_gmail__get_message",
+            '{"snippet":"TLDR AI digest","payload":{"headers":[{"name":"Subject","value":"iPhone Duo"}]}}',
+        ),
+    ]
+
+    out = mod.deterministic_tool_response_summary(
+        messages,
+        0,
+        "worker_alpha",
+        "Busca el correo y saca insights",
+    )
+    low = out.lower()
+    assert "registro" not in low
+    assert "ahora" not in low
+    assert "correo" in low or "gmail" in low or "iphone" in low or "shopify" in low
+
+
+def test_email_policy_clears_read_sql_on_later_hops() -> None:
+    """Source contract: email override must not require already_has_tool_result=False."""
+    text = (
+        REPO_ROOT
+        / "packages"
+        / "agents"
+        / "src"
+        / "duckclaw"
+        / "workers"
+        / "factory_graph_nodes_agent_policy_early.py"
+    ).read_text(encoding="utf-8")
+    assert "Email/Gmail wins over db-first / orch read_sql noise on EVERY hop" in text
+    # The gate that only cleared SQL on hop 1 must not guard the whole email block.
+    assert "and not already_has_tool_result\n                    and not telegram_context_summarize_directive" not in text

@@ -185,6 +185,44 @@ def _humanize_tool_line(tool_name: str, tool_content: str) -> str:
             err_txt = str(parsed.get("error") or "").strip()
             if err_txt:
                 return f"No se pudo completar: {err_txt[:200]}"
+            # Gmail MCP payloads: prefer subject/snippet over dumping raw JSON.
+            if "gmail" in name.lower() or name.endswith(
+                ("__get_message", "__get_thread", "__search_threads")
+            ):
+                if name.endswith("__search_threads") or "search_threads" in name:
+                    threads = parsed.get("threads")
+                    if isinstance(threads, list):
+                        if not threads:
+                            return "Gmail: sin hilos para esa búsqueda."
+                        snip = ""
+                        first = threads[0] if isinstance(threads[0], dict) else {}
+                        if isinstance(first, dict):
+                            snip = str(first.get("snippet") or "").strip()
+                        if snip:
+                            return f"Gmail: {len(threads)} hilo(s). {snip[:160]}"
+                        return f"Gmail: {len(threads)} hilo(s)."
+                subject = str(parsed.get("subject") or "").strip()
+                # headers may be a list of {name,value}
+                if not subject:
+                    payload = parsed.get("payload")
+                    headers = payload.get("headers") if isinstance(payload, dict) else None
+                    if isinstance(headers, list):
+                        for h in headers:
+                            if isinstance(h, dict) and str(h.get("name") or "").lower() == "subject":
+                                subject = str(h.get("value") or "").strip()
+                                break
+                    elif isinstance(headers, dict):
+                        subject = str(headers.get("Subject") or headers.get("subject") or "").strip()
+                snip = str(parsed.get("snippet") or "").strip()
+                if subject and snip:
+                    return f"Correo «{subject[:120]}»: {snip[:140]}"
+                if subject:
+                    return f"Correo «{subject[:160]}»."
+                if snip:
+                    return f"Correo: {snip[:200]}"
+                msgs = parsed.get("messages")
+                if isinstance(msgs, list) and msgs:
+                    return f"Hilo Gmail con {len(msgs)} mensaje(s)."
             if name in ("evaluate_homeostasis", "assess_crons_alignment"):
                 aligned = parsed.get("aligned")
                 if aligned is None:
@@ -240,6 +278,19 @@ def _humanize_tool_line(tool_name: str, tool_content: str) -> str:
     return ""
 
 
+def _is_gmail_mcp_tool_name(tool_name: str) -> bool:
+    n = (tool_name or "").strip().lower()
+    if not n:
+        return False
+    if "gmail" in n:
+        return True
+    return n.endswith(("__search_threads", "__get_message", "__get_thread"))
+
+
+def _is_local_sql_noise_tool(tool_name: str) -> bool:
+    return (tool_name or "").strip() in {"read_sql", "admin_sql", "inspect_schema"}
+
+
 def deterministic_tool_response_summary(
     messages: list[Any],
     last_human_idx: int,
@@ -260,13 +311,23 @@ def deterministic_tool_response_summary(
         time_text = str(clock_data.get("time") or "")[:5]
         header = f"{brand} · {day} {time_text} COT".strip()
 
+    slice_msgs = messages[max(0, last_human_idx + 1) :]
+    has_gmail_tool = any(
+        isinstance(m, ToolMessage) and _is_gmail_mcp_tool_name(str(getattr(m, "name", "") or ""))
+        for m in slice_msgs
+    )
+
     summaries: list[str] = []
-    for message in messages[max(0, last_human_idx + 1) :]:
+    for message in slice_msgs:
         if not isinstance(message, ToolMessage):
             continue
         tool_name = str(getattr(message, "name", "") or "")
         tool_content = str(getattr(message, "content", "") or "").strip()
         if not tool_content or tool_name == "get_current_time":
+            continue
+        # Email turns often burn a forced read_sql (SELECT now()); never let that
+        # become the user-visible "1 registro (ahora…)." when Gmail already ran.
+        if has_gmail_tool and _is_local_sql_noise_tool(tool_name):
             continue
         line = _humanize_tool_line(tool_name, tool_content)
         if line:

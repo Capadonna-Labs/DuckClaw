@@ -29,6 +29,7 @@ export default defineConfig({
       'src/components/chat/chatMarkdown.test.ts',
       'src/lib/toolUsageGroup.test.ts',
       'src/lib/chatEphemeralMerge.test.ts',
+      'src/lib/findHeartbeatInsertIndex.test.ts',
       'src/lib/chatEphemeralWipe.test.ts',
       'src/lib/sessionExpired.test.ts',
       'src/lib/integrationDocsUrls.test.ts',

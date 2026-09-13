@@ -13,8 +13,10 @@ except ImportError:
 
 from duckclaw.egress.tool_response_repair import (
     deterministic_tool_response_summary as _deterministic_tool_response_summary,
+    messages_have_gmail_tools_since as _messages_have_gmail_tools_since,
     repair_tool_response_egress_reply as _repair_tool_response_egress_reply,
     reply_is_tool_json_echo as _reply_is_tool_json_echo,
+    reply_looks_like_collapsed_stub as _reply_looks_like_collapsed_stub,
     tool_response_needs_egress_repair as _tool_response_needs_egress_repair,
 )
 from duckclaw.workers.factory_agent_node_helpers import (
@@ -232,13 +234,20 @@ def make_set_reply_node(ctx: WorkerGraphContext):
         else:
             _spec_lid = _spec_logical_worker_id(spec)
             _lh_repair = _last_human_message_index(list(msgs) if msgs else [])
+            _gmail_turn = _messages_have_gmail_tools_since(
+                list(msgs) if msgs else [], _lh_repair
+            )
+            # Gmail turns: enable egress repair so collapsed stubs
+            # (``worker_id 1`` / snippet dumps) become a real analysis.
             _egress_needs_repair = _tool_response_needs_egress_repair(
                 list(msgs) if msgs else [],
                 _inc_for_ctx,
                 reply or "",
                 last_human_idx=_lh_repair,
-                repair_enabled=False,
+                repair_enabled=_gmail_turn,
             )
+            if _gmail_turn and _reply_looks_like_collapsed_stub(reply or ""):
+                _egress_needs_repair = True
             if _egress_needs_repair:
                 reply = _repair_tool_response_egress_reply(
                     llm,
@@ -249,7 +258,9 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                     skip_llm_synthesis=False,
                     worker_display_name=str(getattr(spec, "name", None) or ""),
                 )
-                if _reply_is_tool_json_echo(reply or ""):
+                if _reply_is_tool_json_echo(reply or "") or (
+                    _gmail_turn and _reply_looks_like_collapsed_stub(reply or "")
+                ):
                     _det_egress = _deterministic_tool_response_summary(
                         list(msgs),
                         _lh_repair,
@@ -258,7 +269,10 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                         worker_display_name=str(getattr(spec, "name", None) or ""),
                     )
                     if _det_egress and not _reply_is_tool_json_echo(_det_egress):
-                        reply = _det_egress
+                        # Prefer repair synthesis; only fall back to deterministic
+                        # if repair still looks collapsed and we have no better text.
+                        if not (reply or "").strip() or _reply_is_tool_json_echo(reply or ""):
+                            reply = _det_egress
             reply = _apply_nl_synthesis(reply or "")
         _rescind_incoming = state_evidence_for_context_summary_rescind(state)
         reply = rescind_trivial_context_summary_reply(
@@ -411,10 +425,28 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                         reply = sanitize_worker_reply_text(_restored)
                 except Exception:
                     pass
-        if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) and msgs:
+        _lh_fb = _last_human_message_index(list(msgs)) if msgs else -1
+        _gmail_fb = bool(msgs) and _messages_have_gmail_tools_since(list(msgs), _lh_fb)
+        _need_fb = (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) or (
+            _gmail_fb and _reply_looks_like_collapsed_stub(reply or "")
+        )
+        if _need_fb and msgs:
             _spec_lid_fb = _spec_logical_worker_id(spec)
-            _lh_fb = _last_human_message_index(list(msgs))
-            if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")):
+            if _gmail_fb and llm is not None:
+                _repaired_fb = _repair_tool_response_egress_reply(
+                    llm,
+                    spec,
+                    _inc_for_ctx,
+                    reply or "",
+                    msgs,
+                    skip_llm_synthesis=False,
+                    worker_display_name=str(getattr(spec, "name", None) or ""),
+                )
+                if (_repaired_fb or "").strip() and not _reply_looks_like_collapsed_stub(_repaired_fb):
+                    reply = sanitize_worker_reply_text(_repaired_fb)
+            if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) or (
+                _gmail_fb and _reply_looks_like_collapsed_stub(reply or "")
+            ):
                 _det = _deterministic_tool_response_summary(
                     list(msgs),
                     _lh_fb,
@@ -422,9 +454,13 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                     _inc_for_ctx,
                     worker_display_name=str(getattr(spec, "name", None) or ""),
                 )
-                if _det:
+                if _det and not _gmail_fb:
                     reply = sanitize_worker_reply_text(_det)
-                else:
+                elif _det and (
+                    not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")
+                ):
+                    reply = sanitize_worker_reply_text(_det)
+                elif not (reply or "").strip():
                     for _m in reversed(msgs):
                         if isinstance(_m, ToolMessage):
                             _fallback = sanitize_worker_reply_text(format_tool_reply(_m.content))

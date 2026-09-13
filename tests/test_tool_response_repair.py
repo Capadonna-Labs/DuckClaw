@@ -192,3 +192,65 @@ def test_email_policy_clears_read_sql_on_later_hops() -> None:
     assert "Email/Gmail wins over db-first / orch read_sql noise on EVERY hop" in text
     # The gate that only cleared SQL on hop 1 must not guard the whole email block.
     assert "and not already_has_tool_result\n                    and not telegram_context_summarize_directive" not in text
+
+
+def test_collapsed_stub_detection_and_gmail_repair_gate() -> None:
+    mod = _repair_module()
+    assert mod.reply_looks_like_collapsed_stub("worker_alpha 1")
+    assert mod.reply_looks_like_collapsed_stub(
+        "worker_alpha 1\n\nGmail: 1 hilo(s). first foldable iPhone"
+    )
+    assert not mod.reply_looks_like_collapsed_stub(
+        "## Insights\n- El iPhone Duo parte en $1999\n- Pantalla 7.6\""
+    )
+
+    messages = [
+        HumanMessage(content="Busca el correo y saca insights"),
+        _tool_message(
+            "mcp__google_gmail__get_message",
+            '{"snippet":"first foldable iPhone Duo starts at $1999","payload":{"mimeType":"text/plain","body":{"data":""}}}',
+        ),
+    ]
+    assert (
+        mod.tool_response_needs_egress_repair(
+            messages,
+            "Busca el correo y saca insights",
+            "worker_alpha 1\n\nGmail: 1 hilo(s). first foldable iPhone",
+            last_human_idx=0,
+            repair_enabled=True,
+        )
+        is True
+    )
+    assert (
+        mod.tool_response_needs_egress_repair(
+            messages,
+            "Busca el correo y saca insights",
+            "worker_alpha 1",
+            last_human_idx=0,
+            repair_enabled=False,
+        )
+        is False
+    )
+
+
+def test_extract_gmail_evidence_prefers_plain_body() -> None:
+    import base64
+    import json
+
+    mod = _repair_module()
+    body = "Shopify buys Tailwind. iPhone Duo at $1999. Full newsletter body."
+    b64 = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
+    payload = {
+        "snippet": "first foldable",
+        "payload": {"mimeType": "text/plain", "body": {"data": b64}},
+        "payloadHeaders": [{"name": "Subject", "value": "TLDR"}],
+    }
+    # subject via top-level for extractor
+    payload["subject"] = "TLDR"
+    messages = [
+        HumanMessage(content="insights"),
+        _tool_message("mcp__google_gmail__get_message", json.dumps(payload)),
+    ]
+    evidence = mod.extract_gmail_evidence_for_synthesis(messages, 0)
+    assert "Shopify buys Tailwind" in evidence
+    assert "TLDR" in evidence or "Asunto" in evidence

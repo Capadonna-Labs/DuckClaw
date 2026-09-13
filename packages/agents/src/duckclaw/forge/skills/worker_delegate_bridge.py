@@ -70,12 +70,14 @@ def register_worker_delegate_tools(
             payload["error"] = result.error
         return json.dumps(payload, ensure_ascii=False)
 
+    allowed_list = ", ".join(allowed)
     tools.append(
         StructuredTool.from_function(
             func=invoke_worker,
             name="invoke_worker",
             description=(
-                "Invoca otro worker del catálogo (solo ids en allowed_delegates). "
+                "Invoca otro worker del catálogo (solo ids en allowed_delegates: "
+                f"{allowed_list}). "
                 "Pasa task con contexto completo; para dashboards HTML incluye report_id=<chat_id>."
             ),
         )

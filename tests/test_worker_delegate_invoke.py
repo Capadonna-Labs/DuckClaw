@@ -59,6 +59,16 @@ def test_invoke_delegated_worker_rejects_not_in_allowlist() -> None:
     assert result.error == "not_allowed"
 
 
+def test_is_target_allowed_matches_hyphen_underscore_aliases() -> None:
+    from duckclaw.workers.worker_invoke import _is_target_allowed
+
+    caller_spec = SimpleNamespace(allowed_delegates=("quant_trader", "quant_reporter"))
+    assert _is_target_allowed(caller_spec, "quant-trader", None) is True
+    assert _is_target_allowed(caller_spec, "quant_trader", None) is True
+    assert _is_target_allowed(caller_spec, "quant-reporter", None) is True
+    assert _is_target_allowed(caller_spec, "youtube-analyst", None) is False
+
+
 def test_invoke_delegated_worker_rejects_nested_depth() -> None:
     from duckclaw.workers import worker_invoke as wi
 

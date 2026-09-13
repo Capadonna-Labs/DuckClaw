@@ -321,15 +321,22 @@ def _parse_allowed_delegates(
         raw = [s.strip() for s in raw.split(",") if s.strip()]
     if not isinstance(raw, (list, tuple)):
         return ()
-    from duckclaw.workers.template_registry import resolve_template_id_global
+    from duckclaw.workers.template_registry import (
+        resolve_template_id_global,
+        template_id_match_variants,
+    )
 
     out: list[str] = []
+    seen_keys: set[str] = set()
     for item in raw:
         if not isinstance(item, str) or not item.strip():
             continue
         resolved = resolve_template_id_global(item.strip(), templates_root) or item.strip()
-        if resolved not in out:
-            out.append(resolved)
+        keys = set(template_id_match_variants(resolved))
+        if keys & seen_keys:
+            continue
+        seen_keys.update(keys)
+        out.append(resolved)
     return tuple(out)
 
 

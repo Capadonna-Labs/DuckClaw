@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { ExternalLink, Plug, Smartphone, Server } from 'lucide-react';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
@@ -170,23 +170,15 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
     }
   }, [android?.adb_debug_port, loadAndroid]);
 
-  const gatewayOk = isGatewayHealthy(health);
-  const pm2Rows = useMemo(() => {
-    const names = ['DuckClaw-Gateway', 'DuckClaw-DB-Writer', 'DuckClaw-Heartbeat'];
-    const byName = new Map((health?.pm2 ?? []).map((row) => [row.name, row]));
-    return names.map((name) => byName.get(name) ?? { name, status: 'unknown' });
-  }, [health?.pm2]);
+  const gatewayOk = health ? isGatewayHealthy(health.status) : null;
 
   const androidFooter = (
     <>
       Grants y MCP en{' '}
       <Link href="/mcp/connectors" className="font-semibold text-gov-blue-700 dark:text-dark-cyan">
-        MCP → conector Android Agent
+        MCP → Android Agent
       </Link>
-      . Env: <code className="font-mono">ANDROID_ADB_HOST</code>,{' '}
-      <code className="font-mono">ANDROID_ADB_DEBUG_PORT</code>,{' '}
-      <code className="font-mono">ANDROID_MCP_PORT</code>,{' '}
-      <code className="font-mono">ANDROID_MCP_COMMAND</code>.
+      .
     </>
   );
 
@@ -201,12 +193,6 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             </p>
           </header>
         )}
-
-        <p className="text-sm text-gov-gray-600 dark:text-dark-muted">
-          Esta pestaña muestra telemetría del dispositivo (conexión ADB, modelo, batería). La
-          configuración del conector MCP, grants por worker y arranque del servidor Android MCP viven
-          en la pestaña MCP.
-        </p>
 
         {androidError ? (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-950/40 dark:text-red-400">
@@ -223,15 +209,13 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             onRefresh={() => void loadAndroid()}
             refreshing={androidLoading}
             actions={
-              <div className="flex w-full flex-col gap-2">
-                <p className="text-[11px] text-gov-gray-500 dark:text-dark-muted">
-                  1) Teléfono → Depuración inalámbrica → <strong>Emparejar con código</strong> (puerto
-                  pair + 6 dígitos, caduca rápido). 2) Pantalla principal → copia{' '}
-                  <strong>puerto debug</strong> → Conectar.
+              <div className="space-y-3">
+                <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+                  Depuración inalámbrica: puerto pair + código, luego puerto debug.
                 </p>
-                <div className="flex w-full flex-wrap items-end gap-2">
-                  <label className="flex min-w-[7rem] flex-col gap-0.5 text-xs">
-                    <span className="font-semibold text-gov-gray-500 dark:text-dark-muted">
+                <div className="grid gap-2 sm:grid-cols-3">
+                  <label className="block text-xs">
+                    <span className="mb-1 block font-semibold text-gov-gray-500 dark:text-dark-muted">
                       Puerto pair
                     </span>
                     <input
@@ -242,11 +226,11 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
                       autoComplete="off"
                       placeholder="ej. 42871"
                       defaultValue=""
-                      className="rounded-lg border border-gov-gray-200 px-2 py-1.5 font-mono text-sm dark:border-dark-border dark:bg-dark-bg"
+                      className="w-full rounded-lg border border-gov-gray-200 px-3 py-2 font-mono text-sm dark:border-dark-border dark:bg-dark-bg"
                     />
                   </label>
-                  <label className="flex min-w-[7rem] flex-col gap-0.5 text-xs">
-                    <span className="font-semibold text-gov-gray-500 dark:text-dark-muted">
+                  <label className="block text-xs">
+                    <span className="mb-1 block font-semibold text-gov-gray-500 dark:text-dark-muted">
                       Código pair
                     </span>
                     <input
@@ -261,11 +245,11 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
                       onInput={(e) => {
                         e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '').slice(0, 6);
                       }}
-                      className="rounded-lg border border-gov-gray-200 px-2 py-1.5 font-mono text-sm tracking-widest dark:border-dark-border dark:bg-dark-bg"
+                      className="w-full rounded-lg border border-gov-gray-200 px-3 py-2 font-mono text-sm tracking-widest dark:border-dark-border dark:bg-dark-bg"
                     />
                   </label>
-                  <label className="flex min-w-[7rem] flex-col gap-0.5 text-xs">
-                    <span className="font-semibold text-gov-gray-500 dark:text-dark-muted">
+                  <label className="block text-xs">
+                    <span className="mb-1 block font-semibold text-gov-gray-500 dark:text-dark-muted">
                       Puerto debug
                     </span>
                     <input
@@ -279,19 +263,19 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
                       spellCheck={false}
                       placeholder="ej. 42961"
                       defaultValue=""
-                      className="rounded-lg border border-gov-gray-200 px-2 py-1.5 font-mono text-sm dark:border-dark-border dark:bg-dark-bg"
+                      className="w-full rounded-lg border border-gov-gray-200 px-3 py-2 font-mono text-sm dark:border-dark-border dark:bg-dark-bg"
                     />
                   </label>
-                  <button
-                    type="button"
-                    disabled={connectBusy || androidLoading}
-                    onClick={() => void connectAdb()}
-                    className="inline-flex items-center gap-1 rounded-lg bg-gov-blue-700 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
-                  >
-                    <Plug size={12} className={connectBusy ? 'animate-pulse' : ''} />
-                    {connectBusy ? 'Conectando…' : 'Emparejar y conectar'}
-                  </button>
                 </div>
+                <button
+                  type="button"
+                  disabled={connectBusy || androidLoading}
+                  onClick={() => void connectAdb()}
+                  className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg bg-gov-blue-700 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50 sm:w-auto dark:bg-dark-cyan dark:text-dark-bg"
+                >
+                  <Plug size={14} className={connectBusy ? 'animate-pulse' : ''} />
+                  {connectBusy ? 'Conectando…' : 'Emparejar y conectar'}
+                </button>
               </div>
             }
             footer={androidFooter}
@@ -357,7 +341,7 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
 
           <DeviceStatusCard
             title="Host gateway"
-            subtitle="Gateway, Redis y procesos PM2 core"
+            subtitle="Estado básico del stack"
             tone={vpsTone(gatewayOk, recovering)}
             statusLabel={
               recovering ? 'Recuperando…' : gatewayOk ? 'Saludable' : healthError ? 'Offline' : '—'
@@ -367,7 +351,10 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             footer={
               <>
                 Detalle en{' '}
-                <Link href="/overview" className="inline-flex items-center gap-1 font-semibold text-gov-blue-700 dark:text-dark-cyan">
+                <Link
+                  href="/overview"
+                  className="inline-flex items-center gap-1 font-semibold text-gov-blue-700 dark:text-dark-cyan"
+                >
                   Overview
                   <ExternalLink size={12} />
                 </Link>
@@ -376,23 +363,21 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
           >
             <div className="flex items-start gap-3 text-sm text-gov-gray-700 dark:text-dark-muted">
               <Server size={18} className="mt-0.5 shrink-0 opacity-70" />
-              <dl className="grid w-full gap-1 text-xs sm:text-sm">
-                <div className="flex gap-2">
-                  <dt className="font-semibold text-gov-gray-500">Gateway</dt>
-                  <dd>{gatewayOk ? 'OK' : healthError ? 'error' : '—'}</dd>
+              <dl className="grid gap-1.5 text-sm">
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="min-w-[7rem] font-semibold text-gov-gray-500">Gateway</dt>
+                  <dd>{gatewayOk ? 'OK' : healthError ? 'error' : health?.status || '—'}</dd>
                 </div>
-                <div className="flex gap-2">
-                  <dt className="font-semibold text-gov-gray-500">Redis</dt>
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="min-w-[7rem] font-semibold text-gov-gray-500">Redis</dt>
                   <dd>
                     {health?.redis === true ? 'OK' : health?.redis === false ? 'offline' : '—'}
                   </dd>
                 </div>
-                {pm2Rows.map((row) => (
-                  <div key={row.name} className="flex gap-2">
-                    <dt className="font-semibold text-gov-gray-500">{row.name}</dt>
-                    <dd>{row.status || '—'}</dd>
-                  </div>
-                ))}
+                <div className="flex flex-wrap gap-x-2">
+                  <dt className="min-w-[7rem] font-semibold text-gov-gray-500">Workers</dt>
+                  <dd>{health?.workers_count ?? '—'}</dd>
+                </div>
               </dl>
             </div>
           </DeviceStatusCard>

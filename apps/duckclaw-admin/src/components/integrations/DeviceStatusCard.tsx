@@ -30,6 +30,7 @@ function toneBadgeClass(tone: DeviceStatusTone): string {
   }
 }
 
+/** Card de estado genérica: badge + refresh en header, body, acciones, footer. */
 export function DeviceStatusCard({
   title,
   subtitle,
@@ -45,40 +46,40 @@ export function DeviceStatusCard({
     <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
       <div className="border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-base font-semibold text-gov-gray-900 dark:text-dark-text">{title}</h2>
             {subtitle ? (
-              <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">{subtitle}</p>
+              <p className="mt-0.5 truncate text-xs text-gov-gray-500 dark:text-dark-muted">{subtitle}</p>
             ) : null}
           </div>
-          <span
-            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${toneBadgeClass(tone)}`}
-          >
-            {statusLabel}
-          </span>
-        </div>
-      </div>
-      <div className="space-y-3 p-4">
-        {children}
-        {(actions || onRefresh) && (
-          <div className="flex flex-wrap gap-2">
-            {actions}
+          <div className="flex shrink-0 items-center gap-2">
+            <span
+              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${toneBadgeClass(tone)}`}
+            >
+              {statusLabel}
+            </span>
             {onRefresh ? (
               <button
                 type="button"
                 disabled={refreshing}
                 onClick={onRefresh}
-                className="inline-flex items-center gap-1 rounded-lg border border-gov-gray-200 px-3 py-1.5 text-xs font-semibold dark:border-dark-border disabled:opacity-50"
+                className="inline-flex items-center gap-1 rounded-lg border border-gov-gray-200 px-2.5 py-1 text-xs font-semibold dark:border-dark-border disabled:opacity-50"
+                title="Actualizar"
+                aria-label="Actualizar"
               >
                 <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
-                {refreshing ? 'Actualizando…' : 'Actualizar'}
+                <span className="hidden sm:inline">{refreshing ? 'Actualizando…' : 'Actualizar'}</span>
               </button>
             ) : null}
           </div>
-        )}
-        {footer ? (
-          <p className="text-xs text-gov-gray-500 dark:text-dark-muted">{footer}</p>
+        </div>
+      </div>
+      <div className="space-y-3 p-4">
+        {children}
+        {actions ? (
+          <div className="border-t border-gov-gray-100 pt-3 dark:border-dark-border">{actions}</div>
         ) : null}
+        {footer ? <p className="text-xs text-gov-gray-500 dark:text-dark-muted">{footer}</p> : null}
       </div>
     </section>
   );

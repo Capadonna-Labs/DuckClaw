@@ -47,20 +47,32 @@ function stopDomAudio(): void {
   revokeDomAudioUrl();
 }
 
-/** Desbloquea reproducción tras gesto del usuario (enviar mensaje/voz o botón). */
+/**
+ * Desbloquea reproducción tras gesto del usuario (voz / botón Escuchar).
+ * Usar muted+volume 0: un play() audible (aunque sea WAV vacío) en iOS/Android
+ * captura la sesión de audio y corta música de fondo (Spotify, etc.).
+ * No llamar en envíos de texto sin TTS.
+ */
 export function primeAudioPlayback(): void {
   if (audioPrimed || typeof window === 'undefined') return;
   try {
     const audio = ensureDomAudio();
-    audio.volume = 1;
-    audio.muted = false;
+    audio.muted = true;
+    audio.volume = 0;
     audio.src = `data:audio/wav;base64,${SILENT_WAV_B64}`;
-    void audio.play().then(() => {
-      audioPrimed = true;
-      audio.pause();
-      audio.removeAttribute('src');
-      audio.load();
-    });
+    void audio
+      .play()
+      .then(() => {
+        audioPrimed = true;
+        audio.pause();
+        audio.muted = false;
+        audio.volume = 1;
+        audio.removeAttribute('src');
+        audio.load();
+      })
+      .catch(() => {
+        /* gesto inválido / autoplay blocked — playTtsAudio reintentará */
+      });
   } catch {
     /* ignore */
   }

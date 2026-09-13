@@ -187,7 +187,7 @@ export function AdminChatMessageList({
           <button
             type="button"
             onClick={() => scrollToBottom('smooth')}
-            className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface max-lg:bottom-16"
+            className="absolute bottom-3 right-3 z-10 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface max-lg:bottom-28"
             aria-label="Ir al final de la conversación"
             title="Ir abajo"
           >

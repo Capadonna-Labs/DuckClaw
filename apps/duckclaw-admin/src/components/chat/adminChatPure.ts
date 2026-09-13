@@ -78,20 +78,97 @@ export function artifactImagePreview(
 
 /** Heartbeats/plan/tool no están en Redis; conservarlos si recargamos historial en vivo. */
 export function mergeHistoryWithEphemeral(server: ChatMsg[], ephemeral: ChatMsg[]): ChatMsg[] {
-  if (!ephemeral.length) return server;
-  return interleaveEphemeralIntoHistory(server, ephemeral);
+  if (!ephemeral.length) return coalesceTrailingToolHeartbeats(server);
+  return coalesceTrailingToolHeartbeats(interleaveEphemeralIntoHistory(server, ephemeral));
 }
 
 export function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
   return messages.filter((m) => m.role === 'heartbeat');
 }
 
+/**
+ * Índice donde insertar heartbeats del turno actual.
+ * Siempre antes del assistant del turno — nunca al final si ya hay respuesta
+ * (si no, Tool Usage queda flotando entre el último mensaje y el composer).
+ */
+export function findHeartbeatInsertIndex(messages: ChatMsg[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'assistant' && messages[i]?.streaming) {
+      return i;
+    }
+  }
+  let lastUser = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') {
+      lastUser = i;
+      break;
+    }
+  }
+  if (lastUser >= 0) {
+    for (let i = lastUser + 1; i < messages.length; i++) {
+      if (messages[i]?.role === 'assistant') return i;
+    }
+  }
+  return messages.length;
+}
+
+/**
+ * Si quedaron tool heartbeats *después* del assistant del último turno
+ * (p. ej. eventos SSE tardíos antes del fix, o race al cerrar streaming),
+ * los mueve justo antes de ese assistant para que Tool Usage no flote
+ * entre la respuesta y el composer.
+ */
+export function coalesceTrailingToolHeartbeats(messages: ChatMsg[]): ChatMsg[] {
+  let lastUser = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') {
+      lastUser = i;
+      break;
+    }
+  }
+  if (lastUser < 0) return messages;
+
+  let assistantIdx = -1;
+  for (let i = lastUser + 1; i < messages.length; i++) {
+    if (messages[i]?.role === 'assistant') {
+      assistantIdx = i;
+      break;
+    }
+  }
+  if (assistantIdx < 0) return messages;
+
+  const trailingIdx: number[] = [];
+  for (let i = assistantIdx + 1; i < messages.length; i++) {
+    const m = messages[i];
+    if (m?.role === 'user' || m?.role === 'assistant') break;
+    if (m?.role === 'heartbeat' && m.heartbeatKind === 'tool') {
+      trailingIdx.push(i);
+    }
+  }
+  if (!trailingIdx.length) return messages;
+
+  const trailing = trailingIdx.map((i) => messages[i]);
+  const without = messages.filter((_, i) => !trailingIdx.includes(i));
+  let newAssistant = -1;
+  for (let i = lastUser + 1; i < without.length; i++) {
+    if (without[i]?.role === 'assistant') {
+      newAssistant = i;
+      break;
+    }
+  }
+  if (newAssistant < 0) return messages;
+  const out = [...without];
+  out.splice(newAssistant, 0, ...trailing);
+  return out;
+}
+
 /** True si hay heartbeat de herramienta en el turno actual (entre último user y assistant streaming). */
 export function hasToolHeartbeatInCurrentTurn(messages: ChatMsg[]): boolean {
-  const streamIdx = messages.findIndex(
-    (x, i) => x.role === 'assistant' && x.streaming && i === messages.length - 1
-  );
-  const end = streamIdx >= 0 ? streamIdx : messages.length;
+  const insertAt = findHeartbeatInsertIndex(messages);
+  const end =
+    insertAt < messages.length && messages[insertAt]?.role === 'assistant'
+      ? insertAt
+      : messages.length;
   for (let i = end - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role === 'user') break;

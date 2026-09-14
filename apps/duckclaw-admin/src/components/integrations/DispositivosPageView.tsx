@@ -219,7 +219,11 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             subtitle={android?.mcp_url || 'ADB + MCP local'}
             tone={androidTone(android)}
             statusLabel={androidLoading ? 'Comprobando…' : androidStatusLabel(android)}
-            onRefresh={() => void loadAndroid()}
+            onRefresh={() => {
+              setConnectMessage(null);
+              setConnectOk(null);
+              void loadAndroid();
+            }}
             refreshing={androidLoading}
             actions={
               <div className="space-y-3">

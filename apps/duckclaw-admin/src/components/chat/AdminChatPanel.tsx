@@ -499,6 +499,7 @@ export function AdminChatPanel({
               onRenameConversation={onRenameConversation}
               tokenUsage={lastTurnUsage}
               contextEstimatedTokens={contextEstimatedTokens}
+              model={config?.llm?.model ?? null}
               leading={studioHeaderLeading}
               trailing={studioHeaderTrailing}
             />

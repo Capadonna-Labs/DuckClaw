@@ -107,6 +107,16 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         keyword_context={"db": "db"},
     ),
     SkillToolRegistrar(
+        skill_name="record_operational_lesson",
+        phase="post_llm",
+        registrar_path=(
+            "duckclaw.forge.skills.record_operational_lesson_bridge:"
+            "register_record_operational_lesson_skill"
+        ),
+        empty_config_registers=True,
+        keyword_context={"db": "db"},
+    ),
+    SkillToolRegistrar(
         skill_name="position_metrics",
         phase="pre_llm",
         registrar_path="duckclaw.forge.skills.position_metrics_bridge:register_position_metrics_skill",

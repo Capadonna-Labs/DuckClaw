@@ -112,6 +112,7 @@ def test_fal_is_in_skill_tool_registry() -> None:
 
     names = {item.skill_name for item in DEFAULT_SKILL_TOOL_REGISTRY}
     assert "fal" in names
+    assert "record_operational_lesson" in names
     fal = next(item for item in DEFAULT_SKILL_TOOL_REGISTRY if item.skill_name == "fal")
     assert fal.registrar_path.endswith("fal_bridge:register_fal_skill")
     assert fal.phase == "post_llm"

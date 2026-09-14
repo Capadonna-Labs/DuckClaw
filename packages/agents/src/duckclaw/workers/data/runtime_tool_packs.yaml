@@ -30,6 +30,7 @@ packs:
         - unlock_tool_pack
         - update_system_prompt
         - update_my_system_prompt
+        - record_operational_lesson
       prefixes: []
     activation_signals: []
 
@@ -100,6 +101,7 @@ packs:
         - list_disk_roots
         - list_disk_folder
         - read_disk_text
+        - search_semantic_context
       prefixes: []
     activation_signals:
       - conocimiento
@@ -116,6 +118,9 @@ packs:
       - lee el archivo
       - leer archivo
       - allowed_roots
+      - semantic_memory
+      - search_semantic_context
+      - memoria semántica
 
   - id: reports
     always: false

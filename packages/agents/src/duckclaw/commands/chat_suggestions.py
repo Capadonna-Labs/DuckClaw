@@ -21,7 +21,8 @@ _SYSTEM_PROMPT = (
     "podría enviar a continuación. "
     "Obligatorio: cada sugerencia debe referirse SOLO a temas, decisiones o datos "
     "mencionados en la respuesta más reciente del asistente (no a turnos anteriores). "
-    "Usa el mismo idioma del último mensaje del usuario. "
+    "Usa el mismo idioma de la respuesta del asistente (si el «usuario» es un "
+    "[SYSTEM_EVENT] / ciclo /loop, ignora ese texto para el idioma y alinea al reporte). "
     "Responde ÚNICAMENTE con un array JSON de "
     f"{_MAX_SUGGESTIONS} strings, sin explicación ni markdown, por ejemplo: "
     '["...", "...", "..."]'

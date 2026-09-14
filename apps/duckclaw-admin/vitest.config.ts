@@ -7,6 +7,7 @@ export default defineConfig({
     include: [
       'src/lib/opsSubprocessEnv.test.ts',
       'src/lib/pollWriteTask.test.ts',
+      'src/lib/modelContextWindow.test.ts',
       'src/lib/ansiLog.test.ts',
       'src/lib/draftManifestYaml.test.ts',
       'src/lib/workerRoleTemplates.test.ts',

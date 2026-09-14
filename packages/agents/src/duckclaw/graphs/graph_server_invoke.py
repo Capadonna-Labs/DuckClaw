@@ -129,6 +129,17 @@ async def _ainvoke(
     out: dict[str, Any] = {"reply": reply, "messages": messages}
     if usage:
         out["usage_tokens"] = usage
+    try:
+        from duckclaw.workers.provider_input_budget import estimate_context_token_breakdown
+
+        breakdown = estimate_context_token_breakdown(
+            list(messages) if isinstance(messages, list) else None
+        )
+        if breakdown.get("total", 0) > 0:
+            out["context_token_breakdown"] = breakdown
+            out["context_estimated_tokens"] = int(breakdown["total"])
+    except Exception:
+        pass
     model_id = _model_id_from_messages(messages)
     if model_id:
         out["model"] = model_id

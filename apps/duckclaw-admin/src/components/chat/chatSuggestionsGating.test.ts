@@ -21,10 +21,17 @@ describe('shouldFetchChatSuggestions', () => {
     expect(shouldFetchChatSuggestions('  /summarize', 'Resumen listo', false)).toBe(false);
   });
 
-  it('false para mensajes de sistema de loop', () => {
+  it('true tras ciclos /loop (SYSTEM_EVENT o [Ciclo loop]) con reporte outbound', () => {
     expect(
-      shouldFetchChatSuggestions('[Ciclo loop] tick', 'Resumen del ciclo', false)
-    ).toBe(false);
+      shouldFetchChatSuggestions(
+        '[SYSTEM_EVENT: Ciclo de auto-mejora modo conversación activa /loop on. Metas…]',
+        '## Reporte /loop — contraste metas vs datos',
+        false
+      )
+    ).toBe(true);
+    expect(
+      shouldFetchChatSuggestions('[Ciclo loop] tick', 'Resumen del ciclo con TP/SL', false)
+    ).toBe(true);
   });
 
   it('false si no hay respuesta del asistente', () => {
@@ -79,6 +86,23 @@ describe('lastUserAssistantExchange', () => {
       { role: 'assistant', text: 'Modo activo' },
     ];
     expect(lastUserAssistantExchange(messages)).toBeNull();
+  });
+
+  it('devuelve el par tras un ciclo /loop SYSTEM_EVENT', () => {
+    const messages: ChatMsg[] = [
+      { role: 'user', text: '/loop on' },
+      { role: 'assistant', text: 'Modo /loop activo' },
+      {
+        role: 'user',
+        text: '[SYSTEM_EVENT: Ciclo de auto-mejora modo conversación activa /loop on. Metas…]',
+      },
+      { role: 'assistant', text: '## Reporte /loop — CEG mark IBKR' },
+    ];
+    expect(lastUserAssistantExchange(messages)).toEqual({
+      userText:
+        '[SYSTEM_EVENT: Ciclo de auto-mejora modo conversación activa /loop on. Metas…]',
+      assistantText: '## Reporte /loop — CEG mark IBKR',
+    });
   });
 });
 

@@ -23,6 +23,7 @@ export type AdminChatComposeFooterProps = {
   isCompact: boolean;
   composeChips?: ReactNode;
   suggestions?: string[];
+  recommendedSuggestionIndex?: number;
   onPickSuggestion?: (text: string) => void | Promise<void>;
   input: string;
   setInput: (value: string) => void;
@@ -98,6 +99,7 @@ export function AdminChatComposeFooter({
   isCompact,
   composeChips,
   suggestions = [],
+  recommendedSuggestionIndex = 0,
   onPickSuggestion,
   input,
   setInput,
@@ -190,6 +192,8 @@ export function AdminChatComposeFooter({
             <div className="mb-2">
               <AdminChatSuggestionChips
                 suggestions={suggestions}
+                recommendedIndex={recommendedSuggestionIndex}
+                busy={loading}
                 onPick={(text) => void onPickSuggestion?.(text)}
               />
             </div>
@@ -293,6 +297,8 @@ export function AdminChatComposeFooter({
               <div className="mb-2">
                 <AdminChatSuggestionChips
                   suggestions={suggestions}
+                  recommendedIndex={recommendedSuggestionIndex}
+                  busy={loading}
                   onPick={(text) => void onPickSuggestion?.(text)}
                 />
               </div>

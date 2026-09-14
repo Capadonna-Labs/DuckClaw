@@ -364,6 +364,13 @@ async def finalize_chat_response(
     }
     if isinstance(usage, dict) and usage:
         out_resp["usage_tokens"] = usage
+    if isinstance(result, dict):
+        ctx_est = result.get("context_estimated_tokens")
+        if isinstance(ctx_est, (int, float)) and ctx_est >= 0:
+            out_resp["context_estimated_tokens"] = int(ctx_est)
+        breakdown = result.get("context_token_breakdown")
+        if isinstance(breakdown, dict) and breakdown:
+            out_resp["context_token_breakdown"] = breakdown
     if telegram_parts["parts_count"] > 1:
         out_resp["response_parts"] = telegram_parts["parts_count"]
     if telegram_parts["head"] is not None and (telegram_parts["tail"] or "").strip():

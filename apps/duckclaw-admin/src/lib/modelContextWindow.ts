@@ -13,6 +13,9 @@ const MODEL_CONTEXT_WINDOW: Array<{ match: RegExp; tokens: number }> = [
   { match: /gpt-3\.5/i, tokens: 16_385 },
   { match: /gemini-2\.5|gemini-2\.0|gemini-1\.5-pro/i, tokens: 1_000_000 },
   { match: /gemini-1\.5-flash/i, tokens: 1_000_000 },
+  // DeepSeek V4 (Flash/Pro): official 1M context (max_position_embeddings=1048576).
+  // Must stay above the generic /deepseek/ V3 heuristic.
+  { match: /deepseek[-_/]?v4/i, tokens: 1_000_000 },
   { match: /deepseek/i, tokens: 128_000 },
   { match: /qwen.*72b|qwen2\.5/i, tokens: 128_000 },
   { match: /llama-3\.1|llama3\.1/i, tokens: 128_000 },

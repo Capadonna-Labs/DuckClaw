@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from duckclaw.commands.chat_suggestions import generate_followup_suggestions
+from duckclaw.commands.chat_suggestions import (
+    _parse_suggestions_payload,
+    generate_followup_suggestions,
+)
 
 
 class _FakeLLM:
@@ -22,11 +25,33 @@ def _patch_triplet(monkeypatch) -> None:
     )
 
 
-def test_generate_followup_suggestions_parses_json_array(monkeypatch) -> None:
+def test_parse_payload_object_with_recommended_index() -> None:
+    out = _parse_suggestions_payload(
+        '{"suggestions":["a","b","c"],"recommended_index":2}'
+    )
+    assert out == {"suggestions": ["a", "b", "c"], "recommended_index": 2}
+
+
+def test_parse_payload_legacy_array_defaults_index_zero() -> None:
+    out = _parse_suggestions_payload('["a", "b", "c"]')
+    assert out == {"suggestions": ["a", "b", "c"], "recommended_index": 0}
+
+
+def test_parse_payload_clamps_bad_index() -> None:
+    out = _parse_suggestions_payload(
+        '{"suggestions":["a","b"],"recommended_index":99}'
+    )
+    assert out["recommended_index"] == 0
+
+
+def test_generate_followup_suggestions_parses_json_object(monkeypatch) -> None:
     _patch_triplet(monkeypatch)
     monkeypatch.setattr(
         "duckclaw.integrations.llm_providers.build_llm",
-        lambda *a, **k: _FakeLLM('["¿Puedes profundizar?", "Resume en 3 puntos", "¿Qué sigue?"]'),
+        lambda *a, **k: _FakeLLM(
+            '{"suggestions":["¿Puedes profundizar?", "Resume en 3 puntos", "¿Qué sigue?"],'
+            '"recommended_index":1}'
+        ),
     )
     out = generate_followup_suggestions(
         object(),
@@ -34,7 +59,12 @@ def test_generate_followup_suggestions_parses_json_array(monkeypatch) -> None:
         last_user_text="hola",
         last_assistant_text="Respuesta del asistente",
     )
-    assert out == ["¿Puedes profundizar?", "Resume en 3 puntos", "¿Qué sigue?"]
+    assert out["suggestions"] == [
+        "¿Puedes profundizar?",
+        "Resume en 3 puntos",
+        "¿Qué sigue?",
+    ]
+    assert out["recommended_index"] == 1
 
 
 def test_generate_followup_suggestions_strips_markdown_fence(monkeypatch) -> None:
@@ -46,7 +76,8 @@ def test_generate_followup_suggestions_strips_markdown_fence(monkeypatch) -> Non
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
-    assert out == ["a", "b", "c"]
+    assert out["suggestions"] == ["a", "b", "c"]
+    assert out["recommended_index"] == 0
 
 
 def test_generate_followup_suggestions_caps_to_three(monkeypatch) -> None:
@@ -58,7 +89,7 @@ def test_generate_followup_suggestions_caps_to_three(monkeypatch) -> None:
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
-    assert out == ["a", "b", "c"]
+    assert out["suggestions"] == ["a", "b", "c"]
 
 
 def test_generate_followup_suggestions_malformed_json_returns_empty(monkeypatch) -> None:
@@ -70,7 +101,7 @@ def test_generate_followup_suggestions_malformed_json_returns_empty(monkeypatch)
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
-    assert out == []
+    assert out == {"suggestions": [], "recommended_index": 0}
 
 
 def test_generate_followup_suggestions_llm_exception_returns_empty(monkeypatch) -> None:
@@ -83,7 +114,7 @@ def test_generate_followup_suggestions_llm_exception_returns_empty(monkeypatch) 
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
-    assert out == []
+    assert out == {"suggestions": [], "recommended_index": 0}
 
 
 def test_generate_followup_suggestions_none_llm_returns_empty(monkeypatch) -> None:
@@ -92,7 +123,7 @@ def test_generate_followup_suggestions_none_llm_returns_empty(monkeypatch) -> No
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
-    assert out == []
+    assert out == {"suggestions": [], "recommended_index": 0}
 
 
 def test_generate_followup_suggestions_empty_assistant_text_short_circuits(monkeypatch) -> None:
@@ -105,7 +136,7 @@ def test_generate_followup_suggestions_empty_assistant_text_short_circuits(monke
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="   "
     )
-    assert out == []
+    assert out == {"suggestions": [], "recommended_index": 0}
 
 
 def test_generate_followup_suggestions_disabled_by_env(monkeypatch) -> None:
@@ -120,4 +151,4 @@ def test_generate_followup_suggestions_disabled_by_env(monkeypatch) -> None:
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
-    assert out == []
+    assert out == {"suggestions": [], "recommended_index": 0}

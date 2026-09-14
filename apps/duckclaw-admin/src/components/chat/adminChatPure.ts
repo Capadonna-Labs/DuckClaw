@@ -2,6 +2,10 @@ import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import { artifactPreviewApiPath } from '@/lib/artifactPreview';
 import { interleaveEphemeralIntoHistory } from '@/lib/chatEphemeralMerge';
 import { normalizeUsageTokens, type UsageTokenBreakdown } from '@/lib/formatTokenCount';
+import {
+  normalizeContextTokenBreakdown,
+  type ContextTokenBreakdown,
+} from '@/lib/contextTokenBreakdown';
 
 /** True si, tras un turno, corresponde pedir sugerencias de continuación al backend. */
 export function shouldFetchChatSuggestions(
@@ -10,8 +14,9 @@ export function shouldFetchChatSuggestions(
   aborted: boolean
 ): boolean {
   if (aborted) return false;
+  // Slash fly acks (/loop on, /summarize, …) no piden chips.
+  // Los ciclos /loop (SYSTEM_EVENT / [Ciclo loop] como "user") sí: hay reporte outbound útil.
   if (userText.trim().startsWith('/')) return false;
-  if (isLoopSystemUserMessage(userText)) return false;
   return assistantResponse.trim().length > 0;
 }
 
@@ -278,23 +283,38 @@ export function readStoredWorker(chatId: string): string | null {
 export type TurnTokenMeta = {
   usage_tokens?: Record<string, number> | null;
   context_estimated_tokens?: number | null;
+  context_token_breakdown?: Record<string, number> | null;
 };
 
 /** Header mirrors gateway log line: last turn usage_tokens, not session sum. */
 export function applyLastTurnTokenDisplay(
   setLastTurnUsage: (value: UsageTokenBreakdown | null) => void,
   setContextEstimatedTokens: (value: number | null) => void,
-  meta: TurnTokenMeta
+  meta: TurnTokenMeta,
+  setContextTokenBreakdown?: (value: ContextTokenBreakdown | null) => void
 ): void {
   const usage = normalizeUsageTokens(meta.usage_tokens);
+  const breakdown = normalizeContextTokenBreakdown(meta.context_token_breakdown ?? null);
   if (usage) {
     setLastTurnUsage(usage);
-    setContextEstimatedTokens(null);
+  } else {
+    setLastTurnUsage(null);
+  }
+  if (breakdown) {
+    setContextTokenBreakdown?.(breakdown);
+    setContextEstimatedTokens(breakdown.total);
     return;
   }
+  setContextTokenBreakdown?.(null);
   const ctx = meta.context_estimated_tokens;
   if (ctx != null && Number.isFinite(ctx) && ctx >= 0) {
-    setLastTurnUsage(null);
     setContextEstimatedTokens(Math.floor(ctx));
+    return;
   }
+  // Prefer billed input_tokens as occupancy when no heuristic breakdown arrived.
+  if (usage && usage.input_tokens > 0) {
+    setContextEstimatedTokens(usage.input_tokens);
+    return;
+  }
+  setContextEstimatedTokens(null);
 }

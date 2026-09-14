@@ -9,6 +9,14 @@ describe('inferModelContextWindow', () => {
     expect(inferModelContextWindow('unknown-local-gguf')).toBeNull();
     expect(inferModelContextWindow('')).toBeNull();
   });
+
+  it('uses 1M for DeepSeek V4 and 128k for legacy DeepSeek', () => {
+    expect(inferModelContextWindow('deepseek/deepseek-v4-flash')).toBe(1_000_000);
+    expect(inferModelContextWindow('deepseek/deepseek-v4-pro')).toBe(1_000_000);
+    expect(inferModelContextWindow('deepseek-v4-flash')).toBe(1_000_000);
+    expect(inferModelContextWindow('deepseek/deepseek-chat')).toBe(128_000);
+    expect(inferModelContextWindow('deepseek-reasoner')).toBe(128_000);
+  });
 });
 
 describe('formatCompactTokenCount', () => {

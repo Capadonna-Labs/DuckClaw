@@ -28,10 +28,10 @@ async def post_chat_suggestions(body: ChatSuggestionsBody) -> dict[str, Any]:
 
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
-        return {"suggestions": []}
+        return {"suggestions": [], "recommended_index": 0}
     db = DuckClaw(gw, read_only=True)
     try:
-        suggestions = generate_followup_suggestions(
+        payload = generate_followup_suggestions(
             db,
             body.chat_id,
             tenant_id=body.tenant_id,
@@ -40,4 +40,16 @@ async def post_chat_suggestions(body: ChatSuggestionsBody) -> dict[str, Any]:
         )
     finally:
         db.close()
-    return {"suggestions": suggestions}
+    if isinstance(payload, dict):
+        suggestions = payload.get("suggestions") if isinstance(payload.get("suggestions"), list) else []
+        try:
+            recommended_index = int(payload.get("recommended_index") or 0)
+        except (TypeError, ValueError):
+            recommended_index = 0
+    else:
+        # Legacy list return (tests / older builds).
+        suggestions = list(payload) if isinstance(payload, list) else []
+        recommended_index = 0
+    if recommended_index < 0 or recommended_index >= len(suggestions):
+        recommended_index = 0
+    return {"suggestions": suggestions, "recommended_index": recommended_index}

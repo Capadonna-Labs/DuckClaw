@@ -23,11 +23,27 @@ _SYSTEM_PROMPT = (
     "mencionados en la respuesta más reciente del asistente (no a turnos anteriores). "
     "Usa el mismo idioma de la respuesta del asistente (si el «usuario» es un "
     "[SYSTEM_EVENT] / ciclo /loop, ignora ese texto para el idioma y alinea al reporte). "
-    "Elige además la MEJOR sugerencia para continuar ahora (la más concreta y útil). "
+    "\n"
+    "Prioridad de utilidad (NO encadenes solo el siguiente paso operativo): "
+    "las 3 sugerencias deben ser distintas entre sí y mezclar ángulos útiles, p. ej. "
+    "(1) revisar riesgo/dato anómalo (distancias TP/SL, R:R, fills parciales, "
+    "cantidades inconsistentes, señales stale), "
+    "(2) pedir explicación o contraste de un hallazgo concreto, "
+    "(3) una alternativa o decisión no obvia. "
+    "Evita chips que solo confirmen/ejecuten/aprueben el siguiente paso "
+    "(p. ej. «confirma las OCAs», «ejecuta el batch», «re-registra TP/SL», "
+    "«elimina la señal stale», «sí, adelante») salvo que el usuario YA haya "
+    "pedido explícitamente esa acción en su último mensaje. "
+    "Prefiere preguntas que ayuden a decidir con criterio, no atajos de workflow. "
+    "\n"
+    "Elige además la MEJOR sugerencia (recommended_index): la más útil para "
+    "entender riesgo o resolver una ambigüedad, NO la que meramente avanza el "
+    "pipeline. "
     "Responde ÚNICAMENTE con un objeto JSON (sin markdown) con esta forma exacta: "
     '{"suggestions":["...","...","..."],"recommended_index":0} '
     f"donde recommended_index es un entero 0..{_MAX_SUGGESTIONS - 1}."
 )
+
 
 
 def _suggestions_globally_enabled() -> bool:

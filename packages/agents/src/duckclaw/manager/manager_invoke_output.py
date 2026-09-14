@@ -47,6 +47,13 @@ def build_invoke_worker_output(
         aid = (worker_invoke.get("visual_artifact_id") or "").strip()
     if aid:
         out["visual_artifact_id"] = aid
+    if isinstance(worker_invoke, dict):
+        bound_n = worker_invoke.get("_context_bound_tools_n")
+        if bound_n is not None:
+            try:
+                out["_context_bound_tools_n"] = int(bound_n)
+            except (TypeError, ValueError):
+                pass
     if "active_mission" in state:
         out["active_mission"] = state.get("active_mission")
     if "handoff_context" in state:

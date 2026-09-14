@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   formatTokenCount,
   formatUsageTokensLogLine,
@@ -63,6 +63,7 @@ export function TokenConsumptionMenu({
 }: TokenConsumptionMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
   const panelId = useId();
 
   useEffect(() => {
@@ -80,6 +81,30 @@ export function TokenConsumptionMenu({
       document.removeEventListener('keydown', onKey);
     };
   }, [open]);
+
+  // Keep the popover inside the viewport on narrow screens (button is mid-header, not flush right).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const panel = panelRef.current;
+    if (!panel) return;
+    const margin = 10;
+    const place = () => {
+      panel.style.transform = '';
+      const rect = panel.getBoundingClientRect();
+      let dx = 0;
+      if (rect.left < margin) dx = margin - rect.left;
+      if (rect.right + dx > window.innerWidth - margin) {
+        dx = window.innerWidth - margin - rect.right;
+      }
+      panel.style.transform = dx ? `translateX(${dx}px)` : '';
+    };
+    place();
+    window.addEventListener('resize', place);
+    return () => {
+      window.removeEventListener('resize', place);
+      panel.style.transform = '';
+    };
+  }, [open, contextTokenBreakdown, contextEstimatedTokens, tokenUsage, model]);
 
   const contextWindow = useMemo(() => inferModelContextWindow(model), [model]);
   const contextUsed = useMemo(() => {
@@ -199,10 +224,11 @@ export function TokenConsumptionMenu({
 
       {open ? (
         <div
+          ref={panelRef}
           id={panelId}
           role="dialog"
           aria-label="Detalle de consumo"
-          className="absolute right-0 top-full z-[70] mt-2 w-[18.5rem] max-w-[calc(100vw-1.25rem)] origin-top-right rounded-2xl border border-gov-gray-200 bg-white p-3 shadow-xl dark:border-dark-border dark:bg-dark-surface"
+          className="absolute right-0 top-full z-[70] mt-2 w-[min(18.5rem,calc(100vw-1.25rem))] max-w-[calc(100vw-1.25rem)] rounded-2xl border border-gov-gray-200 bg-white p-3 shadow-xl dark:border-dark-border dark:bg-dark-surface"
         >
           <div className="space-y-3">
             <section className="space-y-1.5">

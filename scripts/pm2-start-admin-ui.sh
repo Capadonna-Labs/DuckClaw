@@ -18,9 +18,13 @@ export PORT="${PORT:-3000}"
 # resolves to 127.0.1.1 and breaks nginx/Tailscale — always force all interfaces.
 export HOSTNAME="${DUCKCLAW_ADMIN_BIND_HOST:-0.0.0.0}"
 export NODE_ENV=production
-export DUCKCLAW_REPO_ROOT="${DUCKCLAW_REPO_ROOT:-${ROOT}}"
 
-# Load app secrets after bind host so .env cannot override HOSTNAME to the FQDN.
+# Load app env BEFORE defaulting REPO_ROOT so .env.local can point
+# DUCKCLAW_EXTENSION_ROOT / DUCKCLAW_REPO_ROOT at the product vault tree
+# (must match the gateway writer). Otherwise /api/admin/artifacts → 404 and
+# chat/preview show broken <img> even when PNGs exist on disk.
+# Do NOT source monorepo ROOT/.env here — it can pull HOSTNAME/MCP ports that
+# break the Next bind.
 set -a
 # shellcheck disable=SC1091
 [[ -f "${ADMIN}/.env.local" ]] && . "${ADMIN}/.env.local"
@@ -29,6 +33,8 @@ set -a
 # shellcheck disable=SC1091
 [[ -f "${STANDALONE}/.env" ]] && . "${STANDALONE}/.env"
 set +a
+
+export DUCKCLAW_REPO_ROOT="${DUCKCLAW_REPO_ROOT:-${ROOT}}"
 export HOSTNAME="${DUCKCLAW_ADMIN_BIND_HOST:-0.0.0.0}"
 
 cd "${STANDALONE}"

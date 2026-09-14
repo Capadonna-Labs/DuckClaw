@@ -181,6 +181,7 @@ export function useAdminChat({
     null
   );
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [recommendedSuggestionIndex, setRecommendedSuggestionIndex] = useState(0);
   const thinkingStartedAt = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -236,6 +237,7 @@ export function useAdminChat({
     setContextEstimatedTokens(null);
     setContextTokenBreakdown(null);
     setSuggestions([]);
+    setRecommendedSuggestionIndex(0);
     suggestionsExchangeKeyRef.current = '';
   }, [chatId]);
 
@@ -263,11 +265,20 @@ export function useAdminChat({
         if (cancelled) return;
         const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
         setSuggestions(next);
+        const rawIdx = Number(r.recommended_index ?? 0);
+        const idx =
+          next.length === 0
+            ? 0
+            : Number.isFinite(rawIdx)
+              ? Math.min(Math.max(0, Math.floor(rawIdx)), next.length - 1)
+              : 0;
+        setRecommendedSuggestionIndex(idx);
         if (next.length === 0) suggestionsExchangeKeyRef.current = '';
       })
       .catch(() => {
         if (cancelled) return;
         setSuggestions([]);
+        setRecommendedSuggestionIndex(0);
         suggestionsExchangeKeyRef.current = '';
       });
     return () => {
@@ -427,6 +438,7 @@ export function useAdminChat({
         setContextTokenBreakdown,
         setLoopSchedulePolling,
         setSuggestions,
+        setRecommendedSuggestionIndex,
         suggestionsExchangeKeyRef,
         finalizeCancelledGeneration,
         clearLoopHistoryReload,
@@ -639,6 +651,7 @@ export function useAdminChat({
     send,
     sendSuggestion,
     suggestions,
+    recommendedSuggestionIndex,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,

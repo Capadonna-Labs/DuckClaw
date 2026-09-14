@@ -7,8 +7,17 @@ if (-not (Test-Path $exe)) {
   Write-Error "No encontrado: $exe"
 }
 
-Write-Host "Deteniendo duckclaw_backend..."
-cmd /c "taskkill /F /IM duckclaw_backend.exe >nul 2>nul"
+Write-Host "Deteniendo sidecar DuckClaw..."
+$sidecarImages = @(
+  "duckclaw_backend.exe",
+  "duckclaw_backend-x86_64-pc-windows-msvc.exe"
+)
+foreach ($image in $sidecarImages) {
+  & taskkill /F /IM $image *> $null
+}
+Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | ForEach-Object {
+  Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
+}
 Start-Sleep -Seconds 1
 
 if (Test-Path $envFile) {
@@ -20,6 +29,7 @@ if (Test-Path $envFile) {
 }
 
 $env:LITE_MODE = "1"
+$env:DUCKCLAW_SPAWN_PROFILE = "1"
 $env:DUCKCLAW_DISABLE_DOTENV = "1"
 
 Write-Host "Arrancando $exe"

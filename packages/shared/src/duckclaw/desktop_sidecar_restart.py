@@ -52,25 +52,48 @@ async def restart_desktop_sidecar() -> dict[str, Any]:
         }
 
     if sys.platform == "win32":
-        proc = await asyncio.create_subprocess_exec(
-            "taskkill",
-            "/F",
-            "/IM",
+        sidecar_images = (
             "duckclaw_backend.exe",
+            "duckclaw_backend-x86_64-pc-windows-msvc.exe",
+        )
+        for image in sidecar_images:
+            proc = await asyncio.create_subprocess_exec(
+                "taskkill",
+                "/F",
+                "/IM",
+                image,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            await proc.wait()
+        chunks.append("── taskkill sidecar DuckClaw ──\nOK\n")
+
+        subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue | "
+                "ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }",
+            ],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
-        await proc.wait()
-        chunks.append("── taskkill duckclaw_backend.exe ──\nOK\n")
+
         deadline = time.monotonic() + 15.0
         while time.monotonic() < deadline:
-            listed = subprocess.run(
-                ["tasklist", "/FI", "IMAGENAME eq duckclaw_backend.exe", "/FO", "CSV", "/NH"],
-                capture_output=True,
-                text=True,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-            )
-            if "duckclaw_backend.exe" not in (listed.stdout or "").lower():
+            any_sidecar = False
+            for image in sidecar_images:
+                listed = subprocess.run(
+                    ["tasklist", "/FI", f"IMAGENAME eq {image}", "/FO", "CSV", "/NH"],
+                    capture_output=True,
+                    text=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                )
+                any_sidecar = any_sidecar or image.lower() in (listed.stdout or "").lower()
+            if not any_sidecar:
                 break
             await asyncio.sleep(0.5)
 

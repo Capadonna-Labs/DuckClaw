@@ -1,0 +1,96 @@
+name: Desktop Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to create or update, for example v0.2.1"
+        required: true
+        type: string
+      release_name:
+        description: "Release title shown in GitHub"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  windows:
+    name: build-windows
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      DUCKCLAW_ADMIN_RELAX_BUILD: "1"
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: "--max-old-space-size=4096"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve release metadata
+        id: meta
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag_name }}"
+          }
+          if (-not $tag.StartsWith("v")) {
+            throw "tag_name must start with v, for example v0.2.1"
+          }
+          $name = "${{ inputs.release_name }}"
+          if (-not $name) { $name = "DuckClaw $tag" }
+          "tag_name=$tag" >> $env:GITHUB_OUTPUT
+          "release_name=$name" >> $env:GITHUB_OUTPUT
+
+      - name: Check updater signing secret
+        shell: pwsh
+        run: |
+          if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
+            throw "Missing repository secret TAURI_SIGNING_PRIVATE_KEY. Generate it with Tauri signer and store the private key content as a GitHub Actions secret."
+          }
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable pnpm
+        shell: pwsh
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.15.0 --activate
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Stage desktop sidecar, admin UI, and Node runtime
+        shell: pwsh
+        run: ./scripts/build_desktop.ps1 -SkipTauri
+
+      - name: Publish signed Tauri release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: packages/desktop
+          tagName: ${{ steps.meta.outputs.tag_name }}
+          releaseName: ${{ steps.meta.outputs.release_name }}
+          releaseBody: "DuckClaw desktop build with signed updater artifacts."
+          releaseDraft: false
+          prerelease: false
+          generateReleaseNotes: true
+          uploadUpdaterJson: true
+          uploadUpdaterSignatures: true
+          updaterJsonPreferNsis: true

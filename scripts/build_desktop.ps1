@@ -171,21 +171,23 @@ function Sync-UpdaterConfig {
 
 function Set-TauriSigningEnv {
     $keyPath = Join-Path $DesktopRoot ".tauri\duckclaw.key"
+    if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+        Write-Host "Updater signing env ready (private key provided by environment)"
+        return
+    }
     if (-not (Test-Path $keyPath)) {
-        Write-Host "==> No Minisign private key; generating..."
+        Write-Host "==> No Minisign private key; generating local dev key..."
         & (Join-Path $RepoRoot "scripts\setup_desktop_signing.ps1")
     }
     if (-not (Test-Path $keyPath)) {
-        throw "Missing Minisign private key at $keyPath (run scripts/setup_desktop_signing.ps1)"
+        throw "Missing Minisign private key at $keyPath (run scripts/setup_desktop_signing.ps1 or set TAURI_SIGNING_PRIVATE_KEY)"
     }
-    if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
-        $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath $keyPath -Raw
-    }
+    $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath $keyPath -Raw
     if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
         # ponytail: matches setup_desktop_signing.ps1 dev default; CI should set env explicitly
         $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = "duckclaw-dev-signing"
     }
-    Write-Host "Updater signing env ready (private key loaded)"
+    Write-Host "Updater signing env ready (private key loaded from local dev key)"
 }
 
 if (-not $SkipTauri) {

@@ -37,6 +37,7 @@ import {
 import { runAdminChatTurn } from './runAdminChatTurn';
 import { useAdminChatHistory } from './useAdminChatHistory';
 import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
+import type { ContextTokenBreakdown } from '@/lib/contextTokenBreakdown';
 
 
 export {
@@ -176,6 +177,9 @@ export function useAdminChat({
   const [vaultPath, setVaultPathState] = useState('');
   const [lastTurnUsage, setLastTurnUsage] = useState<UsageTokenBreakdown | null>(null);
   const [contextEstimatedTokens, setContextEstimatedTokens] = useState<number | null>(null);
+  const [contextTokenBreakdown, setContextTokenBreakdown] = useState<ContextTokenBreakdown | null>(
+    null
+  );
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const thinkingStartedAt = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -230,6 +234,7 @@ export function useAdminChat({
   useEffect(() => {
     setLastTurnUsage(null);
     setContextEstimatedTokens(null);
+    setContextTokenBreakdown(null);
     setSuggestions([]);
     suggestionsExchangeKeyRef.current = '';
   }, [chatId]);
@@ -419,6 +424,7 @@ export function useAdminChat({
         setMessages,
         setLastTurnUsage,
         setContextEstimatedTokens,
+        setContextTokenBreakdown,
         setLoopSchedulePolling,
         setSuggestions,
         suggestionsExchangeKeyRef,
@@ -649,6 +655,7 @@ export function useAdminChat({
     setVaultPath,
     lastTurnUsage,
     contextEstimatedTokens,
+    contextTokenBreakdown,
     reloadConfig: loadConfig,
     reloadHistory,
   };

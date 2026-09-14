@@ -185,6 +185,79 @@ def estimate_tokens_from_messages(messages: list[Any]) -> int:
     return max(0, total // 4)
 
 
+def _estimate_tokens_one_message(message: Any) -> int:
+    return estimate_tokens_from_messages([message])
+
+
+def estimate_context_token_breakdown(
+    messages: list[Any] | None,
+    *,
+    bound_tools_n: int | None = None,
+) -> dict[str, int]:
+    """
+    Heuristic context composition for the consumption UI (Claude-style categories).
+
+    - system: SystemMessage content
+    - messages: Human + AI text (not tool payloads)
+    - tools: ToolMessage content + estimated bound-tool schemas
+    - total: sum of the above
+
+    Schema size uses ``mlx_tool_schema_reserve_tokens`` when ``bound_tools_n`` is set;
+    otherwise estimates from distinct tool names seen in AIMessage.tool_calls.
+    """
+    try:
+        from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+    except Exception:  # pragma: no cover
+        AIMessage = HumanMessage = SystemMessage = ToolMessage = tuple()  # type: ignore[misc, assignment]
+
+    system = 0
+    chat = 0
+    tool_results = 0
+    tool_names: set[str] = set()
+
+    for message in messages or []:
+        tokens = _estimate_tokens_one_message(message)
+        if ToolMessage and isinstance(message, ToolMessage):
+            tool_results += tokens
+            name = str(getattr(message, "name", None) or getattr(message, "tool_name", None) or "").strip()
+            if name:
+                tool_names.add(name)
+            continue
+        if SystemMessage and isinstance(message, SystemMessage):
+            system += tokens
+            continue
+        if HumanMessage and isinstance(message, HumanMessage):
+            chat += tokens
+            continue
+        if AIMessage and isinstance(message, AIMessage):
+            chat += tokens
+            for tc in getattr(message, "tool_calls", None) or []:
+                if isinstance(tc, dict):
+                    name = str(tc.get("name") or "").strip()
+                else:
+                    name = str(getattr(tc, "name", None) or "").strip()
+                if name:
+                    tool_names.add(name)
+            continue
+        chat += tokens
+
+    if bound_tools_n is not None:
+        schema_n = max(0, int(bound_tools_n))
+    else:
+        schema_n = len(tool_names)
+    tool_schemas = mlx_tool_schema_reserve_tokens(schema_n) if schema_n else 0
+    tools = tool_results + tool_schemas
+    total = system + chat + tools
+    return {
+        "system": int(system),
+        "messages": int(chat),
+        "tools": int(tools),
+        "tool_results": int(tool_results),
+        "tool_schemas": int(tool_schemas),
+        "total": int(total),
+    }
+
+
 def groq_max_estimated_input_tokens(*, db: Any = None) -> int:
     """
     Estimated chars/4 cap for serialized messages sent to Groq.
@@ -399,6 +472,7 @@ __all__ = [
     "context_prune_globally_enabled",
     "context_prune_max_estimated_tokens",
     "context_prune_max_estimated_tokens_for_provider",
+    "estimate_context_token_breakdown",
     "estimate_tokens_from_messages",
     "groq_max_estimated_input_tokens",
     "groq_tool_message_max_chars",

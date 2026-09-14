@@ -153,6 +153,9 @@ async def invoke_chat_sse_body(
             ctx_est = result.get("context_estimated_tokens")
             if isinstance(ctx_est, (int, float)) and ctx_est >= 0:
                 sse_extra["context_estimated_tokens"] = int(ctx_est)
+            breakdown = result.get("context_token_breakdown")
+            if isinstance(breakdown, dict) and breakdown:
+                sse_extra["context_token_breakdown"] = breakdown
         else:
             reply = str(result or "")
         want_tts = voice_response and bool((reply or "").strip())

@@ -24,15 +24,15 @@ if ((Test-Path $KeyPath) -and -not $Force) {
     Push-Location $DesktopRoot
     try {
         if (-not (Test-Path "node_modules")) { npm install }
-        $args = @("signer", "generate", "-w", $KeyPath)
-        if ($Force) { $args += "-f" }
+        $tauriArgs = @("signer", "generate", "-w", $KeyPath)
+        if ($Force) { $tauriArgs += "-f" }
         if ($Password) {
-            $args += @("--password", $Password)
+            $tauriArgs += @("--password", $Password)
         } else {
             # ponytail: dev-only default; override with -Password in CI
-            $args += @("--password", "duckclaw-dev-signing")
+            $tauriArgs += @("--password", "duckclaw-dev-signing")
         }
-        & npx tauri @args
+        & npm exec -- tauri @tauriArgs
         if ($LASTEXITCODE -ne 0) { throw "tauri signer generate failed (exit $LASTEXITCODE)" }
     } finally {
         Pop-Location

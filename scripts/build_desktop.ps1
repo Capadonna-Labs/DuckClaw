@@ -179,7 +179,7 @@ function Set-TauriSigningEnv {
         throw "Missing Minisign private key at $keyPath (run scripts/setup_desktop_signing.ps1)"
     }
     if (-not $env:TAURI_SIGNING_PRIVATE_KEY) {
-        $env:TAURI_SIGNING_PRIVATE_KEY = (Resolve-Path -LiteralPath $keyPath).Path
+        $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content -LiteralPath $keyPath -Raw
     }
     if (-not $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
         # ponytail: matches setup_desktop_signing.ps1 dev default; CI should set env explicitly

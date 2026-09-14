@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from duckclaw.commands.chat_suggestions import (
+    _SYSTEM_PROMPT,
     _parse_suggestions_payload,
     generate_followup_suggestions,
 )
@@ -23,6 +24,16 @@ def _patch_triplet(monkeypatch) -> None:
         "duckclaw.commands.chat_suggestions._effective_llm_triplet_for_chat_ui",
         lambda db, chat_id: ("openai", "gpt-4o-mini", ""),
     )
+
+
+def test_system_prompt_prefers_useful_angles_over_next_step_ops() -> None:
+    """Guardrail: chips must not only push confirm/execute workflow."""
+    lower = _SYSTEM_PROMPT.lower()
+    assert "siguiente paso operativo" in lower or "siguiente paso" in lower
+    assert "confirma las ocas" in lower or "ejecuta el batch" in lower
+    assert "riesgo" in lower or "distancias" in lower
+    assert "recommended_index" in lower
+    assert "ambigüedad" in lower or "ambiguedad" in lower or "anómalo" in lower
 
 
 def test_parse_payload_object_with_recommended_index() -> None:

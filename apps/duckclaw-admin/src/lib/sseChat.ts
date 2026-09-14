@@ -8,6 +8,7 @@ export type SseChatEvent =
       assigned_worker_id?: string;
       usage_tokens?: Record<string, number>;
       context_estimated_tokens?: number;
+      context_token_breakdown?: Record<string, number>;
       worker_id?: string;
       elapsed_ms?: number;
       figure_base64?: string;
@@ -63,6 +64,10 @@ function parseDataLine(data: string): SseChatEvent | null {
             : j.context_estimated_tokens != null
               ? Number(j.context_estimated_tokens)
               : undefined,
+        context_token_breakdown:
+          j.context_token_breakdown && typeof j.context_token_breakdown === 'object'
+            ? (j.context_token_breakdown as Record<string, number>)
+            : undefined,
         worker_id: j.worker_id as string | undefined,
         elapsed_ms:
           typeof j.elapsed_ms === 'number'

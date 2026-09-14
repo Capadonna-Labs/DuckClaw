@@ -139,6 +139,7 @@ export function AdminChatPanel({
     setVaultPath,
     lastTurnUsage,
     contextEstimatedTokens,
+    contextTokenBreakdown,
     reloadConfig,
     reloadHistory,
   } = chat;
@@ -499,6 +500,7 @@ export function AdminChatPanel({
               onRenameConversation={onRenameConversation}
               tokenUsage={lastTurnUsage}
               contextEstimatedTokens={contextEstimatedTokens}
+              contextTokenBreakdown={contextTokenBreakdown}
               model={config?.llm?.model ?? null}
               leading={studioHeaderLeading}
               trailing={studioHeaderTrailing}

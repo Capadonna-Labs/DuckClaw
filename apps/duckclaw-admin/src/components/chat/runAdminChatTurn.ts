@@ -30,6 +30,7 @@ import {
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
 import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
+import type { ContextTokenBreakdown } from '@/lib/contextTokenBreakdown';
 
 export type ThinkingIdentity = { workerId: string; swarmSlot: number };
 
@@ -56,6 +57,7 @@ export type RunAdminChatTurnParams = {
   setMessages: Dispatch<SetStateAction<ChatMsg[]>>;
   setLastTurnUsage: Dispatch<SetStateAction<UsageTokenBreakdown | null>>;
   setContextEstimatedTokens: Dispatch<SetStateAction<number | null>>;
+  setContextTokenBreakdown: Dispatch<SetStateAction<ContextTokenBreakdown | null>>;
   setLoopSchedulePolling: Dispatch<SetStateAction<boolean>>;
   setSuggestions: Dispatch<SetStateAction<string[]>>;
   /** Ref compartida con el efecto de historial: evita refetch duplicado tras el turno. */
@@ -94,6 +96,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setMessages,
     setLastTurnUsage,
     setContextEstimatedTokens,
+    setContextTokenBreakdown,
     setLoopSchedulePolling,
     setSuggestions,
     suggestionsExchangeKeyRef,
@@ -364,7 +367,12 @@ try {
         };
       },
       onDone: (meta) => {
-        applyLastTurnTokenDisplay(setLastTurnUsage, setContextEstimatedTokens, meta);
+        applyLastTurnTokenDisplay(
+          setLastTurnUsage,
+          setContextEstimatedTokens,
+          meta,
+          setContextTokenBreakdown
+        );
         if ((meta.response || '').trim()) {
           authoritativeResponse = meta.response.trim();
         }

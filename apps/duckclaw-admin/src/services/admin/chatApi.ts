@@ -378,6 +378,7 @@ export const chatApi = {
         assigned_worker_id?: string;
         usage_tokens?: Record<string, number>;
         context_estimated_tokens?: number;
+        context_token_breakdown?: Record<string, number>;
         elapsed_ms?: number;
         figure_base64?: string;
         fly_charts_b64?: string[];
@@ -444,6 +445,7 @@ export const chatApi = {
             assigned_worker_id: ev.assigned_worker_id,
             usage_tokens: ev.usage_tokens,
             context_estimated_tokens: ev.context_estimated_tokens,
+            context_token_breakdown: ev.context_token_breakdown,
             elapsed_ms: ev.elapsed_ms,
             figure_base64: ev.figure_base64,
             fly_charts_b64: ev.fly_charts_b64,

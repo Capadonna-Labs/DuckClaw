@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 export const SUGGESTIONS_AUTO_STORAGE_KEY = 'duckclaw.chat.suggestionsAuto';
-export const SUGGESTIONS_AUTO_COUNTDOWN_SEC = 3;
+export const SUGGESTIONS_AUTO_COUNTDOWN_SEC = 15;
 
 type AdminChatSuggestionChipsProps = {
   suggestions: string[];

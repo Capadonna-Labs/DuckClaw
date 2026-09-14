@@ -14,8 +14,9 @@ export function shouldFetchChatSuggestions(
   aborted: boolean
 ): boolean {
   if (aborted) return false;
+  // Slash fly acks (/loop on, /summarize, …) no piden chips.
+  // Los ciclos /loop (SYSTEM_EVENT / [Ciclo loop] como "user") sí: hay reporte outbound útil.
   if (userText.trim().startsWith('/')) return false;
-  if (isLoopSystemUserMessage(userText)) return false;
   return assistantResponse.trim().length > 0;
 }
 

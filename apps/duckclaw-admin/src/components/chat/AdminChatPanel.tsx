@@ -124,6 +124,7 @@ export function AdminChatPanel({
     send,
     sendSuggestion,
     suggestions,
+    recommendedSuggestionIndex,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,
@@ -139,6 +140,7 @@ export function AdminChatPanel({
     setVaultPath,
     lastTurnUsage,
     contextEstimatedTokens,
+    contextTokenBreakdown,
     reloadConfig,
     reloadHistory,
   } = chat;
@@ -499,6 +501,7 @@ export function AdminChatPanel({
               onRenameConversation={onRenameConversation}
               tokenUsage={lastTurnUsage}
               contextEstimatedTokens={contextEstimatedTokens}
+              contextTokenBreakdown={contextTokenBreakdown}
               model={config?.llm?.model ?? null}
               leading={studioHeaderLeading}
               trailing={studioHeaderTrailing}
@@ -592,6 +595,7 @@ export function AdminChatPanel({
             documentAttachments={documentAttachments}
             send={send}
             suggestions={suggestions}
+            recommendedSuggestionIndex={recommendedSuggestionIndex}
             onPickSuggestion={sendSuggestion}
             cancelGeneration={cancelGeneration}
             onTextareaPaste={onTextareaPaste}

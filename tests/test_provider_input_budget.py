@@ -10,6 +10,7 @@ from duckclaw.workers.provider_input_budget import (
     configure_provider_budget_runtime_db_provider,
     context_prune_globally_enabled,
     context_prune_max_estimated_tokens,
+    estimate_context_token_breakdown,
     estimate_tokens_from_messages,
     groq_max_estimated_input_tokens,
     groq_tool_message_max_chars,
@@ -249,6 +250,22 @@ def test_mlx_provider_input_budget_trims_large_history(monkeypatch) -> None:
 
     assert out[-1].content == "recent question"
     assert estimate_tokens_from_messages(out) <= 20_000
+
+
+def test_estimate_context_token_breakdown_categories() -> None:
+    msgs = [
+        SystemMessage(content="S" * 40),
+        HumanMessage(content="H" * 40),
+        AIMessage(content="A" * 20, tool_calls=[{"id": "1", "name": "search_web", "args": {}}]),
+        ToolMessage(content="T" * 80, tool_call_id="1", name="search_web"),
+    ]
+    out = estimate_context_token_breakdown(msgs)
+    assert out["system"] == 10
+    assert out["messages"] == 15  # 10 human + 5 AI
+    assert out["tool_results"] == 20
+    assert out["tool_schemas"] == 350  # one distinct tool * default reserve
+    assert out["tools"] == 370
+    assert out["total"] == out["system"] + out["messages"] + out["tools"]
 
 
 def test_mlx_max_bound_tools_default(monkeypatch) -> None:

@@ -582,6 +582,9 @@ def format_playground_chat_payload(
         ctx_est = result.get("context_estimated_tokens")
         if isinstance(ctx_est, (int, float)) and ctx_est >= 0:
             payload["context_estimated_tokens"] = int(ctx_est)
+        breakdown = result.get("context_token_breakdown")
+        if isinstance(breakdown, dict) and breakdown:
+            payload["context_token_breakdown"] = breakdown
         if visual:
             payload.update(visual)
         return payload

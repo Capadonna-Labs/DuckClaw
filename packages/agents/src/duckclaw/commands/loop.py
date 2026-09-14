@@ -377,6 +377,10 @@ def build_loop_self_system_event_message(
         " Para distancias SL/TP y % PnL por ticker: el grafo inyecta "
         "calculate_tp_sl_distance sobre niveles ACTIVE; "
         "prohibido inventar o invertir signos de % en prosa. "
+        "En tablas de precio/TP/SL etiqueta SIEMPRE la fuente "
+        "(IBKR mark paper/live vs OHLCV last close vs vault portfolio_positions) "
+        "y la sesión (RTH/premarket/AH); no presentes marks IBKR como si fueran "
+        "el cierre de TradingView u otra UI. Si discrepan, muestra ambas cifras. "
     )
     return (
         f"[SYSTEM_EVENT: {hitl_prefix}Ciclo de auto-mejora {trigger}. Metas (/goals): {summary}.{priority_note} "

@@ -30,6 +30,7 @@ import {
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
 import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
+import type { ContextTokenBreakdown } from '@/lib/contextTokenBreakdown';
 
 export type ThinkingIdentity = { workerId: string; swarmSlot: number };
 
@@ -56,8 +57,10 @@ export type RunAdminChatTurnParams = {
   setMessages: Dispatch<SetStateAction<ChatMsg[]>>;
   setLastTurnUsage: Dispatch<SetStateAction<UsageTokenBreakdown | null>>;
   setContextEstimatedTokens: Dispatch<SetStateAction<number | null>>;
+  setContextTokenBreakdown: Dispatch<SetStateAction<ContextTokenBreakdown | null>>;
   setLoopSchedulePolling: Dispatch<SetStateAction<boolean>>;
   setSuggestions: Dispatch<SetStateAction<string[]>>;
+  setRecommendedSuggestionIndex?: Dispatch<SetStateAction<number>>;
   /** Ref compartida con el efecto de historial: evita refetch duplicado tras el turno. */
   suggestionsExchangeKeyRef?: MutableRefObject<string>;
   finalizeCancelledGeneration: () => void;
@@ -94,8 +97,10 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setMessages,
     setLastTurnUsage,
     setContextEstimatedTokens,
+    setContextTokenBreakdown,
     setLoopSchedulePolling,
     setSuggestions,
+    setRecommendedSuggestionIndex,
     suggestionsExchangeKeyRef,
     finalizeCancelledGeneration,
     clearLoopHistoryReload,
@@ -130,6 +135,7 @@ setThinkingIdentity({ workerId, swarmSlot: 1 });
 setThinking(true);
 setError(null);
 setSuggestions([]);
+setRecommendedSuggestionIndex?.(0);
 if (suggestionsExchangeKeyRef) suggestionsExchangeKeyRef.current = '';
 setMessages((m) => [
   ...m,
@@ -364,7 +370,12 @@ try {
         };
       },
       onDone: (meta) => {
-        applyLastTurnTokenDisplay(setLastTurnUsage, setContextEstimatedTokens, meta);
+        applyLastTurnTokenDisplay(
+          setLastTurnUsage,
+          setContextEstimatedTokens,
+          meta,
+          setContextTokenBreakdown
+        );
         if ((meta.response || '').trim()) {
           authoritativeResponse = meta.response.trim();
         }
@@ -530,6 +541,14 @@ try {
         const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
         // Siempre reemplazar: chips nuevas alineadas al turno, o vacío si el LLM falló.
         setSuggestions(next);
+        const rawIdx = Number(r.recommended_index ?? 0);
+        const idx =
+          next.length === 0
+            ? 0
+            : Number.isFinite(rawIdx)
+              ? Math.min(Math.max(0, Math.floor(rawIdx)), next.length - 1)
+              : 0;
+        setRecommendedSuggestionIndex?.(idx);
         if (suggestionsExchangeKeyRef) {
           suggestionsExchangeKeyRef.current = next.length > 0
             ? suggestionsExchangeKey(chatId, text, assistantForSuggestions)
@@ -538,6 +557,7 @@ try {
       })
       .catch(() => {
         setSuggestions([]);
+        setRecommendedSuggestionIndex?.(0);
         if (suggestionsExchangeKeyRef) suggestionsExchangeKeyRef.current = '';
       });
   }

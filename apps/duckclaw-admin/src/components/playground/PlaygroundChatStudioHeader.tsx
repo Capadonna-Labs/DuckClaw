@@ -4,12 +4,14 @@ import type { ReactNode } from 'react';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import { TokenConsumptionMenu } from '@/components/chat/TokenConsumptionMenu';
 import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
+import type { ContextTokenBreakdown } from '@/lib/contextTokenBreakdown';
 
 type PlaygroundChatStudioHeaderProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
   tokenUsage?: UsageTokenBreakdown | null;
   contextEstimatedTokens?: number | null;
+  contextTokenBreakdown?: ContextTokenBreakdown | null;
   /** Modelo LLM activo (para estimar ventana de contexto). */
   model?: string | null;
   fallbackTitle?: string;
@@ -25,6 +27,7 @@ export function PlaygroundChatStudioHeader({
   onRenameConversation,
   tokenUsage = null,
   contextEstimatedTokens = null,
+  contextTokenBreakdown = null,
   model = null,
   fallbackTitle = 'Nueva conversación',
   leading,
@@ -52,6 +55,7 @@ export function PlaygroundChatStudioHeader({
       <TokenConsumptionMenu
         tokenUsage={tokenUsage}
         contextEstimatedTokens={contextEstimatedTokens}
+        contextTokenBreakdown={contextTokenBreakdown}
         model={model}
       />
       {trailing ? <div className="flex shrink-0 items-center gap-1">{trailing}</div> : null}

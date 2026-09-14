@@ -45,7 +45,9 @@ POSITION_METRICS_RETRY_REASON = "missing_tool_evidence_for_tp_sl_distance"
 POSITION_METRICS_RETRY_DIRECTIVE = (
     "Cifras de distancia SL/TP o RR detectadas en prosa sin tool call en este turno. "
     "Invoca calculate_tp_sl_distance(price, sl, tp) y copia el JSON tal cual en el reporte. "
-    "Prohibido recalcular porcentajes en lenguaje natural."
+    "Prohibido recalcular porcentajes en lenguaje natural. "
+    "Etiqueta siempre la fuente del precio (IBKR mark vs OHLCV last close) y la sesión "
+    "(RTH / premarket / after-hours); no mezcles TradingView con marks IBKR sin decirlo."
 )
 
 POSITION_METRICS_USER_ERROR = (
@@ -620,6 +622,62 @@ def _merge_named_with_metrics(
     return out
 
 
+def _infer_price_source_label(tool_name: str, raw: str) -> str:
+    """Human label for where a mark/close came from in this turn."""
+    name = (tool_name or "").strip().lower()
+    blob = (raw or "").lower()
+    if name in {"get_ibkr_portfolio", "get_ibkr_positions", "ibkr_portfolio"}:
+        mode = "paper" if "paper" in blob else ("live" if "live" in blob else "IBKR")
+        return f"IBKR mark ({mode})"
+    if name == "fetch_market_data":
+        return "fetch_market_data"
+    if name in {"evaluate_homeostasis", "evaluate_tp_sl_monitor", "read_tp_sl_levels"}:
+        return "homeostasis/tp_sl tool"
+    if "portfolio_positions" in blob and "current_price" in blob:
+        return "vault portfolio_positions (IBKR sync)"
+    if "ohlcv" in blob and ("close" in blob or '"close"' in blob):
+        return "OHLCV last close"
+    if name == "read_sql":
+        return "read_sql (ver SQL del turno)"
+    return "precio del turno"
+
+
+def _price_source_hints_from_messages(messages: list[Any] | None) -> dict[float, str]:
+    """Map rounded price → source label from same-turn tool blobs."""
+    out: dict[float, str] = {}
+    wanted = {
+        "fetch_market_data",
+        "read_sql",
+        "evaluate_homeostasis",
+        "evaluate_tp_sl_monitor",
+        "get_ibkr_portfolio",
+        "get_ibkr_positions",
+    }
+    price_re = re.compile(
+        r'"(?:price|last|close|current_price|avgCost|market_price|mark_price)"\s*:\s*'
+        r"(-?\d+(?:\.\d+)?)",
+        re.IGNORECASE,
+    )
+    for m in messages or []:
+        name = _message_name(m)
+        if name not in wanted:
+            continue
+        raw = _message_content(m)
+        label = _infer_price_source_label(name, raw)
+        for pm in price_re.finditer(raw):
+            px = _finite(pm.group(1))
+            if px is None or px <= 0:
+                continue
+            # Prefer more specific IBKR/OHLCV labels over generic read_sql.
+            key = round(float(px), 4)
+            prev = out.get(key) or ""
+            if (not prev) or prev.startswith("read_sql") or prev.startswith("precio"):
+                out[key] = label
+            elif "IBKR mark" in label:
+                out[key] = label
+    return out
+
+
 def _price_ticker_hints_from_messages(messages: list[Any] | None) -> dict[float, str]:
     """Map last/close/price → ticker from market/portfolio tool blobs."""
     out: dict[float, str] = {}
@@ -628,6 +686,8 @@ def _price_ticker_hints_from_messages(messages: list[Any] | None) -> dict[float,
         "read_sql",
         "evaluate_homeostasis",
         "evaluate_tp_sl_monitor",
+        "get_ibkr_portfolio",
+        "get_ibkr_positions",
     }
     for m in messages or []:
         name = _message_name(m)
@@ -776,10 +836,11 @@ def build_canonical_tp_sl_section(levels: list[dict[str, Any]]) -> str:
     lines: list[str] = [
         "## Distancia TP/SL (determinística)",
         "",
-        "| Ticker | Side | Dist SL % | Dist TP % | RR |",
-        "| --- | --- | ---: | ---: | ---: |",
+        "| Ticker | Precio | Fuente precio | Side | Dist SL % | Dist TP % | RR |",
+        "| --- | ---: | --- | --- | ---: | ---: | ---: |",
     ]
     n_ok = 0
+    sources: list[str] = []
     ordered = sorted(
         levels,
         key=lambda r: (str(r.get("ticker") or "\uffff").upper(), str(r.get("id") or "")),
@@ -790,9 +851,17 @@ def build_canonical_tp_sl_section(levels: list[dict[str, Any]]) -> str:
             continue
         n_ok += 1
         ticker = (row.get("ticker") or "").strip().upper() or "?"
+        src = str(row.get("price_source") or "precio del turno").strip() or "precio del turno"
+        sources.append(src)
+        try:
+            px_s = f"{float(row['price']):.2f}"
+        except (TypeError, ValueError):
+            px_s = str(row.get("price") or "?")
         lines.append(
-            "| {ticker} | {side} | {sl} | {tp} | {rr} |".format(
+            "| {ticker} | {price} | {src} | {side} | {sl} | {tp} | {rr} |".format(
                 ticker=ticker,
+                price=px_s,
+                src=src.replace("|", "/"),
                 side=metrics.get("side") or "?",
                 sl=metrics.get("dist_sl_pct"),
                 tp=metrics.get("dist_tp_pct"),
@@ -801,10 +870,17 @@ def build_canonical_tp_sl_section(levels: list[dict[str, Any]]) -> str:
         )
     if n_ok == 0:
         return ""
+    uniq: list[str] = []
+    for s in sources:
+        if s not in uniq:
+            uniq.append(s)
+    src_note = ", ".join(uniq) if uniq else "precio del turno"
     lines.append("")
     lines.append(
-        "_Fuente: calculate_tp_sl_distance sobre niveles ACTIVE del turno "
-        "(no recalcular signos en prosa)._"
+        f"_Distancias: `calculate_tp_sl_distance` sobre niveles ACTIVE del turno "
+        f"(no recalcular signos en prosa). Precio(s): {src_note}. "
+        "No igualar a TradingView u otra UI sin contrastar; en premarket/after-hours "
+        "el mark IBKR puede diferir del último cierre._"
     )
     return "\n".join(lines)
 
@@ -820,12 +896,23 @@ def apply_deterministic_tp_sl_rewrite(
     present in evaluate_homeostasis / tp_sl_monitor (or prior tool JSON).
     """
     levels = extract_tp_sl_level_inputs(messages)
+    src_hints = _price_source_hints_from_messages(messages)
+    for row in levels:
+        if row.get("price_source"):
+            continue
+        px = row.get("price")
+        if px is None:
+            row["price_source"] = "precio del turno"
+            continue
+        hit = src_hints.get(round(float(px), 4))
+        row["price_source"] = hit or "precio del turno"
     meta: dict[str, Any] = {
         "levels_found": len(levels),
         "tickers": [r.get("ticker") or "?" for r in levels],
         "claims_before": reply_claims_tp_sl_pct(reply or ""),
         "rewrote": False,
         "section_rows": 0,
+        "price_sources": [r.get("price_source") for r in levels],
     }
     if not levels:
         return reply, meta

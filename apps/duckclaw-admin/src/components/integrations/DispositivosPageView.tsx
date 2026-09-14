@@ -136,7 +136,6 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
       let adbErr = '';
       let host = '';
       let paired = false;
-      let envUpdated: string[] | undefined;
       let hint = '';
       if (out.stdout) {
         try {
@@ -146,12 +145,10 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             stderr?: string;
             hint?: string;
             paired?: boolean;
-            env_updated?: string[];
           };
           host = (parsed.host || '').trim();
           adbOut = (parsed.stdout || '').trim();
           adbErr = (parsed.stderr || '').trim();
-          envUpdated = parsed.env_updated;
           hint = parsed.hint || '';
           paired = Boolean(parsed.paired);
           if (paired && pairCodeRef.current) pairCodeRef.current.value = '';
@@ -160,31 +157,23 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
         }
       }
       if (!adbErr) adbErr = (out.stderr || '').trim();
-      const savedKeys = envUpdated?.length
-        ? ` · .env: ${envUpdated.join(', ')}`
-        : envUpdated
-          ? ''
-          : '';
-      const envNote = envUpdated?.length ? ` · .env: ${envUpdated.join(', ')}` : '';
 
       if (!out.ok) {
         await loadAndroid();
         const failDetail = adbErr || adbOut || host || 'adb connect falló';
         const prefix = paired ? 'Emparejado, pero ' : '';
         setConnectOk(false);
-        throw new Error(
-          [prefix + failDetail, hint, envNote ? `(${envNote.replace(/^ · /, '')})` : '']
-            .filter(Boolean)
-            .join(' '),
-        );
+        throw new Error([prefix + failDetail, hint].filter(Boolean).join(' '));
       }
 
-      const target = host || adbOut.replace(/^(already )?connected to\s*/i, '').trim() || `puerto ${port}`;
-      const msg = paired
-        ? `ADB conectado a ${target} (emparejado)${envNote}`
-        : `ADB conectado a ${target}${envNote}`;
+      // Prefer host from ops JSON; strip raw adb English ("connected to …").
+      // Do not append env_updated keys — that looked like a fault next to Conectado.
+      const target =
+        host ||
+        adbOut.replace(/^(already )?connected to\s*/i, '').trim() ||
+        `puerto ${port}`;
       setConnectOk(true);
-      setConnectMessage(msg);
+      setConnectMessage(`Conectado a ${target}`);
       await loadAndroid();
     } catch (e) {
       setConnectOk(false);
@@ -230,7 +219,11 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             subtitle={android?.mcp_url || 'ADB + MCP local'}
             tone={androidTone(android)}
             statusLabel={androidLoading ? 'Comprobando…' : androidStatusLabel(android)}
-            onRefresh={() => void loadAndroid()}
+            onRefresh={() => {
+              setConnectMessage(null);
+              setConnectOk(null);
+              void loadAndroid();
+            }}
             refreshing={androidLoading}
             actions={
               <div className="space-y-3">

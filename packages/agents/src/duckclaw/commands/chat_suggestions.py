@@ -23,16 +23,10 @@ _SYSTEM_PROMPT = (
     "mencionados en la respuesta más reciente del asistente (no a turnos anteriores). "
     "Usa el mismo idioma de la respuesta del asistente (si el «usuario» es un "
     "[SYSTEM_EVENT] / ciclo /loop, ignora ese texto para el idioma y alinea al reporte). "
-<<<<<<< HEAD
-    "Responde ÚNICAMENTE con un array JSON de "
-    f"{_MAX_SUGGESTIONS} strings, sin explicación ni markdown, por ejemplo: "
-    '["...", "...", "..."]'
-=======
     "Elige además la MEJOR sugerencia para continuar ahora (la más concreta y útil). "
     "Responde ÚNICAMENTE con un objeto JSON (sin markdown) con esta forma exacta: "
     '{"suggestions":["...","...","..."],"recommended_index":0} '
     f"donde recommended_index es un entero 0..{_MAX_SUGGESTIONS - 1}."
->>>>>>> origin/cursor/suggestion-auto-mode-ff2c
 )
 
 

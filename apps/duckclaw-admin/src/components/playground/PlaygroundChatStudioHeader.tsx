@@ -2,17 +2,16 @@
 
 import type { ReactNode } from 'react';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
-import {
-  formatTokenCount,
-  formatUsageTokensLogLine,
-  type UsageTokenBreakdown,
-} from '@/lib/formatTokenCount';
+import { TokenConsumptionMenu } from '@/components/chat/TokenConsumptionMenu';
+import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
 
 type PlaygroundChatStudioHeaderProps = {
   conversationTitle?: string | null;
   onRenameConversation?: (title: string) => Promise<void>;
   tokenUsage?: UsageTokenBreakdown | null;
   contextEstimatedTokens?: number | null;
+  /** Modelo LLM activo (para estimar ventana de contexto). */
+  model?: string | null;
   fallbackTitle?: string;
   /** Botón volver u otras acciones a la izquierda (misma fila, centradas). */
   leading?: ReactNode;
@@ -20,27 +19,23 @@ type PlaygroundChatStudioHeaderProps = {
   trailing?: ReactNode;
 };
 
-/** Cabecera estilo AI Studio: título editable + tokens del último turno (misma línea que gateway logs). */
+/** Cabecera estilo AI Studio: título editable + botón de consumo (estilo Claude). */
 export function PlaygroundChatStudioHeader({
   conversationTitle,
   onRenameConversation,
   tokenUsage = null,
   contextEstimatedTokens = null,
+  model = null,
   fallbackTitle = 'Nueva conversación',
   leading,
   trailing,
 }: PlaygroundChatStudioHeaderProps) {
   const displayTitle = (conversationTitle || '').trim() || fallbackTitle;
-  const tokenLabel = tokenUsage
-    ? formatUsageTokensLogLine(tokenUsage)
-    : contextEstimatedTokens != null && contextEstimatedTokens > 0
-      ? `${formatTokenCount(contextEstimatedTokens)} (est.)`
-      : null;
 
   return (
     <header className="studio-glass-chrome flex min-h-14 shrink-0 items-center gap-2 border-b px-2.5 py-2 sm:gap-3 sm:px-4 sm:py-2.5">
       {leading ? <div className="flex shrink-0 items-center gap-1">{leading}</div> : null}
-      <div className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+      <div className="flex min-w-0 flex-1 flex-col justify-center">
         {onRenameConversation ? (
           <EditableConversationTitle
             value={displayTitle}
@@ -53,19 +48,12 @@ export function PlaygroundChatStudioHeader({
             {displayTitle}
           </h2>
         )}
-        {tokenLabel ? (
-          <span
-            className="max-w-full truncate text-[10px] leading-none tabular-nums text-gov-gray-500 dark:text-dark-muted"
-            title={
-              tokenUsage
-                ? 'Tokens del último turno (igual que gateway logs: Total [P:prompt, C:completion])'
-                : 'Tokens estimados del contexto tras compactar el hilo'
-            }
-          >
-            {tokenLabel}
-          </span>
-        ) : null}
       </div>
+      <TokenConsumptionMenu
+        tokenUsage={tokenUsage}
+        contextEstimatedTokens={contextEstimatedTokens}
+        model={model}
+      />
       {trailing ? <div className="flex shrink-0 items-center gap-1">{trailing}</div> : null}
     </header>
   );

@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 
 from duckclaw.commands.chat_suggestions import (
-    _DO_NOT_PROCEED_CHIP,
-    _PROCEED_CHIP,
     _SYSTEM_PROMPT,
-    _normalize_proceed_triplet,
     _parse_suggestions_payload,
     generate_followup_suggestions,
 )
@@ -30,57 +26,38 @@ def _patch_triplet(monkeypatch) -> None:
     )
 
 
-def test_system_prompt_documents_proceed_pair_and_prudent_proceed() -> None:
-    assert _PROCEED_CHIP in _SYSTEM_PROMPT
-    assert _DO_NOT_PROCEED_CHIP in _SYSTEM_PROMPT
+def test_system_prompt_allows_optional_prudent_proceed() -> None:
+    assert "Procede" in _SYSTEM_PROMPT
     assert "pruden" in _SYSTEM_PROMPT.lower()
-    assert "recommended_index" in _SYSTEM_PROMPT
+    assert "siguiente paso operativo" in _SYSTEM_PROMPT or "siguiente paso" in _SYSTEM_PROMPT
 
 
-def test_normalize_defaults_recommended_to_no_proceed() -> None:
-    out = _normalize_proceed_triplet("¿Qué TP/SL conviene?", recommended_raw=99)
-    assert out == {
-        "suggestions": [_PROCEED_CHIP, _DO_NOT_PROCEED_CHIP, "¿Qué TP/SL conviene?"],
-        "recommended_index": 1,
-    }
-
-
-def test_normalize_allows_proceed_when_index_zero() -> None:
-    out = _normalize_proceed_triplet("Detalle el plan", recommended_raw=0)
-    assert out["suggestions"][0] == _PROCEED_CHIP
-    assert out["recommended_index"] == 0
-
-
-def test_parse_payload_third_suggestion_object() -> None:
+def test_parse_payload_object_with_recommended_index() -> None:
     out = _parse_suggestions_payload(
-        '{"third_suggestion":"¿Qué riesgo queda?","recommended_index":1}'
+        '{"suggestions":["a","b","c"],"recommended_index":2}'
     )
-    assert out["suggestions"] == [_PROCEED_CHIP, _DO_NOT_PROCEED_CHIP, "¿Qué riesgo queda?"]
-    assert out["recommended_index"] == 1
+    assert out == {"suggestions": ["a", "b", "c"], "recommended_index": 2}
 
 
-def test_parse_payload_object_with_recommended_proceed() -> None:
+def test_parse_payload_allows_proceed_as_free_chip() -> None:
     out = _parse_suggestions_payload(
-        '{"suggestions":["Procede","No procede","¿Listo para corregir?"],'
+        '{"suggestions":["Procede","¿Qué riesgo queda?","¿Falta TP/SL?"],'
         '"recommended_index":0}'
     )
-    assert out["suggestions"][0] == _PROCEED_CHIP
-    assert out["suggestions"][1] == _DO_NOT_PROCEED_CHIP
-    assert out["suggestions"][2] == "¿Listo para corregir?"
+    assert out["suggestions"][0] == "Procede"
     assert out["recommended_index"] == 0
 
 
-def test_parse_payload_legacy_array_forces_proceed_pair() -> None:
+def test_parse_payload_legacy_array_defaults_index_zero() -> None:
     out = _parse_suggestions_payload('["a", "b", "c"]')
-    assert out["suggestions"] == [_PROCEED_CHIP, _DO_NOT_PROCEED_CHIP, "c"]
-    assert out["recommended_index"] == 1
+    assert out == {"suggestions": ["a", "b", "c"], "recommended_index": 0}
 
 
-def test_parse_payload_clamps_bad_index_to_no_proceed() -> None:
+def test_parse_payload_clamps_bad_index() -> None:
     out = _parse_suggestions_payload(
-        '{"third_suggestion":"x","recommended_index":99}'
+        '{"suggestions":["a","b"],"recommended_index":99}'
     )
-    assert out["recommended_index"] == 1
+    assert out["recommended_index"] == 0
 
 
 def test_generate_followup_suggestions_parses_json_object(monkeypatch) -> None:
@@ -88,7 +65,8 @@ def test_generate_followup_suggestions_parses_json_object(monkeypatch) -> None:
     monkeypatch.setattr(
         "duckclaw.integrations.llm_providers.build_llm",
         lambda *a, **k: _FakeLLM(
-            '{"third_suggestion":"¿Qué TP/SL conviene?","recommended_index":1}'
+            '{"suggestions":["¿Puedes profundizar?", "Resume en 3 puntos", "¿Qué sigue?"],'
+            '"recommended_index":1}'
         ),
     )
     out = generate_followup_suggestions(
@@ -98,9 +76,9 @@ def test_generate_followup_suggestions_parses_json_object(monkeypatch) -> None:
         last_assistant_text="Respuesta del asistente",
     )
     assert out["suggestions"] == [
-        _PROCEED_CHIP,
-        _DO_NOT_PROCEED_CHIP,
-        "¿Qué TP/SL conviene?",
+        "¿Puedes profundizar?",
+        "Resume en 3 puntos",
+        "¿Qué sigue?",
     ]
     assert out["recommended_index"] == 1
 
@@ -109,30 +87,25 @@ def test_generate_followup_suggestions_strips_markdown_fence(monkeypatch) -> Non
     _patch_triplet(monkeypatch)
     monkeypatch.setattr(
         "duckclaw.integrations.llm_providers.build_llm",
-        lambda *a, **k: _FakeLLM(
-            '```json\n{"third_suggestion":"c","recommended_index":0}\n```'
-        ),
+        lambda *a, **k: _FakeLLM('```json\n["a", "b", "c"]\n```'),
     )
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
-    assert out["suggestions"] == [_PROCEED_CHIP, _DO_NOT_PROCEED_CHIP, "c"]
+    assert out["suggestions"] == ["a", "b", "c"]
     assert out["recommended_index"] == 0
 
 
-def test_generate_followup_suggestions_caps_third_length(monkeypatch) -> None:
+def test_generate_followup_suggestions_caps_to_three(monkeypatch) -> None:
     _patch_triplet(monkeypatch)
-    long_third = "x" * 200
     monkeypatch.setattr(
         "duckclaw.integrations.llm_providers.build_llm",
-        lambda *a, **k: _FakeLLM(
-            json.dumps({"third_suggestion": long_third, "recommended_index": 1})
-        ),
+        lambda *a, **k: _FakeLLM('["a", "b", "c", "d", "e"]'),
     )
     out = generate_followup_suggestions(
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
-    assert len(out["suggestions"][2]) <= 80
+    assert out["suggestions"] == ["a", "b", "c"]
 
 
 def test_generate_followup_suggestions_malformed_json_returns_empty(monkeypatch) -> None:

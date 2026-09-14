@@ -23,7 +23,28 @@ _SYSTEM_PROMPT = (
     "mencionados en la respuesta más reciente del asistente (no a turnos anteriores). "
     "Usa el mismo idioma de la respuesta del asistente (si el «usuario» es un "
     "[SYSTEM_EVENT] / ciclo /loop, ignora ese texto para el idioma y alinea al reporte). "
-    "Elige además la MEJOR sugerencia para continuar ahora (la más concreta y útil). "
+    "\n"
+    "PRIORIDAD 1 — si el asistente hace una pregunta directa al usuario "
+    "(¿Quieres…?, ¿Debo…?, ¿Lo documento…?, ¿Confirmas…?, ¿Procedo…?, etc.): "
+    "las sugerencias deben CONTINUAR la conversación respondiendo a ESA pregunta, "
+    "como réplicas naturales del usuario. Típico: 2 chips de respuesta "
+    "(sí/aceptar con matices vs no/aplazar/rechazar) + 1 chip de matiz o "
+    "aclaración sobre el mismo pedido. "
+    "Ej.: asistente pregunta «¿documentarlo como issue en Capadonna-Driller?» → "
+    "chips válidos: «Sí, documentalo como issue», «No por ahora», "
+    "«Sí y priorízalo». "
+    "PROHIBIDO en este caso inventar preguntas técnicas ajenas a lo que el "
+    "asistente acaba de preguntar (p. ej. no pivotes a «¿por qué el 3-Ago?» "
+    "si te pidió sí/no sobre documentar un issue). "
+    "recommended_index debe apuntar a la respuesta más natural/afirmativa "
+    "prudente (suele ser el «sí» acotado). "
+    "\n"
+    "PRIORIDAD 2 — si el asistente NO pregunta nada (solo informa/reporta): "
+    "elige la continuación más concreta y útil (riesgo, aclaración o siguiente "
+    "paso pertinente al reporte). "
+    "\n"
+    "Elige la MEJOR sugerencia (recommended_index): si hubo pregunta del "
+    "asistente, la mejor respuesta conversacional; si no, la más concreta/útil. "
     "Responde ÚNICAMENTE con un objeto JSON (sin markdown) con esta forma exacta: "
     '{"suggestions":["...","...","..."],"recommended_index":0} '
     f"donde recommended_index es un entero 0..{_MAX_SUGGESTIONS - 1}."
@@ -109,7 +130,11 @@ def generate_followup_suggestions(
             return empty
         human_content = (
             f"Último mensaje del usuario: {(last_user_text or '').strip()}\n\n"
-            f"Respuesta más reciente del asistente (alinea las sugerencias a ESTO):\n{assistant_text}"
+            "Respuesta más reciente del asistente (alinea las sugerencias a ESTO).\n"
+            "Si el asistente termina con una pregunta al usuario, PRIORIZA chips "
+            "que respondan esa pregunta como en una conversación "
+            "(sí/no/matiz), no preguntas nuevas no pedidas:\n"
+            f"{assistant_text}"
         )
         reply = llm.invoke(
             [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_content)]

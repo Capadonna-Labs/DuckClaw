@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from duckclaw.commands.chat_suggestions import (
+    _SYSTEM_PROMPT,
     _parse_suggestions_payload,
     generate_followup_suggestions,
 )
@@ -25,6 +26,15 @@ def _patch_triplet(monkeypatch) -> None:
     )
 
 
+def test_system_prompt_prioritizes_answering_assistant_questions() -> None:
+    low = _SYSTEM_PROMPT.lower()
+    assert "prioridad 1" in low
+    assert "pregunta directa" in low
+    assert "respondiendo a esa pregunta" in low
+    assert "documentarlo como issue" in low or "documentalo como issue" in low
+    assert "prohibido" in low
+
+
 def test_parse_payload_object_with_recommended_index() -> None:
     out = _parse_suggestions_payload(
         '{"suggestions":["a","b","c"],"recommended_index":2}'
@@ -42,6 +52,43 @@ def test_parse_payload_clamps_bad_index() -> None:
         '{"suggestions":["a","b"],"recommended_index":99}'
     )
     assert out["recommended_index"] == 0
+
+
+def test_generate_followup_suggestions_human_prompt_flags_assistant_question(
+    monkeypatch,
+) -> None:
+    """When the worker asks something, the human prompt must steer chips to reply."""
+    _patch_triplet(monkeypatch)
+    captured: list[Any] = []
+
+    class _CaptureLLM:
+        def invoke(self, messages):  # noqa: ANN001
+            captured.extend(messages)
+            return SimpleNamespace(
+                content='{"suggestions":["Sí, documentalo","No por ahora","Sí y priorízalo"],'
+                '"recommended_index":0}'
+            )
+
+    monkeypatch.setattr(
+        "duckclaw.integrations.llm_providers.build_llm",
+        lambda *a, **k: _CaptureLLM(),
+    )
+    out = generate_followup_suggestions(
+        object(),
+        "chat-1",
+        last_user_text="¿Sigue el bug?",
+        last_assistant_text=(
+            "El bug sigue activo.\n"
+            "¿Quieres que documente esto como issue en el repo de Capadonna-Driller?"
+        ),
+    )
+    assert out["suggestions"][0].startswith("Sí")
+    assert len(captured) == 2
+    human = str(getattr(captured[1], "content", ""))
+    assert "PRIORIZA chips" in human
+    assert "respondan esa pregunta" in human
+    system = str(getattr(captured[0], "content", ""))
+    assert "PRIORIDAD 1" in system
 
 
 def test_generate_followup_suggestions_parses_json_object(monkeypatch) -> None:

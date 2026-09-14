@@ -52,7 +52,9 @@ def register_position_metrics_skill(
                 "[Position metrics] Distancia % a SL y TP (magnitudes positivas) + rr_ratio + side. "
                 "Cuándo: reportes /loop P4 o cualquier cita de distancia a stop/take-profit. "
                 "NO calcules % en prosa: invoca esta tool y copia dist_sl_pct/dist_tp_pct/rr_ratio "
-                "tal cual del JSON. Args: price, sl, tp (números)."
+                "tal cual del JSON. Args: price, sl, tp (números). "
+                "Al citar el precio de entrada, etiqueta fuente (IBKR mark vs last close) "
+                "y sesión; no mezcles TradingView con marks sin contrastar."
             ),
         )
     )

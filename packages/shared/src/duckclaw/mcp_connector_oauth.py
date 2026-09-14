@@ -18,8 +18,14 @@ def persist_mcp_connector_oauth_tokens(
     connector_id: str,
     bearer_token: str,
     refresh_token: str = "",
+    oauth_client_id: str = "",
+    oauth_redirect_uri: str = "",
 ) -> str:
-    """Persist OAuth tokens synchronously; ponytail: async queue alone loses tokens on DuckDB lock."""
+    """Persist OAuth tokens synchronously; ponytail: async queue alone loses tokens on DuckDB lock.
+
+    When ``oauth_client_id`` is set (Notion/DCR), also store the client that issued the
+    tokens so refresh does not reuse a stale DCR client from a previous redirect_uri.
+    """
     from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
     from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
@@ -30,6 +36,8 @@ def persist_mcp_connector_oauth_tokens(
         "connector_id": connector_id,
         "bearer_token": bearer_token,
         "refresh_token": refresh_token,
+        "oauth_client_id": oauth_client_id,
+        "oauth_redirect_uri": oauth_redirect_uri,
     }
     path = (get_gateway_db_path() or "").strip()
     if not path:

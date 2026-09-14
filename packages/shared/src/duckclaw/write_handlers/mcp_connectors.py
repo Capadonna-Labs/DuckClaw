@@ -231,6 +231,56 @@ def _apply_set_mcp_connector_auth(conn: Any, payload: dict) -> None:
             },
         )
 
+    # ponytail: DCR client_id that minted these tokens must travel with them.
+    # OAuth start may register a new client when redirect_uri changes, but used to
+    # leave the old notion.client_id in DB → refresh "Client ID mismatch".
+    oauth_client_id = str(payload.get("oauth_client_id") or "").strip()
+    if oauth_client_id:
+        oauth_redirect = str(payload.get("oauth_redirect_uri") or "").strip()
+        client_meta = {"redirect_uri": oauth_redirect} if oauth_redirect else None
+        _apply_upsert_runtime_setting(
+            conn,
+            {
+                "tenant_id": tenant_id,
+                "actor_email": actor,
+                "domain": "mcp_connector",
+                "key": f"{connector_id}.oauth_client_id",
+                "value": oauth_client_id,
+                "secret": False,
+                "value_json": client_meta,
+                "updated_by": actor,
+            },
+        )
+        preset_row = _exec_fetchone(
+            conn,
+            "SELECT preset_id FROM main.admin_mcp_connectors "
+            "WHERE connector_id = ? AND tenant_id = ? AND active = true LIMIT 1",
+            [connector_id, tenant_id],
+        )
+        preset_id = ""
+        if preset_row:
+            preset_id = str(
+                preset_row[0]
+                if not isinstance(preset_row, dict)
+                else preset_row.get("preset_id") or ""
+            ).strip().lower()
+        if preset_id == "notion":
+            from duckclaw.mcp_higgsfield_oauth import OAUTH_CLIENT_DOMAIN
+
+            _apply_upsert_runtime_setting(
+                conn,
+                {
+                    "tenant_id": tenant_id,
+                    "actor_email": actor,
+                    "domain": OAUTH_CLIENT_DOMAIN,
+                    "key": "notion.client_id",
+                    "value": oauth_client_id,
+                    "secret": False,
+                    "value_json": client_meta,
+                    "updated_by": actor,
+                },
+            )
+
 
 def _apply_grant_worker_mcp_connector(conn: Any, payload: dict) -> None:
     connector_id = str(payload.get("connector_id") or "").strip()

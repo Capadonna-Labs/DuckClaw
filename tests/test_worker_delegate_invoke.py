@@ -267,7 +267,8 @@ def test_invoke_delegated_worker_success_with_report_id(mock_build_graph: MagicM
     assert "Dashboard" in result.reply
 
 
-def test_build_worker_tools_omits_write_output_when_allowed_delegates() -> None:
+def test_build_worker_tools_keeps_write_output_with_allowed_delegates() -> None:
+    """Delegating managers still write vault notes; only HTML publishers skip it."""
     from duckclaw.workers.factory_tool_builder import _build_worker_tools
 
     spec = WorkerSpec(
@@ -287,6 +288,27 @@ def test_build_worker_tools_omits_write_output_when_allowed_delegates() -> None:
     tools = _build_worker_tools(MagicMock(), spec)  # type: ignore[arg-type]
     names = {t.name for t in tools}
     assert "invoke_worker" in names
+    assert "write_output_document" in names
+
+
+def test_build_worker_tools_omits_write_output_for_html_publisher() -> None:
+    from duckclaw.workers.factory_tool_builder import _build_worker_tools
+
+    spec = WorkerSpec(
+        worker_id="quant_reporter",
+        logical_worker_id="quant_reporter",
+        name="qr",
+        schema_name="finance_worker",
+        llm_required=None,
+        temperature=0.1,
+        topology="general",
+        skills_list=["read_sql", "publish_custom_report"],
+        allowed_tables=[],
+        read_only=True,
+        worker_dir=Path("/tmp"),
+    )
+    tools = _build_worker_tools(MagicMock(), spec)  # type: ignore[arg-type]
+    names = {t.name for t in tools}
     assert "write_output_document" not in names
 
 

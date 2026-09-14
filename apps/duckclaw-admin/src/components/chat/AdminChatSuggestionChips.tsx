@@ -35,7 +35,7 @@ function writeStoredAuto(enabled: boolean): void {
   }
 }
 
-/** Dropdown fijo "Sugerencias" encima del composer; Auto on/off junto a los chips. */
+/** Dropdown fijo "Sugerencias" encima del composer; Auto on/off en el header. */
 export function AdminChatSuggestionChips({
   suggestions,
   onPick,
@@ -103,39 +103,50 @@ export function AdminChatSuggestionChips({
     writeStoredAuto(next);
   };
 
-  const cancelCountdown = () => {
-    cancelledRef.current = true;
-    setCountdown(null);
-  };
-
   return (
     <div className="overflow-hidden rounded-xl border border-gov-gray-200 bg-white/90 shadow-sm dark:border-dark-border dark:bg-dark-surface/90">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
-        aria-expanded={open}
-        aria-controls={panelId}
-      >
-        <span className="text-xs font-bold uppercase tracking-wider text-gov-gray-600 dark:text-dark-muted">
-          Sugerencias
-          <span className="ml-1.5 font-semibold normal-case text-gov-blue-700 dark:text-dark-cyan">
-            ({suggestions.length})
-          </span>
-          {autoEnabled && countdown != null ? (
-            <span className="ml-2 font-semibold normal-case text-gov-blue-600 dark:text-dark-cyan">
-              Auto {countdown}s
+      <div className="flex w-full items-center gap-2 px-3 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+          aria-expanded={open}
+          aria-controls={panelId}
+        >
+          <span className="min-w-0 text-xs font-bold uppercase tracking-wider text-gov-gray-600 dark:text-dark-muted">
+            Sugerencias
+            <span className="ml-1.5 font-semibold normal-case text-gov-blue-700 dark:text-dark-cyan">
+              ({suggestions.length})
             </span>
-          ) : null}
-        </span>
-        <ChevronDown
-          size={16}
-          className={`shrink-0 text-gov-gray-500 transition-transform dark:text-dark-muted ${
-            open ? 'rotate-0' : '-rotate-90'
+          </span>
+          <ChevronDown
+            size={16}
+            className={`ml-auto shrink-0 text-gov-gray-500 transition-transform dark:text-dark-muted ${
+              open ? 'rotate-0' : '-rotate-90'
+            }`}
+            aria-hidden
+          />
+        </button>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={autoEnabled}
+          aria-label="Modo auto de sugerencias"
+          onClick={() => setAuto(!autoEnabled)}
+          className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition-colors ${
+            autoEnabled
+              ? 'border-gov-blue-500 bg-gov-blue-600 text-white dark:border-dark-cyan dark:bg-dark-cyan dark:text-dark-bg'
+              : 'border-gov-gray-200 bg-gov-gray-50 text-gov-gray-600 dark:border-dark-border dark:bg-dark-bg dark:text-dark-muted'
           }`}
-          aria-hidden
-        />
-      </button>
+        >
+          Auto {autoEnabled ? 'on' : 'off'}
+        </button>
+        {autoEnabled && countdown != null ? (
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-gov-blue-600 dark:text-dark-cyan">
+            {countdown}s
+          </span>
+        ) : null}
+      </div>
       {open ? (
         <div
           id={panelId}
@@ -150,7 +161,8 @@ export function AdminChatSuggestionChips({
                 type="button"
                 role="listitem"
                 onClick={() => {
-                  cancelCountdown();
+                  cancelledRef.current = true;
+                  setCountdown(null);
                   onPick(s);
                 }}
                 className={`rounded-full border px-3 py-1.5 text-left text-xs transition-colors ${
@@ -168,29 +180,6 @@ export function AdminChatSuggestionChips({
               </button>
             );
           })}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={autoEnabled}
-            aria-label="Modo auto de sugerencias"
-            onClick={() => setAuto(!autoEnabled)}
-            className={`shrink-0 rounded-full border px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wide transition-colors ${
-              autoEnabled
-                ? 'border-gov-blue-500 bg-gov-blue-600 text-white dark:border-dark-cyan dark:bg-dark-cyan dark:text-dark-bg'
-                : 'border-gov-gray-200 bg-gov-gray-50 text-gov-gray-600 dark:border-dark-border dark:bg-dark-bg dark:text-dark-muted'
-            }`}
-          >
-            Auto {autoEnabled ? 'on' : 'off'}
-          </button>
-          {autoEnabled && countdown != null ? (
-            <button
-              type="button"
-              onClick={cancelCountdown}
-              className="rounded-full border border-gov-gray-200 px-2.5 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-gov-gray-500 hover:bg-gov-gray-50 dark:border-dark-border dark:text-dark-muted"
-            >
-              Cancelar
-            </button>
-          ) : null}
         </div>
       ) : null}
     </div>

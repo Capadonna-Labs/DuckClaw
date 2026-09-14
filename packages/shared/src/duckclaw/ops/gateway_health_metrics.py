@@ -1,4 +1,4 @@
-"""Lightweight metrics for Gateway /health (no blocking I/O beyond Redis LLEN)."""
+"""Lightweight metrics for Gateway /health."""
 
 from __future__ import annotations
 
@@ -33,6 +33,15 @@ def process_rss_mb() -> float | None:
     return _process_rss_mb()
 
 
+def _spawn_inline_writes_enabled() -> bool:
+    try:
+        from duckclaw.spawn_profile import spawn_inline_writes_enabled
+
+        return bool(spawn_inline_writes_enabled())
+    except Exception:
+        return False
+
+
 def _worker_graph_cache_stats() -> dict[str, Any]:
     try:
         from duckclaw.manager.manager_worker_cache import worker_graph_cache_stats
@@ -55,6 +64,9 @@ def _worker_capabilities_catalog_cache_stats() -> dict[str, Any]:
 
 def _knowledge_queue_depth() -> int | None:
     try:
+        if _spawn_inline_writes_enabled():
+            return None
+
         from duckclaw.knowledge_sync_queue import knowledge_sync_queue_depth
 
         return knowledge_sync_queue_depth()
@@ -63,6 +75,9 @@ def _knowledge_queue_depth() -> int | None:
 
 
 def _cached_pm2_stack_health() -> list[dict[str, Any]]:
+    if _spawn_inline_writes_enabled():
+        return []
+
     now = time.time()
     if now < float(_pm2_metrics_cache["expires_at"]):
         rows = _pm2_metrics_cache["rows"]
@@ -80,13 +95,24 @@ def _cached_pm2_stack_health() -> list[dict[str, Any]]:
 
 def _db_write_queue_depth() -> int | None:
     try:
+        if _spawn_inline_writes_enabled():
+            return None
+
         import redis
 
         from duckclaw.db_write_queue import DEFAULT_WRITE_QUEUE_NAME
         from duckclaw.runtime_env import resolve_redis_url
 
-        client = redis.from_url(resolve_redis_url(), decode_responses=True)
-        return int(client.llen(DEFAULT_WRITE_QUEUE_NAME))
+        client = redis.from_url(
+            resolve_redis_url(),
+            decode_responses=True,
+            socket_connect_timeout=0.25,
+            socket_timeout=0.25,
+        )
+        try:
+            return int(client.llen(DEFAULT_WRITE_QUEUE_NAME))
+        finally:
+            client.close()
     except Exception:
         return None
 

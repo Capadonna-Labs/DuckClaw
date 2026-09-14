@@ -292,8 +292,10 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         for skill in (getattr(spec, "skills_list", None) or [])
     ]
     _publish_html_worker = "publish_custom_report" in skills_list_norm
-    # Reporters publish via custom_reports iframe — not vault disk or sandbox codegen.
-    if not tuple(getattr(spec, "allowed_delegates", None) or ()) and not _publish_html_worker:
+    # Reporters that publish via custom_reports iframe skip vault disk writes.
+    # Managers with allowed_delegates still need write_output_document (notes/md
+    # analysis in the vault); only omit it for pure HTML-publish workers.
+    if not _publish_html_worker:
         register_write_output_document_tool(tools)
     register_render_docx_template_tool(tools)
     from duckclaw.forge.skills.export_docx_to_pdf_bridge import register_export_docx_to_pdf_tool

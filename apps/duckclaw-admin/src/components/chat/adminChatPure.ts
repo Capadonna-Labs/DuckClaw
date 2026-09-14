@@ -15,7 +15,11 @@ export function shouldFetchChatSuggestions(
 ): boolean {
   if (aborted) return false;
   // Slash fly acks (/loop on, /summarize, …) no piden chips.
+<<<<<<< HEAD
   // Los ciclos /loop (SYSTEM_EVENT / [Ciclo loop] como "user") sí: hay reporte outbound útil.
+=======
+  // Los ciclos /loop (SYSTEM_EVENT / [Ciclo loop] como "user") sí.
+>>>>>>> origin/cursor/suggestion-auto-mode-ff2c
   if (userText.trim().startsWith('/')) return false;
   return assistantResponse.trim().length > 0;
 }

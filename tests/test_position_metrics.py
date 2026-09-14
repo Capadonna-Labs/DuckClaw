@@ -205,9 +205,51 @@ def test_deterministic_rewrite_from_homeostasis_levels() -> None:
     assert "-5.0%" not in out
     assert "Distancia TP/SL (determinística)" in out
     assert "| CCJ |" in out
+    assert "| 100.00 |" in out
+    assert "Fuente precio" in out
     assert "| 5.0 |" in out
     assert "| 10.0 |" in out
     assert "| 2.0 |" in out
+    assert "homeostasis/tp_sl tool" in out or "precio del turno" in out
+
+
+def test_canonical_section_labels_ibkr_mark_source() -> None:
+    from duckclaw.position_metrics import apply_deterministic_tp_sl_rewrite
+
+    class _Levels:
+        name = "evaluate_homeostasis"
+        content = json.dumps(
+            {
+                "tp_sl_monitor": {
+                    "levels": [
+                        {
+                            "ticker": "CEG",
+                            "price": 277.0,
+                            "stop_loss": 270.0,
+                            "take_profit": 290.0,
+                            "status": "ACTIVE",
+                        }
+                    ]
+                }
+            }
+        )
+
+    class _Ibkr:
+        name = "get_ibkr_portfolio"
+        content = json.dumps(
+            {
+                "account_mode": "paper",
+                "positions": [
+                    {"symbol": "CEG", "market_price": 277.0, "quantity": 994.0},
+                ],
+            }
+        )
+
+    out, meta = apply_deterministic_tp_sl_rewrite("CEG Distancia a SL: 1%\n", [_Levels(), _Ibkr()])
+    assert meta["rewrote"] is True
+    assert "IBKR mark (paper)" in out
+    assert "TradingView" in out
+    assert "| 277.00 |" in out
 
 
 def test_guard_skips_retry_when_levels_present_without_tool() -> None:

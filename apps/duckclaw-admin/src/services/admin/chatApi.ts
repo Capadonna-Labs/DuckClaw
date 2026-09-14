@@ -199,7 +199,7 @@ export const chatApi = {
     last_user_message: string;
     last_assistant_message: string;
   }) =>
-    adminFetch<{ suggestions: string[] }>('/chat/suggestions', {
+    adminFetch<{ suggestions: string[]; recommended_index?: number }>('/chat/suggestions', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

@@ -21,10 +21,17 @@ describe('shouldFetchChatSuggestions', () => {
     expect(shouldFetchChatSuggestions('  /summarize', 'Resumen listo', false)).toBe(false);
   });
 
-  it('false para mensajes de sistema de loop', () => {
+  it('true para ciclos /loop (SYSTEM_EVENT / [Ciclo loop]), no para slash acks', () => {
     expect(
       shouldFetchChatSuggestions('[Ciclo loop] tick', 'Resumen del ciclo', false)
-    ).toBe(false);
+    ).toBe(true);
+    expect(
+      shouldFetchChatSuggestions(
+        '[SYSTEM_EVENT] loop tick',
+        'Reporte del ciclo',
+        false
+      )
+    ).toBe(true);
   });
 
   it('false si no hay respuesta del asistente', () => {

@@ -124,6 +124,7 @@ export function AdminChatPanel({
     send,
     sendSuggestion,
     suggestions,
+    recommendedSuggestionIndex,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,
@@ -592,6 +593,7 @@ export function AdminChatPanel({
             documentAttachments={documentAttachments}
             send={send}
             suggestions={suggestions}
+            recommendedSuggestionIndex={recommendedSuggestionIndex}
             onPickSuggestion={sendSuggestion}
             cancelGeneration={cancelGeneration}
             onTextareaPaste={onTextareaPaste}

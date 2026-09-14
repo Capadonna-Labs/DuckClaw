@@ -53,6 +53,8 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
   const pairCodeRef = useRef<HTMLInputElement>(null);
   const [connectBusy, setConnectBusy] = useState(false);
   const [connectMessage, setConnectMessage] = useState<string | null>(null);
+  /** Tone from the last connect attempt — do not infer success from "Emparejado" prefix. */
+  const [connectOk, setConnectOk] = useState<boolean | null>(null);
   const { data: health, error: healthError, recovering, refresh: refreshHealth } =
     useGatewayHealthStore();
 
@@ -101,6 +103,7 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
       parsePort(debugPortRef.current?.value ?? '') ??
       parsePort(android?.adb_debug_port ?? '');
     if (port == null) {
+      setConnectOk(false);
       setConnectMessage(
         'Falta puerto debug: en el teléfono cierra el diálogo de pair y copia el número después de los dos puntos (ej. 42961).',
       );
@@ -110,15 +113,18 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
     const pairCodeRaw = (pairCodeRef.current?.value ?? '').trim();
     const pairPort = pairPortRaw.trim() ? parsePort(pairPortRaw) : null;
     if (pairPortRaw.trim() && pairPort == null) {
+      setConnectOk(false);
       setConnectMessage('Puerto pair inválido (1–65535)');
       return;
     }
     if ((pairPort != null && !pairCodeRaw) || (pairCodeRaw && pairPort == null)) {
+      setConnectOk(false);
       setConnectMessage('Emparejamiento requiere puerto pair y código de 6 dígitos');
       return;
     }
     setConnectBusy(true);
     setConnectMessage(null);
+    setConnectOk(null);
     try {
       sessionStorage.setItem(ADB_DEBUG_PORT_KEY, String(port));
       if (pairPort != null) sessionStorage.setItem(ADB_PAIR_PORT_KEY, String(pairPort));
@@ -126,7 +132,10 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
       if (pairPort != null) params.pair_port = pairPort;
       if (pairCodeRaw) params.pair_code = pairCodeRaw;
       const out = await adminService.runOps('android_adb_connect', params);
-      let detail = out.stderr?.trim() || '';
+      let adbOut = '';
+      let adbErr = '';
+      let host = '';
+      let paired = false;
       let envUpdated: string[] | undefined;
       let hint = '';
       if (out.stdout) {
@@ -139,31 +148,46 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             paired?: boolean;
             env_updated?: string[];
           };
-          detail = parsed.stdout || parsed.stderr || parsed.host || detail;
+          host = (parsed.host || '').trim();
+          adbOut = (parsed.stdout || '').trim();
+          adbErr = (parsed.stderr || '').trim();
           envUpdated = parsed.env_updated;
           hint = parsed.hint || '';
-          if (parsed.paired) {
-            detail = `Emparejado. ${detail}`.trim();
-            if (pairCodeRef.current) pairCodeRef.current.value = '';
-          }
+          paired = Boolean(parsed.paired);
+          if (paired && pairCodeRef.current) pairCodeRef.current.value = '';
         } catch {
-          detail = out.stdout.trim() || detail;
+          adbOut = out.stdout.trim();
         }
       }
+      if (!adbErr) adbErr = (out.stderr || '').trim();
+      const savedKeys = envUpdated?.length
+        ? ` · .env: ${envUpdated.join(', ')}`
+        : envUpdated
+          ? ''
+          : '';
+      const envNote = envUpdated?.length ? ` · .env: ${envUpdated.join(', ')}` : '';
+
       if (!out.ok) {
         await loadAndroid();
+        const failDetail = adbErr || adbOut || host || 'adb connect falló';
+        const prefix = paired ? 'Emparejado, pero ' : '';
+        setConnectOk(false);
         throw new Error(
-          [detail || 'adb connect falló', hint, envUpdated?.length ? `(env: ${envUpdated.join(', ')})` : '']
+          [prefix + failDetail, hint, envNote ? `(${envNote.replace(/^ · /, '')})` : '']
             .filter(Boolean)
             .join(' '),
         );
       }
-      const savedKeys = envUpdated?.length
-        ? ` · .env: ${envUpdated.join(', ')}`
-        : ' · .env actualizado';
-      setConnectMessage(detail ? `${detail}${savedKeys}` : `ADB conectado${savedKeys}`);
+
+      const target = host || adbOut.replace(/^(already )?connected to\s*/i, '').trim() || `puerto ${port}`;
+      const msg = paired
+        ? `ADB conectado a ${target} (emparejado)${envNote}`
+        : `ADB conectado a ${target}${envNote}`;
+      setConnectOk(true);
+      setConnectMessage(msg);
       await loadAndroid();
     } catch (e) {
+      setConnectOk(false);
       setConnectMessage(e instanceof Error ? e.message : 'No se pudo conectar ADB');
     } finally {
       setConnectBusy(false);
@@ -283,12 +307,11 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
             {connectMessage ? (
               <p
                 className={`rounded-lg px-3 py-2 text-xs ${
-                  /^(already )?connected to\b/i.test(connectMessage.trim()) ||
-                  connectMessage.startsWith('Conectado') ||
-                  connectMessage.startsWith('Emparejado') ||
-                  connectMessage.startsWith('ADB conectado')
+                  connectOk === true
                     ? 'bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200'
-                    : 'bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100'
+                    : connectOk === false
+                      ? 'bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100'
+                      : 'bg-gov-gray-50 text-gov-gray-700 dark:bg-dark-bg dark:text-dark-muted'
                 }`}
               >
                 {connectMessage}

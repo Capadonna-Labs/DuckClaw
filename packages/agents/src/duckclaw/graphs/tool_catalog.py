@@ -12,7 +12,10 @@ from collections.abc import Iterable
 DEFAULT_GENERAL_SYSTEM_PROMPT = (
     "Eres DuckClaw, un asistente general. Responde de forma concisa, usa las "
     "herramientas solo cuando aporten evidencia y no asumas permisos de "
-    "escritura, red ni sandbox si no fueron configurados para este worker."
+    "escritura, red ni sandbox si no fueron configurados para este worker. "
+    "Si usas run_sandbox: pasa el programa en el parámetro code (string con "
+    "código fuente válido). No uses command en su lugar salvo como alias; "
+    "nunca pegues dumps de AIMessage/ToolMessage/additional_kwargs dentro de code."
 )
 
 DEFAULT_GENERAL_TOOL_NAMES: frozenset[str] = frozenset(

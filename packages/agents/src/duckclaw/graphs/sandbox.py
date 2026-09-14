@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from duckclaw.forge.schema import (
     SecurityPolicy,
@@ -1834,35 +1834,121 @@ def get_browser_session_url_tool_factory(db: Any, llm: Any) -> Any:
     )
 
 
+# LLM a menudo pega dumps de ToolMessage/AIMessage dentro de `code` → SyntaxError + 3 reintentos (~60s).
+_SANDBOX_MESSAGE_DUMP_RE = re.compile(
+    r"(?:additional_kwargs|response_metadata|tool_calls|invalid_tool_calls)\s*=|AIMessage\s*\(|ToolMessage\s*\(",
+    re.IGNORECASE,
+)
+
+
+class RunSandboxArgs(BaseModel):
+    """Args de run_sandbox. Acepta alias command/script → code (fallo frecuente del LLM)."""
+
+    model_config = ConfigDict(extra="ignore")
+    code: str = Field(
+        default="",
+        description=(
+            "Código fuente Python o Bash a ejecutar (SOLO el programa). "
+            "No pegues dumps de AIMessage/ToolMessage ni additional_kwargs."
+        ),
+    )
+    command: str = Field(
+        default="",
+        description="Alias de code (si omites code). Preferible usar code.",
+    )
+    script: str = Field(
+        default="",
+        description="Alias de code (si omites code). Preferible usar code.",
+    )
+    language: str = Field(default="python", description="'python' (default) o 'bash'")
+    data_sql: str = Field(
+        default="",
+        description="SQL opcional: el resultado se monta como data.csv en el sandbox",
+    )
+    session_id: str = Field(
+        default="",
+        description="Sesión para reutilizar el contenedor Docker si ya existe",
+    )
+    worker_id: str = Field(default="", description="Worker id (política de seguridad)")
+    chat_id: str = Field(default="", description="Chat id (inyectado por el runtime)")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_code_aliases(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        code = data.get("code")
+        if isinstance(code, str) and code.strip():
+            return data
+        for key in ("command", "script", "source", "program"):
+            alt = data.get(key)
+            if isinstance(alt, str) and alt.strip():
+                merged = dict(data)
+                merged["code"] = alt
+                return merged
+        return data
+
+    def resolved_code(self) -> str:
+        for value in (self.code, self.command, self.script):
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+
 def sandbox_tool_factory(db: Any, llm: Any) -> Any:
     """Crea el StructuredTool 'run_sandbox' para usar en general_graph.
 
     Parámetros de entrada para el LLM:
-    - code: código Python o Bash a ejecutar
+    - code: código Python o Bash a ejecutar (alias aceptados: command, script)
     - language: 'python' (default) o 'bash'
     - data_sql: SQL opcional — el resultado se monta como data.csv dentro del sandbox
     - session_id: identificador de sesión (reutiliza contenedor si ya existe)
     """
     from langchain_core.tools import StructuredTool  # noqa: PLC0415
 
-    def _run(
-        code: str,
-        language: str = "python",
-        data_sql: str = "",
-        session_id: str = "",
-        worker_id: str = "",
-        chat_id: str = "",
-    ) -> str:
-        cid = (chat_id or "").strip() or None
+    def _run_with_args(args: RunSandboxArgs) -> str:
+        code = args.resolved_code()
+        if not code:
+            return json.dumps(
+                {
+                    "exit_code": 1,
+                    "output": (
+                        "Error en Sandbox: falta el parámetro 'code' (string con el programa). "
+                        "También se aceptan los alias 'command' o 'script'. "
+                        "Ejemplo: code=\"print(1)\" con language=\"python\"."
+                    ),
+                    "stdout": "",
+                    "figure_base64": None,
+                },
+                ensure_ascii=False,
+            )
+        if _SANDBOX_MESSAGE_DUMP_RE.search(code):
+            return json.dumps(
+                {
+                    "exit_code": 1,
+                    "output": (
+                        "Error en Sandbox: 'code' parece un dump de mensaje "
+                        "(AIMessage/ToolMessage/additional_kwargs), no código fuente. "
+                        "Reescribe 'code' con SOLO Python/Bash válido. "
+                        "Para decodificar base64/quoted-printable, usa un string/bytes literal "
+                        "escapado — no incrustes objetos de la conversación."
+                    ),
+                    "stdout": "",
+                    "figure_base64": None,
+                },
+                ensure_ascii=False,
+            )
+
+        cid = (args.chat_id or "").strip() or None
         result = run_in_sandbox(
             db=db,
             llm=llm,
             code=code,
-            language=language or "python",
-            session_id=session_id or uuid.uuid4().hex[:12],
-            data_sql=data_sql or None,
+            language=args.language or "python",
+            session_id=args.session_id or uuid.uuid4().hex[:12],
+            data_sql=args.data_sql or None,
             original_request=code,
-            worker_id=worker_id or "",
+            worker_id=args.worker_id or "",
             chat_id=cid,
         )
         out = {
@@ -1911,13 +1997,21 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
                 )
         return json.dumps(out, ensure_ascii=False)
 
+    def _run(**kwargs: Any) -> str:
+        return _run_with_args(RunSandboxArgs.model_validate(kwargs or {}))
+
     return StructuredTool.from_function(
         _run,
         name="run_sandbox",
         description=(
-            "Ejecuta código Python o Bash en un sandbox Docker aislado (sin acceso a red ni al host). "
-            "Usa cuando el usuario pida ejecutar scripts, análisis complejos, modelos, gráficos dinámicos o código libre. "
-            "Para PNG con matplotlib: guardar en /workspace/output/ con savefig(dpi=100, facecolor='white', edgecolor='none'). "
-            "Parámetros: code (str), language ('python'|'bash'), data_sql (SQL para inyectar datos), session_id (str), worker_id (str opcional para política)."
+            "Ejecuta código Python o Bash en un sandbox Docker aislado (sin red ni acceso al host). "
+            "Parámetro principal: code = SOLO el código fuente (string). "
+            "Alias aceptados si omites code: command o script. "
+            "PROHIBIDO pegar dumps de AIMessage/ToolMessage/additional_kwargs dentro de code. "
+            "Para decodificar base64/quoted-printable de un correo: usa string/bytes literales en code, "
+            "no reenvíes objetos de herramientas previas. "
+            "language: 'python'|'bash'. data_sql opcional (inyecta CSV). "
+            "PNG matplotlib: savefig en /workspace/output/ (dpi=100, facecolor='white')."
         ),
+        args_schema=RunSandboxArgs,
     )

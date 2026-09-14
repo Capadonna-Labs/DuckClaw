@@ -86,6 +86,10 @@ def register_record_operational_lesson_skill(
             db=db,
         )
 
+    existing = {str(getattr(t, "name", "") or "") for t in tools_list}
+    if "record_operational_lesson" in existing:
+        return
+
     tools_list.append(
         StructuredTool.from_function(
             _record,

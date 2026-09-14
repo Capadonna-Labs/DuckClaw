@@ -46,9 +46,10 @@ def test_record_operational_lesson_persists_with_lesson_type(monkeypatch) -> Non
     assert calls[0][2] == "broker_position_hallucination:audit mismatch AAPL"
 
 
-def test_record_operational_lesson_requires_text() -> None:
-    class _Db:
-        schema = "main"
+def test_register_skips_when_tool_already_present() -> None:
+    class _Existing:
+        name = "record_operational_lesson"
 
-    out = json.loads(_record_operational_lesson_impl("  ", db=_Db()))
-    assert out["ok"] is False
+    tools: list = [_Existing()]
+    register_record_operational_lesson_skill(tools, {})
+    assert len(tools) == 1

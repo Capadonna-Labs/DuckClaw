@@ -6,11 +6,13 @@ import {
   formatUsageTokensLogLine,
   type UsageTokenBreakdown,
 } from '@/lib/formatTokenCount';
+import type { ContextTokenBreakdown } from '@/lib/contextTokenBreakdown';
 import { formatCompactTokenCount, inferModelContextWindow } from '@/lib/modelContextWindow';
 
 export type TokenConsumptionMenuProps = {
   tokenUsage?: UsageTokenBreakdown | null;
   contextEstimatedTokens?: number | null;
+  contextTokenBreakdown?: ContextTokenBreakdown | null;
   model?: string | null;
   className?: string;
 };
@@ -43,10 +45,19 @@ function SegmentBar({
   );
 }
 
-/** Botón + popover de consumo (estilo Claude): contexto y desglose del último turno. */
+type CategoryRow = {
+  key: string;
+  label: string;
+  tokens: number;
+  className: string;
+  muted?: boolean;
+};
+
+/** Botón + popover de consumo (estilo Claude): categorías de contexto + último turno. */
 export function TokenConsumptionMenu({
   tokenUsage = null,
   contextEstimatedTokens = null,
+  contextTokenBreakdown = null,
   model = null,
   className = '',
 }: TokenConsumptionMenuProps) {
@@ -72,17 +83,75 @@ export function TokenConsumptionMenu({
 
   const contextWindow = useMemo(() => inferModelContextWindow(model), [model]);
   const contextUsed = useMemo(() => {
+    if (contextTokenBreakdown && contextTokenBreakdown.total > 0) {
+      return contextTokenBreakdown.total;
+    }
     if (contextEstimatedTokens != null && contextEstimatedTokens > 0) {
       return Math.floor(contextEstimatedTokens);
     }
     if (tokenUsage && tokenUsage.input_tokens > 0) return tokenUsage.input_tokens;
     return null;
-  }, [contextEstimatedTokens, tokenUsage]);
+  }, [contextEstimatedTokens, contextTokenBreakdown, tokenUsage]);
 
   const contextPct =
     contextWindow && contextUsed != null
       ? clampPct((contextUsed / contextWindow) * 100)
       : null;
+
+  const categoryRows = useMemo((): CategoryRow[] => {
+    if (!contextWindow || contextUsed == null) return [];
+    const bd = contextTokenBreakdown;
+    const messages = bd?.messages ?? 0;
+    const tools = bd?.tools ?? 0;
+    const system = bd?.system ?? 0;
+    const accounted = messages + tools + system;
+    // When we only have a total (no breakdown), show a single "used" bucket.
+    if (!bd || accounted <= 0) {
+      const free = Math.max(0, contextWindow - contextUsed);
+      return [
+        { key: 'used', label: 'Usado', tokens: contextUsed, className: 'bg-gov-blue-500' },
+        {
+          key: 'free',
+          label: 'Espacio libre',
+          tokens: free,
+          className: 'bg-gov-gray-300 dark:bg-dark-border',
+          muted: true,
+        },
+      ];
+    }
+    const free = Math.max(0, contextWindow - accounted);
+    return [
+      { key: 'messages', label: 'Mensajes', tokens: messages, className: 'bg-gov-blue-500' },
+      { key: 'tools', label: 'Herramientas', tokens: tools, className: 'bg-rose-500' },
+      { key: 'system', label: 'System prompt', tokens: system, className: 'bg-amber-500' },
+      {
+        key: 'free',
+        label: 'Espacio libre',
+        tokens: free,
+        className: 'bg-gov-gray-300 dark:bg-dark-border',
+        muted: true,
+      },
+    ].filter((row) => row.tokens > 0 || row.key === 'free');
+  }, [contextTokenBreakdown, contextUsed, contextWindow]);
+
+  const contextSegments = useMemo(() => {
+    if (!contextWindow || categoryRows.length === 0) {
+      return [
+        {
+          pct: contextPct ?? (contextUsed != null ? 12 : 0),
+          className: 'bg-gov-blue-500',
+          title: 'Contexto usado',
+        },
+      ];
+    }
+    return categoryRows
+      .filter((row) => row.key !== 'free')
+      .map((row) => ({
+        pct: (row.tokens / contextWindow) * 100,
+        className: row.className,
+        title: `${row.label} ${row.tokens.toLocaleString('es-CO')}`,
+      }));
+  }, [categoryRows, contextPct, contextUsed, contextWindow]);
 
   const turnTotal = tokenUsage?.total_tokens ?? 0;
   const turnPrompt = tokenUsage?.input_tokens ?? 0;
@@ -133,7 +202,7 @@ export function TokenConsumptionMenu({
           id={panelId}
           role="dialog"
           aria-label="Detalle de consumo"
-          className="absolute right-0 top-full z-[70] mt-2 w-[17.5rem] max-w-[calc(100vw-1.25rem)] origin-top-right rounded-2xl border border-gov-gray-200 bg-white p-3 shadow-xl dark:border-dark-border dark:bg-dark-surface"
+          className="absolute right-0 top-full z-[70] mt-2 w-[18.5rem] max-w-[calc(100vw-1.25rem)] origin-top-right rounded-2xl border border-gov-gray-200 bg-white p-3 shadow-xl dark:border-dark-border dark:bg-dark-surface"
         >
           <div className="space-y-3">
             <section className="space-y-1.5">
@@ -149,15 +218,43 @@ export function TokenConsumptionMenu({
                       : 'Sin estimado'}
                 </p>
               </div>
-              <SegmentBar
-                segments={[
-                  {
-                    pct: contextPct ?? (contextUsed != null ? 12 : 0),
-                    className: 'bg-gov-blue-500',
-                    title: 'Contexto usado',
-                  },
-                ]}
-              />
+              <SegmentBar segments={contextSegments} />
+              {categoryRows.length > 0 ? (
+                <dl className="mt-1.5 grid grid-cols-[1fr_auto_auto] gap-x-2 gap-y-1 text-[11px] tabular-nums">
+                  {categoryRows.map((row) => {
+                    const pct =
+                      contextWindow && contextWindow > 0
+                        ? (row.tokens / contextWindow) * 100
+                        : 0;
+                    return (
+                      <div key={row.key} className="contents">
+                        <dt
+                          className={`flex items-center gap-1.5 ${
+                            row.muted
+                              ? 'text-gov-gray-400 dark:text-dark-muted'
+                              : 'text-gov-gray-600 dark:text-dark-muted'
+                          }`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-sm ${row.className}`} aria-hidden />
+                          {row.label}
+                        </dt>
+                        <dd
+                          className={
+                            row.muted
+                              ? 'text-gov-gray-400 dark:text-dark-muted'
+                              : 'text-gov-gray-900 dark:text-dark-text'
+                          }
+                        >
+                          {formatCompactTokenCount(row.tokens)}
+                        </dd>
+                        <dd className="text-right text-gov-gray-400 dark:text-dark-muted">
+                          {pct.toFixed(1)}%
+                        </dd>
+                      </div>
+                    );
+                  })}
+                </dl>
+              ) : null}
               {modelLabel ? (
                 <p
                   className="truncate text-[10px] text-gov-gray-500 dark:text-dark-muted"

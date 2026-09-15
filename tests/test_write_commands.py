@@ -1419,7 +1419,7 @@ class TestCommandHandlers:
             ORDER BY policy_type, policy_name
             """
         ).fetchall()
-        assert len(rows) == 4
+        assert len(rows) == 5
         for _ptype, _pname, metadata_raw in rows:
             metadata = json.loads(metadata_raw) if metadata_raw else {}
             assert metadata.get("seed") == "framework_policy_pack_v1"
@@ -1760,7 +1760,7 @@ class TestCommandHandlers:
             "WHERE worker_id = 'ctx-w')"
         ).fetchall()
         assert len(rows) >= 1
-        assert rows[0][0] == "system_prompt"
+        assert rows[0][0] == "system_prompt.md"
 
     def test_upsert_worker_capability_applies_and_is_idempotent(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import (

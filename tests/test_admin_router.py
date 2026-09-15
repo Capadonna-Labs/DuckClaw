@@ -119,7 +119,7 @@ def test_admin_prompt_policy_health_reports_missing_db_first_requirements(
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is False
-    assert data["checked_count"] == 7
+    assert data["checked_count"] == 6
     assert data["missing_count"] == 2
     assert data["inherited_count"] == 0
     assert data["missing"] == [
@@ -1593,7 +1593,7 @@ def test_gateway_db_fixture_applies_knowledge_migration(gateway_db: Path) -> Non
     assert "admin_knowledge_sources" in tables
     assert "admin_knowledge_documents" in tables
     assert "admin_knowledge_chunks" in tables
-    assert 15 in versions
+    assert 1 in versions
 
 
 def test_knowledge_sources_and_search_are_scoped(

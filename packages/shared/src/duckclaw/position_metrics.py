@@ -123,6 +123,32 @@ def infer_side(price: float, sl: float, tp: float) -> str:
     return "ambiguous"
 
 
+def infer_side_and_breach(
+    price: float, sl: float, tp: float
+) -> tuple[str, str | None]:
+    """Infer side + optional breach when price is past SL or TP.
+
+    Long band is ``sl < tp``; short is ``tp < sl``. Past-level prices stay
+    ``ok`` for reporting (XLU-style mark below SL) instead of ``ambiguous``.
+    """
+    side = infer_side(price, sl, tp)
+    if side != "ambiguous":
+        return side, None
+    if sl < tp:
+        # Long protective geometry.
+        if price <= sl:
+            return "long", "sl"
+        if price >= tp:
+            return "long", "tp"
+    elif tp < sl:
+        # Short protective geometry.
+        if price >= sl:
+            return "short", "sl"
+        if price <= tp:
+            return "short", "tp"
+    return "ambiguous", None
+
+
 def calculate_tp_sl_distance(
     price: float | int | str,
     sl: float | int | str,
@@ -132,6 +158,7 @@ def calculate_tp_sl_distance(
     Unsigned % distances to SL/TP plus RR.
 
     Returns magnitudes only (always >= 0). Side is separate.
+    When mark is past SL/TP, ``ok`` stays True with ``breached`` in {sl,tp}.
     """
     p = _finite(price)
     s = _finite(sl)
@@ -142,6 +169,7 @@ def calculate_tp_sl_distance(
         "sl": s,
         "tp": t,
         "side": "ambiguous",
+        "breached": None,
         "dist_sl_pct": None,
         "dist_tp_pct": None,
         "rr_ratio": None,
@@ -156,7 +184,7 @@ def calculate_tp_sl_distance(
         base["error"] = "sl y tp no pueden ser iguales"
         return base
 
-    side = infer_side(p, s, t)
+    side, breached = infer_side_and_breach(p, s, t)
     dist_sl = abs(p - s) / p * 100.0
     dist_tp = abs(t - p) / p * 100.0
     out: dict[str, Any] = {
@@ -165,6 +193,7 @@ def calculate_tp_sl_distance(
         "sl": s,
         "tp": t,
         "side": side,
+        "breached": breached,
         "dist_sl_pct": _round4(dist_sl),
         "dist_tp_pct": _round4(dist_tp),
         "rr_ratio": _round4(dist_tp / dist_sl) if dist_sl > 0 else None,
@@ -836,8 +865,8 @@ def build_canonical_tp_sl_section(levels: list[dict[str, Any]]) -> str:
     lines: list[str] = [
         "## Distancia TP/SL (determinística)",
         "",
-        "| Ticker | Precio | Fuente precio | Side | Dist SL % | Dist TP % | RR |",
-        "| --- | ---: | --- | --- | ---: | ---: | ---: |",
+        "| Ticker | Precio | Fuente precio | Side | Dist SL % | Dist TP % | RR | Breach |",
+        "| --- | ---: | --- | --- | ---: | ---: | ---: | --- |",
     ]
     n_ok = 0
     sources: list[str] = []
@@ -857,8 +886,10 @@ def build_canonical_tp_sl_section(levels: list[dict[str, Any]]) -> str:
             px_s = f"{float(row['price']):.2f}"
         except (TypeError, ValueError):
             px_s = str(row.get("price") or "?")
+        breached = metrics.get("breached")
+        breach_s = str(breached).upper() if breached else "—"
         lines.append(
-            "| {ticker} | {price} | {src} | {side} | {sl} | {tp} | {rr} |".format(
+            "| {ticker} | {price} | {src} | {side} | {sl} | {tp} | {rr} | {breach} |".format(
                 ticker=ticker,
                 price=px_s,
                 src=src.replace("|", "/"),
@@ -866,6 +897,7 @@ def build_canonical_tp_sl_section(levels: list[dict[str, Any]]) -> str:
                 sl=metrics.get("dist_sl_pct"),
                 tp=metrics.get("dist_tp_pct"),
                 rr=metrics.get("rr_ratio") if metrics.get("rr_ratio") is not None else "—",
+                breach=breach_s,
             )
         )
     if n_ok == 0:
@@ -879,6 +911,7 @@ def build_canonical_tp_sl_section(levels: list[dict[str, Any]]) -> str:
     lines.append(
         f"_Distancias: `calculate_tp_sl_distance` sobre niveles ACTIVE del turno "
         f"(no recalcular signos en prosa). Precio(s): {src_note}. "
+        "Breach=SL/TP cuando el mark ya cruzó el nivel (sigue reportando magnitudes). "
         "No igualar a TradingView u otra UI sin contrastar; en premarket/after-hours "
         "el mark IBKR puede diferir del último cierre._"
     )

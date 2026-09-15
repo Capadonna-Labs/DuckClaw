@@ -157,6 +157,11 @@ def mlx_openai_compatible_base_url() -> str:
     return resolved
 
 
+def _is_unittest_mock(obj: Any) -> bool:
+    """True for unittest.mock stand-ins (getattr creates new children forever)."""
+    return type(obj).__name__ in ("MagicMock", "Mock", "AsyncMock", "NonCallableMagicMock")
+
+
 def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
     """
     Deduce proveedor desde ``ChatOpenAI`` (base URL) cuando la etiqueta ``llm_provider`` del grafo
@@ -164,11 +169,11 @@ def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
     """
     if llm is None:
         return ""
-    # unittest.mock.MagicMock: getattr("bound") crea mocks anidados → RecursionError.
-    if type(llm).__name__ in ("MagicMock", "Mock", "AsyncMock", "NonCallableMagicMock"):
+    # unittest.mock.MagicMock: getattr("bound") crea mocks anidados → RecursionError / hang.
+    if _is_unittest_mock(llm):
         return ""
     bound = getattr(llm, "bound", None)
-    if bound is not None and bound is not llm:
+    if bound is not None and bound is not llm and not _is_unittest_mock(bound):
         inner = infer_provider_from_openai_compatible_llm(bound)
         if inner:
             return inner
@@ -182,7 +187,7 @@ def infer_provider_from_openai_compatible_llm(llm: Any) -> str:
             bases.append(s.lower())
     for attr in ("client", "async_client", "root_client", "root_async_client"):
         c = getattr(llm, attr, None)
-        if c is None:
+        if c is None or _is_unittest_mock(c):
             continue
         bu = getattr(c, "base_url", None)
         if bu is not None:
@@ -371,19 +376,25 @@ def _openrouter_attribution_wire_snapshot(llm: Any) -> dict[str, str | bool]:
 
 def _llm_openrouter_base_urls(llm: Any) -> list[str]:
     """URLs base candidatas que indican endpoint OpenRouter."""
+    if llm is None or _is_unittest_mock(llm):
+        return []
     urls: list[str] = []
     seen: set[str] = set()
     nodes: list[Any] = [llm]
     visited: set[int] = set()
-    while nodes:
+    # Cap walks: MagicMock.bound (or pathological wrappers) must not spin forever.
+    max_nodes = 64
+    while nodes and len(visited) < max_nodes:
         node = nodes.pop()
+        if node is None or _is_unittest_mock(node):
+            continue
         nid = id(node)
         if nid in visited:
             continue
         visited.add(nid)
         for attr in ("openai_api_base", "base_url"):
             raw = getattr(node, attr, None)
-            if raw is None:
+            if raw is None or _is_unittest_mock(raw):
                 continue
             text = str(raw).strip().lower()
             if text and text not in seen:
@@ -391,24 +402,29 @@ def _llm_openrouter_base_urls(llm: Any) -> list[str]:
                 urls.append(text)
         for attr in ("client", "async_client", "root_client", "root_async_client"):
             client = getattr(node, attr, None)
-            if client is None:
+            if client is None or _is_unittest_mock(client):
                 continue
             bu = getattr(client, "base_url", None)
-            if bu is None:
+            if bu is None or _is_unittest_mock(bu):
                 continue
             text = str(bu).strip().lower()
             if text and text not in seen:
                 seen.add(text)
                 urls.append(text)
         bound = getattr(node, "bound", None)
-        if bound is not None and bound is not node:
+        if (
+            bound is not None
+            and bound is not node
+            and not _is_unittest_mock(bound)
+            and id(bound) not in visited
+        ):
             nodes.append(bound)
     return urls
 
 
 def llm_targets_openrouter_endpoint(llm: Any) -> bool:
     """True si el cliente LangChain apunta a openrouter.ai (aunque el label del provider sea otro)."""
-    if llm is None:
+    if llm is None or _is_unittest_mock(llm):
         return False
     if (infer_provider_from_openai_compatible_llm(llm) or "").strip().lower() == "openrouter":
         return True
@@ -475,22 +491,33 @@ def ensure_openrouter_attribution_headers(llm: Any) -> Any:
     HTTP-Referer + X-OpenRouter-Title. LangChain puede perderlos tras bind_tools;
     este helper re-aplica la política antes de cada llamada.
     """
-    if llm is None:
+    if llm is None or _is_unittest_mock(llm):
         return llm
     if not llm_targets_openrouter_endpoint(llm):
         return llm
     nodes: list[Any] = [llm]
     visited: set[int] = set()
-    while nodes:
+    max_nodes = 64
+    while nodes and len(visited) < max_nodes:
         node = nodes.pop()
+        if node is None or _is_unittest_mock(node):
+            continue
         nid = id(node)
         if nid in visited:
             continue
         visited.add(nid)
         for attr in ("root_client", "root_async_client", "client", "async_client"):
-            _patch_openrouter_default_headers_on_client(getattr(node, attr, None))
+            client = getattr(node, attr, None)
+            if client is None or _is_unittest_mock(client):
+                continue
+            _patch_openrouter_default_headers_on_client(client)
         bound = getattr(node, "bound", None)
-        if bound is not None and bound is not node:
+        if (
+            bound is not None
+            and bound is not node
+            and not _is_unittest_mock(bound)
+            and id(bound) not in visited
+        ):
             nodes.append(bound)
     _install_openrouter_invoke_guard(llm)
     return llm

@@ -87,6 +87,7 @@ def test_build_meditate_self_system_event_message(mock_manifest: None) -> None:
     db = _FakeDb()
     msg = build_meditate_self_system_event_message(db, "1", "default", scheduled=True)
     assert "SYSTEM_EVENT" in msg
+    assert "evaluate_homeostasis" in msg
     assert "assess_crons_alignment" in msg
     assert "request_homeostasis_validation" in msg
     assert "programado /loop" in msg

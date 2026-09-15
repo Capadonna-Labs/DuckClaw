@@ -14,7 +14,11 @@ import os
 from pathlib import Path
 from typing import Any
 
-from duckclaw.admin_worker_catalog import get_latest_worker_version, get_worker_by_tenant_worker_id
+from duckclaw.admin_worker_catalog import (
+    get_active_worker_by_worker_id,
+    get_latest_worker_version,
+    get_worker_by_tenant_worker_id,
+)
 from duckclaw.shared_db_grants import _query_all_dicts, _sql_lit
 
 _log = logging.getLogger(__name__)
@@ -40,11 +44,70 @@ def _hub_catalog_db_if_different(db: Any) -> Any | None:
             if db_path == hub_path:
                 return None
     try:
-        # .query JSON Ã¢â€ â€™ _query_all_dicts; execute is no-op (RO DDL skipped).
+        # .query JSON → _query_all_dicts; execute is no-op (RO DDL skipped).
         return GatewayDbEphemeralReadonly(hub_path)
     except Exception as exc:
         _log.debug("hub catalog open failed: %s", exc)
         return None
+
+
+def _lookup_catalog_worker(
+    db: Any,
+    *,
+    worker_id: str,
+    tenant_id: str,
+) -> tuple[dict[str, Any] | None, Any]:
+    """Resolve catalog row for manifest load.
+
+    Order: requested tenant on ``db`` → same on hub → ``default`` tenant → any
+    active hub row matching worker_id variants. Does not change playground ACL.
+    """
+    tid = (tenant_id or "default").strip() or "default"
+    cat = get_worker_by_tenant_worker_id(db, tenant_id=tid, worker_id=worker_id)
+    if cat:
+        return cat, db
+
+    hub = _hub_catalog_db_if_different(db)
+    catalog_db = hub if hub is not None else db
+
+    if hub is not None:
+        cat = get_worker_by_tenant_worker_id(hub, tenant_id=tid, worker_id=worker_id)
+        if cat:
+            return cat, hub
+
+    if tid != "default":
+        cat = get_worker_by_tenant_worker_id(catalog_db, tenant_id="default", worker_id=worker_id)
+        if cat:
+            _log.info(
+                "catalog manifest: worker=%s tenant=%s miss → using default tenant row",
+                worker_id,
+                tid,
+            )
+            return cat, catalog_db
+        if hub is None:
+            cat = get_worker_by_tenant_worker_id(db, tenant_id="default", worker_id=worker_id)
+            if cat:
+                _log.info(
+                    "catalog manifest: worker=%s tenant=%s miss → using default on local db",
+                    worker_id,
+                    tid,
+                )
+                return cat, db
+
+    # Seeded/imported workers may live under another hub tenant while /loop
+    # carries the vault user-* tenant. Manifest load is not an ACL check.
+    cat = get_active_worker_by_worker_id(catalog_db, worker_id=worker_id)
+    if cat:
+        _log.info(
+            "catalog manifest: worker=%s tenant=%s miss → using active row tenant=%s",
+            worker_id,
+            tid,
+            cat.get("tenant_id"),
+        )
+        return cat, catalog_db
+    if hub is not None:
+        return None, hub
+    return None, db
 
 
 def _cache_dir(worker_uid: str, files_digest: str) -> Path:
@@ -78,23 +141,7 @@ def load_manifest_from_catalog(
     Raises ``FileNotFoundError`` if the worker is not found in the catalog
     or has no versions.
     """
-    catalog_db = db
-    cat = get_worker_by_tenant_worker_id(
-        catalog_db,
-        tenant_id=tenant_id,
-        worker_id=worker_id,
-    )
-    if not cat:
-        # Tenant vault DBs may ship without admin_worker_catalog rows; hub holds catalog.
-        hub = _hub_catalog_db_if_different(catalog_db)
-        if hub is not None:
-            cat = get_worker_by_tenant_worker_id(
-                hub,
-                tenant_id=tenant_id,
-                worker_id=worker_id,
-            )
-            if cat:
-                catalog_db = hub
+    cat, catalog_db = _lookup_catalog_worker(db, worker_id=worker_id, tenant_id=tenant_id)
     if not cat:
         raise FileNotFoundError(
             f"Worker '{worker_id}' not found in catalog for tenant '{tenant_id}'"
@@ -138,7 +185,9 @@ def load_manifest_from_catalog(
     from duckclaw.workers.manifest import build_spec_from_manifest
 
     try:
-        spec = build_spec_from_manifest(manifest, worker_id, cache_path)
+        # Prefer catalog's canonical worker_id (hyphen) over caller alias.
+        canonical_id = str(cat.get("worker_id") or worker_id).strip() or worker_id
+        spec = build_spec_from_manifest(manifest, canonical_id, cache_path)
     except Exception as exc:
         _log.error(
             "failed to build WorkerSpec for '%s' from catalog: %s",
@@ -166,9 +215,10 @@ def list_catalog_template_ids(db: Any, tenant_id: str = "default") -> list[str]:
 
 
 def worker_exists_in_catalog(db: Any, worker_id: str, tenant_id: str = "default") -> bool:
-    """Check if a worker exists in the DB catalog."""
+    """Check if a worker exists in the DB catalog (same resolve as manifest load)."""
     try:
-        return get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=worker_id) is not None
+        cat, _catalog_db = _lookup_catalog_worker(db, worker_id=worker_id, tenant_id=tenant_id)
+        return cat is not None
     except Exception as exc:
         _log.warning("worker_exists_in_catalog(%s) failed: %s", worker_id, exc)
         return False

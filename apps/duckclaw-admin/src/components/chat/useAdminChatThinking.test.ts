@@ -30,6 +30,20 @@ assert.deepEqual(stripThinkingStatusHeartbeats(messages), [
   { role: 'assistant', text: '', streaming: true },
 ]);
 
+assert.deepEqual(
+  stripThinkingStatusHeartbeats([
+    {
+      role: 'heartbeat',
+      heartbeatKind: 'status',
+      text: "Worker 'quant_analyst' not found in catalog for tenant 'user-x'",
+      workerId: 'quant_analyst',
+    },
+    { role: 'assistant', text: 'ok' },
+  ]),
+  [{ role: 'assistant', text: 'ok' }],
+  'drop stale catalog-miss PROGRESO heartbeats'
+);
+
 const emptyStreamingAssistant = messages[3];
 assert.equal(
   shouldSkipEmptyStreamingAssistant(emptyStreamingAssistant, messages),

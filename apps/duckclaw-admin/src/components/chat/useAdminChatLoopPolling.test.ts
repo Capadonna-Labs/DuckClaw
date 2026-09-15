@@ -6,6 +6,7 @@ import {
   conversationIndicatesLoopScheduling,
   isLoopProgressHeartbeat,
   isLoopSystemUserMessage,
+  stripThinkingStatusHeartbeats,
 } from '@/components/chat/useAdminChat';
 import { mergeEphemeralHeartbeats } from '@/lib/chatEphemeralStorage';
 
@@ -13,6 +14,19 @@ describe('loop outbound polling helpers', () => {
   it('detects loop progress heartbeats', () => {
     expect(isLoopProgressHeartbeat('[loop] self_tick_dispatched')).toBe(true);
     expect(isLoopProgressHeartbeat('Pensando…')).toBe(false);
+  });
+
+  it('strips stale catalog-miss PROGRESO heartbeats', () => {
+    const miss: ChatMsg = {
+      role: 'heartbeat',
+      heartbeatKind: 'status',
+      text: "Worker 'quant_analyst' not found in catalog for tenant 'user-x'",
+      workerId: 'quant_analyst',
+    };
+    expect(stripThinkingStatusHeartbeats([miss, { role: 'assistant', text: 'ok' }])).toEqual([
+      { role: 'assistant', text: 'ok' },
+    ]);
+    expect(mergeEphemeralHeartbeats([miss], [])).toEqual([]);
   });
 
   it('detects SYSTEM_EVENT loop user turns as loop result', () => {

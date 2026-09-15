@@ -25,6 +25,7 @@ import {
   conversationIndicatesLoopScheduling,
   isLoopProgressHeartbeat,
   mergeHistoryWithEphemeral,
+  stripThinkingStatusHeartbeats,
 } from './adminChatPure';
 import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 
@@ -129,8 +130,10 @@ export function useAdminChatHistory({
             );
           }
           const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
-          return finalizeRunningToolHeartbeats(
-            mergeHistoryWithEphemeral(withImages, ephemeral)
+          return stripThinkingStatusHeartbeats(
+            finalizeRunningToolHeartbeats(
+              mergeHistoryWithEphemeral(withImages, ephemeral)
+            )
           );
         });
       })
@@ -228,8 +231,10 @@ export function useAdminChatHistory({
             );
           }
           const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
-          return finalizeRunningToolHeartbeats(
-            mergeHistoryWithEphemeral(withImages, ephemeral)
+          return stripThinkingStatusHeartbeats(
+            finalizeRunningToolHeartbeats(
+              mergeHistoryWithEphemeral(withImages, ephemeral)
+            )
           );
         });
         const convWorker = (

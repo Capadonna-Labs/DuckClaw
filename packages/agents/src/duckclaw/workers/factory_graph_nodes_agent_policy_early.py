@@ -32,6 +32,7 @@ from duckclaw.workers.tool_binding import tool_called_since as _tool_called_sinc
 from duckclaw.workers.tool_invocation_policy import (
     decide_current_time_tool_invocation as _decide_current_time_tool_invocation,
     decide_db_first_tool_invocation as _decide_db_first_tool_invocation,
+    decide_loop_homeostasis_tool_invocation as _decide_loop_homeostasis_tool_invocation,
     decide_update_system_prompt_invocation as _decide_update_system_prompt_invocation,
 )
 from duckclaw.workers.tool_surface_policy import tool_surface_intent_text
@@ -460,6 +461,24 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                         and _worker_use_heuristic_first_tool(spec)
                     ):
                         force_orch_tool = _gmail_search_tool
+
+                # /loop SYSTEM_EVENT: evaluate_homeostasis wins over orch/db-first
+                # read_sql on hop 1 when the worker exposes the sensor pack.
+                _loop_homeo = _decide_loop_homeostasis_tool_invocation(
+                    incoming=incoming,
+                    available_tools=tools_by_name,
+                    called_tools_since_last_human=_usp_ran,
+                    already_has_tool_result=already_has_tool_result,
+                    summarize_directive=telegram_context_summarize_directive,
+                )
+                if _loop_homeo.should_force and _loop_homeo.tool_name:
+                    force_orch_tool = _loop_homeo.tool_name
+                    force_schema = False
+                    force_admin_sql = False
+                    force_read_sql = False
+                    force_tavily = False
+                    force_reddit = False
+                    force_visual = False
 
                 ctx.agent_turn = {'_intent_incoming': _intent_incoming, '_orch': _orch, '_orch_forced': _orch_forced, '_reddit_resolved_comments_url': _reddit_resolved_comments_url, '_reddit_share_mcp_exhausted': _reddit_share_mcp_exhausted, '_visual_tool_already_ok': _visual_tool_already_ok, '_wl': _wl, 'already_has_tool_result': already_has_tool_result, 'force_admin_sql': force_admin_sql, 'force_orch_tool': force_orch_tool, 'force_read_sql': force_read_sql, 'force_reddit': force_reddit, 'force_schema': force_schema, 'force_tavily': force_tavily, 'force_visual': force_visual, 'incoming': incoming, 'incoming_for_reddit': incoming_for_reddit, 'is_latest_game': is_latest_game, 'is_schema': is_schema, 'is_table_content': is_table_content, 'reddit_search_tool_count': reddit_search_tool_count, 'state': state, 'summarize_stored_directive': summarize_stored_directive, 'telegram_context_summarize_directive': telegram_context_summarize_directive}
                 return None

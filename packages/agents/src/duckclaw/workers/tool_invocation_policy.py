@@ -292,6 +292,58 @@ def _update_system_prompt_intent(text: str) -> bool:
     )
 
 
+def _is_loop_or_proactive_system_event(text: str) -> bool:
+    """True for /loop or proactive-review SYSTEM_EVENT ticks (not ordinary chat)."""
+    raw = (text or "").strip()
+    if not raw.lower().startswith("[system_event:"):
+        return False
+    try:
+        from duckclaw.graphs.proactive_review_markers import (
+            proactive_review_event_phrase_in_text,
+        )
+
+        return proactive_review_event_phrase_in_text(raw)
+    except Exception:
+        return (
+            "Ciclo de auto-mejora" in raw
+            or "/loop" in raw
+            or "Revisión periódica de /crons" in raw
+            or "Revisión periódica de /goals" in raw
+        )
+
+
+def decide_loop_homeostasis_tool_invocation(
+    *,
+    incoming: str,
+    available_tools: Collection[str] | Mapping[str, Any],
+    called_tools_since_last_human: Collection[str] = (),
+    already_has_tool_result: bool = False,
+    summarize_directive: bool = False,
+) -> ToolInvocationDecision:
+    """
+    Force ``evaluate_homeostasis`` as the first tool on /loop SYSTEM_EVENT ticks.
+
+    Prompt text alone is not enough: db-first / orchestration often steal hop 1
+    with ``read_sql``, and the agent then reports false "0 desviaciones" from
+    ``assess_crons_alignment`` alone (missing SL breach / OCA / OHLCV sensors).
+    """
+    tool_names = _tool_names(available_tools)
+    called = {str(n) for n in called_tools_since_last_human}
+    if already_has_tool_result or summarize_directive:
+        return _no_tool_invocation()
+    if "evaluate_homeostasis" in called:
+        return _no_tool_invocation()
+    if "evaluate_homeostasis" not in tool_names:
+        return _no_tool_invocation()
+    if not _is_loop_or_proactive_system_event(incoming):
+        return _no_tool_invocation()
+    return ToolInvocationDecision(
+        tool_name="evaluate_homeostasis",
+        reason="platform.loop.evaluate_homeostasis.first_hop",
+        requires_heuristic_first_tool=False,
+    )
+
+
 def decide_update_system_prompt_invocation(
     *,
     incoming: str,

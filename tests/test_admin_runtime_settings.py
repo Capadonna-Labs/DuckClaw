@@ -192,6 +192,11 @@ def test_playground_config_uses_actor_runtime_defaults(
             "worker_id": "axis_bot",
             "display_name": "Demo Bot",
             "source_template_id": "default",
+            "system_prompt": (
+                "Eres un asistente general para demos del playground. Responde "
+                "de forma breve y útil, y pide aclaraciones cuando falte contexto."
+            ),
+            "soul": "Asistente demo amable y directo para pruebas.",
         },
     )
     assert created.status_code == 200

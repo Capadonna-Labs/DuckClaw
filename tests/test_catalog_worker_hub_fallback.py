@@ -123,3 +123,100 @@ def test_load_manifest_falls_back_to_hub_when_vault_catalog_empty(
         except Exception:
             pass
         vault_con.close()
+
+
+def test_load_manifest_falls_back_to_default_tenant_when_user_tenant_misses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """/loop carries vault user-* tenant; seeded catalog rows often live under default."""
+    hub_path = tmp_path / "hub.duckdb"
+    hub_con = duckdb.connect(str(hub_path))
+    try:
+        hub = _Adapter(hub_con, str(hub_path))
+        bootstrap_core_schema(hub, seed_admin=False)
+        # Seed-style row under default (not the chat/vault user tenant).
+        worker = create_worker(
+            hub,
+            owner_email="system@duckclaw.local",
+            worker_id="quant-analyst",
+            display_name="Quant Analyst",
+        )
+        hub_con.execute(
+            "UPDATE main.admin_worker_catalog SET tenant_id = 'default' WHERE worker_uid = ?",
+            [worker["worker_uid"]],
+        )
+        add_worker_version(
+            hub,
+            worker_uid=worker["worker_uid"],
+            created_by="system@duckclaw.local",
+            manifest_snapshot={"id": "quant-analyst", "skills": []},
+            files_snapshot={"manifest.yaml": "id: quant-analyst\nskills: []\n"},
+            change_note="test",
+        )
+        hub_con.close()
+        monkeypatch.setenv("DUCKCLAW_GATEWAY_DB_PATH", str(hub_path))
+        import duckclaw.catalog_worker as cw
+
+        monkeypatch.setattr(
+            cw,
+            "_hub_catalog_db_if_different",
+            lambda _db: None,  # db is already the hub handle
+        )
+
+        hub_ro = GatewayDbEphemeralReadonly(str(hub_path))
+        # Underscore alias + user-* tenant (the VPS failure shape).
+        spec = load_manifest_from_catalog(
+            hub_ro,
+            "quant_analyst",
+            tenant_id="user-juanjoarevalo57-79c5ca60b91d4f3e",
+        )
+        assert getattr(spec, "worker_id", None) == "quant-analyst"
+    finally:
+        try:
+            hub_con.close()
+        except Exception:
+            pass
+
+
+def test_load_manifest_falls_back_to_active_row_on_other_hub_tenant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    hub_path = tmp_path / "hub.duckdb"
+    hub_con = duckdb.connect(str(hub_path))
+    try:
+        hub = _Adapter(hub_con, str(hub_path))
+        bootstrap_core_schema(hub, seed_admin=False)
+        profile = ensure_profile_for_user(hub, email="owner@other.local")
+        worker = create_worker(
+            hub,
+            owner_email=profile["email"],
+            worker_id="quant-analyst",
+            display_name="Quant Analyst",
+        )
+        add_worker_version(
+            hub,
+            worker_uid=worker["worker_uid"],
+            created_by=profile["email"],
+            manifest_snapshot={"id": "quant-analyst", "skills": []},
+            files_snapshot={"manifest.yaml": "id: quant-analyst\nskills: []\n"},
+            change_note="test",
+        )
+        assert worker["tenant_id"] != "default"
+        hub_con.close()
+        monkeypatch.setenv("DUCKCLAW_GATEWAY_DB_PATH", str(hub_path))
+        import duckclaw.catalog_worker as cw
+
+        monkeypatch.setattr(cw, "_hub_catalog_db_if_different", lambda _db: None)
+
+        hub_ro = GatewayDbEphemeralReadonly(str(hub_path))
+        spec = load_manifest_from_catalog(
+            hub_ro,
+            "quant_analyst",
+            tenant_id="user-other-tenant-aaaaaaaaaaaaaaaa",
+        )
+        assert getattr(spec, "worker_id", None) == "quant-analyst"
+    finally:
+        try:
+            hub_con.close()
+        except Exception:
+            pass

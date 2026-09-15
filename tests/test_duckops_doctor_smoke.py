@@ -54,10 +54,15 @@ def test_doctor_smoke_ok_when_health_responds(monkeypatch, tmp_path: Path) -> No
     env_file.write_text(
         "DUCKCLAW_ADMIN_API_KEY=real-key-abc\n"
         "DUCKCLAW_ADMIN_EMAIL=admin@test.local\n"
-        "DUCKCLAW_ADMIN_PASSWORD=secret-pass-9\n",
+        "DUCKCLAW_ADMIN_PASSWORD=secret-pass-9\n"
+        "REDIS_URL=redis://127.0.0.1:6379/0\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DUCKCLAW_ADMIN_API_KEY", "real-key-abc")
+    monkeypatch.setenv("DUCKCLAW_ADMIN_EMAIL", "admin@test.local")
+    monkeypatch.setenv("DUCKCLAW_ADMIN_PASSWORD", "secret-pass-9")
+    monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6379/0")
     monkeypatch.setattr(doctor, "_repo_root", lambda: tmp_path)
     monkeypatch.setattr(
         "duckops.sovereign.validate.redis_ping_url",
@@ -75,6 +80,16 @@ def test_doctor_smoke_ok_when_health_responds(monkeypatch, tmp_path: Path) -> No
         "duckclaw.gateway_port.resolve_gateway_port",
         lambda *_a, **_k: 8000,
     )
+    monkeypatch.setattr(
+        doctor,
+        "_check_db_writer",
+        lambda: (True, "ok (mocked)"),
+    )
+    monkeypatch.setattr(
+        doctor,
+        "sync_admin_console_user_from_env",
+        lambda *_a, **_k: (True, "ok (mocked)"),
+    )
 
     class _Resp:
         status = 200
@@ -89,6 +104,12 @@ def test_doctor_smoke_ok_when_health_responds(monkeypatch, tmp_path: Path) -> No
             return None
 
     monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: _Resp())
+    monkeypatch.setattr(
+        "duckops.admin_path_smoke.run_admin_path_smoke",
+        lambda **_kwargs: [
+            SimpleNamespace(name="Smoke admin path", ok=True, detail="ok (mocked)"),
+        ],
+    )
 
     result = runner.invoke(app, ["doctor", "--smoke", "-C", str(tmp_path)])
 

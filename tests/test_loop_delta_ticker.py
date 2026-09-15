@@ -411,33 +411,46 @@ def test_loop_on_off_routed_by_fly(mock_manifest: None, monkeypatch: pytest.Monk
     assert "iniciado" in self_msg.lower()
 
 
-def test_is_meditate_footer_turn_fly_command() -> None:
-    from core.chat_invoke_finalize import _is_meditate_footer_turn
+def _load_chat_invoke_finalize():
+    import sys
+    from pathlib import Path
 
-    assert _is_meditate_footer_turn(
+    gateway = str(Path("services/api-gateway").resolve())
+    if gateway not in sys.path:
+        sys.path.insert(0, gateway)
+    from core import chat_invoke_finalize
+
+    return chat_invoke_finalize
+
+
+def test_is_loop_footer_turn_fly_command() -> None:
+    mod = _load_chat_invoke_finalize()
+
+    assert mod._is_loop_footer_turn(
         user_incoming="/loop",
         message="",
         fly_cmd="/loop",
-        cmd_name="meditate",
+        cmd_name="loop",
     )
 
 
-def test_is_meditate_footer_turn_ciclo_label() -> None:
-    from core.chat_invoke_finalize import _is_meditate_footer_turn
-    from duckclaw.commands.loop import MEDITATE_SYSTEM_USER_LABEL
+def test_is_loop_footer_turn_ciclo_label() -> None:
+    from duckclaw.commands.loop import LOOP_SYSTEM_USER_LABEL
 
-    assert _is_meditate_footer_turn(
-        user_incoming=MEDITATE_SYSTEM_USER_LABEL,
+    mod = _load_chat_invoke_finalize()
+
+    assert mod._is_loop_footer_turn(
+        user_incoming=LOOP_SYSTEM_USER_LABEL,
         message="[SYSTEM_EVENT: Validación HITL pendiente]",
-        fly_cmd=MEDITATE_SYSTEM_USER_LABEL,
+        fly_cmd=LOOP_SYSTEM_USER_LABEL,
         cmd_name="",
     )
 
 
-def test_is_meditate_footer_turn_negative() -> None:
-    from core.chat_invoke_finalize import _is_meditate_footer_turn
+def test_is_loop_footer_turn_negative() -> None:
+    mod = _load_chat_invoke_finalize()
 
-    assert not _is_meditate_footer_turn(
+    assert not mod._is_loop_footer_turn(
         user_incoming="hola",
         message="¿cómo va el proyecto?",
         fly_cmd="hola",

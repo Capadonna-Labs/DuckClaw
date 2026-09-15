@@ -1,22 +1,22 @@
 from __future__ import annotations
 
 import importlib
-import inspect
 
 from duckclaw.graphs import on_the_fly_commands
 
 
-CANONICAL_MODULE = "duckclaw.commands.meditate"
-MEDITATE_FUNCTION_EXPORTS = (
-    "parse_meditate_delta_arg",
+CANONICAL_MODULE = "duckclaw.commands.loop"
+# Meditate is a deprecated shim over loop; on_the_fly still re-exports meditate aliases.
+ON_THE_FLY_MEDITATE_ALIASES = (
+    "parse_loop_delta_arg",
     "chat_id_from_meditate_delta_config_key",
-    "clear_meditate_schedule",
-    "get_meditate_schedule_status",
-    "apply_meditate_schedule",
+    "clear_loop_schedule",
+    "get_loop_schedule_status",
+    "apply_loop_schedule",
     "_format_meditate_cycle_summary",
-    "_publish_meditate_tick_heartbeat",
+    "_publish_loop_tick_heartbeat",
     "_resolve_meditate_vault_user_id",
-    "invoke_meditate_cycle_for_chat",
+    "invoke_loop_cycle_for_chat",
     "execute_meditate",
 )
 MEDITATE_CONSTANT_EXPORTS = (
@@ -30,21 +30,26 @@ MEDITATE_CONSTANT_EXPORTS = (
 
 
 def test_meditate_command_ownership_lives_outside_graphs() -> None:
-    meditate = importlib.import_module(CANONICAL_MODULE)
+    meditate = importlib.import_module("duckclaw.commands.meditate")
+    loop = importlib.import_module(CANONICAL_MODULE)
 
-    for name in MEDITATE_FUNCTION_EXPORTS:
+    assert meditate.execute_meditate is loop.execute_loop
+    assert meditate.parse_meditate_delta_arg is loop.parse_loop_delta_arg
+
+    for name in ON_THE_FLY_MEDITATE_ALIASES:
         exported = getattr(on_the_fly_commands, name)
-        assert exported.__module__ == CANONICAL_MODULE
-
-    source = inspect.getsource(meditate)
-    assert "duckclaw.graphs.on_the_fly_commands" not in source
-    assert "from duckclaw.graphs" not in source
+        assert exported.__module__ == CANONICAL_MODULE, name
 
 
 def test_on_the_fly_meditate_imports_remain_compatible() -> None:
-    meditate = importlib.import_module(CANONICAL_MODULE)
+    meditate = importlib.import_module("duckclaw.commands.meditate")
+    loop = importlib.import_module(CANONICAL_MODULE)
 
-    for name in MEDITATE_FUNCTION_EXPORTS:
-        assert getattr(on_the_fly_commands, name) is getattr(meditate, name)
+    assert getattr(on_the_fly_commands, "execute_meditate") is loop.execute_loop
+    assert getattr(on_the_fly_commands, "parse_loop_delta_arg") is loop.parse_loop_delta_arg
     for name in MEDITATE_CONSTANT_EXPORTS:
-        assert getattr(on_the_fly_commands, name) == getattr(meditate, name)
+        assert getattr(on_the_fly_commands, name) == getattr(loop, name)
+    # meditate shim is `import *` (public names); underscore aliases live on loop / on_the_fly.
+    assert meditate.execute_meditate is loop.execute_loop
+    assert meditate.MEDITATE_DELTA_MIN_SECONDS == loop.MEDITATE_DELTA_MIN_SECONDS
+    assert meditate.MEDITATE_DELTA_MAX_SECONDS == loop.MEDITATE_DELTA_MAX_SECONDS

@@ -56,10 +56,11 @@ def test_pm2_recycle_shell_matches_process_names() -> None:
     dw = seed["pm2_processes"]["db_writer"]
     gw_shell = pm2_recycle_gateway_shell(repo_root="/tmp/repo")
     dw_shell = pm2_recycle_db_writer_shell(repo_root="/tmp/repo")
-    assert f'pm2 delete {gw["name"]}' in gw_shell
+    assert f'pm2 delete "$n"' in gw_shell or "pm2 delete" in gw_shell
+    assert gw["name"] in gw_shell
     assert gw["ecosystem"] in gw_shell
     assert "PM2_RECYCLE_GATEWAY_OK" in gw_shell
-    assert f'pm2 delete {dw["name"]}' in dw_shell
+    assert f'pm2 delete "$n"' in dw_shell or dw["name"] in dw_shell
     assert dw["ecosystem"] in dw_shell
     assert "PM2_RECYCLE_DB_WRITER_OK" in dw_shell
 

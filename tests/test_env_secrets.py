@@ -33,10 +33,12 @@ def test_strip_secrets_from_env() -> None:
 def test_dotenv_override_replaces_stale_empty_openrouter_key(monkeypatch) -> None:
     """PM2 puede dejar OPENROUTER_API_KEY=''; .env debe ganar (DOTENV_OVERRIDE_KEYS)."""
     monkeypatch.setenv("OPENROUTER_API_KEY", "")
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     apply_dotenv_overrides_to_os_environ(
         {"OPENROUTER_API_KEY": "sk-or-from-dotenv", "DEEPSEEK_API_KEY": ""}
     )
     import os
 
     assert os.environ["OPENROUTER_API_KEY"] == "sk-or-from-dotenv"
-    assert os.environ["DEEPSEEK_API_KEY"] == ""
+    # Empty dotenv values are ignored (do not invent blank secrets in the environ).
+    assert "DEEPSEEK_API_KEY" not in os.environ

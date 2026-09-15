@@ -6,6 +6,8 @@ export const BFF_TIMEOUT_DEFAULT_WRITE_MS = 45_000;
 export const BFF_TIMEOUT_HEALTH_MS = 10_000;
 export const BFF_TIMEOUT_KNOWLEDGE_MUTATION_MS = 120_000;
 export const BFF_TIMEOUT_OPS_MS = 60_000;
+/** Post-turn LLM chips; gateway can be busy after a long worker turn. */
+export const BFF_TIMEOUT_CHAT_SUGGESTIONS_MS = 120_000;
 
 export function bffGatewayTimeoutMs(sub: string, method: string): number {
   const verb = method.toUpperCase();
@@ -19,6 +21,11 @@ export function bffGatewayTimeoutMs(sub: string, method: string): number {
   }
   if (path.startsWith('playground/config')) {
     return BFF_TIMEOUT_DEFAULT_GET_MS;
+  }
+  // Suggestion chips are a separate LLM call after the turn; 45s default
+  // write timeout aborts under load and the UI then wipes chips to [].
+  if (path === 'chat/suggestions' || path.startsWith('chat/suggestions/')) {
+    return BFF_TIMEOUT_CHAT_SUGGESTIONS_MS;
   }
   if (path.startsWith('knowledge/') && verb !== 'GET' && verb !== 'HEAD') {
     return BFF_TIMEOUT_KNOWLEDGE_MUTATION_MS;

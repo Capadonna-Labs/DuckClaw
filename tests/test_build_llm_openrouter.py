@@ -110,6 +110,25 @@ def test_normalize_openrouter_model_id_glm_label() -> None:
     assert normalize_openrouter_model_id("z-ai/glm-5.2") == "z-ai/glm-5.2"
 
 
+def test_openrouter_walkers_tolerate_magicmock() -> None:
+    """Regression: MagicMock.bound must not hang CI (infinite URL / header walk)."""
+    from unittest.mock import MagicMock
+
+    from duckclaw.integrations.llm_providers import (
+        _llm_openrouter_base_urls,
+        bind_tools_with_parallel_default,
+        ensure_openrouter_attribution_headers,
+        llm_targets_openrouter_endpoint,
+    )
+
+    mock_llm = MagicMock()
+    assert _llm_openrouter_base_urls(mock_llm) == []
+    assert llm_targets_openrouter_endpoint(mock_llm) is False
+    assert ensure_openrouter_attribution_headers(mock_llm) is mock_llm
+    bound = bind_tools_with_parallel_default(mock_llm, [])
+    assert bound is not None
+
+
 def test_build_openrouter_llm_accepts_glm_display_label(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
     llm = build_openrouter_llm("GLM 5.2")

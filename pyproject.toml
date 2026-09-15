@@ -53,14 +53,19 @@ duckclaw-mcp = { path = "packages/mcp/duckclaw", editable = true }
 [dependency-groups]
 dev = [
     "pytest>=7.0.0",
+    "pytest-timeout>=2.3.0",
     "httpx>=0.25.0",
     "pyinstaller>=6.0.0",
 ]
 
 [tool.pytest.ini_options]
 norecursedirs = [".git", ".venv", "deprecated", "tests/deprecated"]
+# Fail hung tests with a traceback instead of letting the GitHub runner die.
+timeout = 120
+timeout_method = "thread"
 markers = [
     "integration: marks tests that require Redis and full pipeline (deselect with '-m \"not integration\"')",
     "slow: tests that may take several seconds (network, DuckDB extensions)",
     "requires_docker: needs Docker daemon; optional duckclaw/sandbox:latest for full mercenary smoke",
+    "smoke: lightweight compile/import smoke (must stay fast; no network)",
 ]

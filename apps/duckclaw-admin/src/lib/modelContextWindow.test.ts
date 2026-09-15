@@ -17,6 +17,12 @@ describe('inferModelContextWindow', () => {
     expect(inferModelContextWindow('deepseek/deepseek-chat')).toBe(128_000);
     expect(inferModelContextWindow('deepseek-reasoner')).toBe(128_000);
   });
+
+  it('uses 1M for GLM-5.2 (Z.ai / OpenRouter)', () => {
+    expect(inferModelContextWindow('z-ai/glm-5.2')).toBe(1_000_000);
+    expect(inferModelContextWindow('glm-5.2')).toBe(1_000_000);
+    expect(inferModelContextWindow('glm-5.2[1m]')).toBe(1_000_000);
+  });
 });
 
 describe('formatCompactTokenCount', () => {

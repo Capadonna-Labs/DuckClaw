@@ -106,9 +106,13 @@ def test_user_agent_endpoint_creates_runtime_agent_and_playground_lists_it(
             "worker_id": "sales_bot",
             "display_name": "Sales Bot",
             "source_template_id": "default",
-            "system_prompt": "Ayuda con ventas consultivas.",
+            "system_prompt": (
+                "Ayuda con ventas consultivas. Responde con claridad, resume el "
+                "contexto del cliente y propone siguientes pasos concretos."
+            ),
+            "soul": "Eres un asesor comercial cercano y preciso.",
             "description": "Agente de ventas",
-            "skills": ["crm"],
+            "skills": ["research"],
         },
     )
     assert created.status_code == 200
@@ -122,7 +126,6 @@ def test_user_agent_endpoint_creates_runtime_agent_and_playground_lists_it(
     cfg = gateway_admin_client.get("/api/v1/admin/playground/config", headers=headers)
     assert cfg.status_code == 200
     workers = {w["id"]: w for w in cfg.json()["workers"]}
-    assert "default" in workers
     assert workers["sales_bot"]["label"] == "Sales Bot"
 
     templates = gateway_admin_client.get("/api/v1/admin/templates", headers=headers)

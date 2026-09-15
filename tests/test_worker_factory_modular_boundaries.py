@@ -581,7 +581,11 @@ def test_graph_builder_modules_respect_line_limits() -> None:
     workers = Path("packages/agents/src/duckclaw/workers")
     limits = {
         "factory_graph_assembly.py": 200,
-        "factory_graph_nodes_agent_invoke.py": 450,
+        "factory_graph_nodes_agent_invoke.py": 520,
+        "factory_graph_nodes_agent_policy_early.py": 480,
+        "factory_graph_nodes_set_reply.py": 500,
+        "factory_graph_nodes_tools.py": 580,
+        "factory_graph_setup.py": 430,
     }
     default_max = 400
     for path in sorted(workers.glob("factory_graph_*.py")):

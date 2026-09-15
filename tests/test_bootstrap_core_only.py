@@ -44,7 +44,8 @@ def test_bootstrap_core_schema_creates_tables_no_domain_schemas(tmp_path: Path, 
 
         from duckclaw.bootstrap_core import core_unexpected_schemas_present
 
-        assert core_unexpected_schemas_present(con, ("quant_core", "finance_worker", "harness_core")) == []
+        # quant_core may exist after migrations (IBKR); finance/harness must not.
+        assert core_unexpected_schemas_present(con, ("finance_worker", "harness_core")) == []
     finally:
         con.close()
 
@@ -82,7 +83,7 @@ def test_bootstrap_dbs_core_only_cli(tmp_path: Path, monkeypatch) -> None:
     try:
         from duckclaw.bootstrap_core import core_unexpected_schemas_present
 
-        assert core_unexpected_schemas_present(con, ("quant_core", "finance_worker")) == []
+        assert core_unexpected_schemas_present(con, ("finance_worker",)) == []
     finally:
         con.close()
         db_path.unlink(missing_ok=True)

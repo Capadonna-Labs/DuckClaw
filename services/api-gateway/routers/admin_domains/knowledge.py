@@ -472,8 +472,12 @@ async def upload_knowledge_files(
 
     try:
         source_id = f"ksrc_{uuid.uuid4().hex[:16]}"
+        # Keep full relative paths in metadata; display name uses basenames.
         upload_labels = [name for name, _data in file_payloads]
-        resolved_display = _upload_display_name(display_name, upload_labels)
+        display_labels = [
+            Path(name.replace("\\", "/")).name.strip() or name for name in upload_labels
+        ]
+        resolved_display = _upload_display_name(display_name, display_labels)
         staging_dir = str(
             stage_browser_upload(job_id=f"kupload_{source_id}", files=file_payloads)
         )

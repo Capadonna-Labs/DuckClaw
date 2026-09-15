@@ -4,7 +4,6 @@ import importlib
 import inspect
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 from duckclaw.graphs import on_the_fly_commands
@@ -66,33 +65,37 @@ class _ReadOnlyTeamDb:
         self.resumed += 1
 
 
+def _patch_typed_write_enqueue(monkeypatch, queued, *, with_meta: bool = False) -> None:
+    """Patch fire-and-forget enqueue used by chat_state / team_templates."""
+
+    def fake_enqueue_write_and_resolve(command, *, db_path: str, user_id: str = "default"):
+        assert isinstance(command, UpsertAgentConfigEntriesCommand)
+        if with_meta:
+            queued.append((command, db_path, user_id))
+        else:
+            queued.append(command)
+        return True, ""
+
+    monkeypatch.setattr(
+        "duckclaw.workers.discovery.list_workers_for_fly",
+        lambda *_args, **_kwargs: ["alpha", "beta"],
+    )
+    monkeypatch.setattr(
+        "duckclaw.commands.chat_state.enqueue_write_and_resolve",
+        fake_enqueue_write_and_resolve,
+    )
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.enqueue_write_and_resolve",
+        fake_enqueue_write_and_resolve,
+    )
+
+
 def test_workers_read_only_set_queues_typed_chat_team_command(monkeypatch, tmp_path: Path) -> None:
     from duckclaw.commands import team_templates
     from duckclaw.commands.chat_state import _chat_key
 
     queued: list[tuple[UpsertAgentConfigEntriesCommand, str, str]] = []
-
-    def fake_enqueue_typed_command(
-        command: Any,
-        *,
-        db_path: str,
-        user_id: str = "default",
-        queue_name: str = "duckdb_write_queue",
-    ) -> str:
-        assert queue_name == "duckdb_write_queue"
-        assert isinstance(command, UpsertAgentConfigEntriesCommand)
-        queued.append((command, db_path, user_id))
-        return command.task_id
-
-    monkeypatch.setattr("duckclaw.workers.factory.list_workers", lambda *_args, **_kwargs: ["alpha", "beta"])
-    monkeypatch.setattr(
-        "duckclaw.commands.chat_state.db_write_queue.enqueue_typed_command",
-        fake_enqueue_typed_command,
-    )
-    monkeypatch.setattr(
-        "duckclaw.commands.chat_state.db_write_queue.poll_task_status_sync",
-        lambda _task_id, timeout_sec=30.0: SimpleNamespace(status="success", detail=""),
-    )
+    _patch_typed_write_enqueue(monkeypatch, queued, with_meta=True)
 
     db_path = tmp_path / "vault.duckdb"
     db = _ReadOnlyTeamDb(db_path)
@@ -124,28 +127,7 @@ def test_workers_read_only_admin_sync_queues_typed_tenant_team_command(
     from duckclaw.commands import team_templates
 
     queued: list[UpsertAgentConfigEntriesCommand] = []
-
-    def fake_enqueue_typed_command(
-        command: Any,
-        *,
-        db_path: str,
-        user_id: str = "default",
-        queue_name: str = "duckdb_write_queue",
-    ) -> str:
-        _ = db_path, user_id, queue_name
-        assert isinstance(command, UpsertAgentConfigEntriesCommand)
-        queued.append(command)
-        return command.task_id
-
-    monkeypatch.setattr("duckclaw.workers.factory.list_workers", lambda *_args, **_kwargs: ["alpha", "beta"])
-    monkeypatch.setattr(
-        "duckclaw.commands.chat_state.db_write_queue.enqueue_typed_command",
-        fake_enqueue_typed_command,
-    )
-    monkeypatch.setattr(
-        "duckclaw.commands.chat_state.db_write_queue.poll_task_status_sync",
-        lambda _task_id, timeout_sec=30.0: SimpleNamespace(status="success", detail=""),
-    )
+    _patch_typed_write_enqueue(monkeypatch, queued)
 
     original_checker = getattr(team_templates, "_team_admin_checker")
     team_templates.configure_team_template_admin_checker(
@@ -177,28 +159,7 @@ def test_workers_read_only_add_and_rm_queue_typed_chat_team_commands(
     from duckclaw.commands.chat_state import _chat_key
 
     queued: list[UpsertAgentConfigEntriesCommand] = []
-
-    def fake_enqueue_typed_command(
-        command: Any,
-        *,
-        db_path: str,
-        user_id: str = "default",
-        queue_name: str = "duckdb_write_queue",
-    ) -> str:
-        _ = db_path, user_id, queue_name
-        assert isinstance(command, UpsertAgentConfigEntriesCommand)
-        queued.append(command)
-        return command.task_id
-
-    monkeypatch.setattr("duckclaw.workers.factory.list_workers", lambda *_args, **_kwargs: ["alpha", "beta"])
-    monkeypatch.setattr(
-        "duckclaw.commands.chat_state.db_write_queue.enqueue_typed_command",
-        fake_enqueue_typed_command,
-    )
-    monkeypatch.setattr(
-        "duckclaw.commands.chat_state.db_write_queue.poll_task_status_sync",
-        lambda _task_id, timeout_sec=30.0: SimpleNamespace(status="success", detail=""),
-    )
+    _patch_typed_write_enqueue(monkeypatch, queued)
 
     add_out = team_templates.execute_team(
         _ReadOnlyTeamDb(tmp_path / "add.duckdb", initial_team=["alpha"]),

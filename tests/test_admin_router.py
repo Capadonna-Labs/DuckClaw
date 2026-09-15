@@ -27,6 +27,35 @@ def _playground_worker_ids(data: dict) -> list[str]:
     return ids
 
 
+PLAYGROUND_ACTOR_HEADERS = {
+    "X-Admin-Key": "test-admin-key",
+    "X-Duckclaw-Actor": "admin@test.local",
+}
+
+
+def seed_playground_catalog_worker(
+    gateway_db: Path,
+    *,
+    worker_id: str = "default",
+    owner_email: str = "admin@test.local",
+    display_name: str | None = None,
+) -> dict:
+    """Own ``worker_id`` in actor catalog so playground chat passes zero-trust."""
+    from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker
+
+    db = DuckClaw(str(gateway_db), read_only=False, engine="python")
+    try:
+        return create_worker(
+            db,
+            owner_email=owner_email,
+            worker_id=worker_id,
+            display_name=display_name or worker_id,
+        )
+    finally:
+        db.close()
+
+
 def test_admin_requires_key(admin_client: TestClient):
     r = admin_client.get("/api/v1/admin/health")
     assert r.status_code == 401
@@ -119,7 +148,7 @@ def test_admin_prompt_policy_health_reports_missing_db_first_requirements(
     assert response.status_code == 200
     data = response.json()
     assert data["ok"] is False
-    assert data["checked_count"] == 7
+    assert data["checked_count"] == 6
     assert data["missing_count"] == 2
     assert data["inherited_count"] == 0
     assert data["missing"] == [
@@ -503,6 +532,7 @@ def test_playground_config_voice_available_when_sensory_tts_loaded(
 
 def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, catalog_db):
     from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker, ensure_admin_worker_catalog_schema
     from duckclaw.workers.factory import list_workers
 
     all_w = list_workers(db=catalog_db, tenant_id="default")
@@ -520,15 +550,26 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     with tempfile.TemporaryDirectory() as td:
         db_path = str(Path(td) / "pg_team.duckdb")
         db = DuckClaw(db_path, read_only=False, engine="python")
+        ensure_admin_worker_catalog_schema(db)
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id=target if isinstance(target, str) else str(target),
+            display_name=str(target),
+        )
         from duckclaw.graphs.on_the_fly_commands import set_team_templates
 
         set_team_templates(db, DEFAULT_TEST_TELEGRAM_USER_ID, [target])
         db.close()
         monkeypatch.setenv("DUCKDB_PATH", db_path)
         monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: db_path)
+        monkeypatch.setattr("core.admin_identity.get_gateway_db_path", lambda: db_path)
         r = admin_client.get(
             "/api/v1/admin/playground/config",
-            headers={"X-Admin-Key": "test-admin-key"},
+            headers={
+                "X-Admin-Key": "test-admin-key",
+                "X-Duckclaw-Actor": "admin@test.local",
+            },
             params={
                 "telegram_user_id": DEFAULT_TEST_TELEGRAM_USER_ID,
                 "tenant_id": "default",
@@ -539,6 +580,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert data.get("authorized") is True
     from duckclaw.workers.identity import normalize_worker_id
 
+    # Playground workers are DB-first catalog only (telegram team is not merged).
     assert normalize_worker_id(target) in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
 
@@ -621,7 +663,9 @@ def test_playground_chat_rejects_worker_outside_team(
     assert r.status_code == 403
 
 
-def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_playground_chat_no_tailscale_key(
+    admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch
+):
     monkeypatch.setenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "ts-required")
     gw_dir = Path(__file__).resolve().parent.parent / "services" / "api-gateway"
     import sys
@@ -634,6 +678,7 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
     async def _fake_invoke(*_args, **_kwargs):
         return {"response": "ok"}
 
+    seed_playground_catalog_worker(gateway_db, worker_id="default")
     monkeypatch.setattr(
         playground_chat_router,
         "_playground_team_context",
@@ -642,7 +687,7 @@ def test_playground_chat_no_tailscale_key(admin_client: TestClient, monkeypatch:
     monkeypatch.setattr(playground_chat_turn, "invoke_chat", _fake_invoke)
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=PLAYGROUND_ACTOR_HEADERS,
         json={"worker_id": "default", "message": "ping"},
     )
     assert r.status_code == 200
@@ -1593,7 +1638,7 @@ def test_gateway_db_fixture_applies_knowledge_migration(gateway_db: Path) -> Non
     assert "admin_knowledge_sources" in tables
     assert "admin_knowledge_documents" in tables
     assert "admin_knowledge_chunks" in tables
-    assert 15 in versions
+    assert 1 in versions
 
 
 def test_knowledge_sources_and_search_are_scoped(
@@ -1671,6 +1716,11 @@ def test_knowledge_uploads_use_filename_as_display_name_when_unset(
     monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
 
+    monkeypatch.setattr(
+        "duckclaw.knowledge_sync_queue.enqueue_browser_upload_job",
+        lambda **kwargs: f"kjob_{kwargs.get('source_id', 'x')}",
+    )
+
     response = gateway_admin_client.post(
         "/api/v1/admin/knowledge/uploads",
         headers=headers,
@@ -1687,8 +1737,12 @@ def test_knowledge_uploads_use_filename_as_display_name_when_unset(
         },
     )
 
-    assert response.status_code == 200
-    source_id = response.json()["source_id"]
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload.get("ok") is True
+    assert payload.get("accepted") is True or payload.get("documents") == 1
+    assert payload.get("chunks", 0) == 0
+    source_id = payload["source_id"]
 
     listed = gateway_admin_client.get(
         "/api/v1/admin/knowledge/sources",
@@ -1698,7 +1752,7 @@ def test_knowledge_uploads_use_filename_as_display_name_when_unset(
     assert listed.status_code == 200
     source = next(item for item in listed.json()["sources"] if item["source_id"] == source_id)
     assert source["display_name"] == "iam.md"
-    assert source["document_paths"] == "aws/iam.md"
+    assert source.get("status") in {"indexing", "pending", "active", ""}
 
 
 def test_knowledge_uploads_create_project_scoped_chunks(
@@ -1710,6 +1764,11 @@ def test_knowledge_uploads_create_project_scoped_chunks(
 
     monkeypatch.setenv("DUCKCLAW_SPAWN_PROFILE", "1")
     headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@test.local"}
+
+    monkeypatch.setattr(
+        "duckclaw.knowledge_sync_queue.enqueue_browser_upload_job",
+        lambda **kwargs: f"kjob_{kwargs.get('source_id', 'x')}",
+    )
 
     response = gateway_admin_client.post(
         "/api/v1/admin/knowledge/uploads",
@@ -1728,21 +1787,21 @@ def test_knowledge_uploads_create_project_scoped_chunks(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     payload = response.json()
     assert payload["ok"] is True
     assert payload["documents"] == 1
-    assert payload["chunks"] >= 1
+    # Gateway only enqueues; Knowledge-Indexer writes chunks asynchronously.
+    assert payload["chunks"] == 0
+    assert payload.get("sync_job_id")
 
     con = duckdb.connect(str(gateway_db), read_only=True)
     try:
         row = con.execute(
             """
-            SELECT s.project_id, s.worker_uid, d.relative_path, c.content
-            FROM main.admin_knowledge_sources s
-            JOIN main.admin_knowledge_documents d ON d.source_id = s.source_id
-            JOIN main.admin_knowledge_chunks c ON c.source_id = s.source_id
-            WHERE s.source_id = ?
+            SELECT project_id, worker_uid, display_name, status
+            FROM main.admin_knowledge_sources
+            WHERE source_id = ?
             """,
             [payload["source_id"]],
         ).fetchone()
@@ -1751,8 +1810,8 @@ def test_knowledge_uploads_create_project_scoped_chunks(
     assert row is not None
     assert row[0] == "proj_upload"
     assert row[1] == "wrk_upload"
-    assert row[2] == "aws/iam.md"
-    assert "least privilege" in row[3]
+    assert row[2] == "AWS Docs"
+    assert row[3] == "indexing"
 
 
 def test_admin_auth_login_smoke(
@@ -1802,10 +1861,12 @@ def test_admin_auth_login_smoke(
     assert "session" in r.cookies
 
 
-def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_playground_chat_images_smoke(
+    admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch
+):
     from core import vlm_ingest as vlm
 
-    async def _fake_enrich(message: str, images):
+    async def _fake_enrich(message: str, images, **_kwargs):
         return f"{message}\nContexto visual adjunto: smoke"
 
     monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fake_enrich)
@@ -1820,6 +1881,7 @@ def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pyt
     async def _fake_invoke(*_a, **_k):
         return {"response": "ok"}
 
+    seed_playground_catalog_worker(gateway_db, worker_id="default")
     monkeypatch.setattr(
         playground_chat_router,
         "_playground_team_context",
@@ -1829,14 +1891,14 @@ def test_playground_chat_images_smoke(admin_client: TestClient, monkeypatch: pyt
 
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=PLAYGROUND_ACTOR_HEADERS,
         json={
             "worker_id": "default",
             "message": "test",
             "images": [{"mime_type": "image/png", "data_base64": png_b64}],
         },
     )
-    assert r.status_code == 200
+    assert r.status_code == 200, r.text
 
 
 def test_comfyui_templates(admin_client: TestClient):

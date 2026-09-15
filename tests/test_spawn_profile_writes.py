@@ -12,6 +12,7 @@ import pytest
 def test_spawn_profile_helpers(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
     monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+    monkeypatch.delenv("LITE_MODE", raising=False)
 
     from duckclaw.spawn_profile import is_spawn_profile, spawn_inline_writes_enabled
 

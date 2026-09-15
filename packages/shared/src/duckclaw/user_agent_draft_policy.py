@@ -109,7 +109,11 @@ def apply_user_agent_draft_policy(db: Any, *, force: bool = False) -> bool:
         LIMIT 1
         """,
         [policy_type, policy_name],
-    ).fetchone()
+    )
+    if hasattr(row, "fetchone"):
+        row = row.fetchone()
+    elif isinstance(row, list):
+        row = row[0] if row else None
     existing_checksum = ""
     if row:
         existing_checksum = str(row[0] if not isinstance(row, dict) else row.get("checksum") or "")
@@ -124,7 +128,11 @@ def apply_user_agent_draft_policy(db: Any, *, force: bool = False) -> bool:
         WHERE policy_type = ? AND policy_name = ?
         """,
         [policy_type, policy_name],
-    ).fetchone()
+    )
+    if hasattr(version_row, "fetchone"):
+        version_row = version_row.fetchone()
+    elif isinstance(version_row, list):
+        version_row = version_row[0] if version_row else None
     next_version = int(version_row[0] if version_row else 0) + 1
     policy_id = f"ppol_{policy_name}_v{next_version}"
 

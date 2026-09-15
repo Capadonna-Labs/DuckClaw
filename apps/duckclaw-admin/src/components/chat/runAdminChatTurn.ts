@@ -562,8 +562,7 @@ try {
         }
       })
       .catch(() => {
-        setSuggestions([]);
-        setRecommendedSuggestionIndex?.(0);
+        // Keep any chips already shown; a BFF/gateway timeout must not erase them.
         if (suggestionsExchangeKeyRef) suggestionsExchangeKeyRef.current = '';
       });
   }

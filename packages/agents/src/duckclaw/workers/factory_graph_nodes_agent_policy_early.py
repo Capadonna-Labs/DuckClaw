@@ -32,13 +32,13 @@ from duckclaw.workers.tool_binding import tool_called_since as _tool_called_sinc
 from duckclaw.workers.tool_invocation_policy import (
     decide_current_time_tool_invocation as _decide_current_time_tool_invocation,
     decide_db_first_tool_invocation as _decide_db_first_tool_invocation,
-    decide_loop_homeostasis_tool_invocation as _decide_loop_homeostasis_tool_invocation,
     decide_update_system_prompt_invocation as _decide_update_system_prompt_invocation,
 )
 from duckclaw.workers.tool_surface_policy import tool_surface_intent_text
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from duckclaw.workers.factory_graph_nodes_agent_policy_early_context import (
+    apply_terminal_force_tool_overrides,
     bind_agent_turn_tool_context,
     maybe_force_get_current_time_orchestration,
 )
@@ -408,8 +408,6 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                             )
 
                 from duckclaw.workers.tool_orchestration import (
-                    find_gmail_mcp_search_tool,
-                    incoming_has_email_intent,
                     _last_human_index,
                     _tools_since,
                 )
@@ -433,52 +431,32 @@ def make_agent_policy_early(ctx: WorkerGraphContext):
                     force_reddit = False
                     force_visual = False
 
-                # Email/Gmail wins over db-first / orch read_sql noise on EVERY hop.
-                # Hop 1: force Gmail search. Hop 2+: still clear read_sql — otherwise
-                # orch re-forces SELECT now() AS ahora and set_reply falls back to
-                # "1 registro (ahora…)." after a successful get_message.
-                _email_intent = incoming_has_email_intent(
-                    _orch_incoming or _intent_incoming or incoming
-                )
-                _gmail_search_tool = (
-                    find_gmail_mcp_search_tool(tools_by_name) if _email_intent else None
-                )
-                if (
-                    _gmail_search_tool
-                    and not telegram_context_summarize_directive
-                    and not summarize_stored_directive
-                ):
-                    force_schema = False
-                    force_admin_sql = False
-                    force_read_sql = False
-                    force_tavily = False
-                    force_reddit = False
-                    force_visual = False
-                    if force_orch_tool in ("read_sql", "admin_sql", "inspect_schema"):
-                        force_orch_tool = None
-                    if (
-                        not already_has_tool_result
-                        and _worker_use_heuristic_first_tool(spec)
-                    ):
-                        force_orch_tool = _gmail_search_tool
-
-                # /loop SYSTEM_EVENT: evaluate_homeostasis wins over orch/db-first
-                # read_sql on hop 1 when the worker exposes the sensor pack.
-                _loop_homeo = _decide_loop_homeostasis_tool_invocation(
+                (
+                    force_orch_tool,
+                    force_schema,
+                    force_admin_sql,
+                    force_read_sql,
+                    force_tavily,
+                    force_reddit,
+                    force_visual,
+                ) = apply_terminal_force_tool_overrides(
                     incoming=incoming,
-                    available_tools=tools_by_name,
+                    orch_incoming=_orch_incoming,
+                    intent_incoming=_intent_incoming,
+                    tools_by_name=tools_by_name,
                     called_tools_since_last_human=_usp_ran,
                     already_has_tool_result=already_has_tool_result,
-                    summarize_directive=telegram_context_summarize_directive,
+                    telegram_context_summarize_directive=telegram_context_summarize_directive,
+                    summarize_stored_directive=summarize_stored_directive,
+                    use_heuristic_first_tool=_worker_use_heuristic_first_tool(spec),
+                    force_orch_tool=force_orch_tool,
+                    force_schema=force_schema,
+                    force_admin_sql=force_admin_sql,
+                    force_read_sql=force_read_sql,
+                    force_tavily=force_tavily,
+                    force_reddit=force_reddit,
+                    force_visual=force_visual,
                 )
-                if _loop_homeo.should_force and _loop_homeo.tool_name:
-                    force_orch_tool = _loop_homeo.tool_name
-                    force_schema = False
-                    force_admin_sql = False
-                    force_read_sql = False
-                    force_tavily = False
-                    force_reddit = False
-                    force_visual = False
 
                 ctx.agent_turn = {'_intent_incoming': _intent_incoming, '_orch': _orch, '_orch_forced': _orch_forced, '_reddit_resolved_comments_url': _reddit_resolved_comments_url, '_reddit_share_mcp_exhausted': _reddit_share_mcp_exhausted, '_visual_tool_already_ok': _visual_tool_already_ok, '_wl': _wl, 'already_has_tool_result': already_has_tool_result, 'force_admin_sql': force_admin_sql, 'force_orch_tool': force_orch_tool, 'force_read_sql': force_read_sql, 'force_reddit': force_reddit, 'force_schema': force_schema, 'force_tavily': force_tavily, 'force_visual': force_visual, 'incoming': incoming, 'incoming_for_reddit': incoming_for_reddit, 'is_latest_game': is_latest_game, 'is_schema': is_schema, 'is_table_content': is_table_content, 'reddit_search_tool_count': reddit_search_tool_count, 'state': state, 'summarize_stored_directive': summarize_stored_directive, 'telegram_context_summarize_directive': telegram_context_summarize_directive}
                 return None

@@ -247,6 +247,11 @@ def match_intent(incoming: str, orch: ToolOrchestration) -> str | None:
     text = (incoming or "").strip()
     if not text or "[system_directive:" in text.lower():
         return None
+    # /loop and proactive-review ticks must not match user intent patterns
+    # (e.g. "estado"/"consulta" → force read_sql) and steal hop 1 from
+    # evaluate_homeostasis.
+    if text.lower().startswith("[system_event:"):
+        return None
     for iid, idef in orch.intents.items():
         for pat in idef.patterns:
             if pat.search(text):

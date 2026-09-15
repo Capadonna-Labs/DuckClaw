@@ -328,3 +328,26 @@ def test_dashboard_html_intent_forces_invoke_worker() -> None:
     orch = parse_tool_orchestration(spec)
     assert orch is not None
     assert match_intent("Generá y publicá un dashboard HTML con métricas", orch) == "dashboard_html"
+
+
+def test_match_intent_skips_loop_system_event() -> None:
+    from duckclaw.workers.tool_orchestration import match_intent, parse_tool_orchestration
+
+    spec = SimpleNamespace(
+        tool_orchestration_config={
+            "intents": {
+                "ledger_status": {
+                    "patterns": ["(?i)estado|consulta|metas"],
+                    "force_first_tool": "read_sql",
+                }
+            }
+        }
+    )
+    orch = parse_tool_orchestration(spec)
+    assert orch is not None
+    assert match_intent("consulta el estado de las metas", orch) == "ledger_status"
+    loop_msg = (
+        "[SYSTEM_EVENT: Ciclo de auto-mejora programado /loop. Metas (/goals): SL. "
+        "Preferí evaluate_homeostasis; consulta desviaciones.]"
+    )
+    assert match_intent(loop_msg, orch) is None

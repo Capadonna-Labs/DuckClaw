@@ -187,7 +187,7 @@ def test_email_policy_clears_read_sql_on_later_hops() -> None:
         / "src"
         / "duckclaw"
         / "workers"
-        / "factory_graph_nodes_agent_policy_early.py"
+        / "factory_graph_nodes_agent_policy_early_context.py"
     ).read_text(encoding="utf-8")
     assert "Email/Gmail wins over db-first / orch read_sql noise on EVERY hop" in text
     # The gate that only cleared SQL on hop 1 must not guard the whole email block.

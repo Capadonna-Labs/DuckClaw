@@ -5,6 +5,7 @@ from pathlib import Path
 
 
 GATEWAY_ROOT = Path("services/api-gateway")
+APP_FACTORY = GATEWAY_ROOT / "gateway_app_factory.py"
 
 
 def _py_files() -> list[Path]:
@@ -27,7 +28,10 @@ def _fly_command_set(source: str, name: str) -> set[str]:
 
 
 def test_gateway_structured_writes_have_explicit_read_write_allowlist() -> None:
-    allowed: set[tuple[str, str]] = set()
+    allowed: set[tuple[str, str]] = {
+        ("services/api-gateway/routers/admin_domains/agent_spawn.py", "import_spawn_package"),
+        ("services/api-gateway/routers/admin_domains/agent_spawn.py", "patch_a2a_discoverable"),
+    }
     found: set[tuple[str, str]] = set()
     for path in _py_files():
         source = path.read_text(encoding="utf-8")
@@ -136,18 +140,22 @@ def test_legacy_raw_query_enqueue_has_audited_compat_comment() -> None:
 
 def test_gateway_main_no_longer_owns_legacy_raw_query_enqueue() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
 
     assert "async def enqueue_write(" not in main
     assert "DB-first compat allowlist: /api/v1/db/write" not in main
-    assert "db_write_compat_router" in main
+    assert "db_write_compat_router" in factory
 
 
 def test_gateway_main_delegates_lifespan_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
     lifespan_owner = (GATEWAY_ROOT / "core" / "lifespan.py").read_text(encoding="utf-8")
 
-    assert "from core.lifespan import lifespan" in main
+    assert "from gateway_app_factory import app" in main
+    assert "from core.lifespan import lifespan" in factory
     assert "async def lifespan" not in main
+    assert "async def lifespan" not in factory
     assert "assert_gateway_startup_ready" not in main
     assert "async def lifespan" in lifespan_owner
     assert "assert_gateway_startup_ready" in lifespan_owner
@@ -155,10 +163,11 @@ def test_gateway_main_delegates_lifespan_to_core_module() -> None:
 
 def test_gateway_main_delegates_health_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
     health_owner = (GATEWAY_ROOT / "core" / "health.py").read_text(encoding="utf-8")
 
-    assert "from core.health import router as health_router" in main
-    assert "app.include_router(health_router)" in main
+    assert "from core.health import router as health_router" in factory
+    assert "app.include_router(health_router)" in factory
     assert "async def root()" not in main
     assert "async def health()" not in main
     assert "async def system_health()" not in main
@@ -169,10 +178,11 @@ def test_gateway_main_delegates_health_to_core_module() -> None:
 
 def test_gateway_main_delegates_homeostasis_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
     homeostasis_owner = (GATEWAY_ROOT / "core" / "homeostasis.py").read_text(encoding="utf-8")
 
-    assert "from core.homeostasis import router as homeostasis_router" in main
-    assert "app.include_router(homeostasis_router)" in main
+    assert "from core.homeostasis import router as homeostasis_router" in factory
+    assert "app.include_router(homeostasis_router)" in factory
     assert "async def homeostasis_status" not in main
     assert "async def homeostasis_ask_task" not in main
     assert "class AskTaskBody" not in main
@@ -182,10 +192,11 @@ def test_gateway_main_delegates_homeostasis_to_core_module() -> None:
 
 def test_gateway_main_delegates_middleware_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
     middleware_owner = (GATEWAY_ROOT / "core" / "middleware.py").read_text(encoding="utf-8")
 
-    assert "from core.middleware import register_gateway_middleware" in main
-    assert "register_gateway_middleware(app)" in main
+    assert "from core.middleware import register_gateway_middleware" in factory
+    assert "register_gateway_middleware(app)" in factory
     assert "async def observability_context_middleware" not in main
     assert "async def tailscale_auth_middleware" not in main
     assert "async def telegram_http_ingress_probe_middleware" not in main
@@ -195,10 +206,11 @@ def test_gateway_main_delegates_middleware_to_core_module() -> None:
 
 def test_gateway_main_delegates_agent_routes_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
     agent_owner = (GATEWAY_ROOT / "core" / "agent_routes.py").read_text(encoding="utf-8")
 
-    assert "from core.agent_routes import effective_tenant_id, router as agent_routes_router" in main
-    assert "app.include_router(agent_routes_router)" in main
+    assert "from core.agent_routes import effective_tenant_id, router as agent_routes_router" in factory
+    assert "app.include_router(agent_routes_router)" in factory
     assert "async def agent_workers" not in main
     assert "async def agent_history" not in main
     assert '@router.get("/api/v1/agent/workers")' in agent_owner
@@ -219,9 +231,10 @@ def test_gateway_main_delegates_chat_locks_to_core_module() -> None:
 
 def test_gateway_main_delegates_telegram_delivery_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
     delivery_owner = (GATEWAY_ROOT / "core" / "telegram_delivery.py").read_text(encoding="utf-8")
 
-    assert "from core.telegram_delivery import" in main
+    assert "from core.telegram_delivery import" in factory
     assert "def _outbound_deliver_chat_text_sync" not in main
     assert "def _deliver_outbound_by_channel" not in main
     assert "def outbound_deliver_chat_text_sync" in delivery_owner
@@ -230,10 +243,11 @@ def test_gateway_main_delegates_telegram_delivery_to_core_module() -> None:
 
 def test_gateway_main_delegates_db_read_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
     db_read_owner = (GATEWAY_ROOT / "core" / "db_read_route.py").read_text(encoding="utf-8")
 
-    assert "from core.db_read_route import router as db_read_router" in main
-    assert "app.include_router(db_read_router)" in main
+    assert "from core.db_read_route import router as db_read_router" in factory
+    assert "app.include_router(db_read_router)" in factory
     assert "class ReadRequest" not in main
     assert "async def db_read" not in main
     assert "def resolve_db_path_for_vault" not in main
@@ -242,14 +256,15 @@ def test_gateway_main_delegates_db_read_to_core_module() -> None:
 
 def test_gateway_main_delegates_agent_chat_to_core_module() -> None:
     main = (GATEWAY_ROOT / "main.py").read_text(encoding="utf-8")
+    factory = APP_FACTORY.read_text(encoding="utf-8")
     chat_owner = (GATEWAY_ROOT / "core" / "agent_chat.py").read_text(encoding="utf-8")
     routes_owner = (GATEWAY_ROOT / "core" / "chat_http_routes.py").read_text(encoding="utf-8")
     auth_owner = (GATEWAY_ROOT / "core" / "chat_auth.py").read_text(encoding="utf-8")
     format_owner = (GATEWAY_ROOT / "core" / "chat_reply_format.py").read_text(encoding="utf-8")
 
-    assert "from core.agent_chat import invoke_chat, resolve_chat_session_id, router as agent_chat_router" in main
-    assert "app.include_router(agent_chat_router)" in main
-    assert "invoke_agent_chat=invoke_chat" in main
+    assert "from core.agent_chat import invoke_chat, resolve_chat_session_id, router as agent_chat_router" in factory
+    assert "app.include_router(agent_chat_router)" in factory
+    assert "invoke_agent_chat=invoke_chat" in factory
     assert "async def agent_chat" not in main
     assert "async def _invoke_chat" not in main
     assert "async def invoke_chat" in chat_owner

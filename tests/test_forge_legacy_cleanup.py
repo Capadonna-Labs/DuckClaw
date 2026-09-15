@@ -137,8 +137,11 @@ DB_FIRST_DDL_ALLOWLIST_REASONS = {
     "services/api-gateway/routers/admin_domains/runtime_config.py": "authorized admin runtime config (mutations via typed commands)",
     "services/db-writer/context_injection_handler.py": "DB-writer context command schema",
     "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate command schema",
+    "services/db-writer/loop_state_delta_handler.py": "DB-writer loop command schema (meditate rename)",
+    "services/db-writer/vlm_state_delta_handler.py": "DB-writer VLM state-delta schema",
     "services/db-writer/reports_state_delta_handler.py": "DB-writer reports command schema",
     "services/db-writer/visual_state_delta_handler.py": "DB-writer visual command schema",
+    "packages/agents/src/duckclaw/commands/goals.py": "goals proactive schedule bootstrap DDL",
 }
 DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 
@@ -154,8 +157,16 @@ DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "services/db-writer/context_injection_handler.py": "DB-writer context mutations",
     "services/db-writer/main.py": "singleton DB-writer",
     "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate mutations",
+    "services/db-writer/loop_state_delta_handler.py": "DB-writer loop mutations (meditate rename)",
+    "services/db-writer/vlm_state_delta_handler.py": "DB-writer VLM mutations",
+    "services/db-writer/startup_bootstrap.py": "DB-writer startup schema bootstrap",
     "services/db-writer/reports_state_delta_handler.py": "DB-writer reports mutations",
     "services/db-writer/visual_state_delta_handler.py": "DB-writer visual mutations",
+    "services/api-gateway/core/chat_graph_runner.py": "legacy fly/chat graph bridge pending typed-command migration",
+    "services/api-gateway/core/chat_history_persist.py": "loop activity touch via DuckClaw RW compat path",
+    "services/api-gateway/core/chat_invoke_finalize.py": "chat finalize loop footer RW compat path",
+    "services/api-gateway/core/admin_conversations_db.py": "admin conversation durable meta writes",
+    "services/api-gateway/routers/admin_domains/agent_spawn.py": "authorized admin agent spawn mutators",
 }
 DB_FIRST_READ_WRITE_ALLOWLIST = frozenset(DB_FIRST_READ_WRITE_ALLOWLIST_REASONS)
 
@@ -211,6 +222,17 @@ REMOVED_DOMAIN_VERTICAL_MARKERS_RE = re.compile(
 )
 DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/state_delta_enqueue.py": "transversal state-delta router without product imports",
+    # Opt-in quant / IBKR vertical surfaces (not forge legacy packages).
+    "packages/agents/src/duckclaw/workers/worker_invoke.py": "worker id aliases include quant-trader template id",
+    "packages/agents/src/duckclaw/workers/template_registry.py": "template registry lists quant-trader opt-in worker",
+    "packages/shared/src/duckclaw/signal_execution_bridge.py": "IBKR/quant signal bridge opt-in extension",
+    "packages/shared/src/duckclaw/write_commands.py": "typed commands for quant_core.ibkr_orders",
+    "packages/shared/src/duckclaw/schema_migrations.py": "schema seeds + quant_core.ibkr_orders migration",
+    "packages/shared/src/duckclaw/admin_worker_catalog.py": "catalog helpers mention quant worker family",
+    "packages/shared/src/duckclaw/ibkr_order_monitor.py": "IBKR order monitor opt-in extension",
+    "packages/shared/src/duckclaw/write_handlers/ibkr_orders.py": "DB-writer handler for quant_core.ibkr_orders",
+    "services/api-gateway/routers/admin_domains/workspace_managed_draft.py": "managed draft policy labels include finance/finanzas locales",
+    "scripts/place_protective_gtc_brackets.py": "ops script for IBKR protective brackets",
 }
 DOMAIN_VERTICAL_RUNTIME_ALLOWLIST = frozenset(DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS)
 CAPADONNA_DRILLER_IMPORT_ALLOWLIST = frozenset()

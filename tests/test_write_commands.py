@@ -2429,6 +2429,7 @@ class TestEnqueueTypedCommand:
         monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6379/0")
         monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
         monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+        monkeypatch.delenv("LITE_MODE", raising=False)
 
         cmd = UpsertWorkerCommand(
             worker_id="enqueue-test", display_name="Enqueue T",
@@ -2472,6 +2473,7 @@ class TestEnqueueTypedCommand:
         monkeypatch.setenv("REDIS_URL", "redis://127.0.0.1:6379/0")
         monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
         monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+        monkeypatch.delenv("LITE_MODE", raising=False)
 
         cmd = UpsertSharedDbGrantCommand(
             tenant_id="tenant-a",

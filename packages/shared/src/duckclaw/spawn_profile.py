@@ -27,7 +27,11 @@ def is_lite_mode() -> bool:
 
 
 def apply_lite_mode_env() -> None:
-    """Map ``LITE_MODE=1`` → Spawn inline profile. Idempotent; call before gateway bootstrap."""
+    """Map ``LITE_MODE=1`` → Spawn inline profile. Idempotent; call before gateway bootstrap.
+
+    Do **not** call from read-only helpers like ``is_spawn_profile`` — mutating
+    ``os.environ`` mid-suite leaks ``DUCKCLAW_SPAWN_PROFILE`` into later tests.
+    """
     if not is_lite_mode():
         return
     os.environ.setdefault("DUCKCLAW_SPAWN_PROFILE", "1")
@@ -35,9 +39,8 @@ def apply_lite_mode_env() -> None:
 
 
 def is_spawn_profile() -> bool:
-    """True si la VM/perfil Spawn está activo (``DUCKCLAW_SPAWN_PROFILE``)."""
-    apply_lite_mode_env()
-    return _env_truthy("DUCKCLAW_SPAWN_PROFILE")
+    """True si la VM/perfil Spawn está activo (``DUCKCLAW_SPAWN_PROFILE`` o ``LITE_MODE``)."""
+    return _env_truthy("DUCKCLAW_SPAWN_PROFILE") or is_lite_mode()
 
 
 def spawn_inline_writes_enabled() -> bool:
@@ -46,7 +49,6 @@ def spawn_inline_writes_enabled() -> bool:
 
     Desactivar solo si se arranca explícitamente el proceso ``DuckClaw-DB-Writer``.
     """
-    apply_lite_mode_env()
     return is_spawn_profile() and not _env_truthy("DUCKCLAW_SPAWN_USE_DB_WRITER")
 
 

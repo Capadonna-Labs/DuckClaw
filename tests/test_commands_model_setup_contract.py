@@ -135,7 +135,9 @@ def test_prompt_change_writes_system_prompt_policy_registry() -> None:
         FROM main.prompt_policy_registry
         WHERE policy_type = 'system_prompt'
           AND policy_name = 'default'
-          AND version = 1
+          AND active = true
+        ORDER BY version DESC
+        LIMIT 1
         """
     )
     row = rows[0] if isinstance(rows, list) and rows else None

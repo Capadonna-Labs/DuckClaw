@@ -33,8 +33,15 @@ def test_mcp_hub_links_connectors_page() -> None:
     assert "testMcpConnector" in service
     assert "grantMcpConnector" in service
     assert "startMcpConnectorOAuth" in service
-    assert "Conectar OAuth" in panel
-    assert "presetUsesOAuthPkce" in panel
+    drawer = Path("apps/duckclaw-admin/src/components/mcp/ConnectorDetailDrawer.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert "Conectar OAuth" in drawer
+    oauth_helpers = Path("apps/duckclaw-admin/src/lib/mcpPresetAuth.ts").read_text(encoding="utf-8")
+    assert "presetUsesOAuthPkce" in oauth_helpers
+    assert "presetUsesOAuthPkce" in Path(
+        "apps/duckclaw-admin/src/components/mcp/McpNewConnectorSection.tsx"
+    ).read_text(encoding="utf-8")
     assert "handleMcpOAuthCallback" in callback
     oauth_lib = Path("apps/duckclaw-admin/src/lib/mcpOAuthCallback.ts").read_text(encoding="utf-8")
     assert "oauth/complete" in oauth_lib

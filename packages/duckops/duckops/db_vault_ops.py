@@ -67,14 +67,13 @@ def fresh_dev_platform(*, dry_run: bool = False) -> int:
     root = repo_root()
     os.chdir(root)
     env_path = root / ".env"
-    if not env_path.is_file():
-        print(f"error: falta .env en {root}", file=sys.stderr)
-        return 1
-
     if dry_run:
         print("DRY-RUN: duckops stack down")
         print("DRY-RUN: rm vault + duckclaw-migrate + duckops stack deploy")
         return 0
+    if not env_path.is_file():
+        print(f"error: falta .env en {root}", file=sys.stderr)
+        return 1
 
     subprocess.run(["uv", "run", "duckops", "stack", "down"], cwd=root, check=False)
 

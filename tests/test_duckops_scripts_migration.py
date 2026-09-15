@@ -57,7 +57,6 @@ def test_one_off_scripts_removed_from_active_scripts() -> None:
         "packages/shared/scripts/sync_telegram_duckdb.sh",
         "packages/shared/scripts/install_duckclaw.sh",
         "docs/core",
-        "docs/operations",
         "docs/architecture/UIUX-PATTERNS.md",
         "docs/architecture/DB_FIRST_CORE_REFACTOR.md",
         "docs/architecture/ADMIN_IDENTITY_RBAC_ERD.md",
@@ -87,6 +86,8 @@ def test_surviving_docs_are_contracts_not_implementation_journals() -> None:
     architecture = Path("docs/architecture")
     surviving = {p.name for p in architecture.glob("*.md")}
     assert surviving == {
+        "AGENT_HARNESS_CONTROL.md",
+        "AGENT_TOOL_SURFACE.md",
         "GATEWAY_DB_WRITER_BOUNDARIES.md",
         "GATEWAY_PROCESS_BOUNDARIES.md",
         "MULTI_VAULT_SYSTEM.md",

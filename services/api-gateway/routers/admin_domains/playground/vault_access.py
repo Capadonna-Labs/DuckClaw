@@ -148,8 +148,18 @@ async def resolved_vault_for_admin_chat(
     default_effective = resolve_env_duckdb_path(default_path) if default_path else ""
     runtime_default = (runtime_default_vault or "").strip()
     wid = re.sub(r"[^a-zA-Z0-9_-]", "", (worker_id or "").strip())
+    # Only an explicit forge vault binding should beat actor runtime defaults.
+    # Active-vault fallback (admin-playground) must not suppress them.
+    worker_bound = ""
+    if wid and wid != "default":
+        try:
+            uid = _playground_vault_user_id(team_ctx)
+            tid = str(team_ctx.get("tenant_id") or "default").strip() or "default"
+            worker_bound = (_playground_worker_vault_path(wid, uid, tid) or "").strip()
+        except Exception:
+            worker_bound = ""
     worker_vault_ready = bool(
-        wid and wid != "default" and default_effective and os.path.isfile(default_effective)
+        worker_bound and os.path.isfile(resolve_env_duckdb_path(worker_bound))
     )
     if not override and runtime_default and not worker_vault_ready:
         runtime_effective = resolve_env_duckdb_path(runtime_default)

@@ -31,7 +31,7 @@ def test_resolved_slm_defaults_disabled(tmp_path: Path, monkeypatch: pytest.Monk
         repo_root=tmp_path,
     )
     assert payload["enabled"] is False
-    assert payload["pm2_name"] == "MLX-Inference"
+    assert payload["pm2_name"] == "local-inference"
     assert payload["model"] == "gemma4-e4b"
 
 

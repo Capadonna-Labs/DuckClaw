@@ -1,5 +1,6 @@
 import { accessApi } from './admin/accessApi';
 import { chatApi } from './admin/chatApi';
+import { cronsApi } from './admin/cronsApi';
 import { duckdbApi } from './admin/duckdbApi';
 import { knowledgeApi } from './admin/knowledgeApi';
 import { mcpApi } from './admin/mcpApi';
@@ -111,6 +112,7 @@ export const adminService = {
   ...skillsApi,
   ...mcpApi,
   ...opsApi,
+  ...cronsApi,
   ...workspaceApi,
   ...chatApi,
   ...trainApi,

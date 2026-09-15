@@ -6,6 +6,15 @@ import json
 from typing import Any
 
 
+def _fetchone(result: Any) -> Any | None:
+    """DuckClaw.execute returns a list; DuckDB cursors expose fetchone()."""
+    if hasattr(result, "fetchone"):
+        return result.fetchone()
+    if isinstance(result, list):
+        return result[0] if result else None
+    return None
+
+
 def _json_metadata(raw: Any) -> str:
     data = raw if isinstance(raw, dict) else {}
     return json.dumps(data, ensure_ascii=False, default=str)
@@ -52,11 +61,13 @@ def _apply_upsert_prompt_policy(conn: Any, payload: dict) -> None:
     checksum = hashlib.sha256(content.encode("utf-8")).hexdigest()
     active = status == "active"
 
-    existing = conn.execute(
-        "SELECT policy_id FROM main.prompt_policy_registry "
-        "WHERE policy_type = ? AND policy_name = ? AND version = ?",
-        [policy_type, policy_name, version],
-    ).fetchone()
+    existing = _fetchone(
+        conn.execute(
+            "SELECT policy_id FROM main.prompt_policy_registry "
+            "WHERE policy_type = ? AND policy_name = ? AND version = ?",
+            [policy_type, policy_name, version],
+        )
+    )
     if existing:
         conn.execute(
             "UPDATE main.prompt_policy_registry "
@@ -77,6 +88,14 @@ def _apply_upsert_prompt_policy(conn: Any, payload: dict) -> None:
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             [policy_id, policy_type, policy_name, version, status, content, checksum, metadata_json, active],
         )
+    # At most one active version per (type, name).
+    if active:
+        conn.execute(
+            "UPDATE main.prompt_policy_registry "
+            "SET active = false, status = 'inactive', updated_at = CURRENT_TIMESTAMP "
+            "WHERE policy_type = ? AND policy_name = ? AND version != ?",
+            [policy_type, policy_name, version],
+        )
 
 
 def _apply_deactivate_prompt_policy(conn: Any, payload: dict) -> None:
@@ -93,11 +112,13 @@ def _apply_deactivate_prompt_policy(conn: Any, payload: dict) -> None:
             raise ValueError("version must be >= 1")
         version_clause = " AND version = ?"
         params.append(version)
-    row = conn.execute(
-        "SELECT policy_id FROM main.prompt_policy_registry "
-        "WHERE policy_type = ? AND policy_name = ?" + version_clause + " LIMIT 1",
-        params,
-    ).fetchone()
+    row = _fetchone(
+        conn.execute(
+            "SELECT policy_id FROM main.prompt_policy_registry "
+            "WHERE policy_type = ? AND policy_name = ?" + version_clause + " LIMIT 1",
+            params,
+        )
+    )
     if not row:
         raise ValueError(f"Prompt policy not found: {policy_type}/{policy_name}")
     conn.execute(

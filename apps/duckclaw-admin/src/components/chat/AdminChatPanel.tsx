@@ -125,6 +125,8 @@ export function AdminChatPanel({
     sendSuggestion,
     suggestions,
     recommendedSuggestionIndex,
+    suggestionsAutoEnabled,
+    onSuggestionsAutoChange,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,
@@ -596,6 +598,8 @@ export function AdminChatPanel({
             send={send}
             suggestions={suggestions}
             recommendedSuggestionIndex={recommendedSuggestionIndex}
+            suggestionsAutoEnabled={suggestionsAutoEnabled}
+            onSuggestionsAutoChange={onSuggestionsAutoChange}
             onPickSuggestion={sendSuggestion}
             cancelGeneration={cancelGeneration}
             onTextareaPaste={onTextareaPaste}

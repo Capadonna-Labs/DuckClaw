@@ -244,6 +244,85 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 ensure_ascii=False,
             )
 
+        def configure_suggestions_auto(enabled: bool = False) -> str:
+            """
+            Activa o desactiva el countdown Auto de chips de sugerencias en este chat.
+            enabled=false cuando cierras un tema, despides, o no hay siguiente acción automática prudente.
+            """
+            cid = get_goals_tool_chat_id()
+            if not cid:
+                return json.dumps(
+                    {"status": "error", "error": "chat_id no disponible en este turno"},
+                    ensure_ascii=False,
+                )
+            tid = get_goals_tool_tenant_id()
+            use_db = _resolve_tool_db(db, get_goals_tool_db_path())
+            from duckclaw.commands.suggestions_auto import set_suggestions_auto_enabled
+
+            ok, err = set_suggestions_auto_enabled(
+                use_db,
+                cid,
+                bool(enabled),
+                tenant_id=tid,
+            )
+            if not ok:
+                return json.dumps(
+                    {"status": "error", "error": err or "persist_failed"},
+                    ensure_ascii=False,
+                )
+            return json.dumps(
+                {
+                    "status": "ok",
+                    "suggestions_auto_enabled": bool(enabled),
+                    "note": (
+                        "Auto off: la UI no auto-enviará chips."
+                        if not enabled
+                        else "Auto on: la UI puede auto-enviar la chip recomendada."
+                    ),
+                },
+                ensure_ascii=False,
+            )
+
+        def pause_chat_autonomy() -> str:
+            """
+            Apaga AUTO de sugerencias y /loop en este chat.
+            Usar al cerrar un tema, despedir al usuario, o cuando no conviene continuar solo.
+            """
+            cid = get_goals_tool_chat_id()
+            if not cid:
+                return json.dumps(
+                    {"status": "error", "error": "chat_id no disponible en este turno"},
+                    ensure_ascii=False,
+                )
+            tid = get_goals_tool_tenant_id()
+            use_db = _resolve_tool_db(db, get_goals_tool_db_path())
+            wid = _effective_worker_id(use_db, cid)
+            from duckclaw.commands.suggestions_auto import set_suggestions_auto_enabled
+
+            loop_out = apply_loop_schedule(
+                use_db,
+                cid,
+                tenant_id=tid,
+                worker_id=wid,
+                interval_seconds=0,
+            )
+            ok, err = set_suggestions_auto_enabled(
+                use_db,
+                cid,
+                False,
+                tenant_id=tid,
+            )
+            return json.dumps(
+                {
+                    "status": "ok" if ok else "partial",
+                    "loop": loop_out,
+                    "suggestions_auto_enabled": False,
+                    "suggestions_auto_error": (err or None) if not ok else None,
+                    "note": "Loop y Auto de sugerencias desactivados para este chat.",
+                },
+                ensure_ascii=False,
+            )
+
         tools_list.append(
             StructuredTool.from_function(
                 configure_loop_homeostasis,
@@ -251,6 +330,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 description=(
                     "Programa auto-mejora /loop (evalúa /goals periódicamente). "
                     "interval='off' o '10min'/'4h'. mode='clock' (reloj) o 'idle' (silencio desde último mensaje). "
+                    "Al cerrar un tema o despedir, usa interval='off' (o pause_chat_autonomy). "
                     "Revisión ligera al usuario: /crons --delta."
                 ),
             )
@@ -272,6 +352,26 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                     "Paso HITL final de /loop solo para metas **task** (sin metas monitor en manifiesto). "
                     "Metas monitor (métricas continuas como latencia o error_rate) se revisan cada ciclo y **nunca** se declaran cumplidas. "
                     "Solo si no hay desviaciones. Detente tras llamar; homeostasis solo tras /loop-approve."
+                ),
+            )
+        )
+        tools_list.append(
+            StructuredTool.from_function(
+                configure_suggestions_auto,
+                name="configure_suggestions_auto",
+                description=(
+                    "Activa/desactiva el Auto de chips de sugerencias (countdown que auto-envía). "
+                    "enabled=false al cerrar un tema, despedir, o cuando no hay siguiente paso automático prudente."
+                ),
+            )
+        )
+        tools_list.append(
+            StructuredTool.from_function(
+                pause_chat_autonomy,
+                name="pause_chat_autonomy",
+                description=(
+                    "Apaga /loop y Auto de sugerencias en este chat. "
+                    "Usar cuando el turno es cierre/despedida o no conviene continuar solo."
                 ),
             )
         )

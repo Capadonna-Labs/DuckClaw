@@ -8,6 +8,7 @@ export default defineConfig({
       'src/lib/opsSubprocessEnv.test.ts',
       'src/lib/pollWriteTask.test.ts',
       'src/lib/modelContextWindow.test.ts',
+      'src/lib/bffGatewayTimeouts.test.ts',
       'src/lib/contextTokenBreakdown.test.ts',
       'src/lib/ansiLog.test.ts',
       'src/lib/draftManifestYaml.test.ts',

@@ -103,6 +103,8 @@ def test_homeostasis_loop_tools_always_bound() -> None:
         "evaluate_homeostasis",
         "configure_loop_homeostasis",
         "get_loop_homeostasis_status",
+        "configure_suggestions_auto",
+        "pause_chat_autonomy",
         "calculate_tp_sl_distance",
     ):
         assert catalog.packs_for_tool(name) == frozenset({"homeostasis"})
@@ -117,6 +119,8 @@ def test_homeostasis_loop_tools_always_bound() -> None:
         _tool("evaluate_homeostasis"),
         _tool("configure_loop_homeostasis"),
         _tool("get_loop_homeostasis_status"),
+        _tool("configure_suggestions_auto"),
+        _tool("pause_chat_autonomy"),
         _tool("calculate_tp_sl_distance"),
         _tool("calculate_pnl_contribution"),
         _tool("external_orphan_tool"),  # orphan unless some pack claims it

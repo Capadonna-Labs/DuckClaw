@@ -61,6 +61,7 @@ export type RunAdminChatTurnParams = {
   setLoopSchedulePolling: Dispatch<SetStateAction<boolean>>;
   setSuggestions: Dispatch<SetStateAction<string[]>>;
   setRecommendedSuggestionIndex?: Dispatch<SetStateAction<number>>;
+  setSuggestionsAutoEnabled?: Dispatch<SetStateAction<boolean | null>>;
   /** Ref compartida con el efecto de historial: evita refetch duplicado tras el turno. */
   suggestionsExchangeKeyRef?: MutableRefObject<string>;
   finalizeCancelledGeneration: () => void;
@@ -101,6 +102,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setLoopSchedulePolling,
     setSuggestions,
     setRecommendedSuggestionIndex,
+    setSuggestionsAutoEnabled,
     suggestionsExchangeKeyRef,
     finalizeCancelledGeneration,
     clearLoopHistoryReload,
@@ -536,6 +538,7 @@ try {
         tenant_id: effectiveTenantId,
         last_user_message: text,
         last_assistant_message: assistantForSuggestions,
+        vault_db_path: vaultPath || undefined,
       })
       .then((r) => {
         const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
@@ -549,6 +552,9 @@ try {
               ? Math.min(Math.max(0, Math.floor(rawIdx)), next.length - 1)
               : 0;
         setRecommendedSuggestionIndex?.(idx);
+        if (typeof r.suggestions_auto_enabled === 'boolean') {
+          setSuggestionsAutoEnabled?.(r.suggestions_auto_enabled);
+        }
         if (suggestionsExchangeKeyRef) {
           suggestionsExchangeKeyRef.current = next.length > 0
             ? suggestionsExchangeKey(chatId, text, assistantForSuggestions)

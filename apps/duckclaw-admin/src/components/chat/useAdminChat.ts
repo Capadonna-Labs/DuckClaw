@@ -182,6 +182,7 @@ export function useAdminChat({
   );
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [recommendedSuggestionIndex, setRecommendedSuggestionIndex] = useState(0);
+  const [suggestionsAutoEnabled, setSuggestionsAutoEnabled] = useState<boolean | null>(null);
   const thinkingStartedAt = useRef<number>(0);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -238,6 +239,7 @@ export function useAdminChat({
     setContextTokenBreakdown(null);
     setSuggestions([]);
     setRecommendedSuggestionIndex(0);
+    setSuggestionsAutoEnabled(null);
     suggestionsExchangeKeyRef.current = '';
   }, [chatId]);
 
@@ -260,6 +262,7 @@ export function useAdminChat({
         tenant_id: config?.effective_tenant_id,
         last_user_message: exchange.userText.slice(0, 8000),
         last_assistant_message: exchange.assistantText.slice(0, 16000),
+        vault_db_path: vaultPath || undefined,
       })
       .then((r) => {
         if (cancelled) return;
@@ -273,6 +276,9 @@ export function useAdminChat({
               ? Math.min(Math.max(0, Math.floor(rawIdx)), next.length - 1)
               : 0;
         setRecommendedSuggestionIndex(idx);
+        if (typeof r.suggestions_auto_enabled === 'boolean') {
+          setSuggestionsAutoEnabled(r.suggestions_auto_enabled);
+        }
         if (next.length === 0) suggestionsExchangeKeyRef.current = '';
       })
       .catch(() => {
@@ -292,6 +298,7 @@ export function useAdminChat({
     thinking,
     messages,
     config?.effective_tenant_id,
+    vaultPath,
   ]);
 
   const loadConfig = useCallback(() => {
@@ -439,6 +446,7 @@ export function useAdminChat({
         setLoopSchedulePolling,
         setSuggestions,
         setRecommendedSuggestionIndex,
+        setSuggestionsAutoEnabled,
         suggestionsExchangeKeyRef,
         finalizeCancelledGeneration,
         clearLoopHistoryReload,
@@ -493,6 +501,22 @@ export function useAdminChat({
       await runChatTurn(trimmed);
     },
     [loading, workerId, runChatTurn]
+  );
+
+  const onSuggestionsAutoChange = useCallback(
+    (enabled: boolean) => {
+      setSuggestionsAutoEnabled(enabled);
+      if (!chatId) return;
+      void adminService
+        .setChatSuggestionsAuto({
+          chat_id: chatId,
+          tenant_id: config?.effective_tenant_id,
+          enabled,
+          vault_db_path: vaultPath || undefined,
+        })
+        .catch(() => undefined);
+    },
+    [chatId, config?.effective_tenant_id, vaultPath]
   );
 
   const retryFromMessage = useCallback(
@@ -652,6 +676,8 @@ export function useAdminChat({
     sendSuggestion,
     suggestions,
     recommendedSuggestionIndex,
+    suggestionsAutoEnabled,
+    onSuggestionsAutoChange,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,

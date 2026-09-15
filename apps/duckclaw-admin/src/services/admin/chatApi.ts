@@ -198,8 +198,28 @@ export const chatApi = {
     tenant_id?: string;
     last_user_message: string;
     last_assistant_message: string;
+    vault_db_path?: string;
   }) =>
-    adminFetch<{ suggestions: string[]; recommended_index?: number }>('/chat/suggestions', {
+    adminFetch<{
+      suggestions: string[];
+      recommended_index?: number;
+      suggestions_auto_enabled?: boolean | null;
+    }>('/chat/suggestions', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  setChatSuggestionsAuto: (body: {
+    chat_id: string;
+    tenant_id?: string;
+    enabled: boolean;
+    vault_db_path?: string;
+  }) =>
+    adminFetch<{
+      ok: boolean;
+      error?: string;
+      suggestions_auto_enabled?: boolean | null;
+    }>('/chat/suggestions/auto', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

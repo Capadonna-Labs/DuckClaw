@@ -24,6 +24,8 @@ export type AdminChatComposeFooterProps = {
   composeChips?: ReactNode;
   suggestions?: string[];
   recommendedSuggestionIndex?: number;
+  suggestionsAutoEnabled?: boolean | null;
+  onSuggestionsAutoChange?: (enabled: boolean) => void;
   onPickSuggestion?: (text: string) => void | Promise<void>;
   input: string;
   setInput: (value: string) => void;
@@ -100,6 +102,8 @@ export function AdminChatComposeFooter({
   composeChips,
   suggestions = [],
   recommendedSuggestionIndex = 0,
+  suggestionsAutoEnabled = null,
+  onSuggestionsAutoChange,
   onPickSuggestion,
   input,
   setInput,
@@ -194,6 +198,8 @@ export function AdminChatComposeFooter({
                 suggestions={suggestions}
                 recommendedIndex={recommendedSuggestionIndex}
                 busy={loading}
+                serverAutoEnabled={suggestionsAutoEnabled}
+                onAutoChange={onSuggestionsAutoChange}
                 onPick={(text) => void onPickSuggestion?.(text)}
               />
             </div>
@@ -299,6 +305,8 @@ export function AdminChatComposeFooter({
                   suggestions={suggestions}
                   recommendedIndex={recommendedSuggestionIndex}
                   busy={loading}
+                  serverAutoEnabled={suggestionsAutoEnabled}
+                  onAutoChange={onSuggestionsAutoChange}
                   onPick={(text) => void onPickSuggestion?.(text)}
                 />
               </div>

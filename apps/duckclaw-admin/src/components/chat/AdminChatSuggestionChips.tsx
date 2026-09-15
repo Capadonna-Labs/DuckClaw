@@ -15,6 +15,13 @@ type AdminChatSuggestionChipsProps = {
   recommendedIndex?: number;
   /** True mientras el chat está enviando (pausa el countdown). */
   busy?: boolean;
+  /**
+   * Preferencia persistida en vault (agente / API).
+   * `false` fuerza Auto off; `true` fuerza Auto on; `null`/omit → localStorage.
+   */
+  serverAutoEnabled?: boolean | null;
+  /** Persistir toggle del usuario (limpia suppress del agente al activar). */
+  onAutoChange?: (enabled: boolean) => void;
 };
 
 function readStoredAuto(): boolean {
@@ -42,6 +49,8 @@ export function AdminChatSuggestionChips({
   defaultOpen = true,
   recommendedIndex = 0,
   busy = false,
+  serverAutoEnabled = null,
+  onAutoChange,
 }: AdminChatSuggestionChipsProps) {
   const panelId = useId();
   const [open, setOpen] = useState(defaultOpen);
@@ -60,8 +69,20 @@ export function AdminChatSuggestionChips({
   }, [onPick]);
 
   useEffect(() => {
+    if (serverAutoEnabled === false) {
+      setAutoEnabled(false);
+      writeStoredAuto(false);
+      cancelledRef.current = true;
+      setCountdown(null);
+      return;
+    }
+    if (serverAutoEnabled === true) {
+      setAutoEnabled(true);
+      writeStoredAuto(true);
+      return;
+    }
     setAutoEnabled(readStoredAuto());
-  }, []);
+  }, [serverAutoEnabled]);
 
   useEffect(() => {
     if (suggestions.length === 0) return;
@@ -101,6 +122,7 @@ export function AdminChatSuggestionChips({
     setCountdown(null);
     setAutoEnabled(next);
     writeStoredAuto(next);
+    onAutoChange?.(next);
   };
 
   return (

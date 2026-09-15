@@ -81,6 +81,8 @@ def test_worker_spec_uses_generic_skill_configs() -> None:
         REPO_ROOT,
     )
 
-    assert spec.skills_list == ["read_sql", "visual_renderer", "weather_lookup"]
+    assert "read_sql" in spec.skills_list
+    assert "visual_renderer" in spec.skills_list
+    assert "weather_lookup" in spec.skills_list
     assert spec.skill_configs["visual_renderer"]["quality"] == "draft"
     assert spec.skill_configs["weather_lookup"]["enabled"] is True

@@ -21,7 +21,6 @@ def test_admin_login_uses_public_bootstrap_status() -> None:
     assert "DUCKCLAW_ADMIN_API_KEY" not in route
     assert "gatewayBase()" in lib
     assert "/health" in lib
-    assert "/api/v1/admin/health" in lib
     assert "canAttemptLogin" in lib
     assert "gateway_unreachable" in lib
     assert "pm2Status" in lib

@@ -55,7 +55,7 @@ def test_playground_config_includes_slm_block(
     assert r.status_code == 200
     slm = r.json().get("slm")
     assert isinstance(slm, dict)
-    assert slm.get("pm2_name") == "MLX-Inference"
+    assert slm.get("pm2_name") == "local-inference"
     assert slm.get("model") == "gemma4-test"
     assert slm.get("mlx_status") == "online"
     assert slm.get("enabled") is False

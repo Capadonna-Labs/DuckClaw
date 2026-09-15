@@ -23,8 +23,8 @@ export NODE_ENV=production
 # DUCKCLAW_EXTENSION_ROOT / DUCKCLAW_REPO_ROOT at the product vault tree
 # (must match the gateway writer). Otherwise /api/admin/artifacts → 404 and
 # chat/preview show broken <img> even when PNGs exist on disk.
-# Do NOT source monorepo ROOT/.env here — it can pull HOSTNAME/MCP ports that
-# break the Next bind.
+# Do NOT source monorepo ROOT/.env wholesale — it can pull HOSTNAME/MCP ports
+# that break the Next bind. Only lift the two vault-root keys when missing.
 set -a
 # shellcheck disable=SC1091
 [[ -f "${ADMIN}/.env.local" ]] && . "${ADMIN}/.env.local"
@@ -33,6 +33,21 @@ set -a
 # shellcheck disable=SC1091
 [[ -f "${STANDALONE}/.env" ]] && . "${STANDALONE}/.env"
 set +a
+
+if [[ -z "${DUCKCLAW_EXTENSION_ROOT:-}" || -z "${DUCKCLAW_REPO_ROOT:-}" ]] && [[ -f "${ROOT}/.env" ]]; then
+  # ponytail: VPS gateway .env has the Capadonna vault root; admin .env.local
+  # often only has API key. Selective grep avoids HOSTNAME/port collisions.
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    case "${line}" in
+      DUCKCLAW_EXTENSION_ROOT=*|DUCKCLAW_REPO_ROOT=*)
+        key="${line%%=*}"
+        if [[ -z "${!key:-}" ]]; then
+          export "${line?}"
+        fi
+        ;;
+    esac
+  done < <(grep -E '^(DUCKCLAW_EXTENSION_ROOT|DUCKCLAW_REPO_ROOT)=' "${ROOT}/.env" || true)
+fi
 
 export DUCKCLAW_REPO_ROOT="${DUCKCLAW_REPO_ROOT:-${ROOT}}"
 export HOSTNAME="${DUCKCLAW_ADMIN_BIND_HOST:-0.0.0.0}"

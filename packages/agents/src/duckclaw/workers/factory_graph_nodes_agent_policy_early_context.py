@@ -123,3 +123,86 @@ def maybe_force_get_current_time_orchestration(
     }
     out.update(_identity_fields(state))
     return out
+
+
+def apply_terminal_force_tool_overrides(
+    *,
+    incoming: str,
+    orch_incoming: str,
+    intent_incoming: str,
+    tools_by_name: dict[str, Any],
+    called_tools_since_last_human: set[str] | frozenset[str],
+    already_has_tool_result: bool,
+    telegram_context_summarize_directive: bool,
+    summarize_stored_directive: bool,
+    use_heuristic_first_tool: bool,
+    force_orch_tool: str | None,
+    force_schema: bool,
+    force_admin_sql: bool,
+    force_read_sql: bool,
+    force_tavily: bool,
+    force_reddit: bool,
+    force_visual: bool,
+) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
+    """Email then /loop homeostasis overrides (clear competing force_* flags).
+
+    Email/Gmail wins over db-first / orch read_sql noise on EVERY hop.
+    Hop 1: force Gmail search. Hop 2+: still clear read_sql — otherwise
+    orch re-forces SELECT now() AS ahora and set_reply falls back to
+    "1 registro (ahora…)." after a successful get_message.
+    """
+    from duckclaw.workers.tool_invocation_policy import (
+        decide_loop_homeostasis_tool_invocation,
+    )
+    from duckclaw.workers.tool_orchestration import (
+        find_gmail_mcp_search_tool,
+        incoming_has_email_intent,
+    )
+
+    email_intent = incoming_has_email_intent(
+        orch_incoming or intent_incoming or incoming
+    )
+    gmail_search_tool = (
+        find_gmail_mcp_search_tool(tools_by_name) if email_intent else None
+    )
+    if (
+        gmail_search_tool
+        and not telegram_context_summarize_directive
+        and not summarize_stored_directive
+    ):
+        force_schema = False
+        force_admin_sql = False
+        force_read_sql = False
+        force_tavily = False
+        force_reddit = False
+        force_visual = False
+        if force_orch_tool in ("read_sql", "admin_sql", "inspect_schema"):
+            force_orch_tool = None
+        if not already_has_tool_result and use_heuristic_first_tool:
+            force_orch_tool = gmail_search_tool
+
+    decision = decide_loop_homeostasis_tool_invocation(
+        incoming=incoming,
+        available_tools=tools_by_name,
+        called_tools_since_last_human=called_tools_since_last_human,
+        already_has_tool_result=already_has_tool_result,
+        summarize_directive=telegram_context_summarize_directive,
+    )
+    if decision.should_force and decision.tool_name:
+        force_orch_tool = decision.tool_name
+        force_schema = False
+        force_admin_sql = False
+        force_read_sql = False
+        force_tavily = False
+        force_reddit = False
+        force_visual = False
+
+    return (
+        force_orch_tool,
+        force_schema,
+        force_admin_sql,
+        force_read_sql,
+        force_tavily,
+        force_reddit,
+        force_visual,
+    )

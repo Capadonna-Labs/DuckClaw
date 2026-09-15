@@ -144,7 +144,13 @@ def apply_terminal_force_tool_overrides(
     force_reddit: bool,
     force_visual: bool,
 ) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
-    """Email then /loop homeostasis overrides (clear competing force_* flags)."""
+    """Email then /loop homeostasis overrides (clear competing force_* flags).
+
+    Email/Gmail wins over db-first / orch read_sql noise on EVERY hop.
+    Hop 1: force Gmail search. Hop 2+: still clear read_sql — otherwise
+    orch re-forces SELECT now() AS ahora and set_reply falls back to
+    "1 registro (ahora…)." after a successful get_message.
+    """
     from duckclaw.workers.tool_invocation_policy import (
         decide_loop_homeostasis_tool_invocation,
     )

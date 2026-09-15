@@ -119,6 +119,56 @@ def test_email_intent_skips_db_first_read_sql() -> None:
     assert not marker_only.should_force
 
 
+def test_loop_system_event_forces_evaluate_homeostasis_first_hop() -> None:
+    policy = importlib.import_module("duckclaw.workers.tool_invocation_policy")
+
+    loop_msg = (
+        "[SYSTEM_EVENT: Ciclo de auto-mejora programado /loop. Metas (/goals): SL XLU. "
+        "1) Preferí evaluate_homeostasis si tu worker la expone (TP/SL, OCA, OHLCV); "
+        "assess_crons_alignment solo cubre metas /goals.]"
+    )
+    decision = policy.decide_loop_homeostasis_tool_invocation(
+        incoming=loop_msg,
+        available_tools={"read_sql", "evaluate_homeostasis", "assess_crons_alignment"},
+    )
+    assert decision.tool_name == "evaluate_homeostasis"
+    assert decision.reason == "platform.loop.evaluate_homeostasis.first_hop"
+    assert not decision.requires_heuristic_first_tool
+
+    already = policy.decide_loop_homeostasis_tool_invocation(
+        incoming=loop_msg,
+        available_tools={"evaluate_homeostasis"},
+        already_has_tool_result=True,
+    )
+    assert not already.should_force
+
+    called = policy.decide_loop_homeostasis_tool_invocation(
+        incoming=loop_msg,
+        available_tools={"evaluate_homeostasis"},
+        called_tools_since_last_human={"evaluate_homeostasis"},
+    )
+    assert not called.should_force
+
+    missing = policy.decide_loop_homeostasis_tool_invocation(
+        incoming=loop_msg,
+        available_tools={"read_sql", "assess_crons_alignment"},
+    )
+    assert not missing.should_force
+
+    ordinary = policy.decide_loop_homeostasis_tool_invocation(
+        incoming="¿cómo está el portfolio?",
+        available_tools={"evaluate_homeostasis"},
+    )
+    assert not ordinary.should_force
+
+    # Plain SYSTEM_EVENT without loop/proactive markers must not force.
+    unrelated_event = policy.decide_loop_homeostasis_tool_invocation(
+        incoming="[SYSTEM_EVENT: heartbeat ping]",
+        available_tools={"evaluate_homeostasis"},
+    )
+    assert not unrelated_event.should_force
+
+
 def test_update_system_prompt_forced_on_persist_request() -> None:
     policy = importlib.import_module("duckclaw.workers.tool_invocation_policy")
 

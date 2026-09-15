@@ -45,6 +45,34 @@ assert.equal(
   'done'
 );
 
+assert.equal(
+  mergeEphemeralHeartbeats(
+    [
+      {
+        role: 'heartbeat',
+        heartbeatKind: 'status',
+        text: "Worker 'quant_analyst' not found in catalog for tenant 'user-x'",
+      },
+    ],
+    [toolA]
+  ).length,
+  1,
+  'catalog-miss PROGRESO heartbeats are not persisted in ephemeral merge'
+);
+assert.equal(
+  mergeEphemeralHeartbeats(
+    [
+      {
+        role: 'heartbeat',
+        heartbeatKind: 'status',
+        text: "Worker 'quant_analyst' not found in catalog for tenant 'user-x'",
+      },
+    ],
+    [toolA]
+  )[0]?.toolName,
+  'read_sql'
+);
+
 assert.ok(workerMatches('UiDesignerWorker', 'ui-designer'));
 assert.ok(workerMatches('platform-orchestrator', 'PlatformOrchestratorWorker'));
 

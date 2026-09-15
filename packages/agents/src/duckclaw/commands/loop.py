@@ -384,8 +384,9 @@ def build_loop_self_system_event_message(
     )
     return (
         f"[SYSTEM_EVENT: {hitl_prefix}Ciclo de auto-mejora {trigger}. Metas (/goals): {summary}.{priority_note} "
-        "1) Usa assess_crons_alignment (o evaluate_homeostasis si tu worker la expone) "
-        "y reporta el contraste en el chat. "
+        "1) Preferí evaluate_homeostasis si tu worker la expone (TP/SL, OCA, OHLCV, exposición); "
+        "assess_crons_alignment solo cubre metas /goals persistidas y NO basta para breach SL "
+        "ni OHLCV stale. Reporta desviaciones en el chat. "
         "2) Si métricas alineadas (sin desviaciones), llama request_homeostasis_validation "
         "y DETENTE — pregunta confirmación HITL; no declares homeostasis hasta /loop-approve. "
         "3) Si hay desviaciones, planifica corrección con las tools de este worker y pregunta. "

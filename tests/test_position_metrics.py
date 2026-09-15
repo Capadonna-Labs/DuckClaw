@@ -71,9 +71,37 @@ def test_rejects_equal_levels_and_bad_price() -> None:
     zero = calculate_tp_sl_distance(0, 95, 110)
     assert zero["ok"] is False
 
-    amb = calculate_tp_sl_distance(100, 90, 80)
-    assert amb["ok"] is False
-    assert amb["side"] == "ambiguous"
+
+def test_price_past_sl_long_is_breach_not_ambiguous() -> None:
+    # XLU-style: mark below stop on long geometry.
+    out = calculate_tp_sl_distance(41.46, 41.50, 43.50)
+    assert out["ok"] is True
+    assert out["side"] == "long"
+    assert out["breached"] == "sl"
+    assert out["dist_sl_pct"] is not None and out["dist_sl_pct"] >= 0
+    assert out["dist_tp_pct"] is not None and out["dist_tp_pct"] > out["dist_sl_pct"]
+
+
+def test_price_past_tp_long_is_breach() -> None:
+    out = calculate_tp_sl_distance(111.0, 95.0, 110.0)
+    assert out["ok"] is True
+    assert out["side"] == "long"
+    assert out["breached"] == "tp"
+
+
+def test_price_past_sl_short_is_breach() -> None:
+    out = calculate_tp_sl_distance(106.0, 105.0, 90.0)
+    assert out["ok"] is True
+    assert out["side"] == "short"
+    assert out["breached"] == "sl"
+
+
+def test_inverted_band_above_price_is_short_sl_breach() -> None:
+    # Former ambiguous fixture (sl=90,tp=80,price=100) is short geometry past SL.
+    out = calculate_tp_sl_distance(100, 90, 80)
+    assert out["ok"] is True
+    assert out["side"] == "short"
+    assert out["breached"] == "sl"
 
 
 def test_string_numeric_inputs() -> None:

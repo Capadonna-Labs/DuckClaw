@@ -282,6 +282,29 @@ def get_worker_by_tenant_worker_id(db: Any, *, tenant_id: str, worker_id: str) -
     return None
 
 
+def get_active_worker_by_worker_id(db: Any, *, worker_id: str) -> dict[str, str] | None:
+    """Find an active catalog row by worker_id (hyphen/underscore), any tenant.
+
+    Prefer ``default`` tenant, then lexicographic tenant_id. Used only for
+    manifest loading when the chat/vault tenant has no matching row — not for
+    playground ACL (``get_visible_worker_for_actor`` stays strict).
+    """
+    ensure_admin_worker_catalog_schema(db)
+    for wid in catalog_worker_id_variants(worker_id):
+        row = _first_row(
+            db,
+            "SELECT worker_uid, tenant_id, owner_email, worker_id, display_name, source_kind, "
+            "source_template_id, visibility, a2a_discoverable, status, active, created_at, updated_at "
+            "FROM main.admin_worker_catalog "
+            f"WHERE active = true AND worker_id = '{_sql_lit(wid, 64)}' "
+            "ORDER BY CASE WHEN tenant_id = 'default' THEN 0 ELSE 1 END, tenant_id, worker_uid "
+            "LIMIT 1",
+        )
+        if row:
+            return _worker_row_to_public(row)
+    return None
+
+
 def create_worker(
     db: Any,
     *,

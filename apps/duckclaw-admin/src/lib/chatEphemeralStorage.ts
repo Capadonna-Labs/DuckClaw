@@ -2,7 +2,10 @@
 
 import type { ChatMsg } from '@/components/chat/types';
 import { countUsersBefore } from '@/lib/chatEphemeralMerge';
-import { isLoopProgressHeartbeat } from '@/components/chat/adminChatPure';
+import {
+  isCatalogMissHeartbeat,
+  isLoopProgressHeartbeat,
+} from '@/components/chat/adminChatPure';
 import { toolHeartbeatInvocationKey } from '@/lib/toolHeartbeat';
 import { normalizeWorkerKey, workerMatches } from '@/lib/workerOptions';
 
@@ -71,7 +74,9 @@ function ephemeralDedupeKey(m: ChatMsg): string | null {
 
 /** Dedupe por invocación de tool; status/loop/plan por texto estable. */
 export function mergeEphemeralHeartbeats(a: ChatMsg[], b: ChatMsg[]): ChatMsg[] {
-  const combined = [...a, ...b].filter(isEphemeralMessage);
+  const combined = [...a, ...b].filter(
+    (m) => isEphemeralMessage(m) && !isCatalogMissHeartbeat(m)
+  );
   if (!combined.length) return [];
   const byKey = new Map<string, ChatMsg>();
   const orderedKeys: string[] = [];
@@ -108,6 +113,7 @@ export function readEphemeralHeartbeats(chatId: string, workerId = ''): ChatMsg[
   const seen = new Set<string>();
   for (const key of keys) {
     for (const m of parseStoredHeartbeats(sessionStorage.getItem(key))) {
+      if (isCatalogMissHeartbeat(m)) continue;
       const id =
         toolHeartbeatInvocationKey(m) ||
         `${m.toolName || ''}|${m.toolStartedAt || ''}|${m.text || ''}|${out.length}`;
@@ -133,7 +139,7 @@ export function writeEphemeralHeartbeats(
   const ephemeral: ChatMsg[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
-    if (m.role !== 'heartbeat') continue;
+    if (m.role !== 'heartbeat' || isCatalogMissHeartbeat(m)) continue;
     ephemeral.push({ ...m, turnUserIndex: countUsersBefore(messages, i) });
   }
   try {

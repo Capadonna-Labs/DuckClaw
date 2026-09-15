@@ -59,6 +59,8 @@ class DomainGoal(BaseModel):
     anchor_setting_key: str = ""
     # Lower number = higher priority (P1 before P2). Agent should address in this order.
     priority: int = Field(default=100, ge=1)
+    # Optional owner worker (empty = shared / tenant-wide). /loop filters by this when set.
+    owner_worker_id: str = ""
 
 
 class HomeostasisManifest(BaseModel):

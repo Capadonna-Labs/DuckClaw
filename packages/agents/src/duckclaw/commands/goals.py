@@ -35,6 +35,48 @@ def _normalize_belief_key(key: str) -> str:
     return "".join(c if c.isalnum() or c == "_" else "_" for c in (key or "").strip())
 
 
+def _extract_worker_flag(toks: list[str]) -> tuple[str, list[str]]:
+    """Pull `--worker <id>` out of argv; remaining tokens keep original order."""
+    worker = ""
+    out: list[str] = []
+    i = 0
+    while i < len(toks):
+        if toks[i] == "--worker" and i + 1 < len(toks):
+            worker = (toks[i + 1] or "").strip()
+            i += 2
+            continue
+        out.append(toks[i])
+        i += 1
+    return worker, out
+
+
+def _apply_goals_owner(
+    manifest: Any, target: str, owner_worker_id: str
+) -> tuple[Any, str | None]:
+    """Assign or clear owner_worker_id on a goal (`-` / none / shared / clear → shared)."""
+    tgt = (target or "").strip()
+    if not tgt:
+        return manifest, "Falta goal_id."
+    key = _resolve_goal_id(manifest, tgt)
+    if not key:
+        return manifest, f"No encontré meta `{tgt}` en el manifiesto."
+    owner = (owner_worker_id or "").strip()
+    if owner.lower() in {"-", "none", "shared", "clear"}:
+        owner = ""
+    new_goals = []
+    found = False
+    for g in manifest.goals:
+        if (g.belief_key or "").strip() == key:
+            found = True
+            new_goals.append(g.model_copy(update={"owner_worker_id": owner}))
+        else:
+            new_goals.append(g)
+    if not found:
+        return manifest, f"No encontré meta `{tgt}` en el manifiesto."
+    return manifest.model_copy(update={"goals": new_goals}), None
+
+
+
 def _get_goals_registry_fallback_first() -> Optional[Any]:
     """Compatibility hook: goals registry must not fallback to filesystem manifests."""
     return None
@@ -440,6 +482,7 @@ def _format_homeostasis_manifest_listing(
     manifest: Any,
     *,
     registry: Any = None,
+    worker_id: str = "",
 ) -> str:
     from duckclaw.homeostasis.surprise import compute_surprise, detect_value_scale_mismatch
     from harness_core.goal_priority import goal_priority_display, sort_goals_by_priority
@@ -447,10 +490,26 @@ def _format_homeostasis_manifest_listing(
     lines = ["Manifiesto homeostasis", ""]
     reg = registry if registry is not None else _get_goals_registry_for_chat(db, chat_id)
     key_to_belief = {b.key.strip(): b for b in (reg.beliefs if reg else [])}
-    lines.append("Metas / señales de calidad (menor P = atender antes):")
-    sorted_goals = sort_goals_by_priority(list(manifest.goals or []))
+    wid = (worker_id or "").strip()
+    all_goals = list(manifest.goals or [])
+    if wid:
+        from harness_core.targets import filter_goals_for_worker, goal_owner_worker_id
+
+        sorted_goals = sort_goals_by_priority(
+            filter_goals_for_worker(all_goals, wid, include_shared=False)
+        )
+        shared_n = sum(1 for g in all_goals if not goal_owner_worker_id(g))
+        lines.append(f"Metas del worker `{wid}` (menor P = atender antes):")
+        if shared_n:
+            lines.append(f"_(+{shared_n} meta(s) compartida(s) sin owner; usa /goals sin --worker)_")
+    else:
+        sorted_goals = sort_goals_by_priority(all_goals)
+        lines.append("Metas / señales de calidad (menor P = atender antes):")
     if not sorted_goals:
-        lines.append("- (ninguna). Añade con /goals <objetivo>")
+        if wid:
+            lines.append(f"- (ninguna para `{wid}`). Añade con /goals --worker {wid} <objetivo>")
+        else:
+            lines.append("- (ninguna). Añade con /goals <objetivo>")
     else:
         for rank, g in enumerate(sorted_goals, start=1):
             key = (g.belief_key or "").strip()
@@ -466,6 +525,8 @@ def _format_homeostasis_manifest_listing(
             id_label = f"**{key}**" if key else "(sin id)"
             kind = getattr(g, "goal_kind", None) or "task"
             kind_tag = " · tipo=monitor" if kind == "monitor" else ""
+            owner = (getattr(g, "owner_worker_id", None) or "").strip()
+            owner_tag = f" · worker=`{owner}`" if owner else ""
             prio_tag = f"**{goal_priority_display(g, rank=rank)}** · "
             value_unit = getattr(b, "value_unit", None) if b is not None else None
             if observed is not None and (target != 0 or thresh != 0):
@@ -473,18 +534,18 @@ def _format_homeostasis_manifest_listing(
                     float(observed), target, thresh, value_unit=value_unit
                 ):
                     lines.append(
-                        f"- {prio_tag}{id_label} · {title}{kind_tag}: target={target} "
+                        f"- {prio_tag}{id_label} · {title}{kind_tag}{owner_tag}: target={target} "
                         f"(obs: {observed}, escala incompatible) —"
                     )
                 else:
                     res = compute_surprise(float(observed), target, thresh, comparison=comp)
                     st = "⚠️" if res.is_anomaly else "✓"
                     lines.append(
-                        f"- {prio_tag}{id_label} · {title}{kind_tag}: target={target} (obs: {observed}) {st}"
+                        f"- {prio_tag}{id_label} · {title}{kind_tag}{owner_tag}: target={target} (obs: {observed}) {st}"
                     )
             else:
                 lines.append(
-                    f"- {prio_tag}{id_label} · {title}{kind_tag}: target={target}, thresh={thresh} (sin dato)"
+                    f"- {prio_tag}{id_label} · {title}{kind_tag}{owner_tag}: target={target}, thresh={thresh} (sin dato)"
                 )
     infra = manifest.infra
     lines.append("")
@@ -514,7 +575,8 @@ def execute_homeostasis_goals(
     registry = _get_goals_registry_for_chat(db, chat_id, tenant_id=tid)
     raw = (args or "").strip()
     toks = raw.split()
-    # DB-first: legacy agent_config goals only via explicit --migrate (never ghost-list after rm).
+    worker_filter, toks = _extract_worker_flag(toks)
+    raw_rest = " ".join(toks).strip()
     manifest = load_homeostasis_manifest(db, tid, chat_id=chat_id, migrate_legacy=False)
 
     if toks and toks[0] == "--migrate":
@@ -660,6 +722,27 @@ def execute_homeostasis_goals(
         kid = key_resolved or target
         return f"✅ Meta `{kid}` marcada como tarea discreta (goal_kind=task)."
 
+
+    if toks and toks[0] == "--owner":
+        if len(toks) < 3:
+            return "Uso: /goals --owner <goal_id> <worker_id> · /goals --owner <goal_id> -  (limpiar)"
+        owner_val = toks[-1].strip()
+        target = " ".join(toks[1:-1]).strip()
+        key_resolved = _resolve_goal_id(manifest, target)
+        updated, err = _apply_goals_owner(manifest, target, owner_val)
+        if err:
+            return err
+        ok, err_save = _persist_homeostasis_manifest_db(
+            db, chat_id, tid, updated, vault_user_id=vault_user_id
+        )
+        if not ok:
+            return f"No se pudo guardar: {err_save}"
+        kid = key_resolved or target
+        cleared = owner_val.lower() in {"-", "none", "shared", "clear"} or not owner_val.strip()
+        if cleared:
+            return f"✅ Meta `{kid}` → owner compartido (sin worker)."
+        return f"✅ Meta `{kid}` → owner worker=`{owner_val.strip()}`"
+
     if toks and toks[0] == "--priority":
         if len(toks) < 3:
             return "Uso: /goals --priority <goal_id> <n>  (1 = mayor prioridad)"
@@ -680,11 +763,11 @@ def execute_homeostasis_goals(
         kid = key_resolved or target
         return f"✅ Meta `{kid}` → **P{prio}** (menor número = atender antes){_goal_count_suffix(db, chat_id, tid)}"
 
-    if raw and not raw.startswith("--") and toks[0] != "rm":
-        key_norm = _normalize_belief_key(raw)
+    if raw_rest and not raw_rest.startswith("--") and toks and toks[0] != "rm":
+        key_norm = _normalize_belief_key(raw_rest)
         belief = None
         if registry:
-            belief = registry.get_belief(raw.strip())
+            belief = registry.get_belief(raw_rest.strip())
             if not belief:
                 for b in registry.beliefs:
                     if _normalize_belief_key(b.key) == key_norm:
@@ -701,7 +784,7 @@ def execute_homeostasis_goals(
                 anchor_setting_key=str(getattr(belief, "anchor_setting_key", "") or "").strip(),
             )
         else:
-            params = _natural_language_goal_to_params(db, chat_id, raw)
+            params = _natural_language_goal_to_params(db, chat_id, raw_rest)
             if params:
                 new_goal = DomainGoal(
                     belief_key=params["belief_key"],
@@ -715,9 +798,11 @@ def execute_homeostasis_goals(
                     belief_key=key_norm or "objetivo",
                     target_value=0.0,
                     threshold=0.0,
-                    title=raw[:120].strip(),
+                    title=raw_rest[:120].strip(),
                     priority=next_goal_priority(manifest.goals),
                 )
+        if worker_filter:
+            new_goal = new_goal.model_copy(update={"owner_worker_id": worker_filter})
         goals = [g for g in manifest.goals if (g.belief_key or "").strip() != new_goal.belief_key]
         goals.append(new_goal)
         manifest = manifest.model_copy(update={"goals": goals})
@@ -729,12 +814,15 @@ def execute_homeostasis_goals(
         title_display = new_goal.title or new_goal.belief_key
         return (
             f"✅ Meta homeostasis añadida: {title_display} "
-            f"(prioridad P{new_goal.priority}){_goal_count_suffix(db, chat_id, tid)}"
+            f"(prioridad P{new_goal.priority}{f' · worker=`{worker_filter}`' if worker_filter else ''}){_goal_count_suffix(db, chat_id, tid)}"
         )
 
     return (
-        _format_homeostasis_manifest_listing(db, chat_id, manifest, registry=registry)
-        + "\n\nUso: /goals <objetivo> · /goals --set error_rate_pct 2 · "
+        _format_homeostasis_manifest_listing(
+            db, chat_id, manifest, registry=registry, worker_id=worker_filter
+        )
+        + "\n\nUso: /goals <objetivo> · /goals --worker <id> [objetivo] · "
+        "/goals --owner <goal_id> <worker_id> · /goals --set error_rate_pct 2 · "
         "/goals rm <goal_id> · /goals rm all · /goals --priority <goal_id> <n> · "
         "/goals --monitor <goal_id> · "
         "/goals --task <goal_id> · /goals --migrate · /goals --reset · "

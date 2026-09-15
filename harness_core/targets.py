@@ -156,15 +156,57 @@ def manifest_goals_as_dicts(manifest: HomeostasisManifest) -> list[dict[str, Any
     return [g.model_dump() for g in sort_goals_by_priority(manifest.goals)]
 
 
+def goal_owner_worker_id(goal: Any) -> str:
+    """Normalize owner_worker_id from DomainGoal or dict (empty = shared)."""
+    if isinstance(goal, dict):
+        return str(goal.get("owner_worker_id") or "").strip()
+    return str(getattr(goal, "owner_worker_id", "") or "").strip()
+
+
+def goal_visible_to_worker(goal: Any, worker_id: str) -> bool:
+    """True if goal is shared or owned by worker_id. Empty worker_id → all goals."""
+    wid = (worker_id or "").strip()
+    if not wid:
+        return True
+    owner = goal_owner_worker_id(goal)
+    return (not owner) or owner == wid
+
+
+def filter_goals_for_worker(
+    goals: list[Any],
+    worker_id: str,
+    *,
+    include_shared: bool = True,
+) -> list[Any]:
+    """Filter goals by owner_worker_id.
+
+    - include_shared=True (default, for /loop alignment): shared + owned by worker.
+    - include_shared=False (strict /goals --worker list): only owned by worker.
+    """
+    wid = (worker_id or "").strip()
+    if not wid:
+        return list(goals or [])
+    out: list[Any] = []
+    for g in goals or []:
+        owner = goal_owner_worker_id(g)
+        if owner == wid or (include_shared and not owner):
+            out.append(g)
+    return out
+
+
 def get_manifest_goals_for_chat(
     db: Any,
     chat_id: Any,
     *,
     tenant_id: str | None = None,
+    worker_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Goals from homeostasis manifest (single source for /crons scheduler and /loop)."""
     tid = resolve_homeostasis_tenant_id(db, chat_id, tenant_id)
-    return manifest_goals_as_dicts(load_homeostasis_manifest(db, tid, chat_id=chat_id))
+    goals = manifest_goals_as_dicts(load_homeostasis_manifest(db, tid, chat_id=chat_id))
+    if worker_id:
+        return filter_goals_for_worker(goals, worker_id, include_shared=True)
+    return goals
 
 
 def save_homeostasis_manifest(

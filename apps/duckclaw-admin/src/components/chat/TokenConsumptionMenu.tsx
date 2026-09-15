@@ -108,6 +108,7 @@ export function TokenConsumptionMenu({
 
   const contextWindow = useMemo(() => inferModelContextWindow(model), [model]);
   const contextUsed = useMemo(() => {
+    // Prefer gateway breakdown (peak-floored). tokenUsage.input_tokens is a turn sum.
     if (contextTokenBreakdown && contextTokenBreakdown.total > 0) {
       return contextTokenBreakdown.total;
     }
@@ -126,10 +127,15 @@ export function TokenConsumptionMenu({
   const categoryRows = useMemo((): CategoryRow[] => {
     if (!contextWindow || contextUsed == null) return [];
     const bd = contextTokenBreakdown;
-    const messages = bd?.messages ?? 0;
-    const tools = bd?.tools ?? 0;
-    const system = bd?.system ?? 0;
-    const accounted = messages + tools + system;
+    let messages = bd?.messages ?? 0;
+    let tools = bd?.tools ?? 0;
+    let system = bd?.system ?? 0;
+    let accounted = messages + tools + system;
+    // Attribute residual vs billed occupancy to tools (schemas not in heuristic).
+    if (bd && accounted > 0 && contextUsed > accounted) {
+      tools += contextUsed - accounted;
+      accounted = contextUsed;
+    }
     // When we only have a total (no breakdown), show a single "used" bucket.
     if (!bd || accounted <= 0) {
       const free = Math.max(0, contextWindow - contextUsed);

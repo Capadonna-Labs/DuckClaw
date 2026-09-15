@@ -8,6 +8,7 @@ from duckclaw.utils.langsmith_trace import (
 from duckclaw.utils.tool_reply import format_tool_reply
 from duckclaw.utils.logger import (
     configure_structured_logging,
+    extract_peak_input_tokens_from_messages,
     extract_usage_from_messages,
     format_chat_id_for_terminal,
     get_obs_logger,
@@ -28,6 +29,7 @@ __all__ = [
     "format_tool_reply",
     "configure_structured_logging",
     "extract_usage_from_messages",
+    "extract_peak_input_tokens_from_messages",
     "format_chat_id_for_terminal",
     "create_completed_langsmith_run",
     "get_tracing_config",

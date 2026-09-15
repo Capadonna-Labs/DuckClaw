@@ -130,10 +130,17 @@ async def _ainvoke(
     if usage:
         out["usage_tokens"] = usage
     try:
+        from duckclaw.utils.logger import extract_peak_input_tokens_from_messages
         from duckclaw.workers.provider_input_budget import estimate_context_token_breakdown
 
-        breakdown = estimate_context_token_breakdown(
+        peak_in = extract_peak_input_tokens_from_messages(
             list(messages) if isinstance(messages, list) else None
+        )
+        bound_n = result.get("_context_bound_tools_n")
+        breakdown = estimate_context_token_breakdown(
+            list(messages) if isinstance(messages, list) else None,
+            bound_tools_n=int(bound_n) if bound_n is not None else None,
+            billed_input_tokens=peak_in,
         )
         if breakdown.get("total", 0) > 0:
             out["context_token_breakdown"] = breakdown
@@ -152,6 +159,7 @@ async def _ainvoke(
         "visual_artifact_id",
         "outbound_image_paths",
         "analytical_summary",
+        "_context_bound_tools_n",
     ):
         if _k in result:
             out[_k] = result[_k]

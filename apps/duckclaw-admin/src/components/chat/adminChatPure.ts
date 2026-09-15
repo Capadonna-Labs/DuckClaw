@@ -286,6 +286,25 @@ export type TurnTokenMeta = {
   context_token_breakdown?: Record<string, number> | null;
 };
 
+/**
+ * Floor heuristic breakdown at billed prompt size.
+ * Bound tool schemas often dominate the real window but are missing from chars/4 estimates.
+ */
+export function floorContextBreakdownAtBilledInput(
+  breakdown: ContextTokenBreakdown,
+  billedInputTokens: number
+): ContextTokenBreakdown {
+  const billed = Math.max(0, Math.floor(billedInputTokens));
+  if (billed <= breakdown.total) return breakdown;
+  const residual = billed - breakdown.total;
+  return {
+    ...breakdown,
+    tools: breakdown.tools + residual,
+    tool_schemas: (breakdown.tool_schemas ?? 0) + residual,
+    total: billed,
+  };
+}
+
 /** Header mirrors gateway log line: last turn usage_tokens, not session sum. */
 export function applyLastTurnTokenDisplay(
   setLastTurnUsage: (value: UsageTokenBreakdown | null) => void,
@@ -294,11 +313,21 @@ export function applyLastTurnTokenDisplay(
   setContextTokenBreakdown?: (value: ContextTokenBreakdown | null) => void
 ): void {
   const usage = normalizeUsageTokens(meta.usage_tokens);
-  const breakdown = normalizeContextTokenBreakdown(meta.context_token_breakdown ?? null);
+  let breakdown = normalizeContextTokenBreakdown(meta.context_token_breakdown ?? null);
   if (usage) {
     setLastTurnUsage(usage);
   } else {
     setLastTurnUsage(null);
+  }
+  // Trust gateway breakdown (already floored at peak single-call prompt).
+  // usage.input_tokens is a turn *sum* and must not inflate occupancy.
+  if (breakdown && usage && usage.input_tokens > breakdown.total) {
+    // Old gateways: heuristic undercounts tool schemas; floor at billed prompt.
+    // Cap at input_tokens only when breakdown looks like a pure heuristic
+    // (no tools) — still prefer not using multi-call sums when tools > 0.
+    if ((breakdown.tools ?? 0) <= 0) {
+      breakdown = floorContextBreakdownAtBilledInput(breakdown, usage.input_tokens);
+    }
   }
   if (breakdown) {
     setContextTokenBreakdown?.(breakdown);
@@ -308,7 +337,9 @@ export function applyLastTurnTokenDisplay(
   setContextTokenBreakdown?.(null);
   const ctx = meta.context_estimated_tokens;
   if (ctx != null && Number.isFinite(ctx) && ctx >= 0) {
-    setContextEstimatedTokens(Math.floor(ctx));
+    const floored =
+      usage && usage.input_tokens > ctx ? usage.input_tokens : Math.floor(ctx);
+    setContextEstimatedTokens(floored);
     return;
   }
   // Prefer billed input_tokens as occupancy when no heuristic breakdown arrived.

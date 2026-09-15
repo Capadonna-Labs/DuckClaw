@@ -268,6 +268,28 @@ def test_estimate_context_token_breakdown_categories() -> None:
     assert out["total"] == out["system"] + out["messages"] + out["tools"]
 
 
+def test_estimate_context_token_breakdown_floors_at_billed_input() -> None:
+    msgs = [
+        SystemMessage(content="S" * 40),
+        HumanMessage(content="H" * 40),
+    ]
+    out = estimate_context_token_breakdown(msgs, billed_input_tokens=42_529)
+    assert out["system"] == 10
+    assert out["messages"] == 10
+    # Residual attributed to tool schemas (bound tools invisible in message list).
+    assert out["total"] == 42_529
+    assert out["tools"] == 42_529 - 20
+    assert out["tool_schemas"] == out["tools"]
+
+
+def test_estimate_context_token_breakdown_bound_tools_n() -> None:
+    msgs = [HumanMessage(content="H" * 40)]
+    out = estimate_context_token_breakdown(msgs, bound_tools_n=80)
+    assert out["messages"] == 10
+    assert out["tool_schemas"] == 80 * 350
+    assert out["total"] == out["messages"] + out["tools"]
+
+
 def test_mlx_max_bound_tools_default(monkeypatch) -> None:
     monkeypatch.delenv("DUCKCLAW_MLX_MAX_INPUT_TOKENS", raising=False)
     configure_provider_budget_runtime_db_provider(None)
@@ -289,3 +311,26 @@ def test_mlx_tools_for_bind_caps_surface() -> None:
     out = mlx_tools_for_bind(tools, max_tools=10)
     assert len(out) == 10
     assert getattr(out[0], "name") == "read_sql"
+
+
+def test_extract_peak_input_tokens_from_messages() -> None:
+    from duckclaw.utils.logger import (
+        extract_peak_input_tokens_from_messages,
+        extract_usage_from_messages,
+    )
+    from langchain_core.messages import AIMessage, HumanMessage
+
+    def _ai(inp: int, out: int) -> AIMessage:
+        m = AIMessage(content="x")
+        m.usage_metadata = {
+            "input_tokens": inp,
+            "output_tokens": out,
+            "total_tokens": inp + out,
+        }
+        return m
+
+    msgs = [HumanMessage(content="hi"), _ai(40_000, 50), _ai(42_529, 70)]
+    assert extract_peak_input_tokens_from_messages(msgs) == 42_529
+    usage = extract_usage_from_messages(msgs)
+    assert usage is not None
+    assert usage["input_tokens"] == 40_000 + 42_529

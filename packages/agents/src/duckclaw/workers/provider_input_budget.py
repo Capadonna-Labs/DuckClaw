@@ -193,6 +193,7 @@ def estimate_context_token_breakdown(
     messages: list[Any] | None,
     *,
     bound_tools_n: int | None = None,
+    billed_input_tokens: int | None = None,
 ) -> dict[str, int]:
     """
     Heuristic context composition for the consumption UI (Claude-style categories).
@@ -202,8 +203,12 @@ def estimate_context_token_breakdown(
     - tools: ToolMessage content + estimated bound-tool schemas
     - total: sum of the above
 
-    Schema size uses ``mlx_tool_schema_reserve_tokens`` when ``bound_tools_n`` is set;
+    Schema size uses ``n * mlx_tokens_per_bound_tool_estimate`` when ``bound_tools_n`` is set;
     otherwise estimates from distinct tool names seen in AIMessage.tool_calls.
+
+    When ``billed_input_tokens`` (peak provider prompt for the turn) exceeds the
+    heuristic total, residual is attributed to tools/schemas — bound tool JSON
+    is invisible in the message list but still occupies the context window.
     """
     try:
         from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -245,9 +250,20 @@ def estimate_context_token_breakdown(
         schema_n = max(0, int(bound_tools_n))
     else:
         schema_n = len(tool_names)
-    tool_schemas = mlx_tool_schema_reserve_tokens(schema_n) if schema_n else 0
+    # UI occupancy must not use the MLX VRAM schema cap — that undercounts
+    # OpenRouter/DeepSeek prompts where 80+ tools (~350 tok each) are bound.
+    tool_schemas = (
+        schema_n * mlx_tokens_per_bound_tool_estimate() if schema_n else 0
+    )
     tools = tool_results + tool_schemas
     total = system + chat + tools
+    if billed_input_tokens is not None:
+        billed = max(0, int(billed_input_tokens))
+        if billed > total:
+            residual = billed - total
+            tool_schemas += residual
+            tools += residual
+            total = billed
     return {
         "system": int(system),
         "messages": int(chat),

@@ -505,6 +505,19 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 "_duckclaw_worker_llm_failure_kind",
             ):
                 out.pop(_k, None)
+        # Context UI: tool schemas are not in messages; expose bind count for occupancy.
+        _ctx_bound_n = 0
+        try:
+            _lk = getattr(_invoked_llm, "kwargs", None)
+            if isinstance(_lk, dict) and _lk.get("tools"):
+                _ctx_bound_n = len(_lk.get("tools") or [])
+        except Exception:
+            pass
+        if _ctx_bound_n <= 0:
+            _ctx_bound_n = len(
+                _tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind
+            )
+        out["_context_bound_tools_n"] = int(_ctx_bound_n)
         out.update(_identity_fields(state))
         return out
 

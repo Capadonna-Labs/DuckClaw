@@ -391,3 +391,29 @@ def extract_usage_from_messages(messages: Optional[list[Any]]) -> Optional[dict[
     if total_all <= 0:
         total_all = total_in + total_out
     return {"input_tokens": total_in, "output_tokens": total_out, "total_tokens": total_all}
+
+
+def extract_peak_input_tokens_from_messages(messages: Optional[list[Any]]) -> Optional[int]:
+    """
+    Largest single-call prompt tokens in the turn (context-window occupancy).
+
+    Unlike ``extract_usage_from_messages`` (which sums every AIMessage), this is
+    the size of the biggest provider request — what actually sat in the window.
+    """
+    if not messages:
+        return None
+    try:
+        from langchain_core.messages import AIMessage
+    except Exception:
+        AIMessage = None  # type: ignore[assignment,misc]
+    peak = 0
+    found = False
+    for m in messages:
+        if AIMessage is not None and isinstance(m, AIMessage):
+            u = _usage_dict_from_ai_message(m)
+            if u:
+                found = True
+                peak = max(peak, int(u["input_tokens"] or 0))
+    if not found or peak <= 0:
+        return None
+    return peak

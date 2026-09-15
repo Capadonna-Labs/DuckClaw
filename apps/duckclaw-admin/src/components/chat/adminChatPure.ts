@@ -201,9 +201,15 @@ export function isThinkingStatusHeartbeat(m: ChatMsg | undefined): boolean {
   );
 }
 
-/** Remove stale "Pensando…" status heartbeats from persisted chat history. */
+/** Stale PROGRESO box from a failed manifest load (kept in sessionStorage). */
+export function isCatalogMissHeartbeat(m: ChatMsg | undefined): boolean {
+  if (m?.role !== 'heartbeat') return false;
+  return /not found in catalog for tenant/i.test((m.text || '').trim());
+}
+
+/** Remove stale "Pensando…" / catalog-miss status heartbeats from persisted chat history. */
 export function stripThinkingStatusHeartbeats(messages: ChatMsg[]): ChatMsg[] {
-  return messages.filter((m) => !isThinkingStatusHeartbeat(m));
+  return messages.filter((m) => !isThinkingStatusHeartbeat(m) && !isCatalogMissHeartbeat(m));
 }
 
 /** Server history includes loop system user turn plus assistant reply. */

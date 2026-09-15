@@ -69,10 +69,12 @@ def test_load_context_fold_summary_from_vault(tmp_path, monkeypatch) -> None:
 
 def test_save_context_fold_summary_round_trip(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("DUCKCLAW_CONTEXT_FOLD_PERSIST", "1")
+    monkeypatch.setenv("DUCKCLAW_WRITE_POLL_SEC", "1")
     vault = tmp_path / "vault.duckdb"
     _ensure_agent_config_table(str(vault))
 
-    def _fake_enqueue(command, **kwargs):
+    def _fake_enqueue(command, *, db_path: str, user_id: str):
+        _ = db_path, user_id
         con = duckdb.connect(str(vault))
         try:
             from duckclaw.write_command_handlers import dispatch_command
@@ -83,11 +85,11 @@ def test_save_context_fold_summary_round_trip(tmp_path, monkeypatch) -> None:
         return "task-fold-1"
 
     monkeypatch.setattr(
-        "duckclaw.commands.chat_state.db_write_queue.enqueue_typed_command",
+        "duckclaw.db_write_fire_and_forget.enqueue_write_command",
         _fake_enqueue,
     )
     monkeypatch.setattr(
-        "duckclaw.commands.chat_state.db_write_queue.poll_task_status_sync",
+        "duckclaw.db_write_fire_and_forget.wait_write_task",
         lambda *_a, **_k: SimpleNamespace(status="success", detail=""),
     )
 

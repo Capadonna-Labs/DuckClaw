@@ -42,13 +42,33 @@ def ensure_migrations_table(db: Any) -> None:
     db.execute(_MIGRATIONS_TABLE_DDL)
 
 
+def _fetchall(result: Any) -> list[Any]:
+    """DuckClaw.execute returns a list; DuckDB cursors expose fetchall()."""
+    if hasattr(result, "fetchall"):
+        return list(result.fetchall())
+    if isinstance(result, list):
+        return result
+    return []
+
+
+def _fetchone(result: Any) -> Any | None:
+    """DuckClaw.execute returns a list; DuckDB cursors expose fetchone()."""
+    if hasattr(result, "fetchone"):
+        return result.fetchone()
+    if isinstance(result, list):
+        return result[0] if result else None
+    return None
+
+
 def applied_versions(db: Any, *, create_table: bool = True) -> set[int]:
     if create_table:
         ensure_migrations_table(db)
     try:
-        rows = db.execute(
-            "SELECT version, checksum FROM main.schema_migrations ORDER BY version"
-        ).fetchall()
+        rows = _fetchall(
+            db.execute(
+                "SELECT version, checksum FROM main.schema_migrations ORDER BY version"
+            )
+        )
         return {int(r[0]) for r in rows}
     except Exception:
         return set()
@@ -58,9 +78,11 @@ def applied_with_checksums(db: Any, *, create_table: bool = True) -> dict[int, s
     if create_table:
         ensure_migrations_table(db)
     try:
-        rows = db.execute(
-            "SELECT version, checksum FROM main.schema_migrations ORDER BY version"
-        ).fetchall()
+        rows = _fetchall(
+            db.execute(
+                "SELECT version, checksum FROM main.schema_migrations ORDER BY version"
+            )
+        )
         return {int(r[0]): str(r[1]) for r in rows}
     except Exception:
         return {}
@@ -1282,10 +1304,12 @@ def _migration_029_sync_skill_catalog_github_mcp(db: Any) -> None:
 def _migration_033_harness_core_to_main(db: Any) -> None:
     """Copia datos legacy harness_core.* → main.* y elimina el schema obsoleto."""
     try:
-        has_legacy = db.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'harness_core' AND table_name = 'homeostasis_targets'"
-        ).fetchone()
+        has_legacy = _fetchone(
+            db.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'harness_core' AND table_name = 'homeostasis_targets'"
+            )
+        )
         if has_legacy and int(has_legacy[0]) > 0:
             db.execute(
                 """
@@ -1295,10 +1319,12 @@ def _migration_033_harness_core_to_main(db: Any) -> None:
                 ON CONFLICT (tenant_id) DO NOTHING
                 """
             )
-        has_loop = db.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'harness_core' AND table_name = 'loop_runs'"
-        ).fetchone()
+        has_loop = _fetchone(
+            db.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'harness_core' AND table_name = 'loop_runs'"
+            )
+        )
         if has_loop and int(has_loop[0]) > 0:
             _ensure_main_loop_runs_table(db)
             db.execute(
@@ -1311,10 +1337,12 @@ def _migration_033_harness_core_to_main(db: Any) -> None:
                 ON CONFLICT (run_id) DO NOTHING
                 """
             )
-        has_runs = db.execute(
-            "SELECT COUNT(*) FROM information_schema.tables "
-            "WHERE table_schema = 'harness_core' AND table_name = 'meditate_runs'"
-        ).fetchone()
+        has_runs = _fetchone(
+            db.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema = 'harness_core' AND table_name = 'meditate_runs'"
+            )
+        )
         if has_runs and int(has_runs[0]) > 0:
             db.execute(
                 """

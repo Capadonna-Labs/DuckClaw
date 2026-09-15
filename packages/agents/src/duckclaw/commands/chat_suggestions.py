@@ -30,7 +30,7 @@ _SYSTEM_PROMPT = (
     "como réplicas naturales del usuario. Típico: 2 chips de respuesta "
     "(sí/aceptar con matices vs no/aplazar/rechazar) + 1 chip de matiz o "
     "aclaración sobre el mismo pedido. "
-    "Ej.: asistente pregunta «¿documentarlo como issue en Capadonna-Driller?» → "
+    "Ej.: asistente pregunta «¿documentarlo como issue en el tracker?» → "
     "chips válidos: «Sí, documentalo como issue», «No por ahora», "
     "«Sí y priorízalo». "
     "PROHIBIDO en este caso inventar preguntas técnicas ajenas a lo que el "

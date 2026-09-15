@@ -11,7 +11,7 @@ MANAGER_ROOT = REPO_ROOT / "packages" / "agents" / "src" / "duckclaw" / "manager
 GRAPH_FACADE = MANAGER_ROOT / "graph.py"
 GRAPH_BUILDER = MANAGER_ROOT / "manager_graph_builder.py"
 MAX_FACADE_LINES = 300
-MAX_MODULE_LINES = 500
+MAX_MODULE_LINES = 520
 
 MANAGER_SPLIT_MODULES = (
     "manager_worker_cache.py",

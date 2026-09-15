@@ -201,7 +201,7 @@ def test_playground_chat_requires_message_or_images(admin_client: TestClient) ->
 
 
 def test_playground_chat_with_images_routes_edit_inbound(
-    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: dict = {}
 
@@ -219,9 +219,13 @@ def test_playground_chat_with_images_routes_edit_inbound(
 
     monkeypatch.setattr(vlm, "enrich_message_with_admin_images", _fake_enrich)
 
-    import routers.admin as admin_router
     import routers.admin_domains.playground.chat_turn as playground_chat_turn
-    from test_admin_router import _mock_playground_team
+    import routers.admin_domains.playground_chat as playground_chat_router
+    from test_admin_router import (
+        PLAYGROUND_ACTOR_HEADERS,
+        _mock_playground_team,
+        seed_playground_catalog_worker,
+    )
 
     seen: dict = {}
 
@@ -229,8 +233,9 @@ def test_playground_chat_with_images_routes_edit_inbound(
         seen["message"] = chat.message
         return {"response": "ok", "assigned_worker_id": "default"}
 
+    seed_playground_catalog_worker(gateway_db, worker_id="default")
     monkeypatch.setattr(
-        admin_router,
+        playground_chat_router,
         "_playground_team_context",
         lambda **_: _mock_playground_team(workers=["default"]),
     )
@@ -240,7 +245,7 @@ def test_playground_chat_with_images_routes_edit_inbound(
 
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=PLAYGROUND_ACTOR_HEADERS,
         json={
             "worker_id": "default",
             "message": "Haz la ropa amarilla",
@@ -254,7 +259,7 @@ def test_playground_chat_with_images_routes_edit_inbound(
 
 
 def test_playground_chat_with_images_mock_vlm(
-    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core import vlm_ingest as vlm
 
@@ -265,11 +270,16 @@ def test_playground_chat_with_images_mock_vlm(
 
     import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
-    from test_admin_router import _mock_playground_team
+    from test_admin_router import (
+        PLAYGROUND_ACTOR_HEADERS,
+        _mock_playground_team,
+        seed_playground_catalog_worker,
+    )
 
     async def _fake_invoke(*_a, **_k):
         return {"response": "ok", "assigned_worker_id": "default"}
 
+    seed_playground_catalog_worker(gateway_db, worker_id="default")
     monkeypatch.setattr(
         playground_chat_router,
         "_playground_team_context",
@@ -280,7 +290,7 @@ def test_playground_chat_with_images_mock_vlm(
 
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=PLAYGROUND_ACTOR_HEADERS,
         json={
             "worker_id": "default",
             "message": "compara estas",
@@ -310,7 +320,7 @@ def test_playground_chat_invalid_mime(admin_client: TestClient, monkeypatch: pyt
 
 
 def test_playground_fly_command_skips_vlm_with_images(
-    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core import vlm_ingest as vlm
 
@@ -321,11 +331,16 @@ def test_playground_fly_command_skips_vlm_with_images(
 
     import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
-    from test_admin_router import _mock_playground_team
+    from test_admin_router import (
+        PLAYGROUND_ACTOR_HEADERS,
+        _mock_playground_team,
+        seed_playground_catalog_worker,
+    )
 
     async def _fake_invoke(*_a, **_k):
         return {"response": "fly-ok", "assigned_worker_id": "default"}
 
+    seed_playground_catalog_worker(gateway_db, worker_id="default")
     monkeypatch.setattr(
         playground_chat_router,
         "_playground_team_context",
@@ -336,7 +351,7 @@ def test_playground_fly_command_skips_vlm_with_images(
 
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=PLAYGROUND_ACTOR_HEADERS,
         json={
             "worker_id": "default",
             "user_incoming": "/loop --status",
@@ -349,7 +364,7 @@ def test_playground_fly_command_skips_vlm_with_images(
 
 
 def test_playground_image_only_sets_user_incoming(
-    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core import vlm_ingest as vlm
 
@@ -366,7 +381,11 @@ def test_playground_image_only_sets_user_incoming(
 
     import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
-    from test_admin_router import _mock_playground_team
+    from test_admin_router import (
+        PLAYGROUND_ACTOR_HEADERS,
+        _mock_playground_team,
+        seed_playground_catalog_worker,
+    )
 
     seen: dict[str, str] = {}
 
@@ -375,6 +394,7 @@ def test_playground_image_only_sets_user_incoming(
         seen["user_incoming"] = str(getattr(chat, "user_incoming", "") or "")
         return {"response": "ok", "assigned_worker_id": "default"}
 
+    seed_playground_catalog_worker(gateway_db, worker_id="default")
     monkeypatch.setattr(
         playground_chat_router,
         "_playground_team_context",
@@ -385,7 +405,7 @@ def test_playground_image_only_sets_user_incoming(
 
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=PLAYGROUND_ACTOR_HEADERS,
         json={
             "worker_id": "default",
             "message": "",
@@ -399,7 +419,7 @@ def test_playground_image_only_sets_user_incoming(
 
 
 def test_playground_vlm_all_failed_degrades_instead_of_502(
-    admin_client: TestClient, monkeypatch: pytest.MonkeyPatch
+    admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from core import vlm_ingest as vlm
 
@@ -417,7 +437,11 @@ def test_playground_vlm_all_failed_degrades_instead_of_502(
 
     import routers.admin_domains.playground.chat_turn as playground_chat_turn
     import routers.admin_domains.playground_chat as playground_chat_router
-    from test_admin_router import _mock_playground_team
+    from test_admin_router import (
+        PLAYGROUND_ACTOR_HEADERS,
+        _mock_playground_team,
+        seed_playground_catalog_worker,
+    )
 
     seen: dict[str, str] = {}
 
@@ -426,6 +450,7 @@ def test_playground_vlm_all_failed_degrades_instead_of_502(
         seen["message"] = str(getattr(chat, "message", "") or "")
         return {"response": "ok", "assigned_worker_id": "default"}
 
+    seed_playground_catalog_worker(gateway_db, worker_id="default")
     monkeypatch.setattr(
         playground_chat_router,
         "_playground_team_context",
@@ -436,7 +461,7 @@ def test_playground_vlm_all_failed_degrades_instead_of_502(
 
     r = admin_client.post(
         "/api/v1/admin/playground/chat",
-        headers={"X-Admin-Key": "test-admin-key"},
+        headers=PLAYGROUND_ACTOR_HEADERS,
         json={
             "worker_id": "default",
             "message": "describe",

@@ -5,8 +5,12 @@ from unittest.mock import MagicMock, patch
 from duckclaw.db_write_queue import DbWriteTaskStatus
 
 
-def test_get_write_task_status_pending_when_missing() -> None:
+def test_get_write_task_status_pending_when_missing(monkeypatch) -> None:
     from duckclaw.gateway_enqueue import get_write_task_status
+
+    monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
+    monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+    monkeypatch.delenv("LITE_MODE", raising=False)
 
     fake = MagicMock()
     fake.get.return_value = None
@@ -14,8 +18,12 @@ def test_get_write_task_status_pending_when_missing() -> None:
         assert get_write_task_status("task_missing") is None
 
 
-def test_get_write_task_status_parses_success() -> None:
+def test_get_write_task_status_parses_success(monkeypatch) -> None:
     from duckclaw.gateway_enqueue import get_write_task_status
+
+    monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
+    monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+    monkeypatch.delenv("LITE_MODE", raising=False)
 
     payload = DbWriteTaskStatus(status="success").model_dump_json()
     fake = MagicMock()

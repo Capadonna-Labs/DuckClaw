@@ -69,8 +69,9 @@ def resolve_playground_actor_turn(
     try:
         with open_gateway_db(read_only=True) as db:
             profile = ensure_profile_for_user(db, email=actor)
-            if get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
-                catalog_allowed = True
+            # Project scope remaps ``default`` → project coordinator even when the
+            # scaffold ``default`` row is not itself catalog-visible.
+            if project_id_clean:
                 try:
                     wid, project_id_clean = resolve_playground_worker_for_project(
                         db,
@@ -78,14 +79,15 @@ def resolve_playground_actor_turn(
                         project_id=project_id_clean,
                         worker_id=wid,
                     )
-                    if project_id_clean:
-                        project_context = project_context_for_actor(
-                            db,
-                            actor_email=actor,
-                            project_id=project_id_clean,
-                        )
                 except PermissionError as exc:
                     raise problem(403, str(exc), wid) from exc
+                project_context = project_context_for_actor(
+                    db,
+                    actor_email=actor,
+                    project_id=project_id_clean,
+                )
+            if get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
+                catalog_allowed = True
     except FileNotFoundError:
         pass
     eff_tenant = str(profile.get("tenant_id") or "").strip() or gateway_effective_tenant_id("default")

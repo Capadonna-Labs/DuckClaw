@@ -65,7 +65,7 @@ def test_history_task_audit_writes_use_typed_db_writer_command() -> None:
     source = inspect.getsource(history)
 
     assert "AppendTaskAuditCommand" in source
-    assert "enqueue_typed_command" in source
+    assert "enqueue_write_and_resolve" in source
 
 
 def test_history_round_trip_appends_and_lists_task_audit_row() -> None:

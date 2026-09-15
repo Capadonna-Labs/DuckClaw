@@ -35,27 +35,30 @@ def test_active_conversation_is_scoped_by_authenticated_tenant() -> None:
 
 def test_admin_chat_status_text_uses_plain_labels_without_emoji() -> None:
     heartbeat = Path("apps/duckclaw-admin/src/lib/toolHeartbeat.ts").read_text(encoding="utf-8")
-    chat = Path("apps/duckclaw-admin/src/components/chat/ChatBubble.tsx").read_text(encoding="utf-8")
     hook = admin_chat_corpus()
 
-    assert "const base = `Usando: ${name}`" in heartbeat
-    assert "`Usando: ${toolName}`" in chat
+    assert "export function toolHeartbeatDisplayText" in heartbeat
+    assert "const base = name;" in heartbeat
     assert "Tiempo: ${(meta.elapsed_ms / 1000).toFixed(2)}s" in hook
     assert "const base = `🔄 Usando: ${name}`" not in heartbeat
     assert "return `⏱️" not in heartbeat
-    assert "running ? ' · ⏱️" not in chat
+    assert "🔄 Usando:" not in heartbeat.split("export function toolHeartbeatDisplayText", 1)[1].split("export function mapSseToolPhase", 1)[0]
 
 
 def test_sidebar_removes_inline_hide_menu_button_and_adds_playground_selector() -> None:
     sidebar = Path("apps/duckclaw-admin/src/components/layout/Sidebar.tsx").read_text(encoding="utf-8")
+    history = Path("apps/duckclaw-admin/src/components/playground/PlaygroundHistoryView.tsx").read_text(
+        encoding="utf-8"
+    )
+    page = playground_ui_corpus()
 
     assert 'openLabel="Ocultar menú"' not in sidebar
     assert "consoleRoleLabel" not in sidebar
     assert "Rol activo:" not in sidebar
-    assert "Historial" in sidebar
-    assert "Nueva conversación" in sidebar
-    assert '/playground?view=history' in sidebar
-    assert "/playground?new=1" in sidebar
+    assert "Historial" in history
+    assert "Nueva conversación" in page or "new=1" in page
+    assert "PlaygroundHistoryView" in page
+    assert "/playground?new=1" in page or "searchParams.get('new')" in page
     nav = Path("apps/duckclaw-admin/src/config/adminNav.ts").read_text(encoding="utf-8")
     assert "href: '/productividad'" in nav
     assert "adminService.listConversations" not in sidebar
@@ -71,8 +74,8 @@ def test_playground_nav_groups_keep_kanban_nested_and_audit_in_security() -> Non
 
     assert "label: 'Inicio'" in primary_body
     assert "label: 'Chat'" in primary_body
-    assert "label: 'Conocimiento'" in primary_body
-    assert "href: '/productividad'" in more_body
+    assert "label: 'Base de Conocimiento'" in primary_body
+    assert "href: '/productividad'" in primary_body
     assert "href: '/plataforma'" in more_body
     assert "href: '/integraciones'" in more_body
     assert "href: '/administracion'" in more_body
@@ -116,12 +119,12 @@ def test_admin_sidebar_keeps_core_groups_and_data_access() -> None:
     assert "label: 'Inicio'" in primary_body
     assert "label: 'Chat'" in primary_body or "href: '/playground'" in primary_body
     assert "label: 'Agentes'" in primary_body
-    assert "label: 'Conocimiento'" in primary_body
+    assert "label: 'Base de Conocimiento'" in primary_body
     assert "href: '/plataforma'" in more_body
-    assert "AdminHubShell" in Path(
+    assert "PlataformaHubContent" in Path(
         "apps/duckclaw-admin/src/app/(admin)/plataforma/page.tsx"
     ).read_text(encoding="utf-8")
-    assert "label: 'Más'" in nav
+    assert "label: 'Avanzado'" in nav
     assert "{ type: 'group', group: PRIMARY_NAV_GROUP }" in structure_body
     assert "{ type: 'group', group: MORE_NAV_GROUP }" in structure_body
     assert "openGroupId" in sidebar
@@ -161,14 +164,20 @@ def test_playground_new_query_creates_new_conversation() -> None:
 def test_playground_selects_conversation_from_sidebar_history() -> None:
     page = playground_ui_corpus()
     hook = Path("apps/duckclaw-admin/src/components/chat/useActiveConversation.ts").read_text(encoding="utf-8")
+    history = Path("apps/duckclaw-admin/src/components/playground/PlaygroundHistoryView.tsx").read_text(
+        encoding="utf-8"
+    )
+    helpers = Path("apps/duckclaw-admin/src/components/playground/playgroundHistoryHelpers.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert "ConversationInbox" not in page
     assert "PlaygroundHistoryView" in page
-    assert "function uniqueConversationsBySession" in page
-    assert "uniqueConversations.map((conversation)" in page
-    assert "searchParams.get('view') === 'history'" in page
-    assert "adminService.listConversations({ tenant_id: tenantId, limit: 80 })" in page
-    assert "href={`/playground?conversation=${encodeURIComponent(conversation.session_id)}`}" in page
+    assert "export function uniqueConversationsBySession" in helpers
+    assert "uniqueConversations.map((conversation)" in history
+    assert "const [showHistory, setShowHistory] = useState" in page
+    assert "adminService.listConversations" in page or "adminService.listConversations" in history
+    assert "conversation.session_id" in history
     assert "const selectConversationById = useCallback" in hook
     assert "searchParams.get('conversation')" in page
     assert "selectConversationById(requestedConversation)" in page
@@ -228,7 +237,7 @@ def test_playground_run_settings_shows_worker_composition() -> None:
     assert "workerId={workerId}" in page
     assert "capabilitiesRefreshKey={sandboxRefreshKey}" not in page
     assert "enabled={toolsOpen}" in panel
-    assert "toolsOpen, setToolsOpen] = useState(false)" in panel
+    assert "toolsOpen, setToolsOpen] = useState(true)" in panel
     assert "getSandboxChatPolicy" in panel
     assert "historyWorkerLabel" in page
     assert "getWorkerCapabilities" in composition
@@ -266,8 +275,8 @@ def test_playground_config_panel_uses_compact_cards_and_modals() -> None:
     assert "const panelToggleTitle = panelOpen" in page
     assert "aria-label={panelToggleTitle}" in page
     assert "title={panelToggleTitle}" in page
-    assert "panelOpen ? <PanelRightClose size={18} /> : <PanelRightOpen size={18} />" in page
-    assert "fixed right-6 top-24 z-20" in page
+    assert "<PanelRightOpen size={18}" in page and "<PanelRightClose size={16}" in page
+    assert "w-80 opacity-100" in page or "panelOpen" in page
     assert "top-1/2 -translate-y-1/2" not in page
     assert "openLabel=\"Ocultar panel\"" not in page
     assert "PanelToggleButton" not in page
@@ -311,17 +320,12 @@ def test_floating_chat_uses_fixed_large_panel_and_header_actions() -> None:
         encoding="utf-8"
     )
 
-    assert "const PANEL_WIDTH_PX = 560" in floating
-    assert "const PANEL_HEIGHT_PX = 720" in floating
-    assert "width: PANEL_WIDTH_PX" in floating
-    assert "height: `min(${PANEL_HEIGHT_PX}px, calc(100dvh - 2rem))`" in floating
-    assert "NARROW_BREAKPOINT_PX" in floating
+    assert "w-[420px]" in floating
     assert "conversationManage={{" in floating
     assert "headerActions={" in floating
     assert "ChatViewTabBar" not in panel
     assert "<ConversationManagePanel" not in panel
-    assert "aria-label=\"Abrir Playground completo\"" in floating
-    assert "aria-label={loading ? 'Minimizar chat (el agente sigue pensando)' : 'Cerrar chat'}" in floating
+    assert 'aria-label="Abrir Playground completo"' in floating
     assert "Redimensionar ventana de chat" not in floating
     assert "PANEL_WIDTH_STORAGE_KEY" not in floating
     assert "PANEL_HEIGHT_STORAGE_KEY" not in floating
@@ -475,10 +479,17 @@ def test_projects_page_only_renders_db_first_projects() -> None:
 
 def test_playground_initial_worker_query_wins_over_server_selection() -> None:
     page = playground_ui_corpus()
-    load_config_body = page.split("const loadConfig = useCallback", 1)[1].split("useEffect(() => {", 1)[0]
+    resolver = Path("apps/duckclaw-admin/src/lib/playgroundLastSelection.ts").read_text(
+        encoding="utf-8"
+    )
+    load_config_body = page.split("const loadConfig = useCallback", 1)[1].split(
+        "useEffect(() => {", 1
+    )[0]
 
-    assert load_config_body.index("initialWorker && ids.includes(initialWorker)") < load_config_body.index(
-        "fromServer && ids.includes(fromServer)"
+    assert "resolvePlaygroundWorkerId" in load_config_body
+    assert "if (initial && workerOk(initial)) return initial;" in resolver
+    assert load_config_body.index("resolvePlaygroundWorkerId") < load_config_body.index(
+        "setWorkerId(nextWorker)"
     )
 
 

@@ -41,7 +41,10 @@ def test_query_uses_ephemeral_read_while_writer_defer_active(tmp_path: Path) -> 
     assert "42" in out
     assert db._con is None
     db.resume_file_handle()
-    assert db._con is not None
+    # RO vaults use ephemeral connections; resume clears defer without pinning _con.
+    assert db._con is None
+    assert not db._external_writer_defer_active()
+    assert "42" in db.query("SELECT x FROM t1")
 
 
 def test_release_worker_db_handle_retains_graph_when_cache_enabled(

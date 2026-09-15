@@ -428,6 +428,9 @@ def test_publish_admin_tool_event_start_and_done_with_duration(
 ) -> None:
     """Admin SSE: start al invocar; done con duración ⏱️ (sin volcar SQL en detail)."""
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
+    monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+    monkeypatch.delenv("LITE_MODE", raising=False)
     payloads: list[str] = []
 
     class FakeClient:
@@ -482,6 +485,9 @@ def test_publish_admin_tool_event_start_and_done_with_duration(
 
 def test_publish_admin_chat_heartbeat_includes_worker_and_slot(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    monkeypatch.delenv("DUCKCLAW_SPAWN_PROFILE", raising=False)
+    monkeypatch.delenv("DUCKCLAW_SPAWN_USE_DB_WRITER", raising=False)
+    monkeypatch.delenv("LITE_MODE", raising=False)
     payloads: list[str] = []
 
     class FakeClient:

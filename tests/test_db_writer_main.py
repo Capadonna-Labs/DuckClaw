@@ -116,7 +116,7 @@ def test_raw_sql_handled_in_typed_sync_path(tmp_path: Path) -> None:
         target_db_path=str(db_path),
     )
 
-    assert outcome == "completed"
+    assert outcome[0] == "completed"
     import duckdb
 
     con = duckdb.connect(str(db_path), read_only=True)

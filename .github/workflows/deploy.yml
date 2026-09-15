@@ -9,6 +9,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: test
@@ -43,7 +47,16 @@ jobs:
         run: uv sync
 
       - name: Run tests (unit + smoke)
-        run: uv run pytest tests/ -v -m "not integration" --ignore=tests/run_singleton_writer_pipeline.py --ignore=tests/deprecated
+        timeout-minutes: 25
+        env:
+          PYTHONFAULTHANDLER: "1"
+        run: >
+          uv run pytest tests/ -v
+          -m "not integration"
+          --ignore=tests/run_singleton_writer_pipeline.py
+          --ignore=tests/deprecated
+          --durations=25
+          --timeout=120
 
       - name: Migrate gateway schema
         env:
@@ -52,6 +65,7 @@ jobs:
         run: uv run duckclaw-migrate --no-seed-admin
 
       - name: Run singleton writer pipeline integration test with logs
+        timeout-minutes: 10
         env:
           REDIS_URL: redis://localhost:6379/0
           DUCKDB_PATH: db/duckclaw.duckdb

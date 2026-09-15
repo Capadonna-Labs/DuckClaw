@@ -34,7 +34,7 @@ def test_worker_graph_cache_lru_evicts_oldest() -> None:
 def test_worker_graph_cache_get_rehydrates_closed_db() -> None:
     from duckclaw.manager import manager_worker_cache as mwc
 
-    wdb = MagicMock(_con=None, _path="/tmp/vault.duckdb")
+    wdb = MagicMock(_con=None, _path="/tmp/vault.duckdb", _ephemeral_ro=False)
 
     def _resume() -> None:
         wdb._con = object()
@@ -56,7 +56,7 @@ def test_worker_graph_cache_get_evicts_when_rehydrate_fails() -> None:
     from duckclaw.manager import manager_worker_cache as mwc
 
     graph = MagicMock()
-    wdb = MagicMock(_con=None, _path="/nonexistent/bad.duckdb")
+    wdb = MagicMock(_con=None, _path="/nonexistent/bad.duckdb", _ephemeral_ro=False)
     wdb.resume_file_handle = MagicMock(side_effect=OSError("nope"))
     graph._worker_db = wdb
     mwc.remember_worker_graph_cache("k1", graph)

@@ -15,7 +15,7 @@ def test_user_facing_python_copy_avoids_forge_templates_paths() -> None:
     assert "No hay agentes configurados en el catálogo" in manager
     assert "forge/templates (con manifest.yaml)" not in manager
 
-    assert "No se encontraron agentes en el catálogo" in catalog
+    assert "No hay workers en el catálogo DuckDB" in catalog
     assert "No se encontraron plantillas en forge/templates" not in catalog
 
     assert 'subtitle = f"Agente del catálogo ({template_id})"' in meta

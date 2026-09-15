@@ -532,6 +532,7 @@ def test_playground_config_voice_available_when_sensory_tts_loaded(
 
 def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monkeypatch: pytest.MonkeyPatch, catalog_db):
     from duckclaw import DuckClaw
+    from duckclaw.admin_worker_catalog import create_worker, ensure_admin_worker_catalog_schema
     from duckclaw.workers.factory import list_workers
 
     all_w = list_workers(db=catalog_db, tenant_id="default")
@@ -549,15 +550,26 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     with tempfile.TemporaryDirectory() as td:
         db_path = str(Path(td) / "pg_team.duckdb")
         db = DuckClaw(db_path, read_only=False, engine="python")
+        ensure_admin_worker_catalog_schema(db)
+        create_worker(
+            db,
+            owner_email="admin@test.local",
+            worker_id=target if isinstance(target, str) else str(target),
+            display_name=str(target),
+        )
         from duckclaw.graphs.on_the_fly_commands import set_team_templates
 
         set_team_templates(db, DEFAULT_TEST_TELEGRAM_USER_ID, [target])
         db.close()
         monkeypatch.setenv("DUCKDB_PATH", db_path)
         monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: db_path)
+        monkeypatch.setattr("core.admin_identity.get_gateway_db_path", lambda: db_path)
         r = admin_client.get(
             "/api/v1/admin/playground/config",
-            headers={"X-Admin-Key": "test-admin-key"},
+            headers={
+                "X-Admin-Key": "test-admin-key",
+                "X-Duckclaw-Actor": "admin@test.local",
+            },
             params={
                 "telegram_user_id": DEFAULT_TEST_TELEGRAM_USER_ID,
                 "tenant_id": "default",
@@ -568,6 +580,7 @@ def test_playground_config_team_for_telegram_chat(admin_client: TestClient, monk
     assert data.get("authorized") is True
     from duckclaw.workers.identity import normalize_worker_id
 
+    # Playground workers are DB-first catalog only (telegram team is not merged).
     assert normalize_worker_id(target) in _playground_worker_ids(data)
     assert data.get("team_source") == "chat"
 

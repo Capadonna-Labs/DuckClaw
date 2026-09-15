@@ -205,13 +205,19 @@ def import_templates_to_catalog(
 
         from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
 
-        sync_worker_system_prompt_policy(
-            db,
-            worker_id=worker_id,
-            files=files,
-            actor_email=profile["email"],
-            worker_uid=str(worker.get("worker_uid") or ""),
-        )
+        try:
+            sync_worker_system_prompt_policy(
+                db,
+                worker_id=worker_id,
+                files=files,
+                actor_email=profile["email"],
+                worker_uid=str(worker.get("worker_uid") or ""),
+            )
+        except Exception as exc:
+            # Hub may lack prompt_policy_registry until migrations run; catalog
+            # import must still succeed so workers are usable.
+            _log = __import__("logging").getLogger(__name__)
+            _log.debug("catalog prompt sync skipped for %s: %s", worker_id, exc)
 
         imported.append({"worker_id": worker_id, "worker_uid": worker["worker_uid"], "template_dir": str(template_dir)})
 

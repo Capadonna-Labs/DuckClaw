@@ -127,28 +127,14 @@ export function AdminChatSuggestionChips({
 
   return (
     <div className="overflow-hidden rounded-xl border border-gov-gray-200 bg-white/90 shadow-sm dark:border-dark-border dark:bg-dark-surface/90">
+      {/* Auto sits immediately beside the label (not far-right); chevron keeps expand affordance. */}
       <div className="flex w-full items-center gap-2 px-3 py-2">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-          aria-expanded={open}
-          aria-controls={panelId}
-        >
-          <span className="min-w-0 text-xs font-bold uppercase tracking-wider text-gov-gray-600 dark:text-dark-muted">
-            Sugerencias
-            <span className="ml-1.5 font-semibold normal-case text-gov-blue-700 dark:text-dark-cyan">
-              ({suggestions.length})
-            </span>
+        <span className="min-w-0 shrink-0 text-xs font-bold uppercase tracking-wider text-gov-gray-600 dark:text-dark-muted">
+          Sugerencias
+          <span className="ml-1.5 font-semibold normal-case text-gov-blue-700 dark:text-dark-cyan">
+            ({suggestions.length})
           </span>
-          <ChevronDown
-            size={16}
-            className={`ml-auto shrink-0 text-gov-gray-500 transition-transform dark:text-dark-muted ${
-              open ? 'rotate-0' : '-rotate-90'
-            }`}
-            aria-hidden
-          />
-        </button>
+        </span>
         <button
           type="button"
           role="switch"
@@ -168,6 +154,20 @@ export function AdminChatSuggestionChips({
             {countdown}s
           </span>
         ) : null}
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="ml-auto flex shrink-0 items-center justify-center rounded-md p-1 text-gov-gray-500 hover:bg-gov-gray-100 dark:text-dark-muted dark:hover:bg-dark-bg"
+          aria-expanded={open}
+          aria-controls={panelId}
+          aria-label={open ? 'Ocultar sugerencias' : 'Mostrar sugerencias'}
+        >
+          <ChevronDown
+            size={16}
+            className={`transition-transform ${open ? 'rotate-0' : '-rotate-90'}`}
+            aria-hidden
+          />
+        </button>
       </div>
       {open ? (
         <div

@@ -150,6 +150,13 @@ export function AdminChatPanel({
   const isCompact = variant === 'compact';
   const showSuggestions = shouldShowSuggestionChips(suggestions, loading, input);
 
+  // When Sugerencias appear, the glass composer grows — re-pin scroll so the last
+  // line of the reply is not trapped under the chips bar.
+  useEffect(() => {
+    if (!showSuggestions || showScrollButton) return;
+    requestAnimationFrame(() => scrollToBottom('auto'));
+  }, [showSuggestions, showScrollButton, scrollToBottom]);
+
   const resolvedWorkerLabel = useMemo(() => {
     return resolveWorkerDisplayName(config?.workers, workerId);
   }, [config?.workers, workerId]);
@@ -543,6 +550,7 @@ export function AdminChatPanel({
         showToolUsage={showToolUsage}
         isCompact={isCompact}
         studioChromePad={isStudioCompose && showStudioHeader && !showHeader}
+        padForSuggestions={showSuggestions}
         scrollRef={scrollRef}
         showScrollButton={showScrollButton}
         onScroll={onScroll}

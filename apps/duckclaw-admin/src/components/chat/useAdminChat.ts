@@ -283,8 +283,7 @@ export function useAdminChat({
       })
       .catch(() => {
         if (cancelled) return;
-        setSuggestions([]);
-        setRecommendedSuggestionIndex(0);
+        // Transient BFF timeout after a long turn — retry next effect cycle.
         suggestionsExchangeKeyRef.current = '';
       });
     return () => {

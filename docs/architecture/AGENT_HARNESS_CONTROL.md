@@ -112,7 +112,8 @@ Estado en LangGraph: `_tool_fail_counts`, `_harness_blocked_tools`.
 
 | Control | Default | Dónde |
 |---------|---------|-------|
-| `max_tool_rounds` | 10 | ya existía (`should_continue`) |
+| `max_tool_rounds` | 75 | soft cap agent↔tools (`should_continue`); override `agent_node.max_tool_rounds` / `DUCKCLAW_MAX_TOOL_ROUNDS` |
+| `recursion_limit` | 160 | LangGraph hard cap (~2× tool rounds); override `DUCKCLAW_GRAPH_RECURSION_LIMIT` |
 | `max_failures_per_tool` | 2 | nuevo (`tool_harness` + `tools_node`) |
 | `max_tool_result_chars` | 12000 | truncate de ToolMessage hacia el LLM |
 | `max_bound_tools` | 16 | surface (packs) |

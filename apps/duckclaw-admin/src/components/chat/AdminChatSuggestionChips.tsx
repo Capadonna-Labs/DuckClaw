@@ -57,12 +57,20 @@ export function AdminChatSuggestionChips({
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const cancelledRef = useRef(false);
+  const tickRef = useRef<number | null>(null);
   const onPickRef = useRef(onPick);
   const signature = suggestions.join('\0');
   const safeRecommended =
     suggestions.length === 0
       ? 0
       : Math.min(Math.max(0, Math.floor(recommendedIndex)), suggestions.length - 1);
+
+  const clearTick = () => {
+    if (tickRef.current != null) {
+      window.clearInterval(tickRef.current);
+      tickRef.current = null;
+    }
+  };
 
   useEffect(() => {
     onPickRef.current = onPick;
@@ -73,6 +81,7 @@ export function AdminChatSuggestionChips({
       setAutoEnabled(false);
       writeStoredAuto(false);
       cancelledRef.current = true;
+      clearTick();
       setCountdown(null);
       return;
     }
@@ -91,15 +100,16 @@ export function AdminChatSuggestionChips({
 
   useEffect(() => {
     cancelledRef.current = false;
+    clearTick();
     setCountdown(null);
     if (!autoEnabled || busy || suggestions.length === 0) return;
 
     let remaining = SUGGESTIONS_AUTO_COUNTDOWN_SEC;
     setCountdown(remaining);
-    const tick = window.setInterval(() => {
+    tickRef.current = window.setInterval(() => {
       remaining -= 1;
       if (remaining <= 0) {
-        window.clearInterval(tick);
+        clearTick();
         setCountdown(null);
         if (!cancelledRef.current) {
           const text = (suggestions[safeRecommended] || '').trim();
@@ -107,11 +117,12 @@ export function AdminChatSuggestionChips({
         }
         return;
       }
+      if (cancelledRef.current) return;
       setCountdown(remaining);
     }, 1000);
 
     return () => {
-      window.clearInterval(tick);
+      clearTick();
     };
   }, [autoEnabled, busy, signature, safeRecommended, suggestions]);
 
@@ -119,10 +130,18 @@ export function AdminChatSuggestionChips({
 
   const setAuto = (next: boolean) => {
     cancelledRef.current = true;
+    clearTick();
     setCountdown(null);
     setAutoEnabled(next);
     writeStoredAuto(next);
     onAutoChange?.(next);
+  };
+
+  /** Stop this turn's countdown only — Auto stays on for the next suggestion set. */
+  const cancelCountdown = () => {
+    cancelledRef.current = true;
+    clearTick();
+    setCountdown(null);
   };
 
   return (
@@ -154,6 +173,16 @@ export function AdminChatSuggestionChips({
             {countdown}s
           </span>
         ) : null}
+        {autoEnabled && countdown != null ? (
+          <button
+            type="button"
+            onClick={cancelCountdown}
+            className="shrink-0 rounded-full border border-gov-gray-200 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-gov-gray-500 hover:bg-gov-gray-50 dark:border-dark-border dark:text-dark-muted dark:hover:bg-dark-bg"
+            aria-label="Cancelar auto de este turno"
+          >
+            Cancelar
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -183,8 +212,7 @@ export function AdminChatSuggestionChips({
                 type="button"
                 role="listitem"
                 onClick={() => {
-                  cancelledRef.current = true;
-                  setCountdown(null);
+                  cancelCountdown();
                   onPick(s);
                 }}
                 className={`rounded-full border px-3 py-1.5 text-left text-xs transition-colors ${

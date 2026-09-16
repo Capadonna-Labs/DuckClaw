@@ -42,5 +42,8 @@ class WorkerGraphContext:
     agent_bind: dict[str, Any] = field(default_factory=dict)
     context_guard_enabled: bool = False
     context_guard_max_retries: int = 2
-    max_tool_rounds: int = 10
+    # Soft cap on agent↔tools loops. Keep below ~½ of LangGraph recursion_limit
+    # (each round is typically 2 graph steps). Override via manifest agent_node.max_tool_rounds
+    # or DUCKCLAW_MAX_TOOL_ROUNDS.
+    max_tool_rounds: int = 75
     agent_turn: dict[str, Any] = field(default_factory=dict)

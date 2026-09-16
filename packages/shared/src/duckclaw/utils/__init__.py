@@ -3,7 +3,9 @@
 from duckclaw.utils.langsmith_trace import (
     create_completed_langsmith_run,
     get_tracing_config,
+    resolve_graph_recursion_limit,
     run_name_for_langsmith,
+    with_graph_recursion_limit,
 )
 from duckclaw.utils.tool_reply import format_tool_reply
 from duckclaw.utils.logger import (
@@ -31,7 +33,9 @@ __all__ = [
     "format_chat_id_for_terminal",
     "create_completed_langsmith_run",
     "get_tracing_config",
+    "resolve_graph_recursion_limit",
     "run_name_for_langsmith",
+    "with_graph_recursion_limit",
     "get_obs_logger",
     "log_err",
     "log_plan",

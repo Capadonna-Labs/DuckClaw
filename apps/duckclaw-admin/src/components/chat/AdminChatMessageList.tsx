@@ -27,6 +27,8 @@ export type AdminChatMessageListProps = {
   isCompact: boolean;
   /** Padding extra cuando header/composer son overlays glass (studio). */
   studioChromePad?: boolean;
+  /** Reserva espacio extra cuando el dropdown Sugerencias está sobre el composer. */
+  padForSuggestions?: boolean;
   scrollRef: RefObject<HTMLDivElement>;
   showScrollButton: boolean;
   onScroll: () => void;
@@ -98,6 +100,7 @@ export function AdminChatMessageList({
   showToolUsage = true,
   isCompact,
   studioChromePad = false,
+  padForSuggestions = false,
   scrollRef,
   showScrollButton,
   onScroll,
@@ -114,6 +117,13 @@ export function AdminChatMessageList({
     editFromMessage,
   };
 
+  const studioPadClass = studioChromePad
+    ? padForSuggestions
+      ? // Composer + collapsed Sugerencias header (chips closed) — keep last line visible.
+        'pt-16 pb-[10.75rem] sm:pt-[4.5rem] sm:pb-44'
+      : 'pt-16 pb-[8.5rem] sm:pt-[4.5rem] sm:pb-36'
+    : '';
+
   return (
       <div className="relative z-[1] flex-1 min-h-0 min-w-0 flex flex-col w-full">
         <div
@@ -121,11 +131,7 @@ export function AdminChatMessageList({
           onScroll={onScroll}
           className={`scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3 space-y-3 min-h-0 w-full ${
             isCompact ? '' : 'min-h-[320px]'
-          } ${
-            studioChromePad
-              ? 'pt-16 pb-[8.5rem] sm:pt-[4.5rem] sm:pb-36'
-              : ''
-          }`}
+          } ${studioPadClass}`}
         >
         {messages.length === 0 && (
           <p className="text-sm text-gov-gray-400 text-center py-8">

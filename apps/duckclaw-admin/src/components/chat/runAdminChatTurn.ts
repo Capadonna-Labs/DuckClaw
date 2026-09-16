@@ -64,6 +64,8 @@ export type RunAdminChatTurnParams = {
   setSuggestionsAutoEnabled?: Dispatch<SetStateAction<boolean | null>>;
   /** Ref compartida con el efecto de historial: evita refetch duplicado tras el turno. */
   suggestionsExchangeKeyRef?: MutableRefObject<string>;
+  /** Si false, no pide chips al terminar el turno. */
+  suggestionsEnabled?: boolean;
   finalizeCancelledGeneration: () => void;
   clearLoopHistoryReload: () => void;
   scheduleLoopHistoryReload: () => void;
@@ -104,6 +106,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setRecommendedSuggestionIndex,
     setSuggestionsAutoEnabled,
     suggestionsExchangeKeyRef,
+    suggestionsEnabled = true,
     finalizeCancelledGeneration,
     clearLoopHistoryReload,
     scheduleLoopHistoryReload,
@@ -531,7 +534,10 @@ try {
     (typeof streamedFull === 'string' ? streamedFull : '') ||
     ''
   ).trim();
-  if (shouldFetchChatSuggestions(text, assistantForSuggestions, abortController.signal.aborted)) {
+  if (
+    suggestionsEnabled &&
+    shouldFetchChatSuggestions(text, assistantForSuggestions, abortController.signal.aborted)
+  ) {
     void adminService
       .getChatSuggestions({
         chat_id: chatId,

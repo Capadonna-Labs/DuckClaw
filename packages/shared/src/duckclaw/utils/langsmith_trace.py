@@ -55,6 +55,38 @@ def create_completed_langsmith_run(
     client.create_run(**kw)
 
 
+# LangGraph default is 25; trading delegates (quant-trader) need more agent↔tools
+# steps. Keep ≥ ~2× max_tool_rounds (+overhead). Env: DUCKCLAW_GRAPH_RECURSION_LIMIT.
+DEFAULT_GRAPH_RECURSION_LIMIT = 160
+
+
+def resolve_graph_recursion_limit(explicit: int | None = None) -> int:
+    if explicit is not None:
+        try:
+            return max(1, int(explicit))
+        except (TypeError, ValueError):
+            pass
+    raw = (os.getenv("DUCKCLAW_GRAPH_RECURSION_LIMIT") or "").strip()
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return DEFAULT_GRAPH_RECURSION_LIMIT
+
+
+def with_graph_recursion_limit(config: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Ensure RunnableConfig carries a recursion_limit (never lowers an explicit higher one)."""
+    out: dict[str, Any] = dict(config or {})
+    desired = resolve_graph_recursion_limit()
+    try:
+        current = int(out.get("recursion_limit") or 0)
+    except (TypeError, ValueError):
+        current = 0
+    out["recursion_limit"] = max(current, desired)
+    return out
+
+
 def get_tracing_config(
     tenant_id: str,
     worker_key: str,
@@ -95,6 +127,7 @@ def get_tracing_config(
             "model_version": model_name,
             "deployment_id": commit,
         },
+        "recursion_limit": resolve_graph_recursion_limit(),
     }
 
     if base is None:
@@ -110,4 +143,4 @@ def get_tracing_config(
     parent_meta = dict(merged.get("metadata") or {}) if isinstance(merged.get("metadata"), dict) else {}
     parent_meta.update(layer["metadata"])
     merged["metadata"] = parent_meta
-    return merged
+    return with_graph_recursion_limit(merged)

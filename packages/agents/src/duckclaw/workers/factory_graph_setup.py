@@ -414,4 +414,11 @@ def initialize_worker_graph_context(
     _manifest_max_rounds = getattr(spec, "agent_node_max_tool_rounds", None)
     if _manifest_max_rounds:
         ctx.max_tool_rounds = max(1, int(_manifest_max_rounds))
+    else:
+        _env_rounds = (os.environ.get("DUCKCLAW_MAX_TOOL_ROUNDS") or "").strip()
+        if _env_rounds:
+            try:
+                ctx.max_tool_rounds = max(1, int(_env_rounds))
+            except ValueError:
+                pass
     return ctx

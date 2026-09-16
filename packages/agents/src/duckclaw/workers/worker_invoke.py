@@ -136,9 +136,10 @@ def invoke_worker_graph(
     raise_if_chat_cancelled(str(chat_id or "").strip())
 
     def _run() -> dict[str, Any]:
-        if trace_cfg is not None:
-            return worker_graph.invoke(worker_state, trace_cfg)
-        return worker_graph.invoke(worker_state)
+        from duckclaw.utils.langsmith_trace import with_graph_recursion_limit
+
+        cfg = with_graph_recursion_limit(trace_cfg if isinstance(trace_cfg, dict) else None)
+        return worker_graph.invoke(worker_state, cfg)
 
     limit = timeout_sec if timeout_sec is not None else _DELEGATE_INVOKE_TIMEOUT_SEC
     if limit <= 0:

@@ -55,8 +55,8 @@ def create_completed_langsmith_run(
     client.create_run(**kw)
 
 
-# LangGraph default is 25; trading delegates (quant-trader) need more agent↔tools
-# steps. Keep ≥ ~2× max_tool_rounds (+overhead). Env: DUCKCLAW_GRAPH_RECURSION_LIMIT.
+# LangGraph default is 25; long agent↔tools turns need more steps.
+# Keep ≥ ~2× max_tool_rounds (+overhead). Env: DUCKCLAW_GRAPH_RECURSION_LIMIT.
 DEFAULT_GRAPH_RECURSION_LIMIT = 160
 
 

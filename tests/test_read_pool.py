@@ -124,3 +124,67 @@ def test_run_ephemeral_read_sql_smoke(tmp_path: Path) -> None:
     spec = _minimal_spec()
     out = run_ephemeral_read_sql(spec, p, p, None, [], "SELECT * FROM t")
     assert "1" in out
+
+
+def test_rank_column_candidates_prefers_near_matches() -> None:
+    from duckclaw.workers.read_pool import _rank_column_candidates
+
+    ranked = _rank_column_candidates(
+        "qty",
+        ["symbol", "quantity", "filled_qty", "avg_entry_price", "updated_at"],
+    )
+    assert ranked[0] in ("quantity", "filled_qty")
+    assert "quantity" in ranked[:3]
+
+
+def test_run_worker_read_sql_enriches_binder_error_with_column_candidates() -> None:
+    import json
+
+    from duckclaw.workers.read_pool import run_worker_read_sql
+
+    cols = [
+        {"column_name": "symbol"},
+        {"column_name": "quantity"},
+        {"column_name": "filled_qty"},
+        {"column_name": "filled_price"},
+    ]
+
+    def run_query(sql: str) -> str:
+        upper = sql.upper()
+        if "INFORMATION_SCHEMA.COLUMNS" in upper:
+            return json.dumps(cols)
+        raise Exception('Binder Error: Referenced column "qty" not found in FROM clause!')
+
+    spec = _minimal_spec()
+    spec.allowed_tables = ["portfolio_positions"]
+    out = json.loads(
+        run_worker_read_sql(run_query, spec, "SELECT qty FROM portfolio_positions LIMIT 5")
+    )
+    assert "error" in out
+    assert "qty" in out.get("hint", "")
+    assert "quantity" in out.get("column_candidates", [])
+
+
+def test_run_inspect_schema_worker_lists_columns() -> None:
+    import json
+
+    from duckclaw.workers.read_pool import run_inspect_schema_worker
+
+    def run_query(sql: str) -> str:
+        upper = sql.upper()
+        if "FROM INFORMATION_SCHEMA.TABLES" in upper:
+            return json.dumps([{"table_schema": "quant_core", "table_name": "portfolio_positions"}])
+        if "FROM INFORMATION_SCHEMA.COLUMNS" in upper:
+            return json.dumps(
+                [
+                    {"column_name": "symbol"},
+                    {"column_name": "qty"},
+                    {"column_name": "current_price"},
+                ]
+            )
+        return "[]"
+
+    out = run_inspect_schema_worker(run_query)
+    assert "quant_core.portfolio_positions" in out
+    assert "qty" in out
+    assert "current_price" in out

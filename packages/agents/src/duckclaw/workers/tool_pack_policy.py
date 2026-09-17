@@ -51,6 +51,7 @@ def apply_runtime_tool_packs(
     spec: Any | None,
     intent_text: str | None,
     messages: Iterable[Any] | None = None,
+    loop_system_event: bool = False,
 ) -> PackFilterResult:
     """Filtra tools según packs activos. No-op si ``runtime_packs.enabled`` es false."""
     cfg = resolve_runtime_packs_config(spec)
@@ -75,6 +76,7 @@ def apply_runtime_tool_packs(
         intent_text=intent_text,
         messages=msgs,
         available_tool_names=tool_names,
+        loop_system_event=loop_system_event,
     )
     active = filter_active_packs_for_worker(
         active,
@@ -159,6 +161,7 @@ def resolve_active_pack_ids(
     intent_text: str | None,
     messages: Iterable[Any] = (),
     available_tool_names: Iterable[str] = (),
+    loop_system_event: bool = False,
 ) -> frozenset[str]:
     catalog = cfg.catalog
     disabled = set(cfg.disabled_packs)
@@ -189,12 +192,27 @@ def resolve_active_pack_ids(
             if intent_mentions_token(intent, connector_id):
                 active.add(pack_id)
 
-    active |= sticky_packs_from_messages(messages, catalog) - disabled
-    active |= unlocked_packs_from_messages(messages) - disabled
+    unlocked = unlocked_packs_from_messages(messages) - disabled
+    if not loop_system_event:
+        active |= sticky_packs_from_messages(messages, catalog) - disabled
+    active |= unlocked
 
     # Umbrella mcp (unlock / extra_always) → todos los conectores del worker.
     if MCP_UMBRELLA_PACK_ID in active and MCP_UMBRELLA_PACK_ID not in disabled:
         active |= connector_pack_ids
+
+    # /loop ticks: drop MCP / integrations noise unless explicitly unlocked this turn.
+    if loop_system_event:
+        drop = {
+            pid
+            for pid in active
+            if pid == MCP_UMBRELLA_PACK_ID
+            or pid == "integrations"
+            or pid.startswith(_MCP_CONNECTOR_PACK_PREFIX)
+        }
+        drop -= unlocked
+        active -= drop
+
     return frozenset(active)
 
 

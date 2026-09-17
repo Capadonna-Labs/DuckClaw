@@ -52,10 +52,15 @@ class AlignmentReport:
     items: list[AlignmentItem] = field(default_factory=list)
     goals_count: int = 0
     opener_hint: str = ""
+    unevaluable_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["items"] = [asdict(i) for i in self.items]
+        # assess_crons_alignment JSON: never claim aligned when goals lack observations.
+        if self.unevaluable_count and self.misaligned_count == 0:
+            d["aligned"] = False
+            d["aligned_note"] = "unevaluable_goals_present"
         return d
 
     def to_json(self) -> str:
@@ -364,9 +369,13 @@ def assess_goals_list_alignment(
             )
         )
 
+    unevaluable = sum(1 for i in items if not i.has_data)
+    # Heartbeat proactive path uses .aligned (anomalies only). LLM JSON via
+    # to_dict() flips aligned when unevaluable so assess_crons cannot claim
+    # "0 desviaciones".
     aligned = misaligned == 0
     opener = ""
-    if not aligned:
+    if misaligned:
         first = next((i for i in items if i.is_anomaly), None)
         if first:
             opener = (
@@ -375,6 +384,11 @@ def assess_goals_list_alignment(
             )
         else:
             opener = pick_nudge_opener(str(chat_id), 0.0)
+    elif unevaluable:
+        opener = (
+            f"{unevaluable} meta(s) sin datos evaluables — no reportes 0 desviaciones; "
+            "obtén observed o trata como no alineado."
+        )
 
     return AlignmentReport(
         aligned=aligned,
@@ -382,6 +396,7 @@ def assess_goals_list_alignment(
         items=items,
         goals_count=len(goals),
         opener_hint=opener,
+        unevaluable_count=unevaluable,
     )
 
 
@@ -421,7 +436,12 @@ def format_alignment_report_markdown(report: AlignmentReport) -> str:
     if report.goals_count <= 0:
         lines.append("Sin metas en manifiesto — define objetivos con `/goals`.")
         return "\n".join(lines)
-    if report.aligned:
+    if report.unevaluable_count and report.misaligned_count == 0:
+        lines.append(
+            f"**Estado:** no evaluable ({report.unevaluable_count} meta(s) sin datos) "
+            f"— no es 0 desviaciones."
+        )
+    elif report.aligned:
         lines.append(f"**Estado:** alineado ({report.goals_count} meta(s)).")
     else:
         lines.append(

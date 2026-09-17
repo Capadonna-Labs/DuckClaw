@@ -54,7 +54,6 @@ def test_gateway_manual_transactions_have_explicit_allowlist() -> None:
 
 def test_gateway_duckclaw_read_write_is_limited_to_explicit_runtime_compat() -> None:
     allowed: set[tuple[str, str]] = {
-        ("services/api-gateway/core/chat_graph_runner.py", "run_chat_graph"),
         ("services/api-gateway/core/chat_history_persist.py", "_touch_loop_activity_if_configured"),
         ("services/api-gateway/core/chat_invoke_finalize.py", "finalize_chat_response"),
     }

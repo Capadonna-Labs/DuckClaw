@@ -137,10 +137,14 @@ def test_assess_goals_alignment_percent_vs_absolute_mismatch_no_false_alarm(tmp_
         }
     ]
     report = assess_goals_list_alignment(db, chat_id, goals, worker_id="worker-a")
-    assert report.aligned is True
+    assert report.aligned is True  # no anomalies (proactive ticker)
     assert report.misaligned_count == 0
+    assert report.unevaluable_count == 1
     assert report.items[0].scale_mismatch is True
     assert report.items[0].has_data is False
+    payload = report.to_dict()
+    assert payload["aligned"] is False  # LLM must not claim 0 desviaciones
+    assert payload.get("aligned_note") == "unevaluable_goals_present"
 
 
 def test_execute_goals_delta_with_notify_and_mode(tmp_path: Path) -> None:

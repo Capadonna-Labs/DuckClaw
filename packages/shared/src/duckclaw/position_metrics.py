@@ -939,6 +939,20 @@ def apply_deterministic_tp_sl_rewrite(
             continue
         hit = src_hints.get(round(float(px), 4))
         row["price_source"] = hit or "precio del turno"
+    breaches: list[dict[str, Any]] = []
+    for row in levels:
+        metrics = calculate_tp_sl_distance(row.get("price"), row.get("sl"), row.get("tp"))
+        if metrics.get("ok") and metrics.get("breached"):
+            breaches.append(
+                {
+                    "ticker": (row.get("ticker") or "").strip().upper() or "?",
+                    "breached": metrics.get("breached"),
+                    "price": row.get("price"),
+                    "sl": row.get("sl"),
+                    "tp": row.get("tp"),
+                    "side": metrics.get("side"),
+                }
+            )
     meta: dict[str, Any] = {
         "levels_found": len(levels),
         "tickers": [r.get("ticker") or "?" for r in levels],
@@ -946,6 +960,7 @@ def apply_deterministic_tp_sl_rewrite(
         "rewrote": False,
         "section_rows": 0,
         "price_sources": [r.get("price_source") for r in levels],
+        "breaches": breaches,
     }
     if not levels:
         return reply, meta
@@ -965,6 +980,46 @@ def apply_deterministic_tp_sl_rewrite(
     return text, meta
 
 
+def session_looks_after_hours(text: str) -> bool:
+    """Heuristic: reply/incoming mentions AH / after-hours / premarket."""
+    low = (text or "").lower()
+    return any(
+        tok in low
+        for tok in (
+            "after-hours",
+            "after hours",
+            "afterhours",
+            "premarket",
+            "pre-market",
+            "fuera de rth",
+            "fuera de sesión",
+            "outside rth",
+            "ah session",
+            " sesión ah",
+            "(ah)",
+            " post-market",
+            "postmarket",
+        )
+    )
+
+
+def should_skip_position_metrics_retry(
+    *,
+    messages: list[Any] | None,
+    incoming: str = "",
+    reply: str = "",
+) -> bool:
+    """
+    Skip in-graph PM retry when it would only burn a hop.
+
+    No usable levels (rewrite cannot help) or after-hours / no-evidence context.
+    """
+    if not extract_tp_sl_level_inputs(messages):
+        return True
+    blob = f"{incoming or ''}\n{reply or ''}"
+    return session_looks_after_hours(blob)
+
+
 __all__ = [
     "POSITION_METRICS_RETRY_DIRECTIVE",
     "POSITION_METRICS_RETRY_REASON",
@@ -979,6 +1034,8 @@ __all__ = [
     "extract_tp_sl_level_inputs",
     "infer_side",
     "reply_claims_tp_sl_pct",
+    "session_looks_after_hours",
+    "should_skip_position_metrics_retry",
     "strip_tp_sl_pct_claims",
     "turn_has_tp_sl_tool_evidence",
 ]

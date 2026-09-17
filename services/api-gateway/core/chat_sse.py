@@ -17,6 +17,7 @@ from core.sse_stream import (
     friendly_chat_error_message,
     sse_audio,
     sse_comment,
+    sse_done,
     sse_error,
     sse_heartbeat,
     sse_terminal_done,
@@ -76,6 +77,7 @@ async def invoke_chat_sse_body(
             if http_request is not None and await http_request.is_disconnected():
                 if admin_session:
                     # ponytail: no cancelar invoke_worker anidado si el proxy SSE corta; el cliente recarga historial.
+                    # Still emit a done payload so the UI does not stick on "(sin respuesta)".
                     client_detached = True
                     _gateway_log.info(
                         "admin SSE client disconnected chat_id=%r; invoke continues detached",
@@ -83,12 +85,16 @@ async def invoke_chat_sse_body(
                     )
                     break
                 await abort_chat_invoke_task(session_id, invoke_task)
-                yield sse_error("Interrumpido por el usuario.")
+                _cancel_msg = "Interrumpido por el usuario."
+                yield sse_error(_cancel_msg)
+                yield sse_done(response=_cancel_msg, worker_id=worker_id)
                 yield sse_terminal_done()
                 return
             if is_chat_cancel_requested(session_id):
                 await abort_chat_invoke_task(session_id, invoke_task)
-                yield sse_error("Interrumpido por el usuario.")
+                _cancel_msg = "Interrumpido por el usuario."
+                yield sse_error(_cancel_msg)
+                yield sse_done(response=_cancel_msg, worker_id=worker_id)
                 yield sse_terminal_done()
                 return
             try:
@@ -113,6 +119,14 @@ async def invoke_chat_sse_body(
                 continue
 
         if client_detached:
+            # Proxy/UI dropped SSE; leave invoke running, but close the stream with an explicit
+            # status so admin chat never finalizes as a blank "(sin respuesta)" bubble.
+            _detach_msg = (
+                "La conexión SSE se cerró antes de recibir la respuesta. "
+                "El turno puede seguir en el servidor; recarga el historial en unos segundos."
+            )
+            yield sse_done(response=_detach_msg, worker_id=worker_id)
+            yield sse_terminal_done()
             return
 
         while not heartbeat_queue.empty():
@@ -158,6 +172,18 @@ async def invoke_chat_sse_body(
                 sse_extra["context_token_breakdown"] = breakdown
         else:
             reply = str(result or "")
+        if not (reply or "").strip():
+            # Never stream a blank final bubble — report the failure instead of "(sin respuesta)".
+            reply = (
+                "No hubo respuesta del agente en este turno "
+                "(timeout, fallo de inferencia o interrupción). "
+                "Reintenta o revisa los logs del gateway."
+            )
+            _gateway_log.warning(
+                "admin SSE empty reply substituted chat_id=%r worker_id=%r",
+                session_id,
+                worker_id,
+            )
         want_tts = voice_response and bool((reply or "").strip())
         async for event in emit_chat_reply_sse(
             reply,

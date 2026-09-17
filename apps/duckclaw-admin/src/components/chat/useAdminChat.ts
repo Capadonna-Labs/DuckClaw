@@ -59,6 +59,8 @@ export type UseAdminChatOptions = {
   projectId?: string;
   knowledgeScope?: string;
   enabled?: boolean;
+  /** Si false, no pide ni muestra chips de sugerencias. */
+  suggestionsEnabled?: boolean;
   /** Tras cada turno completado (para refrescar inbox). */
   onConversationActivity?: () => void;
   /** Tras heartbeat visual de sandbox con artefactos nuevos. */
@@ -79,6 +81,7 @@ export function useAdminChat({
   projectId = '',
   knowledgeScope = '',
   enabled = true,
+  suggestionsEnabled = true,
   onConversationActivity,
   onSandboxArtifacts,
   onConversationNotFound,
@@ -249,12 +252,17 @@ export function useAdminChat({
    * La clave evita refetch duplicado tras un turno live que ya regeneró.
    */
   useEffect(() => {
+    if (!suggestionsEnabled) {
+      setSuggestions([]);
+      setRecommendedSuggestionIndex(0);
+      suggestionsExchangeKeyRef.current = '';
+      return;
+    }
     if (!enabled || !chatId || loading || historyLoading || thinking) return;
     const exchange = lastUserAssistantExchange(messages);
     if (!exchange) return;
     const key = suggestionsExchangeKey(chatId, exchange.userText, exchange.assistantText);
     if (suggestionsExchangeKeyRef.current === key) return;
-    suggestionsExchangeKeyRef.current = key;
     let cancelled = false;
     void adminService
       .getChatSuggestions({
@@ -279,7 +287,9 @@ export function useAdminChat({
         if (typeof r.suggestions_auto_enabled === 'boolean') {
           setSuggestionsAutoEnabled(r.suggestions_auto_enabled);
         }
-        if (next.length === 0) suggestionsExchangeKeyRef.current = '';
+        // Only lock the exchange after a successful apply — if this effect was
+        // cancelled mid-flight, a later mount must be free to refetch.
+        suggestionsExchangeKeyRef.current = next.length > 0 ? key : '';
       })
       .catch(() => {
         if (cancelled) return;
@@ -291,6 +301,7 @@ export function useAdminChat({
     };
   }, [
     enabled,
+    suggestionsEnabled,
     chatId,
     loading,
     historyLoading,
@@ -447,6 +458,7 @@ export function useAdminChat({
         setRecommendedSuggestionIndex,
         setSuggestionsAutoEnabled,
         suggestionsExchangeKeyRef,
+        suggestionsEnabled,
         finalizeCancelledGeneration,
         clearLoopHistoryReload,
         scheduleLoopHistoryReload,
@@ -468,6 +480,7 @@ export function useAdminChat({
       vaultPath,
       voiceResponseMode,
       scheduleLoopHistoryReload,
+      suggestionsEnabled,
     ]
   );
 

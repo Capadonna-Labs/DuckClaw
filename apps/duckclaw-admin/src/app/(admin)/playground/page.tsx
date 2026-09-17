@@ -97,6 +97,14 @@ export default function PlaygroundPage() {
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [toolUsageEnabled, setToolUsageEnabled] = useState(true);
+  const [suggestionsEnabled, setSuggestionsEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      return window.localStorage.getItem('duckclaw.chat.suggestionsEnabled') !== '0';
+    } catch {
+      return true;
+    }
+  });
   const [sandboxToggling, setSandboxToggling] = useState(false);
   const loadConfigRunningRef = useRef(false);
   const llmRestoreCompleteRef = useRef(false);
@@ -142,6 +150,7 @@ export default function PlaygroundPage() {
     projectId,
     knowledgeScope,
     enabled: Boolean(conv.sessionId),
+    suggestionsEnabled,
     onConversationActivity: conv.bumpRefresh,
     onConversationNotFound: conv.recoverMissingConversation,
     onSandboxArtifacts: (payload) => {
@@ -153,6 +162,18 @@ export default function PlaygroundPage() {
       router.push(`/sandbox?${q.toString()}`);
     },
   });
+
+  const handleSuggestionsToggle = useCallback(() => {
+    setSuggestionsEnabled((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('duckclaw.chat.suggestionsEnabled', next ? '1' : '0');
+      } catch {
+        /* ignore quota */
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     writeLastProjectId(projectId);
@@ -620,6 +641,8 @@ export default function PlaygroundPage() {
         onLogsToggle={handleLogsToggle}
         toolUsageEnabled={toolUsageEnabled}
         onToolUsageToggle={() => setToolUsageEnabled((enabled) => !enabled)}
+        suggestionsEnabled={suggestionsEnabled}
+        onSuggestionsToggle={handleSuggestionsToggle}
         logsControls={logsPanelOpen ? <Pm2LiveLogsControls variant="studio" /> : null}
         logsViewport={logsPanelOpen ? <Pm2LiveLogsViewport /> : null}
         onSandboxToggle={handleSandboxToggle}

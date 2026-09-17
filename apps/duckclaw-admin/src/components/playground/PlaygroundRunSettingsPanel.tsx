@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Cpu,
   FileText,
+  MessageSquareText,
   Terminal,
   Wrench,
 } from 'lucide-react';
@@ -56,6 +57,8 @@ export type PlaygroundRunSettingsPanelProps = {
   onLogsToggle: () => void;
   toolUsageEnabled: boolean;
   onToolUsageToggle: () => void;
+  suggestionsEnabled: boolean;
+  onSuggestionsToggle: () => void;
   logsControls?: React.ReactNode;
   logsViewport?: React.ReactNode;
   /** Activa/desactiva sandbox de sesión (sin poll de policy en el footer). */
@@ -89,6 +92,8 @@ export function PlaygroundRunSettingsPanel({
   onLogsToggle,
   toolUsageEnabled,
   onToolUsageToggle,
+  suggestionsEnabled,
+  onSuggestionsToggle,
   logsControls,
   logsViewport,
   onSandboxToggle,
@@ -294,6 +299,17 @@ export function PlaygroundRunSettingsPanel({
             checked={toolUsageEnabled}
             onChange={onToolUsageToggle}
             icon={<Wrench size={14} aria-hidden />}
+          />
+          <StudioToggleRow
+            label="Sugerencias"
+            hint={
+              suggestionsEnabled
+                ? 'Chips de continuación encima del input'
+                : 'Ocultas — no se generan tras cada turno'
+            }
+            checked={suggestionsEnabled}
+            onChange={onSuggestionsToggle}
+            icon={<MessageSquareText size={14} aria-hidden />}
           />
           <StudioToggleRow
             label="Logs PM2"

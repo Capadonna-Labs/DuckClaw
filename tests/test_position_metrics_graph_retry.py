@@ -40,3 +40,14 @@ def test_position_metrics_retry_routes_back_to_agent() -> None:
     assert route == "agent", (
         "position_metrics retry must loop to agent; got end → Sin respuesta."
     )
+
+
+def test_should_skip_position_metrics_retry_without_levels() -> None:
+    from duckclaw.position_metrics import should_skip_position_metrics_retry
+
+    assert should_skip_position_metrics_retry(messages=[], reply="SL 5%") is True
+    assert should_skip_position_metrics_retry(
+        messages=[],
+        incoming="ciclo after-hours",
+        reply="Distancia a SL: 1%",
+    ) is True

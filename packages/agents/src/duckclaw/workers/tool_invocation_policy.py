@@ -319,6 +319,7 @@ def decide_loop_homeostasis_tool_invocation(
     called_tools_since_last_human: Collection[str] = (),
     already_has_tool_result: bool = False,
     summarize_directive: bool = False,
+    homeostasis_streak: int = 0,
 ) -> ToolInvocationDecision:
     """
     Force ``evaluate_homeostasis`` as the first tool on /loop SYSTEM_EVENT ticks.
@@ -326,6 +327,9 @@ def decide_loop_homeostasis_tool_invocation(
     Prompt text alone is not enough: db-first / orchestration often steal hop 1
     with ``read_sql``, and the agent then reports false "0 desviaciones" from
     ``assess_crons_alignment`` alone (missing SL breach / OCA / OHLCV sensors).
+
+    When ``homeostasis_streak`` already hit the stuck limit, do **not** force
+    another identical sensor call — the tools node injects nudge/escalate instead.
     """
     tool_names = _tool_names(available_tools)
     called = {str(n) for n in called_tools_since_last_human}
@@ -337,6 +341,13 @@ def decide_loop_homeostasis_tool_invocation(
         return _no_tool_invocation()
     if not _is_loop_or_proactive_system_event(incoming):
         return _no_tool_invocation()
+    try:
+        from duckclaw.workers.homeostasis_stuck import homeostasis_stuck_streak_limit
+
+        if int(homeostasis_streak or 0) >= homeostasis_stuck_streak_limit():
+            return _no_tool_invocation()
+    except Exception:
+        pass
     return ToolInvocationDecision(
         tool_name="evaluate_homeostasis",
         reason="platform.loop.evaluate_homeostasis.first_hop",

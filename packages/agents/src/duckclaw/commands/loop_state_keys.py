@@ -17,6 +17,9 @@ LOOP_WORKER_KEY = "loop_worker_id"
 LOOP_ACTIVE_KEY = "loop_active"
 LOOP_AWAITING_USER_KEY = "loop_awaiting_user"
 LOOP_HITL_PENDING_KEY = "loop_hitl_pending"
+LOOP_HOMEOSTASIS_FP_KEY = "loop_homeostasis_fp"
+LOOP_HOMEOSTASIS_STREAK_KEY = "loop_homeostasis_streak"
+LOOP_CATCHUP_DUE_KEY = "loop_catchup_due"
 
 _LEGACY_TO_LOOP: dict[str, str] = {
     "meditate_delta_seconds": LOOP_DELTA_SECONDS_KEY,
@@ -34,10 +37,13 @@ LOOP_CHAT_STATE_KEYS: tuple[str, ...] = (
     LOOP_LAST_FIRE_KEY,
     LOOP_LAST_ACTIVITY_KEY,
     LOOP_PENDING_TICK_KEY,
+    LOOP_CATCHUP_DUE_KEY,
     LOOP_TENANT_KEY,
     LOOP_WORKER_KEY,
     LOOP_ACTIVE_KEY,
     LOOP_AWAITING_USER_KEY,
+    LOOP_HOMEOSTASIS_FP_KEY,
+    LOOP_HOMEOSTASIS_STREAK_KEY,
 )
 
 

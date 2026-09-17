@@ -254,6 +254,158 @@ def _qualify_allowed_tables(query: str, schema_name: str, spec: WorkerSpec) -> s
     return out
 
 
+_BINDER_COLUMN_RE = re.compile(
+    r"""(?:Referenced column|Binder Error:?\s*column)\s+[\"']?([A-Za-z_][\w]*)[\"']?""",
+    re.IGNORECASE,
+)
+_BINDER_TABLE_RE = re.compile(
+    r"""(?:table|relation)\s+[\"']?((?:[A-Za-z_][\w]*\.)?[A-Za-z_][\w]*)[\"']?""",
+    re.IGNORECASE,
+)
+_FROM_JOIN_TABLE_RE = re.compile(
+    r"""(?:FROM|JOIN)\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?)""",
+    re.IGNORECASE,
+)
+
+
+def _is_binder_column_error(err: str) -> bool:
+    low = (err or "").lower()
+    return "binder" in low or "referenced column" in low or "column" in low and "not found" in low
+
+
+def _parse_binder_column_name(err: str) -> Optional[str]:
+    m = _BINDER_COLUMN_RE.search(err or "")
+    if m:
+        return m.group(1)
+    m2 = re.search(r"""[\"']([A-Za-z_][\w]*)[\"']\s+not found""", err or "", re.IGNORECASE)
+    return m2.group(1) if m2 else None
+
+
+def _tables_mentioned_in_query(query: str, spec: WorkerSpec) -> list[str]:
+    found: list[str] = []
+    for m in _FROM_JOIN_TABLE_RE.finditer(query or ""):
+        name = (m.group(1) or "").strip()
+        if name and name.lower() not in {t.lower() for t in found}:
+            found.append(name)
+    for t in spec.allowed_tables or []:
+        ts = str(t).strip()
+        if ts and ts.lower() not in {x.lower() for x in found}:
+            found.append(ts)
+    return found
+
+
+def _edit_distance(a: str, b: str) -> int:
+    a, b = a.lower(), b.lower()
+    if a == b:
+        return 0
+    if not a:
+        return len(b)
+    if not b:
+        return len(a)
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (0 if ca == cb else 1)))
+        prev = cur
+    return prev[-1]
+
+
+def _rank_column_candidates(wrong: str, columns: list[str], *, limit: int = 8) -> list[str]:
+    if not wrong or not columns:
+        return columns[:limit]
+    scored = sorted(
+        (( _edit_distance(wrong, c), c.lower().startswith(wrong.lower()[:3]), c) for c in columns),
+        key=lambda t: (t[0], 0 if t[1] else 1, t[2].lower()),
+    )
+    out: list[str] = []
+    for _, _, c in scored:
+        if c not in out:
+            out.append(c)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def _fetch_columns_for_table(run_query: Callable[[str], str], table_ref: str) -> list[str]:
+    """Best-effort column list for schema.table or bare table via information_schema."""
+    raw = (table_ref or "").strip()
+    if not raw or not re.match(r"^[A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)?$", raw):
+        return []
+    if "." in raw:
+        schema, table = raw.split(".", 1)
+        sql = (
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_schema = '{schema.replace(chr(39), chr(39)+chr(39))}' "
+            f"AND table_name = '{table.replace(chr(39), chr(39)+chr(39))}' "
+            "ORDER BY ordinal_position"
+        )
+    else:
+        sql = (
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{raw.replace(chr(39), chr(39)+chr(39))}' "
+            "AND table_schema NOT IN ('information_schema','pg_catalog') "
+            "ORDER BY table_schema, ordinal_position"
+        )
+    try:
+        parsed = json.loads(run_query(sql))
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    cols: list[str] = []
+    for row in parsed:
+        if isinstance(row, dict):
+            name = str(row.get("column_name") or "").strip()
+            if name and name not in cols:
+                cols.append(name)
+    return cols
+
+
+def _enrich_binder_error(
+    run_query: Callable[[str], str],
+    spec: WorkerSpec,
+    query: str,
+    err: str,
+) -> str:
+    """Attach column_candidates when DuckDB Binder rejects a column name. Never rewrites SQL."""
+    if not _is_binder_column_error(err):
+        return json.dumps({"error": err})
+    wrong = _parse_binder_column_name(err)
+    table_hint: Optional[str] = None
+    tm = _BINDER_TABLE_RE.search(err or "")
+    if tm:
+        table_hint = tm.group(1)
+    tables = []
+    if table_hint:
+        tables.append(table_hint)
+    tables.extend(_tables_mentioned_in_query(query, spec))
+    all_cols: list[str] = []
+    resolved_table: Optional[str] = None
+    for tref in tables:
+        cols = _fetch_columns_for_table(run_query, tref)
+        if cols:
+            resolved_table = tref
+            all_cols = cols
+            break
+    if not all_cols and (spec.allowed_tables or []):
+        for tref in spec.allowed_tables:
+            cols = _fetch_columns_for_table(run_query, str(tref))
+            if cols:
+                resolved_table = str(tref)
+                all_cols = cols
+                break
+    candidates = _rank_column_candidates(wrong or "", all_cols) if all_cols else []
+    payload: dict[str, Any] = {"error": err}
+    if wrong and resolved_table:
+        payload["hint"] = f"column '{wrong}' not found on {resolved_table}"
+    elif wrong:
+        payload["hint"] = f"column '{wrong}' not found"
+    if candidates:
+        payload["column_candidates"] = candidates
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def validate_worker_read_sql(spec: WorkerSpec, query: str) -> Optional[str]:
     """Devuelve cuerpo JSON de error o None si la consulta pasó validación previa a ejecución."""
     if not query or not query.strip():
@@ -316,13 +468,13 @@ def run_worker_read_sql(run_query: Callable[[str], str], spec: WorkerSpec, q: st
                     try:
                         raw2 = _truncate_read_sql_result_for_llm(run_query(try_q))
                         return _maybe_wrap_summary_dedup_read_sql(spec, try_q, raw2)
-                    except Exception:
-                        pass
-        return json.dumps({"error": err})
+                    except Exception as e2:
+                        err = str(e2)
+        return _enrich_binder_error(run_query, spec, q, err)
 
 
 def run_inspect_schema_worker(run_query: Callable[[str], str]) -> str:
-    """Lista tablas (misma consulta que factory._inspect_schema_worker)."""
+    """Lista tablas con columnas (misma forma útil que graphs.tools.inspect_schema)."""
     try:
         r = json.loads(
             run_query(
@@ -337,7 +489,28 @@ def run_inspect_schema_worker(run_query: Callable[[str], str]) -> str:
         for row in r:
             sch = row.get("table_schema", "") if isinstance(row, dict) else ""
             tbl = row.get("table_name", "") if isinstance(row, dict) else ""
-            if sch and tbl:
+            if not sch or not tbl:
+                continue
+            sch_esc = str(sch).replace("'", "''")
+            tbl_esc = str(tbl).replace("'", "''")
+            try:
+                cols_raw = json.loads(
+                    run_query(
+                        "SELECT column_name FROM information_schema.columns "
+                        f"WHERE table_schema = '{sch_esc}' AND table_name = '{tbl_esc}' "
+                        "ORDER BY ordinal_position"
+                    )
+                )
+            except Exception:
+                cols_raw = []
+            col_names = [
+                str(c.get("column_name", "")).strip()
+                for c in (cols_raw if isinstance(cols_raw, list) else [])
+                if isinstance(c, dict) and str(c.get("column_name", "")).strip()
+            ]
+            if col_names:
+                lines.append(f"- {sch}.{tbl}: {', '.join(col_names)}")
+            else:
                 lines.append(f"- {sch}.{tbl}")
         return "Tablas disponibles:\n" + "\n".join(lines) if lines else "No hay tablas."
     except Exception as e:

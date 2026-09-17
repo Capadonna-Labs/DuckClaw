@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 import threading
 from typing import Any, Callable
@@ -11,15 +10,11 @@ from typing import Any, Callable
 from langchain_core.runnables import RunnableConfig
 
 from duckclaw.forge.rag.context_blocks import preserve_context_blocks_for_worker
-from duckclaw.graphs.agent_resilience import (
-    classify_exception_for_replan,
-    merge_failure_reasons,
-    replan_enabled,
-)
 from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subagent_slot
 from duckclaw.manager import manager_worker_cache as _worker_cache_mod
 from duckclaw.manager.fast_plans import _manager_visual_generation_intent
 from duckclaw.manager.manager_entry_routes import _worker_should_use_url_research_mcp_surface
+from duckclaw.manager.manager_invoke_errors import resolve_invoke_worker_exception
 from duckclaw.manager.manager_invoke_helpers import (
     build_invoke_worker_output,
     build_worker_cache_key,
@@ -419,61 +414,16 @@ def build_invoke_worker_node(
                 _tools_list if _tools_list else "ninguna",
             )
         except Exception as e:
-            msg = str(e)[:2048]
-            low = msg.lower()
-            # Wall-clock invoke timeout: report to user, do not replan (loses tool work).
-            _wall_clock_timeout = isinstance(e, TimeoutError) or (
-                "delegate worker graph exceeded" in low and "chat_id=" in low
+            _exc = resolve_invoke_worker_exception(
+                e,
+                llm_provider=llm_provider or "",
+                chat_id=str(chat_id or ""),
+                pa=pa,
+                max_a=max_a,
+                reasons_acc=reasons_acc,
             )
-            # DuckDB usa "Connection Error" al mezclar RO/RW en el mismo archivo; no confundir con MLX caído.
-            _duckdb_config_clash = (
-                "same database file" in low and "different configuration" in low
-            ) or ("duckdb" in low and "read_only" in low)
-            if _wall_clock_timeout:
-                try:
-                    from duckclaw.workers.worker_invoke import _manager_worker_timeout_sec
-
-                    _lim = int(_manager_worker_timeout_sec() or 0)
-                    if _lim <= 0:
-                        _lim = int(float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "180"))
-                except Exception:
-                    _lim = 180
-                msg = (
-                    f"No pude cerrar el turno a tiempo (límite ~{_lim}s). "
-                    "Las tools pudieron ejecutarse, pero falló la síntesis final por timeout. "
-                    "Reintenta pidiendo un resumen más corto o acota la tarea."
-                )
-            elif (
-                not _duckdb_config_clash
-                and any(
-                    x in low
-                    for x in (
-                        "connection error",
-                        "connection refused",
-                        "remote protocol",
-                        "failed to establish",
-                        "errno 61",
-                        "econnrefused",
-                    )
-                )
-            ):
-                _prov = (llm_provider or "").strip().lower()
-                if _prov in ("openrouter", "or", "router", "deepseek", "groq", "openai", "anthropic", "gemini"):
-                    msg = (
-                        f"No se pudo conectar al proveedor LLM «{_prov or 'cloud'}». "
-                        "Comprueba red, API key en Integraciones y que el modelo sea el slug correcto "
-                        "(en OpenRouter: `deepseek/deepseek-v4-flash`, no la API directa de DeepSeek).\n\n"
-                        f"Detalle: {str(e)[:400]}"
-                    )
-                else:
-                    msg = (
-                        "El backend de inferencia local no está disponible o se reinició "
-                        "(p. ej. MLX en :8080). Si usas OpenRouter u otra API cloud, elige ese proveedor "
-                        "en el selector de modelos; no hace falta MLX.\n\n"
-                        f"Detalle: {str(e)[:400]}"
-                    )
             reply = format_worker_reply(
-                raw_worker_reply=msg,
+                raw_worker_reply=_exc.reply_msg,
                 assigned=assigned,
                 run_label_n=run_label_n,
                 chat_id=chat_id,
@@ -481,40 +431,10 @@ def build_invoke_worker_node(
                 worker_invoke=None,
             )
             status = "FAILED"
-            if _wall_clock_timeout:
-                # Surface the timeout; replanning would discard tool results and often re-hit the same ceiling.
-                replan_after = False
-                exhausted_final = False
-                reasons_acc = merge_failure_reasons(
-                    reasons_acc, f"timeout: wall-clock invoke (~síntesis no cerró)"
-                )
-                try:
-                    from duckclaw.graphs.chat_cancel import clear_graph_interrupt
-
-                    clear_graph_interrupt(str(chat_id or "").strip())
-                except Exception:
-                    pass
-                log_sys(
-                    _obs,
-                    "manager invoke timeout: reporting to user (no replan) chat_id=%s",
-                    chat_id,
-                )
-            else:
-                _retryable, _rreason = classify_exception_for_replan(e, _duckdb_config_clash)
-                if replan_enabled() and _retryable:
-                    reasons_acc = merge_failure_reasons(reasons_acc, _rreason)
-                    if pa + 1 < max_a:
-                        replan_after = True
-                        next_plan_attempt = pa + 1
-                        log_sys(
-                            _obs,
-                            "manager replan: excepción recuperable -> intento %s/%s (%s)",
-                            pa + 2,
-                            max_a,
-                            _rreason,
-                        )
-                    else:
-                        exhausted_final = True
+            replan_after = _exc.replan_after
+            exhausted_final = _exc.exhausted_final
+            next_plan_attempt = _exc.next_plan_attempt
+            reasons_acc = _exc.reasons_acc
         finally:
             finalize_invoke_worker_cleanup(
                 worker_graph=worker_graph,

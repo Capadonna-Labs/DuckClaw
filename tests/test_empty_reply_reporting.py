@@ -27,12 +27,17 @@ def test_admin_ui_no_longer_uses_sin_respuesta_stub() -> None:
 
 
 def test_manager_wall_clock_timeout_does_not_replan() -> None:
-    text = Path("packages/agents/src/duckclaw/manager/manager_nodes_invoke.py").read_text(
+    text = Path("packages/agents/src/duckclaw/manager/manager_invoke_errors.py").read_text(
         encoding="utf-8"
     )
-    assert "_wall_clock_timeout" in text
+    assert "wall-clock" in text.lower() or "wall_clock" in text or "_is_wall_clock" in text
     assert "reporting to user (no replan)" in text
-    assert "_manager_worker_timeout_sec" in text
+    invoke = Path("packages/agents/src/duckclaw/manager/manager_nodes_invoke.py").read_text(
+        encoding="utf-8"
+    )
+    assert "resolve_invoke_worker_exception" in invoke
+    assert "_manager_worker_timeout_sec" in invoke
+
 
 
 def test_invoke_timeout_uses_graph_interrupt_marker() -> None:

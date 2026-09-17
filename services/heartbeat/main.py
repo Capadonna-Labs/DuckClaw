@@ -72,6 +72,7 @@ TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
 
 # Una advertencia corta por ruta cuando el .duckdb no abre (p. ej. WAL inconsistente); evita spam cada poll.
 _GOALS_WAL_WARNED_PATHS: set[str] = set()
+_GOALS_LOCK_WARNED_PATHS: set[str] = set()
 
 
 def _short_duckdb_exception_message(exc: BaseException) -> str:
@@ -175,6 +176,22 @@ def _goals_proactive_db_open_error_is_expected(exc: BaseException) -> bool:
     if "could not set lock" in msg or "conflicting lock" in msg:
         return True
     return False
+
+
+def _log_goals_lock_skip(db_path: str, exc: BaseException) -> None:
+    """Rate-limit lock-conflict skips so vault contention is visible once per path."""
+    path_key = str(db_path or "").strip()
+    if not path_key:
+        return
+    if path_key in _GOALS_LOCK_WARNED_PATHS:
+        logger.debug("meditate_proactive: lock skip %s: %s", path_key, exc)
+        return
+    _GOALS_LOCK_WARNED_PATHS.add(path_key)
+    logger.info(
+        "meditate_proactive: vault lock conflict (skipping scan until free): %s | %s",
+        path_key,
+        exc,
+    )
 
 
 def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
@@ -727,6 +744,7 @@ async def _run_loop_proactive_tick_one_db(
     )
     from duckclaw.commands.loop_state_keys import (
         LOOP_AWAITING_USER_KEY,
+        LOOP_CATCHUP_DUE_KEY,
         LOOP_LAST_ACTIVITY_KEY,
         LOOP_PENDING_TICK_KEY,
         get_loop_chat_state,
@@ -741,7 +759,11 @@ async def _run_loop_proactive_tick_one_db(
             rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     except Exception as exc:  # noqa: BLE001
         if _goals_proactive_db_open_error_is_expected(exc):
-            logger.debug("meditate_proactive: omitiendo %s: %s", db_path, exc)
+            msg = str(exc).lower()
+            if "could not set lock" in msg or "conflicting lock" in msg:
+                _log_goals_lock_skip(db_path, exc)
+            else:
+                logger.debug("meditate_proactive: omitiendo %s: %s", db_path, exc)
         else:
             logger.warning("meditate_proactive: no se pudo leer agent_config (%s): %s", db_path, exc)
         return
@@ -793,16 +815,18 @@ async def _run_loop_proactive_tick_one_db(
             idle_mode = is_loop_delta_idle_mode(db, chat_id)
             active_mode = is_loop_active_mode(db, chat_id)
             pending_tick = (get_loop_chat_state(db, chat_id, LOOP_PENDING_TICK_KEY) or "").strip() == "1"
+            catchup_due = (get_loop_chat_state(db, chat_id, LOOP_CATCHUP_DUE_KEY) or "").strip() == "1"
 
             if idle_mode:
                 last_act = get_loop_last_activity_epoch(db, chat_id)
                 silence = (now - last_act) if last_act > 0 else 0.0
-                if pending_tick:
-                    stale_after = max(float(delta_s) * 2.0, 180.0)
-                    if last_act <= 0 or silence < stale_after:
+                if not catchup_due:
+                    if pending_tick:
+                        stale_after = max(float(delta_s) * 2.0, 180.0)
+                        if last_act <= 0 or silence < stale_after:
+                            continue
+                    if last_act <= 0 or silence < float(delta_s):
                         continue
-                if last_act <= 0 or silence < float(delta_s):
-                    continue
                 message = build_loop_self_system_event_message(
                     db, chat_id, tenant_id, scheduled=True, active_mode=active_mode
                 )
@@ -812,8 +836,9 @@ async def _run_loop_proactive_tick_one_db(
                     last_fire = float(last_raw) if last_raw else 0.0
                 except ValueError:
                     last_fire = 0.0
-                if last_fire > 0 and (now - last_fire) < float(delta_s):
-                    continue
+                if not catchup_due:
+                    if last_fire > 0 and (now - last_fire) < float(delta_s):
+                        continue
                 message = build_loop_self_system_event_message(
                     db, chat_id, tenant_id, scheduled=True
                 )
@@ -823,6 +848,19 @@ async def _run_loop_proactive_tick_one_db(
 
                 activity = get_activity(chat_id) or {}
                 if str(activity.get("status") or "").upper() == "BUSY":
+                    # Due tick missed while chat is BUSY — queue catch-up for next IDLE poll.
+                    # Do not reuse loop_pending_tick (in-flight + 2× silence semantics).
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id,
+                        key=LOOP_CATCHUP_DUE_KEY,
+                        value="1",
+                    )
+                    logger.debug(
+                        "meditate_proactive: BUSY catch-up queued chat=%s",
+                        chat_id,
+                    )
                     continue
             except Exception:
                 pass
@@ -865,6 +903,13 @@ async def _run_loop_proactive_tick_one_db(
                     )
                 continue
             logger.info("meditate_proactive: tick OK chat=%s worker=%s", chat_id, worker_id)
+            await _enqueue_chat_state_write(
+                db_path=db_path,
+                chat_id=chat_id,
+                tenant_id=tenant_id,
+                key=LOOP_CATCHUP_DUE_KEY,
+                value="0",
+            )
             if idle_mode:
                 # Re-anchor even when gateway skip persist/touch (Telegram SYSTEM_EVENT).
                 await _enqueue_chat_state_write(

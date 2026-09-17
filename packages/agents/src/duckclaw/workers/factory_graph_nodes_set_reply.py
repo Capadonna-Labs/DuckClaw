@@ -365,6 +365,36 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                             _pm_meta.get("claims_before"),
                         )
                         reply = _rewritten
+                    _breaches = list(_pm_meta.get("breaches") or [])
+                    if _breaches:
+                        try:
+                            from duckclaw.graphs.chat_heartbeat import (
+                                is_admin_ui_chat_session,
+                                publish_admin_chat_heartbeat,
+                            )
+
+                            _chat_hb = str(state.get("chat_id") or state.get("session_id") or "")
+                            if _chat_hb and is_admin_ui_chat_session(_chat_hb):
+                                _seen = set(state.get("_tp_sl_breach_alerted") or [])
+                                _new_seen = set(_seen)
+                                for _br in _breaches:
+                                    _key = f"{_br.get('ticker')}:{_br.get('breached')}"
+                                    if _key in _new_seen:
+                                        continue
+                                    _new_seen.add(_key)
+                                    publish_admin_chat_heartbeat(
+                                        _chat_hb,
+                                        (
+                                            f"TP/SL BREACH {_br.get('ticker')} "
+                                            f"{str(_br.get('breached') or '').upper()} "
+                                            f"@ {_br.get('price')} "
+                                            f"(sl={_br.get('sl')} tp={_br.get('tp')})"
+                                        ),
+                                        kind="tp_sl_breach",
+                                    )
+                                state = {**state, "_tp_sl_breach_alerted": sorted(_new_seen)}
+                        except Exception:
+                            pass
                 except Exception:
                     pass
 
@@ -374,8 +404,15 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                     spec=spec,
                 )
                 if pm_reason == POSITION_METRICS_RETRY_REASON:
+                    from duckclaw.position_metrics import should_skip_position_metrics_retry
+
                     _pm_count = int(state.get("position_metrics_retry_count") or 0)
-                    if _pm_count < 1:
+                    _skip_pm_retry = should_skip_position_metrics_retry(
+                        messages=msgs,
+                        incoming=str(state.get("incoming") or _rescind_incoming or ""),
+                        reply=reply or "",
+                    )
+                    if _pm_count < 1 and not _skip_pm_retry:
                         _log.warning(
                             "Position metrics audit: %s — in-graph retry",
                             pm_reason,
@@ -393,7 +430,11 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                         }
                         out_pm.update(_identity_fields(state))
                         return out_pm
-                    _log.warning("Position metrics audit: %s — retries exhausted", pm_reason)
+                    _log.warning(
+                        "Position metrics audit: %s — %s",
+                        pm_reason,
+                        "skip retry (AH/no levels)" if _skip_pm_retry else "retries exhausted",
+                    )
                     from duckclaw.position_metrics import (
                         apply_deterministic_tp_sl_rewrite,
                         strip_tp_sl_pct_claims,

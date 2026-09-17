@@ -52,6 +52,7 @@ class AlignmentReport:
     items: list[AlignmentItem] = field(default_factory=list)
     goals_count: int = 0
     opener_hint: str = ""
+    unevaluable_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -364,7 +365,9 @@ def assess_goals_list_alignment(
             )
         )
 
-    aligned = misaligned == 0
+    unevaluable = sum(1 for i in items if not i.has_data)
+    # Goals without observations must NOT report as "0 desviaciones" / aligned.
+    aligned = misaligned == 0 and unevaluable == 0
     opener = ""
     if not aligned:
         first = next((i for i in items if i.is_anomaly), None)
@@ -372,6 +375,11 @@ def assess_goals_list_alignment(
             opener = (
                 f"Detecté desalineación en P{first.priority} «{first.title}» "
                 f"(obs={first.observed}, meta={first.target})."
+            )
+        elif unevaluable:
+            opener = (
+                f"{unevaluable} meta(s) sin datos evaluables — no reportes 0 desviaciones; "
+                "obtén observed o trata como no alineado."
             )
         else:
             opener = pick_nudge_opener(str(chat_id), 0.0)
@@ -382,6 +390,7 @@ def assess_goals_list_alignment(
         items=items,
         goals_count=len(goals),
         opener_hint=opener,
+        unevaluable_count=unevaluable,
     )
 
 
@@ -423,6 +432,11 @@ def format_alignment_report_markdown(report: AlignmentReport) -> str:
         return "\n".join(lines)
     if report.aligned:
         lines.append(f"**Estado:** alineado ({report.goals_count} meta(s)).")
+    elif report.unevaluable_count and report.misaligned_count == 0:
+        lines.append(
+            f"**Estado:** no evaluable ({report.unevaluable_count} meta(s) sin datos) "
+            f"— no es 0 desviaciones."
+        )
     else:
         lines.append(
             f"**Estado:** {report.misaligned_count} desvío(s) "

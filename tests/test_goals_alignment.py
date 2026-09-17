@@ -137,8 +137,9 @@ def test_assess_goals_alignment_percent_vs_absolute_mismatch_no_false_alarm(tmp_
         }
     ]
     report = assess_goals_list_alignment(db, chat_id, goals, worker_id="worker-a")
-    assert report.aligned is True
+    assert report.aligned is False
     assert report.misaligned_count == 0
+    assert report.unevaluable_count == 1
     assert report.items[0].scale_mismatch is True
     assert report.items[0].has_data is False
 

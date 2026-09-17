@@ -549,6 +549,41 @@ def make_tools_node(ctx: WorkerGraphContext):
                         sandbox_enabled,
                     )
                 new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
+        # Platform stuck-breaker: identical evaluate_homeostasis misaligned results.
+        _stuck_nudge_msg = None
+        try:
+            from duckclaw.workers.homeostasis_stuck import (
+                build_stuck_nudge_message,
+                parse_homeostasis_tool_payload,
+                record_homeostasis_observation,
+            )
+            from langchain_core.messages import HumanMessage as _HM
+
+            for _tm in reversed(new_msgs):
+                if getattr(_tm, "name", None) != "evaluate_homeostasis":
+                    continue
+                _payload = parse_homeostasis_tool_payload(str(getattr(_tm, "content", "") or ""))
+                if not _payload:
+                    break
+                _chat = state.get("chat_id") or state.get("session_id") or ""
+                _tid = (state.get("tenant_id") or "").strip() or "default"
+                _obs = record_homeostasis_observation(
+                    db, _chat, _payload, tenant_id=_tid
+                )
+                _action = str(_obs.get("action") or "")
+                if _action in ("nudge", "escalate"):
+                    _stuck_nudge_msg = _HM(
+                        content=build_stuck_nudge_message(
+                            streak=int(_obs.get("streak") or 0),
+                            corrective_tools=list(_obs.get("corrective_tools") or []),
+                            escalate=_action == "escalate",
+                        )
+                    )
+                break
+        except Exception:
+            _stuck_nudge_msg = None
+        if _stuck_nudge_msg is not None:
+            new_msgs = list(new_msgs) + [_stuck_nudge_msg]
         out: dict[str, Any] = {
             **state,
             "messages": new_msgs,

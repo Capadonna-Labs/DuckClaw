@@ -143,10 +143,12 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
             goals_summary: str,
             metrics_json: str = "{}",
             deviations_json: str = "{}",
+            escalate_stuck: bool = False,
         ) -> str:
             """
             Solicita validación HITL antes de declarar homeostasis.
-            Llamar solo cuando métricas alineadas (sin desviaciones).
+            Llamar solo cuando métricas alineadas (sin desviaciones),
+            o con escalate_stuck=true cuando el sensor quedó stuck sin corrección.
             """
             cid = get_goals_tool_chat_id()
             if not cid:
@@ -168,7 +170,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                     deviations = {}
             except Exception:
                 deviations = {}
-            if deviations:
+            if deviations and not escalate_stuck:
                 return json.dumps(
                     {
                         "status": "error",
@@ -181,17 +183,18 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 from harness_core.targets import load_homeostasis_manifest, manifest_goals_as_dicts
                 from duckclaw.homeostasis.goals_alignment import hitl_declarable_for_goals
 
-                manifest = load_homeostasis_manifest(use_db, tid, chat_id=cid)
-                declarable, note = hitl_declarable_for_goals(manifest_goals_as_dicts(manifest))
-                if not declarable:
-                    return json.dumps(
-                        {
-                            "status": "error",
-                            "error": "monitor_goals_not_declarable",
-                            "message": note,
-                        },
-                        ensure_ascii=False,
-                    )
+                if not escalate_stuck:
+                    manifest = load_homeostasis_manifest(use_db, tid, chat_id=cid)
+                    declarable, note = hitl_declarable_for_goals(manifest_goals_as_dicts(manifest))
+                    if not declarable:
+                        return json.dumps(
+                            {
+                                "status": "error",
+                                "error": "monitor_goals_not_declarable",
+                                "message": note,
+                            },
+                            ensure_ascii=False,
+                        )
             except Exception:
                 pass
             from duckclaw.hitl.loop_validation_service import (
@@ -203,6 +206,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 "goals_summary": (goals_summary or "").strip(),
                 "current_metrics": metrics,
                 "deviations": deviations,
+                "escalate_stuck": bool(escalate_stuck),
             }
             created = create_pending_validation(
                 use_db,
@@ -231,14 +235,21 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 )
             vid = str(created.get("validation_id") or "")
             user_prompt = format_hitl_user_prompt(vid, goals_summary)
+            if escalate_stuck:
+                user_prompt = (
+                    f"⚠️ Homeostasis stuck (sensor idéntico sin corrección).\n{user_prompt}"
+                )
             return json.dumps(
                 {
                     "status": "pending_hitl",
                     "validation_id": vid,
                     "user_prompt": user_prompt,
+                    "escalate_stuck": bool(escalate_stuck),
                     "note": (
                         "homeostasis_achieved en evaluate_homeostasis solo indica métricas "
                         "alineadas; no declares homeostasis hasta /loop-approve."
+                        if not escalate_stuck
+                        else "Escalación por sensor stuck; el usuario debe decidir o aprobar pausa."
                     ),
                 },
                 ensure_ascii=False,
@@ -351,7 +362,9 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 description=(
                     "Paso HITL final de /loop solo para metas **task** (sin metas monitor en manifiesto). "
                     "Metas monitor (métricas continuas como latencia o error_rate) se revisan cada ciclo y **nunca** se declaran cumplidas. "
-                    "Solo si no hay desviaciones. Detente tras llamar; homeostasis solo tras /loop-approve."
+                    "Solo si no hay desviaciones, o escalate_stuck=true cuando evaluate_homeostasis "
+                    "quedó stuck (misma lectura misaligned repetida). Detente tras llamar; "
+                    "homeostasis solo tras /loop-approve."
                 ),
             )
         )

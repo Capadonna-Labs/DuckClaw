@@ -143,6 +143,7 @@ def apply_terminal_force_tool_overrides(
     force_tavily: bool,
     force_reddit: bool,
     force_visual: bool,
+    homeostasis_streak: int = 0,
 ) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
     """Email then /loop homeostasis overrides (clear competing force_* flags).
 
@@ -153,6 +154,7 @@ def apply_terminal_force_tool_overrides(
     """
     from duckclaw.workers.tool_invocation_policy import (
         decide_loop_homeostasis_tool_invocation,
+        _is_loop_or_proactive_system_event,
     )
     from duckclaw.workers.tool_orchestration import (
         find_gmail_mcp_search_tool,
@@ -165,6 +167,9 @@ def apply_terminal_force_tool_overrides(
     gmail_search_tool = (
         find_gmail_mcp_search_tool(tools_by_name) if email_intent else None
     )
+    # On /loop ticks, never force Gmail — trading sensors first.
+    if _is_loop_or_proactive_system_event(incoming):
+        gmail_search_tool = None
     if (
         gmail_search_tool
         and not telegram_context_summarize_directive
@@ -187,6 +192,7 @@ def apply_terminal_force_tool_overrides(
         called_tools_since_last_human=called_tools_since_last_human,
         already_has_tool_result=already_has_tool_result,
         summarize_directive=telegram_context_summarize_directive,
+        homeostasis_streak=homeostasis_streak,
     )
     if decision.should_force and decision.tool_name:
         force_orch_tool = decision.tool_name

@@ -226,7 +226,7 @@ async def run_chat_graph(
                         set_loop_awaiting_user,
                     )
 
-                    vdb = DuckClaw(vpath, read_only=False, engine="python")
+                    vdb = DuckClaw(vpath, read_only=True, engine="python")
                     try:
                         if is_loop_active_mode(vdb, session_id) and is_loop_awaiting_user(
                             vdb, session_id
@@ -237,6 +237,7 @@ async def run_chat_graph(
                                 prepared.tenant_id,
                                 prepared.user_incoming or message,
                             )
+                            # Clear awaiting flag via typed command (no long-lived RW vault handle).
                             set_loop_awaiting_user(
                                 vdb,
                                 session_id,

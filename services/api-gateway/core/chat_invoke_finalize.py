@@ -177,6 +177,17 @@ async def finalize_chat_response(
         reply_text = sanitize_worker_reply_text(reply_text or "")
     except Exception:
         pass
+    if not (reply_text or "").strip():
+        # Never leave the admin/Telegram bubble blank — report the failure.
+        reply_text = (
+            "No hubo respuesta del agente en este turno "
+            "(timeout, fallo de inferencia o interrupción). "
+            "Reintenta o revisa los logs del gateway."
+        )
+        _gateway_log.warning(
+            "finalize empty reply substituted session_id=%r",
+            session_id,
+        )
     try:
         reply_text = unescape_telegram_markdown_v2_layers(reply_text or "")
     except Exception:

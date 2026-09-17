@@ -63,9 +63,10 @@ async def prepare_chat_invoke(
     message = (payload.message or "").strip()
     user_incoming = (getattr(payload, "user_incoming", None) or message or "").strip()
     session_id = (session_id or "default").strip() or "default"
-    from duckclaw.graphs.chat_cancel import clear_chat_cancel
+    from duckclaw.graphs.chat_cancel import clear_chat_cancel, clear_graph_interrupt
 
     clear_chat_cancel(session_id)
+    clear_graph_interrupt(session_id)
     tenant_id = effective_tenant_id(tenant_id)
     chat_type = (payload.chat_type or "private").strip().lower() or "private"
     username = (payload.username or "Usuario").strip() or "Usuario"

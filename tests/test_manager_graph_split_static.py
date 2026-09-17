@@ -22,6 +22,7 @@ MANAGER_SPLIT_MODULES = (
     "manager_planner_llm.py",
     "manager_delegation.py",
     "manager_invoke_helpers.py",
+    "manager_invoke_errors.py",
     "manager_graph_routing.py",
     "manager_nodes_router.py",
     "manager_nodes_greeting.py",

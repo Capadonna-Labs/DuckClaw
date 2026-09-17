@@ -467,10 +467,12 @@ try {
     const last = next[next.length - 1];
     if (last?.role === 'assistant') {
       const streamed = (last.text || '').trim();
+      const emptyFallback =
+        'No hubo respuesta del agente en este turno (timeout, fallo de inferencia o interrupción). Reintenta.';
       const base =
         authoritativeResponse.length > streamed.length
           ? authoritativeResponse
-          : streamed || '(sin respuesta)';
+          : streamed || emptyFallback;
       next[next.length - 1] = {
         role: 'assistant',
         text: base + assignedSuffix + elapsedFooter,

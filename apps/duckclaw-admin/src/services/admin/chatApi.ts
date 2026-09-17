@@ -481,6 +481,11 @@ export const chatApi = {
             audio_format: ev.audio_format,
           });
         } else if (ev.type === 'error') {
+          // Prefer surfacing the error as the assistant reply when no tokens arrived.
+          if (!full.trim() && ev.message?.trim()) {
+            full = ev.message.trim();
+            handlers.onToken(full);
+          }
           throw new Error(ev.message);
         }
       }

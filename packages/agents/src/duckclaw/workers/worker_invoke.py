@@ -29,6 +29,14 @@ _DELEGATE_INVOKE_TIMEOUT_SEC = max(
     60.0,
     float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "180"),
 )
+# Manager → worker top-level turns (Android scrapes, multi-tool) need a higher ceiling.
+# 0 = no wall-clock limit. Override via DUCKCLAW_MANAGER_WORKER_TIMEOUT_SEC.
+def _manager_worker_timeout_sec() -> float:
+    raw = (os.environ.get("DUCKCLAW_MANAGER_WORKER_TIMEOUT_SEC") or "900").strip()
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 900.0
 
 
 def set_parent_vault_invoke_lock(lock: threading.RLock | None) -> None:
@@ -133,9 +141,17 @@ def invoke_worker_graph(
     chat_id: str = "",
     timeout_sec: float | None = None,
 ) -> dict[str, Any]:
-    from duckclaw.graphs.chat_cancel import raise_if_chat_cancelled
+    from duckclaw.graphs.chat_cancel import (
+        clear_graph_interrupt,
+        raise_if_chat_cancelled,
+        request_graph_interrupt,
+    )
 
-    raise_if_chat_cancelled(str(chat_id or "").strip())
+    cid = str(chat_id or "").strip()
+    raise_if_chat_cancelled(cid)
+    # Fresh invoke: drop a previous wall-clock interrupt so retries can run.
+    if cid:
+        clear_graph_interrupt(cid)
 
     def _run() -> dict[str, Any]:
         from duckclaw.utils.langsmith_trace import with_graph_recursion_limit
@@ -158,15 +174,12 @@ def invoke_worker_graph(
         try:
             return fut.result(timeout=limit)
         except FuturesTimeoutError as exc:
-            # Stop orphan graph ASAP so it stops burning tools / holding vault lock longer.
-            cid = str(chat_id or "").strip()
+            # Stop orphan graph without aborting parent SSE (request_chat_cancel would).
             if cid:
                 try:
-                    from duckclaw.graphs.chat_cancel import request_chat_cancel
-
-                    request_chat_cancel(cid)
+                    request_graph_interrupt(cid)
                 except Exception:
-                    _log.debug("request_chat_cancel on delegate timeout failed", exc_info=True)
+                    _log.debug("request_graph_interrupt on invoke timeout failed", exc_info=True)
             raise TimeoutError(
                 f"delegate worker graph exceeded {limit:.0f}s (chat_id={chat_id or '?'})"
             ) from exc
@@ -456,4 +469,5 @@ __all__ = [
     "invoke_delegated_worker",
     "invoke_worker_graph",
     "set_parent_vault_invoke_lock",
+    "_manager_worker_timeout_sec",
 ]

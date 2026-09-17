@@ -195,3 +195,42 @@ def build_stuck_nudge_message(*, streak: int, corrective_tools: list[str], escal
         f"({tools_txt}) o pide decisión al usuario. "
         "Solo vuelve a evaluate_homeostasis después de una corrección real."
     )
+
+
+def maybe_append_homeostasis_stuck_nudge(
+    new_msgs: list[Any],
+    *,
+    db: Any,
+    state: dict[str, Any],
+) -> list[Any]:
+    """If last evaluate_homeostasis is stuck, append a SYSTEM nudge HumanMessage."""
+    try:
+        from langchain_core.messages import HumanMessage
+    except Exception:
+        return new_msgs
+    try:
+        for tm in reversed(new_msgs):
+            if getattr(tm, "name", None) != "evaluate_homeostasis":
+                continue
+            payload = parse_homeostasis_tool_payload(str(getattr(tm, "content", "") or ""))
+            if not payload:
+                break
+            chat = state.get("chat_id") or state.get("session_id") or ""
+            tid = (state.get("tenant_id") or "").strip() or "default"
+            obs = record_homeostasis_observation(db, chat, payload, tenant_id=tid)
+            action = str(obs.get("action") or "")
+            if action in ("nudge", "escalate"):
+                return list(new_msgs) + [
+                    HumanMessage(
+                        content=build_stuck_nudge_message(
+                            streak=int(obs.get("streak") or 0),
+                            corrective_tools=list(obs.get("corrective_tools") or []),
+                            escalate=action == "escalate",
+                        )
+                    )
+                ]
+            break
+    except Exception:
+        return new_msgs
+    return new_msgs
+

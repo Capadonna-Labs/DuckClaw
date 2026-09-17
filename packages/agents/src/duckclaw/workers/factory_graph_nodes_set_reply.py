@@ -352,100 +352,31 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                     _log.warning("Visual evidence audit: %s", vreason)
                     reply = new_v
 
-                # Mechanical TP/SL: strip LLM % claims + inject calculate_tp_sl_distance
-                # from evaluate_homeostasis levels — do not wait for optional tool call.
+                # Mechanical TP/SL rewrite + breach alerts + evidence retry.
                 try:
-                    from duckclaw.position_metrics import apply_deterministic_tp_sl_rewrite
+                    from duckclaw.workers.factory_graph_nodes_set_reply_tp_sl import (
+                        apply_tp_sl_rewrite_and_breach_alerts,
+                        enforce_position_metrics_with_optional_retry,
+                    )
 
-                    _rewritten, _pm_meta = apply_deterministic_tp_sl_rewrite(reply or "", msgs)
-                    if _pm_meta.get("rewrote"):
-                        _log.info(
-                            "Position metrics rewrite: levels=%s claims_before=%s",
-                            _pm_meta.get("levels_found"),
-                            _pm_meta.get("claims_before"),
-                        )
-                        reply = _rewritten
-                    _breaches = list(_pm_meta.get("breaches") or [])
-                    if _breaches:
-                        try:
-                            from duckclaw.graphs.chat_heartbeat import (
-                                is_admin_ui_chat_session,
-                                publish_admin_chat_heartbeat,
-                            )
-
-                            _chat_hb = str(state.get("chat_id") or state.get("session_id") or "")
-                            if _chat_hb and is_admin_ui_chat_session(_chat_hb):
-                                _seen = set(state.get("_tp_sl_breach_alerted") or [])
-                                _new_seen = set(_seen)
-                                for _br in _breaches:
-                                    _key = f"{_br.get('ticker')}:{_br.get('breached')}"
-                                    if _key in _new_seen:
-                                        continue
-                                    _new_seen.add(_key)
-                                    publish_admin_chat_heartbeat(
-                                        _chat_hb,
-                                        (
-                                            f"TP/SL BREACH {_br.get('ticker')} "
-                                            f"{str(_br.get('breached') or '').upper()} "
-                                            f"@ {_br.get('price')} "
-                                            f"(sl={_br.get('sl')} tp={_br.get('tp')})"
-                                        ),
-                                        kind="tp_sl_breach",
-                                    )
-                                state = {**state, "_tp_sl_breach_alerted": sorted(_new_seen)}
-                        except Exception:
-                            pass
+                    reply, state = apply_tp_sl_rewrite_and_breach_alerts(
+                        reply=reply or "", messages=msgs, state=state
+                    )
+                    reply, _pm_retry_out = enforce_position_metrics_with_optional_retry(
+                        reply=reply,
+                        messages=msgs,
+                        state=state,
+                        spec=spec,
+                        rescind_incoming=str(_rescind_incoming or ""),
+                        identity_fields=_identity_fields,
+                        enforce_rule=enforce_position_metrics_evidence_rule,
+                        retry_reason=POSITION_METRICS_RETRY_REASON,
+                        retry_system_message=position_metrics_retry_system_message,
+                    )
+                    if _pm_retry_out is not None:
+                        return _pm_retry_out
                 except Exception:
                     pass
-
-                pm_reply, pm_reason = enforce_position_metrics_evidence_rule(
-                    reply=reply,
-                    messages=msgs,
-                    spec=spec,
-                )
-                if pm_reason == POSITION_METRICS_RETRY_REASON:
-                    from duckclaw.position_metrics import should_skip_position_metrics_retry
-
-                    _pm_count = int(state.get("position_metrics_retry_count") or 0)
-                    _skip_pm_retry = should_skip_position_metrics_retry(
-                        messages=msgs,
-                        incoming=str(state.get("incoming") or _rescind_incoming or ""),
-                        reply=reply or "",
-                    )
-                    if _pm_count < 1 and not _skip_pm_retry:
-                        _log.warning(
-                            "Position metrics audit: %s — in-graph retry",
-                            pm_reason,
-                        )
-                        _msgs_pm = list(msgs) + [position_metrics_retry_system_message()]
-                        out_pm: dict = {
-                            **state,
-                            "messages": _msgs_pm,
-                            "reply": "",
-                            "internal_reply": "",
-                            "position_metrics_retry_count": _pm_count + 1,
-                            "position_metrics_graph_retry": True,
-                            # Keep draft so empty retry does not collapse to "Operación completada."
-                            "position_metrics_draft_reply": (reply or "").strip(),
-                        }
-                        out_pm.update(_identity_fields(state))
-                        return out_pm
-                    _log.warning(
-                        "Position metrics audit: %s — %s",
-                        pm_reason,
-                        "skip retry (AH/no levels)" if _skip_pm_retry else "retries exhausted",
-                    )
-                    from duckclaw.position_metrics import (
-                        apply_deterministic_tp_sl_rewrite,
-                        strip_tp_sl_pct_claims,
-                    )
-
-                    _draft = (state.get("position_metrics_draft_reply") or reply or "").strip()
-                    _stripped = strip_tp_sl_pct_claims(_draft)
-                    _rewritten2, _ = apply_deterministic_tp_sl_rewrite(_stripped or pm_reply, msgs)
-                    reply = _rewritten2 or _stripped or pm_reply
-                elif pm_reason:
-                    reply = pm_reply
 
                 new_r, price_reason = market_price_consistency_audit(db, spec, reply, messages=msgs)
                 if price_reason:

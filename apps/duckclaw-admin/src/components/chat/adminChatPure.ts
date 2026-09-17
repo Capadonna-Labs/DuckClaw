@@ -7,6 +7,20 @@ import {
   type ContextTokenBreakdown,
 } from '@/lib/contextTokenBreakdown';
 
+/**
+ * Slash de configuración / ack corto (sin chips).
+ * Comandos agente (`/execute-broker-signals`, …) con respuesta real SÍ piden chips.
+ * Los ciclos /loop llegan como SYSTEM_EVENT / [Ciclo loop] (no empiezan por `/`).
+ */
+export function isFlyConfigSlashAck(userText: string): boolean {
+  const t = (userText || '').trim();
+  if (!t.startsWith('/')) return false;
+  return (
+    /^\/(loop|meditate)(\s|$)/i.test(t) ||
+    /^\/(summarize|sandbox|help|status|voice|tts)\b/i.test(t)
+  );
+}
+
 /** True si, tras un turno, corresponde pedir sugerencias de continuación al backend. */
 export function shouldFetchChatSuggestions(
   userText: string,
@@ -14,10 +28,11 @@ export function shouldFetchChatSuggestions(
   aborted: boolean
 ): boolean {
   if (aborted) return false;
-  // Slash fly acks (/loop on, /summarize, …) no piden chips.
-  // Los ciclos /loop (SYSTEM_EVENT / [Ciclo loop] como "user") sí: hay reporte outbound útil.
-  if (userText.trim().startsWith('/')) return false;
-  return assistantResponse.trim().length > 0;
+  if (!assistantResponse.trim()) return false;
+  // Fly config acks (/loop on, /summarize, …) no piden chips.
+  // Slash que invocan al worker con respuesta útil (/execute-…) sí.
+  if (isFlyConfigSlashAck(userText)) return false;
+  return true;
 }
 
 /**

@@ -15,22 +15,49 @@ export function isToolHeartbeatMessage(m: ChatMsg | undefined): boolean {
   return m?.role === 'heartbeat' && m.heartbeatKind === 'tool';
 }
 
+/**
+ * Una caja Tool Usage por turno (entre user y el siguiente user/fin).
+ * Heartbeats status/plan intercalados no parten el grupo — evita cajas acumuladas.
+ */
 export function groupMessagesForDisplay(messages: ChatMsg[]): ChatDisplayItem[] {
   const out: ChatDisplayItem[] = [];
   let i = 0;
   while (i < messages.length) {
-    if (!isToolHeartbeatMessage(messages[i])) {
+    const m = messages[i];
+    if (m?.role === 'user') {
       out.push({ kind: 'message', index: i });
       i += 1;
+      // Recolectar tools del turno; emitir el grupo en el primer tool.
+      const turnTools: number[] = [];
+      let firstToolOutIdx = -1;
+      while (i < messages.length && messages[i]?.role !== 'user') {
+        if (isToolHeartbeatMessage(messages[i])) {
+          if (firstToolOutIdx < 0) {
+            firstToolOutIdx = out.length;
+            out.push({ kind: 'toolGroup', indices: turnTools });
+          }
+          turnTools.push(i);
+          i += 1;
+          continue;
+        }
+        out.push({ kind: 'message', index: i });
+        i += 1;
+      }
       continue;
     }
-    const indices: number[] = [i];
-    i += 1;
-    while (i < messages.length && isToolHeartbeatMessage(messages[i])) {
-      indices.push(i);
+    if (isToolHeartbeatMessage(m)) {
+      // Orphan tools (sin user previo): agrupar consecutivos.
+      const indices: number[] = [i];
       i += 1;
+      while (i < messages.length && isToolHeartbeatMessage(messages[i])) {
+        indices.push(i);
+        i += 1;
+      }
+      out.push({ kind: 'toolGroup', indices });
+      continue;
     }
-    out.push({ kind: 'toolGroup', indices });
+    out.push({ kind: 'message', index: i });
+    i += 1;
   }
   return out;
 }
@@ -39,21 +66,40 @@ export function toolGroupHasRunning(messages: ChatMsg[], indices: number[]): boo
   return indices.some((idx) => isToolHeartbeatRunning(messages[idx]));
 }
 
+/**
+ * Duración de pared del bloque (primer start → último end), no suma de
+ * elapsed por tool — si no 165×3s → "9m" engañoso.
+ */
 export function toolGroupTotalElapsedMs(messages: ChatMsg[], indices: number[]): number | null {
-  let total = 0;
-  let any = false;
+  let minStart: number | null = null;
+  let maxEnd: number | null = null;
+  let maxElapsed = 0;
+  let anyElapsed = false;
   for (const idx of indices) {
     const m = messages[idx];
     if (isToolHeartbeatRunning(m)) return null;
-    const ms =
+    const start = m.toolStartedAt;
+    const elapsed =
       m.toolElapsedMs ??
-      (m.toolStartedAt != null ? Math.max(0, Date.now() - m.toolStartedAt) : undefined);
-    if (ms != null && Number.isFinite(ms)) {
-      total += ms;
-      any = true;
+      (start != null ? Math.max(0, Date.now() - start) : undefined);
+    if (elapsed != null && Number.isFinite(elapsed)) {
+      anyElapsed = true;
+      maxElapsed = Math.max(maxElapsed, elapsed);
+      if (start != null && Number.isFinite(start)) {
+        minStart = minStart == null ? start : Math.min(minStart, start);
+        const end = start + elapsed;
+        maxEnd = maxEnd == null ? end : Math.max(maxEnd, end);
+      }
+    } else if (start != null && Number.isFinite(start)) {
+      minStart = minStart == null ? start : Math.min(minStart, start);
+      maxEnd = maxEnd == null ? start : Math.max(maxEnd, start);
     }
   }
-  return any ? total : null;
+  if (minStart != null && maxEnd != null && maxEnd >= minStart) {
+    return Math.max(0, maxEnd - minStart);
+  }
+  // Sin timestamps de inicio: mostrar el max individual, nunca la suma.
+  return anyElapsed ? maxElapsed : null;
 }
 
 /** Clave estable por turno: no cambia al añadir tools al mismo grupo. */

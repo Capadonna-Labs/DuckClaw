@@ -50,10 +50,34 @@ describe('toolUsageGroup', () => {
       groupMessagesForDisplay([user, tool('a'), tool('b'), plan, tool('c'), assistant])
     ).toEqual([
       { kind: 'message', index: 0 },
-      { kind: 'toolGroup', indices: [1, 2] },
+      { kind: 'toolGroup', indices: [1, 2, 4] },
       { kind: 'message', index: 3 },
-      { kind: 'toolGroup', indices: [4] },
       { kind: 'message', index: 5 },
+    ]);
+  });
+
+  it('one tool group per turn even with status between tools', () => {
+    const status: ChatMsg = { role: 'heartbeat', heartbeatKind: 'status', text: 'PROGRESO…' };
+    expect(
+      groupMessagesForDisplay([
+        user,
+        tool('a'),
+        status,
+        tool('b'),
+        tool('c'),
+        assistant,
+        { role: 'user', text: 'otro' },
+        tool('d'),
+        assistant,
+      ])
+    ).toEqual([
+      { kind: 'message', index: 0 },
+      { kind: 'toolGroup', indices: [1, 3, 4] },
+      { kind: 'message', index: 2 },
+      { kind: 'message', index: 5 },
+      { kind: 'message', index: 6 },
+      { kind: 'toolGroup', indices: [7] },
+      { kind: 'message', index: 8 },
     ]);
   });
 
@@ -81,7 +105,7 @@ describe('toolUsageGroup', () => {
     expect(toolGroupCurrentToolName([user, done], [1])).toBe('get_current_time');
   });
 
-  it('reports running state and total elapsed', () => {
+  it('reports running state and wall-clock elapsed (not sum)', () => {
     const running = [user, tool('fetch', 'running'), assistant];
     const group = groupMessagesForDisplay(running);
     const indices = (group[1] as { indices: number[] }).indices;
@@ -90,9 +114,16 @@ describe('toolUsageGroup', () => {
 
     const done = [user, tool('a'), tool('b', 'done')];
     done[1].toolElapsedMs = 5;
+    done[1].toolStartedAt = 1000;
     done[2].toolElapsedMs = 7;
+    done[2].toolStartedAt = 1003; // overlaps / follows — span = (1003+7) - 1000 = 10
     const g2 = groupMessagesForDisplay(done);
-    expect(toolGroupTotalElapsedMs(done, (g2[1] as { indices: number[] }).indices)).toBe(12);
+    expect(toolGroupTotalElapsedMs(done, (g2[1] as { indices: number[] }).indices)).toBe(10);
+
+    // Sin startedAt: max individual, no suma
+    const noStart = [user, tool('a', 'done', 5), tool('b', 'done', 7)];
+    const g3 = groupMessagesForDisplay(noStart);
+    expect(toolGroupTotalElapsedMs(noStart, (g3[1] as { indices: number[] }).indices)).toBe(7);
   });
 
   describe('groupToolInvocationsByName', () => {

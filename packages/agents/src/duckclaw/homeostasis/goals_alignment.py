@@ -370,8 +370,9 @@ def assess_goals_list_alignment(
         )
 
     unevaluable = sum(1 for i in items if not i.has_data)
-    # Proactive ticker uses .aligned (anomalies only). LLM JSON via to_dict()
-    # flips aligned when unevaluable so assess_crons cannot claim "0 desviaciones".
+    # Heartbeat proactive path uses .aligned (anomalies only). LLM JSON via
+    # to_dict() flips aligned when unevaluable so assess_crons cannot claim
+    # "0 desviaciones".
     aligned = misaligned == 0
     opener = ""
     if misaligned:

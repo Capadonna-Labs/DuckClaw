@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 import threading
 from typing import Any, Callable
@@ -360,6 +361,7 @@ def build_invoke_worker_node(
             try:
                 raise_if_chat_cancelled(str(chat_id or "").strip())
                 from duckclaw.workers.worker_invoke import (
+                    _manager_worker_timeout_sec,
                     extract_worker_invoke_reply,
                     invoke_worker_graph,
                 )
@@ -369,6 +371,7 @@ def build_invoke_worker_node(
                     worker_state,
                     trace_cfg=trace_cfg,
                     chat_id=str(chat_id or ""),
+                    timeout_sec=_manager_worker_timeout_sec(),
                 )
             except ChatCancelledError:
                 set_idle(chat_id)
@@ -418,11 +421,29 @@ def build_invoke_worker_node(
         except Exception as e:
             msg = str(e)[:2048]
             low = msg.lower()
+            # Wall-clock invoke timeout: report to user, do not replan (loses tool work).
+            _wall_clock_timeout = isinstance(e, TimeoutError) or (
+                "delegate worker graph exceeded" in low and "chat_id=" in low
+            )
             # DuckDB usa "Connection Error" al mezclar RO/RW en el mismo archivo; no confundir con MLX caído.
             _duckdb_config_clash = (
                 "same database file" in low and "different configuration" in low
             ) or ("duckdb" in low and "read_only" in low)
-            if (
+            if _wall_clock_timeout:
+                try:
+                    from duckclaw.workers.worker_invoke import _manager_worker_timeout_sec
+
+                    _lim = int(_manager_worker_timeout_sec() or 0)
+                    if _lim <= 0:
+                        _lim = int(float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "180"))
+                except Exception:
+                    _lim = 180
+                msg = (
+                    f"No pude cerrar el turno a tiempo (límite ~{_lim}s). "
+                    "Las tools pudieron ejecutarse, pero falló la síntesis final por timeout. "
+                    "Reintenta pidiendo un resumen más corto o acota la tarea."
+                )
+            elif (
                 not _duckdb_config_clash
                 and any(
                     x in low
@@ -460,21 +481,40 @@ def build_invoke_worker_node(
                 worker_invoke=None,
             )
             status = "FAILED"
-            _retryable, _rreason = classify_exception_for_replan(e, _duckdb_config_clash)
-            if replan_enabled() and _retryable:
-                reasons_acc = merge_failure_reasons(reasons_acc, _rreason)
-                if pa + 1 < max_a:
-                    replan_after = True
-                    next_plan_attempt = pa + 1
-                    log_sys(
-                        _obs,
-                        "manager replan: excepción recuperable -> intento %s/%s (%s)",
-                        pa + 2,
-                        max_a,
-                        _rreason,
-                    )
-                else:
-                    exhausted_final = True
+            if _wall_clock_timeout:
+                # Surface the timeout; replanning would discard tool results and often re-hit the same ceiling.
+                replan_after = False
+                exhausted_final = False
+                reasons_acc = merge_failure_reasons(
+                    reasons_acc, f"timeout: wall-clock invoke (~síntesis no cerró)"
+                )
+                try:
+                    from duckclaw.graphs.chat_cancel import clear_graph_interrupt
+
+                    clear_graph_interrupt(str(chat_id or "").strip())
+                except Exception:
+                    pass
+                log_sys(
+                    _obs,
+                    "manager invoke timeout: reporting to user (no replan) chat_id=%s",
+                    chat_id,
+                )
+            else:
+                _retryable, _rreason = classify_exception_for_replan(e, _duckdb_config_clash)
+                if replan_enabled() and _retryable:
+                    reasons_acc = merge_failure_reasons(reasons_acc, _rreason)
+                    if pa + 1 < max_a:
+                        replan_after = True
+                        next_plan_attempt = pa + 1
+                        log_sys(
+                            _obs,
+                            "manager replan: excepción recuperable -> intento %s/%s (%s)",
+                            pa + 2,
+                            max_a,
+                            _rreason,
+                        )
+                    else:
+                        exhausted_final = True
         finally:
             finalize_invoke_worker_cleanup(
                 worker_graph=worker_graph,

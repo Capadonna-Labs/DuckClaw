@@ -46,6 +46,16 @@ function earliestRunningStartedAt(messages: ChatMsg[]): number | null {
   return min;
 }
 
+function earliestStartedAt(messages: ChatMsg[]): number | null {
+  let min: number | null = null;
+  for (const m of messages) {
+    const t = m.toolStartedAt;
+    if (t == null) continue;
+    min = min == null ? t : Math.min(min, t);
+  }
+  return min;
+}
+
 function GroupedToolRow({
   grouped,
   identityLabel,
@@ -109,26 +119,10 @@ export function ToolUsageGroup({
   const totalMs = toolGroupTotalElapsedMs(messages, indices);
   const [isOpen, setIsOpen] = useState(false);
 
-  const runningStartedAt = earliestRunningStartedAt(items);
-  const liveHeaderMs = useLiveToolElapsedMs(items, anyRunning, runningStartedAt);
-  // Header: suma de completados + live del running más antiguo (aprox. duración del bloque en curso).
-  const completedPartialMs = (() => {
-    let sum = 0;
-    let any = false;
-    for (const m of items) {
-      if (isToolHeartbeatRunning(m)) continue;
-      const ms =
-        m.toolElapsedMs ??
-        (m.toolStartedAt != null ? Math.max(0, Date.now() - m.toolStartedAt) : undefined);
-      if (ms != null && Number.isFinite(ms)) {
-        sum += ms;
-        any = true;
-      }
-    }
-    return any ? sum : 0;
-  })();
-  const headerLiveTotal =
-    anyRunning && liveHeaderMs != null ? completedPartialMs + liveHeaderMs : null;
+  const blockStartedAt = earliestStartedAt(items);
+  const liveHeaderMs = useLiveToolElapsedMs(items, anyRunning, blockStartedAt);
+  // Wall-clock del bloque mientras corre (primer start → ahora).
+  const headerLiveTotal = anyRunning ? liveHeaderMs : null;
 
   const count = items.length;
   const totalLabel =

@@ -16,9 +16,20 @@ describe('shouldFetchChatSuggestions', () => {
     expect(shouldFetchChatSuggestions('hola', 'Respuesta del asistente', true)).toBe(false);
   });
 
-  it('false para comandos slash (/loop, /meditate, etc.)', () => {
+  it('false para fly config slash (/loop, /summarize, …)', () => {
     expect(shouldFetchChatSuggestions('/loop on', 'Modo /loop activo', false)).toBe(false);
     expect(shouldFetchChatSuggestions('  /summarize', 'Resumen listo', false)).toBe(false);
+    expect(shouldFetchChatSuggestions('/sandbox off', 'Sandbox desactivado', false)).toBe(false);
+  });
+
+  it('true tras slash agente con respuesta útil (/execute-…)', () => {
+    expect(
+      shouldFetchChatSuggestions(
+        '/execute-broker-signals --cancel-ocas',
+        'No hay señales human_approved. Revisé historial IBKR.',
+        false
+      )
+    ).toBe(true);
   });
 
   it('true tras ciclos /loop (SYSTEM_EVENT o [Ciclo loop]) con reporte outbound', () => {
@@ -80,12 +91,23 @@ describe('lastUserAssistantExchange', () => {
     expect(lastUserAssistantExchange(messages)).toBeNull();
   });
 
-  it('null si el último user es comando slash', () => {
+  it('null si el último user es fly config slash', () => {
     const messages: ChatMsg[] = [
       { role: 'user', text: '/loop on' },
       { role: 'assistant', text: 'Modo activo' },
     ];
     expect(lastUserAssistantExchange(messages)).toBeNull();
+  });
+
+  it('devuelve el par tras slash agente con respuesta', () => {
+    const messages: ChatMsg[] = [
+      { role: 'user', text: '/execute-broker-signals --cancel-ocas' },
+      { role: 'assistant', text: 'Sin señales elegibles; historial IBKR revisado.' },
+    ];
+    expect(lastUserAssistantExchange(messages)).toEqual({
+      userText: '/execute-broker-signals --cancel-ocas',
+      assistantText: 'Sin señales elegibles; historial IBKR revisado.',
+    });
   });
 
   it('devuelve el par tras un ciclo /loop SYSTEM_EVENT', () => {

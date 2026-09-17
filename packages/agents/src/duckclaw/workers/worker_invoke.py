@@ -23,9 +23,11 @@ _parent_vault_lock: ContextVar[threading.RLock | None] = ContextVar(
     default=None,
 )
 _MAX_DELEGATE_DEPTH = 1
+# ponytail: 180s wall-clock — trading-day 17-Sep saw 10–15m delegates until Chat interrupted.
+# Override via DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC (floor 60).
 _DELEGATE_INVOKE_TIMEOUT_SEC = max(
     60.0,
-    float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "900"),
+    float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "180"),
 )
 
 
@@ -156,6 +158,15 @@ def invoke_worker_graph(
         try:
             return fut.result(timeout=limit)
         except FuturesTimeoutError as exc:
+            # Stop orphan graph ASAP so it stops burning tools / holding vault lock longer.
+            cid = str(chat_id or "").strip()
+            if cid:
+                try:
+                    from duckclaw.graphs.chat_cancel import request_chat_cancel
+
+                    request_chat_cancel(cid)
+                except Exception:
+                    _log.debug("request_chat_cancel on delegate timeout failed", exc_info=True)
             raise TimeoutError(
                 f"delegate worker graph exceeded {limit:.0f}s (chat_id={chat_id or '?'})"
             ) from exc
@@ -385,6 +396,15 @@ def invoke_delegated_worker(
         status = "ERROR"
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         msg = str(exc)[:2048]
+        if isinstance(exc, TimeoutError) or (
+            "exceeded" in msg.lower() and "delegate" in msg.lower()
+        ):
+            limit_s = int(_DELEGATE_INVOKE_TIMEOUT_SEC)
+            msg = (
+                f"Delegación a {target} cortada a {limit_s}s (timeout). "
+                "Reintenta con una tarea más acotada (1 ticker / 1 acción) "
+                "o pide un status parcial en vez de un flujo largo."
+            )
         log_sys(
             _obs_logger(),
             "worker_delegate caller=%s target=%s status=%s elapsed_ms=%d report_id=%s",

@@ -1045,13 +1045,18 @@ async def _github_mcp_health_tick(r: redis.Redis) -> None:
         logger.debug("GitHub MCP health: PAT OK (api.github.com/user 200)")
         return
     if status == 401:
-        logger.error("GitHub MCP health: GITHUB_TOKEN invÃ¡lido o expirado (401)")
         try:
             set_ok = await r.set(_GITHUB_PAT_401_AUDIT_COOLDOWN_KEY, "1", ex=3600, nx=True)
         except Exception:
-            set_ok = None
+            set_ok = True
         if set_ok:
-            await asyncio.to_thread(_enqueue_github_pat_invalid_task_audit)
+            logger.error("GitHub MCP health: GITHUB_TOKEN inválido o expirado (401)")
+            try:
+                await asyncio.to_thread(_enqueue_github_pat_invalid_task_audit)
+            except Exception:
+                logger.debug("GitHub PAT 401 audit enqueue failed", exc_info=True)
+        else:
+            logger.debug("GitHub MCP health: GITHUB_TOKEN 401 (cooldown activo)")
         return
 
     logger.warning("GitHub MCP health: api.github.com/user â†’ HTTP %s", status)

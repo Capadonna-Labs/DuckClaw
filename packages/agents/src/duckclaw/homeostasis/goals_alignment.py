@@ -57,6 +57,10 @@ class AlignmentReport:
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["items"] = [asdict(i) for i in self.items]
+        # assess_crons_alignment JSON: never claim aligned when goals lack observations.
+        if self.unevaluable_count and self.misaligned_count == 0:
+            d["aligned"] = False
+            d["aligned_note"] = "unevaluable_goals_present"
         return d
 
     def to_json(self) -> str:
@@ -366,23 +370,24 @@ def assess_goals_list_alignment(
         )
 
     unevaluable = sum(1 for i in items if not i.has_data)
-    # Goals without observations must NOT report as "0 desviaciones" / aligned.
-    aligned = misaligned == 0 and unevaluable == 0
+    # Proactive ticker uses .aligned (anomalies only). LLM JSON via to_dict()
+    # flips aligned when unevaluable so assess_crons cannot claim "0 desviaciones".
+    aligned = misaligned == 0
     opener = ""
-    if not aligned:
+    if misaligned:
         first = next((i for i in items if i.is_anomaly), None)
         if first:
             opener = (
                 f"Detecté desalineación en P{first.priority} «{first.title}» "
                 f"(obs={first.observed}, meta={first.target})."
             )
-        elif unevaluable:
-            opener = (
-                f"{unevaluable} meta(s) sin datos evaluables — no reportes 0 desviaciones; "
-                "obtén observed o trata como no alineado."
-            )
         else:
             opener = pick_nudge_opener(str(chat_id), 0.0)
+    elif unevaluable:
+        opener = (
+            f"{unevaluable} meta(s) sin datos evaluables — no reportes 0 desviaciones; "
+            "obtén observed o trata como no alineado."
+        )
 
     return AlignmentReport(
         aligned=aligned,
@@ -430,13 +435,13 @@ def format_alignment_report_markdown(report: AlignmentReport) -> str:
     if report.goals_count <= 0:
         lines.append("Sin metas en manifiesto — define objetivos con `/goals`.")
         return "\n".join(lines)
-    if report.aligned:
-        lines.append(f"**Estado:** alineado ({report.goals_count} meta(s)).")
-    elif report.unevaluable_count and report.misaligned_count == 0:
+    if report.unevaluable_count and report.misaligned_count == 0:
         lines.append(
             f"**Estado:** no evaluable ({report.unevaluable_count} meta(s) sin datos) "
             f"— no es 0 desviaciones."
         )
+    elif report.aligned:
+        lines.append(f"**Estado:** alineado ({report.goals_count} meta(s)).")
     else:
         lines.append(
             f"**Estado:** {report.misaligned_count} desvío(s) "

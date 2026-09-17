@@ -137,8 +137,36 @@ def test_rank_column_candidates_prefers_near_matches() -> None:
     assert "quantity" in ranked[:3]
 
 
-def test_run_worker_read_sql_enriches_binder_error_with_column_candidates() -> None:
+def test_run_worker_read_sql_enriches_when_autocorrect_impossible() -> None:
     import json
+
+    from duckclaw.workers.read_pool import run_worker_read_sql
+
+    cols = [
+        {"column_name": "symbol"},
+        {"column_name": "avg_entry_price"},
+        {"column_name": "updated_at"},
+    ]
+
+    def run_query(sql: str) -> str:
+        upper = sql.upper()
+        if "INFORMATION_SCHEMA.COLUMNS" in upper:
+            return json.dumps(cols)
+        raise Exception('Binder Error: Referenced column "xyzzy_col" not found in FROM clause!')
+
+    spec = _minimal_spec()
+    spec.allowed_tables = ["portfolio_positions"]
+    out = json.loads(
+        run_worker_read_sql(run_query, spec, "SELECT xyzzy_col FROM portfolio_positions LIMIT 5")
+    )
+    assert "error" in out
+    assert "xyzzy_col" in out.get("hint", "")
+    assert "column_candidates" in out
+
+
+def test_run_worker_read_sql_autocorrects_qty_to_quantity() -> None:
+    import json
+    import re
 
     from duckclaw.workers.read_pool import run_worker_read_sql
 
@@ -153,6 +181,8 @@ def test_run_worker_read_sql_enriches_binder_error_with_column_candidates() -> N
         upper = sql.upper()
         if "INFORMATION_SCHEMA.COLUMNS" in upper:
             return json.dumps(cols)
+        if re.search(r"\bquantity\b", sql, re.I) and "INFORMATION_SCHEMA" not in upper:
+            return json.dumps([{"quantity": 3}])
         raise Exception('Binder Error: Referenced column "qty" not found in FROM clause!')
 
     spec = _minimal_spec()
@@ -160,11 +190,42 @@ def test_run_worker_read_sql_enriches_binder_error_with_column_candidates() -> N
     out = json.loads(
         run_worker_read_sql(run_query, spec, "SELECT qty FROM portfolio_positions LIMIT 5")
     )
-    assert "error" in out
-    assert "qty" in out.get("hint", "")
-    assert "quantity" in out.get("column_candidates", [])
+    assert out.get("_autocorrected_column", {}).get("from") == "qty"
+    assert out.get("_autocorrected_column", {}).get("to") == "quantity"
+    assert out.get("rows") == [{"quantity": 3}]
 
 
+def test_run_worker_read_sql_autocorrect_fill_price() -> None:
+    import json
+
+    from duckclaw.workers.read_pool import run_worker_read_sql
+
+    cols = [
+        {"column_name": "ticker"},
+        {"column_name": "filled_price"},
+        {"column_name": "qty"},
+    ]
+
+    def run_query(sql: str) -> str:
+        upper = sql.upper()
+        if "INFORMATION_SCHEMA.COLUMNS" in upper:
+            return json.dumps(cols)
+        if "filled_price" in sql.lower() and "information_schema" not in sql.lower():
+            return json.dumps([{"filled_price": 10.5}])
+        raise Exception('Binder Error: Referenced column "fill_price" not found in FROM clause!')
+
+    spec = _minimal_spec()
+    spec.allowed_tables = ["orders"]
+    out = json.loads(run_worker_read_sql(run_query, spec, "SELECT fill_price FROM orders LIMIT 1"))
+    assert out["_autocorrected_column"]["to"] == "filled_price"
+    assert out.get("rows") == [{"filled_price": 10.5}]
+
+
+def test_pick_unique_column_autocorrect_ambiguous_skips() -> None:
+    from duckclaw.workers.read_pool import _pick_unique_column_autocorrect
+
+    assert _pick_unique_column_autocorrect("ab", ["abc", "abd"]) is None
+    assert _pick_unique_column_autocorrect("qty", ["quantity", "filled_qty"]) == "quantity"
 def test_run_inspect_schema_worker_lists_columns() -> None:
     import json
 

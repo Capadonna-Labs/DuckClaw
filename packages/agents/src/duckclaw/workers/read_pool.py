@@ -362,21 +362,19 @@ def _fetch_columns_for_table(run_query: Callable[[str], str], table_ref: str) ->
     return cols
 
 
-def _enrich_binder_error(
+def _resolve_binder_column_context(
     run_query: Callable[[str], str],
     spec: WorkerSpec,
     query: str,
     err: str,
-) -> str:
-    """Attach column_candidates when DuckDB Binder rejects a column name. Never rewrites SQL."""
-    if not _is_binder_column_error(err):
-        return json.dumps({"error": err})
+) -> tuple[Optional[str], Optional[str], list[str]]:
+    """Return (wrong_column, resolved_table, ranked_candidates)."""
     wrong = _parse_binder_column_name(err)
     table_hint: Optional[str] = None
     tm = _BINDER_TABLE_RE.search(err or "")
     if tm:
         table_hint = tm.group(1)
-    tables = []
+    tables: list[str] = []
     if table_hint:
         tables.append(table_hint)
     tables.extend(_tables_mentioned_in_query(query, spec))
@@ -396,6 +394,81 @@ def _enrich_binder_error(
                 all_cols = cols
                 break
     candidates = _rank_column_candidates(wrong or "", all_cols) if all_cols else []
+    return wrong, resolved_table, candidates
+
+
+# Soft alias hints — only applied when the target column exists on the resolved table.
+_COMMON_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
+    "qty": ("quantity", "qty"),
+    "quantity": ("qty", "quantity"),
+    "fill_price": ("filled_price",),
+    "filled_price": ("fill_price",),
+    "last_close": ("close",),
+    "proposed_qty": ("proposed_weight", "quantity", "qty"),
+    "position_qty": ("qty", "quantity"),
+    "tickers": ("ticker", "symbol"),
+    "ticker": ("symbol", "tickers"),
+    "created_at": ("computed_at", "updated_at", "cancelled_at"),
+    "updated_at": ("computed_at", "created_at"),
+    "price_source": ("current_price",),
+    "mandate_type": ("mandate_id",),
+}
+
+
+def _pick_unique_column_autocorrect(wrong: str, candidates: list[str]) -> Optional[str]:
+    """
+    1-shot alias only when the top candidate is a clear unique winner.
+    Prefer known aliases that exist on the table; else tight edit-distance gap.
+    """
+    if not wrong or not candidates:
+        return None
+    by_lower = {c.lower(): c for c in candidates}
+    hinted = [
+        by_lower[h.lower()]
+        for h in _COMMON_COLUMN_ALIASES.get(wrong.lower(), ())
+        if h.lower() in by_lower
+    ]
+    if len(hinted) == 1:
+        return hinted[0] if hinted[0].lower() != wrong.lower() else None
+    if len(hinted) > 1:
+        for c in candidates:
+            if c in hinted and c.lower() != wrong.lower():
+                return c
+
+    best = candidates[0]
+    if best.lower() == wrong.lower():
+        return None
+    d0 = _edit_distance(wrong, best)
+    if d0 > 3:
+        return None
+    if len(candidates) > 1:
+        d1 = _edit_distance(wrong, candidates[1])
+        if d1 - d0 < 2:
+            return None
+    return best
+
+
+def _rewrite_sql_column(query: str, wrong: str, replacement: str) -> Optional[str]:
+    if not query or not wrong or not replacement or wrong == replacement:
+        return None
+    new_q, n = re.subn(rf"\b{re.escape(wrong)}\b", replacement, query)
+    if n < 1 or new_q == query:
+        return None
+    return new_q
+
+
+def _enrich_binder_error(
+    run_query: Callable[[str], str],
+    spec: WorkerSpec,
+    query: str,
+    err: str,
+) -> str:
+    """Attach column_candidates when DuckDB Binder rejects a column name."""
+    if not _is_binder_column_error(err):
+        return json.dumps({"error": err})
+    wrong, resolved_table, candidates = _resolve_binder_column_context(
+        run_query, spec, query, err
+    )
     payload: dict[str, Any] = {"error": err}
     if wrong and resolved_table:
         payload["hint"] = f"column '{wrong}' not found on {resolved_table}"
@@ -404,6 +477,53 @@ def _enrich_binder_error(
     if candidates:
         payload["column_candidates"] = candidates
     return json.dumps(payload, ensure_ascii=False)
+
+
+def _try_binder_column_autocorrect(
+    run_query: Callable[[str], str],
+    spec: WorkerSpec,
+    query: str,
+    err: str,
+) -> Optional[str]:
+    """One rewrite+retry when Binder rejects a near-match column name."""
+    if not _is_binder_column_error(err):
+        return None
+    wrong, _table, candidates = _resolve_binder_column_context(run_query, spec, query, err)
+    if not wrong:
+        return None
+    replacement = _pick_unique_column_autocorrect(wrong, candidates)
+    if not replacement:
+        return None
+    rewritten = _rewrite_sql_column(query, wrong, replacement)
+    if not rewritten:
+        return None
+    try:
+        raw = _truncate_read_sql_result_for_llm(run_query(rewritten))
+        wrapped = _maybe_wrap_summary_dedup_read_sql(spec, rewritten, raw)
+        # Surface autocorrect so the LLM stops inventing the bad name next turn.
+        try:
+            parsed = json.loads(wrapped)
+            if isinstance(parsed, list):
+                return json.dumps(
+                    {
+                        "rows": parsed,
+                        "_autocorrected_column": {"from": wrong, "to": replacement},
+                        "_rewritten_sql": rewritten,
+                    },
+                    ensure_ascii=False,
+                )
+            if isinstance(parsed, dict) and "error" not in parsed:
+                parsed = {
+                    **parsed,
+                    "_autocorrected_column": {"from": wrong, "to": replacement},
+                    "_rewritten_sql": rewritten,
+                }
+                return json.dumps(parsed, ensure_ascii=False)
+        except Exception:
+            pass
+        return wrapped
+    except Exception:
+        return None
 
 
 def validate_worker_read_sql(spec: WorkerSpec, query: str) -> Optional[str]:
@@ -470,6 +590,9 @@ def run_worker_read_sql(run_query: Callable[[str], str], spec: WorkerSpec, q: st
                         return _maybe_wrap_summary_dedup_read_sql(spec, try_q, raw2)
                     except Exception as e2:
                         err = str(e2)
+        fixed = _try_binder_column_autocorrect(run_query, spec, q, err)
+        if fixed is not None:
+            return fixed
         return _enrich_binder_error(run_query, spec, q, err)
 
 

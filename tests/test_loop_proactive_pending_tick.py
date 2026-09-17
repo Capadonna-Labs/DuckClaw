@@ -99,9 +99,104 @@ def test_idle_tick_success_clears_pending_and_reanchors(
     assert pending_writes[-1] == "0"
 
 
-def test_idle_tick_http_failure_clears_pending(
+def test_busy_due_tick_sets_catchup_and_skips_post(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    now = 1_700_000_000.0
+    delta = 1500
+    chat_id = "quant11"
+    rows = {
+        _chat_key(chat_id, "loop_delta_seconds"): str(delta),
+        _chat_key(chat_id, "loop_delta_idle"): "1",
+        _chat_key(chat_id, "loop_last_activity_epoch"): str(now - float(delta) - 5.0),
+        _chat_key(chat_id, "loop_pending_tick"): "0",
+        _chat_key(chat_id, "loop_worker_id"): "quant-worker",
+        _chat_key(chat_id, "loop_tenant_id"): "default",
+    }
+    writes: list[tuple[str, str]] = []
+    posts: list[str] = []
+
+    monkeypatch.setattr(
+        heartbeat,
+        "duckclaw_open_for_read_scan",
+        lambda _path: _ScanDb(rows),
+    )
+
+    async def _capture_write(**kwargs: Any) -> None:
+        writes.append((str(kwargs["key"]), str(kwargs["value"])))
+
+    monkeypatch.setattr(heartbeat, "_enqueue_chat_state_write", _capture_write)
+
+    async def _ok_tick(**_kwargs: Any) -> dict[str, Any]:
+        posts.append("posted")
+        return {"ok": True, "status_code": 200}
+
+    monkeypatch.setattr(
+        "duckclaw.commands.loop.post_loop_self_tick_async",
+        _ok_tick,
+    )
+    monkeypatch.setattr(
+        "duckclaw.graphs.activity.get_activity",
+        lambda *_a, **_k: {"status": "BUSY"},
+    )
+
+    asyncio.run(
+        heartbeat._run_loop_proactive_tick_one_db("/tmp/fake.duckdb", now=now, headers={})
+    )
+
+    assert ("loop_catchup_due", "1") in writes
+    assert posts == []
+
+
+def test_catchup_due_fires_even_when_silence_short(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 1_700_000_000.0
+    delta = 1500
+    chat_id = "quant11"
+    rows = {
+        _chat_key(chat_id, "loop_delta_seconds"): str(delta),
+        _chat_key(chat_id, "loop_delta_idle"): "1",
+        # Silence only 10s — normally not due, but catchup bypasses silence gate.
+        _chat_key(chat_id, "loop_last_activity_epoch"): str(now - 10.0),
+        _chat_key(chat_id, "loop_catchup_due"): "1",
+        _chat_key(chat_id, "loop_pending_tick"): "0",
+        _chat_key(chat_id, "loop_worker_id"): "quant-worker",
+        _chat_key(chat_id, "loop_tenant_id"): "default",
+    }
+    writes: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        heartbeat,
+        "duckclaw_open_for_read_scan",
+        lambda _path: _ScanDb(rows),
+    )
+
+    async def _capture_write(**kwargs: Any) -> None:
+        writes.append((str(kwargs["key"]), str(kwargs["value"])))
+
+    monkeypatch.setattr(heartbeat, "_enqueue_chat_state_write", _capture_write)
+
+    async def _ok_tick(**_kwargs: Any) -> dict[str, Any]:
+        return {"ok": True, "status_code": 200}
+
+    monkeypatch.setattr(
+        "duckclaw.commands.loop.post_loop_self_tick_async",
+        _ok_tick,
+    )
+    monkeypatch.setattr(
+        "duckclaw.graphs.activity.get_activity",
+        lambda *_a, **_k: {"status": "IDLE"},
+    )
+    monkeypatch.setattr(heartbeat.time, "time", lambda: now + 1.0)
+
+    asyncio.run(
+        heartbeat._run_loop_proactive_tick_one_db("/tmp/fake.duckdb", now=now, headers={})
+    )
+
+    assert ("loop_catchup_due", "0") in writes
+    assert ("loop_pending_tick", "0") in writes
+
     now = 1_700_000_000.0
     delta = 1500
     chat_id = "quant11"

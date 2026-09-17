@@ -509,3 +509,47 @@ def test_mcp_connector_ids_parser() -> None:
         ["mcp__github__list_issues", "mcp__my_notion__query", "read_sql"]
     )
     assert ids == frozenset({"github", "my_notion"})
+
+
+def test_loop_system_event_drops_mcp_and_integrations_sticky() -> None:
+    from duckclaw.workers.tool_pack_catalog import load_default_runtime_tool_pack_catalog
+    from duckclaw.workers.tool_pack_models import RuntimePacksConfig
+    from duckclaw.workers.tool_pack_policy import (
+        enrich_catalog_with_mcp_connectors,
+        resolve_active_pack_ids,
+        with_mcp_connector_packs,
+    )
+
+    catalog = enrich_catalog_with_mcp_connectors(
+        load_default_runtime_tool_pack_catalog(),
+        ["mcp__android__get_ui_dump", "mcp__gmail__search_messages"],
+    )
+    cfg = RuntimePacksConfig(enabled=True, catalog=catalog)
+    cfg = with_mcp_connector_packs(
+        cfg, ["mcp__android__get_ui_dump", "mcp__gmail__search_messages"]
+    )
+    sticky_msg = SimpleNamespace(
+        type="tool",
+        name="mcp__android__get_ui_dump",
+        content="{}",
+    )
+    # Without loop flag, sticky MCP may activate.
+    normal = resolve_active_pack_ids(
+        cfg,
+        intent_text="",
+        messages=[sticky_msg],
+        available_tool_names=["mcp__android__get_ui_dump", "evaluate_homeostasis"],
+        loop_system_event=False,
+    )
+    # With loop flag, MCP/integrations sticky must be dropped.
+    loop = resolve_active_pack_ids(
+        cfg,
+        intent_text="",
+        messages=[sticky_msg],
+        available_tool_names=["mcp__android__get_ui_dump", "evaluate_homeostasis"],
+        loop_system_event=True,
+    )
+    assert "mcp_android" not in loop
+    assert "mcp" not in loop or "mcp" in cfg.extra_always
+    assert "integrations" not in loop
+    assert "homeostasis" in loop or "core" in loop

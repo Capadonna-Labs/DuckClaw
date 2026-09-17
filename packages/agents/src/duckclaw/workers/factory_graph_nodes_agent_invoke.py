@@ -37,6 +37,7 @@ from duckclaw.workers.factory_reddit_helpers import _patch_reddit_get_post_args_
 from duckclaw.workers.provider_input_budget import apply_provider_input_budget as _apply_provider_input_budget
 from duckclaw.workers.runtime_policy_helpers import worker_use_heuristic_first_tool as _worker_use_heuristic_first_tool
 from duckclaw.workers.tool_pack_policy import apply_runtime_tool_packs, log_pack_filter_result
+from duckclaw.workers.tool_invocation_policy import _is_loop_or_proactive_system_event
 from duckclaw.workers.tool_surface_policy import (
     should_hide_sandbox_tools,
     should_hide_storage_identity_tools,
@@ -295,6 +296,9 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 spec=spec,
                 intent_text=_intent_incoming,
                 messages=state.get("messages") or [],
+                loop_system_event=_is_loop_or_proactive_system_event(
+                    str(state.get("incoming") or _intent_incoming or "")
+                ),
             )
             _auto_tools = _pack_result.tools
             log_pack_filter_result(_wl, _pack_result)

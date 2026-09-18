@@ -42,13 +42,61 @@ def parse_homeostasis_tool_payload(content: str) -> Optional[dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
+def _canonicalize_deviations(deviations: Any) -> Any:
+    """Collapse noisy numeric jitter so stuck streaks survive mark-to-market noise.
+
+    ponytail: fingerprint keys + coarse buckets, not raw floats — otherwise a
+    0.01% PnL tick resets the streak and /loop burns another evaluate forever.
+    """
+    if isinstance(deviations, list):
+        out: list[Any] = []
+        for item in deviations[:24]:
+            if isinstance(item, dict):
+                out.append(
+                    {
+                        "k": str(
+                            item.get("ticker")
+                            or item.get("metric")
+                            or item.get("id")
+                            or item.get("name")
+                            or item.get("skill_to_invoke")
+                            or ""
+                        ),
+                        "kind": str(item.get("kind") or item.get("type") or ""),
+                        "breached": item.get("breached"),
+                    }
+                )
+            else:
+                out.append(str(item)[:80])
+        return out
+    if isinstance(deviations, dict):
+        canon: dict[str, Any] = {}
+        for key, val in deviations.items():
+            k = str(key)
+            if isinstance(val, dict):
+                canon[k] = {
+                    "skill": str(val.get("skill_to_invoke") or val.get("tool") or "")[:64],
+                    "breached": val.get("breached"),
+                    "status": str(val.get("status") or val.get("state") or "")[:32],
+                }
+            elif isinstance(val, (int, float)):
+                # 1% buckets — enough to detect real regime change, not ticks.
+                canon[k] = round(float(val), 2)
+            else:
+                canon[k] = str(val)[:64] if val is not None else ""
+            if len(canon) >= 32:
+                break
+        return canon
+    return deviations
+
+
 def fingerprint_homeostasis_payload(data: dict[str, Any]) -> str:
     """Stable hash of the fields that define 'same stuck sensor reading'."""
     slice_: dict[str, Any] = {
         "metrics_aligned": data.get("metrics_aligned"),
         "homeostasis_achieved": data.get("homeostasis_achieved"),
         "hitl_required": data.get("hitl_required"),
-        "deviations": data.get("deviations"),
+        "deviations": _canonicalize_deviations(data.get("deviations")),
         "loop_mode_hint": data.get("loop_mode_hint"),
     }
     # Prefer compact alert ids when present under tp_sl_monitor / deviations.
@@ -60,8 +108,21 @@ def fingerprint_homeostasis_payload(data: dict[str, Any]) -> str:
                 {
                     "ticker": (lv.get("ticker") or lv.get("symbol") or ""),
                     "breached": lv.get("breached"),
-                    "sl": lv.get("sl") or lv.get("stop_loss"),
-                    "tp": lv.get("tp") or lv.get("take_profit"),
+                    # Round prices so tiny mark redraws do not reset the streak.
+                    "sl": round(float(lv["sl"]), 2)
+                    if isinstance(lv.get("sl"), (int, float))
+                    else (
+                        round(float(lv["stop_loss"]), 2)
+                        if isinstance(lv.get("stop_loss"), (int, float))
+                        else (lv.get("sl") or lv.get("stop_loss"))
+                    ),
+                    "tp": round(float(lv["tp"]), 2)
+                    if isinstance(lv.get("tp"), (int, float))
+                    else (
+                        round(float(lv["take_profit"]), 2)
+                        if isinstance(lv.get("take_profit"), (int, float))
+                        else (lv.get("tp") or lv.get("take_profit"))
+                    ),
                 }
                 for lv in levels
                 if isinstance(lv, dict)

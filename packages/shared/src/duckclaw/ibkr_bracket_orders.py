@@ -446,13 +446,77 @@ def create_protective_oca_orders(
         sl_order.ocaGroup = oca
         sl_order.ocaType = 1
 
-    # Última orden del grupo transmite ambas (OCA)
+    # Última orden del grupo transmite ambas (OCA). For protective pairs without a
+    # parent market order, both must transmit=True — otherwise placeOrder(TP) with
+    # transmit=False is held and never flushed when SL is a separate placeOrder.
+    if tp_order is not None:
+        tp_order.transmit = True
     if sl_order is not None:
         sl_order.transmit = True
-    elif tp_order is not None:
-        tp_order.transmit = True
 
     return (tp_order, sl_order)
+
+
+async def cancel_protective_orders_for_ticker(
+    ib: "IB",
+    ticker: str,
+    *,
+    oca_prefix: str = "PROTECT_",
+) -> int:
+    """Cancel open protective/OCA orders for ``ticker`` (best-effort).
+
+    Matches by symbol and optional OCA group prefix (default ``PROTECT_``).
+    Also cancels unmatched open LMT/STP closes on the same symbol so qty
+    realignment does not leave duplicate working brackets.
+    """
+    if not _IB_INSYNC_AVAILABLE:
+        raise ImportError(
+            "ib_insync no disponible — instalar con: uv pip install ib-insync"
+        )
+    sym = (ticker or "").strip().upper()
+    if not sym:
+        return 0
+    prefix = (oca_prefix or "").upper()
+    cancelled = 0
+    try:
+        # Cross-client working orders (protective scripts use ephemeral client ids).
+        try:
+            ib.reqAllOpenOrders()
+            await asyncio.sleep(0.8)
+        except Exception as exc:
+            _log.warning("reqAllOpenOrders before cancel %s: %s", sym, exc)
+        trades = list(ib.openTrades() or [])
+    except Exception as exc:
+        _log.warning("openTrades failed before cancel %s: %s", sym, exc)
+        return 0
+    for trade in trades:
+        c = getattr(trade, "contract", None)
+        o = getattr(trade, "order", None)
+        if c is None or o is None:
+            continue
+        if str(getattr(c, "symbol", "") or "").strip().upper() != sym:
+            continue
+        oca = str(getattr(o, "ocaGroup", "") or "").upper()
+        otype = str(getattr(o, "orderType", "") or "").upper()
+        if prefix and oca.startswith(prefix):
+            pass
+        elif otype in ("LMT", "STP", "STP LMT", "TRAIL"):
+            pass
+        else:
+            continue
+        try:
+            ib.cancelOrder(o)
+            cancelled += 1
+        except Exception as exc:
+            _log.warning(
+                "cancelOrder failed %s id=%s: %s",
+                sym,
+                getattr(o, "orderId", None),
+                exc,
+            )
+    if cancelled:
+        await asyncio.sleep(0.5)
+    return cancelled
 
 
 async def submit_protective_oca_orders(
@@ -464,12 +528,19 @@ async def submit_protective_oca_orders(
     sl_price: Optional[float] = None,
     exchange: str = "SMART",
     currency: str = "USD",
+    *,
+    cancel_existing: bool = False,
 ) -> dict:
     """Coloca TP/SL GTC protectivos para una posición existente (sin nueva entrada)."""
     if not _IB_INSYNC_AVAILABLE:
         raise ImportError(
             "ib_insync no disponible — instalar con: uv pip install ib-insync"
         )
+
+    if cancel_existing:
+        n = await cancel_protective_orders_for_ticker(ib, ticker)
+        if n:
+            _log.info("Cancelled %s existing open order(s) for %s before protective place", n, ticker)
 
     contract = Stock(ticker, exchange, currency)
     tp, sl = create_protective_oca_orders(
@@ -486,7 +557,8 @@ async def submit_protective_oca_orders(
     except Exception as exc:
         _log.warning("qualifyContracts %s: %s (continuando)", ticker, exc)
 
-    oca = f"PROTECT_{ticker.strip().upper()}"
+    # Unique OCA per place so replace cycles do not collide with stale broker groups.
+    oca = f"PROTECT_{ticker.strip().upper()}_{int(datetime.now(timezone.utc).timestamp())}"
     tp_trade = None
     sl_trade = None
     try:

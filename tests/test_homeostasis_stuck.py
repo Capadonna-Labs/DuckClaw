@@ -38,6 +38,18 @@ def test_fingerprint_stable_for_same_slice() -> None:
     assert a != c
 
 
+def test_fingerprint_tolerates_numeric_jitter() -> None:
+    a = fingerprint_homeostasis_payload(_payload(deviations={"exposure": {"delta": 1.201}}))
+    b = fingerprint_homeostasis_payload(_payload(deviations={"exposure": {"delta": 1.209}}))
+    # Nested dicts fingerprint on skill/status/breached — not raw delta floats.
+    assert a == b
+    d1 = fingerprint_homeostasis_payload(_payload(deviations={"exposure": 1.201}))
+    d2 = fingerprint_homeostasis_payload(_payload(deviations={"exposure": 1.204}))
+    assert d1 == d2  # round(..., 2)
+    d3 = fingerprint_homeostasis_payload(_payload(deviations={"exposure": 1.30}))
+    assert d1 != d3
+
+
 def test_record_homeostasis_observation_escalates_after_streak(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("DUCKCLAW_HOMEOSTASIS_STUCK_STREAK", "3")
     from duckclaw import DuckClaw

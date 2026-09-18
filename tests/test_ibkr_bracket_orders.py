@@ -100,7 +100,42 @@ def test_create_protective_oca_orders_long():
     assert sl.orderType == "STP" and sl.auxPrice == 245.0 and sl.tif == "GTC"
     assert tp.ocaGroup == sl.ocaGroup == "PROTECT_CEG"
     assert sl.transmit is True
-    assert tp.transmit is False
+    assert tp.transmit is True
+
+
+def test_cancel_protective_orders_for_ticker_filters_symbol(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from duckclaw import ibkr_bracket_orders as mod
+
+    class FakeIB:
+        def __init__(self):
+            self.cancelled = []
+
+        def openTrades(self):
+            return [
+                SimpleNamespace(
+                    contract=SimpleNamespace(symbol="CEG"),
+                    order=SimpleNamespace(
+                        orderId=1, orderType="LMT", ocaGroup="PROTECT_CEG", action="SELL"
+                    ),
+                ),
+                SimpleNamespace(
+                    contract=SimpleNamespace(symbol="SPY"),
+                    order=SimpleNamespace(
+                        orderId=2, orderType="LMT", ocaGroup="PROTECT_SPY", action="SELL"
+                    ),
+                ),
+            ]
+
+        def cancelOrder(self, order):
+            self.cancelled.append(order.orderId)
+
+    ib = FakeIB()
+    n = asyncio.run(mod.cancel_protective_orders_for_ticker(ib, "CEG"))
+    assert n == 1
+    assert ib.cancelled == [1]
 
 
 def test_create_protective_oca_rejects_bad_rr_long():

@@ -520,6 +520,53 @@ def playground_wants_stream(body: PlaygroundChatBody, request: Request) -> bool:
     return bool(body.stream) or "text/event-stream" in accept
 
 
+def _playground_push_notification_body(reply: str) -> str:
+    text = re.sub(r"\s+", " ", (reply or "").strip())
+    if not text:
+        return "Turno completado."
+    return text if len(text) <= 140 else f"{text[:139]}…"
+
+
+async def _notify_playground_turn_done(session_id: str, wid: str, reply: str = "") -> None:
+    """Push best-effort al terminar un turno de playground (éxito, error o desconexión).
+
+    Espejo de ``_send_web_push_notification`` en services/heartbeat/main.py, pero
+    disparado por turnos interactivos en vez de ticks proactivos — permite salir
+    de la PWA y enterarse cuando el turno termina.
+    """
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path
+        from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
+
+        db_path = str(get_gateway_db_path())
+        subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path)
+        if not subscriptions:
+            return
+        await asyncio.to_thread(
+            send_web_push_notifications,
+            subscriptions,
+            title=f"DuckClaw · {wid}",
+            body=_playground_push_notification_body(reply),
+            url="/playground",
+            tag=f"duckclaw-playground-{session_id}",
+        )
+    except Exception:
+        _log.debug("playground push notification skipped", exc_info=True)
+
+
+async def _sse_body_with_push_notification(
+    body: Any,
+    *,
+    session_id: str,
+    wid: str,
+) -> Any:
+    try:
+        async for chunk in body:
+            yield chunk
+    finally:
+        asyncio.create_task(_notify_playground_turn_done(session_id, wid))
+
+
 def playground_streaming_response(
     prepared: PlaygroundPreparedChat,
     *,
@@ -531,16 +578,20 @@ def playground_streaming_response(
     redis_client = getattr(request.app.state, "redis", None)
     delivery_context = GatewayDeliveryContext.trusted_admin_console()
     return StreamingResponse(
-        invoke_chat_sse_body(
-            prepared.chat,
-            prepared.wid,
-            prepared.session_id,
-            prepared.eff_tenant,
-            redis_client=redis_client,
-            delivery_context=delivery_context,
-            http_request=request,
-            voice_response=voice_response,
-            invoke_chat=invoke_chat,
+        _sse_body_with_push_notification(
+            invoke_chat_sse_body(
+                prepared.chat,
+                prepared.wid,
+                prepared.session_id,
+                prepared.eff_tenant,
+                redis_client=redis_client,
+                delivery_context=delivery_context,
+                http_request=request,
+                voice_response=voice_response,
+                invoke_chat=invoke_chat,
+            ),
+            session_id=prepared.session_id,
+            wid=prepared.wid,
         ),
         media_type="text/event-stream",
         headers=dict(SSE_HEADERS),
@@ -555,7 +606,7 @@ async def invoke_playground_chat_sync(
     redis_client = getattr(request.app.state, "redis", None)
     delivery_context = GatewayDeliveryContext.trusted_admin_console()
     try:
-        return await invoke_chat(
+        result = await invoke_chat(
             prepared.chat,
             prepared.wid,
             session_id=prepared.session_id,
@@ -565,6 +616,10 @@ async def invoke_playground_chat_sync(
         )
     except Exception as exc:
         raise problem(500, "Error en playground chat", str(exc)) from exc
+    asyncio.create_task(
+        _notify_playground_turn_done(prepared.session_id, prepared.wid, extract_playground_reply(result))
+    )
+    return result
 
 
 def format_playground_chat_payload(

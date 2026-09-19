@@ -47,9 +47,16 @@ export function useVisibilityAwareInterval(callback: () => void, delayMs: number
       start();
     }
     document.addEventListener('visibilitychange', onVisibility);
+    // iOS standalone PWA: `visibilitychange` no siempre se dispara al volver de
+    // background (bug conocido de WebKit) — `pageshow`/`focus` son la red de
+    // seguridad para reanudar el cronómetro igual.
+    window.addEventListener('pageshow', onVisibility);
+    window.addEventListener('focus', onVisibility);
     return () => {
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pageshow', onVisibility);
+      window.removeEventListener('focus', onVisibility);
     };
   }, [delayMs]);
 }

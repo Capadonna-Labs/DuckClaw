@@ -45,3 +45,19 @@ def test_vapid_generator_is_documented_and_available() -> None:
     env_example = (ROOT / "deploy/docker/.env.example").read_text(encoding="utf-8")
     assert "scripts/generate_web_push_vapid.py" in docs
     assert "scripts/generate_web_push_vapid.py" in env_example
+
+
+def test_playground_chat_turn_attempts_web_push_on_completion() -> None:
+    chat_turn = (
+        ROOT / "services/api-gateway/routers/admin_domains/playground/chat_turn.py"
+    ).read_text(encoding="utf-8")
+    assert "async def _notify_playground_turn_done" in chat_turn
+    assert "list_web_push_subscriptions" in chat_turn
+    assert "duckclaw-playground-" in chat_turn
+    # Streaming (SSE) path must notify on stream end regardless of how it ends
+    # (success, error, or client disconnect) — the whole point is being able to
+    # leave the PWA and still get told when the turn finished.
+    assert "_sse_body_with_push_notification" in chat_turn
+    assert "finally:" in chat_turn
+    # Non-streaming path notifies right after the result comes back.
+    assert "_notify_playground_turn_done(prepared.session_id, prepared.wid" in chat_turn

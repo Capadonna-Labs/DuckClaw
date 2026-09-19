@@ -1,3 +1,5 @@
+import { mutationHeaders } from '@/lib/csrfClient';
+
 function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
   const padding = '='.repeat((4 - (value.length % 4)) % 4);
   const base64 = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/');
@@ -32,7 +34,7 @@ export async function ensureWebPushSubscription(): Promise<boolean> {
 
     const res = await fetch('/api/admin/notifications/web-push/subscriptions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...mutationHeaders('POST') },
       body: JSON.stringify({
         subscription: subscription.toJSON(),
         device_label: navigator.userAgent.slice(0, 120),

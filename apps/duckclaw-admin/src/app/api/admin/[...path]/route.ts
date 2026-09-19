@@ -96,6 +96,8 @@ function userWriteAllowed(sub: string, method: string): boolean {
   if (sub.startsWith('report-templates')) return true;
   if (sub.startsWith('report-instances')) return true;
   if (sub.startsWith('productivity/')) return true;
+  // Cada usuario registra la suscripción push de su propio dispositivo.
+  if (sub === 'notifications/web-push/subscriptions') return true;
   return false;
 }
 

@@ -27,6 +27,7 @@ dependencies = [
     "mlx-vlm>=0.4.2; sys_platform == 'darwin' and python_full_version >= '3.10'",
     "langchain-google-genai>=2.1.12",
     "pyvis>=0.3.2",
+    "pywebpush>=2.5.0",
 ]
 
 [project.optional-dependencies]

@@ -4,12 +4,14 @@ import "./globals.css";
 
 import { ThemeProvider } from '@/components/shared/ThemeProvider';
 import { AuthProvider } from '@/components/auth/AuthProvider';
+import { PwaServiceWorker } from '@/components/shared/PwaServiceWorker';
 
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "DuckClaw Admin",
   description: "Consola de configuración DuckClaw — agentes, skills, DuckDB y runtime",
+  manifest: '/manifest.webmanifest',
 };
 
 /** Evita el salto del chrome en iOS Safari; el teclado redimensiona el layout. */
@@ -36,6 +38,7 @@ export default function RootLayout({
       >
         <ThemeProvider>
           <AuthProvider>{children}</AuthProvider>
+          <PwaServiceWorker />
         </ThemeProvider>
       </body>
     </html>

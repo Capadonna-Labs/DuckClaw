@@ -132,6 +132,33 @@ services:
     networks:
       - duckclaw
 
+  heartbeat:
+    image: duckclaw/gateway:latest
+    restart: unless-stopped
+    working_dir: /app
+    command: ["python", "services/heartbeat/main.py"]
+    env_file:
+      - .env
+    environment:
+      DUCKCLAW_GATEWAY_DB_PATH: /data/duckclaw.duckdb
+      REDIS_URL: redis://redis:6379/0
+      DUCKCLAW_REPO_ROOT: /app
+      DUCKCLAW_GATEWAY_URL: http://gateway:8000
+      GATEWAY_INTERNAL_URL: http://gateway:8000
+      DUCKCLAW_PROCESS_ROLE: heartbeat
+      PYTHONPATH: /app
+      DUCKCLAW_SKIP_MIGRATE: "1"
+    volumes:
+      - duckclaw-data:/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      db-writer:
+        condition: service_started
+    networks:
+      - duckclaw
   admin:
     build:
       context: ../..

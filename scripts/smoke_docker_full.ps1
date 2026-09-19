@@ -76,7 +76,7 @@ try {
     Write-Host "==> container status"
     [void](Invoke-Docker @("compose", "-f", "docker-compose.yml", "ps"))
 
-    $required = @("gateway", "db-writer", "knowledge-indexer", "redis", "admin")
+    $required = @("gateway", "db-writer", "knowledge-indexer", "heartbeat", "redis", "admin")
     $psJson = & docker compose -f docker-compose.yml ps --format json 2>$null
     $ps = @($psJson | ForEach-Object { $_ | ConvertFrom-Json })
     foreach ($name in $required) {
@@ -141,7 +141,7 @@ Host: $env:COMPUTERNAME
 | Second ``compose up`` → health | ${secondUpSec}s |
 | gateway /health | OK |
 | admin /login | OK |
-| Containers (gateway, db-writer, redis, knowledge-indexer, admin) | OK |
+| Containers (gateway, db-writer, redis, knowledge-indexer, heartbeat, admin) | OK |
 | Login credentials present in .env | OK ($email) |
 | No quant_core / quant tables in base DB | OK |
 | Manual .env / console edits | None required |

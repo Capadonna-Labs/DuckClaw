@@ -23,6 +23,7 @@ COPY integrations/ integrations/
 COPY services/api-gateway/ services/api-gateway/
 COPY services/db-writer/ services/db-writer/
 COPY services/knowledge-indexer/ services/knowledge-indexer/
+COPY services/heartbeat/ services/heartbeat/
 COPY config/ config/
 
 # mlx is darwin-only and skipped on Linux.

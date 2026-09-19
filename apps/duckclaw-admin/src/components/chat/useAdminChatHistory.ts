@@ -31,6 +31,11 @@ import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 
 type PlaygroundConfig = Awaited<ReturnType<typeof adminService.getPlaygroundConfig>>;
 
+function persistentMessageCount(messages: ChatMsg[]): number {
+  return messages.filter((m) => m.role === 'user' || m.role === 'assistant' || m.role === 'error')
+    .length;
+}
+
 export type UseAdminChatHistoryOptions = {
   enabled: boolean;
   chatId: string;
@@ -115,6 +120,9 @@ export function useAdminChatHistory({
           workerIdRef.current || initialWorkerRef.current || '';
         const storedEphemeral = readEphemeralHeartbeats(chatId, activeWorker);
         setMessages((prev) => {
+          if (persistentMessageCount(prev) > persistentMessageCount(fromServer)) {
+            return prev;
+          }
           const liveEphemeral = filterEphemeralForWorker(
             collectEphemeralMessages(prev),
             activeWorker
@@ -215,6 +223,10 @@ export function useAdminChatHistory({
         const fromServer = historyToChatMessages(data.messages, historyTenantId);
         const storedEphemeral = readEphemeralHeartbeats(chatId, workerAtLoad);
         setMessages((prev) => {
+          if (persistentMessageCount(prev) > persistentMessageCount(fromServer)) {
+            loadedKeyRef.current = '';
+            return prev;
+          }
           const liveEphemeral = filterEphemeralForWorker(
             collectEphemeralMessages(prev),
             workerAtLoad

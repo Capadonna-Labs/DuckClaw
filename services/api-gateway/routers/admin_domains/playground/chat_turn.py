@@ -528,7 +528,37 @@ def _playground_push_notification_body(reply: str) -> str:
     return text if len(text) <= 140 else f"{text[:139]}…"
 
 
-async def _notify_playground_turn_done(session_id: str, wid: str, reply: str = "") -> None:
+async def _suggestion_selected_prefix(redis_client: Any, chat_id: str, incoming_message: str) -> str:
+    """"Opción N seleccionada" si ``incoming_message`` matchea una sugerencia cacheada.
+
+    Cubre tanto un tap del chip en la UI como un POST a /chat/suggestions/select —
+    ninguno de los dos le avisa explícitamente a este helper "vino de una sugerencia",
+    así que lo inferimos comparando contra el último set de 3 cacheado en Redis.
+    """
+    needle = (incoming_message or "").strip().casefold()
+    if not needle or redis_client is None:
+        return ""
+    try:
+        from routers.admin_domains.chat_suggestions import _read_cached_suggestions
+
+        cached = await _read_cached_suggestions(redis_client, chat_id)
+        suggestions = (cached or {}).get("suggestions") or []
+        for i, text in enumerate(suggestions):
+            if str(text or "").strip().casefold() == needle:
+                return f"Opción {i + 1} seleccionada automáticamente.\n"
+    except Exception:
+        _log.debug("suggestion-selection check skipped", exc_info=True)
+    return ""
+
+
+async def _notify_playground_turn_done(
+    session_id: str,
+    wid: str,
+    reply: str = "",
+    *,
+    redis_client: Any = None,
+    incoming_message: str = "",
+) -> None:
     """Push best-effort al terminar un turno de playground (éxito, error o desconexión).
 
     Espejo de ``_send_web_push_notification`` en services/heartbeat/main.py, pero
@@ -543,11 +573,12 @@ async def _notify_playground_turn_done(session_id: str, wid: str, reply: str = "
         subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path)
         if not subscriptions:
             return
+        prefix = await _suggestion_selected_prefix(redis_client, session_id, incoming_message)
         result = await asyncio.to_thread(
             send_web_push_notifications,
             subscriptions,
             title=f"DuckClaw · {wid}",
-            body=_playground_push_notification_body(reply),
+            body=prefix + _playground_push_notification_body(reply),
             url="/playground",
             tag=f"duckclaw-playground-{session_id}",
         )
@@ -568,12 +599,21 @@ async def _sse_body_with_push_notification(
     *,
     session_id: str,
     wid: str,
+    redis_client: Any = None,
+    incoming_message: str = "",
 ) -> Any:
     try:
         async for chunk in body:
             yield chunk
     finally:
-        spawn_background(_notify_playground_turn_done(session_id, wid))
+        spawn_background(
+            _notify_playground_turn_done(
+                session_id,
+                wid,
+                redis_client=redis_client,
+                incoming_message=incoming_message,
+            )
+        )
 
 
 def playground_streaming_response(
@@ -601,6 +641,8 @@ def playground_streaming_response(
             ),
             session_id=prepared.session_id,
             wid=prepared.wid,
+            redis_client=redis_client,
+            incoming_message=prepared.original_user_message or "",
         ),
         media_type="text/event-stream",
         headers=dict(SSE_HEADERS),
@@ -626,7 +668,13 @@ async def invoke_playground_chat_sync(
     except Exception as exc:
         raise problem(500, "Error en playground chat", str(exc)) from exc
     spawn_background(
-        _notify_playground_turn_done(prepared.session_id, prepared.wid, extract_playground_reply(result))
+        _notify_playground_turn_done(
+            prepared.session_id,
+            prepared.wid,
+            extract_playground_reply(result),
+            redis_client=redis_client,
+            incoming_message=prepared.original_user_message or "",
+        )
     )
     return result
 

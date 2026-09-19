@@ -543,7 +543,7 @@ async def _notify_playground_turn_done(session_id: str, wid: str, reply: str = "
         subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path)
         if not subscriptions:
             return
-        await asyncio.to_thread(
+        result = await asyncio.to_thread(
             send_web_push_notifications,
             subscriptions,
             title=f"DuckClaw · {wid}",
@@ -551,8 +551,16 @@ async def _notify_playground_turn_done(session_id: str, wid: str, reply: str = "
             url="/playground",
             tag=f"duckclaw-playground-{session_id}",
         )
+        if result.error or result.failed:
+            _log.warning(
+                "playground push send incomplete session_id=%s sent=%s failed=%s error=%s",
+                session_id,
+                result.sent,
+                result.failed,
+                result.error,
+            )
     except Exception:
-        _log.debug("playground push notification skipped", exc_info=True)
+        _log.warning("playground push notification failed", exc_info=True)
 
 
 async def _sse_body_with_push_notification(

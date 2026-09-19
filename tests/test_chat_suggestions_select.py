@@ -15,6 +15,7 @@ from routers.admin_domains.chat_suggestions import (
     _notify_suggestions_ready,
     _read_cached_suggestions,
 )
+from routers.admin_domains.playground.chat_turn import _suggestion_selected_prefix
 
 
 class _FakeRedis:
@@ -123,3 +124,30 @@ def test_suggestions_push_cooldown_is_per_chat_id(monkeypatch) -> None:
 
     asyncio.run(_run())
     assert len(send_calls) == 2
+
+
+def test_suggestion_selected_prefix_matches_cached_option() -> None:
+    redis = _FakeRedis()
+
+    async def _run():
+        await _cache_suggestions(redis, "chat-1", "tenant-a", ["Sí, documentalo", "No por ahora", "Priorízalo"])
+        return await _suggestion_selected_prefix(redis, "chat-1", "  no por ahora  ")
+
+    assert asyncio.run(_run()) == "Opción 2 seleccionada automáticamente.\n"
+
+
+def test_suggestion_selected_prefix_empty_when_no_match() -> None:
+    redis = _FakeRedis()
+
+    async def _run():
+        await _cache_suggestions(redis, "chat-1", "tenant-a", ["a", "b", "c"])
+        return await _suggestion_selected_prefix(redis, "chat-1", "algo que el usuario escribió a mano")
+
+    assert asyncio.run(_run()) == ""
+
+
+def test_suggestion_selected_prefix_empty_without_cache_or_message() -> None:
+    redis = _FakeRedis()
+    assert asyncio.run(_suggestion_selected_prefix(redis, "never-cached", "hola")) == ""
+    assert asyncio.run(_suggestion_selected_prefix(redis, "chat-1", "")) == ""
+    assert asyncio.run(_suggestion_selected_prefix(None, "chat-1", "hola")) == ""

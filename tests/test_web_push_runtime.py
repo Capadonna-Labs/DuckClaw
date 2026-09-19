@@ -59,5 +59,7 @@ def test_playground_chat_turn_attempts_web_push_on_completion() -> None:
     # leave the PWA and still get told when the turn finished.
     assert "_sse_body_with_push_notification" in chat_turn
     assert "finally:" in chat_turn
-    # Non-streaming path notifies right after the result comes back.
-    assert "_notify_playground_turn_done(prepared.session_id, prepared.wid" in chat_turn
+    # Non-streaming path notifies right after the result comes back, tied to a
+    # real user reference so a suggestion-pick can be recognized and annotated.
+    assert "extract_playground_reply(result)" in chat_turn
+    assert "incoming_message=prepared.original_user_message" in chat_turn

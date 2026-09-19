@@ -42,12 +42,9 @@ export async function POST(req: NextRequest) {
   const target = `${base}/api/v1/admin/playground/chat`;
 
   const timeoutSignal = AbortSignal.timeout(GATEWAY_CHAT_SSE_TIMEOUT_MS);
-  const upstreamSignal =
-    typeof AbortSignal.any === 'function'
-      ? AbortSignal.any([req.signal, timeoutSignal])
-      : req.signal.aborted
-        ? req.signal
-        : timeoutSignal;
+  // Mobile Safari/PWA can abort the browser request when the app is backgrounded.
+  // Keep the gateway turn alive so the user can return and reload the chat history.
+  const upstreamSignal = timeoutSignal;
 
   try {
     const res = await gatewayLongFetch(target, {

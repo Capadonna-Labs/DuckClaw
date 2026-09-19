@@ -34,6 +34,28 @@ import type { ContextTokenBreakdown } from '@/lib/contextTokenBreakdown';
 
 export type ThinkingIdentity = { workerId: string; swarmSlot: number };
 
+function shouldUsePersistentMobileTurn(params: {
+  payloadImages: unknown[];
+  payloadDocuments: unknown[];
+  voiceResponseMode: boolean;
+}): boolean {
+  if (params.voiceResponseMode || params.payloadImages.length || params.payloadDocuments.length) {
+    return false;
+  }
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return false;
+  const nav = navigator as Navigator & { standalone?: boolean };
+  const standalone =
+    nav.standalone === true ||
+    window.matchMedia?.('(display-mode: standalone)').matches === true;
+  const isiOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  return standalone && isiOS;
+}
+
+function looksLikeMobileDetachError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error || '');
+  return /load failed|network|abort|terminated|failed to fetch/i.test(msg);
+}
+
 export type RunAdminChatTurnParams = {
   text: string;
   payloadImages?: { mime_type: string; data_base64: string }[];
@@ -333,6 +355,76 @@ if (voiceResponseMode) {
 let authoritativeResponse = '';
 let streamedFull = '';
 try {
+  const persistentMobileTurn = shouldUsePersistentMobileTurn({
+    payloadImages,
+    payloadDocuments,
+    voiceResponseMode,
+  });
+  if (persistentMobileTurn) {
+    try {
+      const result = await adminService.playgroundChat({
+        worker_id: workerId,
+        project_id: projectId || undefined,
+        knowledge_scope: knowledgeScope || undefined,
+        message: text,
+        chat_id: chatId,
+        tenant_id: effectiveTenantId ?? 'default',
+        telegram_user_id: telegramUserId,
+        vault_db_path: vaultPath || undefined,
+        stream: false,
+      });
+      authoritativeResponse = (result.response || '').trim();
+      applyLastTurnTokenDisplay(
+        setLastTurnUsage,
+        setContextEstimatedTokens,
+        result,
+        setContextTokenBreakdown
+      );
+      setMessages((m) => {
+        if (m.length === 0) return m;
+        const next = [...m];
+        const last = next[next.length - 1];
+        if (last?.role === 'assistant') {
+          const workerSuffix =
+            result.assigned_worker_id && result.assigned_worker_id !== workerId
+              ? ` (worker: ${result.assigned_worker_id})`
+              : '';
+          next[next.length - 1] = {
+            role: 'assistant',
+            text:
+              (authoritativeResponse ||
+                'Turno completado. Recarga el historial si no ves la respuesta completa.') +
+              workerSuffix,
+            streaming: false,
+          };
+        }
+        return coalesceTrailingToolHeartbeats(
+          finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next))
+        );
+      });
+      return;
+    } catch (error) {
+      if (!looksLikeMobileDetachError(error)) throw error;
+      setMessages((m) => {
+        if (m.length === 0) return m;
+        const next = [...m];
+        const last = next[next.length - 1];
+        if (last?.role === 'assistant') {
+          next[next.length - 1] = {
+            role: 'assistant',
+            text:
+              'Turno enviado en modo persistente. iOS cerró la conexión visual; vuelve a abrir o refresca en unos segundos para recuperar el historial.',
+            streaming: false,
+          };
+        }
+        return coalesceTrailingToolHeartbeats(
+          finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next))
+        );
+      });
+      window.setTimeout(() => scheduleLoopHistoryReload(), 1000);
+      return;
+    }
+  }
   let assignedSuffix = '';
   let elapsedFooter = '';
   const streamAudioRef: {

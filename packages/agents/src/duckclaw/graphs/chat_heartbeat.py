@@ -277,6 +277,12 @@ def admin_heartbeat_channel(chat_id: str) -> str:
     return f"duckclaw:admin-heartbeat:{cid}"
 
 
+def admin_heartbeat_backlog_key(chat_id: str) -> str:
+    """Backlog temporal para rehidratar progreso si iOS/PWA corta el SSE."""
+    cid = str(chat_id or "").strip() or "unknown"
+    return f"duckclaw:admin-heartbeat-backlog:{cid}"
+
+
 def parse_instance_label(label: str | None) -> tuple[str, int]:
     """
     Parsea etiqueta de instancia swarm (p. ej. ``worker-alpha 2``).
@@ -439,7 +445,13 @@ def publish_admin_chat_heartbeat(
             import redis as redis_sync  # noqa: PLC0415
 
             client = redis_sync.Redis.from_url(url, decode_responses=True)
-            client.publish(channel, payload)
+            backlog = admin_heartbeat_backlog_key(cid)
+            pipe = client.pipeline()
+            pipe.rpush(backlog, payload)
+            pipe.ltrim(backlog, -80, -1)
+            pipe.expire(backlog, 900)
+            pipe.publish(channel, payload)
+            pipe.execute()
         except Exception as exc:
             _log.debug("admin chat heartbeat publish failed chat_id=%r: %s", cid, exc)
 

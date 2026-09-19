@@ -349,6 +349,28 @@ export const chatApi = {
       keepalive: true,
     }),
 
+  getPlaygroundChatActivity: (chatId: string, limit = 40) => {
+    const q = new URLSearchParams();
+    q.set('chat_id', chatId);
+    q.set('limit', String(limit));
+    return adminFetch<{
+      ok: boolean;
+      chat_id: string;
+      events: {
+        text: string;
+        kind?: 'plan' | 'tool' | 'status' | 'visual';
+        worker_id?: string;
+        swarm_slot?: number;
+        artifact_id?: string;
+        artifact_tenant_id?: string;
+        tool_name?: string;
+        tool_phase?: 'start' | 'done' | 'error';
+        tool_detail?: string;
+        elapsed_ms?: number;
+      }[];
+    }>(`/playground/chat/activity?${q.toString()}`);
+  },
+
   /** Interrumpe un turno de chat admin en curso (flag Redis en gateway). */
   playgroundChatCancel: async (chat_id: string) =>
     adminFetch<{ ok: boolean; chat_id: string; cancelled?: boolean }>(

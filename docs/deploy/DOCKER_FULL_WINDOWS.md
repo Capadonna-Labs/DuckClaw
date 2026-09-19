@@ -9,6 +9,7 @@ Generic **full** stack (not Desktop Lite). No Quant-Trader / `quant_core` — th
 | Gateway `:8000` | API + chat |
 | DB-Writer | Redis → DuckDB writes |
 | Knowledge-Indexer | RAG ingest outside Gateway |
+| Heartbeat | Crons, homeostasis and proactive ticks while every UI is closed |
 | Redis | Queue / cache |
 | Admin `:3001` | Next.js console |
 | Sandbox image | `duckclaw/sandbox:latest` — default build uses `Dockerfile.slim`; full Playwright image via `docker/sandbox/Dockerfile` |
@@ -65,7 +66,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/smoke_docker_full.ps
 Report: [`SMOKE_DOCKER_FULL_REPORT.md`](SMOKE_DOCKER_FULL_REPORT.md) (generated). Criteria:
 
 - Clean DB volume (no worker schemas)
-- Gateway + DB-Writer + Redis + Knowledge-Indexer + Admin up
+- Gateway + DB-Writer + Redis + Knowledge-Indexer + Heartbeat + Admin up
 - Admin login page reachable without hand-editing console
 - Document first vs second `compose up` times
 
@@ -82,3 +83,29 @@ Import Quant-Trader worker `.zip` (includes its own `schema.sql`). Do **not** ba
 | Sandbox tools fail | Ensure Docker socket mounted; rebuild `duckclaw/sandbox` |
 | Port 8000/3001 busy | Stop local PM2 / Desktop Lite; or change host ports in compose |
 | Tailscale | `docker compose --profile tailscale up -d` after setting `TS_AUTHKEY` |
+
+## Persistent VPS runtime
+
+The Docker Full stack is also the production runtime for a VPS. The launcher
+and browser are clients; closing either one must not stop the containers. Use
+`restart: unless-stopped`, keep state in Docker volumes or explicit host
+mounts, and stop the stack only with an explicit `docker compose stop/down`.
+
+For a PM2 → Docker Full VPS migration, use a short controlled cutover (the
+actual cutover script is VPS/vertical-specific and lives in the ops repo that
+owns that VPS, not in this generic repo):
+
+1. Back up the current DuckDB vaults and `.env`.
+2. Generate Web Push VAPID keys for phone/watch notifications:
+   `uv run python scripts/generate_web_push_vapid.py --subject mailto:admin@example.com`.
+3. Put `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and
+   `WEB_PUSH_SUBJECT` in the VPS Docker Full `.env`.
+4. Serve Admin over HTTPS or Tailscale HTTPS. Browser Push only works on secure
+   origins, except `localhost` during development.
+5. Stop the PM2 core processes.
+6. Start Docker Full from a stable directory such as `/opt/duckclaw-full`.
+7. Validate Gateway `/health`, Admin `/login`, DB-Writer, Knowledge-Indexer,
+   Heartbeat, and the migrated worker state.
+8. From the installed PWA/browser, allow notifications and call
+   `/api/admin/notifications/web-push/test` through the admin BFF.
+9. Roll back by stopping Compose and restarting PM2 if validation fails.

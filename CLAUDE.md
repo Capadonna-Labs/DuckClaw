@@ -48,6 +48,53 @@ uv run duckops stack up
 uv run duckops stack status
 ```
 
+## Current handoff: Docker Full persistent VPS runtime
+
+Codex started the migration away from loose VPS PM2 processes toward the full
+Docker/.exe runtime. The intended production shape is: Docker Full owns the
+long-running processes, while the browser, desktop launcher, and mobile/PWA
+clients are only clients. Closing any UI must not stop Gateway, DB-Writer,
+Knowledge-Indexer, Heartbeat, Redis, or Admin.
+
+Relevant changes to review:
+
+- Docker Full compose files now include a persistent `heartbeat` service with
+  `restart: unless-stopped`.
+- `docker/gateway/Dockerfile` now bundles `services/heartbeat`.
+- Admin has a PWA/Web Push base: manifest, service worker registration, push
+  subscription registration, Gateway persistence, and Heartbeat delivery hooks.
+- The controlled VPS cutover helper (validates compose before stopping PM2,
+  backs up legacy state, starts Docker Full, checks Gateway/Admin health,
+  prints rollback instructions on failure) lives in the vertical/ops repo that
+  owns the VPS, not in `duckclaw` — `duckclaw` stays the generic harness with
+  no vertical- or VPS-specific paths or scripts.
+- Web Push subscriptions are stored DB-first in `admin_runtime_settings` under
+  `domain=web_push`; Gateway writes through DB-Writer and Heartbeat reads in
+  read-only mode.
+- `pywebpush>=2.5.0` was added so Docker Full can actually deliver Web Push.\n- `scripts/generate_web_push_vapid.py` generates `.env` VAPID keys for deployment.
+- Guardrail tests: `tests/test_docker_full_runtime.py` and
+  `tests/test_web_push_runtime.py`.
+
+Validate before merging/deploying:
+
+```bash
+uv run pytest tests/test_docker_full_runtime.py tests/test_web_push_runtime.py
+docker compose -f deploy/docker/docker-compose.yml config --quiet
+docker compose -f deploy/docker/docker-compose.release.yml config --quiet
+uv run python scripts/generate_web_push_vapid.py --subject mailto:test@example.com\nuv run python -c "from scripts.generate_web_push_vapid import generate_vapid_keys; from py_vapid import Vapid01; k=generate_vapid_keys('mailto:test@example.com'); Vapid01.from_string(k.private_key)"\nuv run python -c "import pywebpush"
+uv sync --frozen --no-dev --no-editable
+git diff --check
+```
+
+Known caveat: Web Push requires valid `WEB_PUSH_VAPID_PUBLIC_KEY`,
+`WEB_PUSH_VAPID_PRIVATE_KEY`, and `WEB_PUSH_SUBJECT` in the deployed stack.
+
+Known caveat: `pnpm --dir apps/duckclaw-admin lint` currently fails on existing
+unrelated lint debt in the admin app. Do not treat that as caused by this PWA
+change unless the touched files show new lint errors.
+
+Notion handoff task: `CLAUDE review - Docker Full persistente + corte VPS`
+https://app.notion.com/p/3e02edf2496f81eca3acd5f2e2e30362?pvs=204
 ## Architecture
 
 DuckClaw is a **DB-first, multi-tenant, multi-agent platform** built on generic LangGraph/LangChain — no vertical-specific logic hardcoded in the core Python. Verticals (Quant, PQRSD, Telegram bot, etc.) are opt-in extensions that live outside `packages/agents` core.

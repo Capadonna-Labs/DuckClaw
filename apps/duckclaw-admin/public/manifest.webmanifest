@@ -1,0 +1,17 @@
+{
+  "name": "DuckClaw Admin",
+  "short_name": "DuckClaw",
+  "description": "DuckClaw runtime console",
+  "start_url": "/login",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "48x48",
+      "type": "image/x-icon"
+    }
+  ]
+}

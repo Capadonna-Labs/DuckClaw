@@ -199,6 +199,30 @@ def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
     return f"{base}/{quote(worker_id, safe='')}/chat?deliver_outbound=1"
 
 
+
+async def _send_web_push_notification(*, title: str, body: str, url: str = "/", tag: str = "duckclaw") -> None:
+    try:
+        from duckclaw.gateway_db import get_gateway_db_path
+        from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
+
+        db_path = str(get_gateway_db_path())
+        subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path)
+        if not subscriptions:
+            return
+        result = await asyncio.to_thread(
+            send_web_push_notifications,
+            subscriptions,
+            title=title,
+            body=body,
+            url=url,
+            tag=tag,
+        )
+        if result.error:
+            logger.warning("web_push: skipped=%s error=%s", result.skipped, result.error)
+        elif result.failed:
+            logger.warning("web_push: sent=%s failed=%s", result.sent, result.failed)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("web_push: notification skipped: %s", exc)
 async def check_cooldown(r: redis.Redis, tenant_id: str, alert_type: str) -> bool:
     """Verifica si ya enviamos esta alerta recientemente (Anti-Spam)."""
     key = f"cooldown:{tenant_id}:{alert_type}"
@@ -541,6 +565,12 @@ async def _run_goals_proactive_tick_one_db(
                 chat_id,
                 worker_id,
             )
+            await _send_web_push_notification(
+                title="DuckClaw",
+                body="Revisión proactiva completada.",
+                url="/admin/playground",
+                tag=f"duckclaw-goals-{chat_id}",
+            )
         else:
             logger.warning(
                 "goals_proactive: HTTP %s chat=%s body=%s",
@@ -707,6 +737,12 @@ async def _run_goals_proactive_tick_one_db(
                 "goals_proactive_wall: tick OK chat=%s worker=%s",
                 chat_id,
                 worker_id,
+            )
+            await _send_web_push_notification(
+                title="DuckClaw",
+                body="Recordatorio programado completado.",
+                url="/admin/playground",
+                tag=f"duckclaw-goals-wall-{chat_id}",
             )
         else:
             logger.warning(
@@ -909,6 +945,12 @@ async def _run_loop_proactive_tick_one_db(
                 tenant_id=tenant_id,
                 key=LOOP_CATCHUP_DUE_KEY,
                 value="0",
+            )
+            await _send_web_push_notification(
+                title="DuckClaw",
+                body="Ciclo proactivo de trabajo ejecutado.",
+                url="/admin/playground",
+                tag=f"duckclaw-loop-{chat_id}",
             )
             if idle_mode:
                 # Re-anchor even when gateway skip persist/touch (Telegram SYSTEM_EVENT).
@@ -1141,13 +1183,20 @@ async def run_heartbeat() -> None:
 
                     try:
                         async with httpx.AsyncClient() as client:
-                            await client.post(
+                            resp = await client.post(
                                 GATEWAY_URL,
                                 params={"tenant_id": tenant_id},
                                 json=payload,
                                 headers=headers,
                                 timeout=30,
                             )
+                            if 200 <= resp.status_code < 300:
+                                await _send_web_push_notification(
+                                    title="DuckClaw alerta",
+                                    body=f"Anomalía detectada: {alert_type}",
+                                    url="/admin/overview",
+                                    tag=f"duckclaw-anomaly-{tenant_id}-{alert_type}",
+                                )
                     except Exception as e:  # noqa: BLE001
                         logger.exception("Error enviando evento al Gateway: %s", e)
 

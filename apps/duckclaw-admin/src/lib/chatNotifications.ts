@@ -1,3 +1,5 @@
+import { ensureWebPushSubscription } from '@/lib/webPushClient';
+
 export type ChatNotificationPayload = {
   title: string;
   body: string;
@@ -16,10 +18,15 @@ export function notificationPermission(): NotificationPermission | 'unsupported'
 
 export async function requestNotificationPermission(): Promise<NotificationPermission | 'unsupported'> {
   if (!notificationsSupported()) return 'unsupported';
-  if (Notification.permission === 'granted') return 'granted';
+  if (Notification.permission === 'granted') {
+    void ensureWebPushSubscription();
+    return 'granted';
+  }
   if (Notification.permission === 'denied') return 'denied';
   try {
-    return await Notification.requestPermission();
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') void ensureWebPushSubscription();
+    return permission;
   } catch {
     return Notification.permission;
   }

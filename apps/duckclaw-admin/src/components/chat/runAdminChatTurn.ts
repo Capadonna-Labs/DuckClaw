@@ -90,7 +90,7 @@ export type RunAdminChatTurnParams = {
   suggestionsEnabled?: boolean;
   finalizeCancelledGeneration: () => void;
   clearLoopHistoryReload: () => void;
-  scheduleLoopHistoryReload: () => void;
+  scheduleLoopHistoryReload: (opts?: { extended?: boolean }) => void;
   onConversationActivity?: () => void;
   onSandboxArtifacts?: (payload: {
     sandbox_run_id?: string;
@@ -421,7 +421,7 @@ try {
           finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next))
         );
       });
-      window.setTimeout(() => scheduleLoopHistoryReload(), 1000);
+      window.setTimeout(() => scheduleLoopHistoryReload({ extended: true }), 1000);
       return;
     }
   }

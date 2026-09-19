@@ -177,10 +177,12 @@ export function useAdminChatHistory({
     };
   }, []);
 
-  const scheduleLoopHistoryReload = useCallback(() => {
+  const scheduleLoopHistoryReload = useCallback((opts?: { extended?: boolean }) => {
     clearLoopHistoryReload();
     reloadHistory({ force: true });
-    const delays = [3_000, 8_000, 15_000, 30_000, 60_000];
+    const delays = opts?.extended
+      ? [3_000, 8_000, 15_000, 30_000, 60_000, 120_000, 180_000, 240_000]
+      : [3_000, 8_000, 15_000, 30_000, 60_000];
     loopHistoryReloadRef.current = delays.map((ms) =>
       window.setTimeout(() => {
         reloadHistory({ force: true });

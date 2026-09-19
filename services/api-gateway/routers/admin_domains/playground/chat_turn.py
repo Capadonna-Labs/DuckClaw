@@ -12,6 +12,7 @@ from fastapi import Request
 from fastapi.responses import StreamingResponse
 
 from core.agent_chat import invoke_chat, invoke_chat_sse_body
+from core.background_tasks import spawn_background
 from core.chat_visual_artifacts import admin_visual_fields_from_invoke_result
 from core.models import ChatRequest
 from duckclaw.channels import GatewayDeliveryContext
@@ -527,20 +528,6 @@ def _playground_push_notification_body(reply: str) -> str:
     return text if len(text) <= 140 else f"{text[:139]}…"
 
 
-# asyncio.create_task() only holds a weak reference to the task; with nothing else
-# referencing it, the event loop is free to garbage-collect it before it ever runs —
-# especially here, where the enclosing request handler returns right after creating it.
-# Keep a strong reference until each task finishes. See:
-# https://docs.python.org/3/library/asyncio-task.html#asyncio.create_task
-_background_tasks: set[asyncio.Task[None]] = set()
-
-
-def _spawn_background(coro: Any) -> None:
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
-
-
 async def _notify_playground_turn_done(session_id: str, wid: str, reply: str = "") -> None:
     """Push best-effort al terminar un turno de playground (éxito, error o desconexión).
 
@@ -578,7 +565,7 @@ async def _sse_body_with_push_notification(
         async for chunk in body:
             yield chunk
     finally:
-        _spawn_background(_notify_playground_turn_done(session_id, wid))
+        spawn_background(_notify_playground_turn_done(session_id, wid))
 
 
 def playground_streaming_response(
@@ -630,7 +617,7 @@ async def invoke_playground_chat_sync(
         )
     except Exception as exc:
         raise problem(500, "Error en playground chat", str(exc)) from exc
-    _spawn_background(
+    spawn_background(
         _notify_playground_turn_done(prepared.session_id, prepared.wid, extract_playground_reply(result))
     )
     return result

@@ -346,6 +346,7 @@ export const chatApi = {
     }>('/playground/chat', {
       method: 'POST',
       body: JSON.stringify(body),
+      keepalive: true,
     }),
 
   /** Interrumpe un turno de chat admin en curso (flag Redis en gateway). */

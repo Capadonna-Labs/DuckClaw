@@ -11,11 +11,17 @@ from typing import Any
 _log = logging.getLogger(__name__)
 
 ADMIN_HEARTBEAT_CHANNEL_PREFIX = "duckclaw:admin-heartbeat:"
+ADMIN_HEARTBEAT_BACKLOG_PREFIX = "duckclaw:admin-heartbeat-backlog:"
 
 
 def admin_heartbeat_channel(chat_id: str) -> str:
     cid = str(chat_id or "").strip() or "unknown"
     return f"{ADMIN_HEARTBEAT_CHANNEL_PREFIX}{cid}"
+
+
+def admin_heartbeat_backlog_key(chat_id: str) -> str:
+    cid = str(chat_id or "").strip() or "unknown"
+    return f"{ADMIN_HEARTBEAT_BACKLOG_PREFIX}{cid}"
 
 
 def parse_admin_heartbeat_payload(raw: str) -> dict[str, Any] | None:
@@ -102,3 +108,29 @@ async def iter_admin_heartbeats(
             await pubsub.aclose()
         except Exception:
             pass
+
+
+async def list_admin_heartbeat_backlog(
+    redis_client: Any,
+    chat_id: str,
+    *,
+    limit: int = 40,
+) -> list[dict[str, Any]]:
+    """Devuelve los últimos heartbeats persistidos temporalmente para un chat admin."""
+    if redis_client is None:
+        return []
+    safe_limit = max(1, min(int(limit or 40), 80))
+    key = admin_heartbeat_backlog_key(chat_id)
+    try:
+        rows = await redis_client.lrange(key, -safe_limit, -1)
+    except Exception as exc:
+        _log.debug("admin heartbeat backlog read failed chat_id=%r: %s", chat_id, exc)
+        return []
+    out: list[dict[str, Any]] = []
+    for row in rows or []:
+        if isinstance(row, bytes):
+            row = row.decode("utf-8", errors="replace")
+        parsed = parse_admin_heartbeat_payload(str(row or ""))
+        if parsed:
+            out.append(parsed)
+    return out

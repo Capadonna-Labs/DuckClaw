@@ -25,6 +25,19 @@ from routers.admin_domains.playground.router import router
 from routers.admin_domains.playground.schemas import PlaygroundChatBody, PlaygroundChatCancelBody, PlaygroundVoiceBody
 
 
+@router.get("/playground/chat/activity", dependencies=[Depends(require_admin_key)])
+async def playground_chat_activity(chat_id: str, request: Request, limit: int = 40) -> dict[str, Any]:
+    """Actividad reciente de un turno admin para rehidratar progreso tras detach PWA."""
+    session_id = (chat_id or "").strip()
+    if not session_id:
+        raise problem(400, "chat_id vacío", chat_id)
+    from core.admin_chat_heartbeat import list_admin_heartbeat_backlog
+
+    redis_client = getattr(request.app.state, "redis", None)
+    events = await list_admin_heartbeat_backlog(redis_client, session_id, limit=limit)
+    return {"ok": True, "chat_id": session_id, "events": events}
+
+
 @router.post("/playground/chat", dependencies=[Depends(require_admin_key)])
 async def playground_chat(
     body: PlaygroundChatBody,

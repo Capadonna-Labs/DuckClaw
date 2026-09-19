@@ -347,6 +347,43 @@ const appendHeartbeat = (payload: {
   }
 };
 
+const pollDetachedActivity = () => {
+  const delays = [2_000, 5_000, 10_000, 20_000, 35_000, 60_000, 90_000, 120_000, 180_000, 240_000];
+  const seenKeys = new Set<string>();
+  for (const delay of delays) {
+    window.setTimeout(() => {
+      void adminService
+        .getPlaygroundChatActivity(chatId, 40)
+        .then((data) => {
+          for (const ev of data.events || []) {
+            const key = [
+              ev.kind || '',
+              ev.worker_id || '',
+              ev.tool_name || '',
+              ev.tool_phase || '',
+              ev.text || '',
+              ev.elapsed_ms ?? '',
+            ].join('|');
+            if (!key || seenKeys.has(key)) continue;
+            seenKeys.add(key);
+            appendHeartbeat({
+              text: ev.text,
+              kind: ev.kind,
+              worker_id: ev.worker_id,
+              swarm_slot: ev.swarm_slot,
+              artifact_id: ev.artifact_id,
+              artifact_tenant_id: ev.artifact_tenant_id,
+              tool_name: ev.tool_name,
+              tool_phase: ev.tool_phase,
+              elapsed_ms: ev.elapsed_ms,
+            });
+          }
+        })
+        .catch(() => undefined);
+    }, delay);
+  }
+};
+
 // Solo desbloquear audio si este turno pedirá TTS. Un play() silencioso en
 // cada Enter interrumpe Spotify/Apple Music en iOS (toma la sesión de audio).
 if (voiceResponseMode) {
@@ -413,7 +450,7 @@ try {
           next[next.length - 1] = {
             role: 'assistant',
             text:
-              'Turno enviado en modo persistente. iOS cerró la conexión visual; vuelve a abrir o refresca en unos segundos para recuperar el historial.',
+              'Turno en ejecución. Recuperando actividad del servidor...',
             streaming: false,
           };
         }
@@ -421,6 +458,7 @@ try {
           finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next))
         );
       });
+      pollDetachedActivity();
       window.setTimeout(() => scheduleLoopHistoryReload({ extended: true }), 1000);
       return;
     }

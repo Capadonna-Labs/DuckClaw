@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAdminRouteAuth } from '@/lib/adminRouteAuth';
 import { adminPublicBase } from '@/lib/adminPublicBase';
 import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProxy';
+import { mcpOAuthRedirectUri } from '@/lib/mcpOAuthCallback';
 
 type Ctx = { params: { connectorId: string } };
 
@@ -71,7 +72,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
   }
 
   const connectorId = encodeURIComponent(ctx.params.connectorId || '');
-  const redirectUri = `${adminPublicBase(req)}/api/admin/mcp/connectors/oauth/callback`;
+  const redirectUri = mcpOAuthRedirectUri(req);
   try {
     const res = await fetch(
       `${base}/api/v1/admin/mcp/connectors/${connectorId}/oauth/start`,

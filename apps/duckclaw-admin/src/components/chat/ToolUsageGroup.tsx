@@ -107,10 +107,12 @@ export function ToolUsageGroup({
   messages,
   indices,
   identityLabel = '',
+  liveWhileLoading = false,
 }: {
   messages: ChatMsg[];
   indices: number[];
   identityLabel?: string;
+  liveWhileLoading?: boolean;
 }) {
   const panelId = useId();
   const items = indices.map((i) => messages[i]).filter(Boolean);
@@ -119,9 +121,10 @@ export function ToolUsageGroup({
   const [isOpen, setIsOpen] = useState(false);
 
   const blockStartedAt = earliestStartedAt(items);
-  const liveHeaderMs = useLiveToolElapsedMs(anyRunning, blockStartedAt);
+  const headerRunning = anyRunning || liveWhileLoading;
+  const liveHeaderMs = useLiveToolElapsedMs(headerRunning, blockStartedAt);
   // Wall-clock del bloque mientras corre (primer start → ahora).
-  const headerLiveTotal = anyRunning ? liveHeaderMs : null;
+  const headerLiveTotal = headerRunning ? liveHeaderMs : null;
 
   const count = items.length;
   const totalLabel =
@@ -156,7 +159,7 @@ export function ToolUsageGroup({
               {' '}
               · {totalLabel}
             </span>
-          ) : anyRunning ? (
+          ) : headerRunning ? (
             <span className="normal-case font-semibold text-sky-600 dark:text-sky-400">
               {' '}
               · en curso

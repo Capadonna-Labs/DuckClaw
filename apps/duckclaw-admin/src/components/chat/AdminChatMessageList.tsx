@@ -152,6 +152,7 @@ export function AdminChatMessageList({
                 messages={messages}
                 indices={item.indices}
                 identityLabel={labelForWorkerId(first?.workerId || workerId)}
+                liveWhileLoading={loading && itemIdx === displayItems.length - 1}
               />
             );
           }

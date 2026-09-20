@@ -15,8 +15,9 @@ function htmlEscape(value: string): string {
   });
 }
 
-function oauthLaunchPage(authorizationUrl: string): NextResponse {
+function oauthLaunchPage(authorizationUrl: string, connectorId: string): NextResponse {
   const safeUrl = htmlEscape(authorizationUrl);
+  const label = connectorId.includes('google') || connectorId.includes('gmail') ? 'Google' : 'Notion';
   return new NextResponse(
     `<!doctype html>
 <html lang="es">
@@ -41,15 +42,15 @@ function oauthLaunchPage(authorizationUrl: string): NextResponse {
 </head>
 <body>
   <main>
-    <h1>Conectar Notion</h1>
-    <p>iOS puede abrir la app de Notion y perder el flujo OAuth. Si pasa, copia esta URL y pegala directamente en la barra de Safari.</p>
+    <h1>Conectar ${htmlEscape(label)}</h1>
+    <p>iOS puede abrir otra app y perder el flujo OAuth. Si pasa, copia esta URL y pegala directamente en la barra de Safari.</p>
     <textarea id="url" readonly>${safeUrl}</textarea>
     <div class="actions">
       <a class="primary" href="${safeUrl}" rel="noopener">Abrir autorizacion</a>
       <button type="button" onclick="navigator.clipboard.writeText(document.getElementById('url').value).then(()=>this.textContent='Copiado')">Copiar URL</button>
       <a class="secondary" href="/mcp?tab=connectors">Volver a MCP</a>
     </div>
-    <small>Cuando Notion termine, debe volver a DuckClaw y mostrar OAuth success.</small>
+    <small>Cuando ${htmlEscape(label)} termine, debe volver a DuckClaw y mostrar OAuth success.</small>
   </main>
 </body>
 </html>`,
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest, ctx: Ctx) {
     if (req.nextUrl.searchParams.get('auto') === '1') {
       return NextResponse.redirect(authorizationUrl);
     }
-    return oauthLaunchPage(authorizationUrl);
+    return oauthLaunchPage(authorizationUrl, ctx.params.connectorId || '');
   } catch (err) {
     const msg = encodeURIComponent(
       (err instanceof Error ? err.message : 'oauth_start_failed').slice(0, 120)

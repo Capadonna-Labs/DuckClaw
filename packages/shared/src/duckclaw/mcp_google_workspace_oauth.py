@@ -27,13 +27,13 @@ GOOGLE_WORKSPACE_OAUTH_PROVIDER = "google_workspace"
 
 
 def resolve_google_redirect_uri(explicit: str | None = None) -> str:
-    # ponytail: Google exige match exacto con URI registrada en GCP; env gana sobre origin del Admin (:8443).
-    env_redirect = (os.environ.get("GOOGLE_OAUTH_REDIRECT_URI") or "").strip()
-    if env_redirect:
-        return env_redirect.rstrip("/")
     explicit_clean = (explicit or "").strip()
     if explicit_clean:
         return explicit_clean.rstrip("/")
+    # ponytail: Google exige match exacto con URI registrada en GCP; env queda como fallback legacy.
+    env_redirect = (os.environ.get("GOOGLE_OAUTH_REDIRECT_URI") or "").strip()
+    if env_redirect:
+        return env_redirect.rstrip("/")
     public = (os.environ.get("DUCKCLAW_PUBLIC_URL") or "").strip().rstrip("/")
     if public:
         return f"{public}/api/v1/oauth/callback"

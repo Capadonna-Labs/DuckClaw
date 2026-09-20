@@ -3,10 +3,10 @@ import { adminApiKey, gatewayBase, gatewayProxyHeaders } from '@/lib/gatewayProx
 import { adminPublicBase } from '@/lib/adminPublicBase';
 
 export function mcpOAuthRedirectUri(req: NextRequest): string {
-  const google = (process.env.GOOGLE_OAUTH_REDIRECT_URI || '').trim();
-  if (google) return google.replace(/\/$/, '');
   const explicit = (process.env.DUCKCLAW_MCP_OAUTH_REDIRECT_URI || '').trim();
   if (explicit) return explicit.replace(/\/$/, '');
+  const google = (process.env.GOOGLE_OAUTH_REDIRECT_URI || '').trim();
+  if (google) return google.replace(/\/$/, '');
   return `${adminPublicBase(req)}/api/admin/mcp/connectors/oauth/callback`;
 }
 

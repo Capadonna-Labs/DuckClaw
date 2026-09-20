@@ -9,7 +9,8 @@ export function PwaServiceWorker() {
     if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost') return;
     navigator.serviceWorker
       .register('/sw.js')
-      .then(() => {
+      .then((registration) => {
+        void registration.update();
         if ('Notification' in window && Notification.permission === 'granted') {
           void ensureWebPushSubscription();
         }

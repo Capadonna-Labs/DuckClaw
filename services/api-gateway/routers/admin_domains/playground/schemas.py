@@ -175,6 +175,10 @@ class PlaygroundChatBody(BaseModel):
         default=False,
         description="Si true, respuesta text/event-stream (tokens SSE + [DONE]).",
     )
+    detached: bool = Field(
+        default=False,
+        description="Si true, acepta el turno y lo ejecuta en background para PWA/iOS.",
+    )
     voice_response: bool = Field(
         default=False,
         description="Si true (con stream), sintetiza TTS tras la respuesta y emite evento SSE audio.",

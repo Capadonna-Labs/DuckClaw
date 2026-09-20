@@ -19,6 +19,13 @@ pnpm run build
 test -f .next/BUILD_ID || { echo "BUILD_ID missing — build failed"; exit 1; }
 echo "── Build OK: $(cat .next/BUILD_ID) ──"
 
+# ponytail: next build traces standalone/server.js but does NOT copy .next/static
+# into it (known Next.js standalone quirk) — without this, every _next/static/*
+# chunk 404s on first request after a rebuild.
+echo "── Copying .next/static into standalone ──"
+rm -rf .next/standalone/.next/static
+cp -r .next/static .next/standalone/.next/static
+
 echo "── Restart PM2 ──"
 cd "${ROOT}"
 pm2 restart duckclaw-admin-ui --update-env 2>/dev/null || pm2 start config/ecosystem.spawn.config.cjs --only duckclaw-admin-ui

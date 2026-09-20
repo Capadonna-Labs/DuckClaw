@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import type { ChatMsg } from '@/components/chat/types';
+import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 import { formatChatIdentityPrefix } from '@/lib/workerOptions';
 import { formatToolDurationMs, isToolHeartbeatRunning } from '@/lib/toolHeartbeat';
 import {
@@ -14,23 +15,21 @@ import {
 } from '@/lib/toolUsageGroup';
 
 /** Cronómetro en vivo mientras hay tools running (misma idea que ToolHeartbeatRow). */
-function useLiveToolElapsedMs(
-  messages: ChatMsg[],
-  running: boolean,
-  startedAt: number | null | undefined
-): number | null {
+function useLiveToolElapsedMs(running: boolean, startedAt: number | null | undefined): number | null {
   const [liveMs, setLiveMs] = useState<number | null>(null);
-
-  useEffect(() => {
+  const tick = useCallback(() => {
     if (!running || startedAt == null) {
       setLiveMs(null);
       return;
     }
-    const tick = () => setLiveMs(Math.max(0, Date.now() - startedAt));
-    tick();
-    const id = window.setInterval(tick, 50);
-    return () => window.clearInterval(id);
+    setLiveMs(Math.max(0, Date.now() - startedAt));
   }, [running, startedAt]);
+
+  useEffect(() => {
+    tick();
+  }, [tick]);
+
+  useVisibilityAwareInterval(tick, running && startedAt != null ? 50 : null);
 
   return running ? liveMs : null;
 }
@@ -65,7 +64,7 @@ function GroupedToolRow({
 }) {
   const { toolName, count, maxMs, averageMs, isRunning, isError, messages } = grouped;
   const runningStartedAt = earliestRunningStartedAt(messages);
-  const liveMs = useLiveToolElapsedMs(messages, isRunning, runningStartedAt);
+  const liveMs = useLiveToolElapsedMs(isRunning, runningStartedAt);
   const max = formatToolDurationMs(maxMs);
   const avg = formatToolDurationMs(averageMs);
   const live = formatToolDurationMs(liveMs);
@@ -120,7 +119,7 @@ export function ToolUsageGroup({
   const [isOpen, setIsOpen] = useState(false);
 
   const blockStartedAt = earliestStartedAt(items);
-  const liveHeaderMs = useLiveToolElapsedMs(items, anyRunning, blockStartedAt);
+  const liveHeaderMs = useLiveToolElapsedMs(anyRunning, blockStartedAt);
   // Wall-clock del bloque mientras corre (primer start → ahora).
   const headerLiveTotal = anyRunning ? liveHeaderMs : null;
 

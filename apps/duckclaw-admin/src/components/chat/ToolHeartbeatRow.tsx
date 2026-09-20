@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ChatMsg } from '@/components/chat/types';
+import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 import {
   formatToolDisplayName,
   formatToolDurationMs,
@@ -17,18 +18,21 @@ export function ToolHeartbeatRow({ message: m }: { message: ChatMsg }) {
     m.toolPhase === 'start' ||
     (m.heartbeatKind === 'tool' && m.toolPhase !== 'done' && m.toolPhase !== 'error');
   const [liveMs, setLiveMs] = useState<number | null>(null);
-
-  useEffect(() => {
+  const [fallbackStartedAt] = useState(() => Date.now());
+  const t0 = m.toolStartedAt ?? fallbackStartedAt;
+  const tick = useCallback(() => {
     if (!running) {
       setLiveMs(m.toolElapsedMs ?? null);
       return;
     }
-    const t0 = m.toolStartedAt ?? Date.now();
-    const tick = () => setLiveMs(Math.max(0, Date.now() - t0));
+    setLiveMs(Math.max(0, Date.now() - t0));
+  }, [m.toolElapsedMs, running, t0]);
+
+  useEffect(() => {
     tick();
-    const id = window.setInterval(tick, 50);
-    return () => window.clearInterval(id);
-  }, [running, m.toolStartedAt, m.toolElapsedMs, m.toolPhase]);
+  }, [tick]);
+
+  useVisibilityAwareInterval(tick, running ? 50 : null);
 
   const durMs = running ? liveMs : (m.toolElapsedMs ?? liveMs);
   const dur = formatToolDurationMs(durMs);

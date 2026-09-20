@@ -42,6 +42,12 @@ const nextConfig = {
   async headers() {
     return [
       {
+        source: '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js).*)',
+        headers: [
+          { key: 'Cache-Control', value: 'no-store' },
+        ],
+      },
+      {
         source: '/api/admin/reports/:reportId',
         headers: [
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },

@@ -7,7 +7,7 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { adminService } from '@/services/adminService';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
-import { userPreviewsFromPayload } from '@/lib/chatMessageImages';
+import { historyToChatMessages, userPreviewsFromPayload } from '@/lib/chatMessageImages';
 import { requestNotificationPermission } from '@/lib/chatNotifications';
 import { playTtsAudio, primeAudioPlayback, type TtsAudioFormat } from '@/lib/playTtsAudio';
 import {
@@ -387,6 +387,38 @@ const pollDetachedActivity = () => {
   }
 };
 
+const pollDetachedCompletion = () => {
+  const delays = [3_000, 8_000, 15_000, 30_000, 60_000, 120_000, 180_000, 240_000, 300_000];
+  for (const delay of delays) {
+    window.setTimeout(() => {
+      void adminService
+        .getConversation(chatId, effectiveTenantId || 'default')
+        .then((data) => {
+          const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
+          const userIdx = [...fromServer]
+            .map((m, i) => ({ m, i }))
+            .reverse()
+            .find(({ m }) => m.role === 'user' && (m.text || '').trim() === text.trim())?.i;
+          const done =
+            userIdx != null &&
+            fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
+          if (!done) return;
+          setMessages((prev) =>
+            coalesceTrailingToolHeartbeats(
+              finalizeRunningToolHeartbeats(
+                stripThinkingStatusHeartbeats(fromServer.length ? fromServer : prev)
+              )
+            )
+          );
+          setLoading(false);
+          setThinking(false);
+          onConversationActivity?.();
+        })
+        .catch(() => undefined);
+    }, delay);
+  }
+};
+
 // Solo desbloquear audio si este turno pedirá TTS. Un play() silencioso en
 // cada Enter interrumpe Spotify/Apple Music en iOS (toma la sesión de audio).
 if (voiceResponseMode) {
@@ -394,6 +426,7 @@ if (voiceResponseMode) {
 }
 let authoritativeResponse = '';
 let streamedFull = '';
+let detachedRunning = false;
 try {
   const persistentMobileTurn = shouldUsePersistentMobileTurn({
     payloadImages,
@@ -412,7 +445,22 @@ try {
         telegram_user_id: telegramUserId,
         vault_db_path: vaultPath || undefined,
         stream: false,
+        detached: true,
       });
+      if (result.accepted) {
+        detachedRunning = true;
+        setThinking(false);
+        setMessages((m) => {
+          const next =
+            m[m.length - 1]?.role === 'assistant' && m[m.length - 1]?.streaming
+              ? m.slice(0, -1)
+              : m;
+          return coalesceTrailingToolHeartbeats(stripThinkingStatusHeartbeats(next));
+        });
+        pollDetachedActivity();
+        pollDetachedCompletion();
+        return;
+      }
       authoritativeResponse = (result.response || '').trim();
       applyLastTurnTokenDisplay(
         setLastTurnUsage,
@@ -445,15 +493,18 @@ try {
       return;
     } catch (error) {
       if (!looksLikeMobileDetachError(error)) throw error;
+      detachedRunning = true;
+      setThinking(false);
       setMessages((m) => {
         if (m.length === 0) return m;
         const next =
           m[m.length - 1]?.role === 'assistant' ? m.slice(0, -1) : [...m];
         return coalesceTrailingToolHeartbeats(
-          finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next))
+          stripThinkingStatusHeartbeats(next)
         );
       });
       pollDetachedActivity();
+      pollDetachedCompletion();
       window.setTimeout(() => scheduleLoopHistoryReload({ extended: true }), 1000);
       return;
     }
@@ -649,6 +700,9 @@ try {
 } finally {
   if (abortControllerRef.current === abortController) {
     abortControllerRef.current = null;
+  }
+  if (detachedRunning) {
+    return;
   }
   setLoading(false);
   setThinking(false);

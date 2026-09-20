@@ -333,13 +333,16 @@ export const chatApi = {
     telegram_user_id?: string;
     vault_db_path?: string;
     stream?: boolean;
+    detached?: boolean;
     images?: { mime_type: string; data_base64: string }[];
     documents?: { filename: string; mime_type: string; data_base64: string }[];
   }) =>
     adminFetch<{
       ok: boolean;
+      accepted?: boolean;
+      chat_id?: string;
       worker_id: string;
-      response: string;
+      response?: string;
       assigned_worker_id?: string;
       usage_tokens?: Record<string, number>;
       rag_context_count?: number;

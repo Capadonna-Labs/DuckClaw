@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import Depends, Request
 
+from core.background_tasks import spawn_background
 from routers.admin_domains.admin_common import actor_from_header, problem, require_admin_key
 from routers.admin_domains.playground.chat_turn import (
     admin_visual_from_result,
@@ -46,6 +47,25 @@ async def playground_chat(
 ):
     """Chat de prueba desde consola admin (exento Tailscale vía prefijo /admin/)."""
     prepared = await prepare_playground_chat_turn(body, actor=actor, request=request)
+    if body.detached:
+        async def _run_detached() -> None:
+            try:
+                await invoke_playground_chat_sync(prepared, request=request)
+            except Exception:
+                logging.getLogger("duckclaw.gateway.admin_playground").warning(
+                    "detached playground turn failed chat_id=%s worker=%s",
+                    prepared.session_id,
+                    prepared.wid,
+                    exc_info=True,
+                )
+
+        spawn_background(_run_detached())
+        return {
+            "ok": True,
+            "accepted": True,
+            "chat_id": prepared.session_id,
+            "worker_id": prepared.wid,
+        }
     if playground_wants_stream(body, request):
         return playground_streaming_response(
             prepared,

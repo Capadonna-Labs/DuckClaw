@@ -231,6 +231,7 @@ DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
     "packages/shared/src/duckclaw/admin_worker_catalog.py": "catalog helpers mention quant worker family",
     "packages/shared/src/duckclaw/ibkr_order_monitor.py": "IBKR order monitor opt-in extension",
     "packages/shared/src/duckclaw/write_handlers/ibkr_orders.py": "DB-writer handler for quant_core.ibkr_orders",
+    "services/api-gateway/routers/admin_domains/worker_capabilities.py": "skill→tool satisfaction map includes quant_schema_reference opt-in",
     "services/api-gateway/routers/admin_domains/workspace_managed_draft.py": "managed draft policy labels include finance/finanzas locales",
     "scripts/place_protective_gtc_brackets.py": "ops script for IBKR protective brackets",
 }

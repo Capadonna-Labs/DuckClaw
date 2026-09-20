@@ -38,15 +38,20 @@ def test_pwa_reopens_resume_detached_turn_from_activity() -> None:
     hook = (
         ROOT / "apps/duckclaw-admin/src/components/chat/useAdminChat.ts"
     ).read_text(encoding="utf-8")
+    resume = (
+        ROOT / "apps/duckclaw-admin/src/components/chat/useDetachedTurnResume.ts"
+    ).read_text(encoding="utf-8")
     state = (
         ROOT / "apps/duckclaw-admin/src/lib/detachedTurnState.ts"
     ).read_text(encoding="utf-8")
 
-    assert "readPendingDetachedTurn(chatId)" in hook
-    assert "getPlaygroundChatActivity(chatId, 80)" in hook
-    assert "setLoading(true)" in hook
-    assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in hook
-    assert "clearPendingDetachedTurn(chatId)" in hook
+    assert "useDetachedTurnResume" in hook
+    assert "from './useDetachedTurnResume'" in hook
+    assert "readPendingDetachedTurn(chatId)" in resume
+    assert "getPlaygroundChatActivity(chatId, 80)" in resume
+    assert "setLoading(true)" in resume
+    assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in resume
+    assert "clearPendingDetachedTurn(chatId)" in resume
     assert "localStorage.setItem(key(turn.chatId)" in state
 
 

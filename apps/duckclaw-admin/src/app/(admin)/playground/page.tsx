@@ -59,7 +59,8 @@ import {
   WORKER_REQUIRED_ALERT_MESSAGE,
   WORKER_REQUIRED_PROJECTS_HREF,
 } from '@/lib/playgroundWorkerGate';
-import { notificationPermission, requestNotificationPermission } from '@/lib/chatNotifications';
+import { notificationPermission } from '@/lib/chatNotifications';
+import { usePlaygroundChatToggles } from '@/components/playground/usePlaygroundChatToggles';
 
 import { PlaygroundHistoryView } from '@/components/playground/PlaygroundHistoryView';
 import {
@@ -98,22 +99,12 @@ export default function PlaygroundPage() {
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [toolUsageEnabled, setToolUsageEnabled] = useState(true);
-  const [suggestionsEnabled, setSuggestionsEnabled] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      return window.localStorage.getItem('duckclaw.chat.suggestionsEnabled') !== '0';
-    } catch {
-      return true;
-    }
-  });
-  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
-    if (typeof window === 'undefined') return true;
-    try {
-      return window.localStorage.getItem('duckclaw.chat.notificationsEnabled') !== '0';
-    } catch {
-      return true;
-    }
-  });
+  const {
+    suggestionsEnabled,
+    notificationsEnabled,
+    handleSuggestionsToggle,
+    handleNotificationsToggle,
+  } = usePlaygroundChatToggles();
   const [sandboxToggling, setSandboxToggling] = useState(false);
   const loadConfigRunningRef = useRef(false);
   const llmRestoreCompleteRef = useRef(false);
@@ -172,31 +163,6 @@ export default function PlaygroundPage() {
       router.push(`/sandbox?${q.toString()}`);
     },
   });
-
-  const handleSuggestionsToggle = useCallback(() => {
-    setSuggestionsEnabled((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem('duckclaw.chat.suggestionsEnabled', next ? '1' : '0');
-      } catch {
-        /* ignore quota */
-      }
-      return next;
-    });
-  }, []);
-
-  const handleNotificationsToggle = useCallback(() => {
-    setNotificationsEnabled((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem('duckclaw.chat.notificationsEnabled', next ? '1' : '0');
-      } catch {
-        /* ignore quota */
-      }
-      if (next) void requestNotificationPermission();
-      return next;
-    });
-  }, []);
 
   useEffect(() => {
     writeLastProjectId(projectId);

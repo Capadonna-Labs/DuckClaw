@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from html.parser import HTMLParser
 from typing import Any, List
 
 from langchain_core.tools import StructuredTool
@@ -36,6 +37,40 @@ def _coerce_publishable_html(html: str) -> str:
     return out + "\n</html>"
 
 
+_VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+}
+
+
+class _UnclosedTagTracker(HTMLParser):
+    """Strict LIFO tag stack (no ancestor-cascade matching like a browser would do) —
+    a real browser silently auto-closes everything nested under a mismatched end tag,
+    which is exactly the leniency that lets truncated-mid-document HTML render as if
+    it were merely missing its final tags. We want the opposite here: surface it."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list) -> None:
+        if tag not in _VOID_TAGS:
+            self.stack.append(tag)
+
+    def handle_endtag(self, tag: str) -> None:
+        if self.stack and self.stack[-1] == tag:
+            self.stack.pop()
+
+
+def _unclosed_tags(html: str) -> list[str]:
+    tracker = _UnclosedTagTracker()
+    try:
+        tracker.feed(html)
+    except Exception:
+        pass
+    return tracker.stack
+
+
 def _validate_html_content(html: str) -> str | None:
     raw = str(html or "")
     if len(raw.encode("utf-8")) > _MAX_HTML_BYTES:
@@ -45,6 +80,15 @@ def _validate_html_content(html: str) -> str | None:
         return "Estructura HTML inválida: falta </html>"
     if "<body" not in low:
         return "Estructura HTML inválida: falta <body>"
+    # _coerce_publishable_html ya cerró </body>/</html> si solo faltaban esos al final;
+    # cualquier tag que siga sin cerrar aquí es contenido cortado a mitad de documento
+    # (generación truncada), no un simple "el modelo olvidó cerrar al final".
+    dangling = _unclosed_tags(raw)
+    if dangling:
+        return (
+            f"HTML truncado a mitad de documento: tags sin cerrar {dangling} "
+            "(probable corte de generación, regenera el documento completo)"
+        )
     for m in re.finditer(r'<script[^>]+src=["\']([^"\']+)["\']', raw, re.IGNORECASE):
         src = m.group(1).lower()
         if not any(cdn in src for cdn in _ALLOWED_SCRIPT_CDN):

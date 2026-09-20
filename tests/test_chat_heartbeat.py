@@ -12,6 +12,32 @@ import pytest
 from env_ids import DEFAULT_TEST_TELEGRAM_USER_ID
 
 
+class _FakeRedisPipeline:
+    """Minimal pipeline for admin heartbeat backlog + publish (rpush/ltrim/expire/publish)."""
+
+    def __init__(self, on_publish) -> None:
+        self._on_publish = on_publish
+        self._pending_publish: tuple[str, str] | None = None
+
+    def rpush(self, *_args: object, **_kwargs: object) -> _FakeRedisPipeline:
+        return self
+
+    def ltrim(self, *_args: object, **_kwargs: object) -> _FakeRedisPipeline:
+        return self
+
+    def expire(self, *_args: object, **_kwargs: object) -> _FakeRedisPipeline:
+        return self
+
+    def publish(self, channel: str, payload: str) -> _FakeRedisPipeline:
+        self._pending_publish = (channel, payload)
+        return self
+
+    def execute(self) -> list[object]:
+        if self._pending_publish is not None:
+            self._on_publish(*self._pending_publish)
+        return []
+
+
 class _DuckDbAdapter:
     def __init__(self, con: duckdb.DuckDBPyConnection) -> None:
         self._con = con
@@ -437,6 +463,9 @@ def test_publish_admin_tool_event_start_and_done_with_duration(
         def publish(self, _channel: str, payload: str) -> None:
             payloads.append(payload)
 
+        def pipeline(self) -> _FakeRedisPipeline:
+            return _FakeRedisPipeline(self.publish)
+
     class FakeRedis:
         @staticmethod
         def from_url(_url: str, **_kwargs: object) -> FakeClient:
@@ -493,6 +522,9 @@ def test_publish_admin_chat_heartbeat_includes_worker_and_slot(monkeypatch: pyte
     class FakeClient:
         def publish(self, _channel: str, payload: str) -> None:
             payloads.append(payload)
+
+        def pipeline(self) -> _FakeRedisPipeline:
+            return _FakeRedisPipeline(self.publish)
 
     class FakeRedis:
         @staticmethod

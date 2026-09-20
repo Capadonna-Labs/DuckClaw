@@ -130,22 +130,23 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     }
   }, [searchParams, load]);
 
-  const oauthRedirectUri = () =>
-    `${window.location.origin}/api/admin/mcp/connectors/oauth/callback`;
-
   const connectOAuth = async (connectorId: string) => {
     if (busyId) return;
+    const connector = connectors.find((c) => c.connector_id === connectorId);
+    const preset = connector?.preset_id ? presetById[connector.preset_id] : undefined;
+    const isGoogleWorkspace =
+      preset?.metadata?.oauth_provider === 'google_workspace' ||
+      (connector?.preset_id || '').startsWith('google_');
+    if (!isGoogleWorkspace) {
+      window.location.href = `/api/admin/mcp/connectors/${encodeURIComponent(connectorId)}/oauth/redirect`;
+      return;
+    }
     setBusyId(`oauth:${connectorId}`);
     setError(null);
     try {
-      const connector = connectors.find((c) => c.connector_id === connectorId);
-      const preset = connector?.preset_id ? presetById[connector.preset_id] : undefined;
-      const isGoogleWorkspace =
-        preset?.metadata?.oauth_provider === 'google_workspace' ||
-        (connector?.preset_id || '').startsWith('google_');
       const result = await adminService.startMcpConnectorOAuth(
         connectorId,
-        isGoogleWorkspace ? '' : oauthRedirectUri()
+        ''
       );
       window.location.href = result.authorization_url;
     } catch (e) {

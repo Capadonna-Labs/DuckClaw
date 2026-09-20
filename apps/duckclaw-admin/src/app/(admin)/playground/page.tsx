@@ -59,6 +59,7 @@ import {
   WORKER_REQUIRED_ALERT_MESSAGE,
   WORKER_REQUIRED_PROJECTS_HREF,
 } from '@/lib/playgroundWorkerGate';
+import { notificationPermission, requestNotificationPermission } from '@/lib/chatNotifications';
 
 import { PlaygroundHistoryView } from '@/components/playground/PlaygroundHistoryView';
 import {
@@ -101,6 +102,14 @@ export default function PlaygroundPage() {
     if (typeof window === 'undefined') return true;
     try {
       return window.localStorage.getItem('duckclaw.chat.suggestionsEnabled') !== '0';
+    } catch {
+      return true;
+    }
+  });
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    try {
+      return window.localStorage.getItem('duckclaw.chat.notificationsEnabled') !== '0';
     } catch {
       return true;
     }
@@ -151,6 +160,7 @@ export default function PlaygroundPage() {
     knowledgeScope,
     enabled: Boolean(conv.sessionId),
     suggestionsEnabled,
+    notificationsEnabled,
     onConversationActivity: conv.bumpRefresh,
     onConversationNotFound: conv.recoverMissingConversation,
     onSandboxArtifacts: (payload) => {
@@ -171,6 +181,19 @@ export default function PlaygroundPage() {
       } catch {
         /* ignore quota */
       }
+      return next;
+    });
+  }, []);
+
+  const handleNotificationsToggle = useCallback(() => {
+    setNotificationsEnabled((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('duckclaw.chat.notificationsEnabled', next ? '1' : '0');
+      } catch {
+        /* ignore quota */
+      }
+      if (next) void requestNotificationPermission();
       return next;
     });
   }, []);
@@ -643,6 +666,9 @@ export default function PlaygroundPage() {
         onToolUsageToggle={() => setToolUsageEnabled((enabled) => !enabled)}
         suggestionsEnabled={suggestionsEnabled}
         onSuggestionsToggle={handleSuggestionsToggle}
+        notificationsEnabled={notificationsEnabled}
+        notificationPermission={notificationPermission()}
+        onNotificationsToggle={handleNotificationsToggle}
         logsControls={logsPanelOpen ? <Pm2LiveLogsControls variant="studio" /> : null}
         logsViewport={logsPanelOpen ? <Pm2LiveLogsViewport /> : null}
         onSandboxToggle={handleSandboxToggle}

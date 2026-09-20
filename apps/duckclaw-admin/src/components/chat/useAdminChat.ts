@@ -61,6 +61,8 @@ export type UseAdminChatOptions = {
   enabled?: boolean;
   /** Si false, no pide ni muestra chips de sugerencias. */
   suggestionsEnabled?: boolean;
+  /** Si false, no pide ni registra notificaciones desde el chat. */
+  notificationsEnabled?: boolean;
   /** Tras cada turno completado (para refrescar inbox). */
   onConversationActivity?: () => void;
   /** Tras heartbeat visual de sandbox con artefactos nuevos. */
@@ -82,6 +84,7 @@ export function useAdminChat({
   knowledgeScope = '',
   enabled = true,
   suggestionsEnabled = true,
+  notificationsEnabled = true,
   onConversationActivity,
   onSandboxArtifacts,
   onConversationNotFound,
@@ -459,6 +462,7 @@ export function useAdminChat({
         setSuggestionsAutoEnabled,
         suggestionsExchangeKeyRef,
         suggestionsEnabled,
+        notificationsEnabled,
         finalizeCancelledGeneration,
         clearLoopHistoryReload,
         scheduleLoopHistoryReload,
@@ -481,6 +485,7 @@ export function useAdminChat({
       voiceResponseMode,
       scheduleLoopHistoryReload,
       suggestionsEnabled,
+      notificationsEnabled,
     ]
   );
 

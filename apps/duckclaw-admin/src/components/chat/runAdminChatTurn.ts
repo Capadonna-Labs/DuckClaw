@@ -88,6 +88,8 @@ export type RunAdminChatTurnParams = {
   suggestionsExchangeKeyRef?: MutableRefObject<string>;
   /** Si false, no pide chips al terminar el turno. */
   suggestionsEnabled?: boolean;
+  /** Si false, no pide permiso/suscripción de notificaciones al enviar turnos. */
+  notificationsEnabled?: boolean;
   finalizeCancelledGeneration: () => void;
   clearLoopHistoryReload: () => void;
   scheduleLoopHistoryReload: (opts?: { extended?: boolean }) => void;
@@ -129,6 +131,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
     setSuggestionsAutoEnabled,
     suggestionsExchangeKeyRef,
     suggestionsEnabled = true,
+    notificationsEnabled = true,
     finalizeCancelledGeneration,
     clearLoopHistoryReload,
     scheduleLoopHistoryReload,
@@ -138,7 +141,7 @@ export async function runAdminChatTurn(params: RunAdminChatTurnParams): Promise<
 
 
 if (!text && payloadImages.length === 0 && payloadDocuments.length === 0) return;
-void requestNotificationPermission();
+if (notificationsEnabled) void requestNotificationPermission();
 abortControllerRef.current?.abort();
 const abortController = new AbortController();
 abortControllerRef.current = abortController;
@@ -444,16 +447,8 @@ try {
       if (!looksLikeMobileDetachError(error)) throw error;
       setMessages((m) => {
         if (m.length === 0) return m;
-        const next = [...m];
-        const last = next[next.length - 1];
-        if (last?.role === 'assistant') {
-          next[next.length - 1] = {
-            role: 'assistant',
-            text:
-              'Turno en ejecución. Recuperando actividad del servidor...',
-            streaming: false,
-          };
-        }
+        const next =
+          m[m.length - 1]?.role === 'assistant' ? m.slice(0, -1) : [...m];
         return coalesceTrailingToolHeartbeats(
           finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(next))
         );

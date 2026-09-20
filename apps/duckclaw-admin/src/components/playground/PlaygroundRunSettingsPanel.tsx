@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import {
   Box,
   Brain,
+  Bell,
   ChevronDown,
   ChevronRight,
   Cpu,
@@ -59,6 +60,9 @@ export type PlaygroundRunSettingsPanelProps = {
   onToolUsageToggle: () => void;
   suggestionsEnabled: boolean;
   onSuggestionsToggle: () => void;
+  notificationsEnabled: boolean;
+  notificationPermission?: NotificationPermission | 'unsupported';
+  onNotificationsToggle: () => void;
   logsControls?: React.ReactNode;
   logsViewport?: React.ReactNode;
   /** Activa/desactiva sandbox de sesión (sin poll de policy en el footer). */
@@ -94,6 +98,9 @@ export function PlaygroundRunSettingsPanel({
   onToolUsageToggle,
   suggestionsEnabled,
   onSuggestionsToggle,
+  notificationsEnabled,
+  notificationPermission = 'default',
+  onNotificationsToggle,
   logsControls,
   logsViewport,
   onSandboxToggle,
@@ -299,6 +306,19 @@ export function PlaygroundRunSettingsPanel({
             checked={toolUsageEnabled}
             onChange={onToolUsageToggle}
             icon={<Wrench size={14} aria-hidden />}
+          />
+          <StudioToggleRow
+            label="Notificaciones"
+            hint={
+              notificationsEnabled
+                ? notificationPermission === 'granted'
+                  ? 'Avisos activos al terminar turnos'
+                  : 'Activas — iOS pedirá permiso cuando haga falta'
+                : 'Apagadas para DuckClaw'
+            }
+            checked={notificationsEnabled}
+            onChange={onNotificationsToggle}
+            icon={<Bell size={14} aria-hidden />}
           />
           <StudioToggleRow
             label="Sugerencias"

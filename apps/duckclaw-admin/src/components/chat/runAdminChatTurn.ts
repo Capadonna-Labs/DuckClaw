@@ -17,6 +17,10 @@ import {
   mergeEphemeralHeartbeats,
   readEphemeralHeartbeats,
 } from '@/lib/chatEphemeralStorage';
+import {
+  clearPendingDetachedTurn,
+  writePendingDetachedTurn,
+} from '@/lib/detachedTurnState';
 import { requestNotificationPermission } from '@/lib/chatNotifications';
 import { playTtsAudio, primeAudioPlayback, type TtsAudioFormat } from '@/lib/playTtsAudio';
 import {
@@ -432,6 +436,7 @@ const pollDetachedCompletion = () => {
           });
           setLoading(false);
           setThinking(false);
+          clearPendingDetachedTurn(chatId);
           onConversationActivity?.();
         })
         .catch(() => undefined);
@@ -468,6 +473,13 @@ try {
         detached: true,
       });
       if (result.accepted) {
+        writePendingDetachedTurn({
+          chatId,
+          tenantId: effectiveTenantId || 'default',
+          workerId,
+          text,
+          startedAt: Date.now(),
+        });
         detachedRunning = true;
         setThinking(false);
         setMessages((m) => {
@@ -513,6 +525,13 @@ try {
       return;
     } catch (error) {
       if (!looksLikeMobileDetachError(error)) throw error;
+      writePendingDetachedTurn({
+        chatId,
+        tenantId: effectiveTenantId || 'default',
+        workerId,
+        text,
+        startedAt: Date.now(),
+      });
       detachedRunning = true;
       setThinking(false);
       setMessages((m) => {

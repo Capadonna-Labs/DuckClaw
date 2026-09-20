@@ -30,6 +30,24 @@ def test_ios_pwa_turn_uses_detached_mode_and_keeps_runtime_visible() -> None:
     assert "setLoading(false);" in turn.split("if (detachedRunning)", 1)[1]
     assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in turn
     assert "readEphemeralHeartbeats(chatId, activeWorker)" in turn
+    assert "writePendingDetachedTurn({" in turn
+    assert "clearPendingDetachedTurn(chatId)" in turn
+
+
+def test_pwa_reopens_resume_detached_turn_from_activity() -> None:
+    hook = (
+        ROOT / "apps/duckclaw-admin/src/components/chat/useAdminChat.ts"
+    ).read_text(encoding="utf-8")
+    state = (
+        ROOT / "apps/duckclaw-admin/src/lib/detachedTurnState.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "readPendingDetachedTurn(chatId)" in hook
+    assert "getPlaygroundChatActivity(chatId, 80)" in hook
+    assert "setLoading(true)" in hook
+    assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in hook
+    assert "clearPendingDetachedTurn(chatId)" in hook
+    assert "localStorage.setItem(key(turn.chatId)" in state
 
 
 def test_tool_usage_timer_stays_live_during_detached_loading() -> None:

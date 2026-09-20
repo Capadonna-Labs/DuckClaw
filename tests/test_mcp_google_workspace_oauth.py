@@ -28,10 +28,10 @@ def test_resolve_google_redirect_uri_prefers_env(monkeypatch: pytest.MonkeyPatch
     assert resolve_google_redirect_uri() == "https://admin.test/api/v1/oauth/callback"
 
 
-def test_resolve_google_redirect_uri_env_wins_over_admin_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_google_redirect_uri_explicit_wins_over_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GOOGLE_OAUTH_REDIRECT_URI", "https://host.test/api/v1/oauth/callback")
     explicit = "https://host.test:8443/api/admin/mcp/connectors/oauth/callback"
-    assert resolve_google_redirect_uri(explicit) == "https://host.test/api/v1/oauth/callback"
+    assert resolve_google_redirect_uri(explicit) == explicit
 
 
 def test_resolve_google_oauth_scopes_filters_write_scopes() -> None:

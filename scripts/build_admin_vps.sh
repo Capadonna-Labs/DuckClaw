@@ -26,6 +26,9 @@ echo "── Copying .next/static into standalone ──"
 rm -rf .next/standalone/.next/static
 cp -r .next/static .next/standalone/.next/static
 
+echo "── Restoring tracked public assets ──"
+git -C "${ROOT}" restore -- apps/duckclaw-admin/public 2>/dev/null || true
+
 echo "── Restart PM2 ──"
 cd "${ROOT}"
 pm2 restart duckclaw-admin-ui --update-env 2>/dev/null || pm2 start config/ecosystem.spawn.config.cjs --only duckclaw-admin-ui

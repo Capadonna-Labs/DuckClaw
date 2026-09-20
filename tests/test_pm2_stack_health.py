@@ -123,8 +123,16 @@ def test_collect_pm2_stack_health_skips_gateway_pm2_process_name(
 def test_collect_gateway_health_metrics_includes_pm2_processes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from duckclaw.ops import gateway_health_metrics
     from duckclaw.ops.gateway_health_metrics import collect_gateway_health_metrics
 
+    # Lite mode short-circuits PM2 collection; reset cache so the monkeypatch is hit.
+    monkeypatch.delenv("LITE_MODE", raising=False)
+    monkeypatch.setattr(
+        gateway_health_metrics,
+        "_pm2_metrics_cache",
+        {"expires_at": 0.0, "rows": []},
+    )
     monkeypatch.setattr(
         "duckclaw.ops.pm2_stack_health.collect_pm2_stack_health",
         lambda **_: [{"name": "DuckClaw-DB-Writer", "status": "online", "rss_mb": 32.0}],

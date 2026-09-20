@@ -7,7 +7,16 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import { adminService } from '@/services/adminService';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
-import { historyToChatMessages, userPreviewsFromPayload } from '@/lib/chatMessageImages';
+import {
+  historyToChatMessages,
+  preserveImagePreviewsFromPrevious,
+  userPreviewsFromPayload,
+} from '@/lib/chatMessageImages';
+import {
+  filterEphemeralForWorker,
+  mergeEphemeralHeartbeats,
+  readEphemeralHeartbeats,
+} from '@/lib/chatEphemeralStorage';
 import { requestNotificationPermission } from '@/lib/chatNotifications';
 import { playTtsAudio, primeAudioPlayback, type TtsAudioFormat } from '@/lib/playTtsAudio';
 import {
@@ -22,9 +31,11 @@ import {
 import {
   applyLastTurnTokenDisplay,
   artifactImagePreview,
+  collectEphemeralMessages,
   coalesceTrailingToolHeartbeats,
   findHeartbeatInsertIndex,
   isLoopProgressHeartbeat,
+  mergeHistoryWithEphemeral,
   shouldFetchChatSuggestions,
   suggestionsExchangeKey,
   stripThinkingStatusHeartbeats,
@@ -403,13 +414,22 @@ const pollDetachedCompletion = () => {
             userIdx != null &&
             fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
           if (!done) return;
-          setMessages((prev) =>
-            coalesceTrailingToolHeartbeats(
+          setMessages((prev) => {
+            const activeWorker = workerId || '';
+            const ephemeral = mergeEphemeralHeartbeats(
+              readEphemeralHeartbeats(chatId, activeWorker),
+              filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
+            );
+            const withImages = preserveImagePreviewsFromPrevious(
+              fromServer.length ? fromServer : prev,
+              prev
+            );
+            return stripThinkingStatusHeartbeats(
               finalizeRunningToolHeartbeats(
-                stripThinkingStatusHeartbeats(fromServer.length ? fromServer : prev)
+                mergeHistoryWithEphemeral(withImages, ephemeral)
               )
-            )
-          );
+            );
+          });
           setLoading(false);
           setThinking(false);
           onConversationActivity?.();

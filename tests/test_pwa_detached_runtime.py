@@ -28,6 +28,8 @@ def test_ios_pwa_turn_uses_detached_mode_and_keeps_runtime_visible() -> None:
     assert "pollDetachedCompletion()" in turn
     assert "if (detachedRunning)" in turn
     assert "setLoading(false);" in turn.split("if (detachedRunning)", 1)[1]
+    assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in turn
+    assert "readEphemeralHeartbeats(chatId, activeWorker)" in turn
 
 
 def test_tool_usage_timer_stays_live_during_detached_loading() -> None:

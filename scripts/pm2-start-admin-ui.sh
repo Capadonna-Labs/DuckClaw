@@ -13,6 +13,10 @@ if [[ ! -f "${SERVER}" ]]; then
   exit 1
 fi
 
+if [[ ! -e "${STANDALONE}/public" && -d "${ADMIN}/public" ]]; then
+  ln -s "${ADMIN}/public" "${STANDALONE}/public"
+fi
+
 export PORT="${PORT:-3000}"
 # Next standalone binds to $HOSTNAME. The shell/OS hostname (e.g. ubuntu-…)
 # resolves to 127.0.1.1 and breaks nginx/Tailscale — always force all interfaces.

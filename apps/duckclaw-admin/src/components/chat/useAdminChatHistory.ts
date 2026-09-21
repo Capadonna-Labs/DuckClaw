@@ -16,6 +16,7 @@ import {
 } from '@/lib/chatEphemeralStorage';
 import { isConversationNotFoundError } from '@/lib/adminErrors';
 import { writeStoredVaultPath } from '@/lib/conversationVaultStorage';
+import { readPendingDetachedTurn } from '@/lib/detachedTurnState';
 import { workerOptionIds, workersInclude } from '@/lib/workerOptions';
 import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 
@@ -25,6 +26,7 @@ import {
   conversationIndicatesLoopScheduling,
   isLoopProgressHeartbeat,
   mergeHistoryWithEphemeral,
+  preserveInFlightOptimisticTurn,
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
 import {
@@ -211,7 +213,13 @@ export function useAdminChatHistory({
                 )
             );
           }
-          const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
+          const pendingText = readPendingDetachedTurn(chatId)?.text;
+          const mergedServer = preserveInFlightOptimisticTurn(
+            fromServer,
+            prev,
+            pendingText
+          );
+          const withImages = preserveImagePreviewsFromPrevious(mergedServer, prev);
           return stripThinkingStatusHeartbeats(
             finalizeRunningToolHeartbeats(
               mergeHistoryWithEphemeral(withImages, ephemeral)
@@ -327,7 +335,13 @@ export function useAdminChatHistory({
                 )
             );
           }
-          const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
+          const pendingText = readPendingDetachedTurn(chatId)?.text;
+          const mergedServer = preserveInFlightOptimisticTurn(
+            fromServer,
+            prev,
+            pendingText
+          );
+          const withImages = preserveImagePreviewsFromPrevious(mergedServer, prev);
           return stripThinkingStatusHeartbeats(
             finalizeRunningToolHeartbeats(
               mergeHistoryWithEphemeral(withImages, ephemeral)

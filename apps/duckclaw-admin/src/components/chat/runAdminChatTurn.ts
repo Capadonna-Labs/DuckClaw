@@ -40,6 +40,7 @@ import {
   findHeartbeatInsertIndex,
   isLoopProgressHeartbeat,
   mergeHistoryWithEphemeral,
+  preserveInFlightOptimisticTurn,
   shouldFetchChatSuggestions,
   suggestionsExchangeKey,
   stripThinkingStatusHeartbeats,
@@ -48,6 +49,21 @@ import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
 import type { ContextTokenBreakdown } from '@/lib/contextTokenBreakdown';
 
 export type ThinkingIdentity = { workerId: string; swarmSlot: number };
+
+/** Invalida polls detached del turno anterior (si no, pisan el user optimista). */
+let detachedPollEpoch = 0;
+const detachedPollTimers: number[] = [];
+function clearDetachedPollTimers() {
+  if (typeof window === 'undefined') return;
+  detachedPollTimers.forEach((id) => window.clearTimeout(id));
+  detachedPollTimers.length = 0;
+}
+function beginDetachedPollEpoch(): number {
+  clearDetachedPollTimers();
+  detachedPollEpoch += 1;
+  return detachedPollEpoch;
+}
+
 
 function shouldUsePersistentMobileTurn(params: {
   payloadImages: unknown[];
@@ -234,6 +250,7 @@ const userLabel = text;
 let loopFollowUp = /^\/(loop|meditate)\b/i.test(text.trim());
 
 setLoading(true);
+beginDetachedPollEpoch();
 thinkingStartedAt.current = Date.now();
 setThinkingIdentity({ workerId, swarmSlot: 1 });
 setThinking(true);
@@ -431,14 +448,16 @@ const appendHeartbeat = (payload: {
   }
 };
 
-const pollDetachedActivity = () => {
+const pollDetachedActivity = (epoch: number) => {
   const delays = [2_000, 5_000, 10_000, 20_000, 35_000, 60_000, 90_000, 120_000, 180_000, 240_000];
   const seenKeys = new Set<string>();
   for (const delay of delays) {
-    window.setTimeout(() => {
+    const id = window.setTimeout(() => {
+      if (epoch !== detachedPollEpoch) return;
       void adminService
         .getPlaygroundChatActivity(chatId, 40)
         .then((data) => {
+          if (epoch !== detachedPollEpoch) return;
           for (const ev of data.events || []) {
             const key = [
               ev.kind || '',
@@ -466,13 +485,15 @@ const pollDetachedActivity = () => {
         })
         .catch(() => undefined);
     }, delay);
+    detachedPollTimers.push(id);
   }
 };
 
-const pollDetachedCompletion = () => {
+const pollDetachedCompletion = (epoch: number) => {
   const delays = [3_000, 8_000, 15_000, 30_000, 60_000, 120_000, 180_000, 240_000, 300_000];
   for (const delay of delays) {
-    window.setTimeout(() => {
+    const id = window.setTimeout(() => {
+      if (epoch !== detachedPollEpoch) return;
       void adminService
         .getConversation(chatId, effectiveTenantId || 'default')
         .then((data) =>
@@ -482,6 +503,7 @@ const pollDetachedCompletion = () => {
           ])
         )
         .then(([data, activity]) => {
+          if (epoch !== detachedPollEpoch) return;
           const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
           const userIdx = [...fromServer]
             .map((m, i) => ({ m, i }))
@@ -504,10 +526,12 @@ const pollDetachedCompletion = () => {
               ),
               activityEphemeral
             );
-            const withImages = preserveImagePreviewsFromPrevious(
+            const base = preserveInFlightOptimisticTurn(
               fromServer.length ? fromServer : prev,
-              prev
+              prev,
+              text
             );
+            const withImages = preserveImagePreviewsFromPrevious(base, prev);
             return stripThinkingStatusHeartbeats(
               finalizeRunningToolHeartbeats(
                 mergeHistoryWithEphemeral(withImages, ephemeral)
@@ -521,6 +545,7 @@ const pollDetachedCompletion = () => {
         })
         .catch(() => undefined);
     }, delay);
+    detachedPollTimers.push(id);
   }
 };
 
@@ -569,8 +594,11 @@ try {
               : m;
           return coalesceTrailingToolHeartbeats(stripThinkingStatusHeartbeats(next));
         });
-        pollDetachedActivity();
-        pollDetachedCompletion();
+        {
+          const epoch = beginDetachedPollEpoch();
+          pollDetachedActivity(epoch);
+          pollDetachedCompletion(epoch);
+        }
         return;
       }
       authoritativeResponse = (result.response || '').trim();
@@ -622,8 +650,11 @@ try {
           stripThinkingStatusHeartbeats(next)
         );
       });
-      pollDetachedActivity();
-      pollDetachedCompletion();
+      {
+        const epoch = beginDetachedPollEpoch();
+        pollDetachedActivity(epoch);
+        pollDetachedCompletion(epoch);
+      }
       window.setTimeout(() => scheduleLoopHistoryReload({ extended: true }), 1000);
       return;
     }

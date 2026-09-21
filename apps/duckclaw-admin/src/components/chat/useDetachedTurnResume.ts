@@ -26,6 +26,7 @@ import {
   coalesceTrailingToolHeartbeats,
   collectEphemeralMessages,
   mergeHistoryWithEphemeral,
+  preserveInFlightOptimisticTurn,
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
 
@@ -130,6 +131,27 @@ export function useDetachedTurnResume(opts: {
         .catch(() => undefined);
     };
 
+    const finishFromHistory = (fromServer: ChatMsg[]) => {
+      setMessages((prev) => {
+        const ephemeral = mergeEphemeralHeartbeats(
+          readEphemeralHeartbeats(chatId, activeWorker),
+          filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
+        );
+        const mergedServer = preserveInFlightOptimisticTurn(
+          fromServer,
+          prev,
+          pending.text
+        );
+        const withImages = preserveImagePreviewsFromPrevious(mergedServer, prev);
+        return stripThinkingStatusHeartbeats(
+          finalizeRunningToolHeartbeats(mergeHistoryWithEphemeral(withImages, ephemeral))
+        );
+      });
+      clearPendingDetachedTurn(chatId);
+      setLoading(false);
+      setThinking(false);
+    };
+
     const checkCompletion = () => {
       void adminService
         .getConversation(chatId, tenantId)
@@ -150,21 +172,7 @@ export function useDetachedTurnResume(opts: {
               .slice(userIdx + 1)
               .some((m) => m.role === 'assistant' && (m.text || '').trim());
           if (!done) return;
-          setMessages((prev) => {
-            const ephemeral = mergeEphemeralHeartbeats(
-              readEphemeralHeartbeats(chatId, activeWorker),
-              filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
-            );
-            const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
-            return stripThinkingStatusHeartbeats(
-              finalizeRunningToolHeartbeats(
-                mergeHistoryWithEphemeral(withImages, ephemeral)
-              )
-            );
-          });
-          clearPendingDetachedTurn(chatId);
-          setLoading(false);
-          setThinking(false);
+          finishFromHistory(fromServer);
         })
         .catch(() => undefined);
     };

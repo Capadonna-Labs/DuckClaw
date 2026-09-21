@@ -8,6 +8,7 @@ Fire-and-forget: el envío corre en un hilo daemon; no bloquear el grafo del age
 from __future__ import annotations
 
 import hashlib
+import contextvars
 import json
 import logging
 import os
@@ -38,6 +39,47 @@ from duckclaw.integrations.telegram.telegram_agent_token import (
     telegram_worker_ids_match_for_compact_route,
 )
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
+
+_ADMIN_TURN_USER_INDEX: contextvars.ContextVar[int | None] = contextvars.ContextVar(
+    "duckclaw_admin_turn_user_index",
+    default=None,
+)
+_ADMIN_TURN_USER_INDEX_BY_CHAT: dict[str, int] = {}
+_ADMIN_TURN_USER_INDEX_LOCK = threading.Lock()
+
+
+def _normalize_turn_user_index(turn_user_index: int | None) -> int | None:
+    if turn_user_index is None:
+        return None
+    try:
+        return max(1, int(turn_user_index))
+    except (TypeError, ValueError):
+        return None
+
+
+def set_admin_turn_user_index(turn_user_index: int | None) -> contextvars.Token[int | None]:
+    return _ADMIN_TURN_USER_INDEX.set(_normalize_turn_user_index(turn_user_index))
+
+
+def reset_admin_turn_user_index(token: contextvars.Token[int | None]) -> None:
+    _ADMIN_TURN_USER_INDEX.reset(token)
+
+
+def set_admin_chat_turn_user_index(chat_id: str, turn_user_index: int | None) -> None:
+    cid = str(chat_id or "").strip()
+    value = _normalize_turn_user_index(turn_user_index)
+    if not cid or value is None:
+        return
+    with _ADMIN_TURN_USER_INDEX_LOCK:
+        _ADMIN_TURN_USER_INDEX_BY_CHAT[cid] = value
+
+
+def clear_admin_chat_turn_user_index(chat_id: str) -> None:
+    cid = str(chat_id or "").strip()
+    if not cid:
+        return
+    with _ADMIN_TURN_USER_INDEX_LOCK:
+        _ADMIN_TURN_USER_INDEX_BY_CHAT.pop(cid, None)
 
 _log = logging.getLogger(__name__)
 
@@ -392,6 +434,12 @@ def publish_admin_chat_heartbeat(
     if slot is None or slot < 1:
         slot = 1
     body: dict[str, Any] = {"text": msg, "kind": (kind or "status").strip() or "status"}
+    turn_user_index = _ADMIN_TURN_USER_INDEX.get()
+    if turn_user_index is None:
+        with _ADMIN_TURN_USER_INDEX_LOCK:
+            turn_user_index = _ADMIN_TURN_USER_INDEX_BY_CHAT.get(cid)
+    if turn_user_index is not None:
+        body["turn_user_index"] = turn_user_index
     if wid:
         body["worker_id"] = wid
     body["swarm_slot"] = int(slot)

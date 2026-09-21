@@ -57,6 +57,7 @@ def sse_heartbeat(
     tool_phase: str | None = None,
     tool_detail: str | None = None,
     elapsed_ms: float | None = None,
+    turn_user_index: int | None = None,
 ) -> str:
     meta: dict[str, Any] = {"type": "heartbeat", "text": text, "kind": kind}
     wid = (worker_id or "").strip()
@@ -64,6 +65,11 @@ def sse_heartbeat(
         meta["worker_id"] = wid
     if swarm_slot is not None:
         meta["swarm_slot"] = max(1, int(swarm_slot))
+    if turn_user_index is not None:
+        try:
+            meta["turn_user_index"] = max(1, int(turn_user_index))
+        except (TypeError, ValueError):
+            pass
     aid = (artifact_id or "").strip()
     if aid:
         meta["artifact_id"] = aid

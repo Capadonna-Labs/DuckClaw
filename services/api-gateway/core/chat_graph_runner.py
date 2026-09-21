@@ -254,6 +254,21 @@ async def run_chat_graph(
 
         t0 = time.monotonic()
         admin_pg_vault_prev = os.environ.get("DUCKCLAW_ADMIN_PLAYGROUND_VAULT")
+        turn_user_index = (
+            sum(1 for item in (prepared.history_for_model or []) if item.get("role") == "user")
+            + (0 if prepared.is_system_prompt else 1)
+        )
+        heartbeat_turn_token = None
+        try:
+            from duckclaw.graphs.chat_heartbeat import (
+                set_admin_chat_turn_user_index,
+                set_admin_turn_user_index,
+            )
+
+            heartbeat_turn_token = set_admin_turn_user_index(turn_user_index)
+            set_admin_chat_turn_user_index(session_id, turn_user_index)
+        except Exception:
+            heartbeat_turn_token = None
         if prepared.auth_policy in {"trusted_admin_console", "trusted_channel_route"}:
             admin_pg_vault = (prepared.payload_vault or prepared.vault_db_path or "").strip()
             if admin_pg_vault:
@@ -351,6 +366,17 @@ async def run_chat_graph(
                 )
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
         finally:
+            if heartbeat_turn_token is not None:
+                try:
+                    from duckclaw.graphs.chat_heartbeat import (
+                        clear_admin_chat_turn_user_index,
+                        reset_admin_turn_user_index,
+                    )
+
+                    reset_admin_turn_user_index(heartbeat_turn_token)
+                    clear_admin_chat_turn_user_index(session_id)
+                except Exception:
+                    pass
             if admin_pg_vault_prev is None:
                 os.environ.pop("DUCKCLAW_ADMIN_PLAYGROUND_VAULT", None)
             else:

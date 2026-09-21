@@ -47,8 +47,7 @@ type ActivityEvent = Awaited<
 
 function toolHeartbeatsFromActivity(
   events: ActivityEvent[],
-  activeWorker: string,
-  turnUserIndex: number
+  activeWorker: string
 ): ChatMsg[] {
   const out: ChatMsg[] = [];
   const runningByTool = new Map<string, number>();
@@ -78,7 +77,10 @@ function toolHeartbeatsFromActivity(
       toolPhase: phase ?? 'done',
       toolStartedAt: startedAt,
       toolElapsedMs: elapsedMs,
-      turnUserIndex,
+      turnUserIndex:
+        ev.turn_user_index != null && Number.isFinite(Number(ev.turn_user_index))
+          ? Math.max(1, Math.floor(Number(ev.turn_user_index)))
+          : undefined,
     };
     if (isStart) {
       runningByTool.set(toolName, out.length);
@@ -177,7 +179,6 @@ export function useAdminChatHistory({
       .then(([data, activity]) => {
         if (loadingRef.current) return;
         const fromServer = historyToChatMessages(data.messages, historyTenantId);
-        const turnUserIndex = fromServer.filter((m) => m.role === 'user').length;
         const hasLoopResult = conversationHasLoopResult(fromServer);
         if (hasLoopResult) {
           clearLoopHistoryReload();
@@ -187,8 +188,7 @@ export function useAdminChatHistory({
         const storedEphemeral = readEphemeralHeartbeats(chatId, activeWorker);
         const activityEphemeral = toolHeartbeatsFromActivity(
           activity.events || [],
-          activeWorker,
-          turnUserIndex
+          activeWorker
         );
         setMessages((prev) => {
           if (persistentMessageCount(prev) > persistentMessageCount(fromServer)) {
@@ -299,12 +299,10 @@ export function useAdminChatHistory({
       .then(([data, activity]) => {
         if (cancelled || loadingRef.current) return;
         const fromServer = historyToChatMessages(data.messages, historyTenantId);
-        const turnUserIndex = fromServer.filter((m) => m.role === 'user').length;
         const storedEphemeral = readEphemeralHeartbeats(chatId, workerAtLoad);
         const activityEphemeral = toolHeartbeatsFromActivity(
           activity.events || [],
-          workerAtLoad,
-          turnUserIndex
+          workerAtLoad
         );
         setMessages((prev) => {
           if (persistentMessageCount(prev) > persistentMessageCount(fromServer)) {

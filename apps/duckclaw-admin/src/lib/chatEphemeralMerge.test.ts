@@ -64,4 +64,21 @@ describe('chatEphemeralMerge', () => {
     );
     expect(merged.map((m) => m.role)).toEqual(['user', 'heartbeat', 'assistant']);
   });
+
+  it('spreads legacy tools across existing turns instead of pinning all to the last turn', () => {
+    const merged = interleaveEphemeralIntoHistory(
+      [user('a'), assistant('A'), user('b'), assistant('B')],
+      [tool('first_legacy'), tool('second_legacy')]
+    );
+    expect(
+      merged.map((m) => `${m.role}${m.toolName ? `:${m.toolName}` : ''}`)
+    ).toEqual([
+      'user',
+      'heartbeat:first_legacy',
+      'assistant',
+      'user',
+      'heartbeat:second_legacy',
+      'assistant',
+    ]);
+  });
 });

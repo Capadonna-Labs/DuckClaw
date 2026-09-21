@@ -28,7 +28,17 @@ self.addEventListener('push', (event) => {
     data: { url: payload.url || '/login' },
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((clients) => {
+        const visible = clients.some(
+          (client) => client.visibilityState === 'visible' && client.focused
+        );
+        if (visible) return undefined;
+        return self.registration.showNotification(title, options);
+      })
+  );
 });
 
 self.addEventListener('notificationclick', (event) => {

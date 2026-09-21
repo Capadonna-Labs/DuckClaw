@@ -216,19 +216,44 @@ def _apply_set_mcp_connector_auth(conn: Any, payload: dict) -> None:
             "updated_by": actor,
         },
     )
+    # Deactivate older actor rows for the same logical secret so resolve cannot
+    # prefer a stale owner=system bearer over a fresh session OAuth.
+    conn.execute(
+        "UPDATE main.admin_runtime_settings "
+        "SET active = false, updated_at = CURRENT_TIMESTAMP "
+        "WHERE tenant_id = ? AND domain = 'mcp_connector' AND key = ? "
+        "AND active = true AND lower(trim(actor_email)) <> ?",
+        [tenant_id, secret_key, actor],
+    )
+    # Keep connector owner aligned with the actor that last completed OAuth.
+    if actor and actor != "system":
+        conn.execute(
+            "UPDATE main.admin_mcp_connectors "
+            "SET owner_email = ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE connector_id = ? AND tenant_id = ? AND active = true",
+            [actor, connector_id, tenant_id],
+        )
     refresh = str(payload.get("refresh_token") or "").strip()
     if refresh:
+        refresh_key = f"{connector_id}.refresh"
         _apply_upsert_runtime_setting(
             conn,
             {
                 "tenant_id": tenant_id,
                 "actor_email": actor,
                 "domain": "mcp_connector",
-                "key": f"{connector_id}.refresh",
+                "key": refresh_key,
                 "value": refresh,
                 "secret": True,
                 "updated_by": actor,
             },
+        )
+        conn.execute(
+            "UPDATE main.admin_runtime_settings "
+            "SET active = false, updated_at = CURRENT_TIMESTAMP "
+            "WHERE tenant_id = ? AND domain = 'mcp_connector' AND key = ? "
+            "AND active = true AND lower(trim(actor_email)) <> ?",
+            [tenant_id, refresh_key, actor],
         )
 
     # ponytail: DCR client_id that minted these tokens must travel with them.

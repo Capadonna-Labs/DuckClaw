@@ -126,6 +126,23 @@ describe('toolUsageGroup', () => {
     expect(toolGroupTotalElapsedMs(noStart, (g3[1] as { indices: number[] }).indices)).toBe(7);
   });
 
+  it('does not inflate elapsed with Date.now()-startedAt when toolElapsedMs missing', () => {
+    const stale: ChatMsg = {
+      role: 'heartbeat',
+      heartbeatKind: 'tool',
+      toolName: 'invoke_worker',
+      toolPhase: 'done',
+      toolStartedAt: Date.now() - 27 * 60_000,
+      // toolElapsedMs deliberately missing (rehydrate / lost SSE field)
+      text: 'Usando: invoke_worker',
+    };
+    const msgs = [user, stale];
+    expect(toolGroupTotalElapsedMs(msgs, [1])).toBe(0);
+    const grouped = groupToolInvocationsByName(msgs, [1]);
+    expect(grouped[0]?.maxMs).toBeNull();
+    expect(grouped[0]?.latestMs).toBeNull();
+  });
+
   describe('groupToolInvocationsByName', () => {
     it('groups repeated tool invocations with count and averages', () => {
       const messages = [

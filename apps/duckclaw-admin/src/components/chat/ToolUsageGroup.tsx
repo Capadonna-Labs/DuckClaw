@@ -107,11 +107,12 @@ export function ToolUsageGroup({
   messages,
   indices,
   identityLabel = '',
-  liveWhileLoading = false,
+  liveWhileLoading: _liveWhileLoading = false,
 }: {
   messages: ChatMsg[];
   indices: number[];
   identityLabel?: string;
+  /** @deprecated Ignored — live header only while a tool is actually running. */
   liveWhileLoading?: boolean;
 }) {
   const panelId = useId();
@@ -121,10 +122,13 @@ export function ToolUsageGroup({
   const [isOpen, setIsOpen] = useState(false);
 
   const blockStartedAt = earliestStartedAt(items);
-  const headerRunning = anyRunning || liveWhileLoading;
+  // Solo tick en vivo mientras hay tool running. Antes, liveWhileLoading + tools
+  // ya cerrados usaba el startedAt más viejo → cabecera "30m" tras un
+  // invoke_worker de ~3m si el turno seguía en loading.
+  const headerRunning = anyRunning;
   const liveHeaderMs = useLiveToolElapsedMs(headerRunning, blockStartedAt);
-  // Wall-clock del bloque mientras corre (primer start → ahora).
   const headerLiveTotal = headerRunning ? liveHeaderMs : null;
+  void _liveWhileLoading;
 
   const count = items.length;
   const totalLabel =

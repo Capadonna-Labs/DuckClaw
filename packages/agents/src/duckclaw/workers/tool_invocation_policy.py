@@ -144,21 +144,6 @@ def _db_validation_intent(text: str) -> bool:
     return "consulta" in value and any(marker in value for marker in ("duckdb", "base de datos", "en la db"))
 
 
-def _current_time_anchor_intent(text: str) -> bool:
-    value = (text or "").strip().lower()
-    if _looks_like_system_or_non_data_turn(value):
-        return False
-    if _local_data_query(value):
-        return True
-    return bool(
-        re.search(
-            r"\b(fecha|hoy|ma[nñ]ana|vencimient|caduc|plazo|deadline|calendario|"
-            r"esta\s+semana|este\s+mes|pr[oó]ximo\s+mes)\b",
-            value,
-        )
-    )
-
-
 def decide_db_first_tool_invocation(
     *,
     spec: Any,
@@ -222,24 +207,32 @@ def decide_current_time_tool_invocation(
     summarize_directive: bool = False,
     orchestration_active: bool = False,
 ) -> ToolInvocationDecision:
-    """Choose deterministic current-time anchoring from runtime policy."""
+    """Force ``get_current_time`` once per user turn when the tool is bound.
 
+    Time-sensitive replies need a real clock before session/hours claims. Skip
+    only empty turns, system directives/events, summarize hops, and when the
+    tool already ran this turn. ``spec`` retained for call-site compatibility.
+    """
+    _ = spec
     tool_names = _tool_names(available_tools)
     gct_called = "get_current_time" in set(called_tools_since_last_human)
+    text = (incoming or "").strip()
+    text_l = text.lower()
     if (
         already_has_tool_result
         or summarize_directive
         or (orchestration_active and gct_called)
         or "get_current_time" not in tool_names
         or gct_called
-        or not _has_local_ledger_capability(spec)
-        or not _current_time_anchor_intent(incoming)
+        or not text
+        or "[system_directive:" in text_l
+        or text_l.startswith("[system_event:")
     ):
         return _no_tool_invocation()
 
     return ToolInvocationDecision(
         tool_name="get_current_time",
-        reason=f"{LOCAL_LEDGER_CAPABILITY}.current_time",
+        reason="clock_anchor.get_current_time",
         direct_tool_call=True,
         tool_args={},
     )

@@ -100,9 +100,27 @@ export function interleaveEphemeralIntoHistory(
     if (m.role === 'assistant') assistantCount += 1;
   }
 
+  let serverUserCount = 0;
+  for (const m of server) {
+    if (m.role === 'user') serverUserCount += 1;
+  }
+
+  // turn_user_index puede quedar +1 cuando Redis ya está en el techo MAX_MSGS
+  // (persist trunca el par más viejo y el user nuevo sigue siendo el último).
   const buckets = bucketEphemeralByTurn(ephemeral, assistantCount);
   const orphan = buckets.get(-1) ?? [];
   buckets.delete(-1);
+  if (serverUserCount > 0) {
+    for (const turn of [...buckets.keys()]) {
+      if (turn > serverUserCount) {
+        const overflow = buckets.get(turn) ?? [];
+        buckets.delete(turn);
+        const list = buckets.get(serverUserCount) ?? [];
+        list.push(...overflow);
+        buckets.set(serverUserCount, list);
+      }
+    }
+  }
 
   const out: ChatMsg[] = [];
   let userCount = 0;

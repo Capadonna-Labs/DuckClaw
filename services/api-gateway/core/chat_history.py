@@ -66,16 +66,43 @@ def normalize_history_item(h: Any) -> dict[str, str] | None:
     return {"role": role, "content": text}
 
 
+def chat_history_max_msgs() -> int:
+    return int(os.environ.get("DUCKCLAW_CHAT_HISTORY_MAX_MSGS", "48"))
+
+
 def normalize_history_list(raw: list[Any]) -> list[dict[str, str]]:
     out: list[dict[str, str]] = []
     for h in raw:
         n = normalize_history_item(h)
         if n:
             out.append(n)
-    max_msgs = int(os.environ.get("DUCKCLAW_CHAT_HISTORY_MAX_MSGS", "48"))
+    max_msgs = chat_history_max_msgs()
     if len(out) > max_msgs:
         out = out[-max_msgs:]
     return out
+
+
+def compute_turn_user_index(
+    history_for_model: list[dict[str, Any]] | None,
+    *,
+    is_system_prompt: bool = False,
+) -> int:
+    """Ordinal 1-based del user de este turno *tras* persist+truncación MAX_MSGS.
+
+    ``prior_users + 1`` se desalinea cuando el historial ya está en el techo:
+    al guardar user+assistant se cae el par más viejo y el user nuevo sigue
+    siendo el último del (no ``prior+1``).
+    """
+    prior = [item for item in (history_for_model or []) if isinstance(item, dict)]
+    if is_system_prompt:
+        return max(1, sum(1 for item in prior if item.get("role") == "user"))
+    projected = list(prior)
+    projected.append({"role": "user", "content": "_"})
+    projected.append({"role": "assistant", "content": "_"})
+    max_msgs = chat_history_max_msgs()
+    if len(projected) > max_msgs:
+        projected = projected[-max_msgs:]
+    return max(1, sum(1 for item in projected if item.get("role") == "user"))
 
 
 async def redis_load_chat_history(

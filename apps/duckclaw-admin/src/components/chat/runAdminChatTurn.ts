@@ -71,6 +71,63 @@ function looksLikeMobileDetachError(error: unknown): boolean {
   return /load failed|network|abort|terminated|failed to fetch/i.test(msg);
 }
 
+type ActivityEvent = Awaited<
+  ReturnType<typeof adminService.getPlaygroundChatActivity>
+>['events'][number];
+
+function toolHeartbeatsFromActivity(
+  events: ActivityEvent[],
+  activeWorker: string,
+  turnUserIndex: number
+): ChatMsg[] {
+  const out: ChatMsg[] = [];
+  const runningByTool = new Map<string, number>();
+  for (const ev of events) {
+    const toolName = String(ev.tool_name || '').trim();
+    if (ev.kind !== 'tool' || !toolName) continue;
+    const phase = mapSseToolPhase(ev.tool_phase);
+    const elapsedMs =
+      ev.elapsed_ms != null && Number.isFinite(Number(ev.elapsed_ms))
+        ? Number(ev.elapsed_ms)
+        : undefined;
+    const isStart = phase === 'running';
+    const runningIdx = runningByTool.get(toolName);
+    const startedAt = elapsedMs != null ? Date.now() - elapsedMs : Date.now();
+    const base: ChatMsg = {
+      role: 'heartbeat',
+      text: toolHeartbeatDisplayText(toolName, phase, elapsedMs),
+      heartbeatKind: 'tool',
+      workerId: String(ev.worker_id || activeWorker || ''),
+      swarmSlot:
+        ev.swarm_slot != null && Number.isFinite(Number(ev.swarm_slot))
+          ? Math.max(1, Math.floor(Number(ev.swarm_slot)))
+          : 1,
+      toolName,
+      toolInvocationId: createToolInvocationId(toolName),
+      toolPhase: phase ?? 'done',
+      toolStartedAt: startedAt,
+      toolElapsedMs: elapsedMs,
+      turnUserIndex,
+    };
+    if (isStart) {
+      runningByTool.set(toolName, out.length);
+      out.push(base);
+      continue;
+    }
+    if (runningIdx != null && out[runningIdx]) {
+      out[runningIdx] = {
+        ...base,
+        toolInvocationId: out[runningIdx].toolInvocationId,
+        toolStartedAt: out[runningIdx].toolStartedAt,
+      };
+      runningByTool.delete(toolName);
+      continue;
+    }
+    out.push(base);
+  }
+  return out;
+}
+
 export type RunAdminChatTurnParams = {
   text: string;
   payloadImages?: { mime_type: string; data_base64: string }[];
@@ -408,7 +465,13 @@ const pollDetachedCompletion = () => {
     window.setTimeout(() => {
       void adminService
         .getConversation(chatId, effectiveTenantId || 'default')
-        .then((data) => {
+        .then((data) =>
+          Promise.all([
+            Promise.resolve(data),
+            adminService.getPlaygroundChatActivity(chatId, 80).catch(() => ({ events: [] })),
+          ])
+        )
+        .then(([data, activity]) => {
           const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
           const userIdx = [...fromServer]
             .map((m, i) => ({ m, i }))
@@ -418,11 +481,20 @@ const pollDetachedCompletion = () => {
             userIdx != null &&
             fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
           if (!done) return;
+          const turnUserIndex = fromServer.filter((m) => m.role === 'user').length;
+          const activeWorker = workerId || '';
+          const activityEphemeral = toolHeartbeatsFromActivity(
+            activity.events || [],
+            activeWorker,
+            turnUserIndex
+          );
           setMessages((prev) => {
-            const activeWorker = workerId || '';
             const ephemeral = mergeEphemeralHeartbeats(
-              readEphemeralHeartbeats(chatId, activeWorker),
-              filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
+              mergeEphemeralHeartbeats(
+                readEphemeralHeartbeats(chatId, activeWorker),
+                filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
+              ),
+              activityEphemeral
             );
             const withImages = preserveImagePreviewsFromPrevious(
               fromServer.length ? fromServer : prev,

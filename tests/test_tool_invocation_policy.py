@@ -86,7 +86,7 @@ def test_local_ledger_current_time_decision_is_direct_tool_call_once_per_turn() 
     assert decision.tool_name == "get_current_time"
     assert decision.direct_tool_call
     assert decision.tool_args == {}
-    assert decision.reason == "local_ledger.current_time"
+    assert decision.reason == "clock_anchor.get_current_time"
 
     already_called = policy.decide_current_time_tool_invocation(
         spec=_spec_with_capabilities("local_ledger"),
@@ -95,6 +95,36 @@ def test_local_ledger_current_time_decision_is_direct_tool_call_once_per_turn() 
         called_tools_since_last_human={"get_current_time"},
     )
     assert not already_called.should_force
+
+
+def test_current_time_forced_without_local_ledger_or_time_keywords() -> None:
+    policy = importlib.import_module("duckclaw.workers.tool_invocation_policy")
+
+    decision = policy.decide_current_time_tool_invocation(
+        spec=_spec_with_capabilities("market_data_bridge"),
+        incoming="Ya lo corrí",
+        available_tools={"get_current_time", "read_sql"},
+        called_tools_since_last_human=set(),
+    )
+    assert decision.tool_name == "get_current_time"
+    assert decision.direct_tool_call
+    assert decision.reason == "clock_anchor.get_current_time"
+
+    system_event = policy.decide_current_time_tool_invocation(
+        spec=_spec_with_capabilities(),
+        incoming="[system_event: heartbeat]",
+        available_tools={"get_current_time"},
+        called_tools_since_last_human=set(),
+    )
+    assert not system_event.should_force
+
+    missing_tool = policy.decide_current_time_tool_invocation(
+        spec=_spec_with_capabilities(),
+        incoming="Qué hora es?",
+        available_tools={"read_sql"},
+        called_tools_since_last_human=set(),
+    )
+    assert not missing_tool.should_force
 
 
 def test_email_intent_skips_db_first_read_sql() -> None:

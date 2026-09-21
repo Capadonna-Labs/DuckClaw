@@ -36,18 +36,38 @@ def test_admin_registers_push_subscription_after_permission() -> None:
     assert "/api/admin/notifications/web-push/subscriptions" in client
     assert "ensureWebPushSubscription" in notifications
     assert "Notification.permission === 'granted'" in service_worker
+    assert "/api/admin/notifications/pwa-presence" in service_worker
 
 
 def test_notifications_only_show_when_pwa_not_visible() -> None:
     service_worker = (ROOT / "apps/duckclaw-admin/public/sw.js").read_text(encoding="utf-8")
+    pwa = (ROOT / "apps/duckclaw-admin/src/components/shared/PwaServiceWorker.tsx").read_text(
+        encoding="utf-8"
+    )
     unread = (
         ROOT / "apps/duckclaw-admin/src/components/chat/useFloatingChatUnread.ts"
     ).read_text(encoding="utf-8")
+    gateway_notifications = (
+        ROOT / "services/api-gateway/routers/admin_domains/notifications.py"
+    ).read_text(encoding="utf-8")
+    suggestions = (
+        ROOT / "services/api-gateway/routers/admin_domains/chat_suggestions.py"
+    ).read_text(encoding="utf-8")
+    chat_turn = (
+        ROOT / "services/api-gateway/routers/admin_domains/playground/chat_turn.py"
+    ).read_text(encoding="utf-8")
+    heartbeat = (ROOT / "services/heartbeat/main.py").read_text(encoding="utf-8")
 
     assert "matchAll({ type: 'window', includeUncontrolled: true })" in service_worker
     assert "client.visibilityState === 'visible'" in service_worker
     assert "client.focused" not in service_worker
     assert "if (visible) return undefined" in service_worker
+    assert "reportPwaPresence(visible())" in pwa
+    assert 'PWA_VISIBLE_KEY = "duckclaw:admin:pwa_visible"' in gateway_notifications
+    assert "async def pwa_visible_recently" in gateway_notifications
+    assert "if await pwa_visible_recently(redis_client):" in suggestions
+    assert "if await pwa_visible_recently(redis_client):" in chat_turn
+    assert 'await r.exists("duckclaw:admin:pwa_visible")' in heartbeat
     assert "{ requireBackground: true }" in unread
     assert "const shouldNotify = tabHidden;" in unread
 

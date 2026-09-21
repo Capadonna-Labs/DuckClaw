@@ -99,6 +99,10 @@ async def _notify_suggestions_ready(redis_client: Any, chat_id: str, suggestions
         except Exception:
             _log.warning("suggestions push cooldown check failed, sending anyway", exc_info=True)
     try:
+        from routers.admin_domains.notifications import pwa_visible_recently
+
+        if await pwa_visible_recently(redis_client):
+            return
         from duckclaw.gateway_db import get_gateway_db_path
         from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
 

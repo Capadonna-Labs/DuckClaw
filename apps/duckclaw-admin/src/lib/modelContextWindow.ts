@@ -16,6 +16,8 @@ const MODEL_CONTEXT_WINDOW: Array<{ match: RegExp; tokens: number }> = [
   // GLM-5.2 (Z.ai / OpenRouter z-ai/glm-5.2): usable 1M context.
   // Keep above any future generic /glm/ heuristic.
   { match: /glm[-_.]?5\.2|z-ai\/glm/i, tokens: 1_000_000 },
+  // TypeSafe Jev (OpenRouter typesafe/jev-1.13): Decisions model, 32K context.
+  { match: /typesafe\/jev|jev[-_.]?1\.13/i, tokens: 32_000 },
   // DeepSeek V4 (Flash/Pro): official 1M context (max_position_embeddings=1048576).
   // Must stay above the generic /deepseek/ V3 heuristic.
   { match: /deepseek[-_/]?v4/i, tokens: 1_000_000 },

@@ -23,6 +23,12 @@ describe('inferModelContextWindow', () => {
     expect(inferModelContextWindow('glm-5.2')).toBe(1_000_000);
     expect(inferModelContextWindow('glm-5.2[1m]')).toBe(1_000_000);
   });
+
+  it('uses 32k for TypeSafe Jev (OpenRouter)', () => {
+    expect(inferModelContextWindow('typesafe/jev-1.13')).toBe(32_000);
+    expect(inferModelContextWindow('jev-1.13')).toBe(32_000);
+    expect(inferModelContextWindow('~typesafe/jev-latest')).toBe(32_000);
+  });
 });
 
 describe('formatCompactTokenCount', () => {

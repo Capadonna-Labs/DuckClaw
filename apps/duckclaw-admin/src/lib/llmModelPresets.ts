@@ -35,6 +35,7 @@ export const OPENROUTER_MODEL_PRESETS: { id: string; label: string }[] = [
   { id: 'openai/gpt-4o', label: 'GPT-4o' },
   { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B Instruct' },
   { id: 'qwen/qwen3-235b-a22b', label: 'Qwen3 235B' },
+  { id: 'typesafe/jev-1.13', label: 'Jev 1.13 (TypeSafe)' },
 ];
 
 const OPENROUTER_LABEL_BY_ID = Object.fromEntries(
@@ -51,6 +52,7 @@ const MLX_FOREIGN_MODEL_PREFIXES = [
   'nvidia/',
   'qwen/',
   'arcee-ai/',
+  'typesafe/',
 ];
 
 /** Modelos HF MLX sugeridos (mlx_lm / MLX-Inference). */

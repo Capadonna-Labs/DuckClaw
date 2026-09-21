@@ -24,10 +24,13 @@ def test_ios_pwa_turn_uses_detached_mode_and_keeps_runtime_visible() -> None:
     ).read_text(encoding="utf-8")
 
     assert "detached: true" in turn
-    assert "pollDetachedActivity()" in turn
-    assert "pollDetachedCompletion()" in turn
+    assert "beginDetachedPollEpoch()" in turn
+    assert "pollDetachedActivity(epoch)" in turn
+    assert "pollDetachedCompletion(epoch)" in turn
+    assert "if (epoch !== detachedPollEpoch) return" in turn
     assert "if (detachedRunning)" in turn
     assert "setLoading(false);" in turn.split("if (detachedRunning)", 1)[1]
+    assert "preserveInFlightOptimisticTurn(" in turn
     assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in turn
     assert "readEphemeralHeartbeats(chatId, activeWorker)" in turn
     assert "writePendingDetachedTurn({" in turn
@@ -50,6 +53,7 @@ def test_pwa_reopens_resume_detached_turn_from_activity() -> None:
     assert "readPendingDetachedTurn(chatId)" in resume
     assert "getPlaygroundChatActivity(chatId, 80)" in resume
     assert "setLoading(true)" in resume
+    assert "preserveInFlightOptimisticTurn(" in resume
     assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in resume
     assert "clearPendingDetachedTurn(chatId)" in resume
     assert "localStorage.setItem(key(turn.chatId)" in state
@@ -72,11 +76,12 @@ def test_detached_completion_keeps_tool_usage_from_activity_backlog() -> None:
         ROOT / "apps/duckclaw-admin/src/components/chat/runAdminChatTurn.ts"
     ).read_text(encoding="utf-8")
 
-    completion = turn.split("const pollDetachedCompletion = () =>", 1)[1]
+    completion = turn.split("const pollDetachedCompletion = (epoch: number) =>", 1)[1]
     assert "function toolHeartbeatsFromActivity(" in turn
     assert "getPlaygroundChatActivity(chatId, 80)" in completion
     assert "activityEphemeral" in completion
     assert "mergeEphemeralHeartbeats(" in completion
+    assert "preserveInFlightOptimisticTurn(" in completion
 
 
 def test_tool_usage_timer_stays_live_during_detached_loading() -> None:

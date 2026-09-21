@@ -1,5 +1,7 @@
 /** Parseo de eventos SSE (text/event-stream) desde fetch streaming. */
 
+import { SSE_IDLE_TIMEOUT_MS, SseIdleTimeoutError } from '@/lib/sseIdle';
+
 export type SseChatEvent =
   | { type: 'token'; content: string }
   | {
@@ -179,12 +181,59 @@ function parseDataLine(data: string): SseChatEvent | null {
   return { type: 'token', content: raw };
 }
 
+function readWithIdleTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  idleMs: number,
+  signal?: AbortSignal
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = globalThis.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new SseIdleTimeoutError());
+    }, idleMs);
+    const onAbort = () => {
+      if (settled) return;
+      settled = true;
+      globalThis.clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+    reader
+      .read()
+      .then((result) => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        resolve(result);
+      })
+      .catch((err) => {
+        if (settled) return;
+        settled = true;
+        globalThis.clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
+        reject(err);
+      });
+  });
+}
+
 /** Lee el cuerpo de una respuesta fetch SSE y emite eventos parseados. */
 export async function* readSseChatStream(
   body: ReadableStream<Uint8Array> | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  opts?: { idleTimeoutMs?: number }
 ): AsyncGenerator<SseChatEvent> {
   if (!body) return;
+  const idleMs =
+    opts?.idleTimeoutMs != null && Number.isFinite(opts.idleTimeoutMs) && opts.idleTimeoutMs > 0
+      ? opts.idleTimeoutMs
+      : SSE_IDLE_TIMEOUT_MS;
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -195,7 +244,20 @@ export async function* readSseChatStream(
   try {
     while (true) {
       if (signal?.aborted) break;
-      const { done, value } = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await readWithIdleTimeout(reader, idleMs, signal);
+      } catch (err) {
+        if (err instanceof SseIdleTimeoutError) {
+          void reader.cancel().catch(() => undefined);
+          throw err;
+        }
+        if (signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+          break;
+        }
+        throw err;
+      }
+      const { done, value } = chunk;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const blocks = buffer.split('\n\n');
@@ -219,6 +281,10 @@ export async function* readSseChatStream(
     }
   } finally {
     signal?.removeEventListener('abort', onAbort);
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch {
+      /* already cancelled */
+    }
   }
 }

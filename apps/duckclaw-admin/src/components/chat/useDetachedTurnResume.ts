@@ -12,12 +12,8 @@ import {
   mergeEphemeralHeartbeats,
   readEphemeralHeartbeats,
 } from '@/lib/chatEphemeralStorage';
-import {
-  createToolInvocationId,
-  finalizeRunningToolHeartbeats,
-  mapSseToolPhase,
-  toolHeartbeatDisplayText,
-} from '@/lib/toolHeartbeat';
+import { toolHeartbeatsFromActivity } from '@/lib/chatActivityHeartbeats';
+import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 import {
   clearPendingDetachedTurn,
   readPendingDetachedTurn,
@@ -59,7 +55,6 @@ export function useDetachedTurnResume(opts: {
     let cancelled = false;
     const activeWorker = pending.workerId || workerId || initialWorker || '';
     const tenantId = pending.tenantId || config.effective_tenant_id || 'default';
-    const seenActivity = new Set<string>();
     setLoading(true);
     setThinking(false);
 
@@ -68,46 +63,10 @@ export function useDetachedTurnResume(opts: {
         .getPlaygroundChatActivity(chatId, 80)
         .then((data) => {
           if (cancelled) return;
-          const heartbeats: ChatMsg[] = [];
-          for (const ev of data.events || []) {
-            const toolName = String(ev.tool_name || '').trim();
-            if (ev.kind !== 'tool' || !toolName) continue;
-            const key = [
-              ev.worker_id || '',
-              toolName,
-              ev.tool_phase || '',
-              ev.elapsed_ms ?? '',
-              ev.text || '',
-            ].join('|');
-            if (seenActivity.has(key)) continue;
-            seenActivity.add(key);
-            const phase = mapSseToolPhase(ev.tool_phase);
-            const elapsedMs =
-              ev.elapsed_ms != null && Number.isFinite(Number(ev.elapsed_ms))
-                ? Number(ev.elapsed_ms)
-                : undefined;
-            const startedAt =
-              elapsedMs != null ? Date.now() - elapsedMs : pending.startedAt;
-            heartbeats.push({
-              role: 'heartbeat',
-              text: toolHeartbeatDisplayText(toolName, phase, elapsedMs),
-              heartbeatKind: 'tool',
-              workerId: String(ev.worker_id || activeWorker || ''),
-              swarmSlot:
-                ev.swarm_slot != null && Number.isFinite(Number(ev.swarm_slot))
-                  ? Math.max(1, Math.floor(Number(ev.swarm_slot)))
-                  : 1,
-              toolName,
-              toolInvocationId: createToolInvocationId(toolName),
-              toolPhase: phase ?? 'done',
-              toolStartedAt: startedAt,
-              toolElapsedMs: elapsedMs,
-              turnUserIndex:
-                ev.turn_user_index != null && Number.isFinite(Number(ev.turn_user_index))
-                  ? Math.max(1, Math.floor(Number(ev.turn_user_index)))
-                  : undefined,
-            });
-          }
+          const heartbeats = toolHeartbeatsFromActivity(
+            data.events || [],
+            activeWorker
+          );
           if (!heartbeats.length) return;
           setMessages((prev) => {
             const next = [...prev];
@@ -123,11 +82,36 @@ export function useDetachedTurnResume(opts: {
             while (insertAt < next.length && next[insertAt]?.role === 'heartbeat') {
               insertAt += 1;
             }
-            next.splice(insertAt, 0, ...heartbeats);
-            return coalesceTrailingToolHeartbeats(next);
+            // Reemplazar tools del turno (no apilar start sin done).
+            const before = next.slice(0, userIdx == null ? next.length : userIdx + 1);
+            const afterUser = next.slice(userIdx == null ? next.length : userIdx + 1);
+            const nonTools = afterUser.filter(
+              (m) => !(m.role === 'heartbeat' && m.heartbeatKind === 'tool')
+            );
+            return coalesceTrailingToolHeartbeats([
+              ...before,
+              ...heartbeats,
+              ...nonTools,
+            ]);
           });
         })
         .catch(() => undefined);
+    };
+
+    const finishFromHistory = (fromServer: ChatMsg[]) => {
+      setMessages((prev) => {
+        const ephemeral = mergeEphemeralHeartbeats(
+          readEphemeralHeartbeats(chatId, activeWorker),
+          filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
+        );
+        const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
+        return stripThinkingStatusHeartbeats(
+          finalizeRunningToolHeartbeats(mergeHistoryWithEphemeral(withImages, ephemeral))
+        );
+      });
+      clearPendingDetachedTurn(chatId);
+      setLoading(false);
+      setThinking(false);
     };
 
     const checkCompletion = () => {
@@ -150,23 +134,31 @@ export function useDetachedTurnResume(opts: {
               .slice(userIdx + 1)
               .some((m) => m.role === 'assistant' && (m.text || '').trim());
           if (!done) return;
-          setMessages((prev) => {
-            const ephemeral = mergeEphemeralHeartbeats(
-              readEphemeralHeartbeats(chatId, activeWorker),
-              filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
-            );
-            const withImages = preserveImagePreviewsFromPrevious(fromServer, prev);
-            return stripThinkingStatusHeartbeats(
-              finalizeRunningToolHeartbeats(
-                mergeHistoryWithEphemeral(withImages, ephemeral)
-              )
-            );
-          });
+          finishFromHistory(fromServer);
+        })
+        .catch(() => undefined);
+    };
+
+    const forceRelease = () => {
+      if (cancelled) return;
+      void adminService
+        .getConversation(chatId, tenantId)
+        .then((data) => {
+          if (cancelled) return;
+          const fromServer = historyToChatMessages(data.messages, tenantId);
+          finishFromHistory(fromServer.length ? fromServer : []);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setMessages((m) =>
+            coalesceTrailingToolHeartbeats(
+              finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(m))
+            )
+          );
           clearPendingDetachedTurn(chatId);
           setLoading(false);
           setThinking(false);
-        })
-        .catch(() => undefined);
+        });
     };
 
     const delays = [
@@ -176,6 +168,7 @@ export function useDetachedTurnResume(opts: {
       window.setTimeout(applyActivity, delay),
       window.setTimeout(checkCompletion, delay + 250),
     ]);
+    timers.push(window.setTimeout(forceRelease, 310_000));
     return () => {
       cancelled = true;
       timers.forEach((id) => window.clearTimeout(id));

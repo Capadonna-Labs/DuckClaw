@@ -1,5 +1,7 @@
 """Etiquetas de subagentes según instancias activas (manager → worker)."""
 
+import time
+
 import pytest
 
 from duckclaw.graphs import subagent_run_id as m
@@ -88,3 +90,19 @@ def test_list_active_swarm_slots_two_parallel(monkeypatch: pytest.MonkeyPatch) -
     m.release_subagent_slot(tid, w, ta)
     m.release_subagent_slot(tid, w, tb)
     assert m.list_active_swarm_slots(tid, [w]) == []
+
+
+def test_fallback_prunes_stale_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("DUCKCLAW_REDIS_URL", raising=False)
+    tid = f"tenant-stale-{id(monkeypatch)}"
+    w = "BI-Analyst"
+    t_old, _ = m.acquire_subagent_slot(tid, w)
+    fbk = m._fallback_bucket_key(tid, w, None)
+    with m._fallback_lock:
+        m._fallback_active[fbk][t_old] = time.monotonic() - m._SLOT_MAX_AGE_S - 10
+    t_new, n_new = m.acquire_subagent_slot(tid, w)
+    assert n_new == 1
+    assert m.active_subagent_label(tid, w, t_old) == 1  # gone → default 1
+    assert m.active_subagent_label(tid, w, t_new) == 1
+    m.release_subagent_slot(tid, w, t_new)

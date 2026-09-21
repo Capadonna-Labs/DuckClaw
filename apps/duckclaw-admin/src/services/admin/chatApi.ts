@@ -1,4 +1,5 @@
 import { readSseChatStream } from '@/lib/sseChat';
+import { isSseIdleTimeoutError } from '@/lib/sseIdle';
 import { friendlyGatewayError } from '@/lib/adminErrors';
 
 import { adminFetch, coalesceAdminGet, sessionHeaders } from './http';
@@ -520,6 +521,10 @@ export const chatApi = {
       }
     } catch (err) {
       if (options?.signal?.aborted || (err instanceof DOMException && err.name === 'AbortError')) {
+        return full;
+      }
+      // Stream muerto (sin keepalive): devolver lo acumulado; el caller reconcilia historial.
+      if (isSseIdleTimeoutError(err)) {
         return full;
       }
       const raw = err instanceof Error ? err.message : 'Error';

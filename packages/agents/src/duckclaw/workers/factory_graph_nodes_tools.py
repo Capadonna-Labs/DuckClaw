@@ -327,6 +327,8 @@ def make_tools_node(ctx: WorkerGraphContext):
                 tool = tool_lookup.get(name)
                 if tool:
                     _tool_t0: float | None = None
+                    _tool_terminal = False
+                    content = ""
                     try:
                         invoke_args: Any = args
                         if isinstance(args, dict):
@@ -521,6 +523,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                             _admin_detail,
                             elapsed_ms=(time.perf_counter() - _tool_t0) * 1000,
                         )
+                        _tool_terminal = True
                     except Exception as e:
                         content = _apply_harness_post(name, "", exc=e)
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
@@ -532,6 +535,23 @@ def make_tools_node(ctx: WorkerGraphContext):
                                 (time.perf_counter() - _tool_t0) * 1000 if _tool_t0 is not None else None
                             ),
                         )
+                        _tool_terminal = True
+                    finally:
+                        if not _tool_terminal:
+                            _tool_notify(
+                                name,
+                                "error",
+                                "interrupted",
+                                elapsed_ms=(
+                                    (time.perf_counter() - _tool_t0) * 1000
+                                    if _tool_t0 is not None
+                                    else None
+                                ),
+                            )
+                            if not content:
+                                content = _apply_harness_post(
+                                    name, "", exc=RuntimeError("tool interrupted")
+                                )
                 else:
                     if not sandbox_enabled and name in (
                         "run_sandbox",

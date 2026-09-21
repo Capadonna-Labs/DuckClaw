@@ -26,8 +26,9 @@ def test_ios_pwa_turn_uses_detached_mode_and_keeps_runtime_visible() -> None:
     assert "detached: true" in turn
     assert "pollDetachedActivity()" in turn
     assert "pollDetachedCompletion()" in turn
-    assert "if (detachedRunning)" in turn
-    assert "setLoading(false);" in turn.split("if (detachedRunning)", 1)[1]
+    assert "if (detachedRunning || reconciledFromHistory)" in turn
+    assert "applyCompletedTurnFromHistory" in turn
+    assert "setLoading(false);" in turn
     assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in turn
     assert "readEphemeralHeartbeats(chatId, activeWorker)" in turn
     assert "writePendingDetachedTurn({" in turn
@@ -52,6 +53,7 @@ def test_pwa_reopens_resume_detached_turn_from_activity() -> None:
     assert "setLoading(true)" in resume
     assert "mergeHistoryWithEphemeral(withImages, ephemeral)" in resume
     assert "clearPendingDetachedTurn(chatId)" in resume
+    assert "forceRelease" in resume
     assert "localStorage.setItem(key(turn.chatId)" in state
 
 
@@ -59,12 +61,16 @@ def test_history_reload_restores_tool_usage_from_activity_backlog() -> None:
     history = (
         ROOT / "apps/duckclaw-admin/src/components/chat/useAdminChatHistory.ts"
     ).read_text(encoding="utf-8")
+    shared = (
+        ROOT / "apps/duckclaw-admin/src/lib/chatActivityHeartbeats.ts"
+    ).read_text(encoding="utf-8")
 
-    assert "function toolHeartbeatsFromActivity(" in history
+    assert "toolHeartbeatsFromActivity" in history
+    assert "from '@/lib/chatActivityHeartbeats'" in history
+    assert "export function toolHeartbeatsFromActivity(" in shared
     assert "getPlaygroundChatActivity(chatId, 80)" in history
     assert "activityEphemeral" in history
     assert "mergeEphemeralHeartbeats(" in history
-    assert "turnUserIndex" in history
 
 
 def test_detached_completion_keeps_tool_usage_from_activity_backlog() -> None:
@@ -72,11 +78,12 @@ def test_detached_completion_keeps_tool_usage_from_activity_backlog() -> None:
         ROOT / "apps/duckclaw-admin/src/components/chat/runAdminChatTurn.ts"
     ).read_text(encoding="utf-8")
 
-    completion = turn.split("const pollDetachedCompletion = () =>", 1)[1]
-    assert "function toolHeartbeatsFromActivity(" in turn
-    assert "getPlaygroundChatActivity(chatId, 80)" in completion
-    assert "activityEphemeral" in completion
-    assert "mergeEphemeralHeartbeats(" in completion
+    assert "toolHeartbeatsFromActivity" in turn
+    assert "from '@/lib/chatActivityHeartbeats'" in turn
+    assert "applyCompletedTurnFromHistory" in turn
+    assert "getPlaygroundChatActivity(chatId, 80)" in turn
+    assert "mergeEphemeralHeartbeats(" in turn
+    assert "startLiveHistoryWatchdog" in turn
 
 
 def test_tool_usage_timer_stays_live_during_detached_loading() -> None:
@@ -89,4 +96,18 @@ def test_tool_usage_timer_stays_live_during_detached_loading() -> None:
 
     assert "liveWhileLoading?: boolean" in group
     assert "const headerRunning = anyRunning || liveWhileLoading" in group
-    assert "liveWhileLoading={loading && itemIdx === displayItems.length - 1}" in message_list
+    assert "liveWhileLoading={" in message_list
+    assert "toolGroupHasRunning(messages, item.indices)" in message_list
+    # No cronómetro eterno solo por loading=true sin tools/streaming.
+    assert "msg.streaming" in message_list
+
+
+def test_sse_idle_timeout_and_idle_error_helpers() -> None:
+    sse = (ROOT / "apps/duckclaw-admin/src/lib/sseChat.ts").read_text(encoding="utf-8")
+    idle = (ROOT / "apps/duckclaw-admin/src/lib/sseIdle.ts").read_text(encoding="utf-8")
+    api = (ROOT / "apps/duckclaw-admin/src/services/admin/chatApi.ts").read_text(encoding="utf-8")
+
+    assert "SseIdleTimeoutError" in sse
+    assert "SSE_IDLE_TIMEOUT_MS" in idle
+    assert "isSseIdleTimeoutError" in api
+    assert "readWithIdleTimeout" in sse

@@ -84,7 +84,12 @@ def test_detached_completion_keeps_tool_usage_from_activity_backlog() -> None:
     assert "preserveInFlightOptimisticTurn(" in completion
 
 
-def test_tool_usage_timer_stays_live_during_detached_loading() -> None:
+def test_tool_usage_timer_only_while_tools_running() -> None:
+    """Live header clock must not keep ticking after tools are done.
+
+    Previously ``anyRunning || liveWhileLoading`` inflated invoke_worker from
+    ~3m (gateway elapsed) to ~30m while the turn stayed in loading.
+    """
     group = (
         ROOT / "apps/duckclaw-admin/src/components/chat/ToolUsageGroup.tsx"
     ).read_text(encoding="utf-8")
@@ -93,5 +98,6 @@ def test_tool_usage_timer_stays_live_during_detached_loading() -> None:
     ).read_text(encoding="utf-8")
 
     assert "liveWhileLoading?: boolean" in group
-    assert "const headerRunning = anyRunning || liveWhileLoading" in group
+    assert "const headerRunning = anyRunning;" in group
+    assert "anyRunning || liveWhileLoading" not in group
     assert "liveWhileLoading={loading && itemIdx === displayItems.length - 1}" in message_list

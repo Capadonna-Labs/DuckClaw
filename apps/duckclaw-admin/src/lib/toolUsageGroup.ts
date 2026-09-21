@@ -79,9 +79,9 @@ export function toolGroupTotalElapsedMs(messages: ChatMsg[], indices: number[]):
     const m = messages[idx];
     if (isToolHeartbeatRunning(m)) return null;
     const start = m.toolStartedAt;
-    const elapsed =
-      m.toolElapsedMs ??
-      (start != null ? Math.max(0, Date.now() - start) : undefined);
+    // Solo toolElapsedMs del done/error — nunca Date.now()-start (crece sin tope
+    // si el SSE done llegó sin elapsed o se perdió el campo al rehidratar).
+    const elapsed = m.toolElapsedMs;
     if (elapsed != null && Number.isFinite(elapsed)) {
       anyElapsed = true;
       maxElapsed = Math.max(maxElapsed, elapsed);
@@ -171,24 +171,20 @@ export function groupToolInvocationsByName(
     const hasRunning = toolMessages.some((m) => isToolHeartbeatRunning(m));
     const hasError = toolMessages.some((m) => m.toolPhase === 'error');
     
-    // Calcular tiempos solo de mensajes completados
+    // Calcular tiempos solo de mensajes completados (elapsed del done, no wall clock).
     const completedMessages = toolMessages.filter((m) => !isToolHeartbeatRunning(m));
     const times = completedMessages
       .map((m) => {
-        const ms =
-          m.toolElapsedMs ??
-          (m.toolStartedAt != null ? Math.max(0, Date.now() - m.toolStartedAt) : undefined);
+        const ms = m.toolElapsedMs;
         return ms != null && Number.isFinite(ms) ? ms : null;
       })
       .filter((t): t is number => t !== null);
-    
-    // Último tiempo (del mensaje más reciente)
+
     const newestCompleted = newestByStartedAt(completedMessages);
     const latestMs =
-      newestCompleted?.toolElapsedMs ??
-      (newestCompleted?.toolStartedAt != null
-        ? Math.max(0, Date.now() - newestCompleted.toolStartedAt)
-        : null);
+      newestCompleted?.toolElapsedMs != null && Number.isFinite(newestCompleted.toolElapsedMs)
+        ? newestCompleted.toolElapsedMs
+        : null;
     
     // Tiempo promedio y máximo
     const averageMs = times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : null;

@@ -31,6 +31,7 @@ import {
   parseToolNameFromHeartbeatText,
   toolHeartbeatDisplayText,
 } from '@/lib/toolHeartbeat';
+import { toolHeartbeatsFromActivity } from '@/lib/chatActivityHeartbeats';
 
 import {
   applyLastTurnTokenDisplay,
@@ -74,61 +75,6 @@ function looksLikeMobileDetachError(error: unknown): boolean {
 type ActivityEvent = Awaited<
   ReturnType<typeof adminService.getPlaygroundChatActivity>
 >['events'][number];
-
-function toolHeartbeatsFromActivity(
-  events: ActivityEvent[],
-  activeWorker: string
-): ChatMsg[] {
-  const out: ChatMsg[] = [];
-  const runningByTool = new Map<string, number>();
-  for (const ev of events) {
-    const toolName = String(ev.tool_name || '').trim();
-    if (ev.kind !== 'tool' || !toolName) continue;
-    const phase = mapSseToolPhase(ev.tool_phase);
-    const elapsedMs =
-      ev.elapsed_ms != null && Number.isFinite(Number(ev.elapsed_ms))
-        ? Number(ev.elapsed_ms)
-        : undefined;
-    const isStart = phase === 'running';
-    const runningIdx = runningByTool.get(toolName);
-    const startedAt = elapsedMs != null ? Date.now() - elapsedMs : Date.now();
-    const base: ChatMsg = {
-      role: 'heartbeat',
-      text: toolHeartbeatDisplayText(toolName, phase, elapsedMs),
-      heartbeatKind: 'tool',
-      workerId: String(ev.worker_id || activeWorker || ''),
-      swarmSlot:
-        ev.swarm_slot != null && Number.isFinite(Number(ev.swarm_slot))
-          ? Math.max(1, Math.floor(Number(ev.swarm_slot)))
-          : 1,
-      toolName,
-      toolInvocationId: createToolInvocationId(toolName),
-      toolPhase: phase ?? 'done',
-      toolStartedAt: startedAt,
-      toolElapsedMs: elapsedMs,
-      turnUserIndex:
-        ev.turn_user_index != null && Number.isFinite(Number(ev.turn_user_index))
-          ? Math.max(1, Math.floor(Number(ev.turn_user_index)))
-          : undefined,
-    };
-    if (isStart) {
-      runningByTool.set(toolName, out.length);
-      out.push(base);
-      continue;
-    }
-    if (runningIdx != null && out[runningIdx]) {
-      out[runningIdx] = {
-        ...base,
-        toolInvocationId: out[runningIdx].toolInvocationId,
-        toolStartedAt: out[runningIdx].toolStartedAt,
-      };
-      runningByTool.delete(toolName);
-      continue;
-    }
-    out.push(base);
-  }
-  return out;
-}
 
 export type RunAdminChatTurnParams = {
   text: string;
@@ -469,59 +415,94 @@ const pollDetachedActivity = () => {
   }
 };
 
+/** Aplica historial+activity cuando el servidor ya terminó el turno (SSE colgado o detach). */
+const applyCompletedTurnFromHistory = async (): Promise<boolean> => {
+  try {
+    const [data, activity] = await Promise.all([
+      adminService.getConversation(chatId, effectiveTenantId || 'default'),
+      adminService.getPlaygroundChatActivity(chatId, 80).catch(() => ({ events: [] as ActivityEvent[] })),
+    ]);
+    const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
+    const userIdx = [...fromServer]
+      .map((m, i) => ({ m, i }))
+      .reverse()
+      .find(({ m }) => m.role === 'user' && (m.text || '').trim() === text.trim())?.i;
+    const done =
+      userIdx != null &&
+      fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
+    if (!done) return false;
+    const activeWorker = workerId || '';
+    const activityEphemeral = toolHeartbeatsFromActivity(activity.events || [], activeWorker);
+    setMessages((prev) => {
+      const ephemeral = mergeEphemeralHeartbeats(
+        mergeEphemeralHeartbeats(
+          readEphemeralHeartbeats(chatId, activeWorker),
+          filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
+        ),
+        activityEphemeral
+      );
+      const withImages = preserveImagePreviewsFromPrevious(
+        fromServer.length ? fromServer : prev,
+        prev
+      );
+      return stripThinkingStatusHeartbeats(
+        finalizeRunningToolHeartbeats(mergeHistoryWithEphemeral(withImages, ephemeral))
+      );
+    });
+    setLoading(false);
+    setThinking(false);
+    clearPendingDetachedTurn(chatId);
+    onConversationActivity?.();
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const pollDetachedCompletion = () => {
   const delays = [3_000, 8_000, 15_000, 30_000, 60_000, 120_000, 180_000, 240_000, 300_000];
   for (const delay of delays) {
     window.setTimeout(() => {
-      void adminService
-        .getConversation(chatId, effectiveTenantId || 'default')
-        .then((data) =>
-          Promise.all([
-            Promise.resolve(data),
-            adminService.getPlaygroundChatActivity(chatId, 80).catch(() => ({ events: [] })),
-          ])
-        )
-        .then(([data, activity]) => {
-          const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
-          const userIdx = [...fromServer]
-            .map((m, i) => ({ m, i }))
-            .reverse()
-            .find(({ m }) => m.role === 'user' && (m.text || '').trim() === text.trim())?.i;
-          const done =
-            userIdx != null &&
-            fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
-          if (!done) return;
-          const activeWorker = workerId || '';
-          const activityEphemeral = toolHeartbeatsFromActivity(
-            activity.events || [],
-            activeWorker
-          );
-          setMessages((prev) => {
-            const ephemeral = mergeEphemeralHeartbeats(
-              mergeEphemeralHeartbeats(
-                readEphemeralHeartbeats(chatId, activeWorker),
-                filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
-              ),
-              activityEphemeral
-            );
-            const withImages = preserveImagePreviewsFromPrevious(
-              fromServer.length ? fromServer : prev,
-              prev
-            );
-            return stripThinkingStatusHeartbeats(
-              finalizeRunningToolHeartbeats(
-                mergeHistoryWithEphemeral(withImages, ephemeral)
-              )
-            );
-          });
-          setLoading(false);
-          setThinking(false);
-          clearPendingDetachedTurn(chatId);
-          onConversationActivity?.();
-        })
-        .catch(() => undefined);
+      void applyCompletedTurnFromHistory();
     }, delay);
   }
+  // Terminal: si tras el último poll el servidor no marcó done, igual soltar loading
+  // (evita X + Tool Usage eternos). El historial puede recuperarse al reabrir.
+  window.setTimeout(() => {
+    void applyCompletedTurnFromHistory().then((done) => {
+      if (done) return;
+      setMessages((m) =>
+        coalesceTrailingToolHeartbeats(
+          finalizeRunningToolHeartbeats(stripThinkingStatusHeartbeats(m))
+        )
+      );
+      setLoading(false);
+      setThinking(false);
+      clearPendingDetachedTurn(chatId);
+    });
+  }, 310_000);
+};
+
+/** Mientras el SSE vive: si Redis ya tiene el assistant, abortar stream y reconciliar. */
+let reconciledFromHistory = false;
+const historyWatchdogTimers: number[] = [];
+const startLiveHistoryWatchdog = () => {
+  const delays = [20_000, 45_000, 75_000, 120_000, 180_000, 240_000];
+  for (const delay of delays) {
+    const id = window.setTimeout(() => {
+      if (reconciledFromHistory || abortController.signal.aborted) return;
+      void applyCompletedTurnFromHistory().then((done) => {
+        if (!done || reconciledFromHistory) return;
+        reconciledFromHistory = true;
+        abortController.abort();
+      });
+    }, delay);
+    historyWatchdogTimers.push(id);
+  }
+};
+const clearLiveHistoryWatchdog = () => {
+  historyWatchdogTimers.forEach((id) => window.clearTimeout(id));
+  historyWatchdogTimers.length = 0;
 };
 
 // Solo desbloquear audio si este turno pedirá TTS. Un play() silencioso en
@@ -645,6 +626,7 @@ try {
     artifact_id?: string;
     artifact_tenant_id?: string;
   } = {};
+  startLiveHistoryWatchdog();
   streamedFull = await adminService.playgroundChatStream(
     {
       worker_id: workerId,
@@ -719,9 +701,21 @@ try {
     },
     { signal: abortController.signal }
   );
+  clearLiveHistoryWatchdog();
+  if (reconciledFromHistory) {
+    return;
+  }
   if (abortController.signal.aborted) {
+    // Stream idle/colgado: intentar historial antes de tratar como cancelación del usuario.
+    const recovered = await applyCompletedTurnFromHistory();
+    if (recovered) return;
     finalizeCancelledGeneration();
     return;
+  }
+  // Idle timeout SSE (sin abort): stream devolvió vacío/parcial sin done — reconciliar.
+  if (!authoritativeResponse.trim()) {
+    const recovered = await applyCompletedTurnFromHistory();
+    if (recovered) return;
   }
   const capturedStreamAudio = streamAudioRef.current;
   const tenantForArtifact =
@@ -803,10 +797,18 @@ try {
     }
   }
 } catch (e) {
+  clearLiveHistoryWatchdog();
+  if (reconciledFromHistory) {
+    return;
+  }
   if (abortController.signal.aborted) {
+    const recovered = await applyCompletedTurnFromHistory();
+    if (recovered) return;
     finalizeCancelledGeneration();
     return;
   }
+  const recovered = await applyCompletedTurnFromHistory();
+  if (recovered) return;
   const msg = friendlyGatewayError(e instanceof Error ? e.message : 'Error');
   setMessages((m) => {
     const trimmed =
@@ -817,10 +819,11 @@ try {
   });
   setError(msg);
 } finally {
+  clearLiveHistoryWatchdog();
   if (abortControllerRef.current === abortController) {
     abortControllerRef.current = null;
   }
-  if (detachedRunning) {
+  if (detachedRunning || reconciledFromHistory) {
     return;
   }
   setLoading(false);

@@ -43,10 +43,34 @@ from typing import Any, Final
 _log = logging.getLogger(__name__)
 
 _REDIS_ACTIVE_PREFIX: Final[str] = "duckclaw:subagent_active:"
+# Tokens huérfanos tras kill/restart del gateway; barrido en acquire/list.
+_SLOT_MAX_AGE_S: Final[float] = 2 * 60 * 60
 
 _fallback_lock = threading.Lock()
 # (tid, wid) o (tid, wid, chat_scope) -> {token: monotonic_ts}
 _fallback_active: dict[tuple[str, ...], dict[str, float]] = {}
+
+
+def _prune_stale_redis_members(client: Any, key: str, *, now: float | None = None) -> int:
+    """Quita miembros más viejos que ``_SLOT_MAX_AGE_S``. Devuelve cuántos removió."""
+    cutoff = (now if now is not None else time.time()) - _SLOT_MAX_AGE_S
+    try:
+        removed = int(client.zremrangebyscore(key, "-inf", cutoff) or 0)
+        if int(client.zcard(key) or 0) == 0:
+            client.delete(key)
+        else:
+            client.expire(key, int(_SLOT_MAX_AGE_S) + 3600)
+        return removed
+    except Exception as exc:
+        _log.debug("subagent_run_id: prune stale falló (%s)", exc)
+        return 0
+
+
+def _prune_stale_fallback(bucket: dict[str, float]) -> None:
+    cutoff = time.monotonic() - _SLOT_MAX_AGE_S
+    stale = [tok for tok, ts in bucket.items() if ts < cutoff]
+    for tok in stale:
+        bucket.pop(tok, None)
 
 
 def _redis_url() -> str:
@@ -185,6 +209,7 @@ def list_active_swarm_slots(
                     wid, chat_scope = parsed
                     if allow and wid not in allow:
                         continue
+                    _prune_stale_redis_members(client, key)
                     members = client.zrange(key, 0, -1, withscores=True)
                     rows.extend(_slots_from_sorted_tokens(list(members), wid, chat_scope))
                 if cursor == 0:
@@ -215,7 +240,9 @@ def acquire_subagent_slot(
 
             client = redis_sync.Redis.from_url(url, decode_responses=True)
             key = _active_key(tid, wid, cscope)
+            _prune_stale_redis_members(client, key)
             client.zadd(key, {token: time.time()})
+            client.expire(key, int(_SLOT_MAX_AGE_S) + 3600)
             rank = client.zrank(key, token)
             return token, int(rank) + 1 if rank is not None else 1
         except Exception as exc:
@@ -223,6 +250,7 @@ def acquire_subagent_slot(
     fbk = _fallback_bucket_key(tid, wid, cscope)
     with _fallback_lock:
         d = _fallback_active.setdefault(fbk, {})
+        _prune_stale_fallback(d)
         d[token] = time.monotonic()
         sorted_toks = sorted(d.keys(), key=lambda t: d[t])
         rank = sorted_toks.index(token)
@@ -242,17 +270,23 @@ def release_subagent_slot(
     cscope = _norm_chat_scope(chat_id)
     url = _redis_url()
     if url:
-        try:
-            import redis as redis_sync  # noqa: PLC0415
+        last_exc: Exception | None = None
+        for _attempt in range(2):
+            try:
+                import redis as redis_sync  # noqa: PLC0415
 
-            client = redis_sync.Redis.from_url(url, decode_responses=True)
-            key = _active_key(tid, wid, cscope)
-            client.zrem(key, token)
-            if int(client.zcard(key) or 0) == 0:
-                client.delete(key)
-            return
-        except Exception as exc:
-            _log.debug("subagent_run_id: Redis ZREM falló (%s), uso fallback en memoria", exc)
+                client = redis_sync.Redis.from_url(url, decode_responses=True)
+                key = _active_key(tid, wid, cscope)
+                client.zrem(key, token)
+                if int(client.zcard(key) or 0) == 0:
+                    client.delete(key)
+                return
+            except Exception as exc:
+                last_exc = exc
+        _log.warning(
+            "subagent_run_id: Redis ZREM falló tras reintento (%s); limpio fallback memoria",
+            last_exc,
+        )
     fbk = _fallback_bucket_key(tid, wid, cscope)
     with _fallback_lock:
         d = _fallback_active.get(fbk)

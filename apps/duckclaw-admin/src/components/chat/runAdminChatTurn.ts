@@ -96,7 +96,9 @@ function toolHeartbeatsFromActivity(
   activeWorker: string
 ): ChatMsg[] {
   const out: ChatMsg[] = [];
-  const runningByTool = new Map<string, number>();
+  // Key by worker+tool so nested delegate tools (caller->target) don't collapse
+  // onto the parent's same-named tool (e.g. two get_current_time).
+  const runningByKey = new Map<string, number>();
   for (const ev of events) {
     const toolName = String(ev.tool_name || '').trim();
     if (ev.kind !== 'tool' || !toolName) continue;
@@ -106,13 +108,15 @@ function toolHeartbeatsFromActivity(
         ? Number(ev.elapsed_ms)
         : undefined;
     const isStart = phase === 'running';
-    const runningIdx = runningByTool.get(toolName);
+    const workerKey = String(ev.worker_id || activeWorker || '').trim();
+    const runKey = `${workerKey}|${toolName}`;
+    const runningIdx = runningByKey.get(runKey);
     const startedAt = elapsedMs != null ? Date.now() - elapsedMs : Date.now();
     const base: ChatMsg = {
       role: 'heartbeat',
       text: toolHeartbeatDisplayText(toolName, phase, elapsedMs),
       heartbeatKind: 'tool',
-      workerId: String(ev.worker_id || activeWorker || ''),
+      workerId: workerKey || String(activeWorker || ''),
       swarmSlot:
         ev.swarm_slot != null && Number.isFinite(Number(ev.swarm_slot))
           ? Math.max(1, Math.floor(Number(ev.swarm_slot)))
@@ -128,7 +132,7 @@ function toolHeartbeatsFromActivity(
           : undefined,
     };
     if (isStart) {
-      runningByTool.set(toolName, out.length);
+      runningByKey.set(runKey, out.length);
       out.push(base);
       continue;
     }
@@ -138,7 +142,7 @@ function toolHeartbeatsFromActivity(
         toolInvocationId: out[runningIdx].toolInvocationId,
         toolStartedAt: out[runningIdx].toolStartedAt,
       };
-      runningByTool.delete(toolName);
+      runningByKey.delete(runKey);
       continue;
     }
     out.push(base);

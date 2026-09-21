@@ -55,6 +55,13 @@ function earliestStartedAt(messages: ChatMsg[]): number | null {
   return min;
 }
 
+function newestToolMessage(messages: ChatMsg[]): ChatMsg | null {
+  return messages.reduce<ChatMsg | null>((best, m) => {
+    if (!best) return m;
+    return (m.toolStartedAt ?? 0) >= (best.toolStartedAt ?? 0) ? m : best;
+  }, null);
+}
+
 function GroupedToolRow({
   grouped,
   identityLabel,
@@ -68,7 +75,15 @@ function GroupedToolRow({
   const max = formatToolDurationMs(maxMs);
   const avg = formatToolDurationMs(averageMs);
   const live = formatToolDurationMs(liveMs);
-  const identityPrefix = formatChatIdentityPrefix(identityLabel);
+  // Prefer the row's own workerId (e.g. quant_analyst->quant-trader) over the
+  // group-level label from the first tool.
+  const rowWorker =
+    (newestToolMessage(messages)?.workerId || '').trim() || identityLabel;
+  const identityPrefix = formatChatIdentityPrefix(
+    rowWorker.includes('->')
+      ? rowWorker.split('->').pop()?.trim() || rowWorker
+      : rowWorker
+  );
 
   let timing = '';
   if (isRunning && live) {

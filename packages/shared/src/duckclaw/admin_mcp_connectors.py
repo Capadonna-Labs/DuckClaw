@@ -214,6 +214,69 @@ def _connector_uses_adb_device(connector: dict[str, Any]) -> bool:
     return connector_uses_adb_auth(connector)
 
 
+def _newest_mcp_connector_secret(
+    db: Any, *, key: str, tenant_id: str
+) -> tuple[str, Any]:
+    """Latest active mcp_connector secret for key/tenant, any actor_email.
+
+    ponytail: OAuth persists under the session actor; connector.owner_email is often
+    still ``system``. Prefer newest by updated_at so a fresh user OAuth is not
+    shadowed by a stale system row (has_auth=false / invalid_grant loop).
+    """
+    key = str(key or "").strip()
+    if not key:
+        return "", None
+    row = _fetchone(
+        db.execute(
+            "SELECT value_text, updated_at FROM main.admin_runtime_settings "
+            "WHERE active = true AND domain = 'mcp_connector' AND key = ? AND tenant_id = ? "
+            "AND length(trim(coalesce(value_text, ''))) > 0 "
+            "ORDER BY updated_at DESC LIMIT 1",
+            [key, tenant_id],
+        )
+    )
+    if not row:
+        return "", None
+    if isinstance(row, dict):
+        return str(row.get("value_text") or "").strip(), row.get("updated_at")
+    return str(row[0] or "").strip(), (row[1] if len(row) > 1 else None)
+
+
+def _parse_secret_updated_at(updated_at: Any) -> Any:
+    """Normalize DB/runtime updated_at to aware datetime for age checks."""
+    if updated_at is None or updated_at == "":
+        return None
+    if hasattr(updated_at, "tzinfo"):
+        from datetime import timezone
+
+        ts = updated_at
+        if ts.tzinfo is None:
+            return ts.replace(tzinfo=timezone.utc)
+        return ts
+    text = str(updated_at).strip()
+    if not text:
+        return None
+    try:
+        from datetime import datetime, timezone
+
+        # DuckDB / _public_setting often stringify as 'YYYY-MM-DD HH:MM:SS[.fff]'
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+        ):
+            try:
+                return datetime.strptime(text.replace("Z", ""), fmt).replace(
+                    tzinfo=timezone.utc
+                )
+            except ValueError:
+                continue
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
 def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
     kind = str(connector.get("auth_kind") or "none").strip().lower()
     if kind in ("", "none"):
@@ -223,37 +286,23 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
         return ""
     tenant_id = str(connector.get("tenant_id") or "default")
     owner = str(connector.get("owner_email") or "system").strip().lower()
-    token = ""
-    updated_at = None
-    for actor in (owner, ""):
-        resolved = resolve_runtime_setting(
-            db,
-            tenant_id=tenant_id,
-            actor_email=actor,
-            domain="mcp_connector",
-            key=secret_key,
-        )
-        token = str(resolved.get("value") or "").strip()
-        if token:
-            break
+    token, updated_at = _newest_mcp_connector_secret(
+        db, key=secret_key, tenant_id=tenant_id
+    )
     if not token:
-        # ponytail: OAuth guarda bearer bajo actor de sesión, no owner_email del conector.
-        row = _fetchone(
-            db.execute(
-                "SELECT value_text, updated_at FROM main.admin_runtime_settings "
-                "WHERE active = true AND domain = 'mcp_connector' AND key = ? AND tenant_id = ? "
-                "AND secret = true AND length(trim(coalesce(value_text, ''))) > 0 "
-                "ORDER BY updated_at DESC LIMIT 1",
-                [secret_key, tenant_id],
+        # Fallback: scoped resolve (owner / blank actor) when SQL path is empty.
+        for actor in (owner, ""):
+            resolved = resolve_runtime_setting(
+                db,
+                tenant_id=tenant_id,
+                actor_email=actor,
+                domain="mcp_connector",
+                key=secret_key,
             )
-        )
-        if row:
-            if isinstance(row, dict):
-                token = str(row.get("value_text") or "").strip()
-                updated_at = row.get("updated_at")
-            else:
-                token = str(row[0] or "").strip()
-                updated_at = row[1] if len(row) > 1 else None
+            token = str(resolved.get("value") or "").strip()
+            if token:
+                updated_at = resolved.get("updated_at")
+                break
 
     preset_id = str(connector.get("preset_id") or "").strip().lower()
     from duckclaw.mcp_connector_presets import is_google_workspace_preset
@@ -266,40 +315,30 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
     refresh_key = f"{connector_id}.refresh" if connector_id else ""
     refresh = ""
     if refresh_key:
-        for actor in (owner, ""):
-            resolved = resolve_runtime_setting(
-                db,
-                tenant_id=tenant_id,
-                actor_email=actor,
-                domain="mcp_connector",
-                key=refresh_key,
-            )
-            refresh = str(resolved.get("value") or "").strip()
-            if refresh:
-                break
+        refresh, _ = _newest_mcp_connector_secret(
+            db, key=refresh_key, tenant_id=tenant_id
+        )
         if not refresh:
-            row = _fetchone(
-                db.execute(
-                    "SELECT value_text FROM main.admin_runtime_settings "
-                    "WHERE active = true AND domain = 'mcp_connector' AND key = ? AND tenant_id = ? "
-                    "AND secret = true AND length(trim(coalesce(value_text, ''))) > 0 "
-                    "ORDER BY updated_at DESC LIMIT 1",
-                    [refresh_key, tenant_id],
+            for actor in (owner, ""):
+                resolved = resolve_runtime_setting(
+                    db,
+                    tenant_id=tenant_id,
+                    actor_email=actor,
+                    domain="mcp_connector",
+                    key=refresh_key,
                 )
-            )
-            if row:
-                refresh = str(row[0] if not isinstance(row, dict) else row.get("value_text") or "").strip()
+                refresh = str(resolved.get("value") or "").strip()
+                if refresh:
+                    break
 
     # ponytail: Google (~1h) and Notion access tokens expire; refresh when stale.
     stale = True
-    if token and updated_at is not None:
+    parsed_updated = _parse_secret_updated_at(updated_at)
+    if token and parsed_updated is not None:
         try:
             from datetime import datetime, timezone
 
-            ts = updated_at
-            if hasattr(ts, "tzinfo") and ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
-            age_s = (datetime.now(timezone.utc) - ts).total_seconds()
+            age_s = (datetime.now(timezone.utc) - parsed_updated).total_seconds()
             # Notion tokens are short-lived; refresh earlier than Google's ~1h window.
             stale_after = 1800 if preset_id == "notion" else 3000
             stale = age_s > stale_after
@@ -322,6 +361,7 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
     else:
         # Notion: no cheap introspection; age-based above. If no updated_at, force refresh.
         stale = True
+
 
     if not stale:
         return token

@@ -209,7 +209,7 @@ def decide_current_time_tool_invocation(
 ) -> ToolInvocationDecision:
     """Force ``get_current_time`` once per user turn when the tool is bound.
 
-    Quant / trading replies need a real clock before market-hours claims. Skip
+    Time-sensitive replies need a real clock before session/hours claims. Skip
     only empty turns, system directives/events, summarize hops, and when the
     tool already ran this turn. ``spec`` retained for call-site compatibility.
     """

@@ -67,6 +67,18 @@ def test_history_reload_restores_tool_usage_from_activity_backlog() -> None:
     assert "turnUserIndex" in history
 
 
+def test_detached_completion_keeps_tool_usage_from_activity_backlog() -> None:
+    turn = (
+        ROOT / "apps/duckclaw-admin/src/components/chat/runAdminChatTurn.ts"
+    ).read_text(encoding="utf-8")
+
+    completion = turn.split("const pollDetachedCompletion = () =>", 1)[1]
+    assert "function toolHeartbeatsFromActivity(" in turn
+    assert "getPlaygroundChatActivity(chatId, 80)" in completion
+    assert "activityEphemeral" in completion
+    assert "mergeEphemeralHeartbeats(" in completion
+
+
 def test_tool_usage_timer_stays_live_during_detached_loading() -> None:
     group = (
         ROOT / "apps/duckclaw-admin/src/components/chat/ToolUsageGroup.tsx"

@@ -55,6 +55,18 @@ def test_pwa_reopens_resume_detached_turn_from_activity() -> None:
     assert "localStorage.setItem(key(turn.chatId)" in state
 
 
+def test_history_reload_restores_tool_usage_from_activity_backlog() -> None:
+    history = (
+        ROOT / "apps/duckclaw-admin/src/components/chat/useAdminChatHistory.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "function toolHeartbeatsFromActivity(" in history
+    assert "getPlaygroundChatActivity(chatId, 80)" in history
+    assert "activityEphemeral" in history
+    assert "mergeEphemeralHeartbeats(" in history
+    assert "turnUserIndex" in history
+
+
 def test_tool_usage_timer_stays_live_during_detached_loading() -> None:
     group = (
         ROOT / "apps/duckclaw-admin/src/components/chat/ToolUsageGroup.tsx"

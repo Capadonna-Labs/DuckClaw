@@ -527,31 +527,17 @@ def make_tools_node(ctx: WorkerGraphContext):
                     except Exception as e:
                         content = _apply_harness_post(name, "", exc=e)
                         _log.warning("[%s] tool=%s failed: %s", _wl, name, e)
-                        _tool_notify(
-                            name,
-                            "error",
-                            str(e)[:240],
-                            elapsed_ms=(
-                                (time.perf_counter() - _tool_t0) * 1000 if _tool_t0 is not None else None
-                            ),
-                        )
+                        _el = (time.perf_counter() - _tool_t0) * 1000 if _tool_t0 is not None else None
+                        _tool_notify(name, "error", str(e)[:240], elapsed_ms=_el)
                         _tool_terminal = True
                     finally:
+                        # BaseException / cancel mid-invoke: no dejar start sin done/error en UI.
                         if not _tool_terminal:
-                            _tool_notify(
-                                name,
-                                "error",
-                                "interrupted",
-                                elapsed_ms=(
-                                    (time.perf_counter() - _tool_t0) * 1000
-                                    if _tool_t0 is not None
-                                    else None
-                                ),
+                            _el = (time.perf_counter() - _tool_t0) * 1000 if _tool_t0 is not None else None
+                            _tool_notify(name, "error", "interrupted", elapsed_ms=_el)
+                            content = content or _apply_harness_post(
+                                name, "", exc=RuntimeError("tool interrupted")
                             )
-                            if not content:
-                                content = _apply_harness_post(
-                                    name, "", exc=RuntimeError("tool interrupted")
-                                )
                 else:
                     if not sandbox_enabled and name in (
                         "run_sandbox",

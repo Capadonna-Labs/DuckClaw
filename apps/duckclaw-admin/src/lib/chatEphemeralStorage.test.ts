@@ -89,4 +89,20 @@ const filtered = filterEphemeralForWorker([orchestratorHb, designerHb], 'UiDesig
 assert.equal(filtered.length, 1);
 assert.equal(filtered[0]?.toolName, 'fetch_market_data');
 
+// Nested invoke_worker labels must stay with the caller worker.
+const nestedHb: ChatMsg = {
+  ...toolA,
+  workerId: 'quant_analyst->quant-trader',
+  toolName: 'propose_trade_signal',
+};
+assert.equal(workerMatches('quant_analyst->quant-trader', 'quant_analyst'), true);
+assert.equal(workerMatches('quant_analyst', 'quant_analyst->quant-trader'), true);
+assert.equal(workerMatches('quant_analyst->quant-trader', 'quant_reporter'), false);
+const nestedKept = filterEphemeralForWorker(
+  [orchestratorHb, nestedHb],
+  'quant_analyst'
+);
+assert.equal(nestedKept.length, 1);
+assert.equal(nestedKept[0]?.toolName, 'propose_trade_signal');
+
 console.log('chatEphemeralStorage.test.ts: ok');

@@ -202,6 +202,13 @@ def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
 
 async def _send_web_push_notification(*, title: str, body: str, url: str = "/", tag: str = "duckclaw") -> None:
     try:
+        if REDIS_URL:
+            r = redis.from_url(REDIS_URL)
+            try:
+                if await r.exists("duckclaw:admin:pwa_visible"):
+                    return
+            finally:
+                await r.aclose()
         from duckclaw.gateway_db import get_gateway_db_path
         from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
 

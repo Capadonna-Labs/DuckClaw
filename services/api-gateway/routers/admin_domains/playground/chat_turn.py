@@ -566,6 +566,10 @@ async def _notify_playground_turn_done(
     de la PWA y enterarse cuando el turno termina.
     """
     try:
+        from routers.admin_domains.notifications import pwa_visible_recently
+
+        if await pwa_visible_recently(redis_client):
+            return
         from duckclaw.gateway_db import get_gateway_db_path
         from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
 

@@ -254,9 +254,11 @@ async def run_chat_graph(
 
         t0 = time.monotonic()
         admin_pg_vault_prev = os.environ.get("DUCKCLAW_ADMIN_PLAYGROUND_VAULT")
-        turn_user_index = (
-            sum(1 for item in (prepared.history_for_model or []) if item.get("role") == "user")
-            + (0 if prepared.is_system_prompt else 1)
+        from core.chat_history import compute_turn_user_index
+
+        turn_user_index = compute_turn_user_index(
+            prepared.history_for_model,
+            is_system_prompt=prepared.is_system_prompt,
         )
         heartbeat_turn_token = None
         try:

@@ -1,5 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import type { ChatMsg } from '@/components/chat/types';
+import { preserveInFlightOptimisticTurn } from '@/components/chat/adminChatPure';
 import {
   readEphemeralHeartbeats,
   writeEphemeralHeartbeats,
@@ -83,5 +84,47 @@ describe('writeEphemeralHeartbeats empty guard', () => {
       { role: 'assistant', text: 'ok' },
     ]);
     expect(readEphemeralHeartbeats(chatId, 'Worker-A')).toHaveLength(1);
+  });
+});
+
+describe('preserveInFlightOptimisticTurn', () => {
+  it('keeps optimistic user+tools when Redis lags behind the current turn', () => {
+    const server: ChatMsg[] = [
+      { role: 'user', text: 'old' },
+      { role: 'assistant', text: 'done asking' },
+    ];
+    const prev: ChatMsg[] = [
+      ...server,
+      { role: 'user', text: 'Sí, pero primero valida el schema' },
+      tool('read_sql'),
+    ];
+    const merged = preserveInFlightOptimisticTurn(
+      server,
+      prev,
+      'Sí, pero primero valida el schema'
+    );
+    expect(merged.map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'user',
+      'heartbeat',
+    ]);
+    expect(merged[2]?.text).toContain('valida el schema');
+  });
+
+  it('is a no-op when Redis already has the pending user', () => {
+    const server: ChatMsg[] = [
+      { role: 'user', text: 'old' },
+      { role: 'assistant', text: 'A' },
+      { role: 'user', text: 'Sí, pero primero valida el schema' },
+      { role: 'assistant', text: 'vista creada' },
+    ];
+    expect(
+      preserveInFlightOptimisticTurn(
+        server,
+        server,
+        'Sí, pero primero valida el schema'
+      )
+    ).toEqual(server);
   });
 });

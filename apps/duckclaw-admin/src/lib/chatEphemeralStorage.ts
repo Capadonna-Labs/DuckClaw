@@ -9,7 +9,7 @@ import {
 import { toolHeartbeatInvocationKey } from '@/lib/toolHeartbeat';
 import { normalizeWorkerKey, workerMatches } from '@/lib/workerOptions';
 
-const KEY_PREFIX = 'duckclaw-admin-chat-ephemeral-';
+const KEY_PREFIX = 'duckclaw-admin-chat-ephemeral-v2-';
 
 function legacyStorageKey(chatId: string): string {
   return `${KEY_PREFIX}${chatId.trim()}`;

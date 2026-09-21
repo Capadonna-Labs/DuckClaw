@@ -120,7 +120,7 @@ export function AdminChatMessageList({
   const studioPadClass = studioChromePad
     ? padForSuggestions
       ? // Composer + Sugerencias overlay — keep the last bubble above the footer.
-        'pt-16 pb-[15.25rem] sm:pt-[4.5rem] sm:pb-52'
+        'pt-16 pb-[12.25rem] sm:pt-[4.5rem] sm:pb-48'
       : 'pt-16 pb-[8.5rem] sm:pt-[4.5rem] sm:pb-36'
     : '';
 

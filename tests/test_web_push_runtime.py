@@ -37,6 +37,19 @@ def test_admin_registers_push_subscription_after_permission() -> None:
     assert "ensureWebPushSubscription" in notifications
     assert "Notification.permission === 'granted'" in service_worker
 
+
+def test_notifications_only_show_when_pwa_not_visible() -> None:
+    service_worker = (ROOT / "apps/duckclaw-admin/public/sw.js").read_text(encoding="utf-8")
+    unread = (
+        ROOT / "apps/duckclaw-admin/src/components/chat/useFloatingChatUnread.ts"
+    ).read_text(encoding="utf-8")
+
+    assert "matchAll({ type: 'window', includeUncontrolled: true })" in service_worker
+    assert "client.visibilityState === 'visible' && client.focused" in service_worker
+    assert "if (visible) return undefined" in service_worker
+    assert "{ requireBackground: true }" in unread
+    assert "const shouldNotify = tabHidden;" in unread
+
 def test_vapid_generator_is_documented_and_available() -> None:
     script = ROOT / "scripts/generate_web_push_vapid.py"
     assert script.exists()

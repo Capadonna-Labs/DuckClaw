@@ -154,10 +154,8 @@ export function useFloatingChatUnread({
         ? countUnreadAssistantMessages(msgs, lastReadRef.current)
         : 0;
       const perm = notificationPermission();
-      const panelClosed =
-        opts?.panelClosed ?? !panelOpenRef.current;
       const tabHidden = opts?.forceBackground ?? shouldNotifyInBackground();
-      const shouldNotify = tabHidden || panelClosed;
+      const shouldNotify = tabHidden;
 
       if (!sessionId || historyLoading) {
         return;
@@ -198,7 +196,7 @@ export function useFloatingChatUnread({
           tag: `duckclaw-chat-${sessionId}`,
           onClick: () => onOpenPanel?.(),
         },
-        { requireBackground: false }
+        { requireBackground: true }
       );
       if (shown) {
         lastNotifiedAssistantIndexRef.current = assistantIdx;

@@ -57,6 +57,17 @@ describe('chatEphemeralMerge', () => {
     expect(merged[merged.length - 1]?.role).toBe('heartbeat');
   });
 
+  it('clamps turn_user_index above server user count to the last user', () => {
+    // Persist truncates at MAX_MSGS → tools tagged 25 with only 24 users in Redis.
+    const merged = interleaveEphemeralIntoHistory(
+      [user('a'), assistant('A'), user('b'), assistant('B')],
+      [tool('read_sql', 99)]
+    );
+    expect(
+      merged.map((m) => `${m.role}${m.toolName ? `:${m.toolName}` : ''}`)
+    ).toEqual(['user', 'assistant', 'user', 'heartbeat:read_sql', 'assistant']);
+  });
+
   it('does not append orphan tools after the last assistant', () => {
     const merged = interleaveEphemeralIntoHistory(
       [user('a'), assistant('A')],

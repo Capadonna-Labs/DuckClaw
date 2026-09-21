@@ -102,6 +102,35 @@ export function mergeHistoryWithEphemeral(server: ChatMsg[], ephemeral: ChatMsg[
   return coalesceTrailingToolHeartbeats(interleaveEphemeralIntoHistory(server, ephemeral));
 }
 
+/**
+ * Si Redis aún no tiene el user del turno en vuelo (o un poll stale del turno
+ * anterior reemplazó el estado), re-adjunta ese user + tools/assistant locales.
+ */
+export function preserveInFlightOptimisticTurn(
+  server: ChatMsg[],
+  prev: ChatMsg[],
+  pendingText?: string
+): ChatMsg[] {
+  const pending = (pendingText || '').trim();
+  if (!pending || !prev.length) return server;
+
+  const serverHasPending = server.some(
+    (m) => m.role === 'user' && (m.text || '').trim() === pending
+  );
+  if (serverHasPending) return server;
+
+  let userIdx = -1;
+  for (let i = prev.length - 1; i >= 0; i--) {
+    if (prev[i]?.role === 'user' && (prev[i]?.text || '').trim() === pending) {
+      userIdx = i;
+      break;
+    }
+  }
+  if (userIdx < 0) return server;
+
+  return [...server, ...prev.slice(userIdx)];
+}
+
 export function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
   return messages.filter((m) => m.role === 'heartbeat');
 }

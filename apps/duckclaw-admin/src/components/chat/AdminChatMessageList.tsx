@@ -9,7 +9,7 @@ import {
   isThinkingStatusHeartbeat,
   shouldSkipEmptyStreamingAssistant,
 } from '@/components/chat/useAdminChat';
-import { groupMessagesForDisplay, toolGroupStableKey } from '@/lib/toolUsageGroup';
+import { groupMessagesForDisplay, toolGroupHasRunning, toolGroupStableKey } from '@/lib/toolUsageGroup';
 import type { RefObject } from 'react';
 
 export type AdminChatMessageListProps = {
@@ -152,7 +152,12 @@ export function AdminChatMessageList({
                 messages={messages}
                 indices={item.indices}
                 identityLabel={labelForWorkerId(first?.workerId || workerId)}
-                liveWhileLoading={loading && itemIdx === displayItems.length - 1}
+                liveWhileLoading={
+                  loading &&
+                  itemIdx === displayItems.length - 1 &&
+                  (toolGroupHasRunning(messages, item.indices) ||
+                    messages.some((msg) => msg.role === 'assistant' && msg.streaming))
+                }
               />
             );
           }

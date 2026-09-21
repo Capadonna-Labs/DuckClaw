@@ -32,9 +32,7 @@ self.addEventListener('push', (event) => {
     self.clients
       .matchAll({ type: 'window', includeUncontrolled: true })
       .then((clients) => {
-        const visible = clients.some(
-          (client) => client.visibilityState === 'visible' && client.focused
-        );
+        const visible = clients.some((client) => client.visibilityState === 'visible');
         if (visible) return undefined;
         return self.registration.showNotification(title, options);
       })

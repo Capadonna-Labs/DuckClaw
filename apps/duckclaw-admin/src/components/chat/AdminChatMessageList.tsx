@@ -119,8 +119,8 @@ export function AdminChatMessageList({
 
   const studioPadClass = studioChromePad
     ? padForSuggestions
-      ? // Composer + collapsed Sugerencias header (chips closed) — keep last line visible.
-        'pt-16 pb-[9.25rem] sm:pt-[4.5rem] sm:pb-40'
+      ? // Composer + Sugerencias overlay — keep the last bubble above the footer.
+        'pt-16 pb-[15.25rem] sm:pt-[4.5rem] sm:pb-52'
       : 'pt-16 pb-[8.5rem] sm:pt-[4.5rem] sm:pb-36'
     : '';
 

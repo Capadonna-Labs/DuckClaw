@@ -110,6 +110,7 @@ async def invoke_chat_sse_body(
                     tool_phase=str(hb.get("tool_phase") or "").strip().lower() or None,
                     tool_detail=str(hb.get("tool_detail") or "").strip() or None,
                     elapsed_ms=hb.get("elapsed_ms"),
+                    turn_user_index=hb.get("turn_user_index"),
                 )
                 last_sse_at = time.monotonic()
             except asyncio.TimeoutError:
@@ -142,6 +143,7 @@ async def invoke_chat_sse_body(
                 tool_phase=str(hb.get("tool_phase") or "").strip().lower() or None,
                 tool_detail=str(hb.get("tool_detail") or "").strip() or None,
                 elapsed_ms=hb.get("elapsed_ms"),
+                turn_user_index=hb.get("turn_user_index"),
             )
 
         result = await invoke_task

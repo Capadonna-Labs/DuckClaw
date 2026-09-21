@@ -45,6 +45,12 @@ def parse_admin_heartbeat_payload(raw: str) -> dict[str, Any] | None:
             out["swarm_slot"] = max(1, int(raw_slot))
         except (TypeError, ValueError):
             out["swarm_slot"] = 1
+    raw_turn = data.get("turn_user_index")
+    if raw_turn is not None:
+        try:
+            out["turn_user_index"] = max(1, int(raw_turn))
+        except (TypeError, ValueError):
+            pass
     aid = str(data.get("artifact_id") or "").strip()
     if aid:
         out["artifact_id"] = aid

@@ -370,6 +370,7 @@ export const chatApi = {
         tool_phase?: 'start' | 'done' | 'error';
         tool_detail?: string;
         elapsed_ms?: number;
+        turn_user_index?: number;
       }[];
     }>(`/playground/chat/activity?${q.toString()}`);
   },
@@ -418,6 +419,7 @@ export const chatApi = {
         tool_name?: string;
         tool_phase?: 'start' | 'done' | 'error';
         elapsed_ms?: number;
+        turn_user_index?: number;
       }) => void;
       onDone?: (meta: {
         response: string;
@@ -484,6 +486,7 @@ export const chatApi = {
             tool_name: ev.tool_name,
             tool_phase: ev.tool_phase,
             elapsed_ms: ev.elapsed_ms,
+            turn_user_index: ev.turn_user_index,
           });
         } else if (ev.type === 'done') {
           handlers.onDone?.({

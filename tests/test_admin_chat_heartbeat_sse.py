@@ -48,6 +48,19 @@ def test_parse_admin_heartbeat_payload_tool_fields() -> None:
     assert parsed["elapsed_ms"] == 12.3
 
 
+def test_admin_heartbeat_turn_user_index_roundtrip() -> None:
+    from core.admin_chat_heartbeat import parse_admin_heartbeat_payload
+
+    parsed = parse_admin_heartbeat_payload(
+        '{"text":"read_sql","kind":"tool","tool_name":"read_sql","turn_user_index":7}'
+    )
+    assert parsed is not None
+    assert parsed["turn_user_index"] == 7
+
+    raw = sse_heartbeat("read_sql", kind="tool", turn_user_index=7)
+    assert '"turn_user_index": 7' in raw
+
+
 def test_iter_admin_heartbeats_with_lite_store() -> None:
     """Desktop lite: heartbeats must flow without Redis."""
     import asyncio

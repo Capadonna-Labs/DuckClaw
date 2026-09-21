@@ -77,8 +77,7 @@ type ActivityEvent = Awaited<
 
 function toolHeartbeatsFromActivity(
   events: ActivityEvent[],
-  activeWorker: string,
-  turnUserIndex: number
+  activeWorker: string
 ): ChatMsg[] {
   const out: ChatMsg[] = [];
   const runningByTool = new Map<string, number>();
@@ -107,7 +106,10 @@ function toolHeartbeatsFromActivity(
       toolPhase: phase ?? 'done',
       toolStartedAt: startedAt,
       toolElapsedMs: elapsedMs,
-      turnUserIndex,
+      turnUserIndex:
+        ev.turn_user_index != null && Number.isFinite(Number(ev.turn_user_index))
+          ? Math.max(1, Math.floor(Number(ev.turn_user_index)))
+          : undefined,
     };
     if (isStart) {
       runningByTool.set(toolName, out.length);
@@ -291,6 +293,7 @@ const appendHeartbeat = (payload: {
   tool_name?: string;
   tool_phase?: 'start' | 'done' | 'error';
   elapsed_ms?: number;
+  turn_user_index?: number;
 }) => {
   const kind = payload.kind ?? 'status';
   if (
@@ -331,6 +334,10 @@ const appendHeartbeat = (payload: {
   }
   const uiPhase = mapSseToolPhase(payload.tool_phase);
   const isToolHb = effectiveKind === 'tool' && Boolean(toolName);
+  const payloadTurnUserIndex =
+    payload.turn_user_index != null && Number.isFinite(Number(payload.turn_user_index))
+      ? Math.max(1, Math.floor(Number(payload.turn_user_index)))
+      : undefined;
   if (kind === 'tool') {
     setThinking(false);
   }
@@ -370,6 +377,7 @@ const appendHeartbeat = (payload: {
           toolInvocationId: createToolInvocationId(toolName),
           toolPhase: 'running',
           toolStartedAt: startedAt,
+          turnUserIndex: payloadTurnUserIndex,
         };
         const next = [...m];
         next.splice(insertAt, 0, merged);
@@ -391,6 +399,7 @@ const appendHeartbeat = (payload: {
         toolStartedAt: startedAt,
         toolElapsedMs:
           elapsedMs != null && Number.isFinite(elapsedMs) ? elapsedMs : undefined,
+        turnUserIndex: payloadTurnUserIndex,
       };
       if (targetIdx >= 0) {
         const next = [...m];
@@ -451,6 +460,7 @@ const pollDetachedActivity = () => {
               tool_name: ev.tool_name,
               tool_phase: ev.tool_phase,
               elapsed_ms: ev.elapsed_ms,
+              turn_user_index: ev.turn_user_index,
             });
           }
         })
@@ -481,12 +491,10 @@ const pollDetachedCompletion = () => {
             userIdx != null &&
             fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
           if (!done) return;
-          const turnUserIndex = fromServer.filter((m) => m.role === 'user').length;
           const activeWorker = workerId || '';
           const activityEphemeral = toolHeartbeatsFromActivity(
             activity.events || [],
-            activeWorker,
-            turnUserIndex
+            activeWorker
           );
           setMessages((prev) => {
             const ephemeral = mergeEphemeralHeartbeats(

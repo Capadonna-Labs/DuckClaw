@@ -102,6 +102,10 @@ export function useDetachedTurnResume(opts: {
               toolPhase: phase ?? 'done',
               toolStartedAt: startedAt,
               toolElapsedMs: elapsedMs,
+              turnUserIndex:
+                ev.turn_user_index != null && Number.isFinite(Number(ev.turn_user_index))
+                  ? Math.max(1, Math.floor(Number(ev.turn_user_index)))
+                  : undefined,
             });
           }
           if (!heartbeats.length) return;

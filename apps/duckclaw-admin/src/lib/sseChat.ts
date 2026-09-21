@@ -32,6 +32,7 @@ export type SseChatEvent =
       tool_phase?: 'start' | 'done' | 'error';
       tool_detail?: string;
       elapsed_ms?: number;
+      turn_user_index?: number;
     }
   | {
       type: 'audio';
@@ -123,6 +124,13 @@ function parseDataLine(data: string): SseChatEvent | null {
           : elapsedRaw != null
             ? Number(elapsedRaw)
             : undefined;
+      const turnRaw = j.turn_user_index;
+      const turn_user_index =
+        typeof turnRaw === 'number'
+          ? turnRaw
+          : turnRaw != null
+            ? Number(turnRaw)
+            : undefined;
       return {
         type: 'heartbeat',
         text: String(j.text ?? ''),
@@ -140,6 +148,9 @@ function parseDataLine(data: string): SseChatEvent | null {
         tool_phase,
         tool_detail: typeof j.tool_detail === 'string' ? j.tool_detail : undefined,
         elapsed_ms: Number.isFinite(elapsed_ms) ? elapsed_ms : undefined,
+        turn_user_index: Number.isFinite(turn_user_index)
+          ? Math.max(1, Math.floor(turn_user_index!))
+          : undefined,
       };
     }
     if (t === 'audio') {

@@ -686,6 +686,27 @@ class UpdateTradeSignalExecutedCommand(WriteCommand):
     executed_at: str = ""  # ISO datetime
 
 
+class InsertClosedTradeCommand(WriteCommand):
+    """Insert a verified round-trip close into quant_core.closed_trades.
+
+    Idempotent on (ticker, closed_at, qty, fill_id). Capadonna fill path
+    (trading_session_fly) enqueues this after match_closing_fills succeeds.
+    """
+
+    command_type: Literal["insert_closed_trade"] = "insert_closed_trade"
+    ticker: str = Field(..., min_length=1, max_length=32)
+    fill_id: str = Field(..., min_length=1, max_length=512)
+    closed_at: str = Field(..., min_length=8, max_length=64)  # ISO / broker timestamp
+    qty: float  # signed (LONG > 0, SHORT < 0)
+    entry_px: float = Field(..., gt=0)
+    exit_px: float = Field(..., gt=0)
+    pnl: float
+    ret_pct: float
+    side: Literal["LONG", "SHORT"]
+    session_uid: str = ""
+    signal_id: str = ""  # UUID string when known; empty → NULL
+
+
 # ---------------------------------------------------------------------------
 # Raw SQL (legacy — keep for admin_sql tool)
 # ---------------------------------------------------------------------------

@@ -110,6 +110,13 @@ def test_normalize_openrouter_model_id_glm_label() -> None:
     assert normalize_openrouter_model_id("z-ai/glm-5.2") == "z-ai/glm-5.2"
 
 
+def test_normalize_openrouter_model_id_jev_aliases() -> None:
+    assert normalize_openrouter_model_id("jev") == "typesafe/jev-1.13"
+    assert normalize_openrouter_model_id("jev 1.13") == "typesafe/jev-1.13"
+    assert normalize_openrouter_model_id("jev-1.13") == "typesafe/jev-1.13"
+    assert normalize_openrouter_model_id("typesafe/jev-1.13") == "typesafe/jev-1.13"
+
+
 def test_openrouter_walkers_tolerate_magicmock() -> None:
     """Regression: MagicMock.bound must not hang CI (infinite URL / header walk)."""
     from unittest.mock import MagicMock

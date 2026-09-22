@@ -53,6 +53,10 @@ OPENROUTER_MODEL_ALIASES: dict[str, str] = {
     "glm5.2": "z-ai/glm-5.2",
     "glm 5": "z-ai/glm-5.2",
     "zhipu/glm-5.2": "z-ai/glm-5.2",
+    # TypeSafe Jev — Decisions API only (tool jev_decide), not chat/completions.
+    "jev": "typesafe/jev-1.13",
+    "jev 1.13": "typesafe/jev-1.13",
+    "jev-1.13": "typesafe/jev-1.13",
 }
 
 

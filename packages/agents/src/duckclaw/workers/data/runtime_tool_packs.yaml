@@ -262,6 +262,7 @@ packs:
         - youtube_
         - tailscale_
         - slm_eval_
+        - jev_
     activation_signals:
       - reddit
       - youtube
@@ -269,3 +270,5 @@ packs:
       - weather
       - trends
       - tailscale
+      - jev
+      - decisions

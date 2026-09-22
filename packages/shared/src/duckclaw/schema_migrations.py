@@ -1685,6 +1685,53 @@ def ensure_ibkr_orders_schema(db_path: str) -> None:
         con.close()
 
 
+# Closed trades ledger — verified round-trips from Capadonna fill matching
+_M040_CLOSED_TRADES: list[str] = [
+    """
+    CREATE SCHEMA IF NOT EXISTS quant_core
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS quant_core.closed_trades (
+        signal_id UUID,
+        session_uid VARCHAR,
+        ticker VARCHAR,
+        closed_at TIMESTAMP,
+        pnl DOUBLE,
+        ret_pct DOUBLE,
+        qty DOUBLE,
+        entry_px DOUBLE,
+        exit_px DOUBLE,
+        side VARCHAR,
+        fill_id VARCHAR
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_closed_trades_idem
+        ON quant_core.closed_trades (ticker, closed_at, qty, fill_id)
+    """,
+]
+
+
+def ensure_closed_trades_schema(db_path: str) -> None:
+    """Apply closed_trades DDL (M040) to a vault or hub DuckDB.
+
+    Hub migrate does not touch per-user vaults. Call against the Quant-Trader
+    vault before enqueueing ``InsertClosedTradeCommand``.
+    """
+    from pathlib import Path as _Path
+
+    import duckdb
+
+    path = _Path(db_path).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    con = duckdb.connect(str(path))
+    try:
+        for stmt in _M040_CLOSED_TRADES:
+            con.execute(stmt)
+    finally:
+        con.close()
+
+
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
     (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),
@@ -1692,4 +1739,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (37, "managed_workspace_draft_policy_v2", _M037_MANAGED_WORKSPACE_DRAFT_POLICY_V2),
     (38, "admin_conversations_meta_v2", _M038_ADMIN_CONVERSATIONS_META_V2),
     (39, "ibkr_orders_v1", _M039_IBKR_ORDERS),
+    (40, "closed_trades_v1", _M040_CLOSED_TRADES),
 ]

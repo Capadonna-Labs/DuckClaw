@@ -42,6 +42,7 @@ from duckclaw.write_handlers.registry import register_handler, registered_handle
 from duckclaw.write_handlers import (  # noqa: F401
     access,
     admin_auth,
+    closed_trades,
     duckdb_maintenance,
     hitl,
     ibkr_orders,

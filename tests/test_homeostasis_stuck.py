@@ -96,3 +96,91 @@ def test_build_stuck_nudge_message_mentions_escalate() -> None:
     msg = build_stuck_nudge_message(streak=3, corrective_tools=["calculate_tp_sl_distance"], escalate=True)
     assert "LOOP_HOMEOSTASIS_STUCK" in msg
     assert "escalate_stuck=true" in msg
+
+
+def test_build_loop_homeostasis_detente_misaligned() -> None:
+    from duckclaw.workers.homeostasis_stuck import build_loop_homeostasis_detente_message
+
+    msg = build_loop_homeostasis_detente_message(_payload())
+    assert "LOOP_HOMEOSTASIS_DETENTE" in msg
+    assert "DETENTE" in msg
+    assert "read_sql" in msg
+    assert "timestamp" in msg
+
+
+def test_build_loop_homeostasis_detente_aligned() -> None:
+    from duckclaw.workers.homeostasis_stuck import build_loop_homeostasis_detente_message
+
+    msg = build_loop_homeostasis_detente_message(
+        _payload(metrics_aligned=True, homeostasis_achieved=True)
+    )
+    assert "request_homeostasis_validation" in msg
+
+
+def test_maybe_append_uses_system_message_not_human(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_HOMEOSTASIS_STUCK_STREAK", "3")
+    from duckclaw import DuckClaw
+    from duckclaw.workers.homeostasis_stuck import maybe_append_homeostasis_stuck_nudge
+    from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
+
+    db_path = tmp_path / "h2.duckdb"
+    db = DuckClaw(str(db_path), read_only=False)
+    import json
+
+    tool = ToolMessage(
+        content=json.dumps(_payload()),
+        tool_call_id="t1",
+        name="evaluate_homeostasis",
+    )
+    out = maybe_append_homeostasis_stuck_nudge(
+        [HumanMessage(content="[SYSTEM_EVENT: Ciclo /loop]"), tool],
+        db=db,
+        state={"chat_id": "admin-conv-x", "tenant_id": "default"},
+    )
+    assert len(out) >= 3
+    assert isinstance(out[-1], SystemMessage) or isinstance(out[-2], SystemMessage)
+    assert not any(isinstance(m, HumanMessage) and "LOOP_HOMEOSTASIS" in str(m.content) for m in out)
+    assert any("LOOP_HOMEOSTASIS_DETENTE" in str(getattr(m, "content", "")) for m in out)
+    db.close()
+
+
+def test_apply_terminal_clears_read_sql_after_evaluate_on_loop() -> None:
+    from duckclaw.workers.factory_graph_nodes_agent_policy_early_context import (
+        apply_terminal_force_tool_overrides,
+    )
+
+    incoming = "[SYSTEM_EVENT: Ciclo de auto-mejora programado /loop. Metas (/goals): SL.]"
+    (
+        orch,
+        force_schema,
+        force_admin,
+        force_read,
+        force_tavily,
+        force_reddit,
+        force_visual,
+    ) = apply_terminal_force_tool_overrides(
+        incoming=incoming,
+        orch_incoming=incoming,
+        intent_incoming=incoming,
+        tools_by_name={"evaluate_homeostasis": object(), "read_sql": object()},
+        called_tools_since_last_human={"evaluate_homeostasis"},
+        already_has_tool_result=False,
+        telegram_context_summarize_directive=False,
+        summarize_stored_directive=False,
+        use_heuristic_first_tool=True,
+        force_orch_tool="read_sql",
+        force_schema=False,
+        force_admin_sql=False,
+        force_read_sql=True,
+        force_tavily=False,
+        force_reddit=False,
+        force_visual=False,
+        homeostasis_streak=1,
+    )
+    assert force_read is False
+    assert force_admin is False
+    assert orch is None
+    assert force_schema is False
+    assert force_tavily is False
+    assert force_reddit is False
+    assert force_visual is False

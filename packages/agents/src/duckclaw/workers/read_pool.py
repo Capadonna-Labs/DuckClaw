@@ -408,8 +408,9 @@ _COMMON_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "position_qty": ("qty", "quantity"),
     "tickers": ("ticker", "symbol"),
     "ticker": ("symbol", "tickers"),
-    "created_at": ("computed_at", "updated_at", "cancelled_at"),
-    "updated_at": ("computed_at", "created_at"),
+    "created_at": ("computed_at", "updated_at", "cancelled_at", "timestamp", "fired_at"),
+    "updated_at": ("computed_at", "created_at", "timestamp", "fired_at"),
+    "timestamp": ("updated_at", "computed_at", "created_at", "fired_at"),
     "price_source": ("current_price",),
     "mandate_type": ("mandate_id",),
 }

@@ -291,19 +291,42 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 ]
             if _rag_turn_without_db_intent or _document_turn_without_db_intent:
                 _auto_tools = without_storage_tools(_auto_tools)
+            _loop_evt = _is_loop_or_proactive_system_event(
+                str(state.get("incoming") or _intent_incoming or incoming or "")
+            )
             _pack_result = apply_runtime_tool_packs(
                 _auto_tools,
                 spec=spec,
                 intent_text=_intent_incoming,
                 messages=state.get("messages") or [],
-                loop_system_event=_is_loop_or_proactive_system_event(
-                    str(state.get("incoming") or _intent_incoming or "")
-                ),
+                loop_system_event=_loop_evt,
             )
             _auto_tools = _pack_result.tools
+            # After evaluate_homeostasis on /loop: synthesis-only (no tool thrash).
+            _loop_post_eval = False
+            if _loop_evt:
+                from duckclaw.workers.tool_orchestration import (
+                    _last_human_index as _lh_idx,
+                    _tools_since as _tools_ran,
+                )
+
+                _lh = _lh_idx(list(state.get("messages") or []))
+                _ran = set(_tools_ran(list(state.get("messages") or []), _lh))
+                if "evaluate_homeostasis" in _ran:
+                    _loop_post_eval = True
+                    _hitl_only = {
+                        "request_homeostasis_validation",
+                        "pause_chat_autonomy",
+                    }
+                    _auto_tools = [
+                        t
+                        for t in _auto_tools
+                        if str(getattr(t, "name", "") or "") in _hitl_only
+                        and str(getattr(t, "name", "") or "") not in _ran
+                    ]
             log_pack_filter_result(_wl, _pack_result)
             _auto_after = [str(getattr(t, "name", "") or "") for t in _auto_tools]
-            if _auto_after != _auto_before:
+            if _auto_after != _auto_before or _loop_post_eval:
                 _invoked_llm = _bind_tools(llm, _auto_tools)
         if _mlx_provider:
             _bound_n = _bind_est

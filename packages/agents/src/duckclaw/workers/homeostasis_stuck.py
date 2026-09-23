@@ -244,17 +244,45 @@ def build_stuck_nudge_message(*, streak: int, corrective_tools: list[str], escal
         return (
             "[SYSTEM_EVENT: LOOP_HOMEOSTASIS_STUCK] "
             f"evaluate_homeostasis devolvió el mismo resultado misaligned {streak} veces "
-            "sin hitl_required. NO vuelvas a llamar evaluate_homeostasis con el mismo informe. "
+            "sin hitl_required. NO vuelvas a llamar evaluate_homeostasis ni abras cascadas "
+            "de read_sql/Android/IBKR en este tick. "
             "Escala: llama request_homeostasis_validation con escalate_stuck=true "
             "(explica desviaciones al usuario) o pause_chat_autonomy si no hay acción segura. "
-            f"Herramientas correctivas sugeridas: {tools_txt}."
+            f"Herramientas correctivas sugeridas (próximo ciclo, no ahora): {tools_txt}."
         )
     return (
         "[SYSTEM_EVENT: LOOP_HOMEOSTASIS_NUDGE] "
         f"evaluate_homeostasis misaligned (racha {streak}) sin HITL. "
-        "NO re-reportes el mismo sensor. Corrige desviaciones con tools del worker "
+        "NO re-reportes el mismo sensor ni inventes SQL. "
+        "Corrige en el PRÓXIMO ciclo con tools del worker "
         f"({tools_txt}) o pide decisión al usuario. "
         "Solo vuelve a evaluate_homeostasis después de una corrección real."
+    )
+
+
+def build_loop_homeostasis_detente_message(payload: dict[str, Any]) -> str:
+    """Post-evaluate DETENTE for /loop ticks — stops read_sql/Android thrash before 900s."""
+    aligned = (
+        payload.get("metrics_aligned") is True
+        or payload.get("homeostasis_achieved") is True
+    )
+    hitl_required = payload.get("hitl_required") is True
+    if aligned or hitl_required:
+        return (
+            "[SYSTEM_EVENT: LOOP_HOMEOSTASIS_DETENTE] "
+            "evaluate_homeostasis ya corrió en este tick con métricas alineadas. "
+            "Si aún no pediste HITL: llama request_homeostasis_validation y DETENTE. "
+            "No llames read_sql, Android MCP, IBKR ni evaluate_homeostasis otra vez. "
+            "Responde en prosa corta al usuario."
+        )
+    return (
+        "[SYSTEM_EVENT: LOOP_HOMEOSTASIS_DETENTE] "
+        "evaluate_homeostasis ya corrió en este tick (métricas NO alineadas). "
+        "REPORTA desviaciones en prosa corta (máx ~15 líneas) y DETENTE. "
+        "Prohibido en este tick: cascadas de read_sql (no inventes columnas), "
+        "Android MCP, get_ibkr_portfolio, ni re-llamar evaluate_homeostasis. "
+        "Correcciones de host/infra van al próximo ciclo /loop o las pide el usuario. "
+        "quant_core.fluid_state usa columna timestamp (no updated_at)."
     )
 
 
@@ -264,9 +292,13 @@ def maybe_append_homeostasis_stuck_nudge(
     db: Any,
     state: dict[str, Any],
 ) -> list[Any]:
-    """If last evaluate_homeostasis is stuck, append a SYSTEM nudge HumanMessage."""
+    """After evaluate_homeostasis, append SystemMessage DETENTE (+ stuck nudge if needed).
+
+    Must be SystemMessage (not HumanMessage): a Human nudge resets
+    ``called_tools_since_last_human`` and re-enables force_read_sql thrash.
+    """
     try:
-        from langchain_core.messages import HumanMessage
+        from langchain_core.messages import SystemMessage
     except Exception:
         return new_msgs
     try:
@@ -280,17 +312,20 @@ def maybe_append_homeostasis_stuck_nudge(
             tid = (state.get("tenant_id") or "").strip() or "default"
             obs = record_homeostasis_observation(db, chat, payload, tenant_id=tid)
             action = str(obs.get("action") or "")
+            extras: list[Any] = [
+                SystemMessage(content=build_loop_homeostasis_detente_message(payload))
+            ]
             if action in ("nudge", "escalate"):
-                return list(new_msgs) + [
-                    HumanMessage(
+                extras.append(
+                    SystemMessage(
                         content=build_stuck_nudge_message(
                             streak=int(obs.get("streak") or 0),
                             corrective_tools=list(obs.get("corrective_tools") or []),
                             escalate=action == "escalate",
                         )
                     )
-                ]
-            break
+                )
+            return list(new_msgs) + extras
     except Exception:
         return new_msgs
     return new_msgs

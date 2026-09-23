@@ -282,8 +282,41 @@ def build_loop_homeostasis_detente_message(payload: dict[str, Any]) -> str:
         "Prohibido en este tick: cascadas de read_sql (no inventes columnas), "
         "Android MCP, get_ibkr_portfolio, ni re-llamar evaluate_homeostasis. "
         "Correcciones de host/infra van al próximo ciclo /loop o las pide el usuario. "
-        "quant_core.fluid_state usa columna timestamp (no updated_at)."
+        "fluid_state usa columna timestamp (no updated_at)."
     )
+
+
+def loop_post_evaluate_hitl_only_tools(
+    tools: list[Any],
+    messages: list[Any],
+    *,
+    loop_system_event: bool,
+) -> tuple[list[Any], bool]:
+    """If /loop already ran evaluate_homeostasis, keep only unused HITL close tools.
+
+    Returns (filtered_tools, applied). Callers re-bind LLM when applied is True.
+    """
+    if not loop_system_event:
+        return tools, False
+    try:
+        from duckclaw.workers.tool_orchestration import (
+            _last_human_index,
+            _tools_since,
+        )
+    except Exception:
+        return tools, False
+    msgs = list(messages or [])
+    ran = set(_tools_since(msgs, _last_human_index(msgs)))
+    if "evaluate_homeostasis" not in ran:
+        return tools, False
+    hitl_only = {"request_homeostasis_validation", "pause_chat_autonomy"}
+    kept = [
+        t
+        for t in tools
+        if str(getattr(t, "name", "") or "") in hitl_only
+        and str(getattr(t, "name", "") or "") not in ran
+    ]
+    return kept, True
 
 
 def maybe_append_homeostasis_stuck_nudge(

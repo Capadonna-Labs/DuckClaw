@@ -301,29 +301,11 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 messages=state.get("messages") or [],
                 loop_system_event=_loop_evt,
             )
-            _auto_tools = _pack_result.tools
-            # After evaluate_homeostasis on /loop: synthesis-only (no tool thrash).
-            _loop_post_eval = False
-            if _loop_evt:
-                from duckclaw.workers.tool_orchestration import (
-                    _last_human_index as _lh_idx,
-                    _tools_since as _tools_ran,
-                )
+            from duckclaw.workers.homeostasis_stuck import loop_post_evaluate_hitl_only_tools
 
-                _lh = _lh_idx(list(state.get("messages") or []))
-                _ran = set(_tools_ran(list(state.get("messages") or []), _lh))
-                if "evaluate_homeostasis" in _ran:
-                    _loop_post_eval = True
-                    _hitl_only = {
-                        "request_homeostasis_validation",
-                        "pause_chat_autonomy",
-                    }
-                    _auto_tools = [
-                        t
-                        for t in _auto_tools
-                        if str(getattr(t, "name", "") or "") in _hitl_only
-                        and str(getattr(t, "name", "") or "") not in _ran
-                    ]
+            _auto_tools, _loop_post_eval = loop_post_evaluate_hitl_only_tools(
+                _pack_result.tools, list(state.get("messages") or []), loop_system_event=_loop_evt
+            )
             log_pack_filter_result(_wl, _pack_result)
             _auto_after = [str(getattr(t, "name", "") or "") for t in _auto_tools]
             if _auto_after != _auto_before or _loop_post_eval:

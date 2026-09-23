@@ -166,7 +166,7 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                     "'schema.tabla') contra un umbral en horas (default 48). Devuelve JSON: "
                     "latest_timestamp, age_hours, threshold_hours, within_threshold. "
                     "Solo lectura (SELECT MAX de una columna de timestamp). "
-                    "Para quant_core.fluid_state usa timestamp_column='timestamp' "
+                    "Para fluid_state usa timestamp_column='timestamp' "
                     "(no updated_at)."
                 ),
             )

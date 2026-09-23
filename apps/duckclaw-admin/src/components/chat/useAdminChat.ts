@@ -232,6 +232,10 @@ export function useAdminChat({
     abortControllerRef.current?.abort();
     if (chatId) {
       void adminService.playgroundChatCancel(chatId).catch(() => undefined);
+      // Orphan tool starts (delegate timeout mid-flight) stick in ephemeral
+      // storage and rehydrate as "running" → Tool Usage timer never resets.
+      clearEphemeralHeartbeats(chatId);
+      clearLegacyEphemeralHeartbeats(chatId);
     }
     setLoading(false);
     setThinking(false);

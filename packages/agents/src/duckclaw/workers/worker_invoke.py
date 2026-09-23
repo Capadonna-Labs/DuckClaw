@@ -23,11 +23,12 @@ _parent_vault_lock: ContextVar[threading.RLock | None] = ContextVar(
     default=None,
 )
 _MAX_DELEGATE_DEPTH = 1
-# ponytail: 180s wall-clock — trading-day 17-Sep saw 10–15m delegates until Chat interrupted.
+# ponytail: Quant Trader OCA/HITL/IBKR flows routinely need several minutes;
+# 180s was cutting mid-flight. Align default with manager worker wall (900s).
 # Override via DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC (floor 60).
 _DELEGATE_INVOKE_TIMEOUT_SEC = max(
     60.0,
-    float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "180"),
+    float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "900"),
 )
 # Manager → worker top-level turns (Android scrapes, multi-tool) need a higher ceiling.
 # 0 = no wall-clock limit. Override via DUCKCLAW_MANAGER_WORKER_TIMEOUT_SEC.

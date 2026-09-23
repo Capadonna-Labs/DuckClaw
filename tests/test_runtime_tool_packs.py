@@ -553,3 +553,18 @@ def test_loop_system_event_drops_mcp_and_integrations_sticky() -> None:
     assert "mcp" not in loop or "mcp" in cfg.extra_always
     assert "integrations" not in loop
     assert "homeostasis" in loop or "core" in loop
+
+    # Even explicit unlock must not bring Android back on /loop ticks.
+    unlock_msg = SimpleNamespace(
+        type="tool",
+        name="unlock_tool_pack",
+        content='{"ok": true, "pack_id": "mcp_android", "unlocked_packs": ["mcp_android"]}',
+    )
+    loop_unlocked = resolve_active_pack_ids(
+        cfg,
+        intent_text="unlock mcp_android",
+        messages=[SimpleNamespace(type="human", content="go"), unlock_msg, sticky_msg],
+        available_tool_names=["mcp__android__get_ui_dump", "evaluate_homeostasis", "unlock_tool_pack"],
+        loop_system_event=True,
+    )
+    assert "mcp_android" not in loop_unlocked

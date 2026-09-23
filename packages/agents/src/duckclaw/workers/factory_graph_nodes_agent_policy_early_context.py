@@ -219,6 +219,34 @@ def apply_terminal_force_tool_overrides(
         force_reddit = False
         force_visual = False
 
+    # Root: after evaluate_homeostasis on a /loop tick, never re-force SQL/noise.
+    # Otherwise db-first / is_table_content keeps forcing read_sql until the 900s
+    # wall timeout and the UI surfaces Binder Error as the "answer".
+    called = {str(n) for n in called_tools_since_last_human}
+    if (
+        _is_loop_or_proactive_system_event(incoming)
+        and "evaluate_homeostasis" in called
+        and not decision.should_force
+    ):
+        force_schema = False
+        force_admin_sql = False
+        force_read_sql = False
+        force_tavily = False
+        force_reddit = False
+        force_visual = False
+        orch = str(force_orch_tool or "").strip()
+        if orch in (
+            "",
+            "read_sql",
+            "admin_sql",
+            "inspect_schema",
+            "evaluate_homeostasis",
+            "get_ibkr_portfolio",
+            "get_ibkr_open_orders",
+            "get_ibkr_order_history",
+        ) or orch.startswith(("mcp__", "android_")):
+            force_orch_tool = None
+
     return (
         force_orch_tool,
         force_schema,

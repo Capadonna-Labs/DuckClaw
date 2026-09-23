@@ -165,7 +165,9 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                     "Compara la marca de tiempo más reciente de una tabla ('tabla' o "
                     "'schema.tabla') contra un umbral en horas (default 48). Devuelve JSON: "
                     "latest_timestamp, age_hours, threshold_hours, within_threshold. "
-                    "Solo lectura (SELECT MAX de una columna de timestamp)."
+                    "Solo lectura (SELECT MAX de una columna de timestamp). "
+                    "Para fluid_state usa timestamp_column='timestamp' "
+                    "(no updated_at)."
                 ),
             )
         )

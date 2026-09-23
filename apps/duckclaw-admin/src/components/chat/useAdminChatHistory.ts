@@ -33,6 +33,7 @@ import {
   createToolInvocationId,
   finalizeRunningToolHeartbeats,
   mapSseToolPhase,
+  parseToolNameFromHeartbeatText,
   toolHeartbeatDisplayText,
 } from '@/lib/toolHeartbeat';
 
@@ -102,6 +103,23 @@ function toolHeartbeatsFromActivity(
       continue;
     }
     out.push(base);
+  }
+  // History/reload only: unpaired starts (delegate timeout) must not stay
+  // "running" or Tool Usage keeps a live wall-clock after Interrumpido.
+  for (const idx of runningByKey.values()) {
+    const m = out[idx];
+    if (!m) continue;
+    const elapsed = m.toolElapsedMs ?? 0;
+    out[idx] = {
+      ...m,
+      toolPhase: 'done',
+      toolElapsedMs: elapsed,
+      text: toolHeartbeatDisplayText(
+        (m.toolName || parseToolNameFromHeartbeatText(m.text || '') || 'tool').trim(),
+        'done',
+        elapsed
+      ),
+    };
   }
   return out;
 }

@@ -226,6 +226,14 @@ def test_pick_unique_column_autocorrect_ambiguous_skips() -> None:
 
     assert _pick_unique_column_autocorrect("ab", ["abc", "abd"]) is None
     assert _pick_unique_column_autocorrect("qty", ["quantity", "filled_qty"]) == "quantity"
+
+
+def test_pick_unique_column_autocorrect_updated_at_to_timestamp() -> None:
+    from duckclaw.workers.read_pool import _pick_unique_column_autocorrect
+
+    # fluid_state candidates from Binder Error in /loop logs
+    cand = ["delta", "phase", "surface_tension", "gamma", "theta", "timestamp"]
+    assert _pick_unique_column_autocorrect("updated_at", cand) == "timestamp"
 def test_run_inspect_schema_worker_lists_columns() -> None:
     import json
 

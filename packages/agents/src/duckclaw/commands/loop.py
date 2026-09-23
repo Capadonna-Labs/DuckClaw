@@ -389,7 +389,10 @@ def build_loop_self_system_event_message(
         "ni OHLCV stale. Reporta desviaciones en el chat. "
         "2) Si métricas alineadas (sin desviaciones), llama request_homeostasis_validation "
         "y DETENTE — pregunta confirmación HITL; no declares homeostasis hasta /loop-approve. "
-        "3) Si hay desviaciones, planifica corrección con las tools de este worker y pregunta. "
+        "3) Si hay desviaciones: REPORTA en prosa corta (máx ~15 líneas) y DETENTE en este tick. "
+        "Prohibido cascadas de read_sql/Android/IBKR inventando columnas; "
+        "quant_core.fluid_state usa timestamp (no updated_at). "
+        "Correcciones de host van al próximo ciclo o las pide el usuario. "
         f"{metrics_note}Metas solo vía /goals o manage_homeostasis_goals.{wait_note}]"
     )
 

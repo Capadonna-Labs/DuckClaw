@@ -190,7 +190,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                     _blocked.add(tool_name)
             return content
 
-        def _harness_precheck(tool_name: str) -> str | None:
+        def _harness_precheck(tool_name: str, args: Any = None) -> str | None:
             if tool_name in _blocked or circuit_should_block(
                 _fail_counts, tool_name, _max_fail
             ):
@@ -201,6 +201,17 @@ def make_tools_node(ctx: WorkerGraphContext):
                 )
             if sandbox_toggle_bypasses_harness(tool_name, sandbox_enabled=sandbox_enabled):
                 return None
+            try:
+                from duckclaw.workers.protective_order_route_guard import (
+                    blocked_protective_broker_route,
+                )
+
+                blocked = blocked_protective_broker_route(tool_name, args, db=db)
+                if blocked is not None:
+                    _harness_stats["risk_denied"] += 1
+                    return blocked
+            except Exception:
+                _log.debug("protective order route guard skipped", exc_info=True)
             risk = classify_tool_risk(tool_name)
             if approval_blocks_execution(risk, _approval_mode):  # type: ignore[arg-type]
                 _harness_stats["risk_denied"] += 1
@@ -319,7 +330,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                 name = (tc.get("name") or "").strip()
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
-                _pre = _harness_precheck(name)
+                _pre = _harness_precheck(name, args)
                 if _pre is not None:
                     new_msgs.append(ToolMessage(content=_pre, tool_call_id=tid, name=name))
                     _tool_notify(name, "error", "harness_precheck", elapsed_ms=0)

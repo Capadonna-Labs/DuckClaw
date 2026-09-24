@@ -49,18 +49,23 @@ def register_ibkr_bracket_orders_skill(
         ticker: str,
         side: str,
         quantity: int,
+        signal_type: str = "ENTRY",
     ) -> str:
         """Ejecuta señal de trading con bracket order (TP/SL automático en IBKR).
         
         Lee niveles TP/SL de tp_sl_levels (ACTIVE), envía bracket order a IBKR
         (main + TP + SL como órdenes GTC), registra en ibkr_orders, y actualiza
         trade_signals.executed_at.
+
+        Si ``signal_type`` es BRACKET/OCA/PROTECTIVE, **no** abre mercado: solo
+        coloca OCA protectiva sobre la posición existente (``side`` = lado abierto).
         
         Args:
             signal_id: ID de la señal en trade_signals
             ticker: Símbolo del instrumento (ej: "CEG", "SPY")
             side: "BUY" o "SELL"
             quantity: Cantidad de shares/contratos (entero > 0)
+            signal_type: ENTRY (default) | EXIT | BRACKET | OCA | PROTECTIVE
         
         Returns:
             JSON con order_ids, status, TP/SL prices, o error details
@@ -90,32 +95,23 @@ def register_ibkr_bracket_orders_skill(
             # No running loop — create new one (standalone execution)
             loop = None
 
+        coro = execute_signal_with_bracket(
+            signal_id=signal_id,
+            ticker=ticker,
+            side=side,
+            quantity=quantity,
+            vault_db_path=vault_db_path,
+            signal_type=signal_type,
+        )
         if loop and loop.is_running():
             # Already in async context (e.g. gateway handler) — use run_in_executor
             import concurrent.futures
             with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(
-                    asyncio.run,
-                    execute_signal_with_bracket(
-                        signal_id=signal_id,
-                        ticker=ticker,
-                        side=side,
-                        quantity=quantity,
-                        vault_db_path=vault_db_path,
-                    )
-                )
+                future = executor.submit(asyncio.run, coro)
                 result = future.result(timeout=30)
         else:
             # No async context — run directly
-            result = asyncio.run(
-                execute_signal_with_bracket(
-                    signal_id=signal_id,
-                    ticker=ticker,
-                    side=side,
-                    quantity=quantity,
-                    vault_db_path=vault_db_path,
-                )
-            )
+            result = asyncio.run(coro)
 
         return json.dumps(result, ensure_ascii=False, default=str)
 
@@ -132,7 +128,11 @@ def register_ibkr_bracket_orders_skill(
                 "TP/SL configurados en tp_sl_levels (status=ACTIVE). NO usar para señales sin TP/SL "
                 "o antes de approval. "
                 "\n\n"
-                "Args: signal_id (str), ticker (str), side ('BUY'|'SELL'), quantity (int > 0). "
+                "signal_type=BRACKET|OCA|PROTECTIVE: solo TP/SL protectivo (sin market buy). "
+                "Nunca uses execute_approved_signal para BRACKET — el hook de broker lo trata como ENTRY. "
+                "\n\n"
+                "Args: signal_id (str), ticker (str), side ('BUY'|'SELL'), quantity (int > 0), "
+                "signal_type (str, default ENTRY). "
                 "\n\n"
                 "Returns: JSON con order_ids (main, tp, sl), prices, status='submitted' o status='error'. "
                 "Copia el JSON completo en tu reporte. Si status='error', revisar campo 'error' y "

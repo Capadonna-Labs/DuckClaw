@@ -7,14 +7,22 @@ envía como órdenes GTC al broker.
 Architecture:
     1. Read signal from trade_signals table
     2. Fetch TP/SL levels from tp_sl_levels (ACTIVE)
-    3. Create bracket order (main + TP + SL)
+    3. Create bracket order (main + TP + SL) **or** protective OCA (no entry)
     4. Submit to IBKR Gateway/TWS
     5. Record order_ids in quant_core.ibkr_orders
     6. Update trade_signals.executed_at
 
+``signal_type=BRACKET`` / OCA / PROTECTIVE is **not** a market entry. Those
+types must call ``execute_protective_oca_for_signal`` (TP/SL only). Coercing
+them to ENTRY market-buys double the position (Error #2 / XLU).
+
 Usage::
 
-    from duckclaw.signal_execution_bridge import execute_signal_with_bracket
+    from duckclaw.signal_execution_bridge import (
+        execute_signal_with_bracket,
+        execute_protective_oca_for_signal,
+        is_protective_signal_type,
+    )
 
     result = await execute_signal_with_bracket(
         signal_id="sig_20260911_CEG_001",
@@ -34,23 +42,248 @@ Usage::
     # }
 
 ponytail: Solo envía a IBKR si hay al menos un TP o SL configurado. Si ambos
-son None, solo envía market order sin bracket. Write commands van a la queue del vault (db_path=vault_db_path),
-fire-and-forget — no espera confirmación de DB-Writer.
+son None, solo envía market order sin bracket — **except** protective types,
+which refuse without ACTIVE TP/SL. Write commands van a la queue del vault
+(db_path=vault_db_path), fire-and-forget — no espera confirmación de DB-Writer.
 """
 
 from __future__ import annotations
 
 import logging
-import os
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
 _log = logging.getLogger(__name__)
 
+# Protective / OCA types must never be coerced to ENTRY market buys.
+PROTECTIVE_SIGNAL_TYPES = frozenset(
+    {
+        "BRACKET",
+        "OCA",
+        "PROTECTIVE",
+        "PROTECT",
+        "PROTECTIVE_OCA",
+        "PROTECT_OCA",
+        "TP_SL",
+        "TPSL",
+    }
+)
+
+_PROTECTIVE_KEYWORD_RE = re.compile(
+    r"(BRACKET|PROTECTIVE_OCA|PROTECT_OCA|PROTECTIVE|\bOCA\b|TP[\s_/:-]?SL)",
+    re.IGNORECASE,
+)
+
+
+def is_protective_signal_type(signal_type: str | None) -> bool:
+    """True when ``signal_type`` means place TP/SL only (no new market entry)."""
+    st = str(signal_type or "").strip().upper().replace("-", "_")
+    if not st:
+        return False
+    if st in PROTECTIVE_SIGNAL_TYPES:
+        return True
+    # Soft aliases: "BRACKET_OCA", "PROTECTIVE_BRACKET", etc.
+    return bool(_PROTECTIVE_KEYWORD_RE.search(st))
+
+
+def text_indicates_protective_order(text: str | None) -> bool:
+    """Heuristic for tool-arg / rationale text that requests a protective OCA."""
+    return bool(_PROTECTIVE_KEYWORD_RE.search(str(text or "")))
+
+
+def refuse_protective_as_market_entry(signal_type: str | None) -> dict | None:
+    """Return an error payload if ``signal_type`` must not go through market entry.
+
+    Capadonna ``broker_execute_signal`` historically coerced unknown types
+    (including ``BRACKET``) to ``ENTRY`` → market buy. Call this before sizing.
+    """
+    if not is_protective_signal_type(signal_type):
+        return None
+    st = str(signal_type or "").strip().upper() or "BRACKET"
+    return {
+        "status": "error",
+        "error": "BLOCKED_PROTECTIVE_ORDER_ROUTE",
+        "signal_type": st,
+        "message": (
+            f"signal_type={st} is a protective OCA (TP/SL only), not a market entry. "
+            "Use execute_protective_oca_for_signal / submit_protective_oca_orders, "
+            "or place the OCA from TWS. Do not coerce to ENTRY."
+        ),
+    }
+
 
 # ---------------------------------------------------------------------------
 # Signal Execution
 # ---------------------------------------------------------------------------
+
+
+def _read_active_tp_sl(vault_db_path: str, ticker: str) -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """Return (tp, sl, error). error is set when the read itself fails."""
+    import duckdb
+
+    try:
+        con = duckdb.connect(vault_db_path, read_only=True)
+        try:
+            tp_sl = con.execute(
+                """
+                SELECT take_profit, stop_loss
+                FROM quant_core.tp_sl_levels
+                WHERE ticker = ? AND status = 'ACTIVE'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                [ticker],
+            ).fetchone()
+        finally:
+            con.close()
+    except Exception as exc:
+        return None, None, f"Error leyendo TP/SL levels: {exc}"
+
+    tp_price = float(tp_sl[0]) if tp_sl and tp_sl[0] is not None else None
+    sl_price = float(tp_sl[1]) if tp_sl and tp_sl[1] is not None else None
+    return tp_price, sl_price, None
+
+
+async def execute_protective_oca_for_signal(
+    signal_id: str,
+    ticker: str,
+    position_side: str,
+    quantity: int,
+    vault_db_path: str,
+    host: str | None = None,
+    port: int | None = None,
+    client_id: int | None = None,
+    *,
+    cancel_existing: bool = True,
+) -> dict:
+    """Place TP/SL GTC OCA for an **existing** position — no market entry.
+
+    Use for ``signal_type`` in :data:`PROTECTIVE_SIGNAL_TYPES` (BRACKET, OCA, …).
+    """
+    from duckclaw.db_write_queue import enqueue_typed_command
+    from duckclaw.ibkr_bracket_orders import connect_ibkr, submit_protective_oca_orders
+    from duckclaw.write_commands import (
+        InsertIbkrOrderCommand,
+        UpdateTradeSignalExecutedCommand,
+    )
+
+    timestamp = datetime.now(timezone.utc)
+    side = (position_side or "").strip().upper()
+    base = {
+        "signal_id": signal_id,
+        "ticker": ticker,
+        "side": side,
+        "quantity": quantity,
+        "main_order_id": None,
+        "tp_order_id": None,
+        "sl_order_id": None,
+        "tp_price": None,
+        "sl_price": None,
+        "timestamp": timestamp,
+        "route": "protective_oca",
+    }
+
+    if side not in ("BUY", "SELL"):
+        return {**base, "status": "error", "error": f"position_side debe ser BUY|SELL, got: {position_side}"}
+    if quantity <= 0:
+        return {**base, "status": "error", "error": f"quantity debe ser > 0, got: {quantity}"}
+
+    tp_price, sl_price, read_err = _read_active_tp_sl(vault_db_path, ticker)
+    base["tp_price"] = tp_price
+    base["sl_price"] = sl_price
+    if read_err:
+        return {**base, "status": "error", "error": read_err}
+    if tp_price is None and sl_price is None:
+        return {
+            **base,
+            "status": "error",
+            "error": (
+                f"No ACTIVE tp_sl_levels for {ticker}; refuse protective OCA "
+                "(would otherwise fall through to a naked market order)."
+            ),
+        }
+
+    try:
+        ib = await connect_ibkr(host=host, port=port, client_id=client_id)
+    except Exception as exc:
+        return {**base, "status": "error", "error": f"Error conectando a IBKR: {exc}"}
+
+    try:
+        result = await submit_protective_oca_orders(
+            ib,
+            ticker,
+            side,
+            quantity,
+            tp_price,
+            sl_price,
+            cancel_existing=cancel_existing,
+        )
+        await ib.disconnect()
+    except Exception as exc:
+        try:
+            await ib.disconnect()
+        except Exception:
+            pass
+        return {**base, "status": "error", "error": f"Error enviando protective OCA: {exc}"}
+
+    close_action = "SELL" if side == "BUY" else "BUY"
+    oca_group = result.get("oca_group")
+    if result.get("tp_order_id"):
+        enqueue_typed_command(
+            InsertIbkrOrderCommand(
+                order_id=result["tp_order_id"],
+                ticker=ticker,
+                side=close_action,
+                quantity=quantity,
+                order_type="LIMIT",
+                limit_price=tp_price,
+                status="submitted",
+                submitted_at=timestamp.isoformat(),
+                trade_signal_id=signal_id,
+                notes=f"protective_oca_tp:{oca_group}",
+            ),
+            db_path=vault_db_path,
+        )
+    if result.get("sl_order_id"):
+        enqueue_typed_command(
+            InsertIbkrOrderCommand(
+                order_id=result["sl_order_id"],
+                ticker=ticker,
+                side=close_action,
+                quantity=quantity,
+                order_type="STOP",
+                stop_price=sl_price,
+                status="submitted",
+                submitted_at=timestamp.isoformat(),
+                trade_signal_id=signal_id,
+                notes=f"protective_oca_sl:{oca_group}",
+            ),
+            db_path=vault_db_path,
+        )
+    enqueue_typed_command(
+        UpdateTradeSignalExecutedCommand(
+            signal_id=signal_id,
+            executed_at=timestamp.isoformat(),
+        ),
+        db_path=vault_db_path,
+    )
+
+    _log.info(
+        "Protective OCA for signal %s: %s qty=%s tp=%s sl=%s",
+        signal_id,
+        ticker,
+        quantity,
+        result.get("tp_order_id"),
+        result.get("sl_order_id"),
+    )
+    return {
+        **base,
+        "status": "submitted",
+        "tp_order_id": result.get("tp_order_id"),
+        "sl_order_id": result.get("sl_order_id"),
+        "oca_group": oca_group,
+    }
 
 
 async def execute_signal_with_bracket(
@@ -62,25 +295,31 @@ async def execute_signal_with_bracket(
     host: str | None = None,
     port: int | None = None,
     client_id: int | None = None,
+    *,
+    signal_type: str | None = None,
 ) -> dict:
     """Ejecuta señal de trading con bracket order (TP/SL) en IBKR.
 
     Workflow:
-        1. Lee tp_sl_levels para el ticker (ACTIVE)
-        2. Conecta a IBKR Gateway/TWS
-        3. Envía bracket order (main + TP + SL)
-        4. Registra en quant_core.ibkr_orders (via write queue)
-        5. Actualiza trade_signals.executed_at
+        1. Si ``signal_type`` es protectivo (BRACKET/OCA/…), desvía a
+           :func:`execute_protective_oca_for_signal` (sin market entry).
+        2. Lee tp_sl_levels para el ticker (ACTIVE)
+        3. Conecta a IBKR Gateway/TWS
+        4. Envía bracket order (main + TP + SL)
+        5. Registra en quant_core.ibkr_orders (via write queue)
+        6. Actualiza trade_signals.executed_at
 
     Args:
         signal_id: ID de la señal en trade_signals
         ticker: Símbolo del instrumento (ej: "CEG")
-        side: "BUY" o "SELL"
+        side: "BUY" o "SELL" (entry side, or open position side for protective)
         quantity: Cantidad de shares/contratos
         vault_db_path: Path al DuckDB vault (lectura de TP/SL levels)
         host: IBKR Gateway host (default: IBKR_HOST env var)
         port: IBKR Gateway port (default: IBKR_PORT env var)
         client_id: Client ID (default: IBKR_CLIENT_ID env var)
+        signal_type: Optional ledger type. ``BRACKET``/OCA/PROTECTIVE never
+            market-enter — they place protective OCA only.
 
     Returns:
         {
@@ -116,8 +355,6 @@ async def execute_signal_with_bracket(
         >>> result["main_order_id"]
         12345
     """
-    import duckdb
-
     from duckclaw.db_write_queue import enqueue_typed_command
     from duckclaw.ibkr_bracket_orders import connect_ibkr, submit_bracket_order
     from duckclaw.write_commands import (
@@ -127,24 +364,30 @@ async def execute_signal_with_bracket(
 
     timestamp = datetime.now(timezone.utc)
 
+    # Protective types must never place a market entry (Error #2: BRACKET→buy).
+    if is_protective_signal_type(signal_type):
+        _log.info(
+            "Routing signal_id=%s signal_type=%s → protective OCA (no market entry)",
+            signal_id,
+            signal_type,
+        )
+        return await execute_protective_oca_for_signal(
+            signal_id=signal_id,
+            ticker=ticker,
+            position_side=side,
+            quantity=quantity,
+            vault_db_path=vault_db_path,
+            host=host,
+            port=port,
+            client_id=client_id,
+        )
+
     # 1. Leer niveles TP/SL del vault
     _log.info(f"Leyendo TP/SL levels para {ticker} (signal_id={signal_id})")
 
-    try:
-        con = duckdb.connect(vault_db_path, read_only=True)
-        tp_sl = con.execute(
-            """
-            SELECT take_profit, stop_loss
-            FROM quant_core.tp_sl_levels
-            WHERE ticker = ? AND status = 'ACTIVE'
-            ORDER BY created_at DESC
-            LIMIT 1
-            """,
-            [ticker],
-        ).fetchone()
-        con.close()
-    except Exception as exc:
-        _log.error(f"Error leyendo tp_sl_levels: {exc}")
+    tp_price, sl_price, read_err = _read_active_tp_sl(vault_db_path, ticker)
+    if read_err:
+        _log.error("%s", read_err)
         return {
             "status": "error",
             "signal_id": signal_id,
@@ -157,11 +400,8 @@ async def execute_signal_with_bracket(
             "tp_price": None,
             "sl_price": None,
             "timestamp": timestamp,
-            "error": f"Error leyendo TP/SL levels: {exc}",
+            "error": read_err,
         }
-
-    tp_price = float(tp_sl[0]) if tp_sl and tp_sl[0] is not None else None
-    sl_price = float(tp_sl[1]) if tp_sl and tp_sl[1] is not None else None
 
     _log.info(
         f"Niveles TP/SL para {ticker}: TP={tp_price}, SL={sl_price} "
@@ -343,6 +583,7 @@ async def execute_signals_batch(
                 host=host,
                 port=port,
                 client_id=client_id,
+                signal_type=spec.get("signal_type"),
             )
             results.append(result)
         except Exception as exc:

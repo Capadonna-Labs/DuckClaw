@@ -301,14 +301,13 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 messages=state.get("messages") or [],
                 loop_system_event=_loop_evt,
             )
-            from duckclaw.workers.homeostasis_stuck import loop_post_evaluate_hitl_only_tools
+            from duckclaw.workers.sql_thrash import apply_auto_bind_tool_guards
 
-            _auto_tools, _loop_post_eval = loop_post_evaluate_hitl_only_tools(
-                _pack_result.tools, list(state.get("messages") or []), loop_system_event=_loop_evt
-            )
             log_pack_filter_result(_wl, _pack_result)
-            _auto_after = [str(getattr(t, "name", "") or "") for t in _auto_tools]
-            if _auto_after != _auto_before or _loop_post_eval:
+            _auto_tools, _rebind, _msg_list, _groq_msgs, _ = apply_auto_bind_tool_guards(
+                _pack_result.tools, list(state.get("messages") or []),
+                loop_system_event=_loop_evt, llm_messages=_msg_list, groq_messages=_groq_msgs)
+            if [str(getattr(t, "name", "") or "") for t in _auto_tools] != _auto_before or _rebind:
                 _invoked_llm = _bind_tools(llm, _auto_tools)
         if _mlx_provider:
             _bound_n = _bind_est

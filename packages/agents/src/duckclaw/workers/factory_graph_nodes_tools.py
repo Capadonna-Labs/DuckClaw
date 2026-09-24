@@ -203,10 +203,9 @@ def make_tools_node(ctx: WorkerGraphContext):
                 return None
             try:
                 from duckclaw.workers.protective_order_route_guard import (
-                    blocked_protective_broker_route,
+                    blocked_protective_broker_route as _prot_block,
                 )
-
-                blocked = blocked_protective_broker_route(tool_name, args, db=db)
+                blocked = _prot_block(tool_name, args, db=db)
                 if blocked is not None:
                     _harness_stats["risk_denied"] += 1
                     return blocked

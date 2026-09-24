@@ -146,6 +146,7 @@ def apply_terminal_force_tool_overrides(
     homeostasis_streak: int = 0,
     db: Any | None = None,
     chat_id: str | None = None,
+    messages: list[Any] | None = None,
 ) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
     """Email then /loop homeostasis overrides (clear competing force_* flags).
 
@@ -246,6 +247,18 @@ def apply_terminal_force_tool_overrides(
             "get_ibkr_order_history",
         ) or orch.startswith(("mcp__", "android_")):
             force_orch_tool = None
+
+    # Normal turns: after N read_sql/admin_sql, stop re-forcing SQL (LLM thrash).
+    # Must use messages (not the called set) — set collapses duplicate read_sql calls.
+    from duckclaw.workers.sql_thrash import clear_sql_forces_if_thrash
+
+    force_orch_tool, force_schema, force_admin_sql, force_read_sql = clear_sql_forces_if_thrash(
+        list(messages or []),
+        force_orch_tool=force_orch_tool,
+        force_schema=force_schema,
+        force_admin_sql=force_admin_sql,
+        force_read_sql=force_read_sql,
+    )
 
     return (
         force_orch_tool,

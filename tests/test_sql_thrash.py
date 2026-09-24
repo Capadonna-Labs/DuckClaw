@@ -18,7 +18,7 @@ def _msgs_with_sql(n: int) -> list:
 def test_count_sql_tools_counts_duplicates_not_set() -> None:
     from duckclaw.workers.sql_thrash import count_sql_tools_since_last_human
 
-    assert count_sql_tools_since_last_human(_msgs_with_sql(3)) == 3
+    assert count_sql_tools_since_last_human(_msgs_with_sql(15)) == 15
     assert count_sql_tools_since_last_human(_msgs_with_sql(1)) == 1
 
 
@@ -28,13 +28,17 @@ def test_is_sql_thrash_respects_limit_env(monkeypatch) -> None:
     monkeypatch.setenv("DUCKCLAW_READ_SQL_THRASH_LIMIT", "2")
     assert mod.is_sql_thrash(_msgs_with_sql(1)) is False
     assert mod.is_sql_thrash(_msgs_with_sql(2)) is True
+    monkeypatch.delenv("DUCKCLAW_READ_SQL_THRASH_LIMIT", raising=False)
+    assert mod.sql_thrash_limit() == 15
+    assert mod.is_sql_thrash(_msgs_with_sql(14)) is False
+    assert mod.is_sql_thrash(_msgs_with_sql(15)) is True
 
 
 def test_clear_sql_forces_if_thrash() -> None:
     from duckclaw.workers.sql_thrash import clear_sql_forces_if_thrash
 
     orch, fs, fa, fr = clear_sql_forces_if_thrash(
-        _msgs_with_sql(3),
+        _msgs_with_sql(15),
         force_orch_tool="read_sql",
         force_schema=True,
         force_admin_sql=True,
@@ -66,7 +70,7 @@ def test_strip_and_maybe_apply_guard() -> None:
     stripped = strip_sql_tools(tools)
     assert [t.name for t in stripped] == ["tavily_search", "invoke_worker"]
 
-    out, applied, det = maybe_apply_sql_thrash_tool_guard(tools, _msgs_with_sql(3))
+    out, applied, det = maybe_apply_sql_thrash_tool_guard(tools, _msgs_with_sql(15))
     assert applied is True
     assert det and "SQL_THRASH_DETENTE" in det
     assert all(t.name not in {"read_sql", "admin_sql", "inspect_schema"} for t in out)
@@ -104,7 +108,7 @@ def test_apply_terminal_clears_force_read_sql_on_thrash() -> None:
         force_tavily=False,
         force_reddit=False,
         force_visual=False,
-        messages=_msgs_with_sql(3),
+        messages=_msgs_with_sql(15),
     )
     assert force_read is False
     assert force_admin is False
@@ -123,7 +127,7 @@ def test_apply_auto_bind_tool_guards_injects_detente() -> None:
     groq = [HumanMessage(content="hi")]
     out_tools, rebind, out_msgs, out_groq, thrash = apply_auto_bind_tool_guards(
         tools,
-        _msgs_with_sql(3),
+        _msgs_with_sql(15),
         loop_system_event=False,
         llm_messages=llm_msgs,
         groq_messages=groq,

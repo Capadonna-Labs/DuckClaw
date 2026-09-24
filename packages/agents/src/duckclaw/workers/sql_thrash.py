@@ -1,8 +1,8 @@
 """Stop repeated read_sql/admin_sql thrash that burns the turn wall-clock.
 
-Quant "profundiza X" turns were looping read_sql on the same OHLCV slice until
-Gateway sat at 100% CPU and the UI looked hung. After N SQL tools since the
-last human message, clear force flags and unbind SQL so the model must answer.
+Deep-dive turns were looping read_sql on the same table slice until Gateway
+sat at 100% CPU and the UI looked hung. After N SQL tools since the last
+human message, clear force flags and unbind SQL so the model must answer.
 """
 
 from __future__ import annotations

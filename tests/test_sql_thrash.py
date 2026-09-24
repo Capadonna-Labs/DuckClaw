@@ -1,4 +1,4 @@
-"""Guardrail: stop repeated read_sql thrash on normal Quant turns."""
+"""Guardrail: stop repeated read_sql thrash on normal chat turns."""
 
 from __future__ import annotations
 

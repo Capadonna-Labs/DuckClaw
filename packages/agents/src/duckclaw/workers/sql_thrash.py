@@ -16,9 +16,9 @@ _SQL_TOOL_NAMES = frozenset({"read_sql", "admin_sql", "inspect_schema"})
 def sql_thrash_limit() -> int:
     """Max SQL tool calls per user turn before synthesis-only (floor 2)."""
     try:
-        return max(2, int(float(os.environ.get("DUCKCLAW_READ_SQL_THRASH_LIMIT") or "3")))
+        return max(2, int(float(os.environ.get("DUCKCLAW_READ_SQL_THRASH_LIMIT") or "15")))
     except (TypeError, ValueError):
-        return 3
+        return 15
 
 
 def count_sql_tools_since_last_human(messages: list[Any]) -> int:

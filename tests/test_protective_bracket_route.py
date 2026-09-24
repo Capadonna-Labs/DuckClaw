@@ -218,6 +218,16 @@ def _plan_from_embedded():
             st = "ENTRY"
         return _WeightPlan(ticker=tkr, signal_type=st, weight_pct=w)
 
+def _plan_from_db(signal_id: str):
+    st_norm = st.strip().upper()
+    if st_norm in ("SELL", "EXIT"):
+        st_norm = "EXIT"
+    elif st_norm in ("BUY", "ENTRY"):
+        st_norm = "ENTRY"
+    else:
+        st_norm = "ENTRY"
+    return _WeightPlan(ticker=tkr, signal_type=st_norm, weight_pct=w)
+
 async def main_async():
         ticker = plan.ticker
         signal_type = plan.signal_type
@@ -241,6 +251,7 @@ async def main_async():
         text = target.read_text(encoding="utf-8")
         assert "BLOCKED_PROTECTIVE_ORDER_ROUTE" in text
         assert 'st = "ENTRY"' not in text
+        assert "Refuse DB-path coercion" in text
         # Idempotent
         assert mod.main() == 0
     finally:

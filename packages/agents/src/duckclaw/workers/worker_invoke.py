@@ -23,21 +23,21 @@ _parent_vault_lock: ContextVar[threading.RLock | None] = ContextVar(
     default=None,
 )
 _MAX_DELEGATE_DEPTH = 1
-# ponytail: Quant Trader OCA/HITL/IBKR flows routinely need several minutes;
-# 180s was cutting mid-flight. Align default with manager worker wall (900s).
+# ponytail: Quant Trader OCA/HITL/IBKR + sandbox RSI routinely need >15m;
+# 900s was cutting mid-synthesis. Align default with manager worker wall (1800s).
 # Override via DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC (floor 60).
 _DELEGATE_INVOKE_TIMEOUT_SEC = max(
     60.0,
-    float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "900"),
+    float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "1800"),
 )
 # Manager → worker top-level turns (Android scrapes, multi-tool) need a higher ceiling.
 # 0 = no wall-clock limit. Override via DUCKCLAW_MANAGER_WORKER_TIMEOUT_SEC.
 def _manager_worker_timeout_sec() -> float:
-    raw = (os.environ.get("DUCKCLAW_MANAGER_WORKER_TIMEOUT_SEC") or "900").strip()
+    raw = (os.environ.get("DUCKCLAW_MANAGER_WORKER_TIMEOUT_SEC") or "1800").strip()
     try:
         return max(0.0, float(raw))
     except ValueError:
-        return 900.0
+        return 1800.0
 
 
 def set_parent_vault_invoke_lock(lock: threading.RLock | None) -> None:

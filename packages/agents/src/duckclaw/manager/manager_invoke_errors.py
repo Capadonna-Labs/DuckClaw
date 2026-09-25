@@ -43,9 +43,9 @@ def _wall_clock_timeout_user_message() -> str:
 
         lim = int(_manager_worker_timeout_sec() or 0)
         if lim <= 0:
-            lim = int(float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "900"))
+            lim = int(float(os.environ.get("DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC") or "1800"))
     except Exception:
-        lim = 900
+        lim = 1800
     return (
         f"No pude cerrar el turno a tiempo (límite ~{lim}s). "
         "Las tools pudieron ejecutarse, pero falló la síntesis final por timeout. "

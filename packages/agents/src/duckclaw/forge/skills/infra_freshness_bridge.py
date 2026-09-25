@@ -167,7 +167,10 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                     "latest_timestamp, age_hours, threshold_hours, within_threshold. "
                     "Solo lectura (SELECT MAX de una columna de timestamp). "
                     "Para fluid_state usa timestamp_column='timestamp' "
-                    "(no updated_at)."
+                    "(no updated_at). Si fluid_state está viejo pero ohlcv_data "
+                    "fresco: el fallo es el job CFD (p.ej. columna date vs "
+                    "timestamp), no el orquestador de servicios — no reiniciar "
+                    "host desde sandbox ni pausar trading por eso."
                 ),
             )
         )

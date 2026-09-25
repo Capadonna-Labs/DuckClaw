@@ -43,14 +43,39 @@ def _mcp_available() -> bool:
         return False
 
 
+def _candidate_venv_bin_dirs() -> list[Path]:
+    """Bin dirs del venv activo.
+
+    No uses Path(sys.executable).resolve(): con uv el intérprete es un symlink
+    hacia ~/.local/share/uv/python/... y el resolve() sale del venv, así que
+    google-trends-mcp del .venv/bin nunca se encuentra y caemos a uvx (roto).
+    """
+    bins: list[Path] = []
+    # Windows: Scripts; POSIX: bin
+    for name in ("bin", "Scripts"):
+        p = Path(sys.prefix) / name
+        if p.is_dir():
+            bins.append(p)
+    # sys.executable sin resolve (ruta del venv, p.ej. .venv/bin/python)
+    exe_parent = Path(sys.executable).parent
+    if exe_parent.is_dir() and exe_parent not in bins:
+        bins.append(exe_parent)
+    return bins
+
+
 def _default_stdio_command_and_args() -> tuple[str, list[str]]:
     """
     Resuelve cómo arrancar el servidor MCP: script del venv, which, o uvx.
     """
-    bin_dir = Path(sys.executable).resolve().parent
-    script = bin_dir / "google-trends-mcp"
-    if script.is_file():
-        return str(script), []
+    for bin_dir in _candidate_venv_bin_dirs():
+        script = bin_dir / "google-trends-mcp"
+        if script.is_file():
+            return str(script), []
+        # Windows entry points
+        for win_name in ("google-trends-mcp.exe", "google-trends-mcp.cmd"):
+            win = bin_dir / win_name
+            if win.is_file():
+                return str(win), []
     wx = shutil.which("google-trends-mcp")
     if wx:
         return wx, []

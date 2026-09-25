@@ -49,7 +49,7 @@ LLM_PROVIDER_CATALOG: list[dict[str, Any]] = [
         "kind": "api",
         "env_keys": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
         "base_url_example": "",
-        "model_example": "gemini-2.0-flash",
+        "model_example": "gemini-3.1-flash-lite",
         "hint": "GOOGLE_API_KEY o GEMINI_API_KEY",
     },
     {

@@ -117,6 +117,17 @@ def test_normalize_openrouter_model_id_jev_aliases() -> None:
     assert normalize_openrouter_model_id("typesafe/jev-1.13") == "typesafe/jev-1.13"
 
 
+def test_normalize_openrouter_model_id_gemini_3_1_aliases() -> None:
+    assert normalize_openrouter_model_id("gemini 3.1") == "google/gemini-3.1-flash-lite"
+    assert normalize_openrouter_model_id("gemini-3.1") == "google/gemini-3.1-flash-lite"
+    assert normalize_openrouter_model_id("gemini-3.1-flash-lite") == "google/gemini-3.1-flash-lite"
+    assert normalize_openrouter_model_id("gemini 3.1 pro") == "google/gemini-3.1-pro-preview"
+    assert (
+        normalize_openrouter_model_id("google/gemini-3.1-flash-lite")
+        == "google/gemini-3.1-flash-lite"
+    )
+
+
 def test_openrouter_walkers_tolerate_magicmock() -> None:
     """Regression: MagicMock.bound must not hang CI (infinite URL / header walk)."""
     from unittest.mock import MagicMock

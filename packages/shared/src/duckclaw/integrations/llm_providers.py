@@ -1256,7 +1256,20 @@ def bind_tools_with_parallel_default(llm: Any, tools: Sequence[Any], **kwargs: A
     (formato OpenAI). Las ``StructuredTool`` con ``args_schema`` (Pydantic) generan el
     JSON Schema que el endpoint espera; si una tool no aparece en la petición, revisar que
     el paquete esté en el esquema y que el modelo esté en modo tools.
+
+    Deduplica por ``name`` antes del bind: Gemini/Google AI Studio rechaza declaraciones
+    duplicadas (p. ej. github skill + mcp_github connector → ``mcp__github__get_commit``).
     """
+    seen_names: set[str] = set()
+    tools_unique: list[Any] = []
+    for tool in tools or []:
+        name = str(getattr(tool, "name", None) or "").strip()
+        if name and name in seen_names:
+            continue
+        if name:
+            seen_names.add(name)
+        tools_unique.append(tool)
+    tools = tools_unique
     try:
         sig = inspect.signature(llm.bind_tools)
     except (TypeError, ValueError):

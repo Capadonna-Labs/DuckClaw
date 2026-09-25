@@ -36,6 +36,28 @@ def groq_tools_without_reddit_for_bind(tools: list[Any]) -> list[Any]:
     ]
 
 
+def dedupe_tools_by_name(tools: list[Any]) -> list[Any]:
+    """
+    Keep the first tool for each ``name``.
+
+    Gemini (via OpenRouter / Google AI Studio) rejects duplicate function
+    declarations (400 INVALID_ARGUMENT). DeepSeek/OpenAI often tolerate them,
+    so duplicates from github skill + mcp_github connector only surface on Gemini.
+    """
+    seen: set[str] = set()
+    out: list[Any] = []
+    for tool in tools or []:
+        name = str(getattr(tool, "name", None) or "").strip()
+        if not name:
+            out.append(tool)
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        out.append(tool)
+    return out
+
+
 _MLX_BIND_PRIORITY_TOOL_NAMES: tuple[str, ...] = (
     "read_sql",
     "admin_sql",
@@ -94,6 +116,7 @@ def filter_tools_for_sandbox(tools: list[Any], enabled: bool) -> list[Any]:
 
 
 __all__ = [
+    "dedupe_tools_by_name",
     "filter_tools_for_sandbox",
     "groq_tools_without_reddit_for_bind",
     "mlx_tools_for_bind",

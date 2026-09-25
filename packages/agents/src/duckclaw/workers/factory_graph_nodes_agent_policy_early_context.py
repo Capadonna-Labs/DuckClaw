@@ -221,7 +221,7 @@ def apply_terminal_force_tool_overrides(
         force_visual = False
 
     # Root: after evaluate_homeostasis on a /loop tick, never re-force SQL/noise.
-    # Otherwise db-first / is_table_content keeps forcing read_sql until the 900s
+    # Otherwise db-first / is_table_content keeps forcing read_sql until the 1800s
     # wall timeout and the UI surfaces Binder Error as the "answer".
     called = {str(n) for n in called_tools_since_last_human}
     if (

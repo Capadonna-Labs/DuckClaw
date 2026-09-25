@@ -35,7 +35,11 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
     try:
 
         def assess_cron_registered(pm2_name: str) -> str:
-            """Verifica si un proceso PM2 con ese nombre exacto existe y su cron_restart."""
+            """Verifica si un proceso PM2 con ese nombre exacto existe y su cron_restart.
+
+            Nota: jobs con cron_restart suelen aparecer status=stopped entre fires;
+            eso no significa que el cron falte. found+has_cron es el criterio útil.
+            """
             name = (pm2_name or "").strip()
             if not name:
                 return json.dumps({"error": "pm2_name vacío"}, ensure_ascii=False)
@@ -63,15 +67,23 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                 if not isinstance(p, dict) or p.get("name") != name:
                     continue
                 env = p.get("pm2_env") or {}
+                status = env.get("status")
+                has_cron = bool(env.get("cron_restart"))
                 return json.dumps(
                     {
                         "found": True,
                         "name": name,
-                        "has_cron": bool(env.get("cron_restart")),
+                        "has_cron": has_cron,
                         "cron_restart": env.get("cron_restart") or None,
-                        "status": env.get("status"),
+                        "status": status,
                         "restarts": env.get("restart_time"),
                         "pm_uptime_epoch_ms": env.get("pm_uptime"),
+                        "between_fires_ok": bool(has_cron and status == "stopped"),
+                        "message": (
+                            "Cron registrado; status=stopped entre ejecuciones es normal."
+                            if has_cron and status == "stopped"
+                            else None
+                        ),
                     },
                     ensure_ascii=False,
                 )
@@ -88,8 +100,15 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
             table: str,
             timestamp_column: str = "timestamp",
             max_age_hours: float = 48.0,
+            ticker_column: str = "",
+            tickers: str = "",
         ) -> str:
-            """Compara MAX(timestamp_column) de una tabla contra un umbral de antigüedad en horas."""
+            """Compara MAX(timestamp_column) contra umbral; opcionalmente filtra por tickers.
+
+            tickers: lista separada por comas. Si se pasa, exige ticker_column
+            (p.ej. 'ticker') y calcula MAX solo sobre esas filas — evita que un
+            símbolo fresco oculte otros stale en la misma tabla.
+            """
             tbl, err = _safe_ident(table, _TABLE_RE, label="table")
             if err:
                 return json.dumps({"error": err}, ensure_ascii=False)
@@ -100,8 +119,21 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                 threshold_h = max(0.0, float(max_age_hours))
             except (TypeError, ValueError):
                 threshold_h = 48.0
+
+            ticker_list = [t.strip().upper() for t in (tickers or "").split(",") if t.strip()]
+            tcol = (ticker_column or "").strip()
+            where_sql = ""
+            if ticker_list:
+                if not tcol:
+                    tcol = "ticker"
+                tcol_safe, err3 = _safe_ident(tcol, _COLUMN_RE, label="ticker_column")
+                if err3:
+                    return json.dumps({"error": err3}, ensure_ascii=False)
+                esc = ",".join("'" + t.replace("'", "''") + "'" for t in ticker_list)
+                where_sql = f" WHERE UPPER(TRIM({tcol_safe})) IN ({esc})"
+
             try:
-                raw = db.query(f"SELECT MAX({col}) AS latest FROM {tbl}")
+                raw = db.query(f"SELECT MAX({col}) AS latest FROM {tbl}{where_sql}")
                 rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
             except Exception as exc:
                 return json.dumps(
@@ -117,6 +149,7 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                         "table": tbl,
                         "latest_timestamp": None,
                         "within_threshold": False,
+                        "tickers_filter": ticker_list or None,
                         "message": "Sin filas o valor nulo.",
                     },
                     ensure_ascii=False,
@@ -142,6 +175,7 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                     "age_hours": round(age_hours, 2),
                     "threshold_hours": threshold_h,
                     "within_threshold": age_hours <= threshold_h,
+                    "tickers_filter": ticker_list or None,
                 },
                 ensure_ascii=False,
             )
@@ -152,8 +186,9 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                 name="assess_cron_registered",
                 description=(
                     "Verifica si un proceso PM2 (nombre exacto) existe en este host y si tiene "
-                    "cron_restart configurado. Devuelve JSON: found, has_cron, cron_restart, "
-                    "status, restarts. Úsalo para confirmar que un job programado no se perdió."
+                    "cron_restart. Devuelve JSON: found, has_cron, cron_restart, status, "
+                    "between_fires_ok. status=stopped con has_cron=true es normal entre fires "
+                    "(no lo trates como cron perdido)."
                 ),
             )
         )
@@ -162,15 +197,11 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                 assess_table_freshness,
                 name="assess_table_freshness",
                 description=(
-                    "Compara la marca de tiempo más reciente de una tabla ('tabla' o "
-                    "'schema.tabla') contra un umbral en horas (default 48). Devuelve JSON: "
-                    "latest_timestamp, age_hours, threshold_hours, within_threshold. "
-                    "Solo lectura (SELECT MAX de una columna de timestamp). "
-                    "Para fluid_state usa timestamp_column='timestamp' "
-                    "(no updated_at). Si fluid_state está viejo pero ohlcv_data "
-                    "fresco: el fallo es el job CFD (p.ej. columna date vs "
-                    "timestamp), no el orquestador de servicios — no reiniciar "
-                    "host desde sandbox ni pausar trading por eso."
+                    "Compara MAX(timestamp) de una tabla ('schema.tabla') vs umbral en horas "
+                    "(default 48). Opcional: tickers='XLU,META' + ticker_column='ticker' para "
+                    "no dejar que un símbolo fresco oculte otros stale. "
+                    "Para fluid_state usa timestamp_column='timestamp' (no updated_at). "
+                    "Si fluid_state está viejo pero ohlcv fresco: refresca CFD, no reinicies host."
                 ),
             )
         )

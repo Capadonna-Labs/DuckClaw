@@ -60,6 +60,10 @@ def test_assess_cron_marks_stopped_with_cron_as_ok(monkeypatch):
         "duckclaw.ops.toolchain.run_pm2",
         lambda *a, **k: Proc(),
     )
+    monkeypatch.setattr(
+        "subprocess.check_output",
+        lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("no crontab")),
+    )
     tools: list = []
     bridge.register_infra_freshness_skill(tools, _FakeDb([]))
     by_name = {t.name: t for t in tools}
@@ -67,3 +71,68 @@ def test_assess_cron_marks_stopped_with_cron_as_ok(monkeypatch):
     assert out["found"] is True
     assert out["has_cron"] is True
     assert out["between_fires_ok"] is True
+    assert out.get("source") == "pm2"
+
+
+def test_assess_cron_falls_back_to_crontab_when_pm2_missing(monkeypatch):
+    from duckclaw.forge.skills import infra_freshness_bridge as bridge
+
+    class Proc:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "duckclaw.ops.toolchain.run_pm2",
+        lambda *a, **k: Proc(),
+    )
+    cron_blob = (
+        "0 20 * * 5 /venv/bin/python /app/scripts/quant/hrp_weekly_job.py "
+        ">> /var/log/quant-hrp-weekly.log 2>&1\n"
+    )
+    monkeypatch.setattr(
+        "subprocess.check_output",
+        lambda *a, **k: cron_blob,
+    )
+    tools: list = []
+    bridge.register_infra_freshness_skill(tools, _FakeDb([]))
+    by_name = {t.name: t for t in tools}
+    out = json.loads(
+        by_name["assess_cron_registered"].invoke(
+            {"pm2_name": "quant-hrp-weekly", "crontab_pattern": "hrp_weekly_job"}
+        )
+    )
+    assert out["found"] is True
+    assert out["has_cron"] is True
+    assert out["source"] == "crontab"
+    assert out["between_fires_ok"] is True
+    assert any("hrp_weekly_job" in line for line in out["crontab_lines"])
+
+
+def test_assess_cron_pm2_name_matches_crontab_log_path(monkeypatch):
+    """Even without crontab_pattern, pm2_name can match crontab log path tokens."""
+    from duckclaw.forge.skills import infra_freshness_bridge as bridge
+
+    class Proc:
+        returncode = 0
+        stdout = "[]"
+        stderr = ""
+
+    monkeypatch.setattr(
+        "duckclaw.ops.toolchain.run_pm2",
+        lambda *a, **k: Proc(),
+    )
+    monkeypatch.setattr(
+        "subprocess.check_output",
+        lambda *a, **k: (
+            "0 20 * * 5 python hrp_weekly_job.py >> /var/log/quant-hrp-weekly.log\n"
+        ),
+    )
+    tools: list = []
+    bridge.register_infra_freshness_skill(tools, _FakeDb([]))
+    by_name = {t.name: t for t in tools}
+    out = json.loads(
+        by_name["assess_cron_registered"].invoke({"pm2_name": "quant-hrp-weekly"})
+    )
+    assert out["found"] is True
+    assert out["source"] == "crontab"

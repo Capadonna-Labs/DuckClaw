@@ -34,64 +34,125 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
     el manifiesto del worker declara el skill ``infra_freshness``."""
     try:
 
-        def assess_cron_registered(pm2_name: str) -> str:
-            """Verifica si un proceso PM2 con ese nombre exacto existe y su cron_restart.
+        def assess_cron_registered(pm2_name: str, crontab_pattern: str = "") -> str:
+            """Verifica cron por PM2 (nombre exacto) y/o crontab del host.
 
-            Nota: jobs con cron_restart suelen aparecer status=stopped entre fires;
-            eso no significa que el cron falte. found+has_cron es el criterio útil.
+            Si PM2 no tiene el proceso, busca en ``crontab -l`` el nombre o
+            ``crontab_pattern`` (p.ej. hrp_weekly_job). Jobs one-shot con
+            cron_restart suelen aparecer status=stopped entre fires — no es fallo.
             """
             name = (pm2_name or "").strip()
-            if not name:
+            pattern = (crontab_pattern or "").strip() or name
+            if not name and not pattern:
                 return json.dumps({"error": "pm2_name vacío"}, ensure_ascii=False)
-            try:
-                from duckclaw.ops.toolchain import run_pm2
 
-                proc = run_pm2("jlist", timeout=30)
-            except Exception as exc:
-                return json.dumps(
-                    {"error": f"PM2 no disponible: {str(exc)[:400]}"}, ensure_ascii=False
-                )
-            if proc.returncode != 0:
-                return json.dumps(
-                    {
-                        "error": "PM2 no respondió",
-                        "detail": (proc.stderr or proc.stdout or "")[:500],
-                    },
-                    ensure_ascii=False,
-                )
+            pm2_payload: dict[str, Any] | None = None
+            if name:
+                try:
+                    from duckclaw.ops.toolchain import run_pm2
+
+                    proc = run_pm2("jlist", timeout=30)
+                except Exception as exc:
+                    proc = None
+                    pm2_err = str(exc)[:400]
+                else:
+                    pm2_err = None
+                    if proc.returncode != 0:
+                        pm2_err = (proc.stderr or proc.stdout or "")[:500]
+                    else:
+                        try:
+                            procs = json.loads(proc.stdout or "[]")
+                        except json.JSONDecodeError:
+                            return json.dumps({"error": "Salida de PM2 inválida"}, ensure_ascii=False)
+                        for p in procs if isinstance(procs, list) else []:
+                            if not isinstance(p, dict) or p.get("name") != name:
+                                continue
+                            env = p.get("pm2_env") or {}
+                            status = env.get("status")
+                            has_cron = bool(env.get("cron_restart"))
+                            pm2_payload = {
+                                "found": True,
+                                "name": name,
+                                "has_cron": has_cron,
+                                "cron_restart": env.get("cron_restart") or None,
+                                "status": status,
+                                "restarts": env.get("restart_time"),
+                                "pm_uptime_epoch_ms": env.get("pm_uptime"),
+                                "between_fires_ok": bool(has_cron and status == "stopped"),
+                                "source": "pm2",
+                                "message": (
+                                    "Cron registrado; status=stopped entre ejecuciones es normal."
+                                    if has_cron and status == "stopped"
+                                    else None
+                                ),
+                            }
+                            break
+                        if pm2_payload is None:
+                            pm2_err = f"Ningún proceso PM2 llamado {name}"
+
+            crontab_lines: list[str] = []
+            needles = [n for n in {name.lower(), pattern.lower()} if n]
             try:
-                procs = json.loads(proc.stdout or "[]")
-            except json.JSONDecodeError:
-                return json.dumps({"error": "Salida de PM2 inválida"}, ensure_ascii=False)
-            for p in procs if isinstance(procs, list) else []:
-                if not isinstance(p, dict) or p.get("name") != name:
-                    continue
-                env = p.get("pm2_env") or {}
-                status = env.get("status")
-                has_cron = bool(env.get("cron_restart"))
+                import subprocess
+
+                out = subprocess.check_output(
+                    ["crontab", "-l"], stderr=subprocess.DEVNULL, text=True, timeout=10
+                )
+                for line in out.splitlines():
+                    if not line.strip() or line.strip().startswith("#"):
+                        continue
+                    low = line.lower()
+                    if any(tok and tok in low for tok in needles):
+                        crontab_lines.append(line.strip())
+            except Exception:
+                pass
+
+            if pm2_payload and pm2_payload.get("has_cron"):
+                if crontab_lines:
+                    pm2_payload["crontab_lines"] = crontab_lines[:5]
+                    pm2_payload["also_in_crontab"] = True
+                return json.dumps(pm2_payload, ensure_ascii=False)
+
+            if crontab_lines:
                 return json.dumps(
                     {
                         "found": True,
-                        "name": name,
-                        "has_cron": has_cron,
-                        "cron_restart": env.get("cron_restart") or None,
-                        "status": status,
-                        "restarts": env.get("restart_time"),
-                        "pm_uptime_epoch_ms": env.get("pm_uptime"),
-                        "between_fires_ok": bool(has_cron and status == "stopped"),
+                        "name": name or pattern,
+                        "has_cron": True,
+                        "cron_restart": None,
+                        "status": None,
+                        "source": "crontab",
+                        "crontab_lines": crontab_lines[:5],
+                        "between_fires_ok": True,
                         "message": (
-                            "Cron registrado; status=stopped entre ejecuciones es normal."
-                            if has_cron and status == "stopped"
-                            else None
+                            "Cron encontrado en crontab del host (no requiere proceso PM2 permanente). "
+                            "No reportes found=false solo porque PM2 no liste el nombre."
                         ),
+                        "pm2": pm2_payload,
                     },
                     ensure_ascii=False,
                 )
+
+            if pm2_payload is not None:
+                # Proceso PM2 sin cron_restart y sin crontab
+                pm2_payload["message"] = (
+                    pm2_payload.get("message")
+                    or "Proceso PM2 encontrado pero sin cron_restart ni línea en crontab."
+                )
+                return json.dumps(pm2_payload, ensure_ascii=False)
+
             return json.dumps(
                 {
                     "found": False,
-                    "name": name,
-                    "message": "Ningún proceso PM2 con ese nombre está registrado en este host.",
+                    "name": name or pattern,
+                    "has_cron": False,
+                    "source": None,
+                    "message": (
+                        "No hay proceso PM2 con ese nombre ni línea matching en crontab. "
+                        "Pasa crontab_pattern con un token del script (p.ej. hrp_weekly_job) "
+                        "si el job vive en crontab y no en PM2."
+                    ),
+                    "pm2_error": pm2_err if name else None,
                 },
                 ensure_ascii=False,
             )
@@ -185,10 +246,11 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                 assess_cron_registered,
                 name="assess_cron_registered",
                 description=(
-                    "Verifica si un proceso PM2 (nombre exacto) existe en este host y si tiene "
-                    "cron_restart. Devuelve JSON: found, has_cron, cron_restart, status, "
-                    "between_fires_ok. status=stopped con has_cron=true es normal entre fires "
-                    "(no lo trates como cron perdido)."
+                    "Verifica cron por PM2 (pm2_name exacto, cron_restart) y/o crontab del host. "
+                    "Opcional crontab_pattern: token en `crontab -l` (p.ej. hrp_weekly_job) si el "
+                    "job no es proceso PM2 permanente. JSON: found, has_cron, source "
+                    "(pm2|crontab), between_fires_ok. status=stopped con has_cron=true es normal "
+                    "entre fires — no lo trates como cron perdido."
                 ),
             )
         )

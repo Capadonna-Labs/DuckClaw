@@ -106,6 +106,8 @@ def test_build_loop_homeostasis_detente_misaligned() -> None:
     assert "DETENTE" in msg
     assert "read_sql" in msg
     assert "timestamp" in msg
+    assert "run_sandbox" in msg or "sandbox" in msg
+    assert "trading" in msg
 
 
 def test_build_loop_homeostasis_detente_aligned() -> None:

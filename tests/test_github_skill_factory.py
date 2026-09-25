@@ -19,6 +19,10 @@ def test_build_worker_tools_invokes_github_skill_when_declared(
         "duckclaw.forge.skills.mcp_connector_bridge.register_worker_mcp_connector_tools",
         lambda *args, **kwargs: None,
     )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.mcp_connector_bridge.worker_has_mcp_connector",
+        lambda **kwargs: False,
+    )
 
     calls: list[dict] = []
 
@@ -49,3 +53,43 @@ def test_build_worker_tools_invokes_github_skill_when_declared(
     assert len(calls) == 1
     assert calls[0]["cfg"] == {"enabled": True}
     assert calls[0]["logical_worker_id"] == "dev-agent"
+
+
+def test_build_worker_tools_skips_github_skill_when_mcp_github_granted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from duckclaw.workers.factory_tool_builder import _build_worker_tools
+
+    monkeypatch.setattr("duckclaw.workers.factory_tool_builder.load_skills", lambda _spec, _db: [])
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.mcp_connector_bridge.register_worker_mcp_connector_tools",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.mcp_connector_bridge.worker_has_mcp_connector",
+        lambda **kwargs: kwargs.get("connector_id") == "mcp_github",
+    )
+
+    calls: list[dict] = []
+
+    def _fake_register_github(tools, cfg, **kwargs):
+        calls.append({"tools": tools, "cfg": cfg, **kwargs})
+
+    monkeypatch.setattr("duckclaw.github.mcp_bridge.register_github_skill", _fake_register_github)
+
+    spec = SimpleNamespace(
+        worker_id="quant_analyst",
+        logical_worker_id="quant_analyst",
+        worker_slug="quant_analyst",
+        name="Quant Analyst",
+        schema_name="main",
+        allowed_tables=[],
+        read_only=True,
+        duckdb_extensions=[],
+        tenant_id="default",
+        worker_dir=Path("."),
+        skills_list=["github"],
+        skill_configs={"github": {}},
+    )
+    _build_worker_tools(MagicMock(), spec)  # type: ignore[arg-type]
+    assert calls == []

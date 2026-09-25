@@ -202,7 +202,7 @@ def resolve_active_pack_ids(
         active |= connector_pack_ids
 
     # /loop ticks: drop ALL MCP / integrations noise (even if unlocked this turn).
-    # Unlocked Android on a loop tick burned 14m+ and still missed the 900s wall.
+    # Unlocked Android on a loop tick burned 14m+ and still missed the invoke wall.
     if loop_system_event:
         drop = {
             pid

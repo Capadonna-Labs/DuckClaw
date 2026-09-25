@@ -320,38 +320,58 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
     from duckclaw.forge.skills.custom_reports_bridge import register_custom_reports_skill
 
     register_custom_reports_skill(tools, db, spec)
+    worker_id_for_mcp = str(
+        getattr(spec, "worker_id", None)
+        or getattr(spec, "logical_worker_id", None)
+        or ""
+    )
+    # Prefer Admin MCP connector grant (mcp_github → mcp__github__*) over the
+    # docker github skill: both publish the same public names and Gemini 400s on duplicates.
+    skip_github_skill = False
     if "github" in skills_list or "github" in skill_configs:
-        from duckclaw.github.mcp_bridge import register_github_skill
+        try:
+            from duckclaw.forge.skills.mcp_connector_bridge import worker_has_mcp_connector
 
-        github_cfg = skill_configs.get("github")
-        if github_cfg is None:
-            github_cfg = {}
-        register_github_skill(
-            tools,
-            github_cfg,
-            logical_worker_id=str(
-                getattr(spec, "logical_worker_id", None)
-                or getattr(spec, "worker_id", None)
-                or ""
-            ),
-            manifest_worker_slug=str(
-                getattr(spec, "worker_slug", None)
-                or getattr(spec, "worker_id", None)
-                or ""
-            ),
-            db=db,
-        )
+            skip_github_skill = worker_has_mcp_connector(
+                worker_id=worker_id_for_mcp,
+                tenant_id=str(tenant_id or "default"),
+                connector_id="mcp_github",
+            )
+        except Exception:
+            skip_github_skill = False
+        if skip_github_skill:
+            _log.info(
+                "Skipping docker github skill; mcp_github connector already granted for worker=%s",
+                worker_id_for_mcp,
+            )
+        else:
+            from duckclaw.github.mcp_bridge import register_github_skill
+
+            github_cfg = skill_configs.get("github")
+            if github_cfg is None:
+                github_cfg = {}
+            register_github_skill(
+                tools,
+                github_cfg,
+                logical_worker_id=str(
+                    getattr(spec, "logical_worker_id", None)
+                    or getattr(spec, "worker_id", None)
+                    or ""
+                ),
+                manifest_worker_slug=str(
+                    getattr(spec, "worker_slug", None)
+                    or getattr(spec, "worker_id", None)
+                    or ""
+                ),
+                db=db,
+            )
     try:
         from duckclaw.forge.skills.mcp_connector_bridge import register_worker_mcp_connector_tools
 
         register_worker_mcp_connector_tools(
             tools,
             db=db,
-            worker_id=str(
-                getattr(spec, "worker_id", None)
-                or getattr(spec, "logical_worker_id", None)
-                or ""
-            ),
+            worker_id=worker_id_for_mcp,
             tenant_id=str(tenant_id or "default"),
         )
     except Exception:
@@ -362,4 +382,6 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         register_worker_delegate_tools(tools, db=db, spec=spec, tenant_id=str(tenant_id or "default"))
     except Exception:
         _log.warning("worker delegate tools registration skipped", exc_info=True)
-    return tools
+    from duckclaw.workers.tool_binding import dedupe_tools_by_name
+
+    return dedupe_tools_by_name(tools)

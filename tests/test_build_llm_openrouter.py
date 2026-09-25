@@ -72,6 +72,25 @@ def test_bind_tools_preserves_openrouter_attribution(monkeypatch: pytest.MonkeyP
     assert snap.get("title") == OPENROUTER_ATTRIBUTION_HEADERS["X-OpenRouter-Title"]
 
 
+def test_bind_tools_dedupes_duplicate_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default
+
+    captured: list[list[str | None]] = []
+
+    class _FakeLlm:
+        def bind_tools(self, tools, **kwargs):
+            captured.append([getattr(t, "name", None) for t in tools])
+            return SimpleNamespace(tools=tools, kwargs=kwargs)
+
+    a = SimpleNamespace(name="mcp__github__get_commit")
+    b = SimpleNamespace(name="mcp__github__get_commit")
+    c = SimpleNamespace(name="read_sql")
+    bind_tools_with_parallel_default(_FakeLlm(), [a, b, c])
+    assert captured == [["mcp__github__get_commit", "read_sql"]]
+
+
 def test_build_llm_openrouter_alias_or(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
     monkeypatch.delenv("DUCKCLAW_LLM_PROVIDER", raising=False)

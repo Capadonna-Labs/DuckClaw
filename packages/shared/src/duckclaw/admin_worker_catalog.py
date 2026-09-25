@@ -599,6 +599,12 @@ def get_latest_worker_version(db: Any, *, worker_uid: str) -> dict[str, Any] | N
 
 
 def get_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -> dict[str, str] | None:
+    """Return catalog worker if the actor may use it (same rules as list_visible).
+
+    Visible when active on the actor tenant and any of: owner, visibility=public,
+    or an admin_worker_assignments row targeting the actor. Owner-only was too
+    strict vs the catalog list and caused false playground 403s.
+    """
     ensure_admin_worker_catalog_schema(db)
     actor = (actor_email or "").strip().lower()
     if "@" not in actor:
@@ -606,9 +612,24 @@ def get_visible_worker_for_actor(db: Any, *, actor_email: str, worker_id: str) -
     profile = ensure_profile_for_user(db, email=actor)
     wid = sanitize_catalog_worker_id(worker_id)
     worker = get_worker_by_tenant_worker_id(db, tenant_id=profile["tenant_id"], worker_id=wid)
-    if worker and _coerce_bool(worker.get("active"), True) and worker["owner_email"] == profile["email"]:
+    if not worker or not _coerce_bool(worker.get("active"), True):
+        return None
+    owner = str(worker.get("owner_email") or "").strip().lower()
+    if owner == profile["email"]:
         return worker
-    return None
+    if str(worker.get("visibility") or "").strip().lower() == "public":
+        return worker
+    uid = str(worker.get("worker_uid") or "").strip()
+    if not uid:
+        return None
+    assigned = _first_row(
+        db,
+        "SELECT worker_uid FROM main.admin_worker_assignments "
+        f"WHERE worker_uid = '{_sql_lit(uid, 64)}' "
+        f"AND target_email = '{_sql_lit(profile['email'], 256)}' "
+        "LIMIT 1",
+    )
+    return worker if assigned else None
 
 
 def set_worker_a2a_discoverable(

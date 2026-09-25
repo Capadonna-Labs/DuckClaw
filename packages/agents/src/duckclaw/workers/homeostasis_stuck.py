@@ -282,7 +282,10 @@ def build_loop_homeostasis_detente_message(payload: dict[str, Any]) -> str:
         "Prohibido en este tick: cascadas de read_sql (no inventes columnas), "
         "Android MCP, get_ibkr_portfolio, ni re-llamar evaluate_homeostasis. "
         "Correcciones de host/infra van al próximo ciclo /loop o las pide el usuario. "
-        "fluid_state usa columna timestamp (no updated_at)."
+        "fluid_state usa columna timestamp (no updated_at). "
+        "Si ohlcv_data está fresco y fluid_state atrasado: refresca CFD, "
+        "no reinicies /root/.../services desde sandbox ni declares trading inseguro "
+        "solo por Permission denied."
     )
 
 

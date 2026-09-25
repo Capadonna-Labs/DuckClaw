@@ -11,7 +11,7 @@ def test_execute_model_accepts_gemini_provider() -> None:
     assert "Modelo actualizado" in out
     current = execute_model(db, "chat1", "")
     assert "provider: gemini" in current
-    assert "model: gemini-2.0-flash" in current
+    assert "model: gemini-3.1-flash-lite" in current
 
 
 def test_execute_model_or_alias_normalizes_to_openrouter() -> None:

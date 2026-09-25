@@ -159,16 +159,28 @@ async def connect_google_trends_mcp(
 
 def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Optional[Any]:
     from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
+    from duckclaw.forge.skills.mcp_tool_args_schema import mcp_input_schema_to_args_model
     from langchain_core.tools import StructuredTool
 
+    # Sin args_schema el LLM/bind_tools omite kwargs → MCP recibe {} y keywords falla.
+    raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
+    args_model = mcp_input_schema_to_args_model(
+        raw_schema if isinstance(raw_schema, dict) else None,
+        f"{name}_google_trends",
+    )
+
     def _sync_call(**kwargs: Any) -> str:
-        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, dict(kwargs)))
+        validated = args_model(**kwargs)
+        payload = validated.model_dump(exclude_none=True)
+        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, payload))
 
     desc = getattr(tool_spec, "description", None) or f"Google Trends MCP: {name}"
     return StructuredTool.from_function(
         _sync_call,
         name=name,
         description=desc,
+        args_schema=args_model,
+        infer_schema=False,
     )
 
 

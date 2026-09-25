@@ -11,6 +11,8 @@ const MODEL_CONTEXT_WINDOW: Array<{ match: RegExp; tokens: number }> = [
   { match: /gpt-4(?!o)/i, tokens: 8_192 },
   { match: /gpt-3\.5-turbo-16k/i, tokens: 16_384 },
   { match: /gpt-3\.5/i, tokens: 16_385 },
+  // Gemini 3.x (3.1 Flash Lite / Pro, 3.5/3.8 Flash): 1M context on OpenRouter.
+  { match: /gemini-3(?:\.\d+)?/i, tokens: 1_000_000 },
   { match: /gemini-2\.5|gemini-2\.0|gemini-1\.5-pro/i, tokens: 1_000_000 },
   { match: /gemini-1\.5-flash/i, tokens: 1_000_000 },
   // GLM-5.2 (Z.ai / OpenRouter z-ai/glm-5.2): usable 1M context.

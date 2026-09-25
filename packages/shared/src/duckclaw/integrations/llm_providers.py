@@ -53,6 +53,15 @@ OPENROUTER_MODEL_ALIASES: dict[str, str] = {
     "glm5.2": "z-ai/glm-5.2",
     "glm 5": "z-ai/glm-5.2",
     "zhipu/glm-5.2": "z-ai/glm-5.2",
+    # Gemini 3.1 — UI labels / short ids → OpenRouter slug.
+    "gemini 3.1": "google/gemini-3.1-flash-lite",
+    "gemini-3.1": "google/gemini-3.1-flash-lite",
+    "gemini3.1": "google/gemini-3.1-flash-lite",
+    "gemini 3.1 flash lite": "google/gemini-3.1-flash-lite",
+    "gemini-3.1-flash-lite": "google/gemini-3.1-flash-lite",
+    "gemini 3.1 pro": "google/gemini-3.1-pro-preview",
+    "gemini-3.1-pro": "google/gemini-3.1-pro-preview",
+    "gemini-3.1-pro-preview": "google/gemini-3.1-pro-preview",
     # TypeSafe Jev — Decisions API only (tool jev_decide), not chat/completions.
     "jev": "typesafe/jev-1.13",
     "jev 1.13": "typesafe/jev-1.13",

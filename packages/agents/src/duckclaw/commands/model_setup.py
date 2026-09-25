@@ -174,7 +174,7 @@ _DEFAULT_MODEL_BY_PROVIDER = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-3-5-haiku-20241022",
     "groq": "llama-3.3-70b-versatile",
-    "gemini": "gemini-2.0-flash",
+    "gemini": "gemini-3.1-flash-lite",
     "openrouter": "deepseek/deepseek-v4-flash",
     "mlx": "",
     "ollama": "llama3.2",

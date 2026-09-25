@@ -23,6 +23,13 @@ describe('inferModelContextWindow', () => {
     expect(inferModelContextWindow('glm-5.2')).toBe(1_000_000);
     expect(inferModelContextWindow('glm-5.2[1m]')).toBe(1_000_000);
   });
+
+  it('uses 1M for Gemini 3.1 / 2.x', () => {
+    expect(inferModelContextWindow('google/gemini-3.1-flash-lite')).toBe(1_000_000);
+    expect(inferModelContextWindow('google/gemini-3.1-pro-preview')).toBe(1_000_000);
+    expect(inferModelContextWindow('gemini-3.1-flash-lite')).toBe(1_000_000);
+    expect(inferModelContextWindow('google/gemini-2.5-flash')).toBe(1_000_000);
+  });
 });
 
 describe('formatCompactTokenCount', () => {

@@ -43,14 +43,39 @@ def _mcp_available() -> bool:
         return False
 
 
+def _candidate_venv_bin_dirs() -> list[Path]:
+    """Bin dirs del venv activo.
+
+    No uses Path(sys.executable).resolve(): con uv el intérprete es un symlink
+    hacia ~/.local/share/uv/python/... y el resolve() sale del venv, así que
+    google-trends-mcp del .venv/bin nunca se encuentra y caemos a uvx (roto).
+    """
+    bins: list[Path] = []
+    # Windows: Scripts; POSIX: bin
+    for name in ("bin", "Scripts"):
+        p = Path(sys.prefix) / name
+        if p.is_dir():
+            bins.append(p)
+    # sys.executable sin resolve (ruta del venv, p.ej. .venv/bin/python)
+    exe_parent = Path(sys.executable).parent
+    if exe_parent.is_dir() and exe_parent not in bins:
+        bins.append(exe_parent)
+    return bins
+
+
 def _default_stdio_command_and_args() -> tuple[str, list[str]]:
     """
     Resuelve cómo arrancar el servidor MCP: script del venv, which, o uvx.
     """
-    bin_dir = Path(sys.executable).resolve().parent
-    script = bin_dir / "google-trends-mcp"
-    if script.is_file():
-        return str(script), []
+    for bin_dir in _candidate_venv_bin_dirs():
+        script = bin_dir / "google-trends-mcp"
+        if script.is_file():
+            return str(script), []
+        # Windows entry points
+        for win_name in ("google-trends-mcp.exe", "google-trends-mcp.cmd"):
+            win = bin_dir / win_name
+            if win.is_file():
+                return str(win), []
     wx = shutil.which("google-trends-mcp")
     if wx:
         return wx, []
@@ -134,16 +159,28 @@ async def connect_google_trends_mcp(
 
 def _mcp_tool_to_structured(server_params: Any, tool_spec: Any, name: str) -> Optional[Any]:
     from duckclaw.forge.skills.mcp_stdio_util import mcp_stdio_call_tool
+    from duckclaw.forge.skills.mcp_tool_args_schema import mcp_input_schema_to_args_model
     from langchain_core.tools import StructuredTool
 
+    # Sin args_schema el LLM/bind_tools omite kwargs → MCP recibe {} y keywords falla.
+    raw_schema = getattr(tool_spec, "inputSchema", None) or getattr(tool_spec, "input_schema", None)
+    args_model = mcp_input_schema_to_args_model(
+        raw_schema if isinstance(raw_schema, dict) else None,
+        f"{name}_google_trends",
+    )
+
     def _sync_call(**kwargs: Any) -> str:
-        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, dict(kwargs)))
+        validated = args_model(**kwargs)
+        payload = validated.model_dump(exclude_none=True)
+        return _run_async_from_sync(mcp_stdio_call_tool(server_params, name, payload))
 
     desc = getattr(tool_spec, "description", None) or f"Google Trends MCP: {name}"
     return StructuredTool.from_function(
         _sync_call,
         name=name,
         description=desc,
+        args_schema=args_model,
+        infer_schema=False,
     )
 
 

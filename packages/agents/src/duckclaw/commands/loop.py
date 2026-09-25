@@ -392,6 +392,9 @@ def build_loop_self_system_event_message(
         "3) Si hay desviaciones: REPORTA en prosa corta (máx ~15 líneas) y DETENTE en este tick. "
         "Prohibido cascadas de read_sql/Android/IBKR inventando columnas; "
         "fluid_state usa timestamp (no updated_at). "
+        "fluid_state stale ≠ sync/IB caídos: si ohlcv_data está fresco, "
+        "refresca CFD (script weekly / record_fluid) — no reinicies servicios "
+        "host desde run_sandbox ni pauses trading por Permission denied. "
         "Correcciones de host van al próximo ciclo o las pide el usuario. "
         f"{metrics_note}Metas solo vía /goals o manage_homeostasis_goals.{wait_note}]"
     )

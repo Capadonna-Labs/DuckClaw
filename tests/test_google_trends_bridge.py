@@ -52,6 +52,41 @@ def test_default_stdio_uses_venv_script_not_uvx(tmp_path: Path, monkeypatch) -> 
     assert args == []
 
 
+def test_mcp_tool_to_structured_passes_keywords_schema(monkeypatch) -> None:
+    """args_schema must expose keywords so invoke does not send {} to MCP."""
+    from types import SimpleNamespace
+
+    from duckclaw.forge.skills import google_trends_bridge as gt
+    import duckclaw.forge.skills.mcp_stdio_util as stdio_util
+
+    calls: list[dict] = []
+
+    async def _fake_call(_params, name, arguments):
+        calls.append({"name": name, "arguments": arguments})
+        return "ok-trends"
+
+    monkeypatch.setattr(stdio_util, "mcp_stdio_call_tool", _fake_call)
+
+    spec = SimpleNamespace(
+        name="interest_over_time",
+        description="Interest over time",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "keywords": {"type": "array", "items": {"type": "string"}},
+                "timeframe": {"type": "string", "default": "today 5-y"},
+            },
+            "required": ["keywords"],
+        },
+    )
+    tool = gt._mcp_tool_to_structured(object(), spec, "interest_over_time")
+    assert tool is not None
+    assert "keywords" in (tool.args or {})
+    out = tool.invoke({"keywords": ["XLU"]})
+    assert out == "ok-trends"
+    assert calls and calls[0]["arguments"].get("keywords") == ["XLU"]
+
+
 def test_default_stdio_falls_back_to_uvx_when_missing(tmp_path: Path, monkeypatch) -> None:
     from duckclaw.forge.skills import google_trends_bridge as gt
 

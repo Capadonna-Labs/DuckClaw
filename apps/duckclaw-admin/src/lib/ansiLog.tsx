@@ -128,7 +128,32 @@ function styleToClass(state: StyleState): string {
   return parts.join(' ');
 }
 
-function ansiTextToSpans(text: string, theme: 'light' | 'dark'): ReactNode[] {
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlightMatches(text: string, query: string, keyPrefix: string): ReactNode[] | string {
+  const q = query.trim();
+  if (!q) return text;
+
+  const parts = text.split(new RegExp(`(${escapeRegExp(q)})`, 'ig'));
+  if (parts.length === 1) return text;
+
+  return parts.map((part, i) =>
+    part.toLowerCase() === q.toLowerCase() ? (
+      <mark
+        key={`${keyPrefix}-hit-${i}`}
+        className="rounded-sm bg-yellow-300/25 px-0.5 text-inherit underline decoration-yellow-300 decoration-2 underline-offset-2 dark:bg-yellow-300/20"
+      >
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
+function ansiTextToSpans(text: string, theme: 'light' | 'dark', highlight = ''): ReactNode[] {
   const fg = theme === 'dark' ? FG_DARK : FG_LIGHT;
   const palette = theme === 'dark' ? PALETTE_DARK : PALETTE_LIGHT;
 
@@ -139,7 +164,7 @@ function ansiTextToSpans(text: string, theme: 'light' | 'dark'): ReactNode[] {
       const { className, text: t } = colorizePlainLogLine(line);
       return (
         <span key={`ln-${i}`} className={className}>
-          {t}
+          {highlightMatches(t, highlight, `ln-${i}`)}
           {i < lines.length - 1 ? '\n' : ''}
         </span>
       );
@@ -164,7 +189,7 @@ function ansiTextToSpans(text: string, theme: 'light' | 'dark'): ReactNode[] {
         className={cls || undefined}
         style={state.color ? { color: state.color } : undefined}
       >
-        {chunk}
+        {highlightMatches(chunk, highlight, `c-${key}`)}
       </span>,
     );
     last = end;
@@ -187,13 +212,21 @@ function ansiTextToSpans(text: string, theme: 'light' | 'dark'): ReactNode[] {
   return nodes.length ? nodes : [text];
 }
 
-export function AnsiLogText({ text, className = '' }: { text: string; className?: string }) {
+export function AnsiLogText({
+  text,
+  className = '',
+  highlight = '',
+}: {
+  text: string;
+  className?: string;
+  highlight?: string;
+}) {
   const { theme } = useTheme();
   return (
     <code
       className={`font-mono text-xs whitespace-pre-wrap break-words text-gov-gray-800 dark:text-slate-200 ${className}`}
     >
-      {ansiTextToSpans(text, theme)}
+      {ansiTextToSpans(text, theme, highlight)}
     </code>
   );
 }

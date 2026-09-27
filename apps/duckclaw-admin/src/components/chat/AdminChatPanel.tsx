@@ -149,6 +149,7 @@ export function AdminChatPanel({
 
   const isCompact = variant === 'compact';
   const showSuggestions = shouldShowSuggestionChips(suggestions, loading, input);
+  const [suggestionsOpen, setSuggestionsOpen] = useState(true);
 
   // When Sugerencias appear, the glass composer grows — re-pin scroll so the last
   // line of the reply is not trapped under the chips bar.
@@ -559,13 +560,15 @@ export function AdminChatPanel({
         editFromMessage={editFromMessage}
       />
 
-      {showScrollButton && isStudioCompose && showStudioHeader && !showHeader ? (
+      {showScrollButton && showSuggestions && isStudioCompose && showStudioHeader && !showHeader ? (
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}
           className={`absolute right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface ${
             showSuggestions
-              ? 'bottom-[8.75rem] sm:bottom-40'
+              ? suggestionsOpen
+                ? 'bottom-[16.75rem] sm:bottom-64'
+                : 'bottom-[11.75rem] sm:bottom-48'
               : 'bottom-[4.75rem] sm:bottom-24'
           }`}
           aria-label="Ir al final de la conversación"
@@ -608,6 +611,7 @@ export function AdminChatPanel({
             recommendedSuggestionIndex={recommendedSuggestionIndex}
             suggestionsAutoEnabled={suggestionsAutoEnabled}
             onSuggestionsAutoChange={onSuggestionsAutoChange}
+            onSuggestionsOpenChange={setSuggestionsOpen}
             onPickSuggestion={sendSuggestion}
             cancelGeneration={cancelGeneration}
             onTextareaPaste={onTextareaPaste}

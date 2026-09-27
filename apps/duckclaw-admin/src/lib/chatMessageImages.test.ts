@@ -73,4 +73,13 @@ const historyStripped = historyToChatMessages(
 assert.equal(historyStripped[0]?.text, '¿Qué puedes hacer?');
 assert.equal(historyStripped[1]?.text, 'Puedo ayudarte.');
 
+const historyWithoutInterrupted = historyToChatMessages(
+  [
+    { role: 'user', content: 'Corre esto' },
+    { role: 'assistant', content: 'Interrumpido.' },
+  ],
+  'default'
+);
+assert.deepEqual(historyWithoutInterrupted, [{ role: 'user', text: 'Corre esto' }]);
+
 console.log('chatMessageImages.test.ts: ok');

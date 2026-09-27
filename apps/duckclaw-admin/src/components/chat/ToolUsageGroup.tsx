@@ -45,16 +45,6 @@ function earliestRunningStartedAt(messages: ChatMsg[]): number | null {
   return min;
 }
 
-function earliestStartedAt(messages: ChatMsg[]): number | null {
-  let min: number | null = null;
-  for (const m of messages) {
-    const t = m.toolStartedAt;
-    if (t == null) continue;
-    min = min == null ? t : Math.min(min, t);
-  }
-  return min;
-}
-
 function newestToolMessage(messages: ChatMsg[]): ChatMsg | null {
   return messages.reduce<ChatMsg | null>((best, m) => {
     if (!best) return m;
@@ -91,7 +81,7 @@ function GroupedToolRow({
   } else if (count > 1 && max) {
     timing = ` · max: ${max}`;
   } else if (count === 1 && max) {
-    timing = ` · ${max}`;
+    timing = ` · max: ${max}`;
   } else if (isRunning) {
     timing = ' · en curso';
   }
@@ -110,7 +100,7 @@ function GroupedToolRow({
         {timing ? (
           <span className="tabular-nums">{timing}</span>
         ) : null}
-        {count > 1 && avg && !isRunning ? (
+        {avg && !isRunning ? (
           <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums"> · avg: {avg}</span>
         ) : null}
       </span>
@@ -127,7 +117,7 @@ export function ToolUsageGroup({
   messages: ChatMsg[];
   indices: number[];
   identityLabel?: string;
-  /** @deprecated Ignored — live header only while a tool is actually running. */
+  /** @deprecated Ignored — the block is live only while a tool is actually running. */
   liveWhileLoading?: boolean;
 }) {
   const panelId = useId();
@@ -136,12 +126,9 @@ export function ToolUsageGroup({
   const totalMs = toolGroupTotalElapsedMs(messages, indices);
   const [isOpen, setIsOpen] = useState(false);
 
-  const blockStartedAt = earliestStartedAt(items);
-  // Solo tick en vivo mientras hay tool running. Antes, liveWhileLoading + tools
-  // ya cerrados usaba el startedAt más viejo → cabecera "30m" tras un
-  // invoke_worker de ~3m si el turno seguía en loading.
-  const headerRunning = anyRunning;
-  const liveHeaderMs = useLiveToolElapsedMs(headerRunning, blockStartedAt);
+  const runningStartedAt = earliestRunningStartedAt(items);
+  const headerRunning = anyRunning && runningStartedAt != null;
+  const liveHeaderMs = useLiveToolElapsedMs(headerRunning, runningStartedAt);
   const headerLiveTotal = headerRunning ? liveHeaderMs : null;
   void _liveWhileLoading;
 
@@ -174,7 +161,11 @@ export function ToolUsageGroup({
             </span>
           ) : null}
           {totalLabel ? (
-            <span className="normal-case font-semibold text-sky-600 dark:text-sky-400 tabular-nums">
+            <span
+              className={`normal-case font-semibold text-sky-600 dark:text-sky-400 tabular-nums ${
+                headerRunning ? 'animate-pulse' : ''
+              }`}
+            >
               {' '}
               · {totalLabel}
             </span>

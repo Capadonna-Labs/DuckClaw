@@ -468,7 +468,9 @@ export const chatApi = {
     }
     let full = '';
     try {
-      for await (const ev of readSseChatStream(res.body, options?.signal)) {
+      for await (const ev of readSseChatStream(res.body, options?.signal, {
+        eventIdleTimeoutMs: 360_000,
+      })) {
         if (options?.signal?.aborted) break;
         if (ev.type === 'token' && ev.content) {
           full += ev.content;

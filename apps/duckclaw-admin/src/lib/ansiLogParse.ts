@@ -12,10 +12,10 @@ export function hasAnsiCodes(text: string): boolean {
 
 export function colorizePlainLogLine(line: string): { className: string; text: string } {
   const t = line.trim();
-  if (/error|exception|traceback|fatal|errno/i.test(t)) {
+  if (/error|exception|traceback|fatal|errno|failed|failure|refused|denied/i.test(t)) {
     return { className: 'text-red-700 dark:text-red-400', text: line };
   }
-  if (/warn|warning/i.test(t)) {
+  if (/warn|warning|offline|timeout|retry|unavailable/i.test(t)) {
     return { className: 'text-amber-700 dark:text-amber-300', text: line };
   }
   if (/^\d+\|/.test(t) || /\[PM2\]/i.test(t)) {

@@ -17,6 +17,11 @@ if [[ ! -e "${STANDALONE}/public" && -d "${ADMIN}/public" ]]; then
   ln -s "${ADMIN}/public" "${STANDALONE}/public"
 fi
 
+if [[ ! -e "${STANDALONE}/.next/static" && -d "${ADMIN}/.next/static" ]]; then
+  mkdir -p "${STANDALONE}/.next"
+  ln -s "${ADMIN}/.next/static" "${STANDALONE}/.next/static"
+fi
+
 export PORT="${PORT:-3000}"
 # Next standalone binds to $HOSTNAME. The shell/OS hostname (e.g. ubuntu-…)
 # resolves to 127.0.1.1 and breaks nginx/Tailscale — always force all interfaces.

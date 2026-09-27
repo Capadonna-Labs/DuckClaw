@@ -13,7 +13,7 @@ import {
 import { AnsiLogText } from '@/lib/ansiLog';
 import { mutationHeaders } from '@/lib/csrfClient';
 import { PM2_LOGGABLE_APPS } from '@/lib/pm2LogApps';
-import { Radio, Square, Terminal } from 'lucide-react';
+import { Radio, Search, Square, Terminal } from 'lucide-react';
 
 const MAX_LINES = 6_000;
 
@@ -41,6 +41,8 @@ type Pm2LogsContextValue = {
   desktopLogs: boolean;
   streaming: boolean;
   logText: string;
+  searchQuery: string;
+  setSearchQuery: (value: string) => void;
   error: string | null;
   autoScroll: boolean;
   setAutoScroll: (value: boolean) => void;
@@ -73,6 +75,7 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
   const [desktopLogs, setDesktopLogs] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [logText, setLogText] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
@@ -251,6 +254,8 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
     desktopLogs,
     streaming,
     logText,
+    searchQuery,
+    setSearchQuery,
     error,
     autoScroll,
     setAutoScroll,
@@ -282,14 +287,16 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
     start,
     stop,
     clear,
+    searchQuery,
+    setSearchQuery,
   } = usePm2LogsContext();
 
   const studio = variant === 'studio';
 
   return (
     <div
-      className={`shrink-0 space-y-2 border-t px-2 py-2 dark:border-dark-border ${
-        studio ? 'border-gov-gray-100' : 'border-slate-800/80 sm:px-3'
+      className={`shrink-0 space-y-2 px-2 py-2 ${
+        studio ? '' : 'border-t border-slate-800/80 sm:px-3'
       }`}
     >
       <div className="flex min-w-0 items-center gap-1.5">
@@ -375,6 +382,27 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
           <span className="text-sky-700 dark:text-sky-400">Modo desktop (sin PM2)</span>
         ) : null}
       </div>
+      <label className="relative block">
+        <span className="sr-only">Buscar logs</span>
+        <Search
+          size={13}
+          className={`pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 ${
+            studio ? 'text-gov-gray-400 dark:text-dark-muted' : 'text-slate-500'
+          }`}
+          aria-hidden
+        />
+        <input
+          type="search"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Buscar logs..."
+          className={
+            studio
+              ? 'w-full rounded-lg border border-gov-gray-200 bg-gov-gray-50 py-1.5 pl-7 pr-2 text-[11px] text-gov-gray-900 outline-none placeholder:text-gov-gray-400 focus:border-gov-blue-400 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text dark:placeholder:text-dark-muted'
+              : 'w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 pl-7 pr-2 text-xs text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500'
+          }
+        />
+      </label>
       {error ? (
         <p className={`text-[11px] ${studio ? 'text-red-600' : 'text-red-400'}`}>{error}</p>
       ) : null}
@@ -383,7 +411,7 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
 }
 
 export function Pm2LiveLogsViewport({ className = '' }: { className?: string }) {
-  const { logText, streaming, tailRef } = usePm2LogsContext();
+  const { logText, streaming, tailRef, searchQuery } = usePm2LogsContext();
 
   return (
     <div
@@ -391,7 +419,7 @@ export function Pm2LiveLogsViewport({ className = '' }: { className?: string }) 
       className={`${LOG_VIEWPORT_SCROLL_CLASS}${className ? ` ${className}` : ''}`}
     >
       {logText ? (
-        <AnsiLogText text={logText} />
+        <AnsiLogText text={logText} highlight={searchQuery} />
       ) : (
         <span className="text-gov-gray-500 dark:text-slate-500">
           {streaming ? 'Esperando líneas…' : 'Pulsa el botón de stream para empezar.'}

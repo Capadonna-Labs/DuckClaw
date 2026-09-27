@@ -80,6 +80,22 @@ export function lastUserAssistantExchange(
   return { userText, assistantText };
 }
 
+/** Detached turns may lose the exact optimistic text after iOS/PWA reload. */
+export function findDetachedTurnUserIndex(
+  messages: ChatMsg[],
+  pendingText: string
+): number | null {
+  const pending = pendingText.trim();
+  let lastUser: number | null = null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role !== 'user') continue;
+    if (lastUser == null) lastUser = i;
+    if (pending && (m.text || '').trim() === pending) return i;
+  }
+  return lastUser;
+}
+
 export function artifactImagePreview(
   tenantId: string,
   artifactId: string

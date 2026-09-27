@@ -186,12 +186,26 @@ def test_blocked_protective_peeks_db_signal_type():
     )
 
     class _Rows:
+        def __init__(self, row):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
         def fetchall(self):
-            return [("BRACKET",)]
+            return [self._row] if self._row is not None else []
 
     class _Db:
-        def execute(self, *a, **k):
-            return _Rows()
+        def execute(self, sql, *a, **k):
+            sql_l = sql.lower()
+            if "finance_worker.trade_signals" in sql_l and "signal_type" in sql_l:
+                # Match progressive projection that includes signal_type.
+                if sql_l.count(",") >= 1:
+                    return _Rows(("sig-1", "BRACKET"))
+                return _Rows(("BRACKET",))
+            if "quant_core.trade_signals" in sql_l:
+                return _Rows(None)
+            return _Rows(None)
 
     blocked = blocked_protective_broker_route(
         "execute_approved_signal",

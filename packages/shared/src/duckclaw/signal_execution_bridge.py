@@ -54,6 +54,8 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
+from duckclaw.trade_signals_ledger import fetch_trade_signal_row_from_path
+
 _log = logging.getLogger(__name__)
 
 # Protective / OCA types must never be coerced to ENTRY market buys.
@@ -444,31 +446,40 @@ async def execute_signal_with_bracket(
         }
 
     try:
-        import duckdb
-
-        con = duckdb.connect(vault_db_path, read_only=True)
-        signal_row = con.execute(
-            """
-            SELECT action, strategy_name, rationale, order_qty
-            FROM quant_core.trade_signals
-            WHERE cast(signal_id AS VARCHAR) = ?
-            LIMIT 1
-            """,
-            [signal_id],
-        ).fetchone()
-        con.close()
+        signal_row = fetch_trade_signal_row_from_path(vault_db_path, signal_id)
     except Exception as exc:
         _log.error("Error leyendo trade_signals: %s", exc)
         signal_row = None
 
-    signal_action = str(signal_row[0] or "") if signal_row else ""
-    strategy_name = str(signal_row[1] or "") if signal_row else ""
-    rationale = str(signal_row[2] or "") if signal_row else ""
+    signal_action = str((signal_row or {}).get("action") or "")
+    strategy_name = str((signal_row or {}).get("strategy_name") or "")
+    rationale = str((signal_row or {}).get("rationale") or "")
+    raw_qty = (signal_row or {}).get("order_qty")
     signal_order_qty = (
-        int(abs(float(signal_row[3])))
-        if signal_row and signal_row[3] is not None and float(signal_row[3]) != 0
+        int(abs(float(raw_qty)))
+        if raw_qty is not None and float(raw_qty) != 0
         else None
     )
+    ledger_st = str((signal_row or {}).get("signal_type") or "").strip() or None
+    # Ledger protective type wins over a missing/stale caller signal_type.
+    if is_protective_signal_type(ledger_st):
+        _log.info(
+            "Routing signal_id=%s signal_type=%s (from ledger) → protective OCA",
+            signal_id,
+            ledger_st,
+        )
+        return await execute_protective_oca_for_signal(
+            signal_id=signal_id,
+            ticker=ticker,
+            position_side=side,
+            quantity=quantity,
+            vault_db_path=vault_db_path,
+            host=host,
+            port=port,
+            client_id=client_id,
+        )
+    if not signal_type and ledger_st:
+        signal_type = ledger_st
     protective_only = _is_protective_signal(strategy_name, rationale)
 
     _log.info(

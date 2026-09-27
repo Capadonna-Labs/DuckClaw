@@ -235,7 +235,22 @@ def resolve_runtime_setting(
     if candidates:
         row = candidates[0]
         value = _row_value(row)
-        return {**_public_setting(row, value=value, source="db"), "value": value}
+        out = {**_public_setting(row, value=value, source="db"), "value": value}
+        # ponytail: string settings can still carry sidecar JSON (e.g. Notion DCR
+        # client_id + redirect_uri). _public_setting only exposes value_json when
+        # value_kind=json, so surface the column here when present.
+        if "value_json" not in out:
+            raw_vj = row.get("value_json")
+            if isinstance(raw_vj, dict):
+                out["value_json"] = raw_vj
+            elif isinstance(raw_vj, str) and raw_vj.strip().startswith("{"):
+                try:
+                    parsed = json.loads(raw_vj)
+                    if isinstance(parsed, dict):
+                        out["value_json"] = parsed
+                except json.JSONDecodeError:
+                    pass
+        return out
 
     if dom == "integrations":
         from duckclaw.integration_secrets import (

@@ -144,3 +144,55 @@ def test_android_collapse_statusbar_runs_adb() -> None:
     assert out["action"] == "collapse"
     run.assert_called_once()
     assert "collapse" in run.call_args[0][0]
+
+
+def test_android_clear_all_notifications_prefers_cmd_cancel_all() -> None:
+    from duckclaw.mcp_android_adb import android_clear_all_notifications
+
+    with patch("duckclaw.mcp_android_adb.primary_adb_serial", return_value="serial1"):
+        with patch(
+            "duckclaw.mcp_android_adb._run_adb",
+            return_value=(0, "", ""),
+        ) as run:
+            out = android_clear_all_notifications()
+    assert out["ok"] is True
+    assert out["action"] == "cmd_notification_cancel_all"
+    assert run.call_args[0][0] == [
+        "-s",
+        "serial1",
+        "shell",
+        "cmd",
+        "notification",
+        "cancel-all",
+    ]
+
+
+def test_android_clear_all_notifications_falls_back_to_service_call() -> None:
+    from duckclaw.mcp_android_adb import android_clear_all_notifications
+
+    responses = [
+        (1, "", "unknown"),
+        (0, "", ""),
+    ]
+
+    def _fake(args, *, timeout=15.0):  # noqa: ARG001
+        return responses.pop(0)
+
+    with patch("duckclaw.mcp_android_adb.primary_adb_serial", return_value="serial1"):
+        with patch("duckclaw.mcp_android_adb._run_adb", side_effect=_fake) as run:
+            out = android_clear_all_notifications()
+    assert out["ok"] is True
+    assert out["action"] == "service_call_notification_1"
+    assert run.call_count == 2
+    assert run.call_args[0][0][-2:] == ["notification", "1"]
+
+
+def test_register_android_adb_helper_includes_clear_all() -> None:
+    from duckclaw.forge.skills.mcp_android_adb_bridge import register_android_adb_helper_tools
+
+    tools: list = []
+    added = register_android_adb_helper_tools(tools)
+    names = {getattr(t, "name", "") for t in tools}
+    assert added >= 3
+    assert "android_clear_all_notifications" in names
+    assert "android_expand_notifications" in names

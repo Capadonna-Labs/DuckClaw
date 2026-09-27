@@ -105,6 +105,35 @@ def test_plan_prepended_with_digest() -> None:
     assert "<node" not in out
 
 
+def test_plan_bulk_dismiss_one_turn() -> None:
+    raw = (
+        '<node text="Telegram" bounds="[0,400][1080,460]"/>'
+        '<node text="Alerta de mercado" bounds="[0,460][1080,540]"/>'
+        '<node text="Bloomberg" bounds="[0,600][1080,660]"/>'
+        '<node text="Fed holds" bounds="[0,660][1080,720]"/>'
+        '<node text="Borrar todo" bounds="[800,100][1040,160]"/>'
+    )
+    hints = analyze_notification_ui_dump(raw)
+    assert hints["one_swipe_per_turn"] is False
+    assert hints["complete_digest_in_one_turn"] is True
+    assert hints["clear_all_target"]["tap"]["x"] == 920
+    assert "todas" in " ".join(hints["workflow"]).lower() or "TODAS" in " ".join(hints["workflow"])
+    assert "continúe" in hints["after_read"].lower() or "continuar" in hints["after_read"].lower()
+    assert "3+" not in hints["after_read"]
+    out = append_notification_hints_to_ui_dump(raw)
+    assert "complete_digest_in_one_turn" in out
+    assert '"one_swipe_per_turn": false' in out
+
+
+def test_clear_all_target_extracted() -> None:
+    from duckclaw.mcp_android_notifications import extract_clear_all_target
+
+    raw = '<node text="Clear all" bounds="[700,80][1000,140]"/>'
+    target = extract_clear_all_target(raw)
+    assert target is not None
+    assert target["tap"] == {"x": 850, "y": 110}
+
+
 def test_multiline_node_bounds_parsed() -> None:
     from duckclaw.mcp_android_notifications import extract_app_hint_rows
 

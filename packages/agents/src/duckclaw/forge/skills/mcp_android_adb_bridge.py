@@ -30,6 +30,11 @@ def register_android_adb_helper_tools(tools_list: list[Any]) -> int:
 
         return json.dumps(android_collapse_statusbar(), ensure_ascii=False)
 
+    def _clear_all() -> str:
+        from duckclaw.mcp_android_adb import android_clear_all_notifications
+
+        return json.dumps(android_clear_all_notifications(), ensure_ascii=False)
+
     names = {str(getattr(t, "name", "") or "") for t in tools_list}
     added = 0
     if "android_expand_notifications" not in names:
@@ -54,6 +59,23 @@ def register_android_adb_helper_tools(tools_list: list[Any]) -> int:
                 _collapse,
                 name="android_collapse_notifications",
                 description="Cierra el panel de notificaciones (cmd statusbar collapse).",
+                args_schema=_Empty,
+                infer_schema=False,
+            )
+        )
+        added += 1
+    if "android_clear_all_notifications" not in names:
+        tools_list.append(
+            StructuredTool.from_function(
+                _clear_all,
+                name="android_clear_all_notifications",
+                description=(
+                    "Descarta TODAS las notificaciones dismissible en un solo comando ADB "
+                    "(cmd notification cancel-all / service call). "
+                    "Usar cuando el usuario pide borrar/descartar todas tras leer el digest "
+                    "(o si solo quiere limpiar). Más rápido que N swipe_screen. "
+                    "Después: get_ui_dump; filas SKIP (sistema/SIM) pueden quedar."
+                ),
                 args_schema=_Empty,
                 infer_schema=False,
             )

@@ -41,6 +41,7 @@ _ANDROID_ADB_HELPER_TOOLS = frozenset(
     {
         "android_expand_notifications",
         "android_collapse_notifications",
+        "android_clear_all_notifications",
     }
 )
 

@@ -13,6 +13,7 @@ def playground_ui_corpus() -> str:
         _ADMIN / "app/(admin)/playground/page.tsx",
         _ADMIN / "components/playground/PlaygroundHistoryView.tsx",
         _ADMIN / "components/playground/PlaygroundSettingsParts.tsx",
+        _ADMIN / "components/playground/PlaygroundSettingsDialogs.tsx",
         _ADMIN / "components/playground/playgroundHistoryHelpers.ts",
         _ADMIN / "components/playground/playgroundTypes.ts",
         _ADMIN / "components/playground/PlaygroundRunSettingsPanel.tsx",

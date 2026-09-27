@@ -132,7 +132,13 @@ function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function highlightMatches(text: string, query: string, keyPrefix: string): ReactNode[] | string {
+function highlightMatches(
+  text: string,
+  query: string,
+  keyPrefix: string,
+  activeIndex: number,
+  nextIndex: () => number,
+): ReactNode[] | string {
   const q = query.trim();
   if (!q) return text;
 
@@ -143,7 +149,9 @@ function highlightMatches(text: string, query: string, keyPrefix: string): React
     part.toLowerCase() === q.toLowerCase() ? (
       <mark
         key={`${keyPrefix}-hit-${i}`}
-        className="rounded-sm bg-yellow-300/25 px-0.5 text-inherit underline decoration-yellow-300 decoration-2 underline-offset-2 dark:bg-yellow-300/20"
+        data-log-search-hit="true"
+        data-log-search-active={nextIndex() === activeIndex ? 'true' : undefined}
+        className="rounded-sm bg-yellow-300/25 px-0.5 text-inherit underline decoration-yellow-300 decoration-2 underline-offset-2 data-[log-search-active=true]:bg-yellow-300/80 data-[log-search-active=true]:text-slate-950 dark:bg-yellow-300/20"
       >
         {part}
       </mark>
@@ -153,9 +161,16 @@ function highlightMatches(text: string, query: string, keyPrefix: string): React
   );
 }
 
-function ansiTextToSpans(text: string, theme: 'light' | 'dark', highlight = ''): ReactNode[] {
+function ansiTextToSpans(
+  text: string,
+  theme: 'light' | 'dark',
+  highlight = '',
+  activeMatchIndex = 0,
+): ReactNode[] {
   const fg = theme === 'dark' ? FG_DARK : FG_LIGHT;
   const palette = theme === 'dark' ? PALETTE_DARK : PALETTE_LIGHT;
+  let matchIndex = 0;
+  const nextIndex = () => matchIndex++;
 
   if (!text) return [];
   if (!hasAnsiCodes(text)) {
@@ -164,7 +179,7 @@ function ansiTextToSpans(text: string, theme: 'light' | 'dark', highlight = ''):
       const { className, text: t } = colorizePlainLogLine(line);
       return (
         <span key={`ln-${i}`} className={className}>
-          {highlightMatches(t, highlight, `ln-${i}`)}
+          {highlightMatches(t, highlight, `ln-${i}`, activeMatchIndex, nextIndex)}
           {i < lines.length - 1 ? '\n' : ''}
         </span>
       );
@@ -189,7 +204,7 @@ function ansiTextToSpans(text: string, theme: 'light' | 'dark', highlight = ''):
         className={cls || undefined}
         style={state.color ? { color: state.color } : undefined}
       >
-        {highlightMatches(chunk, highlight, `c-${key}`)}
+        {highlightMatches(chunk, highlight, `c-${key}`, activeMatchIndex, nextIndex)}
       </span>,
     );
     last = end;
@@ -216,17 +231,19 @@ export function AnsiLogText({
   text,
   className = '',
   highlight = '',
+  activeMatchIndex = 0,
 }: {
   text: string;
   className?: string;
   highlight?: string;
+  activeMatchIndex?: number;
 }) {
   const { theme } = useTheme();
   return (
     <code
       className={`font-mono text-xs whitespace-pre-wrap break-words text-gov-gray-800 dark:text-slate-200 ${className}`}
     >
-      {ansiTextToSpans(text, theme, highlight)}
+      {ansiTextToSpans(text, theme, highlight, activeMatchIndex)}
     </code>
   );
 }

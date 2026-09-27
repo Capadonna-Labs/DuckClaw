@@ -5,15 +5,16 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
   type RefObject,
 } from 'react';
-import { AnsiLogText } from '@/lib/ansiLog';
+import { AnsiLogText, stripAnsi } from '@/lib/ansiLog';
 import { mutationHeaders } from '@/lib/csrfClient';
 import { PM2_LOGGABLE_APPS } from '@/lib/pm2LogApps';
-import { Radio, Search, Square, Terminal } from 'lucide-react';
+import { ChevronDown, ChevronUp, Radio, Search, Square, Terminal } from 'lucide-react';
 
 const MAX_LINES = 6_000;
 
@@ -32,6 +33,21 @@ function sessionHeaders(method = 'GET'): HeadersInit {
   return mutationHeaders(method);
 }
 
+function countSearchMatches(text: string, query: string): number {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return 0;
+  const source = stripAnsi(text).toLowerCase();
+  let count = 0;
+  let from = 0;
+  while (from < source.length) {
+    const at = source.indexOf(needle, from);
+    if (at < 0) break;
+    count += 1;
+    from = at + needle.length;
+  }
+  return count;
+}
+
 type Pm2LogsContextValue = {
   selectedApp: string;
   setSelectedApp: (app: string) => void;
@@ -43,6 +59,9 @@ type Pm2LogsContextValue = {
   logText: string;
   searchQuery: string;
   setSearchQuery: (value: string) => void;
+  searchMatchCount: number;
+  searchMatchIndex: number;
+  jumpSearchMatch: (direction: 1 | -1) => void;
   error: string | null;
   autoScroll: boolean;
   setAutoScroll: (value: boolean) => void;
@@ -76,6 +95,7 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
   const [streaming, setStreaming] = useState(false);
   const [logText, setLogText] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchMatchIndex, setSearchMatchIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const abortRef = useRef<AbortController | null>(null);
@@ -98,6 +118,22 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
   }, []);
 
   const clear = useCallback(() => setLogText(''), []);
+  const searchMatchCount = useMemo(
+    () => countSearchMatches(logText, searchQuery),
+    [logText, searchQuery]
+  );
+
+  const jumpSearchMatch = useCallback(
+    (direction: 1 | -1) => {
+      if (searchMatchCount <= 0) return;
+      setAutoScroll(false);
+      setSearchMatchIndex((current) => {
+        const next = current + direction;
+        return (next + searchMatchCount) % searchMatchCount;
+      });
+    },
+    [searchMatchCount]
+  );
 
   const start = useCallback(async () => {
     const canStream =
@@ -162,6 +198,18 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
     if (!autoScroll || !tailRef.current) return;
     tailRef.current.scrollTop = tailRef.current.scrollHeight;
   }, [logText, autoScroll]);
+
+  useEffect(() => {
+    setSearchMatchIndex(0);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (searchMatchCount <= 0) {
+      setSearchMatchIndex(0);
+      return;
+    }
+    setSearchMatchIndex((current) => Math.min(current, searchMatchCount - 1));
+  }, [searchMatchCount]);
 
   useEffect(() => () => stop(), [stop]);
 
@@ -256,6 +304,9 @@ export function Pm2LiveLogsProvider({ children, autoStart = false }: ProviderPro
     logText,
     searchQuery,
     setSearchQuery,
+    searchMatchCount,
+    searchMatchIndex,
+    jumpSearchMatch,
     error,
     autoScroll,
     setAutoScroll,
@@ -289,6 +340,9 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
     clear,
     searchQuery,
     setSearchQuery,
+    searchMatchCount,
+    searchMatchIndex,
+    jumpSearchMatch,
   } = usePm2LogsContext();
 
   const studio = variant === 'studio';
@@ -398,10 +452,37 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
           placeholder="Buscar logs..."
           className={
             studio
-              ? 'w-full rounded-lg border border-gov-gray-200 bg-gov-gray-50 py-1.5 pl-7 pr-2 text-[11px] text-gov-gray-900 outline-none placeholder:text-gov-gray-400 focus:border-gov-blue-400 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text dark:placeholder:text-dark-muted'
-              : 'w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 pl-7 pr-2 text-xs text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500'
+              ? 'w-full rounded-lg border border-gov-gray-200 bg-gov-gray-50 py-1.5 pl-7 pr-20 text-[11px] text-gov-gray-900 outline-none placeholder:text-gov-gray-400 focus:border-gov-blue-400 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text dark:placeholder:text-dark-muted'
+              : 'w-full rounded-lg border border-slate-700 bg-slate-900 py-1.5 pl-7 pr-20 text-xs text-slate-100 outline-none placeholder:text-slate-500 focus:border-sky-500'
           }
         />
+        <span className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+          {searchQuery.trim() && searchMatchCount > 0 ? (
+            <span className="px-1 text-[10px] text-gov-gray-500 dark:text-dark-muted">
+              {searchMatchIndex + 1}/{searchMatchCount}
+            </span>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => jumpSearchMatch(-1)}
+            disabled={searchMatchCount <= 0}
+            className="grid h-6 w-6 place-items-center rounded-md text-gov-gray-500 hover:bg-gov-gray-100 disabled:opacity-35 dark:text-dark-muted dark:hover:bg-dark-surface"
+            aria-label="Coincidencia anterior"
+            title="Coincidencia anterior"
+          >
+            <ChevronUp size={14} aria-hidden />
+          </button>
+          <button
+            type="button"
+            onClick={() => jumpSearchMatch(1)}
+            disabled={searchMatchCount <= 0}
+            className="grid h-6 w-6 place-items-center rounded-md text-gov-gray-500 hover:bg-gov-gray-100 disabled:opacity-35 dark:text-dark-muted dark:hover:bg-dark-surface"
+            aria-label="Siguiente coincidencia"
+            title="Siguiente coincidencia"
+          >
+            <ChevronDown size={14} aria-hidden />
+          </button>
+        </span>
       </label>
       {error ? (
         <p className={`text-[11px] ${studio ? 'text-red-600' : 'text-red-400'}`}>{error}</p>
@@ -411,7 +492,17 @@ export function Pm2LiveLogsControls({ variant = 'dark' }: ControlsProps) {
 }
 
 export function Pm2LiveLogsViewport({ className = '' }: { className?: string }) {
-  const { logText, streaming, tailRef, searchQuery } = usePm2LogsContext();
+  const { logText, streaming, tailRef, searchQuery, searchMatchIndex } = usePm2LogsContext();
+
+  useEffect(() => {
+    const el = tailRef.current;
+    if (!el || !searchQuery.trim()) return;
+    const active = el.querySelector<HTMLElement>('mark[data-log-search-active="true"]');
+    if (!active) return;
+    const elRect = el.getBoundingClientRect();
+    const activeRect = active.getBoundingClientRect();
+    el.scrollTop += activeRect.top - elRect.top - el.clientHeight / 2 + activeRect.height / 2;
+  }, [tailRef, searchQuery, searchMatchIndex, logText]);
 
   return (
     <div
@@ -419,7 +510,7 @@ export function Pm2LiveLogsViewport({ className = '' }: { className?: string }) 
       className={`${LOG_VIEWPORT_SCROLL_CLASS}${className ? ` ${className}` : ''}`}
     >
       {logText ? (
-        <AnsiLogText text={logText} highlight={searchQuery} />
+        <AnsiLogText text={logText} highlight={searchQuery} activeMatchIndex={searchMatchIndex} />
       ) : (
         <span className="text-gov-gray-500 dark:text-slate-500">
           {streaming ? 'Esperando líneas…' : 'Pulsa el botón de stream para empezar.'}

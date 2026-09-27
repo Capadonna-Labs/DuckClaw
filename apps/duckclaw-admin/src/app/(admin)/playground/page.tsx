@@ -943,12 +943,12 @@ export default function PlaygroundPage() {
           />
           <aside className="relative w-full max-w-[min(100vw,24rem)] min-w-0 h-full flex flex-col bg-white dark:bg-dark-surface border-l dark:border-dark-border shadow-xl">
             <div
-              className={`flex items-center justify-between gap-2 shrink-0 p-4 ${
-                settingsPanelMode === 'logs' ? '' : 'border-b dark:border-dark-border'
+              className={`flex items-center justify-between gap-2 shrink-0 px-4 pt-4 ${
+                settingsPanelMode === 'logs' ? 'pb-1' : 'border-b pb-4 dark:border-dark-border'
               }`}
             >
               <span className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">
-                {settingsPanelMode === 'logs' ? 'Logs PM2' : 'Run settings'}
+                {settingsPanelMode === 'logs' ? 'Logs' : 'Run settings'}
               </span>
               <button
                 type="button"
@@ -959,7 +959,11 @@ export default function PlaygroundPage() {
                 <X size={18} />
               </button>
             </div>
-            <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-4 space-y-3 overscroll-contain">
+            <div
+              className={`scrollbar-thin min-h-0 flex-1 overflow-y-auto px-4 pb-4 overscroll-contain ${
+                settingsPanelMode === 'logs' ? 'space-y-2 pt-1' : 'space-y-3 pt-4'
+              }`}
+            >
               {runSettingsPanel}
             </div>
           </aside>
@@ -981,7 +985,7 @@ export default function PlaygroundPage() {
             }`}
           >
             <h2 className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">
-              {settingsPanelMode === 'logs' ? 'Logs PM2' : 'Run settings'}
+              {settingsPanelMode === 'logs' ? 'Logs' : 'Run settings'}
             </h2>
             <button
               type="button"
@@ -993,7 +997,11 @@ export default function PlaygroundPage() {
               <PanelRightClose size={16} aria-hidden />
             </button>
           </div>
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden pt-3">
+          <div
+            className={`flex min-h-0 flex-1 flex-col overflow-hidden ${
+              settingsPanelMode === 'logs' ? 'pt-1' : 'pt-3'
+            }`}
+          >
             {runSettingsPanel}
           </div>
         </div>

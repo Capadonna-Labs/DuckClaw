@@ -8,20 +8,14 @@ import {
   ArrowLeft,
   FolderOpen,
   Settings2,
-  ChevronRight,
   PanelRightClose,
   PanelRightOpen,
   Terminal,
   X,
 } from 'lucide-react';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
-import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
-import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
-import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
-import { ChatSlmSelector } from '@/components/chat/ChatSlmSelector';
-import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
 import { ScrollFabPair } from '@/components/shared/ScrollFabPair';
 import { useScrollFabPair } from '@/components/shared/useScrollFabPair';
 import { workerOptionId, workerOptionIds, workerOptionLabel } from '@/lib/workerOptions';
@@ -63,11 +57,7 @@ import { notificationPermission } from '@/lib/chatNotifications';
 import { usePlaygroundChatToggles } from '@/components/playground/usePlaygroundChatToggles';
 
 import { PlaygroundHistoryView } from '@/components/playground/PlaygroundHistoryView';
-import {
-  ChatCommandsPanel,
-  ProjectAgentControls,
-  SettingsModal,
-} from '@/components/playground/PlaygroundSettingsParts';
+import { PlaygroundSettingsDialogs } from '@/components/playground/PlaygroundSettingsDialogs';
 import type {
   PlaygroundConfig,
   PlaygroundSettingsModal,
@@ -542,7 +532,7 @@ export default function PlaygroundPage() {
       if (!conv.sessionId || !workerId.trim()) {
         throw new Error('Sesión o worker no listos para sandbox');
       }
-        setSandboxToggling(true);
+      setSandboxToggling(true);
       try {
         await adminService.playgroundChat({
           worker_id: workerId.trim(),
@@ -649,143 +639,29 @@ export default function PlaygroundPage() {
   );
 
   const settingsDialog = (
-    <>
-      {settingsModal === 'routing' && (
-        <SettingsModal
-          title="Contexto del chat"
-          description="Proyecto, agente y alcance de conocimiento RAG."
-          onClose={() => setSettingsModal(null)}
-        >
-          <ProjectAgentControls
-            config={config}
-            projectId={projectId}
-            knowledgeScope={knowledgeScope}
-            activeProject={activeProject}
-            projectWorkerIds={projectWorkerIds}
-            selectableWorkers={selectableWorkers}
-            workerId={workerId}
-            onProjectChange={(nextProjectId) => {
-              setProjectId(nextProjectId);
-              const nextProject = (config?.projects ?? []).find(
-                (project) => project.project_id === nextProjectId
-              );
-              const nextProjectWorkers =
-                nextProject?.agents.map((agent) => agent.worker_id).filter(Boolean) ?? [];
-              if (nextProjectWorkers.length > 0) {
-                const keepCurrent =
-                  workerId.trim() && nextProjectWorkers.includes(workerId.trim());
-                selectWorker(keepCurrent ? workerId : nextProjectWorkers[0]!);
-                return;
-              }
-              // Sin agentes en el proyecto: no vaciar — loadConfig / lista global mantiene default.
-              if (!workerId.trim()) {
-                const ids = workerOptionIds(config?.workers);
-                const fallback = ids.includes('default') ? 'default' : ids[0] ?? '';
-                if (fallback) selectWorker(fallback);
-              }
-            }}
-            onWorkerChange={selectWorker}
-            onKnowledgeScopeChange={(scope) => void persistKnowledgeScope(scope)}
-          />
-        </SettingsModal>
-      )}
-
-      {settingsModal === 'model' && (
-        <SettingsModal
-          title="Model selection"
-          description="Proveedor LLM (nube o inferencia local). SLM abajo es herramienta aparte."
-          size="wide"
-          onClose={() => setSettingsModal(null)}
-        >
-          {conv.sessionId ? (
-            <div className="space-y-6">
-              <div className="space-y-3">
-                <p className="text-xs font-black uppercase tracking-wider text-gov-gray-500">LLM</p>
-                <ChatLlmSelectors
-                  chatId={conv.sessionId}
-                  tenantId={config?.effective_tenant_id || profileTenantId}
-                  provider={config?.llm?.provider ?? ''}
-                  model={config?.llm?.model ?? ''}
-                  catalog={config?.catalog ?? []}
-                  mlxInference={config?.slm}
-                  onUpdated={loadConfig}
-                  disabled={config?.authorized === false || chat.loading}
-                  size="modal"
-                />
-              </div>
-              <div className="space-y-3 border-t dark:border-dark-border pt-4">
-                <p className="text-xs font-black uppercase tracking-wider text-gov-gray-500">
-                  SLM
-                </p>
-                <ChatSlmSelector
-                  chatId={conv.sessionId}
-                  slm={config?.slm}
-                  onUpdated={loadConfig}
-                  disabled={config?.authorized === false || chat.loading}
-                  size="modal"
-                />
-              </div>
-            </div>
-          ) : (
-            <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
-          )}
-        </SettingsModal>
-      )}
-
-      {settingsModal === 'vault' && (
-        <SettingsModal
-          title="Base de datos de esta sesión"
-          description="Archivo .duckdb que usa esta conversación para SQL, reglas y conocimiento (RAG)."
-          onClose={() => setSettingsModal(null)}
-        >
-          {conv.sessionId ? (
-            <ConversationVaultSelector
-              chatId={conv.sessionId}
-              tenantId={config?.effective_tenant_id}
-              value={chat.vaultPath}
-              effectivePath={activeVaultPath}
-              scope={activeVaultScope}
-              options={config?.vault_options}
-              onChange={chat.setVaultPath}
-              onUpdated={loadConfig}
-              compact
-            />
-          ) : (
-            <p className="text-xs text-gov-gray-500">Cargando conversación…</p>
-          )}
-        </SettingsModal>
-      )}
-
-      {settingsModal === 'instructions' && (
-        <SettingsModal
-          title="System instructions"
-          description="Prompt base del agente seleccionado."
-          onClose={() => setSettingsModal(null)}
-        >
-          <MarkdownSnippetPanel
-            content={systemPreview}
-            emptyLabel="Sin system_prompt.md"
-            maxHeightClass="max-h-72"
-          />
-          <Link
-            href={`/templates/${workerId}?focus=system_prompt.md`}
-            className="text-xs text-gov-blue-700 font-semibold mt-3 inline-flex items-center gap-1"
-          >
-            Editar comportamiento <ChevronRight size={12} />
-          </Link>
-        </SettingsModal>
-      )}
-
-      {settingsModal === 'commands' && (
-        <SettingsModal
-          title="Comandos"
-          description="Atajos copiables para hablar con el agente."
-          onClose={() => setSettingsModal(null)}
-        >
-          <ChatCommandsPanel />
-        </SettingsModal>
-      )}
-    </>
+    <PlaygroundSettingsDialogs
+      settingsModal={settingsModal}
+      onClose={() => setSettingsModal(null)}
+      config={config}
+      projectId={projectId}
+      knowledgeScope={knowledgeScope}
+      activeProject={activeProject}
+      projectWorkerIds={projectWorkerIds}
+      selectableWorkers={selectableWorkers}
+      workerId={workerId}
+      onProjectIdChange={setProjectId}
+      onSelectWorker={selectWorker}
+      onKnowledgeScopeChange={(scope) => void persistKnowledgeScope(scope)}
+      sessionId={conv.sessionId}
+      profileTenantId={profileTenantId}
+      chatLoading={chat.loading}
+      vaultPath={chat.vaultPath}
+      onVaultPathChange={chat.setVaultPath}
+      activeVaultPath={activeVaultPath}
+      activeVaultScope={activeVaultScope}
+      systemPreview={systemPreview}
+      onConfigUpdated={loadConfig}
+    />
   );
 
   return (

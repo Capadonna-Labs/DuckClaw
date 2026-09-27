@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Bot } from 'lucide-react';
 import { formatGatewayStatus, isGatewayHealthy } from '@/lib/healthLabels';
 import { workersTooltipLabel } from '@/lib/workersTooltipLabel';
@@ -18,7 +19,11 @@ export function PlatformStatusStrip() {
   const refresh = useGatewayHealthStore((s) => s.refresh);
 
   const [workersOpen, setWorkersOpen] = useState(false);
+  const [portalReady, setPortalReady] = useState(false);
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
   const workersRootRef = useRef<HTMLSpanElement | null>(null);
+  const workersButtonRef = useRef<HTMLButtonElement | null>(null);
+  const workersPanelRef = useRef<HTMLSpanElement | null>(null);
   const workersPanelId = useId();
 
   const poll = useCallback(() => {
@@ -28,6 +33,10 @@ export function PlatformStatusStrip() {
   useEffect(() => {
     void refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    setPortalReady(true);
+  }, []);
 
   const intervalMs = useMemo(() => (error ? POLL_ERROR_MS : POLL_OK_MS), [error]);
   useVisibilityAwareInterval(poll, intervalMs);
@@ -58,12 +67,38 @@ export function PlatformStatusStrip() {
       ? 'Gateway no responde'
       : `Gateway ${gatewayLabel}`;
 
+  const syncPanelPos = useCallback(() => {
+    const btn = workersButtonRef.current;
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    setPanelPos({
+      top: rect.bottom + 8,
+      left: rect.left + rect.width / 2,
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!workersOpen) {
+      setPanelPos(null);
+      return;
+    }
+    syncPanelPos();
+    const onReposition = () => syncPanelPos();
+    window.addEventListener('resize', onReposition);
+    window.addEventListener('scroll', onReposition, true);
+    return () => {
+      window.removeEventListener('resize', onReposition);
+      window.removeEventListener('scroll', onReposition, true);
+    };
+  }, [workersOpen, syncPanelPos]);
+
   useEffect(() => {
     if (!workersOpen) return;
     const onPointerDown = (event: MouseEvent | TouchEvent) => {
-      const root = workersRootRef.current;
-      if (!root) return;
-      if (event.target instanceof Node && root.contains(event.target)) return;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (workersRootRef.current?.contains(target)) return;
+      if (workersPanelRef.current?.contains(target)) return;
       setWorkersOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
@@ -78,6 +113,33 @@ export function PlatformStatusStrip() {
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [workersOpen]);
+
+  const workersPanel =
+    portalReady && workersOpen && panelPos
+      ? createPortal(
+          <span
+            ref={workersPanelRef}
+            id={workersPanelId}
+            role="dialog"
+            aria-label="Workers activos"
+            style={{ top: panelPos.top, left: panelPos.left }}
+            className="fixed z-[10050] w-max max-w-[min(18rem,calc(100vw-1.5rem))] -translate-x-1/2 rounded-lg border border-gov-gray-700 bg-gov-gray-900 px-3 py-2 text-left text-[11px] font-medium leading-snug text-white shadow-lg dark:border-dark-border dark:bg-[#1e1f20]"
+          >
+            {workers.length > 0 ? (
+              <ul className="space-y-1">
+                {workers.map((id) => (
+                  <li key={id} className="whitespace-nowrap">
+                    {id}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              workersTitle
+            )}
+          </span>,
+          document.body
+        )
+      : null;
 
   return (
     <div
@@ -116,6 +178,7 @@ export function PlatformStatusStrip() {
 
       <span ref={workersRootRef} className="relative inline-flex items-stretch">
         <button
+          ref={workersButtonRef}
           type="button"
           onClick={() => setWorkersOpen((v) => !v)}
           className={`inline-flex items-center gap-1.5 px-2.5 py-2 text-gov-blue-800 dark:text-dark-cyan ${
@@ -132,27 +195,8 @@ export function PlatformStatusStrip() {
           <Bot size={15} className="shrink-0 opacity-90" aria-hidden />
           <span className="text-xs font-black tabular-nums">{workersCount ?? '—'}</span>
         </button>
-        {workersOpen ? (
-          <span
-            id={workersPanelId}
-            role="dialog"
-            aria-label="Workers activos"
-            className="absolute left-1/2 top-full z-50 mt-2 w-max max-w-[min(18rem,70vw)] -translate-x-1/2 rounded-lg border border-gov-gray-700 bg-gov-gray-900 px-3 py-2 text-left text-[11px] font-medium leading-snug text-white shadow-lg dark:border-dark-border dark:bg-[#1e1f20]"
-          >
-            {workers.length > 0 ? (
-              <ul className="space-y-1">
-                {workers.map((id) => (
-                  <li key={id} className="whitespace-nowrap">
-                    {id}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              workersTitle
-            )}
-          </span>
-        ) : null}
       </span>
+      {workersPanel}
     </div>
   );
 }

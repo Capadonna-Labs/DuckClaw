@@ -134,7 +134,11 @@ def worker_has_android_mcp_tools(tools: list[Any] | None) -> bool:
         name = str(getattr(tool, "name", "") or "").strip().lower()
         if name.startswith("mcp__android__") or name.startswith("mcp__mcp_android__"):
             return True
-        if name in ("android_expand_notifications", "android_collapse_notifications"):
+        if name in (
+            "android_expand_notifications",
+            "android_collapse_notifications",
+            "android_review_and_dismiss_notifications",
+        ):
             return True
     return False
 

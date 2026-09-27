@@ -588,16 +588,18 @@ def analyze_notification_ui_dump(raw: str) -> dict[str, Any]:
     ]
     workflow = [
         "1. Lee digest — escribe insight en el MENSAJE FINAL (bullets: app + resumen body).",
-        "2. UN swipe horizontal por turno (solo filas DISMISS).",
-        "3. SKIP = no swipe. Verifica con get_ui_dump tras cada dismiss.",
+        "2. Si el usuario pide todo/todas, usa android_review_and_dismiss_notifications y termina en el mismo turno.",
+        "3. Si no usas batch, swipe horizontal por fila DISMISS y verifica.",
+        "4. SKIP = no swipe. Verifica con get_ui_dump tras cada dismiss.",
     ]
     if qs_only or panel_state == "collapsed_or_unparsed":
         workflow = [
             "1. Despertar pantalla si está apagada.",
             "2. android_expand_notifications → get_ui_dump (lee digest ANTES de scroll).",
             "3. Si digest vacío: UN swipe vertical x1=540,y1=1200,x2=540,y2=400 → get_ui_dump.",
-            "4. UN swipe horizontal por turno usando EXACTAMENTE digest[].swipe.",
-            "5. get_ui_dump tras cada dismiss.",
+            "4. Si el usuario pidió todas/todo, usa android_review_and_dismiss_notifications.",
+            "5. Si no usas batch, swipe horizontal usando EXACTAMENTE digest[].swipe.",
+            "6. get_ui_dump tras cada dismiss.",
         ]
     result = {
         "panel_state": panel_state,
@@ -610,14 +612,15 @@ def analyze_notification_ui_dump(raw: str) -> dict[str, Any]:
         "dismissible": dismissible,
         "dismiss_actions": dismiss_actions,
         "max_swipe_attempts_per_row": 1,
-        "one_swipe_per_turn": True,
+        "one_swipe_per_turn": False,
+        "batch_tool": "android_review_and_dismiss_notifications",
         "workflow": workflow,
         "final_message_must_include": (
             "Bullets con cada notificación DISMISS leída: '- {title}: {body}' y cuáles quedaron SKIP."
         ),
         "after_read": (
             "El insight va en la respuesta de texto al usuario, no solo en tool calls. "
-            "Prohibido encadenar 3+ swipe_screen en un solo turno."
+            "Si el usuario pidió todo/todas, no preguntes si continuar: procesa el lote visible."
         ),
         "rule": (
             "No afirmar '0 notificaciones' hasta completar expand + get_ui_dump. "
@@ -703,8 +706,9 @@ def append_notification_hints_to_ui_dump(raw: str) -> str:
             ]
             hints["workflow"] = [
                 "1. Lee digest — bullets con title + body para el usuario.",
-                "2. UN swipe horizontal por turno usando EXACTAMENTE digest[].swipe (y1 real).",
-                "3. get_ui_dump tras cada dismiss para verificar.",
+                "2. Si el usuario pidió todo/todas, usa android_review_and_dismiss_notifications.",
+                "3. Si no usas batch, swipe horizontal usando EXACTAMENTE digest[].swipe (y1 real).",
+                "4. get_ui_dump tras cada dismiss para verificar.",
             ]
             hints["rule"] = (
                 "OBLIGATORIO: copiar x1/y1/x2/y2 de digest[].swipe al llamar swipe_screen. "

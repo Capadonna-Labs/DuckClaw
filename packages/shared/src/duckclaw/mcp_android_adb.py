@@ -177,6 +177,105 @@ def android_collapse_statusbar(*, serial: str | None = None) -> dict[str, Any]:
     }
 
 
+def _android_ui_dump(serial: str) -> tuple[int, str, str]:
+    dump_path = "/sdcard/duckclaw-window.xml"
+    code, _, stderr = _run_adb(
+        ["-s", serial, "shell", "uiautomator", "dump", dump_path],
+        timeout=10.0,
+    )
+    if code != 0:
+        return code, "", stderr
+    cat_code, stdout, cat_stderr = _run_adb(
+        ["-s", serial, "shell", "cat", dump_path],
+        timeout=10.0,
+    )
+    return cat_code, stdout, cat_stderr
+
+
+def android_review_and_dismiss_notifications(
+    *,
+    serial: str | None = None,
+    max_dismiss: int = 12,
+    collapse_when_done: bool = True,
+) -> dict[str, Any]:
+    """Read and dismiss all currently visible dismissible Android notifications via ADB."""
+    sid = (serial or primary_adb_serial()).strip()
+    if not sid:
+        return {"ok": False, "error": "no ADB device in state device"}
+
+    try:
+        limit = max(1, min(30, int(max_dismiss)))
+    except (TypeError, ValueError):
+        limit = 12
+
+    from duckclaw.mcp_android_notifications import analyze_notification_ui_dump
+
+    opened = android_expand_notifications(serial=sid)
+    processed: list[dict[str, Any]] = []
+    skipped: list[str] = []
+    errors: list[str] = []
+    last_digest: list[dict[str, Any]] = []
+
+    for _ in range(limit):
+        code, raw, stderr = _android_ui_dump(sid)
+        if code != 0:
+            errors.append((stderr or "uiautomator dump failed").strip())
+            break
+        plan = analyze_notification_ui_dump(raw)
+        last_digest = list(plan.get("digest") or [])
+        skipped = [str(x) for x in (plan.get("skip_non_dismissible") or [])]
+        dismiss_actions = list(plan.get("dismiss_actions") or [])
+        if not dismiss_actions:
+            break
+
+        row = dismiss_actions[0]
+        swipe = row.get("swipe") or {}
+        try:
+            x1 = int(swipe.get("x1", 980))
+            y1 = int(swipe.get("y1") or row.get("cy") or 725)
+            x2 = int(swipe.get("x2", 80))
+            y2 = int(swipe.get("y2") or row.get("cy") or y1)
+            duration = int(swipe.get("duration_ms", 450))
+        except (TypeError, ValueError):
+            errors.append(f"invalid swipe coords for {row.get('title') or 'notification'}")
+            break
+
+        scode, sout, serr = _run_adb(
+            ["-s", sid, "shell", "input", "swipe", str(x1), str(y1), str(x2), str(y2), str(duration)],
+            timeout=10.0,
+        )
+        item = {
+            "title": row.get("title") or "",
+            "body": row.get("body") or "",
+            "swipe": {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "duration_ms": duration},
+            "ok": scode == 0,
+            "stdout": sout.strip(),
+            "stderr": serr.strip(),
+        }
+        processed.append(item)
+        if scode != 0:
+            errors.append(serr.strip() or f"swipe failed for {item['title']}")
+            break
+
+    collapsed: dict[str, Any] | None = None
+    if collapse_when_done:
+        collapsed = android_collapse_statusbar(serial=sid)
+
+    return {
+        "ok": not errors,
+        "serial": sid,
+        "action": "review-and-dismiss-notifications",
+        "opened": opened,
+        "processed_count": len(processed),
+        "processed": processed,
+        "remaining_digest": last_digest,
+        "skip_non_dismissible": skipped,
+        "errors": errors,
+        "collapsed": collapsed,
+        "hint": "Resume processed en bullets y no preguntes si continuar salvo que errors no esté vacío.",
+    }
+
+
 def android_adb_connect(
     host: str | None = None,
     *,

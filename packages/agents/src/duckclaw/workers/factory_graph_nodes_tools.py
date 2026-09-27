@@ -59,62 +59,6 @@ from langchain_core.messages import ToolMessage
 
 _log = logging.getLogger(__name__)
 
-_BROKER_EXEC_TOOLS = frozenset({"execute_approved_signal", "execute_broker_signals_batch"})
-_PROTECTIVE_ORDER_HINTS = (
-    "bracket",
-    "oca",
-    "protective",
-    "protectivo",
-    "proteccion",
-    "protección",
-    "tp_sl_protection",
-)
-
-
-def _protective_broker_exec_error(args: Any, vault_path: Any) -> str | None:
-    raw = json.dumps(args, ensure_ascii=False, default=str).lower()
-    if any(hint in raw for hint in _PROTECTIVE_ORDER_HINTS):
-        return (
-            "BLOCKED_PROTECTIVE_ORDER_ROUTE: BRACKET/OCA/protective signals must not "
-            "use execute_approved_signal/execute_broker_signals_batch because those "
-            "can submit entry BUY/SELL orders. Use the protective OCA route/script instead."
-        )
-    if not isinstance(args, dict):
-        return None
-    signal_id = str(
-        args.get("signal_id")
-        or args.get("approved_signal_id")
-        or args.get("id")
-        or ""
-    ).strip()
-    if not signal_id:
-        return None
-    try:
-        import duckdb
-
-        con = duckdb.connect(str(vault_path), read_only=True)
-        try:
-            row = con.execute(
-                """
-                SELECT strategy_name, rationale
-                FROM quant_core.trade_signals
-                WHERE cast(signal_id AS VARCHAR) = ?
-                LIMIT 1
-                """,
-                [signal_id],
-            ).fetchone()
-        finally:
-            con.close()
-    except Exception:
-        return None
-    text = " ".join(str(x or "") for x in (row or ())).lower()
-    if any(hint in text for hint in _PROTECTIVE_ORDER_HINTS) or "no es entrada nueva" in text:
-        return (
-            "BLOCKED_PROTECTIVE_ORDER_ROUTE: approved signal is BRACKET/OCA/protective; "
-            "refusing entry-order executor. Use protective OCA route/script instead."
-        )
-    return None
-
 
 def make_tools_node(ctx: WorkerGraphContext):
 
@@ -385,14 +329,6 @@ def make_tools_node(ctx: WorkerGraphContext):
                 name = (tc.get("name") or "").strip()
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
-                if name in _BROKER_EXEC_TOOLS:
-                    _broker_block = _protective_broker_exec_error(args, path)
-                    if _broker_block is not None:
-                        content = json.dumps({"status": "error", "error": _broker_block}, ensure_ascii=False)
-                        content = _apply_harness_post(name, content)
-                        new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
-                        _tool_notify(name, "error", "blocked_protective_order_route", elapsed_ms=0)
-                        continue
                 _pre = _harness_precheck(name, args)
                 if _pre is not None:
                     new_msgs.append(ToolMessage(content=_pre, tool_call_id=tid, name=name))

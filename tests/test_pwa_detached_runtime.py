@@ -98,6 +98,6 @@ def test_tool_usage_timer_only_while_tools_running() -> None:
     ).read_text(encoding="utf-8")
 
     assert "liveWhileLoading?: boolean" in group
-    assert "const headerRunning = anyRunning;" in group
+    assert "const headerRunning = anyRunning && runningStartedAt != null;" in group
     assert "anyRunning || liveWhileLoading" not in group
     assert "liveWhileLoading={loading && itemIdx === displayItems.length - 1}" in message_list

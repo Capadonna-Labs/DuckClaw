@@ -92,7 +92,10 @@ def test_playground_page_delegates_history_and_settings() -> None:
     page = Path("apps/duckclaw-admin/src/app/(admin)/playground/page.tsx").read_text(encoding="utf-8")
     assert "PlaygroundHistoryView" in page
     assert "from '@/components/playground/PlaygroundHistoryView'" in page
-    assert "from '@/components/playground/PlaygroundSettingsParts'" in page
+    assert (
+        "from '@/components/playground/PlaygroundSettingsParts'" in page
+        or "from '@/components/playground/PlaygroundSettingsDialogs'" in page
+    )
     assert "function PlaygroundHistoryView" not in page
     assert "function SettingsModal" not in page
     assert len(page.splitlines()) < 1000

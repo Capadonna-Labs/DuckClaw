@@ -41,6 +41,7 @@ export default defineConfig({
       'src/lib/adminErrors.test.ts',
       'src/components/reports/reportsPageView.test.ts',
       'src/lib/htmlDashboardUpload.test.ts',
+      'src/lib/workersTooltipLabel.test.ts',
     ],
   },
   resolve: {

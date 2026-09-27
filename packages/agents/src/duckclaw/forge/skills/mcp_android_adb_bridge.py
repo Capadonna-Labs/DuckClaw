@@ -30,6 +30,14 @@ def register_android_adb_helper_tools(tools_list: list[Any]) -> int:
 
         return json.dumps(android_collapse_statusbar(), ensure_ascii=False)
 
+    def _review_and_dismiss(max_dismiss: int = 12) -> str:
+        from duckclaw.mcp_android_adb import android_review_and_dismiss_notifications
+
+        return json.dumps(
+            android_review_and_dismiss_notifications(max_dismiss=max_dismiss),
+            ensure_ascii=False,
+        )
+
     names = {str(getattr(t, "name", "") or "") for t in tools_list}
     added = 0
     if "android_expand_notifications" not in names:
@@ -56,6 +64,19 @@ def register_android_adb_helper_tools(tools_list: list[Any]) -> int:
                 description="Cierra el panel de notificaciones (cmd statusbar collapse).",
                 args_schema=_Empty,
                 infer_schema=False,
+            )
+        )
+        added += 1
+    if "android_review_and_dismiss_notifications" not in names:
+        tools_list.append(
+            StructuredTool.from_function(
+                _review_and_dismiss,
+                name="android_review_and_dismiss_notifications",
+                description=(
+                    "Lee y descarta en lote las notificaciones Android dismissible visibles. "
+                    "Usar cuando el usuario pida revisar/descartar todas/todo en un solo turno; "
+                    "devuelve processed[] con title/body para resumir insights."
+                ),
             )
         )
         added += 1

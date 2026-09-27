@@ -30,6 +30,7 @@ export default defineConfig({
       'src/components/chat/chatSuggestionsGating.test.ts',
       'src/components/chat/chatMarkdownMermaid.test.ts',
       'src/components/chat/chatMarkdown.test.ts',
+      'src/lib/sseChat.test.ts',
       'src/lib/toolUsageGroup.test.ts',
       'src/lib/chatEphemeralMerge.test.ts',
       'src/lib/findHeartbeatInsertIndex.test.ts',

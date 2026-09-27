@@ -55,6 +55,7 @@ export type PlaygroundRunSettingsPanelProps = {
   systemReady: boolean;
   invalidWorkers: string[];
   logsPanelOpen: boolean;
+  logsOnly?: boolean;
   onLogsToggle: () => void;
   toolUsageEnabled: boolean;
   onToolUsageToggle: () => void;
@@ -93,6 +94,7 @@ export function PlaygroundRunSettingsPanel({
   systemReady,
   invalidWorkers,
   logsPanelOpen,
+  logsOnly = false,
   onLogsToggle,
   toolUsageEnabled,
   onToolUsageToggle,
@@ -172,11 +174,12 @@ export function PlaygroundRunSettingsPanel({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col gap-2">
-      <div
-        className={`scrollbar-thin min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] ${
-          bottomPanelOpen ? 'max-h-[42%] shrink-0 space-y-3' : 'flex-1 space-y-4'
-        }`}
-      >
+      {!logsOnly ? (
+        <div
+          className={`scrollbar-thin min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-gutter:stable] ${
+            bottomPanelOpen ? 'max-h-[28%] shrink-0 space-y-3' : 'flex-1 space-y-4'
+          }`}
+        >
         <button
           type="button"
           onClick={() => onOpen('model')}
@@ -346,10 +349,19 @@ export function PlaygroundRunSettingsPanel({
             Agentes no disponibles: {invalidWorkers.join(', ')}.
           </p>
         )}
-      </div>
+        </div>
+      ) : logsPanelOpen && logsControls ? (
+        <div className="shrink-0">{logsControls}</div>
+      ) : null}
 
       {logsPanelOpen && logsViewport ? (
-        <div className="flex min-h-[140px] max-h-[min(42vh,380px)] min-w-0 shrink-0 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-white text-gov-gray-800 dark:border-dark-border dark:bg-slate-950 dark:text-slate-200">
+        <div
+          className={`flex min-w-0 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-white text-gov-gray-800 dark:border-dark-border dark:bg-slate-950 dark:text-slate-200 ${
+            logsOnly
+              ? 'min-h-0 flex-1'
+              : 'min-h-[220px] max-h-[min(58vh,520px)] shrink-0'
+          }`}
+        >
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{logsViewport}</div>
         </div>
       ) : null}

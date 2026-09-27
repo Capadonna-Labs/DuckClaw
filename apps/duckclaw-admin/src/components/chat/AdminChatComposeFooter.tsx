@@ -26,6 +26,7 @@ export type AdminChatComposeFooterProps = {
   recommendedSuggestionIndex?: number;
   suggestionsAutoEnabled?: boolean | null;
   onSuggestionsAutoChange?: (enabled: boolean) => void;
+  onSuggestionsOpenChange?: (open: boolean) => void;
   onPickSuggestion?: (text: string) => void | Promise<void>;
   input: string;
   setInput: (value: string) => void;
@@ -104,6 +105,7 @@ export function AdminChatComposeFooter({
   recommendedSuggestionIndex = 0,
   suggestionsAutoEnabled = null,
   onSuggestionsAutoChange,
+  onSuggestionsOpenChange,
   onPickSuggestion,
   input,
   setInput,
@@ -200,6 +202,7 @@ export function AdminChatComposeFooter({
                 busy={loading}
                 serverAutoEnabled={suggestionsAutoEnabled}
                 onAutoChange={onSuggestionsAutoChange}
+                onOpenChange={onSuggestionsOpenChange}
                 onPick={(text) => void onPickSuggestion?.(text)}
               />
             </div>
@@ -307,6 +310,7 @@ export function AdminChatComposeFooter({
                   busy={loading}
                   serverAutoEnabled={suggestionsAutoEnabled}
                   onAutoChange={onSuggestionsAutoChange}
+                  onOpenChange={onSuggestionsOpenChange}
                   onPick={(text) => void onPickSuggestion?.(text)}
                 />
               </div>

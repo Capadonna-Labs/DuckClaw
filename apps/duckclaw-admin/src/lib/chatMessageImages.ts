@@ -106,10 +106,15 @@ export function historyToChatMessages(
     const role = m.role === 'user' ? 'user' : m.role === 'assistant' ? 'assistant' : null;
     const rawText = (m.content || '').trim();
     const text = role === 'user' ? stripContextBlocksForDisplay(rawText) : rawText;
+    if (role === 'assistant' && isInterruptedPlaceholder(text)) continue;
     if (!role || !text) continue;
     const imagePreviews =
       role === 'assistant' ? artifactPreviewFromMessage(text, tid) : undefined;
     out.push({ role, text, ...(imagePreviews ? { imagePreviews } : {}) });
   }
   return out;
+}
+
+export function isInterruptedPlaceholder(text: string): boolean {
+  return /^Interrumpido\.?$/i.test((text || '').trim());
 }

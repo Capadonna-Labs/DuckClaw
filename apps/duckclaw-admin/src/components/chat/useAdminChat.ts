@@ -221,10 +221,7 @@ export function useAdminChat({
       if (last.text.trim()) {
         return stripThinkingStatusHeartbeats([...base, { ...last, streaming: false }]);
       }
-      return stripThinkingStatusHeartbeats([
-        ...base,
-        { role: 'assistant', text: 'Interrumpido', interrupted: true },
-      ]);
+      return stripThinkingStatusHeartbeats(base);
     });
   }, []);
 

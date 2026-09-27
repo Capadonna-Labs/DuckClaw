@@ -113,6 +113,42 @@ def refuse_protective_as_market_entry(signal_type: str | None) -> dict | None:
     }
 
 
+def _is_protective_signal(strategy_name: str | None, rationale: str | None) -> bool:
+    text = f"{strategy_name or ''} {rationale or ''}".lower()
+    if "no es entrada nueva" in text or "no new entry" in text:
+        return True
+    return any(
+        token in text
+        for token in (
+            "protective",
+            "protectivo",
+            "proteccion",
+            "protección",
+            "bracket oca",
+            "oca bracket",
+            "bracket protect",
+            "tp/sl protection",
+            "tp_sl_protection",
+        )
+    )
+
+
+async def _live_position_qty(ib: object, ticker: str) -> float | None:
+    sym = ticker.strip().upper()
+    try:
+        positions = ib.positions()  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    for pos in list(positions or []):
+        contract = getattr(pos, "contract", None)
+        if str(getattr(contract, "symbol", "") or "").strip().upper() == sym:
+            try:
+                return float(getattr(pos, "position"))
+            except Exception:
+                return None
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Signal Execution
 # ---------------------------------------------------------------------------
@@ -356,7 +392,11 @@ async def execute_signal_with_bracket(
         12345
     """
     from duckclaw.db_write_queue import enqueue_typed_command
-    from duckclaw.ibkr_bracket_orders import connect_ibkr, submit_bracket_order
+    from duckclaw.ibkr_bracket_orders import (
+        connect_ibkr,
+        submit_bracket_order,
+        submit_protective_oca_orders,
+    )
     from duckclaw.write_commands import (
         InsertIbkrOrderCommand,
         UpdateTradeSignalExecutedCommand,
@@ -403,10 +443,56 @@ async def execute_signal_with_bracket(
             "error": read_err,
         }
 
+    try:
+        import duckdb
+
+        con = duckdb.connect(vault_db_path, read_only=True)
+        signal_row = con.execute(
+            """
+            SELECT action, strategy_name, rationale, order_qty
+            FROM quant_core.trade_signals
+            WHERE cast(signal_id AS VARCHAR) = ?
+            LIMIT 1
+            """,
+            [signal_id],
+        ).fetchone()
+        con.close()
+    except Exception as exc:
+        _log.error("Error leyendo trade_signals: %s", exc)
+        signal_row = None
+
+    signal_action = str(signal_row[0] or "") if signal_row else ""
+    strategy_name = str(signal_row[1] or "") if signal_row else ""
+    rationale = str(signal_row[2] or "") if signal_row else ""
+    signal_order_qty = (
+        int(abs(float(signal_row[3])))
+        if signal_row and signal_row[3] is not None and float(signal_row[3]) != 0
+        else None
+    )
+    protective_only = _is_protective_signal(strategy_name, rationale)
+
     _log.info(
         f"Niveles TP/SL para {ticker}: TP={tp_price}, SL={sl_price} "
         f"(None = no configurado)"
     )
+
+    if tp_price is None and sl_price is None:
+        msg = "Refusing to submit IBKR market order without TP/SL levels"
+        _log.error("%s: signal_id=%s ticker=%s", msg, signal_id, ticker)
+        return {
+            "status": "error",
+            "signal_id": signal_id,
+            "ticker": ticker,
+            "side": side,
+            "quantity": quantity,
+            "main_order_id": None,
+            "tp_order_id": None,
+            "sl_order_id": None,
+            "tp_price": tp_price,
+            "sl_price": sl_price,
+            "timestamp": timestamp,
+            "error": msg,
+        }
 
     # 2. Conectar a IBKR
     try:
@@ -428,11 +514,33 @@ async def execute_signal_with_bracket(
             "error": f"Error conectando a IBKR: {exc}",
         }
 
-    # 3. Enviar bracket order
+    # 3. Enviar bracket/protective order
     try:
-        result = await submit_bracket_order(
-            ib, ticker, side, quantity, tp_price, sl_price
-        )
+        if protective_only:
+            live_qty = await _live_position_qty(ib, ticker)
+            protective_qty = int(abs(live_qty)) if live_qty and abs(live_qty) > 0 else (
+                signal_order_qty or int(quantity)
+            )
+            position_side = "SELL" if live_qty is not None and live_qty < 0 else (
+                signal_action.strip().upper() or side
+            )
+            if protective_qty <= 0:
+                raise ValueError("protective OCA requires existing positive quantity")
+            result = await submit_protective_oca_orders(
+                ib,
+                ticker,
+                position_side,
+                protective_qty,
+                tp_price=tp_price,
+                sl_price=sl_price,
+                cancel_existing=True,
+            )
+            quantity = protective_qty
+            side = position_side
+        else:
+            result = await submit_bracket_order(
+                ib, ticker, side, quantity, tp_price, sl_price
+            )
         await ib.disconnect()
     except Exception as exc:
         _log.error(f"Error enviando bracket order: {exc}")
@@ -461,18 +569,19 @@ async def execute_signal_with_bracket(
         f"main={result['main_order_id']}, tp={result['tp_order_id']}, sl={result['sl_order_id']}"
     )
 
-    # Main order
-    main_cmd = InsertIbkrOrderCommand(
-        order_id=result["main_order_id"],
-        ticker=ticker,
-        side=side,
-        quantity=quantity,
-        order_type="MARKET",
-        status="submitted",
-        submitted_at=timestamp.isoformat(),
-        trade_signal_id=signal_id,
-    )
-    enqueue_typed_command(main_cmd, db_path=vault_db_path)
+    # Main order (protective OCA has no entry/main order)
+    if result["main_order_id"]:
+        main_cmd = InsertIbkrOrderCommand(
+            order_id=result["main_order_id"],
+            ticker=ticker,
+            side=side,
+            quantity=quantity,
+            order_type="MARKET",
+            status="submitted",
+            submitted_at=timestamp.isoformat(),
+            trade_signal_id=signal_id,
+        )
+        enqueue_typed_command(main_cmd, db_path=vault_db_path)
 
     # TP order
     if result["tp_order_id"]:
@@ -488,7 +597,7 @@ async def execute_signal_with_bracket(
             status="submitted",
             submitted_at=timestamp.isoformat(),
             trade_signal_id=signal_id,
-            notes="Take Profit (GTC)",
+            notes="Take Profit (GTC)" if result["main_order_id"] else f"Protective OCA TP {result.get('oca_group')}",
         )
         enqueue_typed_command(tp_cmd, db_path=vault_db_path)
 
@@ -506,7 +615,7 @@ async def execute_signal_with_bracket(
             status="submitted",
             submitted_at=timestamp.isoformat(),
             trade_signal_id=signal_id,
-            notes="Stop Loss (GTC)",
+            notes="Stop Loss (GTC)" if result["main_order_id"] else f"Protective OCA SL {result.get('oca_group')}",
         )
         enqueue_typed_command(sl_cmd, db_path=vault_db_path)
 

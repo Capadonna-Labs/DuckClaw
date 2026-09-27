@@ -182,12 +182,15 @@ function parseDataLine(data: string): SseChatEvent | null {
 /** Lee el cuerpo de una respuesta fetch SSE y emite eventos parseados. */
 export async function* readSseChatStream(
   body: ReadableStream<Uint8Array> | null,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  opts?: { eventIdleTimeoutMs?: number }
 ): AsyncGenerator<SseChatEvent> {
   if (!body) return;
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  const eventIdleTimeoutMs = Math.max(0, opts?.eventIdleTimeoutMs ?? 0);
+  let lastEventAt = Date.now();
   const onAbort = () => {
     void reader.cancel().catch(() => undefined);
   };
@@ -195,7 +198,23 @@ export async function* readSseChatStream(
   try {
     while (true) {
       if (signal?.aborted) break;
-      const { done, value } = await reader.read();
+      let timeoutId: ReturnType<typeof setTimeout> | null = null;
+      const read =
+        eventIdleTimeoutMs > 0
+          ? Promise.race([
+              reader.read(),
+              new Promise<never>((_, reject) => {
+                const remaining = Math.max(1, eventIdleTimeoutMs - (Date.now() - lastEventAt));
+                timeoutId = setTimeout(
+                  () => reject(new Error('SSE sin actividad; recarga el historial.')),
+                  remaining
+                );
+              }),
+            ]).finally(() => {
+              if (timeoutId != null) clearTimeout(timeoutId);
+            })
+          : reader.read();
+      const { done, value } = await read;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const blocks = buffer.split('\n\n');
@@ -205,7 +224,10 @@ export async function* readSseChatStream(
           if (!line.startsWith('data:')) continue;
           const data = line.startsWith('data: ') ? line.slice(6) : line.slice(5).trimStart();
           const ev = parseDataLine(data);
-          if (ev) yield ev;
+          if (ev) {
+            lastEventAt = Date.now();
+            yield ev;
+          }
         }
       }
     }

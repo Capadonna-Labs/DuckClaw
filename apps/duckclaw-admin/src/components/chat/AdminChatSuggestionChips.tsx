@@ -22,6 +22,7 @@ type AdminChatSuggestionChipsProps = {
   serverAutoEnabled?: boolean | null;
   /** Persistir toggle del usuario (limpia suppress del agente al activar). */
   onAutoChange?: (enabled: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
 };
 
 function readStoredAuto(): boolean {
@@ -51,6 +52,7 @@ export function AdminChatSuggestionChips({
   busy = false,
   serverAutoEnabled = null,
   onAutoChange,
+  onOpenChange,
 }: AdminChatSuggestionChipsProps) {
   const panelId = useId();
   const [open, setOpen] = useState(defaultOpen);
@@ -97,6 +99,10 @@ export function AdminChatSuggestionChips({
     if (suggestions.length === 0) return;
     setOpen(defaultOpen);
   }, [signature, defaultOpen, suggestions.length]);
+
+  useEffect(() => {
+    onOpenChange?.(open);
+  }, [open, onOpenChange]);
 
   useEffect(() => {
     cancelledRef.current = false;

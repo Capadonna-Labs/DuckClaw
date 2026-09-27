@@ -98,6 +98,7 @@ export default function PlaygroundPage() {
   );
   const [indexedKnowledgeSources, setIndexedKnowledgeSources] = useState(0);
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
+  const [settingsPanelMode, setSettingsPanelMode] = useState<'settings' | 'logs'>('settings');
   const [toolUsageEnabled, setToolUsageEnabled] = useState(true);
   const {
     suggestionsEnabled,
@@ -627,6 +628,7 @@ export default function PlaygroundPage() {
         systemReady={Boolean(systemPreview.trim())}
         invalidWorkers={config?.workers_invalid ?? []}
         logsPanelOpen={logsPanelOpen}
+        logsOnly={settingsPanelMode === 'logs'}
         onLogsToggle={handleLogsToggle}
         toolUsageEnabled={toolUsageEnabled}
         onToolUsageToggle={() => setToolUsageEnabled((enabled) => !enabled)}
@@ -871,11 +873,9 @@ export default function PlaygroundPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setLogsPanelOpen((open) => {
-                      const next = !open;
-                      if (next) setPanelOpen(true);
-                      return next;
-                    });
+                    setSettingsPanelMode('logs');
+                    setLogsPanelOpen(true);
+                    setPanelOpen(true);
                   }}
                   className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-sm backdrop-blur-md ${
                     logsPanelOpen
@@ -890,7 +890,10 @@ export default function PlaygroundPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setPanelOpen((open) => !open)}
+                  onClick={() => {
+                    setSettingsPanelMode('settings');
+                    setPanelOpen((open) => !open);
+                  }}
                   className="flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gov-blue-800 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-dark-surface/70 dark:text-dark-cyan"
                   aria-expanded={panelOpen}
                   aria-label={panelToggleTitle}
@@ -914,7 +917,10 @@ export default function PlaygroundPage() {
       {!panelOpen ? (
         <button
           type="button"
-          onClick={() => setPanelOpen(true)}
+          onClick={() => {
+            setSettingsPanelMode('settings');
+            setPanelOpen(true);
+          }}
           className="hidden lg:flex fixed right-0 top-24 z-20 items-center justify-center px-2 py-3 rounded-l-2xl bg-white dark:bg-dark-surface border border-r-0 dark:border-dark-border shadow-md text-gov-blue-700 hover:bg-gov-gray-50 dark:hover:bg-dark-bg"
           aria-label={panelToggleTitle}
           title={panelToggleTitle}
@@ -936,9 +942,13 @@ export default function PlaygroundPage() {
             onClick={() => setPanelOpen(false)}
           />
           <aside className="relative w-full max-w-[min(100vw,24rem)] min-w-0 h-full flex flex-col bg-white dark:bg-dark-surface border-l dark:border-dark-border shadow-xl">
-            <div className="flex items-center justify-between gap-2 shrink-0 p-4 border-b dark:border-dark-border">
+            <div
+              className={`flex items-center justify-between gap-2 shrink-0 p-4 ${
+                settingsPanelMode === 'logs' ? '' : 'border-b dark:border-dark-border'
+              }`}
+            >
               <span className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">
-                Run settings
+                {settingsPanelMode === 'logs' ? 'Logs PM2' : 'Run settings'}
               </span>
               <button
                 type="button"
@@ -963,8 +973,16 @@ export default function PlaygroundPage() {
         aria-hidden={!panelOpen}
       >
         <div className="flex h-full min-h-0 w-80 min-w-0 flex-col overflow-hidden rounded-2xl border border-gov-gray-200/90 bg-gov-gray-50/40 p-3 dark:border-dark-border dark:bg-dark-bg/60">
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gov-gray-200/80 pb-3 dark:border-dark-border">
-            <h2 className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">Run settings</h2>
+          <div
+            className={`flex shrink-0 items-center justify-between gap-2 pb-3 ${
+              settingsPanelMode === 'logs'
+                ? ''
+                : 'border-b border-gov-gray-200/80 dark:border-dark-border'
+            }`}
+          >
+            <h2 className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">
+              {settingsPanelMode === 'logs' ? 'Logs PM2' : 'Run settings'}
+            </h2>
             <button
               type="button"
               onClick={() => setPanelOpen(false)}

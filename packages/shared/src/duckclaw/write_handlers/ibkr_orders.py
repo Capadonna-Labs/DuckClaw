@@ -133,32 +133,24 @@ def _apply_update_ibkr_order_status(conn: Any, payload: dict) -> None:
 
 
 def _apply_update_trade_signal_executed(conn: Any, payload: dict) -> None:
-    """Mark trade signal as executed (update executed_at timestamp)."""
-    # Assuming trade_signals table exists in quant_core schema
+    """Mark trade signal as executed (update executed_at on finance_worker and/or quant_core)."""
+    from duckclaw.trade_signals_ledger import mark_trade_signal_executed
+
     signal_id = str(payload["signal_id"])
     executed_at = str(payload.get("executed_at", ""))
-
-    # Check if table exists first
-    try:
-        conn.execute(
-            "SELECT COUNT(*) FROM quant_core.trade_signals LIMIT 1"
-        ).fetchone()
-    except Exception:
+    touched = mark_trade_signal_executed(conn, signal_id, executed_at)
+    if not touched:
         _log.warning(
-            f"quant_core.trade_signals not found — skipping executed_at update for {signal_id}"
+            "trade_signals executed_at update: signal %s not found in finance_worker/quant_core",
+            signal_id,
         )
         return
-
-    conn.execute(
-        """
-        UPDATE quant_core.trade_signals
-        SET executed_at = ?
-        WHERE signal_id = ?
-        """,
-        [executed_at, signal_id],
+    _log.info(
+        "Trade signal marked as executed: %s @ %s schemas=%s",
+        signal_id,
+        executed_at,
+        touched,
     )
-
-    _log.info(f"Trade signal marked as executed: {signal_id} @ {executed_at}")
 
 
 # Register handlers

@@ -60,39 +60,14 @@ def _signal_type_from_args(args: Any) -> str | None:
 
 
 def _peek_signal_type_from_db(db: Any, signal_id: str) -> str | None:
-    """Best-effort read of finance_worker.trade_signals.signal_type (RO)."""
-    sid = (signal_id or "").strip()
-    if not sid or db is None:
+    """Best-effort read of trade_signals.signal_type (finance_worker then quant_core)."""
+    from duckclaw.trade_signals_ledger import fetch_trade_signal_row
+
+    row = fetch_trade_signal_row(db, signal_id)
+    if not row:
         return None
-    try:
-        rows = db.execute(
-            """
-            SELECT signal_type
-            FROM finance_worker.trade_signals
-            WHERE lower(cast(signal_id AS VARCHAR)) = lower(?)
-            LIMIT 1
-            """,
-            [sid],
-        ).fetchall()
-        if rows:
-            return str(rows[0][0] or "").strip() or None
-    except Exception:
-        _log.debug("protective route: trade_signals peek failed", exc_info=True)
-    try:
-        rows = db.execute(
-            """
-            SELECT signal_type
-            FROM quant_core.trade_signals
-            WHERE lower(cast(signal_id AS VARCHAR)) = lower(?)
-            LIMIT 1
-            """,
-            [sid],
-        ).fetchall()
-        if rows:
-            return str(rows[0][0] or "").strip() or None
-    except Exception:
-        _log.debug("protective route: quant_core.trade_signals peek failed", exc_info=True)
-    return None
+    st = str(row.get("signal_type") or "").strip()
+    return st or None
 
 
 def blocked_protective_broker_route(

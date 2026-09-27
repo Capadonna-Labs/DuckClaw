@@ -443,7 +443,8 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             tokens = refresh_notion_access_token(
                 refresh,
                 client_id=client_id,
-                redirect_uri=redirect_uri or resolve_notion_redirect_uri(),
+                # Only the DCR-registered redirect — never invent a gateway URL.
+                redirect_uri=redirect_uri or None,
             )
             fresh = str(tokens.get("access_token") or "").strip()
             new_refresh = str(tokens.get("refresh_token") or "").strip() or refresh

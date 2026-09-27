@@ -22,22 +22,20 @@ NOTION_PRESET_ID = "notion"
 
 
 def resolve_notion_redirect_uri(explicit: str | None = None) -> str:
+    """Public callback URL — must match Admin ``mcpOAuthRedirectUri`` / DCR registration."""
     override = (explicit or os.environ.get("NOTION_REDIRECT_URI") or "").strip()
     if override:
         return override.rstrip("/")
-    public = (os.environ.get("DUCKCLAW_PUBLIC_URL") or "").strip().rstrip("/")
-    if public:
-        return f"{public}/api/v1/oauth/callback"
-    admin = (os.environ.get("DUCKCLAW_ADMIN_URL") or "").strip().rstrip("/")
-    if admin:
-        from urllib.parse import urlparse
-
-        parsed = urlparse(admin)
-        if parsed.scheme and parsed.hostname:
-            return f"{parsed.scheme}://{parsed.hostname}/api/v1/oauth/callback"
+    # Same order as apps/duckclaw-admin/src/lib/mcpOAuthCallback.ts
+    mcp = (os.environ.get("DUCKCLAW_MCP_OAUTH_REDIRECT_URI") or "").strip()
+    if mcp:
+        return mcp.rstrip("/")
+    google = (os.environ.get("GOOGLE_OAUTH_REDIRECT_URI") or "").strip()
+    if google:
+        return google.rstrip("/")
     from duckclaw.mcp_higgsfield_oauth import resolve_oauth_redirect_uri
 
-    return resolve_oauth_redirect_uri(explicit)
+    return resolve_oauth_redirect_uri(None)
 
 
 async def discover_notion_oauth_metadata() -> tuple[dict[str, Any], str]:
@@ -246,8 +244,10 @@ def refresh_notion_access_token(
         "refresh_token": refresh,
         "client_id": cid,
     }
-    # Some AS implementations echo redirect_uri on refresh; harmless when registered.
-    redir = (redirect_uri or resolve_notion_redirect_uri()).strip()
+    # Only echo redirect_uri when the caller has the DCR-registered value.
+    # Inventing one via resolve_notion_redirect_uri() (gateway /api/v1/...) while
+    # Admin registered …/api/admin/mcp/connectors/oauth/callback → invalid_grant.
+    redir = (redirect_uri or "").strip()
     if redir:
         payload["redirect_uri"] = redir
 

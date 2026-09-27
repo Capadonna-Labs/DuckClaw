@@ -226,6 +226,7 @@ DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
     "packages/agents/src/duckclaw/workers/worker_invoke.py": "worker id aliases include quant-trader template id",
     "packages/agents/src/duckclaw/workers/template_registry.py": "template registry lists quant-trader opt-in worker",
     "packages/shared/src/duckclaw/signal_execution_bridge.py": "IBKR/quant signal bridge opt-in extension",
+    "packages/shared/src/duckclaw/trade_signals_ledger.py": "dual-schema trade_signals resolve/update helper",
     "packages/shared/src/duckclaw/write_commands.py": "typed commands for quant_core.ibkr_orders",
     "packages/shared/src/duckclaw/schema_migrations.py": "schema seeds + quant_core.ibkr_orders migration",
     "packages/shared/src/duckclaw/admin_worker_catalog.py": "catalog helpers mention quant worker family",

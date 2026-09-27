@@ -22,7 +22,7 @@ def test_execute_signal_with_bracket_enqueues_with_vault_db_path(tmp_path):
 
     class _Con:
         def execute(self, sql, *a, **k):
-            if "FROM quant_core.trade_signals" in sql:
+            if "trade_signals" in sql.lower():
                 return _ResultSignal()
             return _ResultTpSl()
 
@@ -98,7 +98,7 @@ def test_execute_signal_with_bracket_refuses_bare_market_order(tmp_path):
 
     class _Con:
         def execute(self, sql, *a, **k):
-            if "FROM quant_core.trade_signals" in sql:
+            if "trade_signals" in sql.lower():
                 return _ResultSignal()
             return _ResultTpSl()
 
@@ -143,7 +143,7 @@ def test_protective_signal_uses_protective_oca_not_entry_bracket(tmp_path):
 
     class _Con:
         def execute(self, sql, *a, **k):
-            if "FROM quant_core.trade_signals" in sql:
+            if "trade_signals" in sql.lower():
                 return _ResultSignal()
             return _ResultTpSl()
 
@@ -225,7 +225,8 @@ def test_tools_node_blocks_protective_signal_from_entry_executor(tmp_path):
         CREATE TABLE quant_core.trade_signals (
             signal_id UUID,
             strategy_name VARCHAR,
-            rationale VARCHAR
+            rationale VARCHAR,
+            signal_type VARCHAR
         )
         """
     )
@@ -234,18 +235,25 @@ def test_tools_node_blocks_protective_signal_from_entry_executor(tmp_path):
         INSERT INTO quant_core.trade_signals VALUES (
             '63f57d0d-2769-48b5-a345-6abe3a65b9ec',
             'cfd_auto',
-            'Bracket OCA 1,296 sh XLU — SL $38 / TP $44'
+            'Bracket OCA 1,296 sh XLU — SL $38 / TP $44',
+            'BRACKET'
         )
         """
     )
     con.close()
 
-    from duckclaw.workers.factory_graph_nodes_tools import _protective_broker_exec_error
+    from duckclaw.workers.protective_order_route_guard import blocked_protective_broker_route
 
-    err = _protective_broker_exec_error(
-        {"signal_id": "63f57d0d-2769-48b5-a345-6abe3a65b9ec"},
-        vault,
-    )
+    # Open RO connection like tools_node harness (db handle).
+    db = duckdb.connect(vault, read_only=True)
+    try:
+        err = blocked_protective_broker_route(
+            "execute_approved_signal",
+            {"signal_id": "63f57d0d-2769-48b5-a345-6abe3a65b9ec"},
+            db=db,
+        )
+    finally:
+        db.close()
     assert err is not None
     assert "BLOCKED_PROTECTIVE_ORDER_ROUTE" in err
 

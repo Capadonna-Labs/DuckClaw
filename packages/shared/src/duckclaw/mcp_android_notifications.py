@@ -586,18 +586,26 @@ def analyze_notification_ui_dump(raw: str) -> dict[str, Any]:
         }
         for r in rows
     ]
+    clear_all = extract_clear_all_target(text)
+    dismiss_count = len(dismissible)
     workflow = [
-        "1. Lee digest — escribe insight en el MENSAJE FINAL (bullets: app + resumen body).",
-        "2. UN swipe horizontal por turno (solo filas DISMISS).",
-        "3. SKIP = no swipe. Verifica con get_ui_dump tras cada dismiss.",
+        "1. Lee TODO el digest — bullets title+body en el MENSAJE FINAL (una sola respuesta).",
+        (
+            f"2. Descartar TODAS las filas DISMISS ({dismiss_count}) en ESTE turno: "
+            "un swipe_screen por fila con EXACTAMENTE digest[].swipe (máx 1 intento/fila)."
+        ),
+        "3. Si hay clear_all_target y el usuario pidió borrar/descartar todo → "
+        "click_ui_element/tap en clear_all_target O android_clear_all_notifications (más rápido).",
+        "4. UN get_ui_dump de verificación al final (no entre cada swipe). Luego collapse.",
+        "5. PROHIBIDO preguntar '¿sigo?' / '¿quieres que continúe?' — termina el digest completo.",
     ]
     if qs_only or panel_state == "collapsed_or_unparsed":
         workflow = [
             "1. Despertar pantalla si está apagada.",
             "2. android_expand_notifications → get_ui_dump (lee digest ANTES de scroll).",
             "3. Si digest vacío: UN swipe vertical x1=540,y1=1200,x2=540,y2=400 → get_ui_dump.",
-            "4. UN swipe horizontal por turno usando EXACTAMENTE digest[].swipe.",
-            "5. get_ui_dump tras cada dismiss.",
+            "4. Con digest: procesa TODAS las filas DISMISS en este turno (swipe por fila + clear_all si aplica).",
+            "5. UN get_ui_dump final → collapse. No preguntes si continuar.",
         ]
     result = {
         "panel_state": panel_state,
@@ -609,19 +617,24 @@ def analyze_notification_ui_dump(raw: str) -> dict[str, Any]:
         "skip_non_dismissible": skip,
         "dismissible": dismissible,
         "dismiss_actions": dismiss_actions,
+        "clear_all_target": clear_all,
         "max_swipe_attempts_per_row": 1,
-        "one_swipe_per_turn": True,
+        "one_swipe_per_turn": False,
+        "complete_digest_in_one_turn": True,
         "workflow": workflow,
         "final_message_must_include": (
-            "Bullets con cada notificación DISMISS leída: '- {title}: {body}' y cuáles quedaron SKIP."
+            "Bullets con cada notificación DISMISS leída: '- {title}: {body}' y cuáles quedaron SKIP. "
+            "Cierra el turno con el resumen completo; no dejes filas 'pendientes' ni pidas permiso para seguir."
         ),
         "after_read": (
             "El insight va en la respuesta de texto al usuario, no solo en tool calls. "
-            "Prohibido encadenar 3+ swipe_screen en un solo turno."
+            "Cuando el usuario diga revisar/descartar todas: completa el digest entero en un solo turno "
+            "(N swipes horizontales + opcional clear_all). No preguntes si continuar."
         ),
         "rule": (
             "No afirmar '0 notificaciones' hasta completar expand + get_ui_dump. "
             "SKIP = no swipe. DISMISS = swipe horizontal una vez con coords exactas del digest. "
+            "Máx 1 swipe por fila (no martillar). Completa todas las DISMISS visibles antes de responder. "
             "Nunca swipe en filas con title 'Hace …', 'Expandir', 'El Tiempo' (son chrome, no apps)."
         ),
     }
@@ -638,7 +651,32 @@ def analyze_notification_ui_dump(raw: str) -> dict[str, Any]:
     return result
 
 
+def extract_clear_all_target(raw: str) -> dict[str, Any] | None:
+    """Find Clear all / Borrar todo chrome button with tap coords (if present)."""
+    for m in _NODE_OPEN_RE.finditer(raw or ""):
+        attrs = _parse_attrs(m.group(1))
+        label = ""
+        for key in ("text", "content-desc"):
+            val = (attrs.get(key) or "").strip()
+            if val:
+                label = val
+                break
+        if label.lower() not in {"clear all", "borrar todo"}:
+            continue
+        bounds = _parse_bounds(attrs)
+        if not bounds:
+            continue
+        x1, y1, x2, y2 = bounds
+        return {
+            "label": label,
+            "bounds": [x1, y1, x2, y2],
+            "tap": {"x": (x1 + x2) // 2, "y": (y1 + y2) // 2},
+        }
+    return None
+
+
 def classify_swipe_result(result: str) -> dict[str, Any]:
+
     m = re.search(
         r"Swiped from \((\d+),\s*(\d+)\) to \((\d+),\s*(\d+)\)",
         result or "",
@@ -702,13 +740,15 @@ def append_notification_hints_to_ui_dump(raw: str) -> str:
                 for r in hint_rows
             ]
             hints["workflow"] = [
-                "1. Lee digest — bullets con title + body para el usuario.",
-                "2. UN swipe horizontal por turno usando EXACTAMENTE digest[].swipe (y1 real).",
-                "3. get_ui_dump tras cada dismiss para verificar.",
+                "1. Lee TODO el digest — bullets title+body en el mensaje final.",
+                "2. Swipe horizontal de TODAS las filas DISMISS en este turno (digest[].swipe exacto).",
+                "3. UN get_ui_dump final para verificar; no preguntes si continuar.",
             ]
+            hints["one_swipe_per_turn"] = False
+            hints["complete_digest_in_one_turn"] = True
             hints["rule"] = (
                 "OBLIGATORIO: copiar x1/y1/x2/y2 de digest[].swipe al llamar swipe_screen. "
-                "No inventar coordenadas."
+                "No inventar coordenadas. Completa todas las DISMISS en un solo turno."
             )
         else:
             hints["digest"] = [{"title": t, "body": "", "action": "READ_ONLY"} for t in fallback]

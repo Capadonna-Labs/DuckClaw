@@ -154,7 +154,7 @@ def android_expand_notifications(*, serial: str | None = None) -> dict[str, Any]
         "exit_code": code,
         "stdout": stdout.strip(),
         "stderr": stderr.strip(),
-        "hint": "Tras expandir, usa get_ui_dump; dismiss = swipe horizontal en fila.",
+        "hint": "Tras expandir: get_ui_dump; lee digest; descarta TODAS las DISMISS en el mismo turno (o android_clear_all_notifications).",
     }
 
 
@@ -174,6 +174,51 @@ def android_collapse_statusbar(*, serial: str | None = None) -> dict[str, Any]:
         "exit_code": code,
         "stdout": stdout.strip(),
         "stderr": stderr.strip(),
+    }
+
+
+def android_clear_all_notifications(*, serial: str | None = None) -> dict[str, Any]:
+    """Dismiss all dismissible notifications via ADB (one shot).
+
+    Tries ``cmd notification cancel-all`` first, then ``service call notification 1``.
+    System/ongoing rows may remain; agent should re-dump after.
+    """
+    sid = (serial or primary_adb_serial()).strip()
+    if not sid:
+        return {"ok": False, "error": "no ADB device in state device"}
+    attempts: list[dict[str, Any]] = []
+    for argv, action in (
+        (["cmd", "notification", "cancel-all"], "cmd_notification_cancel_all"),
+        (["service", "call", "notification", "1"], "service_call_notification_1"),
+    ):
+        code, stdout, stderr = _run_adb(["-s", sid, "shell", *argv], timeout=10.0)
+        attempts.append(
+            {
+                "action": action,
+                "exit_code": code,
+                "stdout": stdout.strip()[:200],
+                "stderr": stderr.strip()[:200],
+            }
+        )
+        if code == 0:
+            return {
+                "ok": True,
+                "serial": sid,
+                "action": action,
+                "exit_code": code,
+                "stdout": stdout.strip(),
+                "stderr": stderr.strip(),
+                "attempts": attempts,
+                "hint": "Tras clear-all: get_ui_dump; SKIP (sistema/SIM) pueden quedar.",
+            }
+    return {
+        "ok": False,
+        "serial": sid,
+        "action": "clear_all_notifications",
+        "exit_code": attempts[-1]["exit_code"] if attempts else -1,
+        "attempts": attempts,
+        "error": "clear-all ADB commands failed",
+        "hint": "Fallback: clear_all_target tap o swipes digest[].swipe en bloque.",
     }
 
 

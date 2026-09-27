@@ -143,6 +143,29 @@ def worker_has_android_mcp_tools(tools: list[Any] | None) -> bool:
     return False
 
 
+_TRADE_SIGNAL_TOOL_MARKERS = frozenset(
+    {
+        "propose_trade_signal",
+        "cancel_trade_signal",
+        "execute_approved_signal",
+        "execute_broker_signals_batch",
+        "execute_signal_with_bracket",
+    }
+)
+
+
+def worker_has_trade_signal_tools(tools: list[Any] | None) -> bool:
+    for tool in tools or []:
+        name = str(getattr(tool, "name", "") or "").strip().lower()
+        if name in _TRADE_SIGNAL_TOOL_MARKERS:
+            return True
+        if "trade_signal" in name:
+            return True
+        if name.endswith("_signal_cycle") and name.startswith("run_"):
+            return True
+    return False
+
+
 def append_android_mcp_directive_if_tools(
     db: Any,
     base: str,
@@ -151,6 +174,16 @@ def append_android_mcp_directive_if_tools(
     if not worker_has_android_mcp_tools(tools):
         return (base or "").strip()
     return _append_framework_directive(db, base, "android_mcp")
+
+
+def append_trade_signals_directive_if_tools(
+    db: Any,
+    base: str,
+    tools: list[Any] | None,
+) -> str:
+    if not worker_has_trade_signal_tools(tools):
+        return (base or "").strip()
+    return _append_framework_directive(db, base, "trade_signals_ledger")
 
 
 def _append_framework_directive(db: Any, base: str, directive_name: str) -> str:

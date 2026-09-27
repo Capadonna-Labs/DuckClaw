@@ -215,9 +215,13 @@ def initialize_worker_graph_context(
     _register_post_llm_skill_tools(tools, spec, db=db, llm=llm, tenant_id=tenant_id)
     tools_by_name = {t.name: t for t in tools}
 
-    from duckclaw.prompt_policies.system_prompt import append_android_mcp_directive_if_tools
+    from duckclaw.prompt_policies.system_prompt import (
+        append_android_mcp_directive_if_tools,
+        append_trade_signals_directive_if_tools,
+    )
 
     system_prompt = append_android_mcp_directive_if_tools(db, system_prompt, tools)
+    system_prompt = append_trade_signals_directive_if_tools(db, system_prompt, tools)
 
     try:
         from duckclaw.extensions.skills import invoke_extension_worker_skill_hooks

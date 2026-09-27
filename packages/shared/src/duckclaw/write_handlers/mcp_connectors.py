@@ -305,6 +305,15 @@ def _apply_set_mcp_connector_auth(conn: Any, payload: dict) -> None:
                     "updated_by": actor,
                 },
             )
+            # Deactivate older DCR clients (empty actor / prior redirect_uri) so
+            # refresh never picks a Client ID mismatch against the live grant.
+            conn.execute(
+                "UPDATE main.admin_runtime_settings "
+                "SET active = false, updated_at = CURRENT_TIMESTAMP "
+                "WHERE tenant_id = ? AND domain = ? AND key = 'notion.client_id' "
+                "AND active = true AND lower(trim(coalesce(actor_email, ''))) <> ?",
+                [tenant_id, OAUTH_CLIENT_DOMAIN, actor],
+            )
 
 
 def _apply_grant_worker_mcp_connector(conn: Any, payload: dict) -> None:

@@ -447,12 +447,29 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             )
             fresh = str(tokens.get("access_token") or "").strip()
             new_refresh = str(tokens.get("refresh_token") or "").strip() or refresh
+            # Keep DCR client with rotated tokens so the next refresh does not
+            # fall back to a stale mcp_oauth.notion.client_id.
+            oauth_client_id_for_persist = client_id
+            oauth_redirect_for_persist = redirect_uri or resolve_notion_redirect_uri()
         else:
             from duckclaw.mcp_google_workspace_oauth import refresh_google_access_token
 
             fresh = refresh_google_access_token(refresh)
-    except Exception:
+            oauth_client_id_for_persist = ""
+            oauth_redirect_for_persist = ""
+    except Exception as refresh_exc:
         fresh = ""
+        oauth_client_id_for_persist = ""
+        oauth_redirect_for_persist = ""
+        # Notion invalid_grant = user must re-OAuth; log once for ops.
+        if preset_id == "notion":
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "notion oauth refresh failed connector=%s: %s",
+                connector_id,
+                str(refresh_exc)[:240],
+            )
     if not fresh:
         # ponytail: stale/revoked refresh must not leak dead bearer (401 loop).
         return ""
@@ -465,6 +482,8 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             connector_id=connector_id,
             bearer_token=fresh,
             refresh_token=new_refresh,
+            oauth_client_id=oauth_client_id_for_persist,
+            oauth_redirect_uri=oauth_redirect_for_persist,
         )
     except Exception:
         if not getattr(db, "_read_only", False):
@@ -479,6 +498,8 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
                         "connector_id": connector_id,
                         "bearer_token": fresh,
                         "refresh_token": new_refresh,
+                        "oauth_client_id": oauth_client_id_for_persist,
+                        "oauth_redirect_uri": oauth_redirect_for_persist,
                     },
                 )
             except Exception:

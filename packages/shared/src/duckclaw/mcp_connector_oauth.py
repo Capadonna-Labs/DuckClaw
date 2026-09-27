@@ -21,40 +21,73 @@ def persist_mcp_connector_oauth_tokens(
     oauth_client_id: str = "",
     oauth_redirect_uri: str = "",
 ) -> str:
-    """Persist OAuth tokens synchronously; ponytail: async queue alone loses tokens on DuckDB lock.
+    """Persist OAuth tokens via the singleton DB-Writer (never open a hub write from Gateway).
 
-    When ``oauth_client_id`` is set (Notion/DCR), also store the client that issued the
-    tokens so refresh does not reuse a stale DCR client from a previous redirect_uri.
+    Opening ``DuckClaw(read_only=False)`` from the Gateway process races the
+    existing read-only hub handle → ``Can't open a connection to same database
+    file with a different configuration``. When Notion rotates ``refresh_token``
+    on refresh and that write is lost, the next cycle gets ``invalid_grant`` and
+    the connector looks "not configured". Gmail often keeps the old refresh
+    usable, which is why it appeared to persist while Notion did not.
+
+    Returns the write ``task_id`` (empty string only for the rare inline-spawn path).
     """
-    from duckclaw import DuckClaw
     from duckclaw.gateway_db import get_gateway_db_path
-    from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
+    from duckclaw.gateway_enqueue import enqueue_admin_command
+    from duckclaw.write_commands import SetMcpConnectorAuthCommand
 
-    payload = {
-        "tenant_id": tenant_id,
-        "actor_email": actor_email,
-        "connector_id": connector_id,
-        "bearer_token": bearer_token,
-        "refresh_token": refresh_token,
-        "oauth_client_id": oauth_client_id,
-        "oauth_redirect_uri": oauth_redirect_uri,
-    }
     path = (get_gateway_db_path() or "").strip()
     if not path:
         raise ValueError("Gateway DuckDB path not configured")
 
+    command = SetMcpConnectorAuthCommand(
+        tenant_id=tenant_id,
+        actor_email=actor_email or "system",
+        connector_id=connector_id,
+        bearer_token=bearer_token,
+        refresh_token=refresh_token,
+        oauth_client_id=oauth_client_id,
+        oauth_redirect_uri=oauth_redirect_uri,
+    )
+    try:
+        return enqueue_admin_command(command, user_id=str(actor_email or "system"))
+    except Exception as exc:
+        _log.warning(
+            "OAuth token enqueue failed connector=%s; trying sync fallback: %s",
+            connector_id,
+            exc,
+        )
+
+    # Fallback for unit tests / spawn-inline / Redis down: direct writer apply.
+    # Still avoid competing with an open Gateway RO handle when possible.
     last_exc: Exception | None = None
     for attempt in range(4):
         try:
+            from duckclaw import DuckClaw
+            from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
+
             db = DuckClaw(path, read_only=False, engine="python")
             try:
-                _apply_set_mcp_connector_auth(db, payload)
+                _apply_set_mcp_connector_auth(
+                    db,
+                    {
+                        "tenant_id": tenant_id,
+                        "actor_email": actor_email,
+                        "connector_id": connector_id,
+                        "bearer_token": bearer_token,
+                        "refresh_token": refresh_token,
+                        "oauth_client_id": oauth_client_id,
+                        "oauth_redirect_uri": oauth_redirect_uri,
+                    },
+                )
             finally:
                 db.close()
-            return ""
-        except Exception as exc:
-            last_exc = exc
-            if "lock" not in str(exc).lower() or attempt >= 3:
+            return command.task_id
+        except Exception as sync_exc:
+            last_exc = sync_exc
+            if "lock" not in str(sync_exc).lower() and "different configuration" not in str(
+                sync_exc
+            ).lower():
                 break
             time.sleep(0.15 * (attempt + 1))
 
@@ -64,7 +97,7 @@ def persist_mcp_connector_oauth_tokens(
         last_exc,
     )
     detail = str(last_exc or "persist failed")[:200]
-    if "lock" in detail.lower():
+    if "lock" in detail.lower() or "different configuration" in detail.lower():
         msg = f"No se pudo guardar el token OAuth ({detail}). Reintenta en unos segundos."
     else:
         msg = f"No se pudo guardar el token OAuth ({detail})."

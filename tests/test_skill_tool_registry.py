@@ -107,6 +107,41 @@ def test_post_llm_registry_passes_declared_context(monkeypatch) -> None:
     )
 
 
+def test_post_llm_registry_registers_empty_default_skills(monkeypatch) -> None:
+    from duckclaw.workers import skill_tool_registry as registry
+
+    calls: list[tuple[str, dict, tuple, dict]] = []
+
+    def _fake_loader(path: str):
+        def _registrar(_tools, config, *args, **kwargs):
+            calls.append((path, config, args, kwargs))
+
+        return _registrar
+
+    monkeypatch.setattr(registry, "_load_callable", _fake_loader)
+
+    llm = object()
+    db = object()
+    vault_db_path = "/tmp/quant.duckdb"
+    spec = _spec_with_skill_configs()
+
+    registry.register_post_llm_skill_tools(
+        [],
+        spec,
+        db=db,
+        llm=llm,
+        vault_db_path=vault_db_path,
+    )
+
+    by_path = {path: (config, args, kwargs) for path, config, args, kwargs in calls}
+    config, args, kwargs = by_path[
+        "duckclaw.forge.skills.ibkr_bracket_orders_bridge:register_ibkr_bracket_orders_skill"
+    ]
+    assert config == {}
+    assert args == ()
+    assert kwargs == {"vault_db_path": vault_db_path}
+
+
 def test_fal_is_in_skill_tool_registry() -> None:
     from duckclaw.workers.skill_tool_registry import DEFAULT_SKILL_TOOL_REGISTRY
 

@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import logging
 import re
+import math
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -151,6 +152,285 @@ async def _live_position_qty(ib: object, ticker: str) -> float | None:
     return None
 
 
+def _finite_price(value: object) -> float | None:
+    try:
+        f = float(value)  # type: ignore[arg-type]
+    except Exception:
+        return None
+    return f if math.isfinite(f) and f > 0 else None
+
+
+async def _live_mark_price(ib: object, ticker: str) -> float | None:
+    """Best-effort IBKR mark/last price. Caller decides whether missing is fatal."""
+    try:
+        from ib_insync import Stock
+    except Exception:
+        return None
+    contract = Stock(ticker.strip().upper(), "SMART", "USD")
+    try:
+        qualify = getattr(ib, "qualifyContractsAsync", None)
+        if callable(qualify):
+            await qualify(contract)
+    except Exception as exc:
+        _log.warning("preflight qualifyContracts %s: %s", ticker, exc)
+    ticker_obj = None
+    try:
+        ticker_obj = ib.reqMktData(contract, "", False, False)  # type: ignore[attr-defined]
+        sleep = getattr(ib, "sleep", None)
+        if callable(sleep):
+            await sleep(1.0)
+        for attr in ("marketPrice", "last", "close", "bid", "ask"):
+            raw = getattr(ticker_obj, attr, None)
+            value = raw() if callable(raw) else raw
+            price = _finite_price(value)
+            if price is not None:
+                return price
+    except Exception as exc:
+        _log.warning("preflight live mark failed %s: %s", ticker, exc)
+    finally:
+        try:
+            ib.cancelMktData(contract)  # type: ignore[attr-defined]
+        except Exception:
+            pass
+    return None
+
+
+def _tp_sl_valid_for_mark(
+    *,
+    side: str,
+    mark: float,
+    tp_price: float | None,
+    sl_price: float | None,
+) -> bool:
+    if tp_price is None and sl_price is None:
+        return True
+    if side == "BUY":
+        if tp_price is not None and not (mark < tp_price):
+            return False
+        if sl_price is not None and not (sl_price < mark):
+            return False
+        return True
+    if side == "SELL":
+        if tp_price is not None and not (tp_price < mark):
+            return False
+        if sl_price is not None and not (mark < sl_price):
+            return False
+        return True
+    return False
+
+
+def _open_orders_for_ticker(ib: object, ticker: str) -> list[object]:
+    sym = ticker.strip().upper()
+    try:
+        req_all = getattr(ib, "reqAllOpenOrders", None)
+        if callable(req_all):
+            req_all()
+    except Exception as exc:
+        _log.warning("preflight reqAllOpenOrders failed %s: %s", sym, exc)
+    try:
+        trades = list(ib.openTrades() or [])  # type: ignore[attr-defined]
+    except Exception as exc:
+        _log.warning("preflight openTrades failed %s: %s", sym, exc)
+        return []
+    out = []
+    for trade in trades:
+        contract = getattr(trade, "contract", None)
+        if str(getattr(contract, "symbol", "") or "").strip().upper() == sym:
+            out.append(trade)
+    return out
+
+
+def _daily_loss_limit_status(vault_db_path: str) -> dict:
+    """Return optional daily loss guard status from quant_core tables.
+
+    Supports both column-style and key/value-style ``trading_risk_constraints``.
+    Missing table/columns means "not configured", not an execution error.
+    """
+    import duckdb
+
+    try:
+        con = duckdb.connect(vault_db_path, read_only=True)
+    except Exception as exc:
+        return {"ok": False, "error": f"PRE_FLIGHT_RISK_DB_UNAVAILABLE: {exc}"}
+    try:
+        rows = con.execute(
+            """
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = 'quant_core'
+              AND table_name IN ('trading_risk_constraints', 'closed_trades')
+            """
+        ).fetchall()
+        tables = {str(r[0]) for r in rows}
+        if "trading_risk_constraints" not in tables:
+            return {"ok": True, "configured": False}
+        cols = {
+            str(r[0])
+            for r in con.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = 'quant_core'
+                  AND table_name = 'trading_risk_constraints'
+                """
+            ).fetchall()
+        }
+        limit: float | None = None
+        for col in ("daily_loss_limit", "max_daily_loss", "daily_loss_limit_usd"):
+            if col in cols:
+                row = con.execute(
+                    f"""
+                    SELECT {col}
+                    FROM quant_core.trading_risk_constraints
+                    WHERE {col} IS NOT NULL
+                    LIMIT 1
+                    """
+                ).fetchone()
+                limit = _finite_price(row[0]) if row else None
+                if limit is not None:
+                    break
+        if limit is None and {"name", "value"}.issubset(cols):
+            row = con.execute(
+                """
+                SELECT value
+                FROM quant_core.trading_risk_constraints
+                WHERE lower(cast(name AS VARCHAR)) IN (
+                    'daily_loss_limit',
+                    'max_daily_loss',
+                    'daily_loss_limit_usd'
+                )
+                LIMIT 1
+                """
+            ).fetchone()
+            limit = _finite_price(row[0]) if row else None
+        if limit is None:
+            return {"ok": True, "configured": False}
+        if "closed_trades" not in tables:
+            return {"ok": True, "configured": True, "limit": limit, "pnl": 0.0}
+        today = datetime.now(timezone.utc).date().isoformat()
+        row = con.execute(
+            """
+            SELECT coalesce(sum(pnl), 0)
+            FROM quant_core.closed_trades
+            WHERE cast(closed_at AS TIMESTAMP) >= cast(? AS TIMESTAMP)
+            """,
+            [today],
+        ).fetchone()
+        pnl = float(row[0] or 0.0) if row else 0.0
+        return {
+            "ok": pnl > -abs(limit),
+            "configured": True,
+            "limit": abs(limit),
+            "pnl": pnl,
+            "error": (
+                f"PRE_FLIGHT_DAILY_LOSS_LIMIT: pnl_today={pnl:.2f} "
+                f"limit={abs(limit):.2f}"
+            ),
+        }
+    except Exception as exc:
+        _log.warning("daily loss preflight unavailable: %s", exc)
+        return {"ok": True, "configured": False, "warning": str(exc)}
+    finally:
+        con.close()
+
+
+async def validate_execution_context(
+    ib: object,
+    *,
+    signal_id: str,
+    ticker: str,
+    side: str,
+    quantity: int,
+    signal_type: str | None,
+    vault_db_path: str,
+    tp_price: float | None,
+    sl_price: float | None,
+    cancel_existing: bool = False,
+) -> dict:
+    """Fail-closed pre-flight for IBKR execution paths."""
+    sym = ticker.strip().upper()
+    side_u = side.strip().upper()
+    st = (signal_type or "").strip().upper()
+    base = {
+        "signal_id": signal_id,
+        "ticker": sym,
+        "side": side_u,
+        "quantity": quantity,
+        "signal_type": st or None,
+    }
+    if quantity <= 0:
+        return {**base, "ok": False, "error": "PRE_FLIGHT_BAD_QUANTITY"}
+
+    risk = _daily_loss_limit_status(vault_db_path)
+    if not risk.get("ok", True):
+        return {**base, "ok": False, "error": risk.get("error", "PRE_FLIGHT_RISK_BLOCKED")}
+
+    live_qty = await _live_position_qty(ib, sym)
+    is_protective = is_protective_signal_type(st)
+    is_exit = st == "EXIT"
+    if is_protective or is_exit:
+        if live_qty is None or abs(live_qty) <= 0:
+            return {**base, "ok": False, "error": "PRE_FLIGHT_NO_LIVE_POSITION"}
+        position_side = "BUY" if live_qty > 0 else "SELL"
+        if side_u != position_side:
+            return {
+                **base,
+                "ok": False,
+                "error": (
+                    f"PRE_FLIGHT_SIDE_MISMATCH: position_side={position_side} "
+                    f"requested={side_u}"
+                ),
+            }
+        if quantity > int(abs(live_qty)):
+            return {
+                **base,
+                "ok": False,
+                "error": (
+                    f"PRE_FLIGHT_QTY_EXCEEDS_POSITION: qty={quantity} "
+                    f"live_qty={live_qty:g}"
+                ),
+            }
+
+    open_orders = _open_orders_for_ticker(ib, sym)
+    if open_orders and not (is_protective and cancel_existing):
+        ids = [
+            str(getattr(getattr(t, "order", None), "orderId", "?"))
+            for t in open_orders[:5]
+        ]
+        return {
+            **base,
+            "ok": False,
+            "error": f"PRE_FLIGHT_OPEN_ORDERS_EXIST: ids={','.join(ids)}",
+        }
+
+    if tp_price is not None or sl_price is not None:
+        mark = await _live_mark_price(ib, sym)
+        if mark is None:
+            return {**base, "ok": False, "error": "PRE_FLIGHT_MARK_UNAVAILABLE"}
+        if not _tp_sl_valid_for_mark(
+            side=side_u,
+            mark=mark,
+            tp_price=tp_price,
+            sl_price=sl_price,
+        ):
+            return {
+                **base,
+                "ok": False,
+                "error": (
+                    f"PRE_FLIGHT_STALE_OR_INVALID_LEVELS: mark={mark:g} "
+                    f"tp={tp_price} sl={sl_price}"
+                ),
+            }
+
+    return {
+        **base,
+        "ok": True,
+        "live_qty": live_qty,
+        "open_orders": len(open_orders),
+        "risk": risk,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Signal Execution
 # ---------------------------------------------------------------------------
@@ -248,6 +528,24 @@ async def execute_protective_oca_for_signal(
         return {**base, "status": "error", "error": f"Error conectando a IBKR: {exc}"}
 
     try:
+        preflight = await validate_execution_context(
+            ib,
+            signal_id=signal_id,
+            ticker=ticker,
+            side=side,
+            quantity=quantity,
+            signal_type="BRACKET",
+            vault_db_path=vault_db_path,
+            tp_price=tp_price,
+            sl_price=sl_price,
+            cancel_existing=cancel_existing,
+        )
+        if not preflight.get("ok"):
+            try:
+                await ib.disconnect()
+            except Exception:
+                pass
+            return {**base, "status": "error", "error": preflight.get("error")}
         result = await submit_protective_oca_orders(
             ib,
             ticker,
@@ -537,6 +835,20 @@ async def execute_signal_with_bracket(
             )
             if protective_qty <= 0:
                 raise ValueError("protective OCA requires existing positive quantity")
+            preflight = await validate_execution_context(
+                ib,
+                signal_id=signal_id,
+                ticker=ticker,
+                side=position_side,
+                quantity=protective_qty,
+                signal_type="BRACKET",
+                vault_db_path=vault_db_path,
+                tp_price=tp_price,
+                sl_price=sl_price,
+                cancel_existing=True,
+            )
+            if not preflight.get("ok"):
+                raise ValueError(str(preflight.get("error") or "PRE_FLIGHT_BLOCKED"))
             result = await submit_protective_oca_orders(
                 ib,
                 ticker,
@@ -549,6 +861,19 @@ async def execute_signal_with_bracket(
             quantity = protective_qty
             side = position_side
         else:
+            preflight = await validate_execution_context(
+                ib,
+                signal_id=signal_id,
+                ticker=ticker,
+                side=side,
+                quantity=quantity,
+                signal_type=signal_type,
+                vault_db_path=vault_db_path,
+                tp_price=tp_price,
+                sl_price=sl_price,
+            )
+            if not preflight.get("ok"):
+                raise ValueError(str(preflight.get("error") or "PRE_FLIGHT_BLOCKED"))
             result = await submit_bracket_order(
                 ib, ticker, side, quantity, tp_price, sl_price
             )

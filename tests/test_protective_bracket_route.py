@@ -71,6 +71,10 @@ def test_execute_signal_with_bracket_routes_protective(tmp_path):
             return None
 
     ib = MagicMock()
+    ib.positions.return_value = [
+        MagicMock(contract=MagicMock(symbol="XLU"), position=1305)
+    ]
+    ib.openTrades.return_value = []
     ib.disconnect = AsyncMock()
 
     async def _run():
@@ -85,6 +89,11 @@ def test_execute_signal_with_bracket_routes_protective(tmp_path):
                 "duckclaw.ibkr_bracket_orders.submit_protective_oca_orders",
                 new_callable=AsyncMock,
                 return_value=protective_result,
+            ),
+            patch(
+                "duckclaw.signal_execution_bridge._live_mark_price",
+                new_callable=AsyncMock,
+                return_value=40.0,
             ),
             patch(
                 "duckclaw.ibkr_bracket_orders.submit_bracket_order",

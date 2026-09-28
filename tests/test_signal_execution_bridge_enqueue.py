@@ -62,6 +62,11 @@ def test_execute_signal_with_bracket_enqueues_with_vault_db_path(tmp_path):
                 return_value=submit_result,
             ),
             patch(
+                "duckclaw.signal_execution_bridge._live_mark_price",
+                new_callable=AsyncMock,
+                return_value=260.0,
+            ),
+            patch(
                 "duckclaw.db_write_queue.enqueue_typed_command",
                 side_effect=_capture,
             ),
@@ -191,6 +196,11 @@ def test_protective_signal_uses_protective_oca_not_entry_bracket(tmp_path):
                 return_value=protective_result,
             ) as protective_oca,
             patch(
+                "duckclaw.signal_execution_bridge._live_mark_price",
+                new_callable=AsyncMock,
+                return_value=40.0,
+            ),
+            patch(
                 "duckclaw.db_write_queue.enqueue_typed_command",
                 side_effect=_capture,
             ),
@@ -214,6 +224,127 @@ def test_protective_signal_uses_protective_oca_not_entry_bracket(tmp_path):
     assert result["main_order_id"] is None
     assert len([x for x in enqueued if x[0] == "insert_ibkr_order"]) == 2
     assert ("insert_ibkr_order", "MARKET", vault) not in enqueued
+
+
+def test_execute_signal_with_bracket_blocks_invalid_live_mark(tmp_path):
+    vault = str(tmp_path / "vault.duckdb")
+
+    class _ResultTpSl:
+        def fetchone(self):
+            return (44.0, 38.0)
+
+    class _ResultSignal:
+        def fetchone(self):
+            return ("BUY", "rebalance_hrp", "new entry", 10)
+
+    class _Con:
+        def execute(self, sql, *a, **k):
+            if "trade_signals" in sql.lower():
+                return _ResultSignal()
+            return _ResultTpSl()
+
+        def close(self):
+            return None
+
+    ib = MagicMock()
+    ib.openTrades.return_value = []
+    ib.disconnect = AsyncMock()
+
+    async def _run():
+        with (
+            patch("duckdb.connect", return_value=_Con()),
+            patch(
+                "duckclaw.ibkr_bracket_orders.connect_ibkr",
+                new_callable=AsyncMock,
+                return_value=ib,
+            ),
+            patch(
+                "duckclaw.ibkr_bracket_orders.submit_bracket_order",
+                new_callable=AsyncMock,
+            ) as submit,
+            patch(
+                "duckclaw.signal_execution_bridge._live_mark_price",
+                new_callable=AsyncMock,
+                return_value=45.0,
+            ),
+        ):
+            from duckclaw.signal_execution_bridge import execute_signal_with_bracket
+
+            result = await execute_signal_with_bracket(
+                signal_id="sig_1",
+                ticker="XLU",
+                side="BUY",
+                quantity=10,
+                vault_db_path=vault,
+            )
+            assert not submit.called
+            return result
+
+    result = asyncio.run(_run())
+    assert result["status"] == "error"
+    assert "PRE_FLIGHT_STALE_OR_INVALID_LEVELS" in result["error"]
+
+
+def test_execute_signal_with_bracket_blocks_existing_open_orders(tmp_path):
+    vault = str(tmp_path / "vault.duckdb")
+
+    class _ResultTpSl:
+        def fetchone(self):
+            return (44.0, 38.0)
+
+    class _ResultSignal:
+        def fetchone(self):
+            return ("BUY", "rebalance_hrp", "new entry", 10)
+
+    class _Con:
+        def execute(self, sql, *a, **k):
+            if "trade_signals" in sql.lower():
+                return _ResultSignal()
+            return _ResultTpSl()
+
+        def close(self):
+            return None
+
+    trade = MagicMock()
+    trade.contract.symbol = "XLU"
+    trade.order.orderId = 123
+    ib = MagicMock()
+    ib.openTrades.return_value = [trade]
+    ib.disconnect = AsyncMock()
+
+    async def _run():
+        with (
+            patch("duckdb.connect", return_value=_Con()),
+            patch(
+                "duckclaw.ibkr_bracket_orders.connect_ibkr",
+                new_callable=AsyncMock,
+                return_value=ib,
+            ),
+            patch(
+                "duckclaw.ibkr_bracket_orders.submit_bracket_order",
+                new_callable=AsyncMock,
+            ) as submit,
+            patch(
+                "duckclaw.signal_execution_bridge._live_mark_price",
+                new_callable=AsyncMock,
+                return_value=40.0,
+            ),
+        ):
+            from duckclaw.signal_execution_bridge import execute_signal_with_bracket
+
+            result = await execute_signal_with_bracket(
+                signal_id="sig_1",
+                ticker="XLU",
+                side="BUY",
+                quantity=10,
+                vault_db_path=vault,
+            )
+            assert not submit.called
+            return result
+
+    result = asyncio.run(_run())
+    assert result["status"] == "error"
+    assert "PRE_FLIGHT_OPEN_ORDERS_EXIST" in result["error"]
 
 
 def test_tools_node_blocks_protective_signal_from_entry_executor(tmp_path):

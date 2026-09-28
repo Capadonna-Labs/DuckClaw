@@ -4,6 +4,7 @@ export interface CronProcess {
   name: string;
   pm_id: number | null;
   cron: string;
+  description: string | null;
   status: string | null;
   restarts: number | null;
   unstable_restarts: number | null;

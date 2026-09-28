@@ -62,22 +62,41 @@ def _cron_processes_from_jlist(stdout: str) -> list[dict[str, Any]]:
         name = p.get("name")
         if not name:
             continue
+        script = env.get("pm_exec_path")
         out.append(
             {
                 "name": name,
                 "pm_id": p.get("pm_id"),
                 "cron": cron,
+                "description": _describe_cron_process(str(name), str(script or "")),
                 "status": env.get("status"),
                 "restarts": env.get("restart_time"),
                 "unstable_restarts": env.get("unstable_restarts"),
                 "cwd": env.get("pm_cwd"),
                 "interpreter": env.get("exec_interpreter") or None,
-                "script": env.get("pm_exec_path"),
+                "script": script,
                 "created_at": env.get("created_at"),
                 "pm_uptime": env.get("pm_uptime"),
             }
         )
     return out
+
+
+def _describe_cron_process(name: str, script: str) -> str:
+    clean = str(name or "").strip()
+    match = re.fullmatch(
+        r"quant-([a-z0-9_.-]+)-(buy|sell)-([0-9]+)(?:-shares)?(?:-open)?-([0-9]{8})",
+        clean,
+        flags=re.IGNORECASE,
+    )
+    if match:
+        ticker, action, quantity, raw_date = match.groups()
+        date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
+        action_label = "BUY" if action.lower() == "buy" else "SELL"
+        return f"{action_label} {quantity} {ticker.upper()} en apertura {date}"
+    if script:
+        return str(script).rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    return clean or "Cron PM2"
 
 
 async def _list_cron_processes() -> list[dict[str, Any]]:

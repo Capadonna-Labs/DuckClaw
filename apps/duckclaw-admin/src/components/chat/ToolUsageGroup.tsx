@@ -75,17 +75,6 @@ function GroupedToolRow({
       : rowWorker
   );
 
-  let timing = '';
-  if (isRunning && live) {
-    timing = ` · ${live}`;
-  } else if (count > 1 && max) {
-    timing = ` · max: ${max}`;
-  } else if (count === 1 && max) {
-    timing = ` · max: ${max}`;
-  } else if (isRunning) {
-    timing = ' · en curso';
-  }
-
   return (
     <li className="px-3 py-1.5 text-sm text-sky-950 dark:text-sky-100">
       <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
@@ -97,11 +86,19 @@ function GroupedToolRow({
           <span className="font-semibold text-sky-700 dark:text-sky-300"> x{count}</span>
         ) : null}
         {isError ? ' · error' : ''}
-        {timing ? (
-          <span className="tabular-nums">{timing}</span>
+        {max ? (
+          <span className="tabular-nums"> · max: {max}</span>
         ) : null}
-        {avg && !isRunning ? (
+        {avg ? (
           <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums"> · avg: {avg}</span>
+        ) : null}
+        {isRunning && live ? (
+          <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums animate-pulse">
+            {' '}
+            · now: {live}
+          </span>
+        ) : isRunning ? (
+          <span className="text-sky-600/80 dark:text-sky-400/80"> · now: en curso</span>
         ) : null}
       </span>
     </li>

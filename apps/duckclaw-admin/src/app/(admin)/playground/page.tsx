@@ -752,11 +752,7 @@ export default function PlaygroundPage() {
                     setLogsPanelOpen(true);
                     setPanelOpen(true);
                   }}
-                  className={`flex h-9 w-9 items-center justify-center rounded-full border shadow-sm backdrop-blur-md ${
-                    logsPanelOpen
-                      ? 'border-gov-blue-700 bg-gov-blue-700 text-white'
-                      : 'border-white/50 bg-white/70 text-gov-blue-800 dark:border-white/10 dark:bg-dark-surface/70 dark:text-dark-cyan'
-                  }`}
+                  className="flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gov-blue-800 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-dark-surface/70 dark:text-dark-cyan"
                   aria-pressed={logsPanelOpen}
                   aria-label="Logs PM2"
                   title="Logs PM2"

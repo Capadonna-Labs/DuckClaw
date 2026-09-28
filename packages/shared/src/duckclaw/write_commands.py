@@ -625,6 +625,9 @@ class SetMcpConnectorAuthCommand(WriteCommand):
     connector_id: str
     bearer_token: str
     refresh_token: str = ""
+    # Notion/DCR: client that minted these tokens must travel with them on refresh.
+    oauth_client_id: str = ""
+    oauth_redirect_uri: str = ""
 
 
 class GrantWorkerMcpConnectorCommand(WriteCommand):

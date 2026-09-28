@@ -36,6 +36,7 @@ def register_ibkr_bracket_orders_skill(
 
     # Import async bridge — defer to avoid import errors if ib_insync not installed
     try:
+        from duckclaw.ibkr_bracket_orders import cancel_open_orders, connect_ibkr
         from duckclaw.signal_execution_bridge import execute_signal_with_bracket
     except ImportError as exc:
         _log.warning(
@@ -145,6 +146,62 @@ def register_ibkr_bracket_orders_skill(
         )
     )
 
+    def _cancel_ibkr_open_orders_sync(
+        ticker: str = "",
+        order_ids: list[int] | None = None,
+        dry_run: bool = True,
+    ) -> str:
+        """Cancela órdenes abiertas en IBKR por ticker y/o order_id.
+
+        Args:
+            ticker: Símbolo opcional, ej. "MU".
+            order_ids: IDs de orden IBKR opcionales, ej. [73, 74].
+            dry_run: True solo lista coincidencias; False cancela.
+        """
+        import asyncio
+
+        async def _run() -> dict:
+            ib = await connect_ibkr()
+            try:
+                return await cancel_open_orders(
+                    ib,
+                    ticker=ticker or None,
+                    order_ids=order_ids or None,
+                    dry_run=bool(dry_run),
+                )
+            finally:
+                try:
+                    await ib.disconnect()
+                except Exception:
+                    pass
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                result = executor.submit(asyncio.run, _run()).result(timeout=30)
+        else:
+            result = asyncio.run(_run())
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    tools_list.append(
+        StructuredTool.from_function(
+            _cancel_ibkr_open_orders_sync,
+            name="cancel_ibkr_open_orders",
+            description=(
+                "[IBKR Trading] Cancela órdenes abiertas existentes en Interactive Brokers "
+                "por ticker y/o order_ids. Usar cuando get_ibkr_open_orders muestra órdenes "
+                "PreSubmitted/Submitted que bloquean el preflight. Por seguridad dry_run=True "
+                "por defecto: primero lista coincidencias; con dry_run=False envía cancelOrder. "
+                "Args: ticker (opcional), order_ids (lista opcional de int), dry_run (bool). "
+                "Devuelve JSON con matched_count, cancelled_count y detalle de órdenes."
+            ),
+        )
+    )
+
     _log.info(
-        "IBKR bracket orders skill registrado — execute_signal_with_bracket disponible"
+        "IBKR bracket orders skill registrado — execute_signal_with_bracket/cancel_ibkr_open_orders disponibles"
     )

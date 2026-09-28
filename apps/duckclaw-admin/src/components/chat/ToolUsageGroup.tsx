@@ -82,13 +82,15 @@ function GroupedToolRow({
   grouped: GroupedToolInvocation;
   identityLabel: string;
 }) {
-  const { toolName, count, maxMs, averageMs, isRunning, isError, messages } = grouped;
+  const { toolName, count, latestMs, maxMs, averageMs, isRunning, isError, messages } = grouped;
   const runningStartedAt = earliestRunningStartedAt(messages);
   const liveMs = useLiveToolElapsedMs(isRunning, runningStartedAt);
   const max = formatToolDurationMs(maxMs);
   const avg = formatToolDurationMs(averageMs);
   const live = formatToolDurationMs(liveMs);
+  const finishedDuration = formatToolDurationMs(latestMs);
   const finishedAt = formatFinishedTimestamp(isRunning ? null : newestFinishedAt(messages));
+  const finishedLabel = [finishedDuration, finishedAt].filter(Boolean).join(' · ');
   // Prefer the row's own workerId (e.g. quant_analyst->quant-trader) over the
   // group-level label from the first tool.
   const rowWorker =
@@ -123,10 +125,10 @@ function GroupedToolRow({
           </span>
         ) : isRunning ? (
           <span className="text-sky-600/80 dark:text-sky-400/80"> · now: en curso</span>
-        ) : finishedAt ? (
+        ) : finishedLabel ? (
           <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums">
             {' '}
-            · finished: {finishedAt}
+            · finished: {finishedLabel}
           </span>
         ) : null}
       </span>

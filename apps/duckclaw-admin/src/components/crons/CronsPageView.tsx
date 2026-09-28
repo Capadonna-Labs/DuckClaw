@@ -153,6 +153,7 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
               <thead className="bg-gov-gray-50 text-left dark:bg-dark-bg">
                 <tr>
                   <th className="px-4 py-2 text-xs font-semibold">Nombre</th>
+                  <th className="px-4 py-2 text-xs font-semibold">Descripcion</th>
                   <th className="px-4 py-2 text-xs font-semibold">Estado</th>
                   <th className="px-4 py-2 text-xs font-semibold">Horario (cron)</th>
                   <th className="px-4 py-2 text-xs font-semibold">Uptime</th>
@@ -165,7 +166,7 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
                 {loading && (
                   <tr>
                     <td
-                      colSpan={canWrite ? 7 : 6}
+                      colSpan={canWrite ? 8 : 7}
                       className="px-4 py-10 text-center text-sm text-gov-gray-500 dark:text-dark-muted"
                     >
                       Cargando procesos…
@@ -175,7 +176,7 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
                 {!loading && crons.length === 0 && (
                   <tr>
                     <td
-                      colSpan={canWrite ? 7 : 6}
+                      colSpan={canWrite ? 8 : 7}
                       className="px-4 py-10 text-center text-sm text-gov-gray-500 dark:text-dark-muted"
                     >
                       Ningún proceso PM2 en esta máquina declara un horario cron todavía.
@@ -185,6 +186,12 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
                 {crons.map((c) => (
                   <tr key={c.name} className="border-t dark:border-dark-border">
                     <td className="px-4 py-2 font-mono text-xs">{c.name}</td>
+                    <td
+                      className="max-w-[14rem] px-4 py-2 text-xs text-gov-gray-700 dark:text-dark-text"
+                      title={c.description ?? ''}
+                    >
+                      {c.description ?? '—'}
+                    </td>
                     <td className="px-4 py-2">
                       <StatusBadge status={c.status} />
                     </td>

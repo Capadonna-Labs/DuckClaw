@@ -52,6 +52,29 @@ function newestToolMessage(messages: ChatMsg[]): ChatMsg | null {
   }, null);
 }
 
+function newestFinishedAt(messages: ChatMsg[]): number | null {
+  let newest: number | null = null;
+  for (const m of messages) {
+    if (isToolHeartbeatRunning(m)) continue;
+    const start = m.toolStartedAt;
+    if (start == null || !Number.isFinite(start)) continue;
+    const elapsed = m.toolElapsedMs;
+    const finishedAt =
+      elapsed != null && Number.isFinite(elapsed) ? start + Math.max(0, elapsed) : start;
+    newest = newest == null ? finishedAt : Math.max(newest, finishedAt);
+  }
+  return newest;
+}
+
+function formatFinishedTimestamp(ms: number | null): string {
+  if (ms == null || !Number.isFinite(ms)) return '';
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(ms));
+}
+
 function GroupedToolRow({
   grouped,
   identityLabel,
@@ -65,6 +88,7 @@ function GroupedToolRow({
   const max = formatToolDurationMs(maxMs);
   const avg = formatToolDurationMs(averageMs);
   const live = formatToolDurationMs(liveMs);
+  const finishedAt = formatFinishedTimestamp(isRunning ? null : newestFinishedAt(messages));
   // Prefer the row's own workerId (e.g. quant_analyst->quant-trader) over the
   // group-level label from the first tool.
   const rowWorker =
@@ -99,6 +123,11 @@ function GroupedToolRow({
           </span>
         ) : isRunning ? (
           <span className="text-sky-600/80 dark:text-sky-400/80"> · now: en curso</span>
+        ) : finishedAt ? (
+          <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums">
+            {' '}
+            · finished: {finishedAt}
+          </span>
         ) : null}
       </span>
     </li>

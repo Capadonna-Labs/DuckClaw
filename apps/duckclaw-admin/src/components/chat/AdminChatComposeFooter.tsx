@@ -3,9 +3,10 @@
 import type { ClipboardEvent, Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import { FileText, Send, X } from 'lucide-react';
 import { AdminChatSuggestionChips } from '@/components/chat/AdminChatSuggestionChips';
+import { SlashCommandMenu } from '@/components/chat/SlashCommandMenu';
 import { LiveVoiceBar } from '@/components/chat/LiveVoiceBar';
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
-import { shouldShowSuggestionChips } from '@/components/chat/adminChatPure';
+import { matchingSlashCommands, shouldShowSuggestionChips } from '@/components/chat/adminChatPure';
 import type { useChatImageAttachments } from '@/components/chat/useChatImageAttachments';
 import type { useChatDocumentAttachments } from '@/components/chat/useChatDocumentAttachments';
 import { useChatFileDrop } from '@/components/chat/useChatFileDrop';
@@ -131,7 +132,12 @@ export function AdminChatComposeFooter({
   voice,
   liveVoice,
 }: AdminChatComposeFooterProps) {
-  const showSuggestions = shouldShowSuggestionChips(suggestions, loading, input);
+  const showSlashMenu = matchingSlashCommands(input).length > 0;
+  const showSuggestions = !showSlashMenu && shouldShowSuggestionChips(suggestions, loading, input);
+  const pickSlashCommand = (cmd: string) => {
+    setInput(`${cmd} `);
+    inputRef.current?.focus();
+  };
   const attachError = imageAttachments.attachError || documentAttachments.attachError;
   const dropEnabled = canSend && !loading && !voice.recording && !liveVoice.isActive;
   const { dragActive, dropProps } = useChatFileDrop({
@@ -194,6 +200,11 @@ export function AdminChatComposeFooter({
 
         {isStudioCompose ? (
           <>
+          {showSlashMenu ? (
+            <div className="mb-2">
+              <SlashCommandMenu input={input} onPick={pickSlashCommand} />
+            </div>
+          ) : null}
           {showSuggestions ? (
             <div className="mb-2">
               <AdminChatSuggestionChips
@@ -302,6 +313,11 @@ export function AdminChatComposeFooter({
           </>
         ) : (
           <>
+            {showSlashMenu ? (
+              <div className="mb-2">
+                <SlashCommandMenu input={input} onPick={pickSlashCommand} />
+              </div>
+            ) : null}
             {showSuggestions ? (
               <div className="mb-2">
                 <AdminChatSuggestionChips

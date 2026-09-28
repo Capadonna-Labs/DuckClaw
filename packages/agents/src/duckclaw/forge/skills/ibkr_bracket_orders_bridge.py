@@ -202,6 +202,193 @@ def register_ibkr_bracket_orders_skill(
         )
     )
 
+    def _schedule_ibkr_shares_order_cron_sync(
+        ticker: str,
+        action: str,
+        quantity: int,
+        run_date_utc: str,
+        cron: str,
+        name: str = "",
+        paper: bool = True,
+        dry_run: bool = True,
+    ) -> str:
+        """Programa una orden determinista de shares como proceso PM2 con cron_restart.
+
+        La tool crea un wrapper idempotente que sólo ejecuta en ``run_date_utc`` y
+        marca un sentinel ``.done`` si el broker script termina OK.
+        """
+        import os
+        import re
+        import shlex
+        import stat
+        import subprocess
+        from datetime import datetime
+        from pathlib import Path
+
+        ticker_norm = str(ticker or "").strip().upper()
+        action_norm = str(action or "").strip().upper()
+        if not re.fullmatch(r"[A-Z][A-Z0-9.\-]{0,15}", ticker_norm):
+            raise ValueError("ticker must be a valid uppercase market symbol, e.g. MU")
+        if action_norm not in {"BUY", "SELL"}:
+            raise ValueError("action must be BUY or SELL")
+        try:
+            qty = int(quantity)
+        except Exception as exc:
+            raise ValueError("quantity must be an integer > 0") from exc
+        if qty <= 0:
+            raise ValueError("quantity must be an integer > 0")
+        try:
+            datetime.strptime(str(run_date_utc), "%Y-%m-%d")
+        except ValueError as exc:
+            raise ValueError("run_date_utc must use YYYY-MM-DD") from exc
+
+        cron_norm = " ".join(str(cron or "").strip().split())
+        if len(cron_norm.split()) != 5 or not re.fullmatch(r"[0-9*/,\-\s]+", cron_norm):
+            raise ValueError("cron must be a standard 5-field numeric PM2 cron expression")
+
+        default_name = f"quant-{ticker_norm.lower()}-{action_norm.lower()}-{qty}-shares-{run_date_utc.replace('-', '')}"
+        raw_name = str(name or default_name).strip()
+        safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_name).strip("-")
+        if not safe_name or len(safe_name) > 80:
+            raise ValueError("name must resolve to 1-80 safe chars [A-Za-z0-9_.-]")
+
+        repo_root_raw = (
+            os.environ.get("CAPADONNA_DRILLER_ROOT")
+            or os.environ.get("DUCKCLAW_REPO_ROOT")
+            or "/root/Capadonna-Driller"
+        )
+        repo_root = Path(repo_root_raw).expanduser()
+        broker_script = repo_root / "scripts" / "capadonna" / "broker_execute_signal.py"
+        python_bin = repo_root / ".venv" / "bin" / "python"
+        if os.name == "nt":
+            win_python = repo_root / ".venv" / "Scripts" / "python.exe"
+            if win_python.exists():
+                python_bin = win_python
+
+        missing = [str(path) for path in (broker_script, python_bin) if not path.exists()]
+        if missing:
+            raise FileNotFoundError(
+                "Cannot schedule order; required runtime files are missing: "
+                + ", ".join(missing)
+            )
+
+        tasks_dir = repo_root / "tasks" / "pm2"
+        script_path = tasks_dir / f"{safe_name}.sh"
+        sentinel_path = tasks_dir / f"{safe_name}.done"
+        embedded_order = {
+            "mode": "shares",
+            "ticker": ticker_norm,
+            "action": action_norm,
+            "quantity": qty,
+        }
+        embedded_json = json.dumps(embedded_order, separators=(",", ":"), ensure_ascii=True)
+        paper_flag = "1" if bool(paper) else "0"
+
+        script = f"""#!/usr/bin/env bash
+set -euo pipefail
+RUN_DATE_UTC={shlex.quote(str(run_date_utc))}
+SENTINEL={shlex.quote(str(sentinel_path))}
+TODAY_UTC="$(date -u +%F)"
+if [ "$TODAY_UTC" != "$RUN_DATE_UTC" ]; then
+  echo "skip: today=$TODAY_UTC run_date=$RUN_DATE_UTC"
+  exit 0
+fi
+if [ -f "$SENTINEL" ]; then
+  echo "skip: already executed ($SENTINEL)"
+  exit 0
+fi
+export DUCKCLAW_EMBEDDED_EXECUTE_JSON={shlex.quote(embedded_json)}
+cd {shlex.quote(str(repo_root))}
+set +e
+{shlex.quote(str(python_bin))} {shlex.quote(str(broker_script))} {shlex.quote(safe_name)} {paper_flag}
+rc=$?
+set -e
+if [ "$rc" -eq 0 ]; then
+  date -u +"%Y-%m-%dT%H:%M:%SZ" > "$SENTINEL"
+fi
+exit "$rc"
+"""
+
+        pm2_command = [
+            "pm2",
+            "start",
+            str(script_path),
+            "--name",
+            safe_name,
+            "--interpreter",
+            "bash",
+            "--cron-restart",
+            cron_norm,
+            "--no-autorestart",
+        ]
+
+        result: dict[str, Any] = {
+            "status": "dry_run" if dry_run else "scheduled",
+            "dry_run": bool(dry_run),
+            "name": safe_name,
+            "ticker": ticker_norm,
+            "action": action_norm,
+            "quantity": qty,
+            "paper": bool(paper),
+            "run_date_utc": str(run_date_utc),
+            "cron": cron_norm,
+            "repo_root": str(repo_root),
+            "script_path": str(script_path),
+            "sentinel_path": str(sentinel_path),
+            "embedded_order": embedded_order,
+            "pm2_command": pm2_command,
+            "appears_in_crons_ui": True,
+        }
+        if dry_run:
+            return json.dumps(result, ensure_ascii=False, default=str)
+
+        tasks_dir.mkdir(parents=True, exist_ok=True)
+        script_path.write_text(script, encoding="utf-8")
+        script_path.chmod(
+            stat.S_IRUSR
+            | stat.S_IWUSR
+            | stat.S_IXUSR
+            | stat.S_IRGRP
+            | stat.S_IXGRP
+        )
+        subprocess.run(
+            ["pm2", "delete", safe_name],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        created = subprocess.run(
+            pm2_command,
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        result["pm2_stdout"] = created.stdout[-2000:]
+        result["pm2_stderr"] = created.stderr[-2000:]
+        return json.dumps(result, ensure_ascii=False, default=str)
+
+    tools_list.append(
+        StructuredTool.from_function(
+            _schedule_ibkr_shares_order_cron_sync,
+            name="schedule_ibkr_shares_order_cron",
+            description=(
+                "[IBKR Trading] Programa una orden determinista de shares como proceso PM2 "
+                "con cron_restart visible en la pantalla Crons. Usa esto cuando el usuario "
+                "pide dejar una venta/compra exacta para apertura o una hora concreta. "
+                "Por seguridad dry_run=True por defecto: primero devuelve el wrapper, cron y "
+                "orden embebida sin crear nada. Con dry_run=False crea tasks/pm2/<name>.sh, "
+                "lo registra en PM2 y queda visible en la UI de Crons. "
+                "Args: ticker, action BUY|SELL, quantity, run_date_utc YYYY-MM-DD, cron "
+                "(5 campos en UTC del VPS), name opcional, paper bool, dry_run bool. "
+                "Devuelve JSON auditable con status, pm2_command, script_path y embedded_order."
+            ),
+        )
+    )
+
     _log.info(
-        "IBKR bracket orders skill registrado — execute_signal_with_bracket/cancel_ibkr_open_orders disponibles"
+        "IBKR bracket orders skill registrado — "
+        "execute_signal_with_bracket/cancel_ibkr_open_orders/"
+        "schedule_ibkr_shares_order_cron disponibles"
     )

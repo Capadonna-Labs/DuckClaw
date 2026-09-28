@@ -7,6 +7,19 @@ import {
   type ContextTokenBreakdown,
 } from '@/lib/contextTokenBreakdown';
 
+/** Comandos fly genéricos (no vertical) reconocidos por cualquier worker — una sola fuente
+ * de verdad para el ack-check de abajo y para el menú "/" del composer. */
+export const GENERIC_FLY_SLASH_COMMANDS: { cmd: string; description: string }[] = [
+  { cmd: '/loop', description: 'Dispara un ciclo de auto-mejora (homeostasis)' },
+  { cmd: '/meditate', description: 'Ciclo de reflexión/meditación del worker' },
+  { cmd: '/summarize', description: 'Resume el contexto del chat' },
+  { cmd: '/sandbox', description: 'Ejecuta código en el sandbox' },
+  { cmd: '/help', description: 'Ayuda del worker' },
+  { cmd: '/status', description: 'Estado actual del worker/loop' },
+  { cmd: '/voice', description: 'Cambia a modo de voz' },
+  { cmd: '/tts', description: 'Texto a voz para la próxima respuesta' },
+];
+
 /**
  * Slash de configuración / ack corto (sin chips).
  * Comandos agente (`/execute-broker-signals`, …) con respuesta real SÍ piden chips.
@@ -15,10 +28,18 @@ import {
 export function isFlyConfigSlashAck(userText: string): boolean {
   const t = (userText || '').trim();
   if (!t.startsWith('/')) return false;
-  return (
-    /^\/(loop|meditate)(\s|$)/i.test(t) ||
-    /^\/(summarize|sandbox|help|status|voice|tts)\b/i.test(t)
-  );
+  const names = GENERIC_FLY_SLASH_COMMANDS.map((c) => c.cmd.slice(1)).join('|');
+  return new RegExp(`^/(${names})\\b`, 'i').test(t);
+}
+
+/** Comandos "/" que calzan con lo ya tecleado (sin espacio todavía) para el menú del composer. */
+export function matchingSlashCommands(
+  input: string
+): { cmd: string; description: string }[] {
+  const t = (input || '').trim();
+  if (!t.startsWith('/') || /\s/.test(t)) return [];
+  const prefix = t.toLowerCase();
+  return GENERIC_FLY_SLASH_COMMANDS.filter((c) => c.cmd.startsWith(prefix));
 }
 
 /** True si, tras un turno, corresponde pedir sugerencias de continuación al backend. */

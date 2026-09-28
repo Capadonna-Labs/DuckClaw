@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   lastUserAssistantExchange,
+  matchingSlashCommands,
   shouldFetchChatSuggestions,
   shouldShowSuggestionChips,
   suggestionsExchangeKey,
@@ -20,6 +21,14 @@ describe('shouldFetchChatSuggestions', () => {
     expect(shouldFetchChatSuggestions('/loop on', 'Modo /loop activo', false)).toBe(false);
     expect(shouldFetchChatSuggestions('  /summarize', 'Resumen listo', false)).toBe(false);
     expect(shouldFetchChatSuggestions('/sandbox off', 'Sandbox desactivado', false)).toBe(false);
+  });
+
+  it('menú "/": filtra por prefijo y no calza tras el espacio de un argumento', () => {
+    expect(matchingSlashCommands('/').length).toBeGreaterThan(0);
+    expect(matchingSlashCommands('/lo').map((c) => c.cmd)).toEqual(['/loop']);
+    expect(matchingSlashCommands('/loop ya en curso')).toEqual([]);
+    expect(matchingSlashCommands('hola')).toEqual([]);
+    expect(matchingSlashCommands('')).toEqual([]);
   });
 
   it('true tras slash agente con respuesta útil (/execute-…)', () => {

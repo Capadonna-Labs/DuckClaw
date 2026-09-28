@@ -9,6 +9,107 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import duckdb
 
 
+def test_preflight_exit_allows_closing_long_with_sell(tmp_path):
+    from duckclaw.signal_execution_bridge import validate_execution_context
+
+    pos = MagicMock()
+    pos.contract.symbol = "MU"
+    pos.position = 29
+    ib = MagicMock()
+    ib.positions.return_value = [pos]
+    ib.openTrades.return_value = []
+
+    async def _run():
+        with (
+            patch(
+                "duckclaw.signal_execution_bridge._daily_loss_limit_status",
+                return_value={"ok": True, "configured": False},
+            ),
+            patch(
+                "duckclaw.signal_execution_bridge._live_mark_price",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            return await validate_execution_context(
+                ib,
+                signal_id="sig_exit_mu",
+                ticker="MU",
+                side="SELL",
+                quantity=15,
+                signal_type="EXIT",
+                vault_db_path=str(tmp_path / "vault.duckdb"),
+                tp_price=None,
+                sl_price=None,
+            )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+
+
+def test_preflight_exit_blocks_same_side_as_long_position(tmp_path):
+    from duckclaw.signal_execution_bridge import validate_execution_context
+
+    pos = MagicMock()
+    pos.contract.symbol = "MU"
+    pos.position = 29
+    ib = MagicMock()
+    ib.positions.return_value = [pos]
+    ib.openTrades.return_value = []
+
+    async def _run():
+        with patch(
+            "duckclaw.signal_execution_bridge._daily_loss_limit_status",
+            return_value={"ok": True, "configured": False},
+        ):
+            return await validate_execution_context(
+                ib,
+                signal_id="sig_bad_exit_mu",
+                ticker="MU",
+                side="BUY",
+                quantity=15,
+                signal_type="EXIT",
+                vault_db_path=str(tmp_path / "vault.duckdb"),
+                tp_price=None,
+                sl_price=None,
+            )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is False
+    assert "PRE_FLIGHT_SIDE_MISMATCH" in result["error"]
+
+
+def test_preflight_exit_allows_closing_short_with_buy(tmp_path):
+    from duckclaw.signal_execution_bridge import validate_execution_context
+
+    pos = MagicMock()
+    pos.contract.symbol = "MU"
+    pos.position = -29
+    ib = MagicMock()
+    ib.positions.return_value = [pos]
+    ib.openTrades.return_value = []
+
+    async def _run():
+        with patch(
+            "duckclaw.signal_execution_bridge._daily_loss_limit_status",
+            return_value={"ok": True, "configured": False},
+        ):
+            return await validate_execution_context(
+                ib,
+                signal_id="sig_exit_short_mu",
+                ticker="MU",
+                side="BUY",
+                quantity=15,
+                signal_type="EXIT",
+                vault_db_path=str(tmp_path / "vault.duckdb"),
+                tp_price=None,
+                sl_price=None,
+            )
+
+    result = asyncio.run(_run())
+    assert result["ok"] is True
+
+
 def test_execute_signal_with_bracket_enqueues_with_vault_db_path(tmp_path):
     vault = str(tmp_path / "vault.duckdb")
 

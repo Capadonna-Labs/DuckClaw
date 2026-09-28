@@ -519,6 +519,79 @@ async def cancel_protective_orders_for_ticker(
     return cancelled
 
 
+async def cancel_open_orders(
+    ib: "IB",
+    *,
+    ticker: str | None = None,
+    order_ids: list[int] | None = None,
+    dry_run: bool = False,
+) -> dict:
+    """Cancel matching open IBKR orders by ticker and/or order id.
+
+    This is the explicit operator/tool path. ``cancel_protective_orders_for_ticker``
+    remains the replacement helper used by protective OCA placement.
+    """
+    if not _IB_INSYNC_AVAILABLE:
+        raise ImportError(
+            "ib_insync no disponible — instalar con: uv pip install ib-insync"
+        )
+    sym = (ticker or "").strip().upper()
+    ids = {int(x) for x in (order_ids or []) if int(x) > 0}
+    if not sym and not ids:
+        raise ValueError("se requiere ticker o al menos un order_id")
+
+    try:
+        try:
+            ib.reqAllOpenOrders()
+            await asyncio.sleep(0.8)
+        except Exception as exc:
+            _log.warning("reqAllOpenOrders before explicit cancel: %s", exc)
+        trades = list(ib.openTrades() or [])
+    except Exception as exc:
+        raise RuntimeError(f"openTrades failed before explicit cancel: {exc}") from exc
+
+    matched = []
+    cancelled = []
+    for trade in trades:
+        c = getattr(trade, "contract", None)
+        o = getattr(trade, "order", None)
+        if c is None or o is None:
+            continue
+        oid = int(getattr(o, "orderId", 0) or 0)
+        tsym = str(getattr(c, "symbol", "") or "").strip().upper()
+        if ids and oid not in ids:
+            continue
+        if sym and tsym != sym:
+            continue
+        row = {
+            "order_id": oid,
+            "ticker": tsym,
+            "action": getattr(o, "action", None),
+            "order_type": getattr(o, "orderType", None),
+            "quantity": float(getattr(o, "totalQuantity", 0) or 0),
+            "oca_group": getattr(o, "ocaGroup", None),
+        }
+        matched.append(row)
+        if dry_run:
+            continue
+        try:
+            ib.cancelOrder(o)
+            cancelled.append(row)
+        except Exception as exc:
+            row["error"] = str(exc)
+
+    if cancelled:
+        await asyncio.sleep(1.0)
+    return {
+        "status": "success",
+        "dry_run": dry_run,
+        "matched_count": len(matched),
+        "cancelled_count": len(cancelled),
+        "matched": matched,
+        "cancelled": cancelled,
+    }
+
+
 async def submit_protective_oca_orders(
     ib: "IB",
     ticker: str,

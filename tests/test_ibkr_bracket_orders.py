@@ -138,6 +138,65 @@ def test_cancel_protective_orders_for_ticker_filters_symbol(monkeypatch):
     assert ib.cancelled == [1]
 
 
+def test_cancel_open_orders_filters_by_order_ids(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from duckclaw import ibkr_bracket_orders as mod
+
+    class FakeIB:
+        def __init__(self):
+            self.cancelled = []
+
+        def reqAllOpenOrders(self):
+            return None
+
+        def openTrades(self):
+            return [
+                SimpleNamespace(
+                    contract=SimpleNamespace(symbol="MU"),
+                    order=SimpleNamespace(
+                        orderId=73,
+                        orderType="LMT",
+                        action="SELL",
+                        totalQuantity=15,
+                        ocaGroup="",
+                    ),
+                ),
+                SimpleNamespace(
+                    contract=SimpleNamespace(symbol="MU"),
+                    order=SimpleNamespace(
+                        orderId=74,
+                        orderType="STP",
+                        action="SELL",
+                        totalQuantity=15,
+                        ocaGroup="",
+                    ),
+                ),
+                SimpleNamespace(
+                    contract=SimpleNamespace(symbol="SPY"),
+                    order=SimpleNamespace(
+                        orderId=75,
+                        orderType="LMT",
+                        action="SELL",
+                        totalQuantity=1,
+                        ocaGroup="",
+                    ),
+                ),
+            ]
+
+        def cancelOrder(self, order):
+            self.cancelled.append(order.orderId)
+
+    ib = FakeIB()
+    result = asyncio.run(
+        mod.cancel_open_orders(ib, ticker="MU", order_ids=[73, 74], dry_run=False)
+    )
+    assert result["matched_count"] == 2
+    assert result["cancelled_count"] == 2
+    assert ib.cancelled == [73, 74]
+
+
 def test_create_protective_oca_rejects_bad_rr_long():
     from duckclaw.ibkr_bracket_orders import create_protective_oca_orders
 

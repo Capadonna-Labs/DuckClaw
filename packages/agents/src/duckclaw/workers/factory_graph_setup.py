@@ -212,7 +212,14 @@ def initialize_worker_graph_context(
     if llm is not None and _cp_early.get("enabled"):
         llm_summary = _build_summary_llm(llm, provider=provider, model=model, base_url=base_url)
 
-    _register_post_llm_skill_tools(tools, spec, db=db, llm=llm, tenant_id=tenant_id)
+    _register_post_llm_skill_tools(
+        tools,
+        spec,
+        db=db,
+        llm=llm,
+        tenant_id=tenant_id,
+        vault_db_path=str(path or ""),
+    )
     tools_by_name = {t.name: t for t in tools}
 
     from duckclaw.prompt_policies.system_prompt import (

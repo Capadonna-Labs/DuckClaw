@@ -175,6 +175,7 @@ def register_post_llm_skill_tools(
     db: Any,
     llm: Any,
     tenant_id: str = "default",
+    vault_db_path: str | None = None,
 ) -> None:
     """Register configured skill tools that may depend on db or llm handles."""
     _register_configured_skill_tools(
@@ -189,6 +190,7 @@ def register_post_llm_skill_tools(
             "research_config": worker_skill_config(spec, "research"),
             "worker_id": str(getattr(spec, "worker_id", None) or ""),
             "tenant_id": str(tenant_id or "default"),
+            "vault_db_path": str(vault_db_path or "").strip() or None,
         },
     )
 
@@ -218,6 +220,8 @@ def _register_configured_skill_tools(
         if not _descriptor_is_active(descriptor, tool_surface=tool_surface, incoming_hint=incoming_hint):
             continue
         config = worker_skill_config(spec, descriptor.skill_name)
+        if config is None and descriptor.empty_config_registers and phase == "post_llm":
+            config = {}
         if config is None:
             continue
         if not config and not descriptor.empty_config_registers:

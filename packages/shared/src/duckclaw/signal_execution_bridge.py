@@ -136,6 +136,10 @@ def _is_protective_signal(strategy_name: str | None, rationale: str | None) -> b
     )
 
 
+def _exit_side_for_position(position_side: str) -> str:
+    return "SELL" if position_side == "BUY" else "BUY"
+
+
 async def _live_position_qty(ib: object, ticker: str) -> float | None:
     sym = ticker.strip().upper()
     try:
@@ -372,7 +376,8 @@ async def validate_execution_context(
         if live_qty is None or abs(live_qty) <= 0:
             return {**base, "ok": False, "error": "PRE_FLIGHT_NO_LIVE_POSITION"}
         position_side = "BUY" if live_qty > 0 else "SELL"
-        if side_u != position_side:
+        expected_side = position_side if is_protective else _exit_side_for_position(position_side)
+        if side_u != expected_side:
             return {
                 **base,
                 "ok": False,

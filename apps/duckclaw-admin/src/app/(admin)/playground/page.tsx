@@ -619,7 +619,6 @@ export default function PlaygroundPage() {
         invalidWorkers={config?.workers_invalid ?? []}
         logsPanelOpen={logsPanelOpen}
         logsOnly={settingsPanelMode === 'logs'}
-        onLogsToggle={handleLogsToggle}
         toolUsageEnabled={toolUsageEnabled}
         onToolUsageToggle={() => setToolUsageEnabled((enabled) => !enabled)}
         suggestionsEnabled={suggestionsEnabled}
@@ -824,7 +823,7 @@ export default function PlaygroundPage() {
               }`}
             >
               <span className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">
-                {settingsPanelMode === 'logs' ? 'Logs' : 'Run settings'}
+                {settingsPanelMode === 'logs' ? 'Logs' : 'Settings'}
               </span>
               <button
                 type="button"
@@ -861,7 +860,7 @@ export default function PlaygroundPage() {
             }`}
           >
             <h2 className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">
-              {settingsPanelMode === 'logs' ? 'Logs' : 'Run settings'}
+              {settingsPanelMode === 'logs' ? 'Logs' : 'Settings'}
             </h2>
             <button
               type="button"

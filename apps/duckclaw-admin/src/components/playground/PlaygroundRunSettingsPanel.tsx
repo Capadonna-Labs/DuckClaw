@@ -10,7 +10,6 @@ import {
   Cpu,
   FileText,
   MessageSquareText,
-  Terminal,
   Wrench,
 } from 'lucide-react';
 
@@ -56,7 +55,6 @@ export type PlaygroundRunSettingsPanelProps = {
   invalidWorkers: string[];
   logsPanelOpen: boolean;
   logsOnly?: boolean;
-  onLogsToggle: () => void;
   toolUsageEnabled: boolean;
   onToolUsageToggle: () => void;
   suggestionsEnabled: boolean;
@@ -81,7 +79,7 @@ function basenamePath(path: string): string {
   return parts[parts.length - 1] || p;
 }
 
-/** Panel lateral Run settings — estilo Google AI Studio. */
+/** Panel lateral Settings — estilo Google AI Studio. */
 export function PlaygroundRunSettingsPanel({
   config,
   workerId,
@@ -95,7 +93,6 @@ export function PlaygroundRunSettingsPanel({
   invalidWorkers,
   logsPanelOpen,
   logsOnly = false,
-  onLogsToggle,
   toolUsageEnabled,
   onToolUsageToggle,
   suggestionsEnabled,
@@ -170,7 +167,7 @@ export function PlaygroundRunSettingsPanel({
   const vaultScope =
     activeVaultScope === 'chat' ? 'Por conversación' : 'Vault compartido (RAG + SQL)';
 
-  const bottomPanelOpen = logsPanelOpen;
+  const bottomPanelOpen = logsOnly && logsPanelOpen;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col gap-2">
@@ -334,14 +331,6 @@ export function PlaygroundRunSettingsPanel({
             onChange={onSuggestionsToggle}
             icon={<MessageSquareText size={14} aria-hidden />}
           />
-          <StudioToggleRow
-            label="Logs PM2"
-            hint={logsPanelOpen ? 'Consola abajo' : 'Mostrar consola de logs'}
-            checked={logsPanelOpen}
-            onChange={onLogsToggle}
-            icon={<Terminal size={14} aria-hidden />}
-          />
-          {logsPanelOpen && logsControls ? logsControls : null}
         </StudioCollapsible>
 
         {invalidWorkers.length > 0 && (
@@ -354,13 +343,9 @@ export function PlaygroundRunSettingsPanel({
         <div className="shrink-0">{logsControls}</div>
       ) : null}
 
-      {logsPanelOpen && logsViewport ? (
+      {logsOnly && logsPanelOpen && logsViewport ? (
         <div
-          className={`flex min-w-0 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-white text-gov-gray-800 dark:border-dark-border dark:bg-slate-950 dark:text-slate-200 ${
-            logsOnly
-              ? 'min-h-0 flex-1'
-              : 'min-h-[220px] max-h-[min(58vh,520px)] shrink-0'
-          }`}
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-gov-gray-200/90 bg-white text-gov-gray-800 dark:border-dark-border dark:bg-slate-950 dark:text-slate-200"
         >
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{logsViewport}</div>
         </div>

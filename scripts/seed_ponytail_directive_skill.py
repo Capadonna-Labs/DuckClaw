@@ -13,6 +13,15 @@ Run: uv run python scripts/seed_ponytail_directive_skill.py
 """
 from __future__ import annotations
 
+from pathlib import Path
+
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+except ImportError:
+    pass
+
 PONYTAIL_DIRECTIVE = (
     "Eres un dev senior perezoso: perezoso = eficiente, no descuidado. Antes de "
     "escribir codigo, sube esta escalera y detente en el primer peldano que sirva: "

@@ -7,7 +7,6 @@ import { SlashCommandMenu } from '@/components/chat/SlashCommandMenu';
 import { LiveVoiceBar } from '@/components/chat/LiveVoiceBar';
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
 import {
-  isKnownSlashCommand,
   matchingSlashCommands,
   shouldShowSuggestionChips,
   splitLeadingSlashCommand,
@@ -147,12 +146,6 @@ export function AdminChatComposeFooter({
     inputRef.current?.focus();
   };
   const leadingSlashCmd = splitLeadingSlashCommand(input);
-  const hasConfirmedSlashCmd = Boolean(
-    leadingSlashCmd && isKnownSlashCommand(leadingSlashCmd.cmd, directiveSkills)
-  );
-  const composeBoxAccent = hasConfirmedSlashCmd
-    ? 'border-gov-blue-500 ring-2 ring-gov-blue-200 dark:border-dark-cyan dark:ring-dark-cyan/30'
-    : '';
   const attachError = imageAttachments.attachError || documentAttachments.attachError;
   const dropEnabled = canSend && !loading && !voice.recording && !liveVoice.isActive;
   const { dragActive, dropProps } = useChatFileDrop({
@@ -233,9 +226,7 @@ export function AdminChatComposeFooter({
               />
             </div>
           ) : null}
-          <div
-            className={`rounded-2xl border border-gov-gray-200 bg-gov-gray-50/90 dark:border-dark-border dark:bg-dark-bg/70 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow ${composeBoxAccent}`}
-          >
+          <div className="rounded-2xl border border-gov-gray-200 bg-gov-gray-50/90 dark:border-dark-border dark:bg-dark-bg/70 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow">
             {(imageAttachments.pendingImages.length > 0 ||
               documentAttachments.pendingDocuments.length > 0) && (
               <div className="flex flex-col gap-2 px-3 pt-2.5">
@@ -278,7 +269,9 @@ export function AdminChatComposeFooter({
                   <span className="font-semibold text-gov-blue-700 dark:text-dark-cyan">
                     {leadingSlashCmd.cmd}
                   </span>
-                  <span className="text-transparent">{leadingSlashCmd.rest}</span>
+                  <span className="text-gov-gray-900 dark:text-dark-text">
+                    {leadingSlashCmd.rest}
+                  </span>
                 </div>
               ) : null}
               <textarea
@@ -430,7 +423,9 @@ export function AdminChatComposeFooter({
                     <span className="font-semibold text-gov-blue-700 dark:text-dark-cyan">
                       {leadingSlashCmd.cmd}
                     </span>
-                    <span className="text-transparent">{leadingSlashCmd.rest}</span>
+                    <span className="text-gov-gray-900 dark:text-dark-text">
+                      {leadingSlashCmd.rest}
+                    </span>
                   </div>
                 ) : null}
                 <textarea
@@ -446,7 +441,7 @@ export function AdminChatComposeFooter({
                   }}
                   rows={isCompact ? 1 : 2}
                   placeholder="Mensaje…"
-                  className={`relative w-full px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none ${composeBoxAccent} ${
+                  className={`relative w-full px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none ${
                     leadingSlashCmd ? 'text-transparent caret-gov-blue-700 dark:caret-dark-cyan' : ''
                   }`}
                   disabled={!canSend || liveVoice.isActive}

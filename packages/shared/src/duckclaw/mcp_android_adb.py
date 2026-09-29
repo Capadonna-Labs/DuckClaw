@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime
@@ -177,19 +178,32 @@ def android_collapse_statusbar(*, serial: str | None = None) -> dict[str, Any]:
     }
 
 
-def _android_ui_dump(serial: str) -> tuple[int, str, str]:
+def _android_ui_dump(
+    serial: str, *, retries: int = 2, retry_delay: float = 0.5
+) -> tuple[int, str, str]:
+    """`uiautomator dump` fails while the UI is mid-transition (shade still expanding,
+    list still reflowing right after a swipe-dismiss) — UiAutomator can't snapshot a
+    tree until Android reports the UI idle, and some devices print that diagnostic to
+    stdout instead of stderr. Retry with a short settle delay and surface whichever
+    stream actually has the message, instead of failing on the first transient miss."""
     dump_path = "/sdcard/duckclaw-window.xml"
-    code, _, stderr = _run_adb(
-        ["-s", serial, "shell", "uiautomator", "dump", dump_path],
-        timeout=10.0,
-    )
-    if code != 0:
-        return code, "", stderr
-    cat_code, stdout, cat_stderr = _run_adb(
-        ["-s", serial, "shell", "cat", dump_path],
-        timeout=10.0,
-    )
-    return cat_code, stdout, cat_stderr
+    last_code, last_err = 1, ""
+    for attempt in range(retries + 1):
+        code, dump_out, stderr = _run_adb(
+            ["-s", serial, "shell", "uiautomator", "dump", dump_path],
+            timeout=10.0,
+        )
+        if code == 0:
+            cat_code, stdout, cat_stderr = _run_adb(
+                ["-s", serial, "shell", "cat", dump_path],
+                timeout=10.0,
+            )
+            return cat_code, stdout, cat_stderr
+        last_code = code
+        last_err = (stderr or "").strip() or (dump_out or "").strip()
+        if attempt < retries:
+            time.sleep(retry_delay)
+    return last_code, "", last_err
 
 
 def android_review_and_dismiss_notifications(
@@ -211,6 +225,9 @@ def android_review_and_dismiss_notifications(
     from duckclaw.mcp_android_notifications import analyze_notification_ui_dump
 
     opened = android_expand_notifications(serial=sid)
+    if opened.get("ok"):
+        # Deja terminar la animación de expansión del shade antes del primer dump.
+        time.sleep(0.5)
     processed: list[dict[str, Any]] = []
     skipped: list[str] = []
     errors: list[str] = []
@@ -256,6 +273,9 @@ def android_review_and_dismiss_notifications(
         if scode != 0:
             errors.append(serr.strip() or f"swipe failed for {item['title']}")
             break
+        # La lista sigue reflotando/settling un momento tras el swipe (más allá de
+        # duration_ms del gesto en sí) — dar margen antes del siguiente dump.
+        time.sleep(0.3)
 
     collapsed: dict[str, Any] | None = None
     if collapse_when_done:

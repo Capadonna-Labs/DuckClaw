@@ -49,6 +49,7 @@ which refuse without ACTIVE TP/SL. Write commands van a la queue del vault
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import math
@@ -186,7 +187,6 @@ async def _live_mark_price(ib: object, ticker: str) -> float | None:
     except Exception as exc:
         _log.warning("preflight qualifyContracts %s: %s", ticker, exc)
 
-    sleep = getattr(ib, "sleep", None)
     set_market_data_type = getattr(ib, "reqMarketDataType", None)
     # ponytail: reqMarketDataType is connection-global, not per-request — fine for
     # this bridge's current sequential preflight-per-ticker usage; would need a
@@ -203,8 +203,12 @@ async def _live_mark_price(ib: object, ticker: str) -> float | None:
             ticker_obj = None
             try:
                 ticker_obj = ib.reqMktData(contract, "", False, False)  # type: ignore[attr-defined]
-                if callable(sleep):
-                    await sleep(1.0)
+                # ib.sleep() (sync, blocks via loop.run_until_complete) reenters the
+                # already-running loop and raises "This event loop is already running"
+                # when called from inside this coroutine — asyncio.sleep() is the
+                # correct async-context equivalent (ib_insync keeps servicing the
+                # socket in the background while this awaits, same as ib.sleep does).
+                await asyncio.sleep(1.0)
                 for attr in ("marketPrice", "last", "close", "bid", "ask"):
                     raw = getattr(ticker_obj, attr, None)
                     value = raw() if callable(raw) else raw
@@ -251,12 +255,15 @@ def _tp_sl_valid_for_mark(
     return False
 
 
-def _open_orders_for_ticker(ib: object, ticker: str) -> list[object]:
+async def _open_orders_for_ticker(ib: object, ticker: str) -> list[object]:
     sym = ticker.strip().upper()
     try:
-        req_all = getattr(ib, "reqAllOpenOrders", None)
+        # reqAllOpenOrders() (sync) blocks via loop.run_until_complete() and raises
+        # "This event loop is already running" from inside this coroutine — use the
+        # Async variant instead, same reason as the sleep() swap in _live_mark_price.
+        req_all = getattr(ib, "reqAllOpenOrdersAsync", None)
         if callable(req_all):
-            req_all()
+            await req_all()
     except Exception as exc:
         _log.warning("preflight reqAllOpenOrders failed %s: %s", sym, exc)
     try:
@@ -424,7 +431,7 @@ async def validate_execution_context(
                 ),
             }
 
-    open_orders = _open_orders_for_ticker(ib, sym)
+    open_orders = await _open_orders_for_ticker(ib, sym)
     if open_orders and not (is_protective and cancel_existing):
         ids = [
             str(getattr(getattr(t, "order", None), "orderId", "?"))

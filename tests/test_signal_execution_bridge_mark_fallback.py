@@ -19,13 +19,12 @@ if "ib_insync" not in sys.modules:
     _fake_ib_insync.Stock = lambda *args, **kwargs: MagicMock()
     sys.modules["ib_insync"] = _fake_ib_insync
 
-from duckclaw.signal_execution_bridge import _live_mark_price
+from duckclaw.signal_execution_bridge import _live_mark_price, _open_orders_for_ticker
 
 
 def _make_ib(ticker_sequence):
     """ticker_sequence: list of dicts, one per reqMktData call, attr->value."""
     ib = MagicMock()
-    ib.sleep = AsyncMock()
     ib.qualifyContractsAsync = AsyncMock()
     calls = {"data_types": [], "req_count": 0}
 
@@ -74,3 +73,21 @@ def test_restores_live_data_type_when_both_attempts_empty() -> None:
     assert price is None
     # tries 1, then 3, then restores to 1 in the finally block
     assert calls["data_types"] == [1, 3, 1]
+
+
+def test_open_orders_for_ticker_uses_async_variant() -> None:
+    """Regression: reqAllOpenOrders() (sync) blocks via loop.run_until_complete()
+    and raises "This event loop is already running" when called from inside a
+    coroutine that's already running on an event loop (exactly the preflight
+    call path) — reqAllOpenOrdersAsync() is the correct equivalent here."""
+    ib = MagicMock()
+    ib.reqAllOpenOrdersAsync = AsyncMock()
+    trade = MagicMock()
+    trade.contract.symbol = "MU"
+    ib.openTrades.return_value = [trade]
+
+    result = asyncio.run(_open_orders_for_ticker(ib, "MU"))
+
+    ib.reqAllOpenOrdersAsync.assert_awaited_once()
+    ib.reqAllOpenOrders.assert_not_called()
+    assert result == [trade]

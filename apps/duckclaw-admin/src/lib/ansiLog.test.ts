@@ -14,6 +14,32 @@ describe('ansiLogParse', () => {
     );
   });
 
+  it('paints tool-usage lines yellow', () => {
+    expect(
+      colorizePlainLogLine('2026-09-29 16:54:47 | [default:manager] | unknown | [TOOL] inspect_custom_report -> OK (⏱️ 231ms)')
+        .className,
+    ).toBe('text-yellow-700 dark:text-yellow-300');
+    expect(
+      colorizePlainLogLine(
+        '2026-09-29 16:20:27 | [user:x] | tool_usage: worker=quant_analyst | tool=read_sql | phase=done | elapsed_ms=452',
+      ).className,
+    ).toBe('text-yellow-700 dark:text-yellow-300');
+    expect(
+      colorizePlainLogLine("[quant_analyst] tool=read_sql | result_len=595 | preview='...'").className,
+    ).toBe('text-yellow-700 dark:text-yellow-300');
+  });
+
+  it('paints harness_metric lines green even when the payload has "denied"/"failures" fields', () => {
+    // Regression: {'risk_denied': 0, 'failures': 0} used to trip the red error
+    // regex via plain substring matching ("denied", "failure") before this
+    // line type had its own check — harness_metric must win first.
+    expect(
+      colorizePlainLogLine(
+        "[quant_analyst] harness_metric {'approval_mode': 'suggest', 'circuit_blocks': 0, 'risk_denied': 0, 'failures': 0, 'truncated_results': 0, 'fail_counts': {}}",
+      ).className,
+    ).toBe('text-emerald-700 dark:text-emerald-300');
+  });
+
   it('regression: a real PM2 stream mixes ANSI and plain lines — each line must be judged on its own, not the whole buffer', () => {
     // Same shape as a real stream: a colored PM2 banner line, then a plain
     // Python traceback with zero ANSI codes (exactly what silently stopped

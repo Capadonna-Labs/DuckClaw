@@ -12,11 +12,19 @@ export function hasAnsiCodes(text: string): boolean {
 
 export function colorizePlainLogLine(line: string): { className: string; text: string } {
   const t = line.trim();
+  // harness_metric payloads carry field names like "risk_denied"/"failures": 0 —
+  // check first so those don't fall through to the error/warn substring checks below.
+  if (/harness_metric/i.test(t)) {
+    return { className: 'text-emerald-700 dark:text-emerald-300', text: line };
+  }
   if (/error|exception|traceback|fatal|errno|failed|failure|refused|denied/i.test(t)) {
     return { className: 'text-red-700 dark:text-red-400', text: line };
   }
   if (/warn|warning|offline|timeout|retry|unavailable/i.test(t)) {
     return { className: 'text-amber-700 dark:text-amber-300', text: line };
+  }
+  if (/\[TOOL\]|tool_usage:|\btool=/i.test(t)) {
+    return { className: 'text-yellow-700 dark:text-yellow-300', text: line };
   }
   if (/^\d+\|/.test(t) || /\[PM2\]/i.test(t)) {
     return { className: 'text-emerald-700 dark:text-emerald-300', text: line };

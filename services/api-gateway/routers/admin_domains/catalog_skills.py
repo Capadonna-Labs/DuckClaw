@@ -65,8 +65,15 @@ def _actor_profile(actor: str) -> dict[str, Any]:
         return ensure_profile_for_user(db, email=actor_email)
 
 
-def _skill_dto(name: str, implementation_ref: str) -> dict[str, str]:
-    return {"id": name, "path": implementation_ref, "scope": "catalog"}
+def _skill_dto(
+    name: str, implementation_ref: str, *, description: str = "", skill_type: str = ""
+) -> dict[str, str]:
+    dto = {"id": name, "path": implementation_ref, "scope": "catalog"}
+    if description:
+        dto["description"] = description
+    if skill_type:
+        dto["skill_type"] = skill_type
+    return dto
 
 
 def _enqueue_catalog_skill_command(command: Any) -> str:
@@ -87,7 +94,7 @@ async def catalog_skills(actor: str = Depends(actor_from_header)) -> dict[str, A
             rows = _fetchall(
                 db.execute(
                     """
-                    SELECT name, implementation_ref
+                    SELECT name, implementation_ref, description, skill_type
                     FROM main.admin_skills
                     WHERE active = true
                       AND tenant_id = ?
@@ -98,8 +105,13 @@ async def catalog_skills(actor: str = Depends(actor_from_header)) -> dict[str, A
                 )
             )
             global_skills = [
-                _skill_dto(str(name or ""), str(implementation_ref or ""))
-                for name, implementation_ref in rows
+                _skill_dto(
+                    str(name or ""),
+                    str(implementation_ref or ""),
+                    description=str(description or ""),
+                    skill_type=str(skill_type or ""),
+                )
+                for name, implementation_ref, description, skill_type in rows
                 if str(name or "").strip()
             ]
             workers = list_visible_workers_for_actor(db, actor_email=actor_email)

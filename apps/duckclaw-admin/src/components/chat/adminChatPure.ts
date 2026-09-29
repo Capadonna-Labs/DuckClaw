@@ -32,14 +32,24 @@ export function isFlyConfigSlashAck(userText: string): boolean {
   return new RegExp(`^/(${names})\\b`, 'i').test(t);
 }
 
-/** Comandos "/" que calzan con lo ya tecleado (sin espacio todavía) para el menú del composer. */
+/**
+ * Comandos "/" que calzan con lo ya tecleado (sin espacio todavía) para el menú del
+ * composer. `extraCommands` son los directive skills instalados (catálogo global,
+ * ver AdminChatPanel) — mismo shape, se mezclan sin duplicar por `cmd`.
+ */
 export function matchingSlashCommands(
-  input: string
+  input: string,
+  extraCommands: { cmd: string; description: string }[] = []
 ): { cmd: string; description: string }[] {
   const t = (input || '').trim();
   if (!t.startsWith('/') || /\s/.test(t)) return [];
   const prefix = t.toLowerCase();
-  return GENERIC_FLY_SLASH_COMMANDS.filter((c) => c.cmd.startsWith(prefix));
+  const seen = new Set(GENERIC_FLY_SLASH_COMMANDS.map((c) => c.cmd));
+  const all = [
+    ...GENERIC_FLY_SLASH_COMMANDS,
+    ...extraCommands.filter((c) => !seen.has(c.cmd)),
+  ];
+  return all.filter((c) => c.cmd.toLowerCase().startsWith(prefix));
 }
 
 /** True si, tras un turno, corresponde pedir sugerencias de continuación al backend. */

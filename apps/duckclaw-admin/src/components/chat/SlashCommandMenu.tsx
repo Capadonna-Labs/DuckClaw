@@ -6,11 +6,14 @@ import { matchingSlashCommands } from '@/components/chat/adminChatPure';
 export function SlashCommandMenu({
   input,
   onPick,
+  extraCommands = [],
 }: {
   input: string;
   onPick: (cmd: string) => void;
+  /** Directive skills instalados (catálogo global) que se muestran junto a los genéricos. */
+  extraCommands?: { cmd: string; description: string }[];
 }) {
-  const matches = matchingSlashCommands(input);
+  const matches = matchingSlashCommands(input, extraCommands);
   if (matches.length === 0) return null;
   return (
     <div className="overflow-hidden rounded-xl border border-gov-gray-200 bg-white/90 shadow-sm dark:border-dark-border dark:bg-dark-surface/90">

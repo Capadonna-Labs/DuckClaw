@@ -333,8 +333,26 @@ async def prepare_playground_chat_turn(
     original_user_message = ((body.user_incoming or "").strip() or msg)
     if not msg and not body.images and not body.documents:
         raise problem(400, "message, images o documents requeridos", "")
+    # Si un directive skill matchea, "msg" (lo que ve el LLM) queda con la instrucción
+    # antepuesta, pero "original_user_message" (lo que se persiste en historial) se deja
+    # intacto — el usuario ve lo que realmente escribió, no el ensayo inyectado.
+    fly_check_incoming = original_user_message
+    if msg.startswith("/"):
+        from core.admin_identity import effective_actor_email
+        from routers.admin_domains.playground.directive_skills import extract_directive_skill
+
+        msg, directive_rest = await asyncio.to_thread(
+            extract_directive_skill,
+            msg,
+            tenant_id=turn.eff_tenant,
+            actor_email=effective_actor_email(actor),
+        )
+        if directive_rest is not None:
+            # Matchéo un directive skill: ya no es fly command, es un turno normal
+            # (con adjuntos/RAG habilitados) cuyo texto real es "directive_rest".
+            fly_check_incoming = directive_rest
     is_fly = _playground_message_is_fly_command(
-        user_incoming=original_user_message,
+        user_incoming=fly_check_incoming,
         message=msg,
     )
     doc_names: list[str] = []

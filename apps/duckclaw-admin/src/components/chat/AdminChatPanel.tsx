@@ -30,6 +30,7 @@ import { workerOptionId, workerOptionLabel, resolveWorkerDisplayName } from '@/l
 import { PlaygroundChatStudioHeader } from '@/components/playground/PlaygroundChatStudioHeader';
 import { useComposeClipboard } from '@/components/chat/useComposeClipboard';
 import { shouldShowSuggestionChips } from '@/components/chat/adminChatPure';
+import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 
 export type AdminChatPanelProps = {
   chatId: string;
@@ -97,6 +98,16 @@ export function AdminChatPanel({
 }: AdminChatPanelProps) {
   const { usuario } = useAuthStore();
   const [compactConfigOpen, setCompactConfigOpen] = useState(false);
+  // Directive skills (instrucciones invocables con "/nombre") del catálogo global —
+  // los tool skills "python" no aplican aquí, no son texto invocable en el chat.
+  const { globalSkills } = useSkillsCatalog();
+  const directiveSkills = useMemo(
+    () =>
+      globalSkills
+        .filter((s) => s.skill_type === 'directive')
+        .map((s) => ({ cmd: `/${s.id}`, description: s.description || '' })),
+    [globalSkills]
+  );
   const internalChat = useAdminChat({
     chatId,
     initialWorker,
@@ -620,6 +631,7 @@ export function AdminChatPanel({
             handleLiveVoiceClick={handleLiveVoiceClick}
             voice={voice}
             liveVoice={liveVoice}
+            directiveSkills={directiveSkills}
           />
         </div>
       </div>

@@ -14,7 +14,7 @@ describe('ansiLogParse', () => {
     );
   });
 
-  it('paints tool-usage lines yellow', () => {
+  it('paints tool-usage and plan lines yellow', () => {
     expect(
       colorizePlainLogLine('2026-09-29 16:54:47 | [default:manager] | unknown | [TOOL] inspect_custom_report -> OK (⏱️ 231ms)')
         .className,
@@ -26,6 +26,11 @@ describe('ansiLogParse', () => {
     ).toBe('text-yellow-700 dark:text-yellow-300');
     expect(
       colorizePlainLogLine("[quant_analyst] tool=read_sql | result_len=595 | preview='...'").className,
+    ).toBe('text-yellow-700 dark:text-yellow-300');
+    expect(
+      colorizePlainLogLine(
+        '2026-09-29 17:13:41 | [user:x] | [PLAN] "Revisar notificaciones Android pendientes" | tasks: [...]',
+      ).className,
     ).toBe('text-yellow-700 dark:text-yellow-300');
   });
 

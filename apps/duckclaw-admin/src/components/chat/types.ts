@@ -27,6 +27,10 @@ export type ChatMsg = {
   toolElapsedMs?: number;
   /** Turno (usuarios previos) para reinsertar heartbeats tras reload. */
   turnUserIndex?: number;
+  /** Ancla estable del turno (texto del user / inicio del assistant) — sobrevive
+   * al corrimiento de la ventana de historial, a diferencia de turnUserIndex. */
+  anchorUser?: string;
+  anchorAssistant?: string;
   imagePreviews?: ChatImagePreview[];
   /** Nombres de documentos adjuntos en el turno (sin binarios). */
   documentNames?: string[];

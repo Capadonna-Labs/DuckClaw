@@ -11,6 +11,74 @@ export function countUsersBefore(messages: ChatMsg[], beforeIndex: number): numb
   return n;
 }
 
+export function anchorText(text: string | undefined, max = 200): string {
+  return (text || '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+/** User text + start of the reply for the turn containing ``index``. */
+export function turnAnchorsAt(
+  messages: ChatMsg[],
+  index: number
+): { anchorUser: string; anchorAssistant: string } {
+  let anchorUser = '';
+  for (let i = index - 1; i >= 0; i--) {
+    if (messages[i]?.role === 'user') {
+      anchorUser = anchorText(messages[i].text);
+      break;
+    }
+  }
+  let anchorAssistant = '';
+  for (let i = index + 1; i < messages.length; i++) {
+    const role = messages[i]?.role;
+    if (role === 'user') break;
+    if (role === 'assistant' && (messages[i].text || '').trim()) {
+      anchorAssistant = anchorText(messages[i].text, 120);
+      break;
+    }
+  }
+  return { anchorUser, anchorAssistant };
+}
+
+/**
+ * turnUserIndex is a position inside the capped history window (48 msgs), so
+ * once a chat passes that cap it goes stale as soon as the window slides — every
+ * stored tool event ended up pointing at the last turn and one "Tool usage" box
+ * kept growing across turns. Re-resolve anchored events against the *current*
+ * window by content; drop those whose turn has scrolled out of it.
+ */
+export function resolveAnchoredTurns(server: ChatMsg[], ephemeral: ChatMsg[]): ChatMsg[] {
+  const turns: { ordinal: number; user: string; assistant: string }[] = [];
+  let ordinal = 0;
+  for (let i = 0; i < server.length; i++) {
+    if (server[i]?.role !== 'user') continue;
+    ordinal += 1;
+    const { anchorAssistant } = turnAnchorsAt(server, i);
+    turns.push({ ordinal, user: anchorText(server[i].text), assistant: anchorAssistant });
+  }
+  const out: ChatMsg[] = [];
+  for (const e of ephemeral) {
+    if (!e.anchorUser && !e.anchorAssistant) {
+      out.push(e);
+      continue;
+    }
+    const byAssistant = e.anchorAssistant
+      ? turns.filter((t) => t.assistant && t.assistant === e.anchorAssistant)
+      : [];
+    const byUser = e.anchorUser ? turns.filter((t) => t.user === e.anchorUser) : [];
+    const hit = byAssistant[byAssistant.length - 1] ?? byUser[byUser.length - 1];
+    if (hit) {
+      out.push({ ...e, turnUserIndex: hit.ordinal });
+    } else if (!e.anchorAssistant) {
+      // In-flight turn (reply not captured yet) whose user text the server stored
+      // differently (e.g. attachment-only send): keep the positional fallback.
+      out.push(e);
+    }
+    // Anchored to a finished turn that's no longer in the window: drop, don't
+    // let it pile onto the last turn.
+  }
+  return out;
+}
+
 function bucketEphemeralByTurn(
   ephemeral: ChatMsg[],
   assistantCount: number
@@ -91,8 +159,9 @@ function spliceToolsForTurn(out: ChatMsg[], turn: number, tools: ChatMsg[]): voi
 
 export function interleaveEphemeralIntoHistory(
   server: ChatMsg[],
-  ephemeral: ChatMsg[]
+  rawEphemeral: ChatMsg[]
 ): ChatMsg[] {
+  const ephemeral = resolveAnchoredTurns(server, rawEphemeral);
   if (!ephemeral.length) return server;
 
   let assistantCount = 0;

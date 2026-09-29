@@ -92,4 +92,41 @@ describe('chatEphemeralMerge', () => {
       'assistant',
     ]);
   });
+
+  it('regression: anchored tools follow their turn when the capped window slides', () => {
+    // Window at the cap: user positions are relative, so after one more turn the
+    // oldest pair drops and every stored turnUserIndex points one turn later.
+    // Before anchors, all of these piled onto the last turn in one growing box.
+    const anchored = (name: string, idx: number, u: string, a: string): ChatMsg => ({
+      ...tool(name, idx),
+      anchorUser: u,
+      anchorAssistant: a,
+    });
+    // Stored while the window was [a, b, c]: turn b = 2, turn c = 3.
+    const ephemeral = [anchored('read_sql', 2, 'b', 'B'), anchored('list_skills', 3, 'c', 'C')];
+    // Window slid: 'a' dropped, 'd' arrived.
+    const server = [user('b'), assistant('B'), user('c'), assistant('C'), user('d'), assistant('D')];
+    expect(
+      interleaveEphemeralIntoHistory(server, ephemeral).map(
+        (m) => `${m.role}${m.toolName ? `:${m.toolName}` : ''}${m.role === 'user' ? `:${m.text}` : ''}`
+      )
+    ).toEqual([
+      'user:b',
+      'heartbeat:read_sql',
+      'assistant',
+      'user:c',
+      'heartbeat:list_skills',
+      'assistant',
+      'user:d',
+      'assistant',
+    ]);
+  });
+
+  it('drops anchored tools whose turn scrolled out of the window', () => {
+    const gone: ChatMsg = { ...tool('old_tool', 3), anchorUser: 'a', anchorAssistant: 'A' };
+    const server = [user('b'), assistant('B'), user('c'), assistant('C')];
+    expect(interleaveEphemeralIntoHistory(server, [gone]).some((m) => m.toolName === 'old_tool')).toBe(
+      false
+    );
+  });
 });

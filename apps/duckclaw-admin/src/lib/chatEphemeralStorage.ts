@@ -1,7 +1,7 @@
 /** Heartbeats/plan/tool SSE: no están en Redis; persistencia por chat+worker en sessionStorage. */
 
 import type { ChatMsg } from '@/components/chat/types';
-import { countUsersBefore } from '@/lib/chatEphemeralMerge';
+import { countUsersBefore, turnAnchorsAt } from '@/lib/chatEphemeralMerge';
 import {
   isCatalogMissHeartbeat,
   isLoopProgressHeartbeat,
@@ -82,8 +82,19 @@ export function mergeEphemeralHeartbeats(a: ChatMsg[], b: ChatMsg[]): ChatMsg[] 
   const orderedKeys: string[] = [];
   for (const m of combined) {
     const key = ephemeralDedupeKey(m) || `other@${orderedKeys.length}`;
-    if (!byKey.has(key)) orderedKeys.push(key);
-    byKey.set(key, m);
+    const prev = byKey.get(key);
+    if (!prev) orderedKeys.push(key);
+    // Backend-backlog copies carry no anchors — don't let them erase stored ones.
+    byKey.set(
+      key,
+      prev
+        ? {
+            ...m,
+            anchorUser: m.anchorUser || prev.anchorUser,
+            anchorAssistant: m.anchorAssistant || prev.anchorAssistant,
+          }
+        : m
+    );
   }
   return orderedKeys.map((k) => byKey.get(k)!).filter(Boolean);
 }
@@ -140,7 +151,13 @@ export function writeEphemeralHeartbeats(
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];
     if (m.role !== 'heartbeat' || isCatalogMissHeartbeat(m)) continue;
-    ephemeral.push({ ...m, turnUserIndex: countUsersBefore(messages, i) });
+    const anchors = turnAnchorsAt(messages, i);
+    ephemeral.push({
+      ...m,
+      turnUserIndex: countUsersBefore(messages, i),
+      anchorUser: m.anchorUser || anchors.anchorUser,
+      anchorAssistant: m.anchorAssistant || anchors.anchorAssistant,
+    });
   }
   try {
     const key = storageKey(chatId, workerId);

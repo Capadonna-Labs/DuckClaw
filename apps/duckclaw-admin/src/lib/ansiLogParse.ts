@@ -10,22 +10,37 @@ export function hasAnsiCodes(text: string): boolean {
   return /\x1b\[[\d;]*m|\x9b[\d;]*m/.test(text);
 }
 
-export function colorizePlainLogLine(line: string): { className: string; text: string } {
+/**
+ * Categorías "fuertes": deben ganar incluso si la línea trae códigos ANSI
+ * incrustados (p. ej. el segmento `@alias (chat_id)` que logger.py colorea en
+ * TODAS las líneas [REQ]/[PLAN]/[TOOL]/[SYS] — eso hacía que hasAnsiCodes()
+ * devolviera true para la línea entera y nunca se llegara a este archivo).
+ */
+export function strongLogCategoryClass(line: string): string | null {
   const t = line.trim();
   // harness_metric payloads carry field names like "risk_denied"/"failures": 0 —
   // check first so those don't fall through to the error/warn substring checks below.
   if (/harness_metric/i.test(t)) {
-    return { className: 'text-emerald-700 dark:text-emerald-300', text: line };
+    return 'text-emerald-700 dark:text-emerald-300';
   }
   if (/error|exception|traceback|fatal|errno|failed|failure|refused|denied/i.test(t)) {
-    return { className: 'text-red-700 dark:text-red-400', text: line };
+    return 'text-red-700 dark:text-red-400';
   }
   if (/warn|warning|offline|timeout|retry|unavailable/i.test(t)) {
-    return { className: 'text-amber-700 dark:text-amber-300', text: line };
+    return 'text-amber-700 dark:text-amber-300';
   }
   if (/\[TOOL\]|\[PLAN\]|tool_usage:|\btool=/i.test(t)) {
-    return { className: 'text-yellow-700 dark:text-yellow-300', text: line };
+    return 'text-yellow-700 dark:text-yellow-300';
   }
+  return null;
+}
+
+export function colorizePlainLogLine(line: string): { className: string; text: string } {
+  const strong = strongLogCategoryClass(line);
+  if (strong) {
+    return { className: strong, text: line };
+  }
+  const t = line.trim();
   if (/^\d+\|/.test(t) || /\[PM2\]/i.test(t)) {
     return { className: 'text-emerald-700 dark:text-emerald-300', text: line };
   }

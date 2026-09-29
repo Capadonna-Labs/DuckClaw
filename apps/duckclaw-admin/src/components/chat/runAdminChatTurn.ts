@@ -849,6 +849,34 @@ try {
     finalizeCancelledGeneration();
     return;
   }
+  // Same network-drop recovery as the persistentMobileTurn branch above, but
+  // this one covers the SSE path — which is what runs whenever there's an
+  // image/document attachment (shouldUsePersistentMobileTurn excludes those).
+  // Without this, an attached-file turn had zero resilience to a flaky mobile
+  // connection: "Load failed" mid-stream just surfaced as a dead-end error
+  // even though the backend turn kept running and would have completed fine.
+  if (looksLikeMobileDetachError(e)) {
+    writePendingDetachedTurn({
+      chatId,
+      tenantId: effectiveTenantId || 'default',
+      workerId,
+      text,
+      startedAt: Date.now(),
+    });
+    detachedRunning = true;
+    setThinking(false);
+    setMessages((m) => {
+      if (m.length === 0) return m;
+      const next = m[m.length - 1]?.role === 'assistant' ? m.slice(0, -1) : [...m];
+      return coalesceTrailingToolHeartbeats(stripThinkingStatusHeartbeats(next));
+    });
+    {
+      const epoch = beginDetachedPollEpoch();
+      pollDetachedActivity(epoch);
+      pollDetachedCompletion(epoch);
+    }
+    return;
+  }
   const msg = friendlyGatewayError(e instanceof Error ? e.message : 'Error');
   setMessages((m) => {
     const trimmed =

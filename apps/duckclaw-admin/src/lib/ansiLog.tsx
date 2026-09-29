@@ -4,7 +4,7 @@
 
 import type { ReactNode } from 'react';
 import { useTheme } from '@/components/shared/ThemeProvider';
-import { colorizePlainLogLine, hasAnsiCodes } from '@/lib/ansiLogParse';
+import { colorizePlainLogLine, hasAnsiCodes, stripAnsi, strongLogCategoryClass } from '@/lib/ansiLogParse';
 
 const ANSI_RE =
   /\x1b\[([\d;]*)m|\x9b([\d;]*)m/g;
@@ -233,7 +233,20 @@ function ansiTextToSpans(
   const nodes: ReactNode[] = [];
   lines.forEach((line, i) => {
     const lineKey = `ln-${i}`;
-    if (hasAnsiCodes(line)) {
+    // logger.py colorea con ANSI real el segmento `@alias (chat_id)` de TODA
+    // línea estructurada [REQ]/[PLAN]/[TOOL]/[SYS] — eso hace que hasAnsiCodes()
+    // sea true para la línea completa y nunca caiga a colorizePlainLogLine.
+    // Una categoría fuerte (error/warn/tool/plan/harness_metric) debe ganar
+    // sobre ese coloreado decorativo, así que se revisa primero y, si aplica,
+    // se pinta la línea entera (con los códigos ANSI ya quitados del texto).
+    const strongClass = strongLogCategoryClass(line);
+    if (strongClass) {
+      nodes.push(
+        <span key={lineKey} className={strongClass}>
+          {highlightMatches(stripAnsi(line), highlight, lineKey, activeMatchIndex, nextIndex)}
+        </span>,
+      );
+    } else if (hasAnsiCodes(line)) {
       nodes.push(...ansiLineToSpans(line, lineKey, fg, palette, highlight, activeMatchIndex, nextIndex));
     } else {
       const { className, text: t } = colorizePlainLogLine(line);

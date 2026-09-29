@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { colorizePlainLogLine, hasAnsiCodes, stripAnsi } from './ansiLogParse';
+import { colorizePlainLogLine, hasAnsiCodes, stripAnsi, strongLogCategoryClass } from './ansiLogParse';
 
 describe('ansiLogParse', () => {
   it('strips ANSI escape codes', () => {
@@ -64,5 +64,24 @@ describe('ansiLogParse', () => {
     const perLineVerdicts = buffer.split('\n').map(hasAnsiCodes);
     expect(perLineVerdicts).toEqual([true, false]);
     expect(colorizePlainLogLine(traceback).className).toBe('text-red-700 dark:text-red-400');
+  });
+
+  it('regression: [TOOL]/[PLAN] lines carry real ANSI codes for the @alias segment — category must win over ANSI rendering', () => {
+    // logger.py wraps the "@alias (chat_id)" identity in every [REQ]/[PLAN]/
+    // [TOOL]/[SYS] line with real \x1b[38;5;Nm...\x1b[0m codes. That made
+    // hasAnsiCodes() true for the WHOLE line, so ansiTextToSpans routed it
+    // through the raw-ANSI renderer and colorizePlainLogLine (and its
+    // [TOOL]/[PLAN] rules) never ran — the line rendered in whatever color
+    // the ANSI codes left behind, not yellow.
+    const toolLine =
+      '2026-09-29 16:54:47 | [default:manager] | \x1b[38;5;133m@juanjoarevalo57@gmail.com\x1b[0m (\x1b[38;5;113madmin-conv-1cbb\x1b[0m) | [TOOL] inspect_custom_report -> OK (231ms)';
+    const planLine =
+      '2026-09-29 17:34:52 | [user:x] | \x1b[38;5;133m@juanjoarevalo57@gmail.com\x1b[0m (\x1b[38;5;113madmin-conv-1cbb\x1b[0m) | [PLAN] "Análisis de imagen financiera" | tasks: [...]';
+
+    expect(hasAnsiCodes(toolLine)).toBe(true);
+    expect(hasAnsiCodes(planLine)).toBe(true);
+    // strongLogCategoryClass must still catch these regardless of the embedded ANSI bytes
+    expect(strongLogCategoryClass(toolLine)).toBe('text-yellow-700 dark:text-yellow-300');
+    expect(strongLogCategoryClass(planLine)).toBe('text-yellow-700 dark:text-yellow-300');
   });
 });

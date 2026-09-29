@@ -264,22 +264,44 @@ export function AdminChatComposeFooter({
                 <PendingDocumentChips documentAttachments={documentAttachments} />
               </div>
             )}
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onPaste={onTextareaPaste}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-              rows={1}
-              placeholder="Escribe un mensaje…"
-              className="w-full min-h-[2.25rem] max-h-28 resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-sm leading-snug text-gov-gray-900 placeholder:text-gov-gray-400 focus:outline-none dark:text-dark-text dark:placeholder:text-dark-muted"
-              disabled={!canSend || liveVoice.isActive}
-            />
+            <div className="relative">
+              {leadingSlashCmd ? (
+                // ponytail: overlay sin sync de scroll — el textarea nativo no expone
+                // su scrollTop para reflejarlo aquí. Aceptable porque el comando "/"
+                // resaltado vive en la posición 0,0 y los mensajes con comando son
+                // cortos; si algún día alguien pega texto largo tras el comando y
+                // se desalinea al hacer scroll, sincronizar con onScroll={...}.
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] px-3.5 pt-2.5 pb-1 text-sm leading-snug"
+                >
+                  <span className="font-semibold text-gov-blue-700 dark:text-dark-cyan">
+                    {leadingSlashCmd.cmd}
+                  </span>
+                  <span className="text-transparent">{leadingSlashCmd.rest}</span>
+                </div>
+              ) : null}
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onPaste={onTextareaPaste}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    void send();
+                  }
+                }}
+                rows={1}
+                placeholder="Escribe un mensaje…"
+                className={`relative w-full min-h-[2.25rem] max-h-28 resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-sm leading-snug placeholder:text-gov-gray-400 focus:outline-none dark:placeholder:text-dark-muted ${
+                  leadingSlashCmd
+                    ? 'text-transparent caret-gov-blue-700 dark:caret-dark-cyan'
+                    : 'text-gov-gray-900 dark:text-dark-text'
+                }`}
+                disabled={!canSend || liveVoice.isActive}
+              />
+            </div>
             <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-0.5">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">{composeChips}</div>
               <div className="flex shrink-0 items-center gap-0.5">
@@ -398,22 +420,38 @@ export function AdminChatComposeFooter({
                 onVoiceNoteClick={() => void handleVoiceClick()}
                 onLiveVoiceClick={() => void handleLiveVoiceClick()}
               />
-              <textarea
-                ref={inputRef}
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onPaste={onTextareaPaste}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    void send();
-                  }
-                }}
-                rows={isCompact ? 1 : 2}
-                placeholder="Mensaje…"
-                className={`flex-1 px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none ${composeBoxAccent}`}
-                disabled={!canSend || liveVoice.isActive}
-              />
+              <div className="relative flex-1">
+                {leadingSlashCmd ? (
+                  // ponytail: mismo corte que la variante studio — sin sync de scroll.
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] px-3 py-2 text-sm"
+                  >
+                    <span className="font-semibold text-gov-blue-700 dark:text-dark-cyan">
+                      {leadingSlashCmd.cmd}
+                    </span>
+                    <span className="text-transparent">{leadingSlashCmd.rest}</span>
+                  </div>
+                ) : null}
+                <textarea
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onPaste={onTextareaPaste}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      void send();
+                    }
+                  }}
+                  rows={isCompact ? 1 : 2}
+                  placeholder="Mensaje…"
+                  className={`relative w-full px-3 py-2 text-sm border rounded-xl dark:border-dark-border dark:bg-dark-surface resize-none ${composeBoxAccent} ${
+                    leadingSlashCmd ? 'text-transparent caret-gov-blue-700 dark:caret-dark-cyan' : ''
+                  }`}
+                  disabled={!canSend || liveVoice.isActive}
+                />
+              </div>
               {loading ? (
                 <button
                   type="button"

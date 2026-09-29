@@ -43,30 +43,32 @@ _PYTHON_METADATA_NOTE = (
 
 
 def _actor_and_db_path(db: Any) -> tuple[str, str]:
-    from duckclaw.forge.skills.goals_tool_context import get_goals_tool_db_path
+    """Actor + the gateway HUB path — never the worker's bound vault.
+
+    admin_skills lives in the hub: the "/" menu (GET /catalog/skills) and
+    /name invocation (playground/directive_skills.py) both read it there. The
+    worker's bound ``db`` is its vault, so writing/reading through it put
+    skills somewhere nothing else ever looks.
+    """
+    del db
     from duckclaw.forge.skills.knowledge_tool_context import get_session_actor_email
+    from duckclaw.gateway_db import get_gateway_db_path
 
     actor = (get_session_actor_email() or "").strip() or "system"
-    db_path = (get_goals_tool_db_path() or "").strip() or str(getattr(db, "_path", "") or "").strip()
-    return actor, db_path
+    return actor, (get_gateway_db_path() or "").strip()
+
+
+def _open_hub_read_only(hub_path: str) -> Any:
+    from duckclaw import DuckClaw
+
+    return DuckClaw(hub_path, read_only=True)
 
 
 def _dispatch_skill_command(db: Any, command: Any, *, actor: str, db_path: str) -> tuple[bool, str]:
-    """Write via the singleton DB-Writer — direct dispatch for an in-process
-    writable handle (tests, scripts), or enqueue-and-confirm for the normal
-    read-only agent db, always waiting for a real DB-Writer status."""
-    if db is not None and not bool(getattr(db, "_read_only", True)):
-        try:
-            from duckclaw.write_command_handlers import dispatch_command
-
-            target = getattr(db, "_con", None) or getattr(db, "_native", None) or db
-            dispatch_command(target, command.model_dump())
-            return True, ""
-        except Exception as exc:
-            return False, str(exc)[:500]
-
+    """Enqueue to the singleton DB-Writer against the hub and wait for its real status."""
+    del db
     if not db_path:
-        return False, "No se pudo resolver la ruta de la bóveda."
+        return False, "No se pudo resolver la ruta del hub (DUCKCLAW_GATEWAY_DB_PATH)."
     try:
         from duckclaw.db_write_fire_and_forget import enqueue_write_command, wait_write_task
     except Exception as exc:
@@ -129,19 +131,25 @@ def _upsert_skill_impl(
 
 
 def _list_skills_impl(db: Any, tenant_id: str = "default") -> str:
-    actor, _ = _actor_and_db_path(db)
-    if db is None:
-        return json.dumps({"ok": False, "error": "DB no disponible"}, ensure_ascii=False)
+    actor, hub_path = _actor_and_db_path(db)
+    if not hub_path:
+        return json.dumps({"ok": False, "error": "No se pudo resolver la ruta del hub."}, ensure_ascii=False)
     tid = (tenant_id or "default").replace("'", "''")
     esc_actor = actor.replace("'", "''")
     try:
-        raw = db.query(
-            "SELECT name, skill_type, description, visibility, owner_email "
-            "FROM main.admin_skills "
-            f"WHERE tenant_id = '{tid}' AND active "
-            f"AND (visibility = 'public' OR owner_email = '{esc_actor}') "
-            "ORDER BY name"
-        )
+        hub = _open_hub_read_only(hub_path)
+        try:
+            raw = hub.query(
+                "SELECT name, skill_type, description, visibility, owner_email "
+                "FROM main.admin_skills "
+                f"WHERE tenant_id = '{tid}' AND active "
+                f"AND (visibility = 'public' OR owner_email = '{esc_actor}') "
+                "ORDER BY name"
+            )
+        finally:
+            close = getattr(hub, "close", None)
+            if callable(close):
+                close()
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)[:500]}, ensure_ascii=False)

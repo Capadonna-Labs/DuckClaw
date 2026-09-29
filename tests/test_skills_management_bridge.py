@@ -118,7 +118,11 @@ def test_list_skills_queries_admin_skills_scoped_to_tenant_and_actor(monkeypatch
             assert "owner_email = 'juan@example.com'" in sql
             return json.dumps([{"name": "radar_watchlist", "skill_type": "directive"}])
 
-    out = json.loads(_list_skills_impl(_Db(), "default"))
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.skills_management_bridge._open_hub_read_only",
+        lambda path: _Db(),
+    )
+    out = json.loads(_list_skills_impl(object(), "default"))
     assert out["ok"] is True
     assert out["skills"] == [{"name": "radar_watchlist", "skill_type": "directive"}]
 
@@ -134,8 +138,30 @@ def test_list_skills_escapes_single_quotes_in_actor_email(monkeypatch) -> None:
             assert "o''brien@example.com" in sql
             return json.dumps([])
 
-    out = json.loads(_list_skills_impl(_Db(), "default"))
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.skills_management_bridge._open_hub_read_only",
+        lambda path: _Db(),
+    )
+    out = json.loads(_list_skills_impl(object(), "default"))
     assert out["ok"] is True
+
+
+def test_skills_target_gateway_hub_not_worker_vault(monkeypatch) -> None:
+    """Regression: resolving the path from the worker's bound db (its vault)
+    made create_skill write — and list_skills read — admin_skills in the
+    vault, while the "/" menu and /name invocation read the hub. The skill
+    looked saved to the agent but never showed up anywhere else."""
+    from duckclaw.forge.skills.skills_management_bridge import _actor_and_db_path
+
+    monkeypatch.setattr(
+        "duckclaw.gateway_db.get_gateway_db_path", lambda: "/data/hub/duckclaw.duckdb"
+    )
+
+    class _VaultDb:
+        _path = "/data/private/1/quant_traderdb1.duckdb"
+
+    _, path = _actor_and_db_path(_VaultDb())
+    assert path == "/data/hub/duckclaw.duckdb"
 
 
 def test_deactivate_skill_dispatches_deactivate_command(monkeypatch) -> None:

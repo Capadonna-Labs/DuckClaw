@@ -28,6 +28,7 @@ export default defineConfig({
       'src/lib/playgroundWorkerGate.test.ts',
       'src/components/chat/useAdminChatLoopPolling.test.ts',
       'src/components/chat/chatSuggestionsGating.test.ts',
+      'src/components/chat/overlongMessageAttachment.test.ts',
       'src/components/chat/chatMarkdownMermaid.test.ts',
       'src/components/chat/chatMarkdown.test.ts',
       'src/lib/sseChat.test.ts',

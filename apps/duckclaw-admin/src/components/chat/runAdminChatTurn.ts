@@ -516,10 +516,16 @@ const pollDetachedCompletion = (epoch: number) => {
         .then(([data, activity]) => {
           if (epoch !== detachedPollEpoch) return;
           const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
+          // Match the most recent user turn by position, not by exact text —
+          // an attachment-only send (e.g. a pasted mensaje.txt with a short or
+          // empty caption) gets stored server-side as a different string (the
+          // [DOCUMENTOS_ADJUNTOS] annotation), so comparing against the raw
+          // client `text` never matched and this poll silently never resolved.
+          // Single-operator admin chat: the last user entry is always ours.
           const userIdx = [...fromServer]
             .map((m, i) => ({ m, i }))
             .reverse()
-            .find(({ m }) => m.role === 'user' && (m.text || '').trim() === text.trim())?.i;
+            .find(({ m }) => m.role === 'user')?.i;
           const done =
             userIdx != null &&
             fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());

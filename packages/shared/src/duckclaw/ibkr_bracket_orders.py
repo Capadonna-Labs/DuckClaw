@@ -365,7 +365,12 @@ async def submit_bracket_order(
             raise RuntimeError(f"Error enviando orden SL: {exc}") from exc
 
     # Esperar confirmación de envío
-    await ib.sleep(1)
+    # ib.sleep() (sync, blocks via loop.run_until_complete) reenters the already-
+    # running loop and raises "This event loop is already running" from inside
+    # this coroutine — uncaught here, which would mask an actually-successful
+    # submission (orders already placed above) as a failure. asyncio.sleep() is
+    # the correct async-context equivalent.
+    await asyncio.sleep(1)
 
     result = {
         "main_order_id": main_trade.order.orderId,
@@ -485,7 +490,10 @@ async def cancel_protective_orders_for_ticker(
     try:
         # Cross-client working orders (protective scripts use ephemeral client ids).
         try:
-            ib.reqAllOpenOrders()
+            # reqAllOpenOrders() (sync) blocks via loop.run_until_complete() and
+            # raises "This event loop is already running" from inside this
+            # coroutine — reqAllOpenOrdersAsync() is the async-context equivalent.
+            await ib.reqAllOpenOrdersAsync()
             await asyncio.sleep(0.8)
         except Exception as exc:
             _log.warning("reqAllOpenOrders before cancel %s: %s", sym, exc)
@@ -546,7 +554,7 @@ async def cancel_open_orders(
 
     try:
         try:
-            ib.reqAllOpenOrders()
+            await ib.reqAllOpenOrdersAsync()
             await asyncio.sleep(0.8)
         except Exception as exc:
             _log.warning("reqAllOpenOrders before explicit cancel: %s", exc)

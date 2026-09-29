@@ -112,6 +112,10 @@ def test_cancel_protective_orders_for_ticker_filters_symbol(monkeypatch):
     class FakeIB:
         def __init__(self):
             self.cancelled = []
+            self.req_all_open_orders_async_calls = 0
+
+        async def reqAllOpenOrdersAsync(self):
+            self.req_all_open_orders_async_calls += 1
 
         def openTrades(self):
             return [
@@ -136,6 +140,11 @@ def test_cancel_protective_orders_for_ticker_filters_symbol(monkeypatch):
     n = asyncio.run(mod.cancel_protective_orders_for_ticker(ib, "CEG"))
     assert n == 1
     assert ib.cancelled == [1]
+    # Regression: reqAllOpenOrders() (sync) blocks via loop.run_until_complete()
+    # and raises "This event loop is already running" from inside this
+    # coroutine — must use the Async variant.
+    assert ib.req_all_open_orders_async_calls == 1
+    assert not hasattr(ib, "reqAllOpenOrders")
 
 
 def test_cancel_open_orders_filters_by_order_ids(monkeypatch):
@@ -147,9 +156,10 @@ def test_cancel_open_orders_filters_by_order_ids(monkeypatch):
     class FakeIB:
         def __init__(self):
             self.cancelled = []
+            self.req_all_open_orders_async_calls = 0
 
-        def reqAllOpenOrders(self):
-            return None
+        async def reqAllOpenOrdersAsync(self):
+            self.req_all_open_orders_async_calls += 1
 
         def openTrades(self):
             return [
@@ -195,6 +205,8 @@ def test_cancel_open_orders_filters_by_order_ids(monkeypatch):
     assert result["matched_count"] == 2
     assert result["cancelled_count"] == 2
     assert ib.cancelled == [73, 74]
+    assert ib.req_all_open_orders_async_calls == 1
+    assert not hasattr(ib, "reqAllOpenOrders")
 
 
 def test_create_protective_oca_rejects_bad_rr_long():

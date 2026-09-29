@@ -49,6 +49,25 @@ from routers.admin_domains.playground.worker_selection import (
 _log = logging.getLogger(__name__)
 
 
+async def _resolve_actor_tenant(actor: str) -> str:
+    """Mismo tenant que usa GET /playground/config — los PUT de modelo/SLM deben
+    escribir aquí, no bajo un "default" fijo que el GET nunca vuelve a leer."""
+
+    def _sync_resolve() -> str:
+        from core.admin_identity import open_gateway_db
+        from duckclaw.admin_user_profiles import ensure_profile_for_user
+
+        with open_gateway_db(read_only=True) as db:
+            profile = ensure_profile_for_user(db, email=actor)
+        return str(profile.get("tenant_id") or "").strip()
+
+    try:
+        tenant = await asyncio.to_thread(_sync_resolve)
+    except Exception:
+        tenant = ""
+    return tenant or gateway_effective_tenant_id("default")
+
+
 @router.get("/playground/config", dependencies=[Depends(require_admin_key)])
 async def playground_config(
     request: Request,
@@ -444,6 +463,8 @@ async def playground_set_model(
     if not gw or not os.path.isfile(gw):
         raise problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
     chat_id = body.chat_id.strip()
+    eff_tenant = await _resolve_actor_tenant(actor)
+
     if prov == "mlx":
         default_model = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
         default_base_url = mlx_openai_compatible_base_url()
@@ -462,7 +483,7 @@ async def playground_set_model(
         ("llm_base_url", base_url_value),
     ):
         command = UpsertRuntimeSettingCommand(
-            tenant_id="default",
+            tenant_id=eff_tenant,
             actor_email=runtime_session_actor(chat_id),
             domain=RUNTIME_SESSION_DOMAIN,
             key=key,
@@ -478,7 +499,7 @@ async def playground_set_model(
             raise problem(400, "No se pudo actualizar el modelo", str(exc)) from exc
         task_ids.append(task_id)
 
-    llm = resolved_llm_for_chat(chat_id)
+    llm = resolved_llm_for_chat(chat_id, tenant_id=eff_tenant)
     catalog: list[dict[str, Any]] = []
     llm_gap: dict[str, str] | None = None
     try:
@@ -490,13 +511,13 @@ async def playground_set_model(
                 catalog = playground_llm_catalog(
                     llm.get("provider", ""),
                     db=db,
-                    tenant_id="default",
+                    tenant_id=eff_tenant,
                     actor_email=runtime_session_actor(chat_id),
                 )
                 llm_gap = build_llm_gap(
                     db,
                     provider=llm.get("provider", ""),
-                    tenant_id="default",
+                    tenant_id=eff_tenant,
                     actor_email=runtime_session_actor(chat_id),
                 )
             return catalog, llm_gap
@@ -527,6 +548,7 @@ async def playground_set_slm(
     if not gw or not os.path.isfile(gw):
         raise problem(503, "Gateway DuckDB no disponible", "Configura DUCKCLAW_GATEWAY_DB_PATH")
     chat_id = body.chat_id.strip()
+    eff_tenant = await _resolve_actor_tenant(actor)
     adapter_value = (body.adapter_path or "").strip()
     base_url_value = slm_base_url()
     enabled_value = "true" if body.enabled else "false"
@@ -538,7 +560,7 @@ async def playground_set_slm(
         ("slm_base_url", base_url_value),
     ):
         command = UpsertRuntimeSettingCommand(
-            tenant_id="default",
+            tenant_id=eff_tenant,
             actor_email=runtime_session_actor(chat_id),
             domain=RUNTIME_SESSION_DOMAIN,
             key=key,
@@ -556,7 +578,7 @@ async def playground_set_slm(
 
     slm = await resolved_slm_for_playground_async(
         chat_id=chat_id,
-        tenant_id="default",
+        tenant_id=eff_tenant,
         repo_root=repo_root(),
     )
     return {

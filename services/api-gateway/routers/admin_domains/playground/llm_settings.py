@@ -67,7 +67,7 @@ def playground_runtime_defaults(tenant_id: str, actor_email: str) -> dict[str, s
         return {}
 
 
-def resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
+def resolved_llm_for_chat(chat_id: str | None, *, tenant_id: str = "default") -> dict[str, str]:
     """LLM efectivo: override agent_config del chat (p. ej. /model) o .env del gateway."""
     env = resolved_llm_env()
     cid = (chat_id or "").strip()
@@ -85,7 +85,9 @@ def resolved_llm_for_chat(chat_id: str | None) -> dict[str, str]:
     except Exception:
         return {**env, "scope": "env_bootstrap", "db_lock_error": True}
     try:
-        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, cid)
+        provider, model, base_url = _effective_llm_triplet_for_chat_ui(
+            db, cid, tenant_id=tenant_id
+        )
     except Exception:
         provider, model, base_url = "", "", ""
     finally:

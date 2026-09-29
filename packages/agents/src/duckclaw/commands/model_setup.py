@@ -205,17 +205,20 @@ def _release_ro_handle_for_writer(db: Any) -> tuple[bool, Any]:
     return False, resume
 
 
-def _llm_runtime_value(db: Any, chat_id: Any, key: str) -> str:
-    return resolve_session_runtime_setting(db, chat_id, key)
+def _llm_runtime_value(db: Any, chat_id: Any, key: str, *, tenant_id: str = "default") -> str:
+    return resolve_session_runtime_setting(db, chat_id, key, tenant_id=tenant_id)
 
 
-def _set_llm_runtime_value(db: Any, chat_id: Any, key: str, value: str) -> tuple[bool, str]:
+def _set_llm_runtime_value(
+    db: Any, chat_id: Any, key: str, value: str, *, tenant_id: str = "default"
+) -> tuple[bool, str]:
     if not bool(getattr(db, "_read_only", False)):
         upsert_session_runtime_setting(
             db,
             chat_id,
             key,
             value,
+            tenant_id=tenant_id,
             updated_by="model-setup",
         )
         return True, ""
@@ -229,7 +232,7 @@ def _set_llm_runtime_value(db: Any, chat_id: Any, key: str, value: str) -> tuple
         target_db_path = raw_path
 
     command = UpsertRuntimeSettingCommand(
-        tenant_id="default",
+        tenant_id=tenant_id,
         actor_email=runtime_session_actor(chat_id),
         domain=RUNTIME_SESSION_DOMAIN,
         key=key,
@@ -256,23 +259,31 @@ def _set_llm_runtime_value(db: Any, chat_id: Any, key: str, value: str) -> tuple
                 pass
 
 
-def _effective_llm_triplet_for_chat_ui(db: Any, chat_id: Any) -> tuple[str, str, str]:
-    """Return provider/model/base_url effective for UI display."""
+def _effective_llm_triplet_for_chat_ui(
+    db: Any, chat_id: Any, *, tenant_id: str = "default"
+) -> tuple[str, str, str]:
+    """Return provider/model/base_url effective for UI display.
+
+    ``tenant_id`` is keyword-only with a "default" fallback so this stays
+    call-compatible with ``LlmTripletResolver`` (registered in commands/goals.py
+    as a 2-arg callback) — callers that know the real tenant (config_routes.py)
+    pass it; callers that don't (the goals resolver) keep the old behavior.
+    """
     from duckclaw.integrations.llm_providers import (
         _ensure_duckclaw_llm_env_from_legacy_llm_vars,
         mlx_openai_compatible_base_url,
     )
 
     _ensure_duckclaw_llm_env_from_legacy_llm_vars()
-    p_chat = (_llm_runtime_value(db, chat_id, "llm_provider") or "").strip()
+    p_chat = (_llm_runtime_value(db, chat_id, "llm_provider", tenant_id=tenant_id) or "").strip()
     p_global = (_get_global_config(db, "llm_provider") or "").strip()
     p_env = (os.environ.get("DUCKCLAW_LLM_PROVIDER", "mlx") or "").strip()
     p = (p_chat or p_global or p_env).strip().lower()
-    m_chat = (_llm_runtime_value(db, chat_id, "llm_model") or "").strip()
+    m_chat = (_llm_runtime_value(db, chat_id, "llm_model", tenant_id=tenant_id) or "").strip()
     m_global = (_get_global_config(db, "llm_model") or "").strip()
     m_env = (os.environ.get("DUCKCLAW_LLM_MODEL", "") or "").strip()
     m = (m_chat or m_global or m_env).strip()
-    u_chat = (_llm_runtime_value(db, chat_id, "llm_base_url") or "").strip()
+    u_chat = (_llm_runtime_value(db, chat_id, "llm_base_url", tenant_id=tenant_id) or "").strip()
     u_global = (_get_global_config(db, "llm_base_url") or "").strip()
     u_env = (os.environ.get("DUCKCLAW_LLM_BASE_URL", "") or "").strip()
     u = (u_chat or u_global or u_env).strip()

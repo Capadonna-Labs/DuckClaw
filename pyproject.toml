@@ -33,7 +33,12 @@ dependencies = [
 [project.optional-dependencies]
 telegram = ["python-telegram-bot>=21.0"]
 google-trends = ["google-trends-mcp>=1.0.2; python_full_version >= '3.10'"]
-trading = ["ib-insync>=0.9.86"]
+# tzdata: zoneinfo (stdlib) has no bundled IANA database on Linux unless the OS
+# package is present — ib_insync's decoder does ZoneInfo("US/Eastern") on every
+# execution report and raises ZoneInfoNotFoundError without it. pandas pulls
+# tzdata in too, but only for python_full_version < '3.11' (its own marker),
+# so on 3.12 nothing actually installs it unless it's listed here directly.
+trading = ["ib-insync>=0.9.86", "tzdata>=2025.2"]
 # document-toolbox / rag-docs: incluidos en duckclaw-shared base — ``uv sync`` basta
 
 [tool.setuptools.packages.find]

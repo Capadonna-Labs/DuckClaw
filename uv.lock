@@ -1036,6 +1036,7 @@ telegram = [
 ]
 trading = [
     { name = "ib-insync" },
+    { name = "tzdata" },
 ]
 
 [package.dev-dependencies]
@@ -1069,6 +1070,7 @@ requires-dist = [
     { name = "pyvis", specifier = ">=0.3.2" },
     { name = "pywebpush", specifier = ">=2.5.0" },
     { name = "redis", specifier = ">=5.0.0" },
+    { name = "tzdata", marker = "extra == 'trading'", specifier = ">=2025.2" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.27.0" },
 ]
 provides-extras = ["telegram", "google-trends", "trading"]

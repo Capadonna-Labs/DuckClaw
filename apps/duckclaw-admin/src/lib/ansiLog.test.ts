@@ -8,9 +8,15 @@ describe('ansiLogParse', () => {
 
   it('colorizes plain log lines for light and dark themes', () => {
     expect(colorizePlainLogLine('ERROR: boom').className).toBe('text-red-700 dark:text-red-400');
-    expect(colorizePlainLogLine('WARN: slow').className).toBe('text-amber-700 dark:text-amber-300');
+    expect(colorizePlainLogLine('WARN: slow').className).toBe('text-red-700 dark:text-red-400');
     expect(colorizePlainLogLine('0|Gateway | info').className).toBe(
       'text-emerald-700 dark:text-emerald-300',
+    );
+  });
+
+  it('paints WARNING lines red, not amber', () => {
+    expect(colorizePlainLogLine('WARNING:  Invalid HTTP request received.').className).toBe(
+      'text-red-700 dark:text-red-400',
     );
   });
 

@@ -47,7 +47,7 @@ def main() -> int:
     from duckclaw.write_commands import UpsertCatalogSkillCommand
 
     command = UpsertCatalogSkillCommand(
-        tenant_id="default",
+        tenant_id="user-juanjoarevalo57-79c5ca60b91d4f3e",
         actor_email="juanjoarevalo57@gmail.com",
         name="ponytail",
         description=PONYTAIL_DIRECTIVE,

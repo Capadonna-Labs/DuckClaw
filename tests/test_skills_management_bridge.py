@@ -48,7 +48,9 @@ def test_create_skill_directive_dispatches_upsert_command(monkeypatch) -> None:
     )
 
     out = json.loads(
-        _upsert_skill_impl(object(), "radar_watchlist", "Vigilar SNX y WOR", "directive")
+        _upsert_skill_impl(
+            object(), "radar_watchlist", "Vigilar SNX y WOR", "directive", "user-juan-tenant"
+        )
     )
 
     assert out["ok"] is True
@@ -60,6 +62,11 @@ def test_create_skill_directive_dispatches_upsert_command(monkeypatch) -> None:
     assert command.skill_type == "directive"
     assert command.implementation_ref == "directive://radar_watchlist"
     assert command.description == "Vigilar SNX y WOR"
+    # Regression: tenant_id used to be left at the Pydantic default ("default")
+    # instead of the caller's real tenant, so DB-Writer rejected every write
+    # with "Tenant mismatch for actor" — silently, since dispatch always
+    # reported ok=True anyway (see test_dispatch_skill_command_* below).
+    assert command.tenant_id == "user-juan-tenant"
     assert actor == "juan@example.com"
     assert db_path == "/tmp/vault.duckdb"
 
@@ -146,6 +153,55 @@ def test_deactivate_skill_dispatches_deactivate_command(monkeypatch) -> None:
         "duckclaw.forge.skills.skills_management_bridge._dispatch_skill_command",
         _fake_dispatch,
     )
-    out = json.loads(_deactivate_skill_impl(object(), "radar_watchlist"))
+    out = json.loads(_deactivate_skill_impl(object(), "radar_watchlist", "user-juan-tenant"))
     assert out["ok"] is True
     assert calls[0].name == "radar_watchlist"
+    assert calls[0].tenant_id == "user-juan-tenant"
+
+
+def test_dispatch_skill_command_reports_db_writer_failure(monkeypatch) -> None:
+    """Regression: DB-Writer rejecting a command (e.g. tenant mismatch) must
+    surface as ok=False, not get swallowed into a blind ok=True."""
+    from duckclaw.forge.skills.skills_management_bridge import _dispatch_skill_command
+    from duckclaw.db_write_queue import DbWriteTaskStatus
+
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.enqueue_write_command",
+        lambda command, db_path, user_id: "task-123",
+    )
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.wait_write_task",
+        lambda task_id, timeout_sec: DbWriteTaskStatus(
+            status="failed", detail="Tenant mismatch for actor: juan@example.com"
+        ),
+    )
+
+    ok, err = _dispatch_skill_command(
+        object(), object(), actor="juan@example.com", db_path="/tmp/vault.duckdb"
+    )
+    assert ok is False
+    assert "Tenant mismatch" in err
+
+
+def test_dispatch_skill_command_never_claims_success_on_timeout(monkeypatch) -> None:
+    """Regression: this deployment runs DUCKCLAW_WRITE_POLL_SEC=0 (fire-and-
+    forget), under which enqueue_write_and_resolve() would report ok=True the
+    instant a command is enqueued, regardless of what DB-Writer does with it
+    afterward. _dispatch_skill_command must not inherit that blind-success
+    behavior — no status within its own timeout must be ok=False."""
+    from duckclaw.forge.skills.skills_management_bridge import _dispatch_skill_command
+
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.enqueue_write_command",
+        lambda command, db_path, user_id: "task-456",
+    )
+    monkeypatch.setattr(
+        "duckclaw.db_write_fire_and_forget.wait_write_task",
+        lambda task_id, timeout_sec: None,
+    )
+
+    ok, err = _dispatch_skill_command(
+        object(), object(), actor="juan@example.com", db_path="/tmp/vault.duckdb"
+    )
+    assert ok is False
+    assert "task-456" in err

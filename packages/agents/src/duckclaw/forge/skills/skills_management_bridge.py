@@ -27,6 +27,14 @@ from pydantic import BaseModel, Field
 
 _log = logging.getLogger(__name__)
 
+# This deployment runs write-confirmation as fire-and-forget by default
+# (DUCKCLAW_WRITE_POLL_SEC unset/0) — enqueue_write_and_resolve() would then
+# report ok=True the instant the command is *enqueued*, blind to the
+# DB-Writer rejecting it moments later (e.g. a tenant mismatch). A skill
+# create/edit/deactivate needs a real yes/no, so this always polls with its
+# own fixed timeout regardless of that env var.
+_WRITE_CONFIRM_TIMEOUT_SEC = 10.0
+
 _PYTHON_METADATA_NOTE = (
     "skill_type='python' solo registra metadata en el catálogo (visible en la UI admin); "
     "no crea una tool ejecutable nueva. Para eso hace falta un módulo Python nuevo en "
@@ -45,8 +53,8 @@ def _actor_and_db_path(db: Any) -> tuple[str, str]:
 
 def _dispatch_skill_command(db: Any, command: Any, *, actor: str, db_path: str) -> tuple[bool, str]:
     """Write via the singleton DB-Writer — direct dispatch for an in-process
-    writable handle (tests, scripts), or the fire-and-forget queue for the
-    normal read-only agent db (mirrors ``model_setup._set_system_prompt_policy``)."""
+    writable handle (tests, scripts), or enqueue-and-confirm for the normal
+    read-only agent db, always waiting for a real DB-Writer status."""
     if db is not None and not bool(getattr(db, "_read_only", True)):
         try:
             from duckclaw.write_command_handlers import dispatch_command
@@ -60,10 +68,19 @@ def _dispatch_skill_command(db: Any, command: Any, *, actor: str, db_path: str) 
     if not db_path:
         return False, "No se pudo resolver la ruta de la bóveda."
     try:
-        from duckclaw.db_write_fire_and_forget import enqueue_write_and_resolve
+        from duckclaw.db_write_fire_and_forget import enqueue_write_command, wait_write_task
     except Exception as exc:
         return False, f"cola DuckDB no disponible: {exc}"
-    return enqueue_write_and_resolve(command, db_path=db_path, user_id=actor)
+    task_id = enqueue_write_command(command, db_path=db_path, user_id=actor)
+    status = wait_write_task(task_id, timeout_sec=_WRITE_CONFIRM_TIMEOUT_SEC)
+    if status is None:
+        # No confirmation either way within our own timeout — never claim
+        # success blindly here (unlike resolve_write_enqueue_result, which
+        # would if DUCKCLAW_WRITE_POLL_SEC is unset, as it is on this deploy).
+        return False, f"Sin confirmación del db-writer tras {_WRITE_CONFIRM_TIMEOUT_SEC:.0f}s (task_id={task_id})"
+    if status.status != "success":
+        return False, (status.detail or "db-writer failed")[:500]
+    return True, ""
 
 
 def _upsert_skill_impl(
@@ -71,6 +88,7 @@ def _upsert_skill_impl(
     name: str,
     description: str,
     skill_type: str = "directive",
+    tenant_id: str = "default",
 ) -> str:
     from duckclaw.write_commands import UpsertCatalogSkillCommand
 
@@ -88,6 +106,7 @@ def _upsert_skill_impl(
     actor, db_path = _actor_and_db_path(db)
     command = UpsertCatalogSkillCommand(
         actor_email=actor,
+        tenant_id=(tenant_id or "default").strip() or "default",
         name=clean_name,
         description=text,
         skill_type=st,
@@ -129,14 +148,18 @@ def _list_skills_impl(db: Any, tenant_id: str = "default") -> str:
     return json.dumps({"ok": True, "skills": rows}, ensure_ascii=False)
 
 
-def _deactivate_skill_impl(db: Any, name: str) -> str:
+def _deactivate_skill_impl(db: Any, name: str, tenant_id: str = "default") -> str:
     from duckclaw.write_commands import DeactivateCatalogSkillCommand
 
     clean_name = (name or "").strip()
     if not clean_name:
         return json.dumps({"ok": False, "error": "name vacío"}, ensure_ascii=False)
     actor, db_path = _actor_and_db_path(db)
-    command = DeactivateCatalogSkillCommand(actor_email=actor, name=clean_name)
+    command = DeactivateCatalogSkillCommand(
+        actor_email=actor,
+        tenant_id=(tenant_id or "default").strip() or "default",
+        name=clean_name,
+    )
     ok, err = _dispatch_skill_command(db, command, actor=actor, db_path=db_path)
     if not ok:
         return json.dumps({"ok": False, "error": err or "No se pudo desactivar el skill"}, ensure_ascii=False)
@@ -188,16 +211,16 @@ def register_skills_management_skill(
     existing = {str(getattr(t, "name", "") or "") for t in tools_list}
 
     def _create_skill(name: str, description: str, skill_type: str = "directive") -> str:
-        return _upsert_skill_impl(db, name, description, skill_type)
+        return _upsert_skill_impl(db, name, description, skill_type, tenant_id)
 
     def _edit_skill(name: str, description: str, skill_type: str = "directive") -> str:
-        return _upsert_skill_impl(db, name, description, skill_type)
+        return _upsert_skill_impl(db, name, description, skill_type, tenant_id)
 
     def _list_skills() -> str:
         return _list_skills_impl(db, tenant_id)
 
     def _deactivate_skill(name: str) -> str:
-        return _deactivate_skill_impl(db, name)
+        return _deactivate_skill_impl(db, name, tenant_id)
 
     if "create_skill" not in existing:
         tools_list.append(

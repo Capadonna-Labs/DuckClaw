@@ -7,6 +7,7 @@ import { ChatMarkdown, looksLikeMarkdown } from '@/components/chat/ChatMarkdown'
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import { stripContextBlocksForDisplay } from '@/lib/chatMessageImages';
+import { splitLeadingSlashCommand } from '@/components/chat/adminChatPure';
 import {
   formatChatIdentityPrefix,
   stripChatIdentityNoise,
@@ -64,6 +65,7 @@ export function ChatBubble({
     return m.text;
   })();
   const identityPrefix = formatChatIdentityPrefix(identityLabel);
+  const slashCmd = isUser ? splitLeadingSlashCommand(displayText || '') : null;
   const hasCopyableText = Boolean((displayText || '').trim());
   const canCopy =
     !m.streaming && !isHeartbeat && hasCopyableText && (isAssistant || isUser);
@@ -290,7 +292,16 @@ export function ChatBubble({
                   <Mic size={14} aria-hidden />
                 </span>
               ) : null}
-              {displayText}
+              {slashCmd ? (
+                <>
+                  <span className="mr-1.5 inline-block rounded-md bg-white/20 px-1.5 py-0.5 font-mono text-xs font-bold align-middle">
+                    {slashCmd.cmd}
+                  </span>
+                  {slashCmd.rest}
+                </>
+              ) : (
+                displayText
+              )}
             </span>
           )
         ) : null

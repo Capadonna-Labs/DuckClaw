@@ -32,6 +32,18 @@ export function isFlyConfigSlashAck(userText: string): boolean {
   return new RegExp(`^/(${names})\\b`, 'i').test(t);
 }
 
+const _LEADING_SLASH_CMD = /^(\/[a-zA-Z][a-zA-Z0-9_.-]*)(\s[\s\S]*)?$/;
+
+/** Si `text` empieza con "/comando", separa el token del resto para resaltarlo en la
+ * burbuja enviada (mismo look que el menú "/"). `null` si no hay comando al inicio. */
+export function splitLeadingSlashCommand(
+  text: string
+): { cmd: string; rest: string } | null {
+  const m = _LEADING_SLASH_CMD.exec((text || '').trim());
+  if (!m) return null;
+  return { cmd: m[1], rest: m[2] || '' };
+}
+
 /**
  * Comandos "/" que calzan con lo ya tecleado (sin espacio todavía) para el menú del
  * composer. `extraCommands` son los directive skills instalados (catálogo global,

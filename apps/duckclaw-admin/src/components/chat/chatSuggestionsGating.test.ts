@@ -4,6 +4,7 @@ import {
   matchingSlashCommands,
   shouldFetchChatSuggestions,
   shouldShowSuggestionChips,
+  splitLeadingSlashCommand,
   suggestionsExchangeKey,
 } from './adminChatPure';
 import type { ChatMsg } from './types';
@@ -29,6 +30,16 @@ describe('shouldFetchChatSuggestions', () => {
     expect(matchingSlashCommands('/loop ya en curso')).toEqual([]);
     expect(matchingSlashCommands('hola')).toEqual([]);
     expect(matchingSlashCommands('')).toEqual([]);
+  });
+
+  it('resalta el comando "/" al inicio de la burbuja enviada, no lo hace desaparecer', () => {
+    expect(splitLeadingSlashCommand('/ponytail arregla este bug')).toEqual({
+      cmd: '/ponytail',
+      rest: ' arregla este bug',
+    });
+    expect(splitLeadingSlashCommand('/ponytail')).toEqual({ cmd: '/ponytail', rest: '' });
+    expect(splitLeadingSlashCommand('hola mundo')).toBeNull();
+    expect(splitLeadingSlashCommand('')).toBeNull();
   });
 
   it('true tras slash agente con respuesta útil (/execute-…)', () => {

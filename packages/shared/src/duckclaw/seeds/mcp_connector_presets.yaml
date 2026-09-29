@@ -35,6 +35,19 @@ profiles:
     read_only: false
 
 presets:
+  telegram_user:
+    display_name: Telegram (cuenta)
+    transport: streamable_http
+    endpoint_url: http://127.0.0.1:8765/mcp
+    auth_kind: none
+    # Reads + writes; which chats is enforced by the server's own allowlists
+    # (TELEGRAM_USER_READ_ALLOW / _SEND_ALLOW), sends default to drafts.
+    read_only: false
+    egress_hosts: [127.0.0.1]
+    metadata:
+      docs_url: https://docs.telethon.dev/
+      setup: "python -m duckclaw_telegram_mcp.user login; pm2 start config/ecosystem.mcp.config.cjs --only DuckClaw-Telegram-User-MCP"
+
   remote_http_oauth:
     display_name: Higgsfield
     transport: streamable_http

@@ -5,11 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "duckclaw-telegram-mcp"
 version = "0.1.0"
-description = "MCP stdio server for Telegram Bot API (sendMessage, sendPhoto/sendDocument)"
+description = "MCP servers for Telegram: Bot API (stdio) and controlled user-account access (Telethon, streamable HTTP)"
 requires-python = ">=3.10"
 dependencies = [
-    "mcp>=1.0.0",
+    "mcp>=1.8.0",
     "duckclaw-shared",
+    "telethon>=1.36",
 ]
 
 [tool.setuptools.packages.find]

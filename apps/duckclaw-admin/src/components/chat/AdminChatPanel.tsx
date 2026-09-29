@@ -100,7 +100,7 @@ export function AdminChatPanel({
   const [compactConfigOpen, setCompactConfigOpen] = useState(false);
   // Directive skills (instrucciones invocables con "/nombre") del catálogo global —
   // los tool skills "python" no aplican aquí, no son texto invocable en el chat.
-  const { globalSkills } = useSkillsCatalog();
+  const { globalSkills, loadSkills } = useSkillsCatalog();
   const directiveSkills = useMemo(
     () =>
       globalSkills
@@ -157,6 +157,14 @@ export function AdminChatPanel({
     reloadConfig,
     reloadHistory,
   } = chat;
+
+  // Agents can create directive skills mid-conversation (create_skill), so the
+  // catalog fetched on mount goes stale — refresh each time a "/" command starts.
+  const slashOpen = (input || '').trimStart().startsWith('/');
+  useEffect(() => {
+    if (slashOpen) void loadSkills().catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashOpen]);
 
   const isCompact = variant === 'compact';
   const showSuggestions = shouldShowSuggestionChips(suggestions, loading, input);

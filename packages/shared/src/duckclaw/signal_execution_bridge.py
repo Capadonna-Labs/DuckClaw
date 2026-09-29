@@ -165,7 +165,15 @@ def _finite_price(value: object) -> float | None:
 
 
 async def _live_mark_price(ib: object, ticker: str) -> float | None:
-    """Best-effort IBKR mark/last price. Caller decides whether missing is fatal."""
+    """Best-effort IBKR mark/last price. Caller decides whether missing is fatal.
+
+    Tries realtime data first (type 1), then falls back to delayed (type 3) if
+    nothing came back — some accounts have realtime entitlements for only a
+    subset of symbols (this is exactly why CEG/SPY work but MU/MSFT/XLU don't:
+    a per-symbol subscription gap, not a Gateway-wide outage). A delayed quote
+    is fine here since ``mark`` only sanity-checks which side of price TP/SL
+    sit on, not execution pricing.
+    """
     try:
         from ib_insync import Stock
     except Exception:
@@ -177,25 +185,45 @@ async def _live_mark_price(ib: object, ticker: str) -> float | None:
             await qualify(contract)
     except Exception as exc:
         _log.warning("preflight qualifyContracts %s: %s", ticker, exc)
-    ticker_obj = None
+
+    sleep = getattr(ib, "sleep", None)
+    set_market_data_type = getattr(ib, "reqMarketDataType", None)
+    # ponytail: reqMarketDataType is connection-global, not per-request — fine for
+    # this bridge's current sequential preflight-per-ticker usage; would need a
+    # lock/serialize if this ever runs concurrent preflights on the same ib client.
     try:
-        ticker_obj = ib.reqMktData(contract, "", False, False)  # type: ignore[attr-defined]
-        sleep = getattr(ib, "sleep", None)
-        if callable(sleep):
-            await sleep(1.0)
-        for attr in ("marketPrice", "last", "close", "bid", "ask"):
-            raw = getattr(ticker_obj, attr, None)
-            value = raw() if callable(raw) else raw
-            price = _finite_price(value)
-            if price is not None:
-                return price
-    except Exception as exc:
-        _log.warning("preflight live mark failed %s: %s", ticker, exc)
+        for data_type in (1, 3):  # 1=live, 3=delayed
+            if callable(set_market_data_type):
+                try:
+                    set_market_data_type(data_type)
+                except Exception as exc:
+                    _log.warning(
+                        "preflight reqMarketDataType(%s) %s: %s", data_type, ticker, exc
+                    )
+            ticker_obj = None
+            try:
+                ticker_obj = ib.reqMktData(contract, "", False, False)  # type: ignore[attr-defined]
+                if callable(sleep):
+                    await sleep(1.0)
+                for attr in ("marketPrice", "last", "close", "bid", "ask"):
+                    raw = getattr(ticker_obj, attr, None)
+                    value = raw() if callable(raw) else raw
+                    price = _finite_price(value)
+                    if price is not None:
+                        return price
+            except Exception as exc:
+                _log.warning("preflight mark type=%s failed %s: %s", data_type, ticker, exc)
+            finally:
+                try:
+                    ib.cancelMktData(contract)  # type: ignore[attr-defined]
+                except Exception:
+                    pass
     finally:
-        try:
-            ib.cancelMktData(contract)  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        if callable(set_market_data_type):
+            try:
+                set_market_data_type(1)  # restore live default for other callers
+            except Exception:
+                pass
     return None
 
 

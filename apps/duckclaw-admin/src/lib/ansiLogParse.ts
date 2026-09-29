@@ -23,11 +23,12 @@ export function strongLogCategoryClass(line: string): string | null {
   if (/harness_metric/i.test(t)) {
     return 'text-emerald-700 dark:text-emerald-300';
   }
-  if (/error|exception|traceback|fatal|errno|failed|failure|refused|denied/i.test(t)) {
+  if (
+    /error|exception|traceback|fatal|errno|failed|failure|refused|denied|warn|warning|offline|timeout|retry|unavailable/i.test(
+      t
+    )
+  ) {
     return 'text-red-700 dark:text-red-400';
-  }
-  if (/warn|warning|offline|timeout|retry|unavailable/i.test(t)) {
-    return 'text-amber-700 dark:text-amber-300';
   }
   if (/\[TOOL\]|\[PLAN\]|tool_usage:|\btool=/i.test(t)) {
     return 'text-yellow-700 dark:text-yellow-300';

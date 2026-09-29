@@ -44,6 +44,19 @@ export function splitLeadingSlashCommand(
   return { cmd: m[1], rest: m[2] || '' };
 }
 
+/** True si `cmd` (p. ej. "/ponytail") es un comando genérico o un directive skill
+ * instalado — para acentuar el composer en cuanto el usuario ya eligió uno real. */
+export function isKnownSlashCommand(
+  cmd: string,
+  extraCommands: { cmd: string; description: string }[] = []
+): boolean {
+  const needle = cmd.toLowerCase();
+  return (
+    GENERIC_FLY_SLASH_COMMANDS.some((c) => c.cmd.toLowerCase() === needle) ||
+    extraCommands.some((c) => c.cmd.toLowerCase() === needle)
+  );
+}
+
 /**
  * Comandos "/" que calzan con lo ya tecleado (sin espacio todavía) para el menú del
  * composer. `extraCommands` son los directive skills instalados (catálogo global,
@@ -53,7 +66,10 @@ export function matchingSlashCommands(
   input: string,
   extraCommands: { cmd: string; description: string }[] = []
 ): { cmd: string; description: string }[] {
-  const t = (input || '').trim();
+  // Solo recorta espacios iniciales — uno final SÍ debe contar como "ya elegido,
+  // ahora escribiendo el argumento" y ocultar el menú (pickSlashCommand inserta
+  // "/cmd " con espacio final justo para esto).
+  const t = (input || '').replace(/^\s+/, '');
   if (!t.startsWith('/') || /\s/.test(t)) return [];
   const prefix = t.toLowerCase();
   const seen = new Set(GENERIC_FLY_SLASH_COMMANDS.map((c) => c.cmd));

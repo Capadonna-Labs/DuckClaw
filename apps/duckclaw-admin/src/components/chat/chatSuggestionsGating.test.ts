@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isKnownSlashCommand,
   lastUserAssistantExchange,
   matchingSlashCommands,
   shouldFetchChatSuggestions,
@@ -30,6 +31,19 @@ describe('shouldFetchChatSuggestions', () => {
     expect(matchingSlashCommands('/loop ya en curso')).toEqual([]);
     expect(matchingSlashCommands('hola')).toEqual([]);
     expect(matchingSlashCommands('')).toEqual([]);
+    // Regresión: pickSlashCommand inserta "/cmd " (espacio final) al tocar el chip —
+    // eso debe ocultar el menú de inmediato, no seguir "matcheando" el mismo comando.
+    expect(matchingSlashCommands('/loop ')).toEqual([]);
+  });
+
+  it('isKnownSlashCommand: genéricos + directive skills instalados, no cualquier /texto', () => {
+    expect(isKnownSlashCommand('/loop')).toBe(true);
+    expect(isKnownSlashCommand('/LOOP')).toBe(true);
+    expect(isKnownSlashCommand('/ponytail')).toBe(false);
+    expect(
+      isKnownSlashCommand('/ponytail', [{ cmd: '/ponytail', description: 'x' }])
+    ).toBe(true);
+    expect(isKnownSlashCommand('/no-existe')).toBe(false);
   });
 
   it('resalta el comando "/" al inicio de la burbuja enviada, no lo hace desaparecer', () => {

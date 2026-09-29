@@ -23,7 +23,7 @@ export function colorizePlainLogLine(line: string): { className: string; text: s
   if (/warn|warning|offline|timeout|retry|unavailable/i.test(t)) {
     return { className: 'text-amber-700 dark:text-amber-300', text: line };
   }
-  if (/\[TOOL\]|tool_usage:|\btool=/i.test(t)) {
+  if (/\[TOOL\]|\[PLAN\]|tool_usage:|\btool=/i.test(t)) {
     return { className: 'text-yellow-700 dark:text-yellow-300', text: line };
   }
   if (/^\d+\|/.test(t) || /\[PM2\]/i.test(t)) {

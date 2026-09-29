@@ -5,6 +5,9 @@ export interface SkillCatalogItem {
   path: string;
   scope: string;
   worker_id?: string;
+  /** Solo presente para skills tipo "directive" (instrucción, no tool). */
+  description?: string;
+  skill_type?: string;
 }
 
 export interface SkillCategorySkillItem {

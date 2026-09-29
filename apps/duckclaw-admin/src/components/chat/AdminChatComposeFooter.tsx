@@ -29,6 +29,8 @@ export type AdminChatComposeFooterProps = {
   onSuggestionsAutoChange?: (enabled: boolean) => void;
   onSuggestionsOpenChange?: (open: boolean) => void;
   onPickSuggestion?: (text: string) => void | Promise<void>;
+  /** Directive skills instalados (catálogo global) para el menú "/". */
+  directiveSkills?: { cmd: string; description: string }[];
   input: string;
   setInput: (value: string) => void;
   inputRef: RefObject<HTMLTextAreaElement>;
@@ -108,6 +110,7 @@ export function AdminChatComposeFooter({
   onSuggestionsAutoChange,
   onSuggestionsOpenChange,
   onPickSuggestion,
+  directiveSkills = [],
   input,
   setInput,
   inputRef,
@@ -132,7 +135,7 @@ export function AdminChatComposeFooter({
   voice,
   liveVoice,
 }: AdminChatComposeFooterProps) {
-  const showSlashMenu = matchingSlashCommands(input).length > 0;
+  const showSlashMenu = matchingSlashCommands(input, directiveSkills).length > 0;
   const showSuggestions = !showSlashMenu && shouldShowSuggestionChips(suggestions, loading, input);
   const pickSlashCommand = (cmd: string) => {
     setInput(`${cmd} `);
@@ -202,7 +205,7 @@ export function AdminChatComposeFooter({
           <>
           {showSlashMenu ? (
             <div className="mb-2">
-              <SlashCommandMenu input={input} onPick={pickSlashCommand} />
+              <SlashCommandMenu input={input} onPick={pickSlashCommand} extraCommands={directiveSkills} />
             </div>
           ) : null}
           {showSuggestions ? (
@@ -315,7 +318,7 @@ export function AdminChatComposeFooter({
           <>
             {showSlashMenu ? (
               <div className="mb-2">
-                <SlashCommandMenu input={input} onPick={pickSlashCommand} />
+                <SlashCommandMenu input={input} onPick={pickSlashCommand} extraCommands={directiveSkills} />
               </div>
             ) : null}
             {showSuggestions ? (

@@ -136,6 +136,15 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         empty_config_registers=True,
         keyword_context={"db": "db", "tenant_id": "tenant_id"},
     ),
+    SkillToolRegistrar(
+        skill_name="skills_management",
+        phase="post_llm",
+        registrar_path=(
+            "duckclaw.forge.skills.skills_management_bridge:register_skills_management_skill"
+        ),
+        empty_config_registers=True,
+        keyword_context={"db": "db", "tenant_id": "tenant_id"},
+    ),
 )
 
 VISUAL_ARTIFACT_READER_PATH = "duckclaw.forge.skills.comfyui_bridge:read_artifact_image_as_b64"

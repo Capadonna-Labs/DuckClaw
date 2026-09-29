@@ -19,10 +19,13 @@ tool when it only catalogued an intent.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Literal, Optional
 
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
+
+_log = logging.getLogger(__name__)
 
 _PYTHON_METADATA_NOTE = (
     "skill_type='python' solo registra metadata en el catálogo (visible en la UI admin); "
@@ -246,3 +249,7 @@ def register_skills_management_skill(
                 args_schema=DeactivateSkillInput,
             )
         )
+    _log.info(
+        "Skills management skill registrado — "
+        "create_skill/edit_skill/list_skills/deactivate_skill disponibles"
+    )

@@ -42,6 +42,7 @@ import {
   mergeHistoryWithEphemeral,
   preserveInFlightOptimisticTurn,
   shouldFetchChatSuggestions,
+  splitOverlongMessageIntoTxtAttachment,
   suggestionsExchangeKey,
   stripThinkingStatusHeartbeats,
 } from './adminChatPure';
@@ -252,6 +253,12 @@ const docLabels =
     : payloadDocuments.map((d) => d.filename).filter(Boolean);
 const userLabel = text;
 let loopFollowUp = /^\/(loop|meditate)\b/i.test(text.trim());
+
+// Gateway rejects message > 16000 chars with a 422 before any turn logic runs —
+// send it as a .txt attachment instead once over that limit. userLabel/docLabels
+// above already captured the original text/names for the sent-bubble UI.
+const { message: wireMessage, extraDocument } = splitOverlongMessageIntoTxtAttachment(text);
+const wirePayloadDocuments = extraDocument ? [...payloadDocuments, extraDocument] : payloadDocuments;
 
 setLoading(true);
 beginDetachedPollEpoch();
@@ -564,7 +571,7 @@ let detachedRunning = false;
 try {
   const persistentMobileTurn = shouldUsePersistentMobileTurn({
     payloadImages,
-    payloadDocuments,
+    payloadDocuments: wirePayloadDocuments,
     voiceResponseMode,
   });
   if (persistentMobileTurn) {
@@ -573,7 +580,7 @@ try {
         worker_id: workerId,
         project_id: projectId || undefined,
         knowledge_scope: knowledgeScope || undefined,
-        message: text,
+        message: wireMessage,
         chat_id: chatId,
         tenant_id: effectiveTenantId ?? 'default',
         telegram_user_id: telegramUserId,
@@ -685,13 +692,13 @@ try {
       worker_id: workerId,
       project_id: projectId || undefined,
       knowledge_scope: knowledgeScope || undefined,
-      message: text,
+      message: wireMessage,
       chat_id: chatId,
           tenant_id: effectiveTenantId ?? 'default',
           telegram_user_id: telegramUserId,
       vault_db_path: vaultPath || undefined,
       images: payloadImages.length ? payloadImages : undefined,
-      documents: payloadDocuments.length ? payloadDocuments : undefined,
+      documents: wirePayloadDocuments.length ? wirePayloadDocuments : undefined,
       voice_response: voiceResponseMode,
     },
     {
@@ -877,7 +884,9 @@ try {
       .getChatSuggestions({
         chat_id: chatId,
         tenant_id: effectiveTenantId,
-        last_user_message: text,
+        // ChatSuggestionsBody.last_user_message caps at 8000 chars (Pydantic
+        // max_length) — an excerpt is enough context for suggestion chips.
+        last_user_message: text.slice(0, 8000),
         last_assistant_message: assistantForSuggestions,
         vault_db_path: vaultPath || undefined,
       })

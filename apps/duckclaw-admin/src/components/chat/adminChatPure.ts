@@ -32,6 +32,40 @@ export function isFlyConfigSlashAck(userText: string): boolean {
   return new RegExp(`^/(${names})\\b`, 'i').test(t);
 }
 
+/** Gateway's PlaygroundChatBody.message caps at 16000 chars (Pydantic max_length) —
+ * pasting more raises a 422 before any turn logic runs. Leaves margin below that. */
+export const MAX_INLINE_MESSAGE_CHARS = 15000;
+
+function utf8ToBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+
+/**
+ * A message over the backend's char limit gets sent as a `mensaje.txt` document
+ * attachment instead (the API already extracts document text into turn context —
+ * no RAG indexing involved), with a short placeholder replacing the wire `message`.
+ * Leaves the original `text` untouched for the sent-bubble UI.
+ */
+export function splitOverlongMessageIntoTxtAttachment(text: string): {
+  message: string;
+  extraDocument: { filename: string; mime_type: string; data_base64: string } | null;
+} {
+  if (text.length <= MAX_INLINE_MESSAGE_CHARS) {
+    return { message: text, extraDocument: null };
+  }
+  return {
+    message: '(mensaje largo adjuntado como mensaje.txt)',
+    extraDocument: {
+      filename: 'mensaje.txt',
+      mime_type: 'text/plain',
+      data_base64: utf8ToBase64(text),
+    },
+  };
+}
+
 const _LEADING_SLASH_CMD = /^(\/[a-zA-Z][a-zA-Z0-9_.-]*)(\s[\s\S]*)?$/;
 
 /** Si `text` empieza con "/comando", separa el token del resto para resaltarlo en la

@@ -161,6 +161,56 @@ function highlightMatches(
   );
 }
 
+/** Renderiza una línea que sí trae códigos ANSI reales, preservando su color. */
+function ansiLineToSpans(
+  line: string,
+  lineKey: string,
+  fg: Record<number, string>,
+  palette: string[],
+  highlight: string,
+  activeMatchIndex: number,
+  nextIndex: () => number,
+): ReactNode[] {
+  ANSI_RE.lastIndex = 0;
+  const nodes: ReactNode[] = [];
+  let state: StyleState = {};
+  let last = 0;
+  let key = 0;
+
+  const flush = (end: number) => {
+    if (end <= last) return;
+    const chunk = line.slice(last, end);
+    if (!chunk) return;
+    const cls = styleToClass(state);
+    nodes.push(
+      <span
+        key={`${lineKey}-c-${key++}`}
+        className={cls || undefined}
+        style={state.color ? { color: state.color } : undefined}
+      >
+        {highlightMatches(chunk, highlight, `${lineKey}-c-${key}`, activeMatchIndex, nextIndex)}
+      </span>,
+    );
+    last = end;
+  };
+
+  let m: RegExpExecArray | null;
+  while ((m = ANSI_RE.exec(line)) !== null) {
+    flush(m.index);
+    const raw = m[1] || m[2] || '';
+    const codes = raw
+      .split(';')
+      .filter(Boolean)
+      .map((x) => Number.parseInt(x, 10))
+      .filter((n) => !Number.isNaN(n));
+    if (codes.length === 0) codes.push(0);
+    state = applyCodes(state, codes, fg, palette);
+    last = m.index + m[0].length;
+  }
+  flush(line.length);
+  return nodes;
+}
+
 function ansiTextToSpans(
   text: string,
   theme: 'light' | 'dark',
@@ -173,58 +223,29 @@ function ansiTextToSpans(
   const nextIndex = () => matchIndex++;
 
   if (!text) return [];
-  if (!hasAnsiCodes(text)) {
-    const lines = text.split('\n');
-    return lines.map((line, i) => {
-      const { className, text: t } = colorizePlainLogLine(line);
-      return (
-        <span key={`ln-${i}`} className={className}>
-          {highlightMatches(t, highlight, `ln-${i}`, activeMatchIndex, nextIndex)}
-          {i < lines.length - 1 ? '\n' : ''}
-        </span>
-      );
-    });
-  }
-  ANSI_RE.lastIndex = 0;
 
+  // Decide por LÍNEA, no por buffer completo: un stream PM2 real mezcla líneas
+  // con ANSI real (banners de arranque coloreados) y líneas planas (tracebacks
+  // Python) — si una sola línea con ANSI hacía que TODO el buffer se procesara
+  // como ANSI, colorizePlainLogLine (que es quien pinta "error"/"traceback" en
+  // rojo) nunca se llegaba a ejecutar para el resto de líneas planas.
+  const lines = text.split('\n');
   const nodes: ReactNode[] = [];
-  let state: StyleState = {};
-  let last = 0;
-  let key = 0;
-  const src = text;
-
-  const flush = (end: number) => {
-    if (end <= last) return;
-    const chunk = src.slice(last, end);
-    if (!chunk) return;
-    const cls = styleToClass(state);
-    nodes.push(
-      <span
-        key={`c-${key++}`}
-        className={cls || undefined}
-        style={state.color ? { color: state.color } : undefined}
-      >
-        {highlightMatches(chunk, highlight, `c-${key}`, activeMatchIndex, nextIndex)}
-      </span>,
-    );
-    last = end;
-  };
-
-  let m: RegExpExecArray | null;
-  while ((m = ANSI_RE.exec(src)) !== null) {
-    flush(m.index);
-    const raw = m[1] || m[2] || '';
-    const codes = raw
-      .split(';')
-      .filter(Boolean)
-      .map((x) => Number.parseInt(x, 10))
-      .filter((n) => !Number.isNaN(n));
-    if (codes.length === 0) codes.push(0);
-    state = applyCodes(state, codes, fg, palette);
-    last = m.index + m[0].length;
-  }
-  flush(src.length);
-  return nodes.length ? nodes : [text];
+  lines.forEach((line, i) => {
+    const lineKey = `ln-${i}`;
+    if (hasAnsiCodes(line)) {
+      nodes.push(...ansiLineToSpans(line, lineKey, fg, palette, highlight, activeMatchIndex, nextIndex));
+    } else {
+      const { className, text: t } = colorizePlainLogLine(line);
+      nodes.push(
+        <span key={lineKey} className={className}>
+          {highlightMatches(t, highlight, lineKey, activeMatchIndex, nextIndex)}
+        </span>,
+      );
+    }
+    if (i < lines.length - 1) nodes.push(<span key={`${lineKey}-nl`}>{'\n'}</span>);
+  });
+  return nodes;
 }
 
 export function AnsiLogText({

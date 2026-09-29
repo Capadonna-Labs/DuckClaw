@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { colorizePlainLogLine, stripAnsi } from './ansiLogParse';
+import { colorizePlainLogLine, hasAnsiCodes, stripAnsi } from './ansiLogParse';
 
 describe('ansiLogParse', () => {
   it('strips ANSI escape codes', () => {
@@ -12,5 +12,26 @@ describe('ansiLogParse', () => {
     expect(colorizePlainLogLine('0|Gateway | info').className).toBe(
       'text-emerald-700 dark:text-emerald-300',
     );
+  });
+
+  it('regression: a real PM2 stream mixes ANSI and plain lines — each line must be judged on its own, not the whole buffer', () => {
+    // Same shape as a real stream: a colored PM2 banner line, then a plain
+    // Python traceback with zero ANSI codes (exactly what silently stopped
+    // rendering red — the old code checked hasAnsiCodes() once for the whole
+    // buffer, and one ANSI line anywhere turned off colorizePlainLogLine for
+    // every other line, including this one).
+    const banner = '\x1b[32m[PM2] App launched\x1b[0m';
+    const traceback = "zoneinfo._common.ZoneInfoNotFoundError: 'No time zone found with key US/Eastern'";
+    const buffer = `${banner}\n${traceback}`;
+
+    expect(hasAnsiCodes(banner)).toBe(true);
+    expect(hasAnsiCodes(traceback)).toBe(false);
+    // the bug: checking the whole buffer at once hides the plain line's own status
+    expect(hasAnsiCodes(buffer)).toBe(true);
+
+    // what the fixed ansiTextToSpans now does: decide per split('\n') line
+    const perLineVerdicts = buffer.split('\n').map(hasAnsiCodes);
+    expect(perLineVerdicts).toEqual([true, false]);
+    expect(colorizePlainLogLine(traceback).className).toBe('text-red-700 dark:text-red-400');
   });
 });

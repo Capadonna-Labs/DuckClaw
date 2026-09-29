@@ -7,6 +7,7 @@ import {
   nonImageFilesFromClipboardData,
 } from '@/components/chat/useChatImageAttachments';
 import { isAllowedChatDocument } from '@/lib/chatDocumentAttachments';
+import { MAX_INLINE_MESSAGE_CHARS } from '@/components/chat/adminChatPure';
 
 type ComposeClipboardDeps = {
   canSend: boolean;
@@ -94,6 +95,17 @@ export function useComposeClipboard({
               : 'Formato no admitido en el chat.'
           );
         }
+        return;
+      }
+      // Texto plano largo: adjuntar como mensaje.txt (chip existente de
+      // documentos) en vez de dejarlo caer entero en la caja de texto — evita
+      // tanto el muro de texto visual como el 422 de PlaygroundChatBody.message
+      // (max_length=16000) si igual se hubiera pegado tal cual.
+      const pastedText = event.clipboardData?.getData('text/plain') ?? '';
+      if (pastedText.length > MAX_INLINE_MESSAGE_CHARS && ingestDocuments) {
+        event.preventDefault();
+        const file = new File([pastedText], 'mensaje.txt', { type: 'text/plain' });
+        void ingestDocuments([file]);
       }
     },
     [canSend, ingestDocuments, ingestFiles, setAttachError]

@@ -87,20 +87,10 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
             pass
 
     def _enforce_allowed_tables(q_upper: str) -> Optional[json]:
-        """Allow-list validation for queries touching DB tables."""
-        if not spec.allowed_tables:
-            return None
-        # Permitir siempre information_schema (SHOW TABLES, esquema, etc.)
-        if "INFORMATION_SCHEMA" in q_upper or "SHOW TABLES" in q_upper or "SHOW " in q_upper:
-            return None
-        for t in spec.allowed_tables:
-            t_str = str(t)
-            if t_str.upper() in q_upper or f"{schema}.{t_str}".upper() in q_upper:
-                return None
-        # No allowed table mentioned; check if query likely touches tables.
-        if any(k in q_upper for k in ("FROM", "INTO", "UPDATE", "DELETE", "JOIN", "TABLE")):
-            return json.dumps({"error": f"Solo se permiten las tablas: {', '.join(spec.allowed_tables)}."})
-        return None
+        """Allow-list validation: every table the statement touches must be allowed."""
+        from duckclaw.workers.sql_table_guard import allowed_tables_error
+
+        return allowed_tables_error(spec.allowed_tables, schema, q_upper)
 
     def _qualify_allowed_tables(query: str, schema_name: str) -> str:
         """

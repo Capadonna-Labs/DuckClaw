@@ -226,19 +226,10 @@ def connection_query_json(conn: Any, sql: str) -> str:
 
 
 def _enforce_allowed_tables_error(spec: WorkerSpec, q_upper: str) -> Optional[str]:
-    schema = spec.schema_name
-    allowed = spec.allowed_tables or []
-    if not allowed:
-        return None
-    if "INFORMATION_SCHEMA" in q_upper or "SHOW TABLES" in q_upper or "SHOW " in q_upper:
-        return None
-    for t in allowed:
-        ts = str(t)
-        if ts.upper() in q_upper or f"{schema}.{ts}".upper() in q_upper:
-            return None
-    if any(k in q_upper for k in ("FROM", "INTO", "UPDATE", "DELETE", "JOIN", "TABLE")):
-        return json.dumps({"error": f"Solo se permiten las tablas: {', '.join(allowed)}."})
-    return None
+    """Every table the statement touches must be in the manifest (see sql_table_guard)."""
+    from duckclaw.workers.sql_table_guard import allowed_tables_error
+
+    return allowed_tables_error(spec.allowed_tables, spec.schema_name, q_upper)
 
 
 def _qualify_allowed_tables(query: str, schema_name: str, spec: WorkerSpec) -> str:

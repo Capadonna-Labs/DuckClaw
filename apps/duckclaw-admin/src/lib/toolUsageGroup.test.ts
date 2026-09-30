@@ -8,6 +8,7 @@ import {
   toolGroupStableKey,
   toolGroupTotalElapsedMs,
   groupToolInvocationsByName,
+  toolRowDurationLabel,
 } from './toolUsageGroup';
 
 const tool = (name: string, phase: ChatMsg['toolPhase'] = 'done', elapsedMs?: number): ChatMsg => ({
@@ -216,5 +217,34 @@ describe('toolUsageGroup', () => {
       expect(grouped[0].maxMs).toBe(100);
       expect(grouped[0].averageMs).toBe(100);
     });
+  });
+});
+
+describe('toolRowDurationLabel', () => {
+  const base = { count: 1, latestMs: 177, maxMs: 177, averageMs: 177, isRunning: false };
+
+  it('single call shows one duration', () => {
+    expect(toolRowDurationLabel(base)).toEqual({ primary: '177ms', secondary: '' });
+  });
+
+  it('repeated calls with equal times do not repeat max/avg', () => {
+    expect(toolRowDurationLabel({ ...base, count: 2, latestMs: 8, maxMs: 8, averageMs: 8 })).toEqual({
+      primary: '8ms',
+      secondary: '',
+    });
+  });
+
+  it('repeated calls with different times show max and average', () => {
+    expect(
+      toolRowDurationLabel({ ...base, count: 3, latestMs: 120, maxMs: 900, averageMs: 400 })
+    ).toEqual({ primary: '900ms', secondary: 'prom 400ms' });
+  });
+
+  it('running shows the live timer', () => {
+    expect(toolRowDurationLabel({ ...base, isRunning: true }, 3200)).toEqual({
+      primary: '3.20s',
+      secondary: '',
+    });
+    expect(toolRowDurationLabel({ ...base, isRunning: true }, null).primary).toBe('');
   });
 });

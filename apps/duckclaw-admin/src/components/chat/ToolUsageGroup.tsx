@@ -1,15 +1,15 @@
 'use client';
 
 import { useCallback, useEffect, useId, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Loader2, X } from 'lucide-react';
 import type { ChatMsg } from '@/components/chat/types';
 import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
-import { formatChatIdentityPrefix } from '@/lib/workerOptions';
 import { formatToolDurationMs, isToolHeartbeatRunning } from '@/lib/toolHeartbeat';
 import {
   toolGroupCurrentToolName,
   toolGroupHasRunning,
   toolGroupTotalElapsedMs,
+  toolRowDurationLabel,
   groupToolInvocationsByName,
   type GroupedToolInvocation,
 } from '@/lib/toolUsageGroup';
@@ -52,29 +52,6 @@ function newestToolMessage(messages: ChatMsg[]): ChatMsg | null {
   }, null);
 }
 
-function newestFinishedAt(messages: ChatMsg[]): number | null {
-  let newest: number | null = null;
-  for (const m of messages) {
-    if (isToolHeartbeatRunning(m)) continue;
-    const start = m.toolStartedAt;
-    if (start == null || !Number.isFinite(start)) continue;
-    const elapsed = m.toolElapsedMs;
-    const finishedAt =
-      elapsed != null && Number.isFinite(elapsed) ? start + Math.max(0, elapsed) : start;
-    newest = newest == null ? finishedAt : Math.max(newest, finishedAt);
-  }
-  return newest;
-}
-
-function formatFinishedTimestamp(ms: number | null): string {
-  if (ms == null || !Number.isFinite(ms)) return '';
-  return new Intl.DateTimeFormat(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  }).format(new Date(ms));
-}
-
 function GroupedToolRow({
   grouped,
   identityLabel,
@@ -82,54 +59,39 @@ function GroupedToolRow({
   grouped: GroupedToolInvocation;
   identityLabel: string;
 }) {
-  const { toolName, count, latestMs, maxMs, averageMs, isRunning, isError, messages } = grouped;
+  const { toolName, count, isRunning, isError, messages } = grouped;
   const runningStartedAt = earliestRunningStartedAt(messages);
   const liveMs = useLiveToolElapsedMs(isRunning, runningStartedAt);
-  const max = formatToolDurationMs(maxMs);
-  const avg = formatToolDurationMs(averageMs);
-  const live = formatToolDurationMs(liveMs);
-  const finishedDuration = formatToolDurationMs(latestMs);
-  const finishedAt = formatFinishedTimestamp(isRunning ? null : newestFinishedAt(messages));
-  const finishedLabel = [finishedDuration, finishedAt].filter(Boolean).join(' · ');
-  // Prefer the row's own workerId (e.g. quant_analyst->quant-trader) over the
-  // group-level label from the first tool.
-  const rowWorker =
-    (newestToolMessage(messages)?.workerId || '').trim() || identityLabel;
-  const identityPrefix = formatChatIdentityPrefix(
-    rowWorker.includes('->')
-      ? rowWorker.split('->').pop()?.trim() || rowWorker
-      : rowWorker
-  );
+  const { primary, secondary } = toolRowDurationLabel(grouped, liveMs);
+  // Worker (e.g. quant_analyst->quant-trader) moves to the tooltip; the swarm
+  // slot number it used to print meant nothing to the reader.
+  const rowWorker = (newestToolMessage(messages)?.workerId || '').trim() || identityLabel;
+  const worker = rowWorker.split('->').pop()?.trim() || '';
 
   return (
-    <li className="px-3 py-1.5 text-sm text-sky-950 dark:text-sky-100">
-      <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
-        {identityPrefix ? (
-          <span className="text-sky-700/80 dark:text-sky-300/80">{identityPrefix} · </span>
-        ) : null}
-        {toolName}
-        {count > 1 ? (
-          <span className="font-semibold text-sky-700 dark:text-sky-300"> x{count}</span>
-        ) : null}
-        {isError ? ' · error' : ''}
-        {max ? (
-          <span className="tabular-nums"> · max: {max}</span>
-        ) : null}
-        {avg ? (
-          <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums"> · avg: {avg}</span>
-        ) : null}
-        {isRunning && live ? (
-          <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums animate-pulse">
-            {' '}
-            · now: {live}
-          </span>
-        ) : isRunning ? (
-          <span className="text-sky-600/80 dark:text-sky-400/80"> · now: en curso</span>
-        ) : finishedLabel ? (
-          <span className="text-sky-600/80 dark:text-sky-400/80 tabular-nums">
-            {' '}
-            · finished: {finishedLabel}
-          </span>
+    <li
+      title={worker ? `Agente: ${worker}` : undefined}
+      className="flex items-center gap-2 px-4 py-1.5 text-sm text-sky-950 dark:text-sky-100"
+    >
+      {isRunning ? (
+        <Loader2 size={14} className="shrink-0 animate-spin text-sky-500" aria-label="En curso" />
+      ) : isError ? (
+        <X size={14} className="shrink-0 text-rose-500" aria-label="Error" />
+      ) : (
+        <Check size={14} className="shrink-0 text-emerald-600 dark:text-emerald-400" aria-label="Completado" />
+      )}
+      <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">{toolName}</span>
+      {count > 1 ? (
+        <span className="shrink-0 rounded-full bg-sky-100 px-1.5 text-[11px] font-semibold tabular-nums text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+          ×{count}
+        </span>
+      ) : null}
+      <span className="shrink-0 text-right text-xs tabular-nums text-sky-700/90 dark:text-sky-300/90">
+        <span className={isRunning ? 'animate-pulse' : undefined}>
+          {primary || (isRunning ? 'en curso' : '')}
+        </span>
+        {secondary ? (
+          <span className="block text-[10px] text-sky-600/70 dark:text-sky-400/70">{secondary}</span>
         ) : null}
       </span>
     </li>

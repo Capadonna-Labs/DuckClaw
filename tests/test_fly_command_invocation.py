@@ -273,6 +273,58 @@ def test_workers_fly_command_opens_read_only_duckclaw(monkeypatch, tmp_path: Pat
     assert opened == [(str(vault_path), True, "python")]
 
 
+def test_slow_fly_command_does_not_block_event_loop(monkeypatch, tmp_path: Path) -> None:
+    """A slow command (e.g. /trading_session --status hitting IBKR) must not freeze /health."""
+    import time
+
+    from core import fly_command_invocation
+
+    class FakeDuckClaw:
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    def slow_handle_command(*_args: Any, **_kwargs: Any) -> str:
+        time.sleep(0.5)
+        return "slow ok"
+
+    monkeypatch.setattr(fly_command_invocation, "DuckClaw", FakeDuckClaw)
+    monkeypatch.setattr(fly_command_invocation, "handle_command", slow_handle_command)
+    monkeypatch.setattr(fly_command_invocation, "_attach_fly_charts", lambda *_args, **_kwargs: None)
+
+    async def scenario() -> tuple[dict[str, Any] | None, int]:
+        ticks = 0
+
+        async def ticker() -> None:
+            nonlocal ticks
+            while True:
+                await asyncio.sleep(0.05)
+                ticks += 1
+
+        task = asyncio.create_task(ticker())
+        response = await fly_command_invocation.invoke_legacy_fly_command(
+            message="/trading_session --status",
+            session_id="chat1",
+            worker_id="manager",
+            tenant_id="tenant-a",
+            vault_db_path=str(tmp_path / "vault.duckdb"),
+            vault_user_id="user-a",
+            requester_id="requester-a",
+            username="ana",
+            delivery_context=SimpleNamespace(channel="http", outbound_bot_token=""),
+            resolve_telegram_bot_token=lambda: "",
+            persist_admin_fly_charts=lambda *_args: [],
+        )
+        task.cancel()
+        return response, ticks
+
+    response, ticks = asyncio.run(scenario())
+    assert response is not None and response["response"] == "slow ok"
+    assert ticks >= 5  # loop kept serving while the command ran
+
+
 def test_forget_fly_command_opens_read_only_duckclaw(monkeypatch, tmp_path: Path) -> None:
     from core import fly_command_invocation
 

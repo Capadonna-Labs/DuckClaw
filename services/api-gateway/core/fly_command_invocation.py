@@ -197,6 +197,28 @@ async def _attach_fly_charts(
             fly_response["figure_base64"] = fly_charts[0]
 
 
+def _run_fly_command_sync(vpath: str, message: str, **kwargs: Any) -> tuple[str | None, int]:
+    """Runs off the event loop: fly commands may block for seconds (IBKR, worker builds)."""
+    loop = asyncio.new_event_loop()  # ib_insync sync calls need a loop in this thread
+    asyncio.set_event_loop(loop)
+    fly_db = None
+    try:
+        _audit_fly_vault_resolution(vpath, "python")
+        _clear_cached_worker_handles_for_fly()
+        fly_db = _open_fly_duckclaw(vpath, message)
+        started_at = time.monotonic()
+        reply = handle_command(fly_db, kwargs.pop("session_id"), message, **kwargs)
+        return reply, int((time.monotonic() - started_at) * 1000)
+    finally:
+        if fly_db is not None:
+            try:
+                fly_db.close()
+            except Exception:
+                pass
+        asyncio.set_event_loop(None)
+        loop.close()
+
+
 async def invoke_legacy_fly_command(
     *,
     message: str,
@@ -215,36 +237,24 @@ async def invoke_legacy_fly_command(
     if not (message or "").strip().startswith("/"):
         return None
 
-    fly_db = None
     cmd_reply: str | None = None
     elapsed_ms = 0
     try:
         vpath = (vault_db_path or "").strip()
         Path(vpath).parent.mkdir(parents=True, exist_ok=True)
-        fly_engine = "python"
-        _audit_fly_vault_resolution(vpath, fly_engine)
-        _clear_cached_worker_handles_for_fly()
-        fly_db = _open_fly_duckclaw(vpath, message)
-        started_at = time.monotonic()
-        cmd_reply = handle_command(
-            fly_db,
-            session_id,
+        cmd_reply, elapsed_ms = await asyncio.to_thread(
+            _run_fly_command_sync,
+            vpath,
             message,
+            session_id=session_id,
             requester_id=requester_id,
             tenant_id=tenant_id,
             vault_user_id=vault_user_id,
             username=username,
             entry_worker_id=worker_id,
         )
-        elapsed_ms = int((time.monotonic() - started_at) * 1000)
     except Exception as exc:
         _log.error("fly command failed chat=%s: %s", format_chat_id_for_terminal(session_id), exc)
-    finally:
-        if fly_db is not None:
-            try:
-                fly_db.close()
-            except Exception:
-                pass
 
     if cmd_reply is None:
         _log.warning(

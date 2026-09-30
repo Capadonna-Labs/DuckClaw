@@ -159,3 +159,14 @@ def test_reset_admin_heartbeat_backlog_clears_previous_turn() -> None:
     assert asyncio.run(list_admin_heartbeat_backlog(r, "c1"))  # previous turn's event
     asyncio.run(reset_admin_heartbeat_backlog(r, "c1"))
     assert asyncio.run(list_admin_heartbeat_backlog(r, "c1")) == []
+
+
+def test_parse_admin_heartbeat_payload_keeps_event_ts() -> None:
+    # ts identifies each event for the detached (polling) UI; repeats must stay distinct.
+    import json
+
+    from core.admin_chat_heartbeat import parse_admin_heartbeat_payload
+
+    a = parse_admin_heartbeat_payload(json.dumps({"text": "🧠 Pensando", "kind": "tool", "tool_name": "Pensando", "tool_phase": "start", "ts": 1000.5}))
+    b = parse_admin_heartbeat_payload(json.dumps({"text": "🧠 Pensando", "kind": "tool", "tool_name": "Pensando", "tool_phase": "start", "ts": 2000.25}))
+    assert a["ts"] == 1000.5 and b["ts"] == 2000.25

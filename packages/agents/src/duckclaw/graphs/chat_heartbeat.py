@@ -435,6 +435,9 @@ def publish_admin_chat_heartbeat(
     if slot is None or slot < 1:
         slot = 1
     body: dict[str, Any] = {"text": msg, "kind": (kind or "status").strip() or "status"}
+    # Event identity + real start time for the detached (polling) UI path, which
+    # otherwise dedupes identical repeats (every "Pensando" start) by content.
+    body["ts"] = round(time.time() * 1000, 3)
     turn_user_index = _ADMIN_TURN_USER_INDEX.get()
     if turn_user_index is None:
         with _ADMIN_TURN_USER_INDEX_LOCK:

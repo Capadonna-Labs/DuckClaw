@@ -93,6 +93,11 @@ function toolHeartbeatsFromActivity(
       out.push(base);
       continue;
     }
+    const renamed = String(ev.tool_rename || '').trim();
+    if (renamed) {
+      base.toolName = renamed;
+      base.text = toolHeartbeatDisplayText(renamed, phase, elapsedMs);
+    }
     if (runningIdx != null && out[runningIdx]) {
       out[runningIdx] = {
         ...base,

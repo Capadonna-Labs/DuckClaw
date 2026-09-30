@@ -137,6 +137,11 @@ function toolHeartbeatsFromActivity(
       out.push(base);
       continue;
     }
+    const renamed = String(ev.tool_rename || '').trim();
+    if (renamed) {
+      base.toolName = renamed;
+      base.text = toolHeartbeatDisplayText(renamed, phase, elapsedMs);
+    }
     if (runningIdx != null && out[runningIdx]) {
       out[runningIdx] = {
         ...base,
@@ -321,6 +326,7 @@ const appendHeartbeat = (payload: {
   tool_name?: string;
   tool_phase?: 'start' | 'done' | 'error';
   tool_detail?: string;
+  tool_rename?: string;
   elapsed_ms?: number;
   turn_user_index?: number;
 }) => {
@@ -416,13 +422,15 @@ const appendHeartbeat = (payload: {
       const targetIdx = runningIdx;
       const existing = targetIdx >= 0 ? m[targetIdx] : null;
       const startedAt = existing?.toolStartedAt ?? Date.now();
+      // done may relabel the running row (model "Pensando" → "Escribiendo respuesta").
+      const finalName = (payload.tool_rename || '').trim() || toolName;
       const merged: ChatMsg = {
         role: 'heartbeat',
-        text: toolHeartbeatDisplayText(toolName, uiPhase, elapsedMs),
+        text: toolHeartbeatDisplayText(finalName, uiPhase, elapsedMs),
         heartbeatKind: 'tool',
         workerId: hbWorker || existing?.workerId,
         swarmSlot: hbSlot,
-        toolName,
+        toolName: finalName,
         toolInvocationId: existing?.toolInvocationId ?? createToolInvocationId(toolName),
         toolPhase: uiPhase ?? 'done',
         toolStartedAt: startedAt,
@@ -493,6 +501,7 @@ const pollDetachedActivity = (epoch: number) => {
               tool_name: ev.tool_name,
               tool_phase: ev.tool_phase,
               tool_detail: ev.tool_detail,
+              tool_rename: ev.tool_rename,
               elapsed_ms: ev.elapsed_ms,
               turn_user_index: ev.turn_user_index,
             });

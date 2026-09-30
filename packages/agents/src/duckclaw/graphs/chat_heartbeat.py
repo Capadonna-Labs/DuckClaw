@@ -406,6 +406,7 @@ def publish_admin_chat_heartbeat(
     tool_phase: str | None = None,
     tool_detail: str | None = None,
     elapsed_ms: float | int | None = None,
+    tool_rename: str | None = None,
 ) -> None:
     """
     Publica heartbeat para la UI admin (playground / widget flotante).
@@ -464,6 +465,9 @@ def publish_admin_chat_heartbeat(
     td = (tool_detail or "").strip()
     if td and tp == "error":
         body["tool_detail"] = td
+    tr = (tool_rename or "").strip()
+    if tr and tp in ("done", "error"):
+        body["tool_rename"] = tr
     if elapsed_ms is not None:
         try:
             body["elapsed_ms"] = max(0.0, float(elapsed_ms))

@@ -246,7 +246,7 @@ def register_ibkr_bracket_orders_skill(
         if len(cron_norm.split()) != 5 or not re.fullmatch(r"[0-9*/,\-\s]+", cron_norm):
             raise ValueError("cron must be a standard 5-field numeric PM2 cron expression")
 
-        default_name = f"quant-{ticker_norm.lower()}-{action_norm.lower()}-{qty}-shares-{run_date_utc.replace('-', '')}"
+        default_name = f"ibkr-{ticker_norm.lower()}-{action_norm.lower()}-{qty}-shares-{run_date_utc.replace('-', '')}"
         raw_name = str(name or default_name).strip()
         safe_name = re.sub(r"[^A-Za-z0-9_.-]+", "-", raw_name).strip("-")
         if not safe_name or len(safe_name) > 80:

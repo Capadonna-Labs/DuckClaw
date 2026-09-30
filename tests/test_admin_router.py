@@ -370,6 +370,7 @@ def test_catalog_skills_global_are_scoped_to_authenticated_db_skills(
             "id": "my_db_skill",
             "path": "db://skills/my_db_skill.py",
             "scope": "catalog",
+            "skill_type": "python",
         }
     ]
 

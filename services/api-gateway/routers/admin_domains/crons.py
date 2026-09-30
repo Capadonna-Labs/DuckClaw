@@ -85,7 +85,7 @@ def _cron_processes_from_jlist(stdout: str) -> list[dict[str, Any]]:
 def _describe_cron_process(name: str, script: str) -> str:
     clean = str(name or "").strip()
     match = re.fullmatch(
-        r"quant-([a-z0-9_.-]+)-(buy|sell)-([0-9]+)(?:-shares)?(?:-open)?-([0-9]{8})",
+        r"[a-z]+-([a-z0-9_.-]+)-(buy|sell)-([0-9]+)(?:-shares)?(?:-open)?-([0-9]{8})",
         clean,
         flags=re.IGNORECASE,
     )

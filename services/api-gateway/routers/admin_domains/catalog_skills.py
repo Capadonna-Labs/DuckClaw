@@ -174,7 +174,12 @@ async def create_catalog_skill(
         task_id = _enqueue_catalog_skill_command(command)
     except ValueError as exc:
         raise problem(400, str(exc), body.name) from exc
-    dto = _skill_dto(body.name, body.implementation_ref)
+    dto = _skill_dto(
+        body.name,
+        body.implementation_ref,
+        description=body.description,
+        skill_type=body.skill_type,
+    )
     admin_audit("catalog.skill.upsert", dto["id"], dto["path"], actor=actor)
     return {"ok": True, "task_id": task_id, "skill": dto}
 

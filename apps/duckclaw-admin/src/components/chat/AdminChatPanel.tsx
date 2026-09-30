@@ -29,10 +29,7 @@ import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSe
 import { workerOptionId, workerOptionLabel, resolveWorkerDisplayName } from '@/lib/workerOptions';
 import { PlaygroundChatStudioHeader } from '@/components/playground/PlaygroundChatStudioHeader';
 import { useComposeClipboard } from '@/components/chat/useComposeClipboard';
-import {
-  shouldShowSuggestionChips,
-  slashMenuEntryFromCatalogSkill,
-} from '@/components/chat/adminChatPure';
+import { shouldShowSuggestionChips, slashMenuEntryFromCatalogSkill } from '@/components/chat/adminChatPure';
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 
 export type AdminChatPanelProps = {

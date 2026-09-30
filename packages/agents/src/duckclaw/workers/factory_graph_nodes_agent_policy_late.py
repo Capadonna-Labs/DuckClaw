@@ -218,7 +218,12 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
                     _out_vis.update(_identity_fields(state))
                     return _out_vis
 
-                ctx.agent_turn.update({'force_orch_tool': ctx.agent_turn.get('force_orch_tool'), 'force_read_sql': force_read_sql, 'force_run_sandbox': force_run_sandbox, 'force_tavily': force_tavily, 'sandbox_enabled': sandbox_enabled})
+                from duckclaw.workers.factory_graph_nodes_prepare import sandbox_explicitly_enabled_for_chat
+
+                _sb_explicit = sandbox_enabled and sandbox_explicitly_enabled_for_chat(
+                    ctx.db, state.get("chat_id") or state.get("session_id"), state.get("tenant_id")
+                )
+                ctx.agent_turn.update({'force_orch_tool': ctx.agent_turn.get('force_orch_tool'), 'force_read_sql': force_read_sql, 'force_run_sandbox': force_run_sandbox, 'force_tavily': force_tavily, 'sandbox_enabled': sandbox_enabled, 'sandbox_explicit': _sb_explicit})
                 return None
 
     return run

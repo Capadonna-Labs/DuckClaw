@@ -107,25 +107,39 @@ def make_prepare_node(ctx: WorkerGraphContext):
     return prepare_node
 
 
+_SANDBOX_ON_VALUES = ("true", "1", "on", "sí", "si")
+
+
+def _sandbox_setting_raw(db: Any, chat_id: Any, tenant_id: Any) -> str:
+    from duckclaw.runtime_session_settings import resolve_session_runtime_setting
+
+    raw = resolve_session_runtime_setting(
+        db,
+        chat_id or "default",
+        "sandbox_enabled",
+        tenant_id=str(tenant_id or "default").strip() or "default",
+    )
+    return (raw or "").strip().lower()
+
+
 def sandbox_enabled_for_chat(db: Any, chat_id: Any, tenant_id: Any) -> bool:
     """Sandbox flag per chat/session (defaults OFF; ON for admin UI si no hay override).
 
     Single source for the worker tool surface and the manager's log line.
     """
     from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
-    from duckclaw.runtime_session_settings import resolve_session_runtime_setting
 
-    cid = chat_id or "default"
-    raw = resolve_session_runtime_setting(
-        db,
-        cid,
-        "sandbox_enabled",
-        tenant_id=str(tenant_id or "default").strip() or "default",
-    )
-    v = (raw or "").strip().lower()
-    if not v and is_admin_ui_chat_session(str(cid)):
+    v = _sandbox_setting_raw(db, chat_id, tenant_id)
+    if not v and is_admin_ui_chat_session(str(chat_id or "default")):
         return True
-    return v in ("true", "1", "on", "sí", "si")
+    return v in _SANDBOX_ON_VALUES
+
+
+def sandbox_explicitly_enabled_for_chat(db: Any, chat_id: Any, tenant_id: Any) -> bool:
+    """True only when the chat's sandbox toggle was switched ON (/sandbox on or the
+    admin switch) — not the admin-UI default. An explicit ON keeps run_sandbox bound
+    even when the message has no code/plot keyword."""
+    return _sandbox_setting_raw(db, chat_id, tenant_id) in _SANDBOX_ON_VALUES
 
 
 def make_sandbox_enabled_for_state(ctx: WorkerGraphContext):

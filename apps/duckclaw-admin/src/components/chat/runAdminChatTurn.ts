@@ -480,7 +480,8 @@ const appendHeartbeat = (payload: {
 // turn end / 15 min; a long-poll endpoint if request volume ever matters.
 const DETACHED_ACTIVITY_POLL_MS = 1_500;
 const DETACHED_COMPLETION_POLL_MS = 3_000;
-const DETACHED_POLL_MAX_MS = 15 * 60_000;
+// Sandbox-heavy turns run 15-20+ min; a 15-min cap left them stuck "running".
+const DETACHED_POLL_MAX_MS = 60 * 60_000;
 
 const scheduleDetachedPoll = (epoch: number, everyMs: number, tick: () => Promise<boolean>) => {
   const startedAt = Date.now();
@@ -545,6 +546,7 @@ const pollDetachedActivity = (epoch: number) => {
 };
 
 const pollDetachedCompletion = (epoch: number) => {
+  const completionStartedAt = Date.now();
   scheduleDetachedPoll(epoch, DETACHED_COMPLETION_POLL_MS, async () => {
     // Activity FIRST, history only after turn_done: the gateway persists the reply
     // before publishing turn_done, so this order can't pair a pre-reply history
@@ -555,7 +557,11 @@ const pollDetachedCompletion = (epoch: number) => {
     // backlog is emptied when the turn is accepted). History can't tell: the new
     // user message is persisted together with the reply, so "last user has a
     // reply" matched the *previous* turn and stopped polling after ~3 s.
-    if (!(activity.events || []).some((ev) => ev.kind === 'turn_done')) return false;
+    // Last round before the poll cap: finalize from history anyway so the turn
+    // can't stay "running" forever (e.g. gateway restarted mid-turn, no marker).
+    const lastRound =
+      Date.now() - completionStartedAt >= DETACHED_POLL_MAX_MS - DETACHED_COMPLETION_POLL_MS;
+    if (!lastRound && !(activity.events || []).some((ev) => ev.kind === 'turn_done')) return false;
     const data = await adminService.getConversation(chatId, effectiveTenantId || 'default');
     if (epoch !== detachedPollEpoch) return true;
     const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');

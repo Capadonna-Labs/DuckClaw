@@ -152,35 +152,49 @@ export function useDetachedTurnResume(opts: {
       setThinking(false);
     };
 
-    const checkCompletion = () => {
+    let finished = false;
+    const finishWithHistory = () =>
+      adminService.getConversation(chatId, tenantId).then((data) => {
+        if (cancelled || finished) return;
+        finished = true;
+        finishFromHistory(historyToChatMessages(data.messages, tenantId));
+      });
+
+    const checkCompletion = () =>
       // Gateway end marker (see runAdminChatTurn): history alone can't tell the
       // in-flight turn from the previous one.
-      void adminService
-        .getPlaygroundChatActivity(chatId, 80)
-        .then((activity) => {
-          if (cancelled) return undefined;
-          if (!(activity.events || []).some((ev) => ev.kind === 'turn_done')) return undefined;
-          return adminService.getConversation(chatId, tenantId);
-        })
-        .then((data) => {
-          if (cancelled || !data) return;
-          finishFromHistory(historyToChatMessages(data.messages, tenantId));
-        })
-        .catch(() => undefined);
-    };
+      adminService.getPlaygroundChatActivity(chatId, 80).then((activity) => {
+        if (cancelled) return undefined;
+        if (!(activity.events || []).some((ev) => ev.kind === 'turn_done')) return undefined;
+        return finishWithHistory();
+      });
 
-    // Every 2 s for the first 3 min (looks live), then sparser up to 10 min.
-    const delays = [
-      ...Array.from({ length: 90 }, (_, k) => 500 + k * 2_000),
-      210_000, 240_000, 300_000, 420_000, 600_000,
-    ];
-    const timers = delays.flatMap((delay) => [
-      window.setTimeout(applyActivity, delay),
-      window.setTimeout(checkCompletion, delay + 250),
-    ]);
+    // Poll until the turn ends: a fixed schedule (last check at 10 min) left
+    // long turns (sandbox runs of 15-20 min) stuck "running" forever.
+    // ponytail: 2 s polling capped at DETACHED_RESUME_MAX_MS, then a final history
+    // reload clears loading so the UI can never stay stuck.
+    const DETACHED_RESUME_POLL_MS = 2_000;
+    const DETACHED_RESUME_MAX_MS = 60 * 60_000;
+    const resumeStartedAt = Date.now();
+    let timer = 0;
+    const tick = () => {
+      if (cancelled || finished) return;
+      applyActivity();
+      void checkCompletion()
+        .catch(() => undefined)
+        .then(() => {
+          if (cancelled || finished) return;
+          if (Date.now() - resumeStartedAt >= DETACHED_RESUME_MAX_MS) {
+            void finishWithHistory().catch(() => undefined);
+            return;
+          }
+          timer = window.setTimeout(tick, DETACHED_RESUME_POLL_MS);
+        });
+    };
+    timer = window.setTimeout(tick, 500);
     return () => {
       cancelled = true;
-      timers.forEach((id) => window.clearTimeout(id));
+      window.clearTimeout(timer);
     };
   }, [
     chatId,

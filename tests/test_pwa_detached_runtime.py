@@ -112,6 +112,18 @@ def test_tool_usage_clock_runs_until_turn_end() -> None:
     assert completion.index("getPlaygroundChatActivity(") < completion.index("getConversation(")
 
 
+def test_detached_polls_outlive_long_turns_and_never_stay_stuck() -> None:
+    """Sandbox turns run 15-20+ min: polling must keep going until turn_done and,
+    at the cap, finalize from history instead of leaving loading on forever."""
+    turn = (ROOT / "apps/duckclaw-admin/src/components/chat/runAdminChatTurn.ts").read_text(encoding="utf-8")
+    resume = (ROOT / "apps/duckclaw-admin/src/components/chat/useDetachedTurnResume.ts").read_text(encoding="utf-8")
+    assert "const DETACHED_POLL_MAX_MS = 60 * 60_000;" in turn
+    assert "lastRound" in turn.split("const pollDetachedCompletion", 1)[1]
+    assert "const DETACHED_RESUME_MAX_MS = 60 * 60_000;" in resume
+    assert "600_000" not in resume  # old fixed schedule: last check at 10 min
+    assert "void finishWithHistory()" in resume
+
+
 def test_detached_turn_resets_backlog_and_marks_turn_done() -> None:
     route = (
         ROOT / "services/api-gateway/routers/admin_domains/playground/chat_routes.py"

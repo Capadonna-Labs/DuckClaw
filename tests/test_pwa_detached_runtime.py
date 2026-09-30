@@ -107,6 +107,9 @@ def test_tool_usage_clock_runs_until_turn_end() -> None:
     assert "liveWhileLoading={loading && itemIdx === liveToolGroupIdx}" in message_list
     completion = turn.split("const pollDetachedCompletion = (epoch: number) =>", 1)[1]
     assert "ev.kind === 'turn_done'" in completion
+    # History must be read AFTER seeing turn_done, or a pre-reply history can be
+    # paired with the end marker and the final answer never shows.
+    assert completion.index("getPlaygroundChatActivity(") < completion.index("getConversation(")
 
 
 def test_detached_turn_resets_backlog_and_marks_turn_done() -> None:

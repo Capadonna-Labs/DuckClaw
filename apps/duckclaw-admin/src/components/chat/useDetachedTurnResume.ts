@@ -70,16 +70,15 @@ export function useDetachedTurnResume(opts: {
         .then((data) => {
           if (cancelled) return;
           const heartbeats: ChatMsg[] = [];
+          const skew = data.server_ts != null ? Date.now() - data.server_ts : 0;
           for (const ev of data.events || []) {
             const toolName = String(ev.tool_name || '').trim();
             if (ev.kind !== 'tool' || !toolName) continue;
-            const key = [
-              ev.worker_id || '',
-              toolName,
-              ev.tool_phase || '',
-              ev.elapsed_ms ?? '',
-              ev.text || '',
-            ].join('|');
+            // ts = event identity; content keys dropped identical repeats.
+            const key =
+              ev.ts != null
+                ? `ts:${ev.ts}`
+                : [ev.worker_id || '', toolName, ev.tool_phase || '', ev.elapsed_ms ?? '', ev.text || ''].join('|');
             if (seenActivity.has(key)) continue;
             seenActivity.add(key);
             const phase = mapSseToolPhase(ev.tool_phase);
@@ -87,8 +86,9 @@ export function useDetachedTurnResume(opts: {
               ev.elapsed_ms != null && Number.isFinite(Number(ev.elapsed_ms))
                 ? Number(ev.elapsed_ms)
                 : undefined;
+            const eventAt = ev.ts != null ? ev.ts + skew : Date.now();
             const startedAt =
-              elapsedMs != null ? Date.now() - elapsedMs : pending.startedAt;
+              elapsedMs != null ? eventAt - elapsedMs : ev.ts != null ? eventAt : pending.startedAt;
             heartbeats.push({
               role: 'heartbeat',
               text: toolHeartbeatDisplayText(toolName, phase, elapsedMs),
@@ -158,14 +158,12 @@ export function useDetachedTurnResume(opts: {
         .then((data) => {
           if (cancelled) return;
           const fromServer = historyToChatMessages(data.messages, tenantId);
+          // Last user turn by position (attachment sends are stored with a different
+          // text, so an exact match never resolved) — same as runAdminChatTurn.
           const userIdx = [...fromServer]
             .map((m, i) => ({ m, i }))
             .reverse()
-            .find(
-              ({ m }) =>
-                m.role === 'user' &&
-                (m.text || '').trim() === pending.text.trim()
-            )?.i;
+            .find(({ m }) => m.role === 'user')?.i;
           const done =
             userIdx != null &&
             fromServer
@@ -177,8 +175,10 @@ export function useDetachedTurnResume(opts: {
         .catch(() => undefined);
     };
 
+    // Every 2 s for the first 3 min (looks live), then sparser up to 10 min.
     const delays = [
-      500, 2_000, 5_000, 10_000, 20_000, 35_000, 60_000, 90_000, 120_000, 180_000, 240_000, 300_000,
+      ...Array.from({ length: 90 }, (_, k) => 500 + k * 2_000),
+      210_000, 240_000, 300_000, 420_000, 600_000,
     ];
     const timers = delays.flatMap((delay) => [
       window.setTimeout(applyActivity, delay),

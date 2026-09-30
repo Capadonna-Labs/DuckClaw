@@ -372,7 +372,10 @@ export const chatApi = {
         tool_rename?: string;
         elapsed_ms?: number;
         turn_user_index?: number;
+        /** Server epoch ms of the event (identity + real start time). */
+        ts?: number;
       }[];
+      server_ts?: number;
     }>(`/playground/chat/activity?${q.toString()}`);
   },
 

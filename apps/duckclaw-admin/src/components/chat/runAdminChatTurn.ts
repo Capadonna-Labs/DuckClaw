@@ -38,6 +38,7 @@ import {
   collectEphemeralMessages,
   coalesceTrailingToolHeartbeats,
   findHeartbeatInsertIndex,
+  hasToolHeartbeatInCurrentTurn,
   isLoopProgressHeartbeat,
   mergeHistoryWithEphemeral,
   preserveInFlightOptimisticTurn,
@@ -329,6 +330,8 @@ const appendHeartbeat = (payload: {
   tool_rename?: string;
   elapsed_ms?: number;
   turn_user_index?: number;
+  /** Detached polling: real event time on the client clock (else "now"). */
+  started_at_ms?: number;
 }) => {
   const kind = payload.kind ?? 'status';
   if (
@@ -401,7 +404,7 @@ const appendHeartbeat = (payload: {
           next[runningIdx] = merged;
           return coalesceTrailingToolHeartbeats(next);
         }
-        const startedAt = Date.now();
+        const startedAt = payload.started_at_ms ?? Date.now();
         const merged: ChatMsg = {
           role: 'heartbeat',
           text: toolHeartbeatDisplayText(toolName, 'running', undefined),
@@ -421,7 +424,9 @@ const appendHeartbeat = (payload: {
 
       const targetIdx = runningIdx;
       const existing = targetIdx >= 0 ? m[targetIdx] : null;
-      const startedAt = existing?.toolStartedAt ?? Date.now();
+      const startedAt =
+        existing?.toolStartedAt ??
+        (payload.started_at_ms != null ? payload.started_at_ms - (elapsedMs ?? 0) : Date.now());
       // done may relabel the running row (model "Pensando" → "Escribiendo respuesta").
       const finalName = (payload.tool_rename || '').trim() || toolName;
       const merged: ChatMsg = {
@@ -470,18 +475,45 @@ const appendHeartbeat = (payload: {
   }
 };
 
-const pollDetachedActivity = (epoch: number) => {
-  const delays = [2_000, 5_000, 10_000, 20_000, 35_000, 60_000, 90_000, 120_000, 180_000, 240_000];
-  const seenKeys = new Set<string>();
-  for (const delay of delays) {
+// Detached (iOS PWA) turns have no SSE: poll the per-turn backlog often enough to
+// look live. ponytail: fixed-interval polling (one Redis LRANGE each), stops at
+// turn end / 15 min; a long-poll endpoint if request volume ever matters.
+const DETACHED_ACTIVITY_POLL_MS = 1_500;
+const DETACHED_COMPLETION_POLL_MS = 3_000;
+const DETACHED_POLL_MAX_MS = 15 * 60_000;
+
+const scheduleDetachedPoll = (epoch: number, everyMs: number, tick: () => Promise<boolean>) => {
+  const startedAt = Date.now();
+  const loop = () => {
     const id = window.setTimeout(() => {
       if (epoch !== detachedPollEpoch) return;
-      void adminService
-        .getPlaygroundChatActivity(chatId, 40)
-        .then((data) => {
-          if (epoch !== detachedPollEpoch) return;
-          for (const ev of data.events || []) {
-            const key = [
+      void tick()
+        .catch(() => false)
+        .then((stop) => {
+          if (!stop && epoch === detachedPollEpoch && Date.now() - startedAt < DETACHED_POLL_MAX_MS) {
+            loop();
+          }
+        });
+    }, everyMs);
+    detachedPollTimers.push(id);
+  };
+  loop();
+};
+
+const pollDetachedActivity = (epoch: number) => {
+  const seenKeys = new Set<string>();
+  scheduleDetachedPoll(epoch, DETACHED_ACTIVITY_POLL_MS, async () => {
+    const data = await adminService.getPlaygroundChatActivity(chatId, 80);
+    if (epoch !== detachedPollEpoch) return true;
+    // Map server event times onto this device's clock (phone/VPS skew).
+    const skew = data.server_ts != null ? Date.now() - data.server_ts : 0;
+    for (const ev of data.events || []) {
+      // ts identifies each event; content keys collapsed identical repeats
+      // (every "Pensando"/read_sql start), so rows never showed as running.
+      const key =
+        ev.ts != null
+          ? `ts:${ev.ts}`
+          : [
               ev.kind || '',
               ev.worker_id || '',
               ev.tool_name || '',
@@ -489,94 +521,76 @@ const pollDetachedActivity = (epoch: number) => {
               ev.text || '',
               ev.elapsed_ms ?? '',
             ].join('|');
-            if (!key || seenKeys.has(key)) continue;
-            seenKeys.add(key);
-            appendHeartbeat({
-              text: ev.text,
-              kind: ev.kind,
-              worker_id: ev.worker_id,
-              swarm_slot: ev.swarm_slot,
-              artifact_id: ev.artifact_id,
-              artifact_tenant_id: ev.artifact_tenant_id,
-              tool_name: ev.tool_name,
-              tool_phase: ev.tool_phase,
-              tool_detail: ev.tool_detail,
-              tool_rename: ev.tool_rename,
-              elapsed_ms: ev.elapsed_ms,
-              turn_user_index: ev.turn_user_index,
-            });
-          }
-        })
-        .catch(() => undefined);
-    }, delay);
-    detachedPollTimers.push(id);
-  }
+      if (!key || seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      appendHeartbeat({
+        text: ev.text,
+        kind: ev.kind,
+        worker_id: ev.worker_id,
+        swarm_slot: ev.swarm_slot,
+        artifact_id: ev.artifact_id,
+        artifact_tenant_id: ev.artifact_tenant_id,
+        tool_name: ev.tool_name,
+        tool_phase: ev.tool_phase,
+        tool_detail: ev.tool_detail,
+        tool_rename: ev.tool_rename,
+        elapsed_ms: ev.elapsed_ms,
+        turn_user_index: ev.turn_user_index,
+        started_at_ms: ev.ts != null ? ev.ts + skew : undefined,
+      });
+    }
+    return false;
+  });
 };
 
 const pollDetachedCompletion = (epoch: number) => {
-  const delays = [3_000, 8_000, 15_000, 30_000, 60_000, 120_000, 180_000, 240_000, 300_000];
-  for (const delay of delays) {
-    const id = window.setTimeout(() => {
-      if (epoch !== detachedPollEpoch) return;
-      void adminService
-        .getConversation(chatId, effectiveTenantId || 'default')
-        .then((data) =>
-          Promise.all([
-            Promise.resolve(data),
-            adminService.getPlaygroundChatActivity(chatId, 80).catch(() => ({ events: [] })),
-          ])
-        )
-        .then(([data, activity]) => {
-          if (epoch !== detachedPollEpoch) return;
-          const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
-          // Match the most recent user turn by position, not by exact text —
-          // an attachment-only send (e.g. a pasted mensaje.txt with a short or
-          // empty caption) gets stored server-side as a different string (the
-          // [DOCUMENTOS_ADJUNTOS] annotation), so comparing against the raw
-          // client `text` never matched and this poll silently never resolved.
-          // Single-operator admin chat: the last user entry is always ours.
-          const userIdx = [...fromServer]
-            .map((m, i) => ({ m, i }))
-            .reverse()
-            .find(({ m }) => m.role === 'user')?.i;
-          const done =
-            userIdx != null &&
-            fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
-          if (!done) return;
-          const activeWorker = workerId || '';
-          const activityEphemeral = toolHeartbeatsFromActivity(
-            activity.events || [],
-            activeWorker
-          );
-          setMessages((prev) => {
-            const ephemeral = mergeEphemeralHeartbeats(
-              mergeEphemeralHeartbeats(
-                readEphemeralHeartbeats(chatId, activeWorker),
-                filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
-              ),
-              activityEphemeral
-            );
-            const base = preserveInFlightOptimisticTurn(
-              fromServer.length ? fromServer : prev,
-              prev,
-              text
-            );
-            const withImages = preserveImagePreviewsFromPrevious(base, prev);
-            return stripThinkingStatusHeartbeats(
-              finalizeRunningToolHeartbeats(
-                mergeHistoryWithEphemeral(withImages, ephemeral)
-              )
-            );
-          });
-          setLoading(false);
-          setThinking(false);
-          clearPendingDetachedTurn(chatId);
-          onConversationActivity?.();
-        })
-        .catch(() => undefined);
-    }, delay);
-    detachedPollTimers.push(id);
-  }
+  scheduleDetachedPoll(epoch, DETACHED_COMPLETION_POLL_MS, async () => {
+    const data = await adminService.getConversation(chatId, effectiveTenantId || 'default');
+    const activity = await adminService
+      .getPlaygroundChatActivity(chatId, 80)
+      .catch(() => ({ events: [] as never[] }));
+    if (epoch !== detachedPollEpoch) return true;
+    const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
+    // Match the most recent user turn by position, not by exact text —
+    // an attachment-only send (e.g. a pasted mensaje.txt with a short or
+    // empty caption) gets stored server-side as a different string (the
+    // [DOCUMENTOS_ADJUNTOS] annotation), so comparing against the raw
+    // client `text` never matched and this poll silently never resolved.
+    // Single-operator admin chat: the last user entry is always ours.
+    const userIdx = [...fromServer]
+      .map((m, i) => ({ m, i }))
+      .reverse()
+      .find(({ m }) => m.role === 'user')?.i;
+    const done =
+      userIdx != null &&
+      fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
+    if (!done) return false;
+    const activeWorker = workerId || '';
+    const activityEphemeral = toolHeartbeatsFromActivity(activity.events || [], activeWorker);
+    setMessages((prev) => {
+      // The activity poll already put this turn's rows in `prev`; re-adding the
+      // backlog (fresh start times → different dedupe keys) duplicated them.
+      const ephemeral = mergeEphemeralHeartbeats(
+        mergeEphemeralHeartbeats(
+          readEphemeralHeartbeats(chatId, activeWorker),
+          filterEphemeralForWorker(collectEphemeralMessages(prev), activeWorker)
+        ),
+        hasToolHeartbeatInCurrentTurn(prev) ? [] : activityEphemeral
+      );
+      const base = preserveInFlightOptimisticTurn(fromServer.length ? fromServer : prev, prev, text);
+      const withImages = preserveImagePreviewsFromPrevious(base, prev);
+      return stripThinkingStatusHeartbeats(
+        finalizeRunningToolHeartbeats(mergeHistoryWithEphemeral(withImages, ephemeral))
+      );
+    });
+    setLoading(false);
+    setThinking(false);
+    clearPendingDetachedTurn(chatId);
+    onConversationActivity?.();
+    // Stops the activity poll too (same epoch).
+    beginDetachedPollEpoch();
+    return true;
+  });
 };
 
 // Solo desbloquear audio si este turno pedirá TTS. Un play() silencioso en
@@ -616,14 +630,10 @@ try {
           startedAt: Date.now(),
         });
         detachedRunning = true;
-        setThinking(false);
-        setMessages((m) => {
-          const next =
-            m[m.length - 1]?.role === 'assistant' && m[m.length - 1]?.streaming
-              ? m.slice(0, -1)
-              : m;
-          return coalesceTrailingToolHeartbeats(stripThinkingStatusHeartbeats(next));
-        });
+        // Keep the empty streaming bubble + thinking: they render the Tool Usage
+        // "Pensando" placeholder until the first polled rows arrive (dropping them
+        // left the turn blank for seconds on iOS).
+        setMessages((m) => coalesceTrailingToolHeartbeats(stripThinkingStatusHeartbeats(m)));
         {
           const epoch = beginDetachedPollEpoch();
           pollDetachedActivity(epoch);
@@ -671,15 +681,8 @@ try {
         startedAt: Date.now(),
       });
       detachedRunning = true;
-      setThinking(false);
-      setMessages((m) => {
-        if (m.length === 0) return m;
-        const next =
-          m[m.length - 1]?.role === 'assistant' ? m.slice(0, -1) : [...m];
-        return coalesceTrailingToolHeartbeats(
-          stripThinkingStatusHeartbeats(next)
-        );
-      });
+      // Same as the accepted path: keep the placeholder bubble while polling.
+      setMessages((m) => coalesceTrailingToolHeartbeats(stripThinkingStatusHeartbeats(m)));
       {
         const epoch = beginDetachedPollEpoch();
         pollDetachedActivity(epoch);

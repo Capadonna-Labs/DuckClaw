@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 RUNTIME_SESSION_DOMAIN = "runtime.session"
@@ -36,7 +37,11 @@ def resolve_session_runtime_setting(
             default=default,
         )
         return str(resolved.get("value") or "").strip()
-    except Exception:
+    except Exception as exc:
+        # A swallowed read silently flipped per-chat toggles (e.g. sandbox) to their default.
+        logging.getLogger(__name__).warning(
+            "runtime session setting %s unreadable for chat=%s: %s", key, chat_id, exc
+        )
         return default
 
 

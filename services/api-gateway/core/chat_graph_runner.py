@@ -370,6 +370,9 @@ async def run_chat_graph(
             set_admin_chat_turn_user_index(session_id, turn_user_index)
         except Exception:
             heartbeat_turn_token = None
+        from core.admin_chat_heartbeat import reset_admin_heartbeat_backlog
+
+        await reset_admin_heartbeat_backlog(redis_client, session_id)
         if prepared.auth_policy in {"trusted_admin_console", "trusted_channel_route"}:
             admin_pg_vault = (prepared.payload_vault or prepared.vault_db_path or "").strip()
             if admin_pg_vault:

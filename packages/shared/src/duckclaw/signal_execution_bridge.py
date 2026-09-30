@@ -658,6 +658,8 @@ async def execute_protective_oca_for_signal(
         "status": "submitted",
         "tp_order_id": result.get("tp_order_id"),
         "sl_order_id": result.get("sl_order_id"),
+        "sl_order_type": result.get("sl_order_type"),
+        "sl_fallback_reason": result.get("sl_fallback_reason"),
         "oca_group": oca_group,
     }
 

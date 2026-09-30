@@ -107,25 +107,35 @@ def make_prepare_node(ctx: WorkerGraphContext):
     return prepare_node
 
 
+def sandbox_enabled_for_chat(db: Any, chat_id: Any, tenant_id: Any) -> bool:
+    """Sandbox flag per chat/session (defaults OFF; ON for admin UI si no hay override).
+
+    Single source for the worker tool surface and the manager's log line.
+    """
+    from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+    from duckclaw.runtime_session_settings import resolve_session_runtime_setting
+
+    cid = chat_id or "default"
+    raw = resolve_session_runtime_setting(
+        db,
+        cid,
+        "sandbox_enabled",
+        tenant_id=str(tenant_id or "default").strip() or "default",
+    )
+    v = (raw or "").strip().lower()
+    if not v and is_admin_ui_chat_session(str(cid)):
+        return True
+    return v in ("true", "1", "on", "sí", "si")
+
+
 def make_sandbox_enabled_for_state(ctx: WorkerGraphContext):
     db = ctx.db
 
     def _sandbox_enabled_for_state(state: dict) -> bool:
-        """Sandbox flag per chat/session (defaults OFF; ON for admin UI si no hay override)."""
-        from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
-        from duckclaw.runtime_session_settings import resolve_session_runtime_setting
-
-        chat_id = state.get("chat_id") or state.get("session_id") or "default"
-        tenant_id = str(state.get("tenant_id") or "default").strip() or "default"
-        raw = resolve_session_runtime_setting(
+        return sandbox_enabled_for_chat(
             db,
-            chat_id,
-            "sandbox_enabled",
-            tenant_id=tenant_id,
+            state.get("chat_id") or state.get("session_id"),
+            state.get("tenant_id"),
         )
-        v = (raw or "").strip().lower()
-        if not v and is_admin_ui_chat_session(str(chat_id)):
-            return True
-        return v in ("true", "1", "on", "sí", "si")
 
     return _sandbox_enabled_for_state

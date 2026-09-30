@@ -237,15 +237,9 @@ def build_invoke_worker_node(
                     except Exception:
                         pass
             _cfg_db = _agent_config_db_for_vault(db, vault_db_path or None)
-            from duckclaw.runtime_session_settings import resolve_session_runtime_setting
+            from duckclaw.workers.factory_graph_nodes_prepare import sandbox_enabled_for_chat
 
-            raw_sb = resolve_session_runtime_setting(
-                _cfg_db,
-                chat_id,
-                "sandbox_enabled",
-                tenant_id=tenant_id,
-            )
-            sb_on = (raw_sb or "").strip().lower() in ("true", "1", "on", "sí", "si")
+            sb_on = sandbox_enabled_for_chat(_cfg_db, chat_id, tenant_id)
             db_display = vault_db_path or db_path or "(unknown)"
             if _will_suspend_ro:
                 db.suspend_readonly_file_handle()

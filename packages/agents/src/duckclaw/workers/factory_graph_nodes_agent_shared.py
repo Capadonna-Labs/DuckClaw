@@ -13,6 +13,27 @@ except ImportError:
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 
 
+def log_llm_usage(
+    worker_label: str, t0: Optional[float] = None, *, tool_calls: Any = None, error: Any = None
+) -> float:
+    """``llm_usage:`` console lines, same shape as ``tool_usage:``.
+
+    ``t0=None`` logs ``phase=thinking`` and returns the start time. With ``t0`` the
+    call finished: ``decided_tools`` / ``writing`` / ``error`` + elapsed. The invoke
+    is non-streaming, so "writing" is only known once the answer comes back.
+    """
+    import logging
+    import time
+
+    log = logging.getLogger("duckclaw.workers.factory_graph_nodes_agent_invoke")
+    if t0 is None:
+        log.info("llm_usage: worker=%s | phase=thinking", worker_label)
+        return time.monotonic()
+    phase = "error" if error is not None else ("decided_tools" if tool_calls else "writing")
+    log.info("llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f", worker_label, phase, (time.monotonic() - t0) * 1000)
+    return t0
+
+
 def load_agent_env(ctx: WorkerGraphContext) -> dict[str, Any]:
     """Execute AGENT_CTX_UNPACK; caller must materialize names for nested closures."""
     env: dict[str, Any] = {"ctx": ctx}

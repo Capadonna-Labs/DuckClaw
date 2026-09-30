@@ -18,10 +18,7 @@ from duckclaw.workers.factory_agent_node_helpers import (
     _raise_if_chat_cancelled_from_state,
     _worker_log_label,
 )
-from duckclaw.forge.rag.prompt_policy import (
-    playground_document_turn_system_prompt,
-    rag_turn_system_prompt,
-)
+from duckclaw.forge.rag.prompt_policy import playground_document_turn_system_prompt, rag_turn_system_prompt
 from duckclaw.forge.rag.tool_policy import (
     should_prioritize_documents_over_storage_tools,
     should_prioritize_rag_over_storage_tools,
@@ -32,7 +29,7 @@ from duckclaw.workers.db_intent_policy import explicit_duckdb_storage_request
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.factory_graph_nodes_agent_policy_early import make_agent_policy_early
 from duckclaw.workers.factory_graph_nodes_agent_policy_late import make_agent_policy_late
-from duckclaw.workers.factory_graph_nodes_agent_shared import load_agent_env, unpack_agent_bindings
+from duckclaw.workers.factory_graph_nodes_agent_shared import load_agent_env, log_llm_usage, unpack_agent_bindings
 from duckclaw.workers.factory_reddit_helpers import _patch_reddit_get_post_args_from_canonical_url
 from duckclaw.workers.provider_input_budget import apply_provider_input_budget as _apply_provider_input_budget
 from duckclaw.workers.runtime_policy_helpers import worker_use_heuristic_first_tool as _worker_use_heuristic_first_tool
@@ -323,6 +320,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 bound_tools_n=_bound_n,
             )
         _llm_invoke_exc: BaseException | None = None
+        _llm_t0 = log_llm_usage(_wl)
         try:
             _raise_if_chat_cancelled_from_state(state)
             from duckclaw.integrations.llm_providers import invoke_chat_model_with_transient_retries
@@ -358,6 +356,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
             resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
         tool_calls = getattr(resp, "tool_calls", None) or []
+        log_llm_usage(_wl, _llm_t0, tool_calls=tool_calls, error=_llm_invoke_exc)
         _is_goals_tick = (
             str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
             and proactive_review_event_phrase_in_text(str(incoming or ""))

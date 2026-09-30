@@ -30,7 +30,7 @@ export function strongLogCategoryClass(line: string): string | null {
   ) {
     return 'text-red-700 dark:text-red-400';
   }
-  if (/\[TOOL\]|\[PLAN\]|tool_usage:|\btool=/i.test(t)) {
+  if (/\[TOOL\]|\[PLAN\]|tool_usage:|llm_usage:|\btool=/i.test(t)) {
     return 'text-yellow-700 dark:text-yellow-300';
   }
   return null;

@@ -31,6 +31,10 @@ describe('ansiLogParse', () => {
       ).className,
     ).toBe('text-yellow-700 dark:text-yellow-300');
     expect(
+      colorizePlainLogLine('2026-09-30 14:10:02 | [user:x] | llm_usage: worker=quant_analyst | phase=thinking')
+        .className,
+    ).toBe('text-yellow-700 dark:text-yellow-300');
+    expect(
       colorizePlainLogLine("[quant_analyst] tool=read_sql | result_len=595 | preview='...'").className,
     ).toBe('text-yellow-700 dark:text-yellow-300');
     expect(

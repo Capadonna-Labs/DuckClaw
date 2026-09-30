@@ -3,6 +3,7 @@
 import type { ChatMsg } from '@/components/chat/types';
 import {
   formatToolDisplayName,
+  formatToolDurationMs,
   isToolHeartbeatRunning,
   parseToolNameFromHeartbeatText,
 } from '@/lib/toolHeartbeat';
@@ -146,6 +147,24 @@ export interface GroupedToolInvocation {
   isRunning: boolean;
   isError: boolean;
   messages: ChatMsg[];
+}
+
+/**
+ * Right-aligned duration for a compact tool row. Single figure unless several
+ * calls actually took different times — then "avg · max" (both shown only when
+ * they'd read differently, not repeated when every call took the same).
+ */
+export function toolRowDurationLabel(
+  grouped: Pick<GroupedToolInvocation, 'count' | 'latestMs' | 'maxMs' | 'averageMs' | 'isRunning'>,
+  liveMs: number | null = null
+): { primary: string; secondary: string } {
+  if (grouped.isRunning) return { primary: formatToolDurationMs(liveMs), secondary: '' };
+  const max = formatToolDurationMs(grouped.maxMs);
+  const avg = formatToolDurationMs(grouped.averageMs);
+  if (grouped.count > 1 && max && avg && max !== avg) {
+    return { primary: max, secondary: `prom ${avg}` };
+  }
+  return { primary: formatToolDurationMs(grouped.latestMs) || max || avg, secondary: '' };
 }
 
 /** Agrupa herramientas repetidas del mismo tipo, mostrando contador y promedios. */

@@ -31,6 +31,7 @@ export type SseChatEvent =
       tool_name?: string;
       tool_phase?: 'start' | 'done' | 'error';
       tool_detail?: string;
+      tool_rename?: string;
       elapsed_ms?: number;
       turn_user_index?: number;
     }
@@ -147,6 +148,7 @@ function parseDataLine(data: string): SseChatEvent | null {
         tool_name: typeof j.tool_name === 'string' ? j.tool_name : undefined,
         tool_phase,
         tool_detail: typeof j.tool_detail === 'string' ? j.tool_detail : undefined,
+        tool_rename: typeof j.tool_rename === 'string' ? j.tool_rename : undefined,
         elapsed_ms: Number.isFinite(elapsed_ms) ? elapsed_ms : undefined,
         turn_user_index: Number.isFinite(turn_user_index)
           ? Math.max(1, Math.floor(turn_user_index!))

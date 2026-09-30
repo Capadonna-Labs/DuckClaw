@@ -109,6 +109,7 @@ async def invoke_chat_sse_body(
                     tool_name=str(hb.get("tool_name") or "").strip() or None,
                     tool_phase=str(hb.get("tool_phase") or "").strip().lower() or None,
                     tool_detail=str(hb.get("tool_detail") or "").strip() or None,
+                    tool_rename=str(hb.get("tool_rename") or "").strip() or None,
                     elapsed_ms=hb.get("elapsed_ms"),
                     turn_user_index=hb.get("turn_user_index"),
                 )
@@ -142,6 +143,7 @@ async def invoke_chat_sse_body(
                 tool_name=str(hb.get("tool_name") or "").strip() or None,
                 tool_phase=str(hb.get("tool_phase") or "").strip().lower() or None,
                 tool_detail=str(hb.get("tool_detail") or "").strip() or None,
+                tool_rename=str(hb.get("tool_rename") or "").strip() or None,
                 elapsed_ms=hb.get("elapsed_ms"),
                 turn_user_index=hb.get("turn_user_index"),
             )

@@ -369,6 +369,7 @@ export const chatApi = {
         tool_name?: string;
         tool_phase?: 'start' | 'done' | 'error';
         tool_detail?: string;
+        tool_rename?: string;
         elapsed_ms?: number;
         turn_user_index?: number;
       }[];

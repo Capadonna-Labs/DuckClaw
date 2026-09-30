@@ -13,14 +13,25 @@ except ImportError:
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 
 
-def log_llm_usage(
-    worker_label: str, t0: Optional[float] = None, *, tool_calls: Any = None, error: Any = None
-) -> float:
-    """``llm_usage:`` console lines, same shape as ``tool_usage:``.
+LLM_THINKING_ROW = "Pensando"
+LLM_WRITING_ROW = "Escribiendo respuesta"
 
-    ``t0=None`` logs ``phase=thinking`` and returns the start time. With ``t0`` the
-    call finished: ``decided_tools`` / ``writing`` / ``error`` + elapsed. The invoke
-    is non-streaming, so "writing" is only known once the answer comes back.
+
+def log_llm_usage(
+    worker_label: str,
+    t0: Optional[float] = None,
+    *,
+    state: Optional[dict[str, Any]] = None,
+    tool_calls: Any = None,
+    error: Any = None,
+) -> float:
+    """``llm_usage:`` console lines (same shape as ``tool_usage:``) + a row in the
+    admin Tool Usage box.
+
+    ``t0=None`` logs ``phase=thinking`` and opens a running "Pensando" row; returns
+    the start time. With ``t0`` the call finished: ``decided_tools`` / ``writing`` /
+    ``error`` + elapsed; a final answer relabels the row "Escribiendo respuesta".
+    The invoke is non-streaming, so "writing" is only known once the answer returns.
     """
     import logging
     import time
@@ -28,10 +39,51 @@ def log_llm_usage(
     log = logging.getLogger("duckclaw.workers.factory_graph_nodes_agent_invoke")
     if t0 is None:
         log.info("llm_usage: worker=%s | phase=thinking", worker_label)
+        _publish_llm_row(state, worker_label, "start")
         return time.monotonic()
     phase = "error" if error is not None else ("decided_tools" if tool_calls else "writing")
-    log.info("llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f", worker_label, phase, (time.monotonic() - t0) * 1000)
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    log.info("llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f", worker_label, phase, elapsed_ms)
+    _publish_llm_row(
+        state,
+        worker_label,
+        "error" if phase == "error" else "done",
+        elapsed_ms=elapsed_ms,
+        rename=LLM_WRITING_ROW if phase == "writing" else "",
+    )
     return t0
+
+
+def _publish_llm_row(
+    state: Optional[dict[str, Any]],
+    worker_label: str,
+    phase: str,
+    *,
+    elapsed_ms: Optional[float] = None,
+    rename: str = "",
+) -> None:
+    """Fire-and-forget; admin UI chats only (same gate as tool heartbeats)."""
+    chat_id = str((state or {}).get("chat_id") or (state or {}).get("session_id") or "").strip()
+    if not chat_id:
+        return
+    try:
+        from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session, publish_admin_chat_heartbeat
+
+        if not is_admin_ui_chat_session(chat_id):
+            return
+        head = str((state or {}).get("subagent_instance_label") or "").strip() or worker_label
+        publish_admin_chat_heartbeat(
+            chat_id,
+            f"🧠 {LLM_THINKING_ROW}",
+            kind="tool",
+            worker_id=head or None,
+            tool_name=LLM_THINKING_ROW,
+            tool_phase=phase,
+            elapsed_ms=elapsed_ms,
+            tool_rename=rename or None,
+        )
+    except Exception:
+        pass
 
 
 def load_agent_env(ctx: WorkerGraphContext) -> dict[str, Any]:

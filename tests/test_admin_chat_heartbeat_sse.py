@@ -18,6 +18,20 @@ def test_sse_heartbeat_payload() -> None:
     assert '"kind": "tool"' in raw
 
 
+def test_sse_heartbeat_tool_rename_only_on_done() -> None:
+    # Model row: running "Pensando" relabeled to "Escribiendo respuesta" on done.
+    done = sse_heartbeat(
+        "🧠 Pensando", kind="tool", tool_name="Pensando", tool_phase="done",
+        elapsed_ms=900, tool_rename="Escribiendo respuesta",
+    )
+    assert '"tool_rename": "Escribiendo respuesta"' in done
+    start = sse_heartbeat(
+        "🧠 Pensando", kind="tool", tool_name="Pensando", tool_phase="start",
+        tool_rename="Escribiendo respuesta",
+    )
+    assert "tool_rename" not in start
+
+
 def test_sse_heartbeat_worker_and_slot() -> None:
     raw = sse_heartbeat("Paso actual", kind="status", worker_id="BI-Analyst", swarm_slot=2)
     assert '"worker_id": "BI-Analyst"' in raw

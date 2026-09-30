@@ -124,6 +124,101 @@ async def _run_context_fold_fly_command(
     return (result_payload, time.monotonic())
 
 
+async def _auto_compact_history_if_needed(
+    prepared: PreparedChatInvoke,
+    *,
+    redis_client: Any,
+) -> tuple[PreparedChatInvoke, list[dict[str, Any]] | None, str]:
+    """
+    Pre-turn: if the history reached ~97% of its token budget, summarize the old
+    turns (same LLM fold as /summarize) and keep the recent tail, instead of the
+    old silent sliding window. Falls back to trimming the oldest turns when there's
+    no vault to hold the summary. Returns (prepared, compacted_history, summary).
+    """
+    import asyncio
+    from dataclasses import replace
+
+    from core.chat_history import (
+        chat_history_token_budget,
+        history_estimated_tokens,
+        history_needs_compaction,
+        redis_save_chat_history,
+        trim_history_to_budget,
+    )
+
+    history = list(prepared.history_for_model or [])
+    if prepared.is_system_prompt or not history_needs_compaction(history):
+        return prepared, None, ""
+
+    session_id = prepared.session_id
+    before = history_estimated_tokens(history)
+    try:
+        from duckclaw.graphs.chat_heartbeat import publish_admin_chat_heartbeat
+
+        publish_admin_chat_heartbeat(
+            session_id,
+            f"🗜️ Compactando contexto ({before:,} de {chat_history_token_budget():,} tokens)…",
+            kind="status",
+        )
+    except Exception:
+        pass
+
+    summary = ""
+    compacted: list[dict[str, Any]] | None = None
+    vpath = (prepared.vault_db_path or "").strip()
+    if vpath:
+        from duckclaw.commands.context_fold_store import save_context_fold_summary
+        from duckclaw.commands.context_summarize import run_manual_context_fold
+        from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+
+        def _fold() -> tuple[str | None, str | None, dict[str, Any]]:
+            return run_manual_context_fold(
+                GatewayDbEphemeralReadonly(vpath),
+                session_id,
+                tenant_id=prepared.tenant_id,
+                worker_id=prepared.worker_id,
+                history=history,
+                vault_db_path=vpath,
+            )
+
+        try:
+            fold_summary, err, meta = await asyncio.to_thread(_fold)
+        except Exception as exc:
+            fold_summary, err, meta = None, str(exc), {}
+        kept = meta.get("kept_history") if isinstance(meta, dict) else None
+        if fold_summary and not err and isinstance(kept, list):
+            summary = fold_summary.strip()
+            save_context_fold_summary(vpath, session_id, summary, tenant_id=prepared.tenant_id)
+            compacted = [item for item in kept if isinstance(item, dict)]
+        else:
+            _gateway_log.warning(
+                "auto-compaction fold failed chat=%s, trimming instead: %s",
+                format_chat_id_for_terminal(session_id),
+                err,
+            )
+    if compacted is None:
+        compacted = trim_history_to_budget(history)
+
+    if redis_client is not None:
+        await redis_save_chat_history(redis_client, prepared.tenant_id, session_id, compacted)
+    _gateway_log.info(
+        "auto-compaction chat=%s history %d→%d tokens (%d→%d msgs, summary=%s)",
+        format_chat_id_for_terminal(session_id),
+        before,
+        history_estimated_tokens(compacted),
+        len(history),
+        len(compacted),
+        "yes" if summary else "no",
+    )
+    new_prepared = replace(
+        prepared,
+        history_for_model=compacted,
+        # Document turns deliberately send no history to the graph; keep that.
+        history_for_graph=compacted if prepared.history_for_graph else [],
+    )
+    return new_prepared, compacted, summary
+
+
 async def run_chat_graph(
     prepared: PreparedChatInvoke,
     *,
@@ -252,6 +347,10 @@ async def run_chat_graph(
                 except Exception:
                     pass
 
+        prepared, auto_compacted, auto_summary = await _auto_compact_history_if_needed(
+            prepared, redis_client=redis_client
+        )
+
         t0 = time.monotonic()
         admin_pg_vault_prev = os.environ.get("DUCKCLAW_ADMIN_PLAYGROUND_VAULT")
         from core.chat_history import compute_turn_user_index
@@ -299,6 +398,7 @@ async def run_chat_graph(
                     integration_channel=(dc.channel or "").strip() or None,
                     project_id=(getattr(prepared.payload, "project_id", None) or "").strip() or None,
                     knowledge_scope=(getattr(prepared.payload, "knowledge_scope", None) or "").strip() or None,
+                    analytical_summary=auto_summary or None,
                 )
             except ChatCancelledError:
                 try:
@@ -390,5 +490,15 @@ async def run_chat_graph(
             set_idle(session_id)
         except Exception:
             pass
+
+        if isinstance(result, dict):
+            from core.chat_history import chat_history_token_budget
+
+            if auto_compacted is not None:
+                # finalize persists this base (+ this turn) instead of the pre-compaction history.
+                result["compacted_history"] = auto_compacted
+            breakdown = result.get("context_token_breakdown")
+            if isinstance(breakdown, dict):
+                breakdown["budget"] = chat_history_token_budget()
 
     return result, t0

@@ -7,6 +7,8 @@ export type ContextTokenBreakdown = {
   tool_results?: number;
   tool_schemas?: number;
   total: number;
+  /** History token budget from the gateway; auto-summarize fires at ~97% of it. */
+  budget?: number;
 };
 
 export function normalizeContextTokenBreakdown(
@@ -21,5 +23,14 @@ export function normalizeContextTokenBreakdown(
   let total = Math.max(0, Math.floor(Number(raw.total) || 0));
   if (total <= 0) total = system + messages + tools;
   if (total <= 0 && system <= 0 && messages <= 0 && tools <= 0) return null;
-  return { system, messages, tools, tool_results, tool_schemas, total };
+  const budget = Math.max(0, Math.floor(Number(raw.budget) || 0));
+  return {
+    system,
+    messages,
+    tools,
+    tool_results,
+    tool_schemas,
+    total,
+    ...(budget > 0 ? { budget } : {}),
+  };
 }

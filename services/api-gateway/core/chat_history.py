@@ -67,7 +67,52 @@ def normalize_history_item(h: Any) -> dict[str, str] | None:
 
 
 def chat_history_max_msgs() -> int:
-    return int(os.environ.get("DUCKCLAW_CHAT_HISTORY_MAX_MSGS", "48"))
+    # Safety net only — the real limit is the token budget below, enforced by
+    # summarizing old turns (chat_graph_runner auto-compaction), not dropping them.
+    return int(os.environ.get("DUCKCLAW_CHAT_HISTORY_MAX_MSGS", "400"))
+
+
+def chat_history_token_budget() -> int:
+    """Token budget for the conversation history sent to the model (chars/4 estimate)."""
+    try:
+        return max(4000, int(os.environ.get("DUCKCLAW_CHAT_HISTORY_TOKEN_BUDGET", "120000")))
+    except ValueError:
+        return 120000
+
+
+def chat_history_compact_at() -> float:
+    """Fraction of the budget at which history gets auto-summarized (default 0.97)."""
+    try:
+        return min(1.0, max(0.1, float(os.environ.get("DUCKCLAW_CHAT_HISTORY_COMPACT_AT", "0.97"))))
+    except ValueError:
+        return 0.97
+
+
+def history_estimated_tokens(items: list[dict[str, Any]] | None) -> int:
+    """Same chars/4 heuristic as the context counter (estimate_tokens_from_messages)."""
+    return sum(len(str(item.get("content") or "")) for item in items or [] if isinstance(item, dict)) // 4
+
+
+def history_needs_compaction(items: list[dict[str, Any]] | None) -> bool:
+    return history_estimated_tokens(items) >= chat_history_token_budget() * chat_history_compact_at()
+
+
+def trim_history_to_budget(items: list[dict[str, Any]], fraction: float = 0.5) -> list[dict[str, Any]]:
+    """Fallback when the LLM fold isn't possible (no vault / fold disabled): keep the
+    newest messages that fit in ``fraction`` of the budget, starting on a user turn."""
+    target = int(chat_history_token_budget() * fraction)
+    kept: list[dict[str, Any]] = []
+    total = 0
+    for item in reversed(items):
+        size = len(str(item.get("content") or "")) // 4
+        if kept and total + size > target:
+            break
+        kept.append(item)
+        total += size
+    kept.reverse()
+    while len(kept) > 1 and kept[0].get("role") != "user":
+        kept.pop(0)
+    return kept
 
 
 def normalize_history_list(raw: list[Any]) -> list[dict[str, str]]:

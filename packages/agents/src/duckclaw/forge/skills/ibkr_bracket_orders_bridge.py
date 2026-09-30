@@ -171,7 +171,7 @@ def register_ibkr_bracket_orders_skill(
                 )
             finally:
                 try:
-                    await ib.disconnect()
+                    ib.disconnect()
                 except Exception:
                     pass
 

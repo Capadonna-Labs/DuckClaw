@@ -582,7 +582,7 @@ async def execute_protective_oca_for_signal(
         )
         if not preflight.get("ok"):
             try:
-                await ib.disconnect()
+                ib.disconnect()
             except Exception:
                 pass
             return {**base, "status": "error", "error": preflight.get("error")}
@@ -595,10 +595,10 @@ async def execute_protective_oca_for_signal(
             sl_price,
             cancel_existing=cancel_existing,
         )
-        await ib.disconnect()
+        ib.disconnect()
     except Exception as exc:
         try:
-            await ib.disconnect()
+            ib.disconnect()
         except Exception:
             pass
         return {**base, "status": "error", "error": f"Error enviando protective OCA: {exc}"}
@@ -917,11 +917,11 @@ async def execute_signal_with_bracket(
             result = await submit_bracket_order(
                 ib, ticker, side, quantity, tp_price, sl_price
             )
-        await ib.disconnect()
+        ib.disconnect()
     except Exception as exc:
         _log.error(f"Error enviando bracket order: {exc}")
         try:
-            await ib.disconnect()
+            ib.disconnect()
         except Exception:
             pass
         return {

@@ -221,7 +221,7 @@ async def sync_order_status(
 
     # 4. Desconectar
     try:
-        await ib.disconnect()
+        ib.disconnect()
     except Exception as exc:
         _log.warning(f"Error desconectando de IBKR: {exc}")
 

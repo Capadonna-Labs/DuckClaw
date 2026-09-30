@@ -32,6 +32,28 @@ export function isFlyConfigSlashAck(userText: string): boolean {
   return new RegExp(`^/(${names})\\b`, 'i').test(t);
 }
 
+/**
+ * Catalog skill → "/" menu entry. ``directive`` skills insert ``/name`` (their text
+ * is injected server-side). ``command`` skills are plain autocomplete for a fly
+ * command a vertical registers (no injection); ``implementation_ref`` =
+ * ``command:///cmd --args`` holds the exact text to insert. Other types: none.
+ */
+export function slashMenuEntryFromCatalogSkill(skill: {
+  id: string;
+  path?: string;
+  description?: string;
+  skill_type?: string;
+}): { cmd: string; description: string } | null {
+  const type = (skill.skill_type || '').trim().toLowerCase();
+  const description = skill.description || '';
+  if (type === 'directive') return { cmd: `/${skill.id}`, description };
+  if (type !== 'command') return null;
+  const ref = (skill.path || '').trim();
+  const fromRef = ref.toLowerCase().startsWith('command://') ? ref.slice('command://'.length).trim() : '';
+  const cmd = fromRef.startsWith('/') ? fromRef : `/${skill.id}`;
+  return { cmd, description };
+}
+
 /** Gateway's PlaygroundChatBody.message caps at 16000 chars (Pydantic max_length) —
  * pasting more raises a 422 before any turn logic runs. Leaves margin below that. */
 export const MAX_INLINE_MESSAGE_CHARS = 15000;

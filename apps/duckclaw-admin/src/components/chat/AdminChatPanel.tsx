@@ -29,7 +29,10 @@ import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSe
 import { workerOptionId, workerOptionLabel, resolveWorkerDisplayName } from '@/lib/workerOptions';
 import { PlaygroundChatStudioHeader } from '@/components/playground/PlaygroundChatStudioHeader';
 import { useComposeClipboard } from '@/components/chat/useComposeClipboard';
-import { shouldShowSuggestionChips } from '@/components/chat/adminChatPure';
+import {
+  shouldShowSuggestionChips,
+  slashMenuEntryFromCatalogSkill,
+} from '@/components/chat/adminChatPure';
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 
 export type AdminChatPanelProps = {
@@ -104,8 +107,8 @@ export function AdminChatPanel({
   const directiveSkills = useMemo(
     () =>
       globalSkills
-        .filter((s) => s.skill_type === 'directive')
-        .map((s) => ({ cmd: `/${s.id}`, description: s.description || '' })),
+        .map(slashMenuEntryFromCatalogSkill)
+        .filter((e): e is { cmd: string; description: string } => e !== null),
     [globalSkills]
   );
   const internalChat = useAdminChat({

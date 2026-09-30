@@ -6,6 +6,7 @@ import {
   shouldFetchChatSuggestions,
   shouldShowSuggestionChips,
   splitLeadingSlashCommand,
+  slashMenuEntryFromCatalogSkill,
   suggestionsExchangeKey,
 } from './adminChatPure';
 import type { ChatMsg } from './types';
@@ -174,5 +175,39 @@ describe('suggestionsExchangeKey', () => {
     const a = suggestionsExchangeKey('c1', 'hola', 'misma');
     const b = suggestionsExchangeKey('c1', 'hola', 'misma');
     expect(a).toBe(b);
+  });
+});
+
+describe('slashMenuEntryFromCatalogSkill', () => {
+  it('directive skills insert /name', () => {
+    expect(
+      slashMenuEntryFromCatalogSkill({ id: 'ponytail', skill_type: 'directive', description: 'd' })
+    ).toEqual({ cmd: '/ponytail', description: 'd' });
+  });
+
+  it('command skills insert the exact command from implementation_ref (args included)', () => {
+    expect(
+      slashMenuEntryFromCatalogSkill({
+        id: 'trading_session',
+        skill_type: 'command',
+        path: 'command:///trading_session --status',
+        description: 'Estado de la sesión',
+      })
+    ).toEqual({ cmd: '/trading_session --status', description: 'Estado de la sesión' });
+    expect(
+      slashMenuEntryFromCatalogSkill({ id: 'foo', skill_type: 'command', path: 'x' })?.cmd
+    ).toBe('/foo');
+  });
+
+  it('python tool skills are not slash entries', () => {
+    expect(slashMenuEntryFromCatalogSkill({ id: 'jev_decide', skill_type: 'python' })).toBeNull();
+  });
+
+  it('a command entry autocompletes from a prefix and closes once args are typed', () => {
+    const extra = [{ cmd: '/trading_session --status', description: '' }];
+    expect(matchingSlashCommands('/trad', extra).map((c) => c.cmd)).toEqual([
+      '/trading_session --status',
+    ]);
+    expect(matchingSlashCommands('/trading_session --status ', extra)).toEqual([]);
   });
 });

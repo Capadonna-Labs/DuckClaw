@@ -109,12 +109,13 @@ export function ToolUsageGroup({
   messages,
   indices,
   identityLabel = '',
-  liveWhileLoading: _liveWhileLoading = false,
+  liveWhileLoading = false,
 }: {
   messages: ChatMsg[];
   indices: number[];
   identityLabel?: string;
-  /** @deprecated Ignored — the block is live only while a tool is actually running. */
+  /** Last block of the in-flight turn: header stopwatch keeps ticking between
+   * tools (LLM thinking), not only while a tool is running. */
   liveWhileLoading?: boolean;
 }) {
   const panelId = useId();
@@ -123,11 +124,14 @@ export function ToolUsageGroup({
   const totalMs = toolGroupTotalElapsedMs(messages, indices);
   const [isOpen, setIsOpen] = useState(false);
 
-  const runningStartedAt = earliestRunningStartedAt(items);
-  const headerRunning = anyRunning && runningStartedAt != null;
-  const liveHeaderMs = useLiveToolElapsedMs(headerRunning, runningStartedAt);
+  // Wall clock from the block's first tool, same basis as the frozen total.
+  const blockStartedAt = items.reduce<number | null>(
+    (min, m) => (m.toolStartedAt == null ? min : min == null ? m.toolStartedAt : Math.min(min, m.toolStartedAt)),
+    null
+  );
+  const headerRunning = (anyRunning || liveWhileLoading) && blockStartedAt != null;
+  const liveHeaderMs = useLiveToolElapsedMs(headerRunning, blockStartedAt);
   const headerLiveTotal = headerRunning ? liveHeaderMs : null;
-  void _liveWhileLoading;
 
   const count = items.length;
   const totalLabel =

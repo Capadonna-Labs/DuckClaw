@@ -361,7 +361,8 @@ export const chatApi = {
       chat_id: string;
       events: {
         text: string;
-        kind?: 'plan' | 'tool' | 'status' | 'visual';
+        /** turn_done: last event of a detached turn (gateway end marker). */
+        kind?: 'plan' | 'tool' | 'status' | 'visual' | 'turn_done';
         worker_id?: string;
         swarm_slot?: number;
         artifact_id?: string;

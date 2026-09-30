@@ -84,11 +84,13 @@ def test_detached_completion_keeps_tool_usage_from_activity_backlog() -> None:
     assert "preserveInFlightOptimisticTurn(" in completion
 
 
-def test_tool_usage_timer_only_while_tools_running() -> None:
-    """Live header clock must not keep ticking after tools are done.
+def test_tool_usage_clock_runs_until_turn_end() -> None:
+    """Header clock ticks for the whole in-flight turn and freezes when it ends.
 
-    Previously ``anyRunning || liveWhileLoading`` inflated invoke_worker from
-    ~3m (gateway elapsed) to ~30m while the turn stayed in loading.
+    The earlier ~30m inflation came from detached turns whose ``loading`` never
+    cleared (completion was inferred from history and misfired); detached
+    completion now keys on the gateway's turn_done marker, so the clock stops
+    with the turn instead of only while a tool runs.
     """
     group = (
         ROOT / "apps/duckclaw-admin/src/components/chat/ToolUsageGroup.tsx"
@@ -96,8 +98,22 @@ def test_tool_usage_timer_only_while_tools_running() -> None:
     message_list = (
         ROOT / "apps/duckclaw-admin/src/components/chat/AdminChatMessageList.tsx"
     ).read_text(encoding="utf-8")
+    turn = (
+        ROOT / "apps/duckclaw-admin/src/components/chat/runAdminChatTurn.ts"
+    ).read_text(encoding="utf-8")
 
     assert "liveWhileLoading?: boolean" in group
-    assert "const headerRunning = anyRunning && runningStartedAt != null;" in group
-    assert "anyRunning || liveWhileLoading" not in group
-    assert "liveWhileLoading={loading && itemIdx === displayItems.length - 1}" in message_list
+    assert "(anyRunning || liveWhileLoading) && blockStartedAt != null" in group
+    assert "liveWhileLoading={loading && itemIdx === liveToolGroupIdx}" in message_list
+    completion = turn.split("const pollDetachedCompletion = (epoch: number) =>", 1)[1]
+    assert "ev.kind === 'turn_done'" in completion
+
+
+def test_detached_turn_resets_backlog_and_marks_turn_done() -> None:
+    route = (
+        ROOT / "services/api-gateway/routers/admin_domains/playground/chat_routes.py"
+    ).read_text(encoding="utf-8")
+    detached = route.split("if body.detached", 1)[1]
+    # Reset must happen before the turn is accepted (no poll can see the previous turn).
+    assert detached.index("reset_admin_heartbeat_backlog") < detached.index('"accepted": True')
+    assert "kind=TURN_DONE_KIND" in detached

@@ -49,6 +49,15 @@ async def playground_chat(
     """Chat de prueba desde consola admin (exento Tailscale vía prefijo /admin/)."""
     prepared = await prepare_playground_chat_turn(body, actor=actor, request=request)
     if body.detached:
+        # Detached (iOS PWA) turns are followed by polling the backlog. Empty it
+        # *before* accepting so no poll sees the previous turn, and mark the end
+        # explicitly: the client can't infer completion from history (the new
+        # user message is only persisted with the reply, so "last user has a
+        # reply" was the previous turn and ended polling after ~3 s).
+        from core.admin_chat_heartbeat import TURN_DONE_KIND, reset_admin_heartbeat_backlog
+
+        await reset_admin_heartbeat_backlog(getattr(request.app.state, "redis", None), prepared.session_id)
+
         async def _run_detached() -> None:
             try:
                 await invoke_playground_chat_sync(prepared, request=request)
@@ -59,6 +68,10 @@ async def playground_chat(
                     prepared.wid,
                     exc_info=True,
                 )
+            finally:
+                from duckclaw.graphs.chat_heartbeat import publish_admin_chat_heartbeat
+
+                publish_admin_chat_heartbeat(prepared.session_id, "turn done", kind=TURN_DONE_KIND)
 
         spawn_background(_run_detached())
         return {

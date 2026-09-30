@@ -245,10 +245,11 @@ export function preserveInFlightOptimisticTurn(
   const pending = (pendingText || '').trim();
   if (!pending || !prev.length) return server;
 
-  const serverHasPending = server.some(
-    (m) => m.role === 'user' && (m.text || '').trim() === pending
-  );
-  if (serverHasPending) return server;
+  // Count occurrences, not existence: a repeated message (e.g. "/revisar_correos"
+  // sent again) already exists in history, so `some()` dropped the in-flight turn.
+  const occurrences = (list: ChatMsg[]) =>
+    list.filter((m) => m.role === 'user' && (m.text || '').trim() === pending).length;
+  if (occurrences(server) >= occurrences(prev)) return server;
 
   let userIdx = -1;
   for (let i = prev.length - 1; i >= 0; i--) {

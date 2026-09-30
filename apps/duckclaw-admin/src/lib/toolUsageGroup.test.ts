@@ -9,6 +9,8 @@ import {
   toolGroupTotalElapsedMs,
   groupToolInvocationsByName,
   toolRowDurationLabel,
+  groupInvocationsByWorker,
+  toolGroupErrorCount,
 } from './toolUsageGroup';
 
 const tool = (name: string, phase: ChatMsg['toolPhase'] = 'done', elapsedMs?: number): ChatMsg => ({
@@ -246,5 +248,63 @@ describe('toolRowDurationLabel', () => {
       secondary: '',
     });
     expect(toolRowDurationLabel({ ...base, isRunning: true }, null).primary).toBe('');
+  });
+});
+
+describe('agent grouping and errors', () => {
+  const tool = (
+    name: string,
+    workerId: string,
+    phase: 'done' | 'error' = 'done',
+    detail?: string,
+    startedAt = 1
+  ): ChatMsg => ({
+    role: 'heartbeat',
+    heartbeatKind: 'tool',
+    text: `Usando: ${name}`,
+    toolName: name,
+    toolPhase: phase,
+    toolElapsedMs: 10,
+    toolStartedAt: startedAt,
+    workerId,
+    toolDetail: detail,
+  });
+
+  it('splits the same tool run by two agents into separate rows, grouped by agent', () => {
+    const msgs = [
+      tool('read_sql', 'manager'),
+      tool('read_sql', 'manager->quant_analyst'),
+      tool('get_current_time', 'quant_analyst'),
+    ];
+    const rows = groupToolInvocationsByName(msgs, [0, 1, 2]);
+    expect(rows.map((r) => `${r.worker}:${r.toolName}`)).toEqual([
+      'manager:read_sql',
+      'quant_analyst:read_sql',
+      'quant_analyst:get_current_time',
+    ]);
+    expect(groupInvocationsByWorker(rows).map((b) => [b.worker, b.rows.length])).toEqual([
+      ['manager', 1],
+      ['quant_analyst', 2],
+    ]);
+  });
+
+  it('events without worker fall back to the group identity instead of a phantom agent', () => {
+    const msgs = [tool('read_sql', ''), tool('read_sql', 'quant_analyst')];
+    const rows = groupToolInvocationsByName(msgs, [0, 1], 'quant_analyst');
+    expect(rows).toHaveLength(1);
+    expect(rows[0].count).toBe(2);
+  });
+
+  it('exposes error count and the newest error detail', () => {
+    const msgs = [
+      tool('execute_signal_with_bracket', 'quant_analyst', 'error', 'viejo', 1),
+      tool('execute_signal_with_bracket', 'quant_analyst', 'done', undefined, 2),
+      tool('execute_signal_with_bracket', 'quant_analyst', 'error', 'PRE_FLIGHT_MARK_UNAVAILABLE', 3),
+    ];
+    const [row] = groupToolInvocationsByName(msgs, [0, 1, 2]);
+    expect(row.isError).toBe(true);
+    expect(row.errorCount).toBe(2);
+    expect(row.errorDetail).toBe('PRE_FLIGHT_MARK_UNAVAILABLE');
+    expect(toolGroupErrorCount(msgs, [0, 1, 2])).toBe(2);
   });
 });

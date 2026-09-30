@@ -320,6 +320,7 @@ const appendHeartbeat = (payload: {
   artifact_ids?: string[];
   tool_name?: string;
   tool_phase?: 'start' | 'done' | 'error';
+  tool_detail?: string;
   elapsed_ms?: number;
   turn_user_index?: number;
 }) => {
@@ -427,6 +428,8 @@ const appendHeartbeat = (payload: {
         toolStartedAt: startedAt,
         toolElapsedMs:
           elapsedMs != null && Number.isFinite(elapsedMs) ? elapsedMs : undefined,
+        toolDetail:
+          payload.tool_phase === 'error' ? (payload.tool_detail || '').trim() || undefined : undefined,
         turnUserIndex: payloadTurnUserIndex,
       };
       if (targetIdx >= 0) {
@@ -489,6 +492,7 @@ const pollDetachedActivity = (epoch: number) => {
               artifact_tenant_id: ev.artifact_tenant_id,
               tool_name: ev.tool_name,
               tool_phase: ev.tool_phase,
+              tool_detail: ev.tool_detail,
               elapsed_ms: ev.elapsed_ms,
               turn_user_index: ev.turn_user_index,
             });

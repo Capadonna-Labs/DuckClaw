@@ -35,8 +35,10 @@ def test_create_bracket_order_buy_with_tp_sl():
     assert sl is not None
     assert sl.action == "SELL"
     assert sl.totalQuantity == 994
-    assert sl.orderType == "STP"
+    # STP LMT: IBKR only honors outsideRth on stop-limits (plain STP is RTH-only).
+    assert sl.orderType == "STP LMT"
     assert sl.auxPrice == 245.0
+    assert sl.lmtPrice == 232.75  # default 5% band below the stop for a long
     assert sl.tif == "GTC"
     assert sl.outsideRth is True
 
@@ -54,6 +56,7 @@ def test_create_bracket_order_sell_with_tp_sl():
 
     assert sl.action == "BUY"
     assert sl.auxPrice == 600.0
+    assert sl.lmtPrice == 630.0  # short: limit band sits above the stop
 
 
 def test_create_bracket_order_only_tp():
@@ -97,7 +100,8 @@ def test_create_protective_oca_orders_long():
     assert tp is not None and sl is not None
     assert tp.action == "SELL" and sl.action == "SELL"
     assert tp.orderType == "LMT" and tp.lmtPrice == 300.0 and tp.tif == "GTC"
-    assert sl.orderType == "STP" and sl.auxPrice == 245.0 and sl.tif == "GTC"
+    assert sl.orderType == "STP LMT" and sl.auxPrice == 245.0 and sl.tif == "GTC"
+    assert sl.outsideRth is True
     assert tp.ocaGroup == sl.ocaGroup == "PROTECT_CEG"
     assert sl.transmit is True
     assert tp.transmit is True

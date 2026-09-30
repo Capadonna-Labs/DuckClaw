@@ -66,7 +66,7 @@ try:
         asyncio.get_event_loop_policy().get_event_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
-    from ib_insync import IB, LimitOrder, MarketOrder, Stock, StopOrder
+    from ib_insync import IB, LimitOrder, MarketOrder, Stock, StopLimitOrder
 
     _IB_INSYNC_AVAILABLE = True
 except ImportError:
@@ -123,13 +123,32 @@ async def connect_ibkr(
 # ---------------------------------------------------------------------------
 
 
+def _stop_loss_order(close_action: str, quantity: int, sl_price: float) -> "StopLimitOrder":
+    """SL as STP LMT: IBKR drops outsideRth on plain STP for US stocks, so a
+    plain stop can't trigger pre/post-market (e.g. an earnings gap AfterClose).
+
+    The limit sits ``IBKR_SL_LIMIT_OFFSET_PCT`` (default 5%) past the stop in the
+    closing direction. ponytail: a gap beyond that band leaves the SL unfilled
+    (resting limit) instead of selling at any price; widen the env knob to trade
+    fill-certainty for slippage.
+    """
+    pct = float(os.getenv("IBKR_SL_LIMIT_OFFSET_PCT", "5")) / 100.0
+    sign = -1.0 if close_action == "SELL" else 1.0
+    lmt = round(sl_price * (1.0 + sign * pct), 2)
+    order = StopLimitOrder(close_action, quantity, lmt, sl_price)
+    order.tif = "GTC"
+    order.outsideRth = True
+    return order
+
+
+
 def create_bracket_order(
     ticker: str,
     side: str,
     quantity: int,
     tp_price: Optional[float] = None,
     sl_price: Optional[float] = None,
-) -> tuple["MarketOrder", Optional["LimitOrder"], Optional["StopOrder"]]:
+) -> tuple["MarketOrder", Optional["LimitOrder"], Optional["StopLimitOrder"]]:
     """Crea bracket order (entrada + TP + SL).
 
     Args:
@@ -212,12 +231,10 @@ def create_bracket_order(
     # Stop Loss (stop order)
     sl_order = None
     if sl_price is not None:
-        sl_order = StopOrder(close_action, quantity, sl_price)
+        sl_order = _stop_loss_order(close_action, quantity, sl_price)
         sl_order.parentId = main.orderId
         # Solo el último en el grupo tiene transmit=True para enviar todo junto
         sl_order.transmit = True if tp_order is None else False
-        sl_order.tif = "GTC"
-        sl_order.outsideRth = True
 
     # Si solo hay TP (sin SL), TP debe tener transmit=True
     if tp_order and not sl_order:
@@ -403,7 +420,7 @@ def create_protective_oca_orders(
     quantity: int,
     tp_price: Optional[float] = None,
     sl_price: Optional[float] = None,
-) -> tuple[Optional["LimitOrder"], Optional["StopOrder"]]:
+) -> tuple[Optional["LimitOrder"], Optional["StopLimitOrder"]]:
     """Crea TP/SL GTC en OCA para una posición ya abierta (sin market entry).
 
     Args:
@@ -448,9 +465,7 @@ def create_protective_oca_orders(
 
     sl_order = None
     if sl_price is not None:
-        sl_order = StopOrder(close_action, quantity, sl_price)
-        sl_order.tif = "GTC"
-        sl_order.outsideRth = True
+        sl_order = _stop_loss_order(close_action, quantity, sl_price)
         sl_order.transmit = False
         sl_order.ocaGroup = oca
         sl_order.ocaType = 1

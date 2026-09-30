@@ -124,6 +124,18 @@ export function AdminChatMessageList({
       : 'pt-16 pb-[8.5rem] sm:pt-[4.5rem] sm:pb-36'
     : '';
 
+  // Tool block of the in-flight turn: its clock runs until the turn ends, even
+  // while the reply streams after it (so not just "the last display item").
+  let liveToolGroupIdx = -1;
+  for (let k = displayItems.length - 1; k >= 0; k--) {
+    const it = displayItems[k];
+    if (it.kind === 'toolGroup') {
+      liveToolGroupIdx = k;
+      break;
+    }
+    if (messages[it.index]?.role === 'user') break;
+  }
+
   return (
       <div className="relative z-[1] flex-1 min-h-0 min-w-0 flex flex-col w-full">
         <div
@@ -152,7 +164,7 @@ export function AdminChatMessageList({
                 messages={messages}
                 indices={item.indices}
                 identityLabel={labelForWorkerId(first?.workerId || workerId)}
-                liveWhileLoading={loading && itemIdx === displayItems.length - 1}
+                liveWhileLoading={loading && itemIdx === liveToolGroupIdx}
               />
             );
           }

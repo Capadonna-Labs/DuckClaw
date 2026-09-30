@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { Check, ChevronDown, Loader2, X } from 'lucide-react';
 import type { ChatMsg } from '@/components/chat/types';
 import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
@@ -131,7 +131,20 @@ export function ToolUsageGroup({
   );
   const headerRunning = (anyRunning || liveWhileLoading) && blockStartedAt != null;
   const liveHeaderMs = useLiveToolElapsedMs(headerRunning, blockStartedAt);
-  const headerLiveTotal = headerRunning ? liveHeaderMs : null;
+  // Turn clock: once the turn ends, keep the last live value (turn wall time)
+  // instead of snapping back to first-tool→last-tool. After a reload there is
+  // no live value, so the tool-span total below is the fallback.
+  const [turnEndMs, setTurnEndMs] = useState<number | null>(null);
+  const lastLiveMs = useRef<number | null>(null);
+  useEffect(() => {
+    if (headerRunning) {
+      if (liveHeaderMs != null) lastLiveMs.current = liveHeaderMs;
+      setTurnEndMs(null);
+    } else if (lastLiveMs.current != null) {
+      setTurnEndMs(lastLiveMs.current);
+    }
+  }, [headerRunning, liveHeaderMs]);
+  const headerLiveTotal = headerRunning ? liveHeaderMs : turnEndMs;
 
   const count = items.length;
   const totalLabel =

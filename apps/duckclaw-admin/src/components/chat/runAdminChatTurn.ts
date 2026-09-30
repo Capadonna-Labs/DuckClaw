@@ -546,16 +546,18 @@ const pollDetachedActivity = (epoch: number) => {
 
 const pollDetachedCompletion = (epoch: number) => {
   scheduleDetachedPoll(epoch, DETACHED_COMPLETION_POLL_MS, async () => {
-    const data = await adminService.getConversation(chatId, effectiveTenantId || 'default');
-    const activity = await adminService
-      .getPlaygroundChatActivity(chatId, 80)
-      .catch(() => ({ events: [] as never[] }));
+    // Activity FIRST, history only after turn_done: the gateway persists the reply
+    // before publishing turn_done, so this order can't pair a pre-reply history
+    // with the end marker (history-then-activity did, dropping the final answer).
+    const activity = await adminService.getPlaygroundChatActivity(chatId, 80);
     if (epoch !== detachedPollEpoch) return true;
     // The gateway marks the end of a detached turn with a turn_done event (its
     // backlog is emptied when the turn is accepted). History can't tell: the new
     // user message is persisted together with the reply, so "last user has a
     // reply" matched the *previous* turn and stopped polling after ~3 s.
     if (!(activity.events || []).some((ev) => ev.kind === 'turn_done')) return false;
+    const data = await adminService.getConversation(chatId, effectiveTenantId || 'default');
+    if (epoch !== detachedPollEpoch) return true;
     const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
     const activeWorker = workerId || '';
     const activityEphemeral = toolHeartbeatsFromActivity(activity.events || [], activeWorker);
@@ -571,9 +573,20 @@ const pollDetachedCompletion = (epoch: number) => {
       );
       const base = preserveInFlightOptimisticTurn(fromServer.length ? fromServer : prev, prev, text);
       const withImages = preserveImagePreviewsFromPrevious(base, prev);
-      return stripThinkingStatusHeartbeats(
+      const out = stripThinkingStatusHeartbeats(
         finalizeRunningToolHeartbeats(mergeHistoryWithEphemeral(withImages, ephemeral))
       );
+      // Turn ended without a persisted reply (failure): don't leave the kept
+      // placeholder bubble empty/hidden — same notice as the SSE path.
+      const last = out[out.length - 1];
+      if (last?.role === 'assistant' && last.streaming && !(last.text || '').trim()) {
+        out[out.length - 1] = {
+          role: 'assistant',
+          text: 'No hubo respuesta del agente en este turno (timeout, fallo de inferencia o interrupción). Reintenta.',
+          streaming: false,
+        };
+      }
+      return out;
     });
     setLoading(false);
     setThinking(false);

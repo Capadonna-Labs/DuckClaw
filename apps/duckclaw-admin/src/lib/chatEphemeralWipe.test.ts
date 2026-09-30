@@ -127,4 +127,14 @@ describe('preserveInFlightOptimisticTurn', () => {
       )
     ).toEqual(server);
   });
+
+  it('keeps a repeated message (same text already in history) while it is in flight', () => {
+    const server: ChatMsg[] = [
+      { role: 'user', text: '/revisar_correos' },
+      { role: 'assistant', text: 'ayer: 3 correos' },
+    ];
+    const prev: ChatMsg[] = [...server, { role: 'user', text: '/revisar_correos' }, tool('gmail')];
+    const merged = preserveInFlightOptimisticTurn(server, prev, '/revisar_correos');
+    expect(merged.map((m) => m.role)).toEqual(['user', 'assistant', 'user', 'heartbeat']);
+  });
 });

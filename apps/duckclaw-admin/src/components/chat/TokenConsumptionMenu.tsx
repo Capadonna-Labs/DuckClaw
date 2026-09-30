@@ -106,8 +106,18 @@ export function TokenConsumptionMenu({
     };
   }, [open, contextTokenBreakdown, contextEstimatedTokens, tokenUsage, model]);
 
-  const contextWindow = useMemo(() => inferModelContextWindow(model), [model]);
+  // With a gateway history budget, the meter tracks history against that budget
+  // (what auto-summarize at ~97% measures) instead of the model's full window,
+  // where a capped history would sit at ~2% forever.
+  const historyBudget = contextTokenBreakdown?.budget ?? null;
+  const contextWindow = useMemo(
+    () => historyBudget ?? inferModelContextWindow(model),
+    [historyBudget, model]
+  );
   const contextUsed = useMemo(() => {
+    if (historyBudget && contextTokenBreakdown) {
+      return contextTokenBreakdown.messages || contextTokenBreakdown.total;
+    }
     if (contextTokenBreakdown && contextTokenBreakdown.total > 0) {
       return contextTokenBreakdown.total;
     }
@@ -116,7 +126,7 @@ export function TokenConsumptionMenu({
     }
     if (tokenUsage && tokenUsage.input_tokens > 0) return tokenUsage.input_tokens;
     return null;
-  }, [contextEstimatedTokens, contextTokenBreakdown, tokenUsage]);
+  }, [contextEstimatedTokens, contextTokenBreakdown, historyBudget, tokenUsage]);
 
   const contextPct =
     contextWindow && contextUsed != null
@@ -144,7 +154,7 @@ export function TokenConsumptionMenu({
         },
       ];
     }
-    const free = Math.max(0, contextWindow - accounted);
+    const free = Math.max(0, contextWindow - (historyBudget ? messages : accounted));
     return [
       { key: 'messages', label: 'Mensajes', tokens: messages, className: 'bg-gov-blue-500' },
       { key: 'tools', label: 'Herramientas', tokens: tools, className: 'bg-rose-500' },
@@ -157,7 +167,7 @@ export function TokenConsumptionMenu({
         muted: true,
       },
     ].filter((row) => row.tokens > 0 || row.key === 'free');
-  }, [contextTokenBreakdown, contextUsed, contextWindow]);
+  }, [contextTokenBreakdown, contextUsed, contextWindow, historyBudget]);
 
   const contextSegments = useMemo(() => {
     if (!contextWindow || categoryRows.length === 0) {
@@ -170,13 +180,14 @@ export function TokenConsumptionMenu({
       ];
     }
     return categoryRows
-      .filter((row) => row.key !== 'free')
+      // Budget mode: only history counts toward the bar (system/tools are listed below).
+      .filter((row) => row.key !== 'free' && (!historyBudget || row.key === 'messages'))
       .map((row) => ({
         pct: (row.tokens / contextWindow) * 100,
         className: row.className,
         title: `${row.label} ${row.tokens.toLocaleString('es-CO')}`,
       }));
-  }, [categoryRows, contextPct, contextUsed, contextWindow]);
+  }, [categoryRows, contextPct, contextUsed, contextWindow, historyBudget]);
 
   const turnTotal = tokenUsage?.total_tokens ?? 0;
   const turnPrompt = tokenUsage?.input_tokens ?? 0;
@@ -234,7 +245,7 @@ export function TokenConsumptionMenu({
             <section className="space-y-1.5">
               <div className="flex items-start justify-between gap-2">
                 <p className="text-xs font-medium text-gov-gray-900 dark:text-dark-text">
-                  Ventana de contexto
+                  {historyBudget ? 'Contexto (se resume al ~97%)' : 'Ventana de contexto'}
                 </p>
                 <p className="shrink-0 text-right text-[11px] tabular-nums text-gov-gray-500 dark:text-dark-muted">
                   {contextUsed != null && contextWindow

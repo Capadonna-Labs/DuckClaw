@@ -64,6 +64,7 @@ async def _ainvoke(
     integration_channel: str | None = None,
     project_id: str | None = None,
     knowledge_scope: str | None = None,
+    analytical_summary: str | None = None,
 ) -> dict:
     """
     Invoca el grafo y retorna {"reply": str, "messages": list | None}.
@@ -102,7 +103,11 @@ async def _ainvoke(
     state["integration_channel"] = _ich
     state["integration_label"] = _ilbl
     _vault = (vault_db_path or "").strip()
-    if _vault:
+    # A summary produced this same turn (pre-turn auto-compaction) wins: its
+    # vault write is a queued typed command and may not be readable yet.
+    if (analytical_summary or "").strip():
+        state["analytical_summary"] = analytical_summary.strip()
+    elif _vault:
         try:
             from duckclaw.commands.context_fold_store import load_context_fold_summary
 
@@ -190,6 +195,7 @@ async def ainvoke_manager_ephemeral(
     integration_channel: str | None = None,
     project_id: str | None = None,
     knowledge_scope: str | None = None,
+    analytical_summary: str | None = None,
 ) -> dict:
     """
     Compila el manager con un DuckClaw RO efímero al gateway, invoca y cierra.
@@ -227,6 +233,7 @@ async def ainvoke_manager_ephemeral(
             integration_channel=integration_channel,
             project_id=project_id,
             knowledge_scope=knowledge_scope,
+            analytical_summary=analytical_summary,
         )
     finally:
         try:

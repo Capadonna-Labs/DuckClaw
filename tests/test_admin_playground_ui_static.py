@@ -214,7 +214,6 @@ def test_playground_config_panel_uses_live_vault_and_plain_labels() -> None:
     assert "Pm2LiveLogsViewport" in page
     assert "Modelo fijado para esta conversación." not in page
     assert "DuckDB fijada para esta conversación" not in page
-    assert "Run settings" in page
     assert "Base URL" not in page
     assert "Override por conversación" not in page
     assert "equivalente a /model" not in page

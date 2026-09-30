@@ -187,6 +187,31 @@ export function AdminChatMessageList({
             isEmptyStreaming &&
             (!showToolUsage || !hasToolHeartbeatInCurrentTurn(messages))
           ) {
+            if (showToolUsage) {
+              // Before the first worker heartbeat: same Tool Usage box + running
+              // "Pensando" row as the backend's model rows (replaced once they arrive).
+              const placeholder: ChatMsg[] = [
+                {
+                  role: 'heartbeat',
+                  text: 'Pensando',
+                  heartbeatKind: 'tool',
+                  toolName: 'Pensando',
+                  toolInvocationId: 'turn-thinking-placeholder',
+                  toolPhase: 'running',
+                  toolStartedAt: thinkingStartedAt.current || Date.now(),
+                  workerId: thinkingIdentity.workerId || workerId,
+                },
+              ];
+              return (
+                <ToolUsageGroup
+                  key={`${i}-thinking`}
+                  messages={placeholder}
+                  indices={[0]}
+                  identityLabel={labelForWorkerId(thinkingIdentity.workerId || workerId)}
+                  liveWhileLoading
+                />
+              );
+            }
             return (
               <ThinkingBubble
                 key={`${i}-thinking`}

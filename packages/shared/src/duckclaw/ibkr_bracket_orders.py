@@ -123,23 +123,27 @@ async def connect_ibkr(
 # ---------------------------------------------------------------------------
 
 
-def _stop_loss_order(close_action: str, quantity: int, sl_price: float) -> "StopOrder | StopLimitOrder":
-    """SL order. Default: plain STP (RTH-only trigger — IBKR drops outsideRth on
-    STP for US stocks).
+def _plain_stop_order(close_action: str, quantity: int, sl_price: float) -> "StopOrder":
+    """Plain STP: RTH-only trigger (IBKR drops outsideRth on STP for US stocks)."""
+    order = StopOrder(close_action, quantity, sl_price)
+    order.tif = "GTC"
+    order.outsideRth = True
+    return order
 
-    ``IBKR_SL_STOP_LIMIT=1`` opts into STP LMT, which can trigger pre/post-market,
-    with the limit ``IBKR_SL_LIMIT_OFFSET_PCT`` (default 5%) past the stop.
-    ponytail: opt-in only — on 2026-09-30 the paper account cancelled a GTC
-    outsideRth STP LMT (MU) right after placement with no error surfaced; a gap
-    beyond the band also leaves it unfilled. Flip the default once the broker
-    behavior is understood.
+
+def _stop_loss_order(close_action: str, quantity: int, sl_price: float) -> "StopOrder | StopLimitOrder":
+    """SL order. Default: STP LMT, which can trigger pre/post-market (earnings gaps).
+
+    The limit sits ``IBKR_SL_LIMIT_OFFSET_PCT`` (default 2%) past the stop. IBKR
+    cancels stop-limits whose limit is "too far through" the stop ("Cancelled by
+    System"); measured on MU (~$1,080) 2026-09-30: 2% accepted, 3% cancelled — the
+    cap varies per symbol. ponytail: a gap beyond the band leaves the SL resting
+    unfilled; submit_protective_oca_orders falls back to plain STP if IBKR rejects
+    it. ``IBKR_SL_STOP_LIMIT=0`` forces plain STP.
     """
-    if (os.getenv("IBKR_SL_STOP_LIMIT") or "").strip().lower() not in ("1", "true", "yes", "on"):
-        order = StopOrder(close_action, quantity, sl_price)
-        order.tif = "GTC"
-        order.outsideRth = True
-        return order
-    pct = float(os.getenv("IBKR_SL_LIMIT_OFFSET_PCT", "5")) / 100.0
+    if (os.getenv("IBKR_SL_STOP_LIMIT") or "1").strip().lower() in ("0", "false", "no", "off"):
+        return _plain_stop_order(close_action, quantity, sl_price)
+    pct = float(os.getenv("IBKR_SL_LIMIT_OFFSET_PCT", "2")) / 100.0
     sign = -1.0 if close_action == "SELL" else 1.0
     lmt = round(sl_price * (1.0 + sign * pct), 2)
     order = StopLimitOrder(close_action, quantity, lmt, sl_price)
@@ -701,10 +705,29 @@ async def submit_protective_oca_orders(
         raise RuntimeError(f"Error enviando protective OCA {ticker}: {exc}") from exc
 
     await asyncio.sleep(1)
+    # IBKR can cancel a stop-limit at placement ("Limit Price … too far through the
+    # Stop Price") and nothing surfaced it — MU sat with only its TP on 2026-09-30.
+    # Never leave the position without an SL: fall back to plain STP in the same OCA.
+    sl_fallback = ""
+    if sl_trade is not None and getattr(sl_trade.order, "orderType", "") == "STP LMT":
+        for _ in range(4):
+            if sl_trade.orderStatus.status in ("Cancelled", "ApiCancelled", "Inactive"):
+                break
+            await asyncio.sleep(0.5)
+        if sl_trade.orderStatus.status in ("Cancelled", "ApiCancelled", "Inactive"):
+            sl_fallback = " / ".join(e.message for e in sl_trade.log if e.message)[:300] or sl_trade.orderStatus.status
+            _log.warning("Protective SL STP LMT %s rejected (%s); placing plain STP", ticker, sl_fallback)
+            plain = _plain_stop_order(sl_trade.order.action, quantity, sl_price)
+            plain.ocaGroup = oca
+            plain.ocaType = 1
+            sl_trade = ib.placeOrder(contract, plain)
+            await asyncio.sleep(1)
     result = {
         "main_order_id": None,
         "tp_order_id": tp_trade.order.orderId if tp_trade else None,
         "sl_order_id": sl_trade.order.orderId if sl_trade else None,
+        "sl_order_type": getattr(sl_trade.order, "orderType", None) if sl_trade else None,
+        "sl_fallback_reason": sl_fallback or None,
         "status": "submitted",
         "timestamp": datetime.now(timezone.utc),
         "ticker": ticker,

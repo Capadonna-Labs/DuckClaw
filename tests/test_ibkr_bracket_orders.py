@@ -35,21 +35,56 @@ def test_create_bracket_order_buy_with_tp_sl():
     assert sl is not None
     assert sl.action == "SELL"
     assert sl.totalQuantity == 994
-    assert sl.orderType == "STP"  # STP LMT is opt-in (IBKR_SL_STOP_LIMIT)
+    # STP LMT: the only stop type IBKR lets trigger outside regular hours.
+    assert sl.orderType == "STP LMT"
     assert sl.auxPrice == 245.0
+    assert sl.lmtPrice == 240.1  # default 2% band below the stop for a long
     assert sl.tif == "GTC"
     assert sl.outsideRth is True
 
 
-def test_stop_limit_sl_is_opt_in(monkeypatch):
-    monkeypatch.setenv("IBKR_SL_STOP_LIMIT", "1")
-    _, _, sl = create_bracket_order("CEG", "BUY", 994, 300.0, 245.0)
-    assert sl.orderType == "STP LMT"
-    assert sl.auxPrice == 245.0
-    assert sl.lmtPrice == 232.75  # default 5% band below the stop for a long
-    assert sl.outsideRth is True
+def test_stop_limit_band_short_and_opt_out(monkeypatch):
     _, _, short_sl = create_bracket_order("SPY", "SELL", 100, 550.0, 600.0)
-    assert short_sl.lmtPrice == 630.0  # short: band sits above the stop
+    assert short_sl.lmtPrice == 612.0  # short: band sits above the stop
+    monkeypatch.setenv("IBKR_SL_STOP_LIMIT", "0")
+    _, _, sl = create_bracket_order("CEG", "BUY", 994, 300.0, 245.0)
+    assert sl.orderType == "STP" and sl.auxPrice == 245.0
+
+
+def test_protective_sl_falls_back_to_plain_stop_when_ibkr_rejects(monkeypatch):
+    """IBKR 'Limit Price … too far through the Stop Price' must not leave the position naked."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from duckclaw import ibkr_bracket_orders as mod
+
+    async def _no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(mod.asyncio, "sleep", _no_sleep)
+    placed = []
+
+    class FakeIB:
+        async def qualifyContractsAsync(self, _c):
+            return None
+
+        def placeOrder(self, _contract, order):
+            order.orderId = len(placed) + 1
+            rejected = order.orderType == "STP LMT"
+            trade = SimpleNamespace(
+                order=order,
+                orderStatus=SimpleNamespace(status="Cancelled" if rejected else "PreSubmitted"),
+                log=[SimpleNamespace(message="Limit Price too far through the Stop Price")] if rejected else [],
+            )
+            placed.append(trade)
+            return trade
+
+    result = asyncio.run(mod.submit_protective_oca_orders(FakeIB(), "MU", "BUY", 14, 1150.0, 980.0))
+    types = [t.order.orderType for t in placed]
+    assert types == ["LMT", "STP LMT", "STP"]
+    assert result["sl_order_type"] == "STP" and result["sl_order_id"] == 3
+    assert "too far through" in result["sl_fallback_reason"]
+    assert placed[2].order.ocaGroup == placed[0].order.ocaGroup  # same OCA as the TP
 
 
 def test_create_bracket_order_sell_with_tp_sl():
@@ -108,7 +143,7 @@ def test_create_protective_oca_orders_long():
     assert tp is not None and sl is not None
     assert tp.action == "SELL" and sl.action == "SELL"
     assert tp.orderType == "LMT" and tp.lmtPrice == 300.0 and tp.tif == "GTC"
-    assert sl.orderType == "STP" and sl.auxPrice == 245.0 and sl.tif == "GTC"
+    assert sl.orderType == "STP LMT" and sl.auxPrice == 245.0 and sl.tif == "GTC"
     assert tp.ocaGroup == sl.ocaGroup == "PROTECT_CEG"
     assert sl.transmit is True
     assert tp.transmit is True

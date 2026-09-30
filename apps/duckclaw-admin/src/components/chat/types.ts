@@ -25,6 +25,8 @@ export type ChatMsg = {
   toolPhase?: ToolHeartbeatPhase;
   toolStartedAt?: number;
   toolElapsedMs?: number;
+  /** Error message the gateway sends with tool_phase=error (≤320 chars). */
+  toolDetail?: string;
   /** Turno (usuarios previos) para reinsertar heartbeats tras reload. */
   turnUserIndex?: number;
   /** Ancla estable del turno (texto del user / inicio del assistant) — sobrevive

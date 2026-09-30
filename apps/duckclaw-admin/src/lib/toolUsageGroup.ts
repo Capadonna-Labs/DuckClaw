@@ -146,7 +146,37 @@ export interface GroupedToolInvocation {
   averageMs: number | null;
   isRunning: boolean;
   isError: boolean;
+  /** Worker that ran it (last hop of "manager->quant_analyst"), '' if unknown. */
+  worker: string;
+  errorCount: number;
+  /** Message of the most recent failed call, if the gateway sent one. */
+  errorDetail: string;
   messages: ChatMsg[];
+}
+
+/** "quant_analyst->quant-trader" → "quant-trader". */
+export function toolWorkerLabel(m: ChatMsg | undefined, fallback = ''): string {
+  const raw = (m?.workerId || '').trim();
+  return (raw.split('->').pop() || '').trim() || fallback.trim();
+}
+
+export function toolGroupErrorCount(messages: ChatMsg[], indices: number[]): number {
+  return indices
+    .map((i) => messages[i])
+    .filter((m) => isToolHeartbeatMessage(m) && m?.toolPhase === 'error').length;
+}
+
+/** Rows split by worker in first-seen order — for subheaders when >1 agent ran tools. */
+export function groupInvocationsByWorker(
+  rows: GroupedToolInvocation[]
+): { worker: string; rows: GroupedToolInvocation[] }[] {
+  const out: { worker: string; rows: GroupedToolInvocation[] }[] = [];
+  for (const row of rows) {
+    const bucket = out.find((b) => b.worker === row.worker);
+    if (bucket) bucket.rows.push(row);
+    else out.push({ worker: row.worker, rows: [row] });
+  }
+  return out;
 }
 
 /**
@@ -170,25 +200,30 @@ export function toolRowDurationLabel(
 /** Agrupa herramientas repetidas del mismo tipo, mostrando contador y promedios. */
 export function groupToolInvocationsByName(
   messages: ChatMsg[],
-  indices: number[]
+  indices: number[],
+  fallbackWorker = ''
 ): GroupedToolInvocation[] {
   const items = indices.map((i) => messages[i]).filter(isToolHeartbeatMessage);
-  
-  // Agrupar por nombre de herramienta
-  const grouped = new Map<string, ChatMsg[]>();
+
+  // Agrupar por (worker, herramienta): el mismo tool en dos agentes son filas distintas.
+  const grouped = new Map<string, { toolName: string; worker: string; items: ChatMsg[] }>();
   for (const msg of items) {
-    const name = toolDisplayName(msg);
-    const existing = grouped.get(name) || [];
-    existing.push(msg);
-    grouped.set(name, existing);
+    const toolName = toolDisplayName(msg);
+    const worker = toolWorkerLabel(msg, fallbackWorker);
+    const key = `${worker}\u0000${toolName}`;
+    const existing = grouped.get(key);
+    if (existing) existing.items.push(msg);
+    else grouped.set(key, { toolName, worker, items: [msg] });
   }
-  
+
   // Convertir a formato de salida con estadísticas
   const result: GroupedToolInvocation[] = [];
-  for (const [toolName, toolMessages] of grouped.entries()) {
+  for (const { toolName, worker, items: toolMessages } of grouped.values()) {
     const count = toolMessages.length;
     const hasRunning = toolMessages.some((m) => isToolHeartbeatRunning(m));
-    const hasError = toolMessages.some((m) => m.toolPhase === 'error');
+    const errors = toolMessages.filter((m) => m.toolPhase === 'error');
+    const hasError = errors.length > 0;
+    const errorDetail = (newestByStartedAt(errors)?.toolDetail || '').trim();
     
     // Calcular tiempos solo de mensajes completados (elapsed del done, no wall clock).
     const completedMessages = toolMessages.filter((m) => !isToolHeartbeatRunning(m));
@@ -217,6 +252,9 @@ export function groupToolInvocationsByName(
       averageMs,
       isRunning: hasRunning,
       isError: hasError,
+      worker,
+      errorCount: errors.length,
+      errorDetail,
       messages: toolMessages,
     });
   }

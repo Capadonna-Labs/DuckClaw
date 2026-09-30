@@ -134,3 +134,28 @@ def test_friendly_chat_error_mlx_port() -> None:
     )
     assert "8080" in msg
     assert "motor local" in msg
+
+
+def test_reset_admin_heartbeat_backlog_clears_previous_turn() -> None:
+    import asyncio
+
+    from core.admin_chat_heartbeat import (
+        admin_heartbeat_backlog_key,
+        list_admin_heartbeat_backlog,
+        reset_admin_heartbeat_backlog,
+    )
+
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.lists = {admin_heartbeat_backlog_key("c1"): ['{"text": "old", "kind": "tool", "tool_name": "read_sql"}']}
+
+        async def delete(self, key: str) -> None:
+            self.lists.pop(key, None)
+
+        async def lrange(self, key: str, start: int, end: int) -> list[str]:
+            return list(self.lists.get(key, []))
+
+    r = FakeRedis()
+    assert asyncio.run(list_admin_heartbeat_backlog(r, "c1"))  # previous turn's event
+    asyncio.run(reset_admin_heartbeat_backlog(r, "c1"))
+    assert asyncio.run(list_admin_heartbeat_backlog(r, "c1")) == []

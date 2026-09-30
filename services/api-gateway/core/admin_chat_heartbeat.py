@@ -119,6 +119,21 @@ async def iter_admin_heartbeats(
             pass
 
 
+async def reset_admin_heartbeat_backlog(redis_client: Any, chat_id: str) -> None:
+    """Start each turn with an empty backlog.
+
+    The backlog only rehydrates the *in-flight* turn after a PWA detach; the UI
+    pastes it under the latest user message, so leftovers from the previous turn
+    showed up there as that turn's (frozen) tool box.
+    """
+    if redis_client is None or not (chat_id or "").strip():
+        return
+    try:
+        await redis_client.delete(admin_heartbeat_backlog_key(chat_id))
+    except Exception as exc:
+        _log.debug("admin heartbeat backlog reset failed chat_id=%r: %s", chat_id, exc)
+
+
 async def list_admin_heartbeat_backlog(
     redis_client: Any,
     chat_id: str,

@@ -153,24 +153,18 @@ export function useDetachedTurnResume(opts: {
     };
 
     const checkCompletion = () => {
+      // Gateway end marker (see runAdminChatTurn): history alone can't tell the
+      // in-flight turn from the previous one.
       void adminService
-        .getConversation(chatId, tenantId)
+        .getPlaygroundChatActivity(chatId, 80)
+        .then((activity) => {
+          if (cancelled) return undefined;
+          if (!(activity.events || []).some((ev) => ev.kind === 'turn_done')) return undefined;
+          return adminService.getConversation(chatId, tenantId);
+        })
         .then((data) => {
-          if (cancelled) return;
-          const fromServer = historyToChatMessages(data.messages, tenantId);
-          // Last user turn by position (attachment sends are stored with a different
-          // text, so an exact match never resolved) — same as runAdminChatTurn.
-          const userIdx = [...fromServer]
-            .map((m, i) => ({ m, i }))
-            .reverse()
-            .find(({ m }) => m.role === 'user')?.i;
-          const done =
-            userIdx != null &&
-            fromServer
-              .slice(userIdx + 1)
-              .some((m) => m.role === 'assistant' && (m.text || '').trim());
-          if (!done) return;
-          finishFromHistory(fromServer);
+          if (cancelled || !data) return;
+          finishFromHistory(historyToChatMessages(data.messages, tenantId));
         })
         .catch(() => undefined);
     };

@@ -508,6 +508,7 @@ const pollDetachedActivity = (epoch: number) => {
     // Map server event times onto this device's clock (phone/VPS skew).
     const skew = data.server_ts != null ? Date.now() - data.server_ts : 0;
     for (const ev of data.events || []) {
+      if (ev.kind === 'turn_done') continue; // end marker, handled by the completion poll
       // ts identifies each event; content keys collapsed identical repeats
       // (every "Pensando"/read_sql start), so rows never showed as running.
       const key =
@@ -550,21 +551,12 @@ const pollDetachedCompletion = (epoch: number) => {
       .getPlaygroundChatActivity(chatId, 80)
       .catch(() => ({ events: [] as never[] }));
     if (epoch !== detachedPollEpoch) return true;
+    // The gateway marks the end of a detached turn with a turn_done event (its
+    // backlog is emptied when the turn is accepted). History can't tell: the new
+    // user message is persisted together with the reply, so "last user has a
+    // reply" matched the *previous* turn and stopped polling after ~3 s.
+    if (!(activity.events || []).some((ev) => ev.kind === 'turn_done')) return false;
     const fromServer = historyToChatMessages(data.messages, effectiveTenantId || 'default');
-    // Match the most recent user turn by position, not by exact text —
-    // an attachment-only send (e.g. a pasted mensaje.txt with a short or
-    // empty caption) gets stored server-side as a different string (the
-    // [DOCUMENTOS_ADJUNTOS] annotation), so comparing against the raw
-    // client `text` never matched and this poll silently never resolved.
-    // Single-operator admin chat: the last user entry is always ours.
-    const userIdx = [...fromServer]
-      .map((m, i) => ({ m, i }))
-      .reverse()
-      .find(({ m }) => m.role === 'user')?.i;
-    const done =
-      userIdx != null &&
-      fromServer.slice(userIdx + 1).some((m) => m.role === 'assistant' && (m.text || '').trim());
-    if (!done) return false;
     const activeWorker = workerId || '';
     const activityEphemeral = toolHeartbeatsFromActivity(activity.events || [], activeWorker);
     setMessages((prev) => {

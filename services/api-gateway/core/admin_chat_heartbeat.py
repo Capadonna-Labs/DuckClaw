@@ -125,6 +125,10 @@ async def iter_admin_heartbeats(
             pass
 
 
+# Last backlog event of a detached turn; the polling client stops on it.
+TURN_DONE_KIND = "turn_done"
+
+
 async def reset_admin_heartbeat_backlog(redis_client: Any, chat_id: str) -> None:
     """Start each turn with an empty backlog.
 

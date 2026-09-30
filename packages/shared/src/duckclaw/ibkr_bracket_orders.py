@@ -37,7 +37,7 @@ Usage::
     result = await submit_bracket_order(ib, "CEG", "BUY", 994, 300.0, 245.0)
     # → {"main_order_id": 123, "tp_order_id": 124, "sl_order_id": 125}
 
-    await ib.disconnect()
+    ib.disconnect()
 
 Environment Variables:
     IBKR_HOST: IP/hostname del Gateway/TWS (default: 127.0.0.1)
@@ -66,7 +66,7 @@ try:
         asyncio.get_event_loop_policy().get_event_loop()
     except RuntimeError:
         asyncio.set_event_loop(asyncio.new_event_loop())
-    from ib_insync import IB, LimitOrder, MarketOrder, Stock, StopLimitOrder
+    from ib_insync import IB, LimitOrder, MarketOrder, Stock, StopLimitOrder, StopOrder
 
     _IB_INSYNC_AVAILABLE = True
 except ImportError:
@@ -123,15 +123,22 @@ async def connect_ibkr(
 # ---------------------------------------------------------------------------
 
 
-def _stop_loss_order(close_action: str, quantity: int, sl_price: float) -> "StopLimitOrder":
-    """SL as STP LMT: IBKR drops outsideRth on plain STP for US stocks, so a
-    plain stop can't trigger pre/post-market (e.g. an earnings gap AfterClose).
+def _stop_loss_order(close_action: str, quantity: int, sl_price: float) -> "StopOrder | StopLimitOrder":
+    """SL order. Default: plain STP (RTH-only trigger — IBKR drops outsideRth on
+    STP for US stocks).
 
-    The limit sits ``IBKR_SL_LIMIT_OFFSET_PCT`` (default 5%) past the stop in the
-    closing direction. ponytail: a gap beyond that band leaves the SL unfilled
-    (resting limit) instead of selling at any price; widen the env knob to trade
-    fill-certainty for slippage.
+    ``IBKR_SL_STOP_LIMIT=1`` opts into STP LMT, which can trigger pre/post-market,
+    with the limit ``IBKR_SL_LIMIT_OFFSET_PCT`` (default 5%) past the stop.
+    ponytail: opt-in only — on 2026-09-30 the paper account cancelled a GTC
+    outsideRth STP LMT (MU) right after placement with no error surfaced; a gap
+    beyond the band also leaves it unfilled. Flip the default once the broker
+    behavior is understood.
     """
+    if (os.getenv("IBKR_SL_STOP_LIMIT") or "").strip().lower() not in ("1", "true", "yes", "on"):
+        order = StopOrder(close_action, quantity, sl_price)
+        order.tif = "GTC"
+        order.outsideRth = True
+        return order
     pct = float(os.getenv("IBKR_SL_LIMIT_OFFSET_PCT", "5")) / 100.0
     sign = -1.0 if close_action == "SELL" else 1.0
     lmt = round(sl_price * (1.0 + sign * pct), 2)
@@ -304,7 +311,7 @@ async def submit_bracket_order(
         ... )
         >>> result["main_order_id"]
         12345
-        >>> await ib.disconnect()
+        >>> ib.disconnect()
     """
     if not _IB_INSYNC_AVAILABLE:
         raise ImportError(

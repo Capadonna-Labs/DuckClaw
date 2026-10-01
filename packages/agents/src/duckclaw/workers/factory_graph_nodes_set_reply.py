@@ -439,6 +439,10 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                             if _fallback:
                                 reply = _fallback
                                 break
+        if reply and msgs:
+            from duckclaw.egress.claim_guard import append_unexecuted_claims_warning
+
+            reply = append_unexecuted_claims_warning(reply, list(msgs), _lh_fb, tools_by_name.keys())
         try:
             from duckclaw.graphs.conversation_traces import sync_final_assistant_egress_in_langchain_messages
 

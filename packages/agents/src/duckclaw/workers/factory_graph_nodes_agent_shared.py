@@ -24,6 +24,7 @@ def log_llm_usage(
     state: Optional[dict[str, Any]] = None,
     tool_calls: Any = None,
     error: Any = None,
+    response: Any = None,
 ) -> float:
     """``llm_usage:`` console lines (same shape as ``tool_usage:``) + a row in the
     admin Tool Usage box.
@@ -43,7 +44,17 @@ def log_llm_usage(
         return time.monotonic()
     phase = "error" if error is not None else ("decided_tools" if tool_calls else "writing")
     elapsed_ms = (time.monotonic() - t0) * 1000
-    log.info("llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f", worker_label, phase, elapsed_ms)
+    meta = getattr(response, "response_metadata", None) or {}
+    if str(meta.get("finish_reason") or meta.get("stop_reason") or "").lower() in ("length", "max_tokens"):
+        # Output budget exhausted (reasoning models count thinking tokens): the reply
+        # is cut or empty and the UI falls back to a tool summary ("N registros.").
+        usage = (meta.get("token_usage") or {}).get("completion_tokens")
+        log.warning(
+            "llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f | truncated=max_tokens completion_tokens=%s",
+            worker_label, phase, elapsed_ms, usage,
+        )
+    else:
+        log.info("llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f", worker_label, phase, elapsed_ms)
     _publish_llm_row(
         state,
         worker_label,

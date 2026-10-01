@@ -357,7 +357,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
             _pl_fail = failure_provider_label_for_llm_invoke(_invoked_llm, provider)
             resp = AIMessage(content=_agent_node_llm_failure_user_message(exc, provider=_pl_fail))
         tool_calls = getattr(resp, "tool_calls", None) or []
-        log_llm_usage(_wl, _llm_t0, state=state, tool_calls=tool_calls, error=_llm_invoke_exc)
+        log_llm_usage(_wl, _llm_t0, state=state, tool_calls=tool_calls, error=_llm_invoke_exc, response=resp)
         _is_goals_tick = (
             str(incoming or "").strip().startswith("[SYSTEM_EVENT:")
             and proactive_review_event_phrase_in_text(str(incoming or ""))

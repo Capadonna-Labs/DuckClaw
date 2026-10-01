@@ -59,6 +59,8 @@ def sse_heartbeat(
     elapsed_ms: float | None = None,
     turn_user_index: int | None = None,
     tool_rename: str | None = None,
+    artifact_ids: list[str] | None = None,
+    sandbox_run_id: str | None = None,
 ) -> str:
     meta: dict[str, Any] = {"type": "heartbeat", "text": text, "kind": kind}
     wid = (worker_id or "").strip()
@@ -90,6 +92,13 @@ def sse_heartbeat(
     tr = (tool_rename or "").strip()
     if tr and tp in ("done", "error"):
         meta["tool_rename"] = tr
+    # run_sandbox charts render inline in the chat (visual heartbeat).
+    aids = [str(a).strip() for a in (artifact_ids or []) if str(a).strip()]
+    if aids:
+        meta["artifact_ids"] = aids
+    srid = (sandbox_run_id or "").strip()
+    if srid:
+        meta["sandbox_run_id"] = srid
     if elapsed_ms is not None:
         try:
             meta["elapsed_ms"] = max(0.0, float(elapsed_ms))

@@ -145,14 +145,8 @@ export default function PlaygroundPage() {
     notificationsEnabled,
     onConversationActivity: conv.bumpRefresh,
     onConversationNotFound: conv.recoverMissingConversation,
-    onSandboxArtifacts: (payload) => {
-      const chat = conv.sessionId ?? '';
-      const run = payload.sandbox_run_id?.trim() ?? '';
-      const q = new URLSearchParams({ tab: 'files' });
-      if (chat) q.set('chat', chat);
-      if (run) q.set('run', run);
-      router.push(`/sandbox?${q.toString()}`);
-    },
+    // Sandbox artifacts now render inline in the chat (visual heartbeat images);
+    // navigating to /sandbox mid-turn pulled the user out of the conversation.
   });
 
   useEffect(() => {

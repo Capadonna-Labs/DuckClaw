@@ -375,6 +375,9 @@ export const chatApi = {
         turn_user_index?: number;
         /** Server epoch ms of the event (identity + real start time). */
         ts?: number;
+        /** kind=visual from run_sandbox: artifacts of the run (charts shown inline). */
+        artifact_ids?: string[];
+        sandbox_run_id?: string;
       }[];
       server_ts?: number;
     }>(`/playground/chat/activity?${q.toString()}`);

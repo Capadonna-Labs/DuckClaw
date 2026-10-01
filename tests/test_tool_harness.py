@@ -85,3 +85,28 @@ def test_resolve_harness_from_spec() -> None:
     assert cfg["approval_mode"] == "never"
     assert cfg["max_failures_per_tool"] == 3
     assert cfg["max_tool_result_chars"] == 2000
+
+
+def test_sandbox_nonzero_exit_counts_as_failure_and_trips_after_budget() -> None:
+    """A loop of failing run_sandbox scripts (exit_code 1, no ok:false) must trip the breaker."""
+    import json
+
+    from duckclaw.workers.tool_harness import (
+        circuit_should_block,
+        content_indicates_failure,
+        record_tool_failure,
+    )
+
+    failed = json.dumps({"exit_code": 1, "output": "Error en Sandbox: SyntaxError"})
+    ok = json.dumps({"exit_code": 0, "output": "SPY: 1000 obs"})
+    assert content_indicates_failure(failed)
+    assert not content_indicates_failure(ok)
+
+    counts: dict[str, int] = {}
+    for _ in range(4):
+        counts = record_tool_failure(counts, "run_sandbox")
+    assert not circuit_should_block(counts, "run_sandbox", 2)  # code iteration budget = 5
+    counts = record_tool_failure(counts, "run_sandbox")
+    assert circuit_should_block(counts, "run_sandbox", 2)
+    # Other tools keep the global default.
+    assert circuit_should_block({"read_sql": 2}, "read_sql", 2)

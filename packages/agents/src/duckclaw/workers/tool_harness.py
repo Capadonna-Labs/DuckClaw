@@ -214,8 +214,14 @@ def truncate_tool_result(content: str, max_chars: int) -> tuple[str, bool]:
     return trimmed + note, True
 
 
+# Code-iteration tools legitimately fail a few times while the model fixes its
+# script; the global default (2) would cut that short.
+_TOOL_MIN_FAILURE_BUDGET = {"run_sandbox": 5}
+
+
 def circuit_should_block(fail_counts: dict[str, int], tool_name: str, max_failures: int) -> bool:
-    return int(fail_counts.get(tool_name) or 0) >= max(1, max_failures)
+    budget = max(max_failures, _TOOL_MIN_FAILURE_BUDGET.get((tool_name or "").strip(), 0))
+    return int(fail_counts.get(tool_name) or 0) >= max(1, budget)
 
 
 def record_tool_failure(fail_counts: dict[str, int], tool_name: str) -> dict[str, int]:
@@ -243,6 +249,10 @@ def content_indicates_failure(content: str) -> bool:
     except json.JSONDecodeError:
         return False
     if isinstance(payload, dict) and payload.get("ok") is False:
+        return True
+    # run_sandbox reports {"exit_code": 1, "output": "Error en Sandbox: …"} without
+    # ok:false; uncounted, a 25-min loop of failing scripts never tripped the breaker.
+    if isinstance(payload, dict) and payload.get("exit_code") not in (None, 0, "0"):
         return True
     return False
 

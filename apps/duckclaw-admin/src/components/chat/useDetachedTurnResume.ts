@@ -174,7 +174,7 @@ export function useDetachedTurnResume(opts: {
     // ponytail: 2 s polling capped at DETACHED_RESUME_MAX_MS, then a final history
     // reload clears loading so the UI can never stay stuck.
     const DETACHED_RESUME_POLL_MS = 2_000;
-    const DETACHED_RESUME_MAX_MS = 60 * 60_000;
+    const DETACHED_RESUME_MAX_MS = 4 * 60 * 60_000;
     const resumeStartedAt = Date.now();
     let timer = 0;
     const tick = () => {

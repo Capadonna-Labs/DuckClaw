@@ -34,7 +34,9 @@ class SecurityPolicy(BaseModel):
     filesystem: FileSystemPolicy = Field(default_factory=FileSystemPolicy)
     secrets: SecretPolicy = Field(default_factory=SecretPolicy)
     # Perfil browser sandbox puede requerir hasta 300s (spec Strix Browser Sandbox).
-    max_execution_time_seconds: int = Field(default=30, le=600)
+    # Long-running agents (training/backtests) may declare more; the runtime ceiling
+    # is DUCKCLAW_SANDBOX_MAX_TIMEOUT_SEC (sandbox._sandbox_max_timeout_sec).
+    max_execution_time_seconds: int = Field(default=30, le=86_400)
 
 
 def _default_zero_trust_policy() -> SecurityPolicy:

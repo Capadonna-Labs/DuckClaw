@@ -83,6 +83,15 @@ _FALLBACK_IMAGE = "python:3.12-slim"
 # 1.5 GB: the image ships PyTorch (CPU), ~300 MB just to import. Override per host.
 _SANDBOX_MEMORY = (os.environ.get("DUCKCLAW_SANDBOX_MEMORY") or "1536m").strip()
 _SANDBOX_TIMEOUT = 120          # segundos de timeout por ejecución
+
+
+def _sandbox_max_timeout_sec() -> int:
+    """Hard ceiling per sandbox run. Was a fixed 600 s; long-running agents
+    (model training, backtests) need more. DUCKCLAW_SANDBOX_MAX_TIMEOUT_SEC, default 1 h."""
+    try:
+        return max(60, int((os.environ.get("DUCKCLAW_SANDBOX_MAX_TIMEOUT_SEC") or "3600").strip()))
+    except ValueError:
+        return 3600
 _MAX_RETRIES_DEFAULT = 3
 
 # Directorio base de sesiones en el host
@@ -512,7 +521,7 @@ class StrixSandboxManager:
             exec_env["STRIX_CHROME_PROFILE_DIR"] = "/workspace/chrome_profile"
 
         limit = int(timeout_seconds) if timeout_seconds is not None else int(self.timeout)
-        limit = max(1, min(limit, 600))
+        limit = max(1, min(limit, _sandbox_max_timeout_sec()))
 
         def _exec_blocking() -> Any:
             return container.exec_run(
@@ -999,7 +1008,7 @@ def _sandbox_effective_timeout_sec(
     image_override: str | None = None,
 ) -> int:
     """Timeout efectivo: policy YAML + piso browser/env."""
-    base = max(1, min(int(policy.max_execution_time_seconds), 600))
+    base = max(1, min(int(policy.max_execution_time_seconds), _sandbox_max_timeout_sec()))
     if image_override:
         raw = (
             (os.environ.get("DUCKCLAW_BROWSER_SANDBOX_TIMEOUT_SEC") or "").strip()
@@ -1015,7 +1024,7 @@ def _sandbox_effective_timeout_sec(
     if image_override and floor <= 0:
         floor = 120
     if floor > 0:
-        base = max(base, min(floor, 600))
+        base = max(base, min(floor, _sandbox_max_timeout_sec()))
     return base
 
 
@@ -1555,7 +1564,7 @@ async def run_mercenary_ephemeral_async(
 ) -> dict[str, Any]:
     if not (directive or "").strip():
         return {"ok": False, "error_code": "MERCENARY_INVALID_INPUT", "message": "directive vacío"}
-    limit = max(1, min(int(timeout_s), 600))
+    limit = max(1, min(int(timeout_s), _sandbox_max_timeout_sec()))
     if not _docker_available():
         return {
             "ok": False,

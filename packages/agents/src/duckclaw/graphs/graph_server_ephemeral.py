@@ -249,12 +249,13 @@ def invoke_ephemeral_gateway_graph(
             _invoke_provider = str(trip[0] or "")
         _log.info(
             "graph_server: llm_invoke_override chat_id=%s trip_source=%s has_trip=%s ovr=%s "
-            "global_provider=%s tenant_id=%s",
+            "global_provider=%s model=%s tenant_id=%s",
             chat_id,
             trip_source,
             trip is not None,
             bool(ovr),
             _invoke_provider,
+            (ovr.get("llm_model_override") or (trip[1] if trip else "") or "env-default"),
             tid,
         )
     except Exception as exc:

@@ -481,7 +481,7 @@ const appendHeartbeat = (payload: {
 const DETACHED_ACTIVITY_POLL_MS = 1_500;
 const DETACHED_COMPLETION_POLL_MS = 3_000;
 // Sandbox-heavy turns run 15-20+ min; a 15-min cap left them stuck "running".
-const DETACHED_POLL_MAX_MS = 60 * 60_000;
+const DETACHED_POLL_MAX_MS = 4 * 60 * 60_000; // long-running agents (training, backtests)
 
 const scheduleDetachedPoll = (epoch: number, everyMs: number, tick: () => Promise<boolean>) => {
   const startedAt = Date.now();

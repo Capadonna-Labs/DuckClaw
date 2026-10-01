@@ -332,6 +332,14 @@ class StrixSandboxManager:
         out_dir = base / "output"
         data_dir.mkdir(parents=True, exist_ok=True)
         out_dir.mkdir(parents=True, exist_ok=True)
+        # The container runs as uid 1000 (non-root) but this dir is created by the
+        # gateway (root, 0755): every write to /workspace/output failed with
+        # "Permission denied", so charts/files never reached the chat. Per-session
+        # scratch dir, only mounted into that session's sandbox.
+        try:
+            out_dir.chmod(0o777)
+        except OSError:
+            pass
         return data_dir, out_dir
 
     def _get_or_create_container(

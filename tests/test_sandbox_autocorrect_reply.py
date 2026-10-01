@@ -37,3 +37,21 @@ def test_sandbox_timeout_ceiling_is_configurable(monkeypatch) -> None:
     monkeypatch.setenv("DUCKCLAW_SANDBOX_MAX_TIMEOUT_SEC", "900")
     assert sb._sandbox_effective_timeout_sec(pol) == 900  # still bounded by the ceiling
     assert SecurityPolicy(max_execution_time_seconds=7200).max_execution_time_seconds == 7200
+
+
+def test_session_output_dir_is_writable_by_non_root_sandbox_user(tmp_path, monkeypatch) -> None:
+    """The container runs as uid 1000; /workspace/output must be writable or charts never reach the chat."""
+    import os
+    import stat
+    import sys
+
+    import pytest
+
+    if sys.platform.startswith("win"):
+        pytest.skip("POSIX permissions")
+    from duckclaw.graphs import sandbox as sb
+
+    monkeypatch.setattr(sb, "_TMP_BASE", tmp_path)
+    mgr = sb.StrixSandboxManager.__new__(sb.StrixSandboxManager)
+    _data, out = mgr._session_dirs("s1")
+    assert stat.S_IMODE(os.stat(out).st_mode) & 0o002  # world-writable

@@ -317,7 +317,11 @@ export function useAdminChatHistory({
 
     const loadKey = `${chatId}|${historyTenantId}`;
     if (loadedKeyRef.current === loadKey) return;
-    if (loadingRef.current) return;
+    // Reopening the PWA mid detached turn: the resume hook turns `loading` on
+    // before this runs, and skipping left the chat with only the Tool Usage box
+    // (no history). The guard is for live SSE turns, which already hold state.
+    const resumingDetached = Boolean(readPendingDetachedTurn(chatId));
+    if (loadingRef.current && !resumingDetached) return;
 
     loadedKeyRef.current = loadKey;
     setHistoryLoading(true);
@@ -331,8 +335,12 @@ export function useAdminChatHistory({
       adminService.getPlaygroundChatActivity(chatId, 80).catch(() => ({ events: [] })),
     ])
       .then(([data, activity]) => {
-        if (cancelled || loadingRef.current) return;
+        if (cancelled || (loadingRef.current && !resumingDetached)) return;
         const fromServer = historyToChatMessages(data.messages, historyTenantId);
+        // In-flight detached turn: its user message is only persisted together
+        // with the reply, so show it from the pending record meanwhile.
+        const pendingResume = resumingDetached ? readPendingDetachedTurn(chatId) : null;
+        if (pendingResume?.text) fromServer.push({ role: 'user', text: pendingResume.text });
         const storedEphemeral = readEphemeralHeartbeats(chatId, workerAtLoad);
         const activityEphemeral = toolHeartbeatsFromActivity(
           activity.events || [],

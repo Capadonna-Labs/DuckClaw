@@ -124,6 +124,14 @@ def test_detached_polls_outlive_long_turns_and_never_stay_stuck() -> None:
     assert "void finishWithHistory()" in resume
 
 
+def test_reopen_mid_detached_turn_still_loads_history() -> None:
+    """Resume turns `loading` on before the first history load; skipping it left
+    the chat showing only the Tool Usage box."""
+    history = (ROOT / "apps/duckclaw-admin/src/components/chat/useAdminChatHistory.ts").read_text(encoding="utf-8")
+    assert "const resumingDetached = Boolean(readPendingDetachedTurn(chatId));" in history
+    assert "if (loadingRef.current && !resumingDetached) return;" in history
+
+
 def test_detached_turn_resets_backlog_and_marks_turn_done() -> None:
     route = (
         ROOT / "services/api-gateway/routers/admin_domains/playground/chat_routes.py"

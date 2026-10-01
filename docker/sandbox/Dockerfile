@@ -36,6 +36,12 @@ RUN pip install --no-cache-dir "ml4t-diagnostic[backtest]==0.1.0b15" \
 
 RUN python -c "import ml4t.diagnostic, ml4t.backtest as _bt; print('ml4t ok:', _bt.__file__)"
 
+# PyTorch CPU (autograd para modelos de investigación; sin CUDA: ~0.8 GB vs ~2.5 GB).
+# Runtime: subir mem_limit (DUCKCLAW_SANDBOX_MEMORY, default 1536m) — torch ocupa ~300 MB al importar.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch==2.5.1 \
+    && rm -rf /root/.cache/pip \
+    && python -c "import torch; print('torch ok:', torch.__version__, 'cuda:', torch.cuda.is_available())"
+
 # Dependencias browser/LLM para automatización en sandbox (según requerimiento).
 RUN uv pip install --system browser-use langchain-openai playwright \
     && python -m playwright install --with-deps chromium

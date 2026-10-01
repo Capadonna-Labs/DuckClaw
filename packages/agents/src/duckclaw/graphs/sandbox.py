@@ -80,7 +80,8 @@ _DEFAULT_BROWSER_IMAGE = "duckclaw/browser-env:latest"
 _BROWSER_SANDBOX_STDOUT_TAIL = 4000
 _BROWSER_SANDBOX_STDERR_TAIL = 1500
 _FALLBACK_IMAGE = "python:3.12-slim"
-_SANDBOX_MEMORY = "768m"
+# 1.5 GB: the image ships PyTorch (CPU), ~300 MB just to import. Override per host.
+_SANDBOX_MEMORY = (os.environ.get("DUCKCLAW_SANDBOX_MEMORY") or "1536m").strip()
 _SANDBOX_TIMEOUT = 120          # segundos de timeout por ejecución
 _MAX_RETRIES_DEFAULT = 3
 
@@ -296,7 +297,7 @@ class StrixSandboxManager:
     Strix sandbox lifecycle (docs/architecture/system_overview.md)
     - network_mode=none (Zero exfiltration)
     - --cap-drop=ALL
-    - mem_limit=768m (default DuckClaw; Python + Playwright headroom)
+    - mem_limit=1536m (DUCKCLAW_SANDBOX_MEMORY; Python + Playwright + PyTorch headroom)
     - Montaje de datos en modo read-only; output en read-write
     """
 

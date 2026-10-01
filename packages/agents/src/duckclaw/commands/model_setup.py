@@ -317,28 +317,38 @@ def _effective_llm_triplet_for_chat_ui(
     return (p, m, u)
 
 
-def chat_has_llm_chat_state_override(db: Any, chat_id: Any) -> bool:
+def chat_has_llm_chat_state_override(db: Any, chat_id: Any, *, tenant_id: str = "default") -> bool:
     cid = str(chat_id or "").strip()
     if not cid:
         return False
     for key in ("llm_provider", "llm_model", "llm_base_url"):
-        if (_llm_runtime_value(db, cid, key) or "").strip():
+        if (_llm_runtime_value(db, cid, key, tenant_id=tenant_id) or "").strip():
             return True
     return False
 
 
-def resolve_llm_triplet_for_chat_invocation(db: Any, chat_id: Any) -> tuple[str, str, str] | None:
-    """Return a chat override triplet for graph invocation, or None to use cached env config."""
-    has_override = chat_has_llm_chat_state_override(db, chat_id)
-    _debug_log_model_config(
-        hypothesis_id="H_override_gate",
-        location="model_setup.resolve_llm_triplet_for_chat_invocation",
-        message="chat_override_gate",
-        data={"chat_id": str(chat_id), "has_override": bool(has_override)},
-    )
-    if not has_override:
-        return None
-    return _effective_llm_triplet_for_chat_ui(db, chat_id)
+def resolve_llm_triplet_for_chat_invocation(
+    db: Any, chat_id: Any, *, tenant_id: str = "default"
+) -> tuple[str, str, str] | None:
+    """Return a chat override triplet for graph invocation, or None to use cached env config.
+
+    Reads the chat's tenant first — the admin model selector (PUT /playground/model)
+    writes there and the UI shows that value. Reading only "default" ran turns on a
+    stale model (UI: v4-flash, invoke: v4-pro). Falls back to "default", where the
+    /model fly command still writes.
+    """
+    tid = str(tenant_id or "default").strip() or "default"
+    for scope in dict.fromkeys((tid, "default")):
+        has_override = chat_has_llm_chat_state_override(db, chat_id, tenant_id=scope)
+        _debug_log_model_config(
+            hypothesis_id="H_override_gate",
+            location="model_setup.resolve_llm_triplet_for_chat_invocation",
+            message="chat_override_gate",
+            data={"chat_id": str(chat_id), "tenant_id": scope, "has_override": bool(has_override)},
+        )
+        if has_override:
+            return _effective_llm_triplet_for_chat_ui(db, chat_id, tenant_id=scope)
+    return None
 
 
 def _apply_provider_defaults(db: Any, chat_id: Any, provider: str) -> None:

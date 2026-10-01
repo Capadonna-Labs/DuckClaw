@@ -136,11 +136,14 @@ def build_openrouter_llm(
     else:
         or_base = (base_url or _or_default).rstrip("/")
     # Sin max_tokens explícito, OpenRouter/LangChain pueden pedir ~64k de salida y fallar 402 en free tier.
-    _or_out = (os.environ.get("DUCKCLAW_OPENROUTER_MAX_OUTPUT_TOKENS") or "2048").strip()
+    # 2048 was too low for reasoning models (DeepSeek v4-pro, GLM): reasoning tokens count
+    # toward the cap, so long turns came back with empty content (finish_reason=length)
+    # and the UI showed the "N registros." fallback. Only generated tokens are billed.
+    _or_out = (os.environ.get("DUCKCLAW_OPENROUTER_MAX_OUTPUT_TOKENS") or "8192").strip()
     try:
-        _mt = max(256, min(int(_or_out), 8192))
+        _mt = max(256, min(int(_or_out), 32768))
     except ValueError:
-        _mt = 2048
+        _mt = 8192
     llm = ChatOpenAI(
         model=resolved_model,
         temperature=0,

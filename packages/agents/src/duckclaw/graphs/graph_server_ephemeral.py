@@ -103,6 +103,7 @@ def resolve_llm_triplet_for_graph_invoke(
     *,
     same_file: bool,
     log: Any | None = None,
+    tenant_id: str = "default",
 ) -> tuple[tuple[str, str, str] | None, str]:
     """
     Resuelve provider/model/base_url para un turno.
@@ -115,7 +116,7 @@ def resolve_llm_triplet_for_graph_invoke(
     from duckclaw.graphs.on_the_fly_commands import resolve_llm_triplet_for_chat_invocation
 
     cid = (chat_id or "").strip() or None
-    hub_trip = resolve_llm_triplet_for_chat_invocation(hub_db, cid) if cid else None
+    hub_trip = resolve_llm_triplet_for_chat_invocation(hub_db, cid, tenant_id=tenant_id) if cid else None
 
     if same_file:
         source = "same_file_as_hub" if hub_trip else "same_file_no_chat_override"
@@ -126,7 +127,7 @@ def resolve_llm_triplet_for_graph_invoke(
     if v_p and v_p != ":memory:":
         try:
             vault_trip = resolve_llm_triplet_for_chat_invocation(
-                GatewayDbEphemeralReadonly(v_p), cid
+                GatewayDbEphemeralReadonly(v_p), cid, tenant_id=tenant_id
             )
         except Exception as exc:
             if log is not None:
@@ -197,6 +198,7 @@ def invoke_ephemeral_gateway_graph(
             v_p or None,
             same_file=same_file,
             log=_log,
+            tenant_id=tid,
         )
         if trip is not None:
             tp, tm, tu = trip

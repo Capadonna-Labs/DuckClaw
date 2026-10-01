@@ -864,6 +864,26 @@ def _correction_prompt(original_request: str, code: str, error: str, attempt: in
     )
 
 
+def _corrected_code_from_llm(message: Any) -> str:
+    """Python source from the auto-correct LLM reply, or "" if unusable.
+
+    Never ``str(message)``: with empty ``content`` (reasoning model spent the
+    whole budget, completion_tokens == max) that injected the AIMessage repr
+    (``content='' additional_kwargs=…``) as the "fixed" script. A reply cut by the
+    token limit is incomplete code, so it is discarded too.
+    """
+    from duckclaw.integrations.llm_providers import lc_message_content_to_text
+
+    meta = getattr(message, "response_metadata", None) or {}
+    if str(meta.get("finish_reason") or meta.get("stop_reason") or "").lower() in ("length", "max_tokens"):
+        return ""
+    raw = message if isinstance(message, str) else lc_message_content_to_text(message)
+    text = (raw or "").strip()
+    # Quitar fences de markdown si el modelo los añade
+    text = re.sub(r"^```(?:python)?\s*", "", text, flags=re.MULTILINE)
+    return re.sub(r"```\s*$", "", text, flags=re.MULTILINE).strip()
+
+
 def _load_allowed_secrets(policy: SecurityPolicy) -> dict[str, str]:
     out: dict[str, str] = {}
     for name in policy.secrets.allowed_secrets:
@@ -1091,12 +1111,12 @@ def run_in_sandbox(
             fix_prompt = _correction_prompt(original_request or code, current_code, error_info, attempt)
             try:
                 fixed = llm.invoke(fix_prompt)
-                fixed_text = (getattr(fixed, "content", None) or str(fixed) or "").strip()
-                # Quitar fences de markdown si el modelo los añade
-                fixed_text = re.sub(r"^```(?:python)?\s*", "", fixed_text, flags=re.MULTILINE)
-                fixed_text = re.sub(r"```\s*$", "", fixed_text, flags=re.MULTILINE).strip()
-                if fixed_text:
-                    current_code = fixed_text
+                fixed_text = _corrected_code_from_llm(fixed)
+                if not fixed_text:
+                    # Empty/truncated fix: keep the real error for the agent instead
+                    # of retrying with garbage.
+                    break
+                current_code = fixed_text
             except Exception:
                 break
 

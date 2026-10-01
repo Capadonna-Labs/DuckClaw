@@ -455,12 +455,23 @@ const appendHeartbeat = (payload: {
       return coalesceTrailingToolHeartbeats(next);
     }
 
+    // Sandbox charts: show the run's artifacts inline (preview streams images;
+    // non-image artifacts fail to load and ChatBubble hides them).
+    const sandboxImages =
+      kind === 'visual' && payload.artifact_ids?.length
+        ? payload.artifact_ids.map((aid) => ({
+            url: `/api/admin/sandbox-artifacts/${encodeURIComponent(aid)}/preview?chat_id=${encodeURIComponent(chatId)}`,
+            name: aid,
+            artifactId: aid,
+          }))
+        : undefined;
     const hb: ChatMsg = {
       role: 'heartbeat',
       text: payload.text,
       heartbeatKind: effectiveKind,
       workerId: hbWorker || undefined,
       swarmSlot: hbSlot,
+      ...(sandboxImages ? { imagePreviews: sandboxImages } : {}),
     };
     const next = [...m];
     next.splice(insertAt, 0, hb);
@@ -538,6 +549,8 @@ const pollDetachedActivity = (epoch: number) => {
         tool_rename: ev.tool_rename,
         elapsed_ms: ev.elapsed_ms,
         turn_user_index: ev.turn_user_index,
+        artifact_ids: ev.artifact_ids,
+        sandbox_run_id: ev.sandbox_run_id,
         started_at_ms: ev.ts != null ? ev.ts + skew : undefined,
       });
     }

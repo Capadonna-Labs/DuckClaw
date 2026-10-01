@@ -242,6 +242,12 @@ export function ChatBubble({
               <img
                 src={img.url}
                 alt={img.name}
+                // Sandbox runs report every artifact (CSV, JSON, duplicate storage ids);
+                // only real images load — hide the rest instead of a broken icon.
+                onError={(e) => {
+                  const btn = e.currentTarget.parentElement;
+                  if (btn) btn.style.display = 'none';
+                }}
                 className={
                   isUser
                     ? 'max-h-32 max-w-full rounded-lg border border-white/20 object-contain'

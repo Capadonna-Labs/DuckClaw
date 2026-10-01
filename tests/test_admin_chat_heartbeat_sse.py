@@ -170,3 +170,16 @@ def test_parse_admin_heartbeat_payload_keeps_event_ts() -> None:
     a = parse_admin_heartbeat_payload(json.dumps({"text": "🧠 Pensando", "kind": "tool", "tool_name": "Pensando", "tool_phase": "start", "ts": 1000.5}))
     b = parse_admin_heartbeat_payload(json.dumps({"text": "🧠 Pensando", "kind": "tool", "tool_name": "Pensando", "tool_phase": "start", "ts": 2000.25}))
     assert a["ts"] == 1000.5 and b["ts"] == 2000.25
+
+
+def test_sandbox_artifacts_survive_backlog_and_sse() -> None:
+    """Charts from run_sandbox render inline only if artifact ids reach the UI (SSE and iOS poll)."""
+    import json
+
+    from core.admin_chat_heartbeat import parse_admin_heartbeat_payload
+
+    raw = json.dumps({"text": "Sandbox: 2 artefactos", "kind": "visual", "artifact_ids": ["a1", "a2"], "sandbox_run_id": "r9"})
+    parsed = parse_admin_heartbeat_payload(raw)
+    assert parsed["artifact_ids"] == ["a1", "a2"] and parsed["sandbox_run_id"] == "r9"
+    sse = sse_heartbeat("Sandbox: 2 artefactos", kind="visual", artifact_ids=["a1"], sandbox_run_id="r9")
+    assert '"artifact_ids": ["a1"]' in sse and '"sandbox_run_id": "r9"' in sse

@@ -69,6 +69,16 @@ def parse_admin_heartbeat_payload(raw: str) -> dict[str, Any] | None:
     tr = str(data.get("tool_rename") or "").strip()
     if tr:
         out["tool_rename"] = tr
+    # run_sandbox artifacts (charts): without these the detached/iOS poll never
+    # learned about them, so images could not render inline.
+    aids = data.get("artifact_ids")
+    if isinstance(aids, list):
+        clean = [str(a).strip() for a in aids if str(a).strip()]
+        if clean:
+            out["artifact_ids"] = clean
+    srid = str(data.get("sandbox_run_id") or "").strip()
+    if srid:
+        out["sandbox_run_id"] = srid
     ts = data.get("ts")
     if ts is not None:
         try:

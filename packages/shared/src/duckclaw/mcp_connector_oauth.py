@@ -21,54 +21,46 @@ def persist_mcp_connector_oauth_tokens(
     oauth_client_id: str = "",
     oauth_redirect_uri: str = "",
 ) -> str:
-    """Persist OAuth tokens synchronously; ponytail: async queue alone loses tokens on DuckDB lock.
+    """Persist OAuth tokens through DB-Writer; returns the write task_id.
+
+    This used to open the hub RW from the Gateway, which raced DB-Writer
+    ("Conflict on tuple deletion"): rotated refresh tokens (Notion, Google) were
+    lost, the next refresh got invalid_grant and the connector died until the user
+    redid OAuth. Fresh tokens are also kept in-process (see
+    ``remember_refreshed_oauth_tokens``) so they work before the write lands.
 
     When ``oauth_client_id`` is set (Notion/DCR), also store the client that issued the
     tokens so refresh does not reuse a stale DCR client from a previous redirect_uri.
     """
-    from duckclaw import DuckClaw
+    from duckclaw.db_write_queue import enqueue_typed_command
     from duckclaw.gateway_db import get_gateway_db_path
-    from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
+    from duckclaw.write_commands import SetMcpConnectorAuthCommand
 
-    payload = {
-        "tenant_id": tenant_id,
-        "actor_email": actor_email,
-        "connector_id": connector_id,
-        "bearer_token": bearer_token,
-        "refresh_token": refresh_token,
-        "oauth_client_id": oauth_client_id,
-        "oauth_redirect_uri": oauth_redirect_uri,
-    }
+    from duckclaw.admin_mcp_connectors import _REFRESHED_OAUTH
+
+    # Latest tokens win immediately (a re-done OAuth must replace a cached dead pair).
+    _REFRESHED_OAUTH[(tenant_id or "default", connector_id)] = (
+        bearer_token,
+        refresh_token,
+        time.time(),
+    )
     path = (get_gateway_db_path() or "").strip()
     if not path:
         raise ValueError("Gateway DuckDB path not configured")
-
-    last_exc: Exception | None = None
-    for attempt in range(4):
-        try:
-            db = DuckClaw(path, read_only=False, engine="python")
-            try:
-                _apply_set_mcp_connector_auth(db, payload)
-            finally:
-                db.close()
-            return ""
-        except Exception as exc:
-            last_exc = exc
-            if "lock" not in str(exc).lower() or attempt >= 3:
-                break
-            time.sleep(0.15 * (attempt + 1))
-
-    _log.warning(
-        "OAuth token sync persist failed connector=%s: %s",
-        connector_id,
-        last_exc,
+    command = SetMcpConnectorAuthCommand(
+        tenant_id=tenant_id or "default",
+        actor_email=actor_email or "system",
+        connector_id=connector_id,
+        bearer_token=bearer_token,
+        refresh_token=refresh_token,
+        oauth_client_id=oauth_client_id,
+        oauth_redirect_uri=oauth_redirect_uri,
     )
-    detail = str(last_exc or "persist failed")[:200]
-    if "lock" in detail.lower():
-        msg = f"No se pudo guardar el token OAuth ({detail}). Reintenta en unos segundos."
-    else:
-        msg = f"No se pudo guardar el token OAuth ({detail})."
-    raise RuntimeError(msg) from last_exc
+    try:
+        return enqueue_typed_command(command, db_path=path)
+    except Exception as exc:
+        _log.warning("OAuth token persist enqueue failed connector=%s: %s", connector_id, exc)
+        raise RuntimeError(f"No se pudo guardar el token OAuth ({str(exc)[:200]}).") from exc
 
 
 async def start_mcp_connector_oauth(

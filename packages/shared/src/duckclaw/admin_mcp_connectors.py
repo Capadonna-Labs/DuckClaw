@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -331,6 +333,16 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
                 if refresh:
                     break
 
+    # Tokens refreshed by this process win over the hub: their DB-Writer write may
+    # not have landed yet, and the rotated refresh token is the only valid one.
+    cache_key = (tenant_id, connector_id)
+    fresh_window = 1800 if preset_id == "notion" else 3000
+    cached = _REFRESHED_OAUTH.get(cache_key)
+    if cached and time.time() - cached[2] < fresh_window:
+        return cached[0]
+    if cached and cached[1]:
+        refresh = cached[1]
+
     # ponytail: Google (~1h) and Notion access tokens expire; refresh when stale.
     stale = True
     parsed_updated = _parse_secret_updated_at(updated_at)
@@ -370,6 +382,39 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
         # Stale access without refresh must not leak a dead bearer (401 loop).
         return ""
 
+    with _OAUTH_REFRESH_LOCK:
+        # Re-check: a parallel turn may have just rotated it (reusing the old refresh
+        # token would get invalid_grant and kill the connector).
+        cached = _REFRESHED_OAUTH.get(cache_key)
+        if cached and time.time() - cached[2] < fresh_window:
+            return cached[0]
+        if cached and cached[1]:
+            refresh = cached[1]
+        return _refresh_connector_oauth(
+            db,
+            preset_id=preset_id,
+            connector_id=connector_id,
+            tenant_id=tenant_id,
+            owner=owner,
+            refresh=refresh,
+        )
+
+
+# ponytail: one global lock for OAuth refreshes (rare, seconds apart); per-connector
+# locks if many connectors refresh at once. Cache is per process, rebuilt from the hub.
+_OAUTH_REFRESH_LOCK = threading.Lock()
+_REFRESHED_OAUTH: dict[tuple[str, str], tuple[str, str, float]] = {}
+
+
+def _refresh_connector_oauth(
+    db: Any,
+    *,
+    preset_id: str,
+    connector_id: str,
+    tenant_id: str,
+    owner: str,
+    refresh: str,
+) -> str:
     fresh = ""
     new_refresh = refresh
     try:
@@ -456,6 +501,7 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
     if not fresh:
         # ponytail: stale/revoked refresh must not leak dead bearer (401 loop).
         return ""
+    _REFRESHED_OAUTH[(tenant_id, connector_id)] = (fresh, new_refresh, time.time())
     try:
         from duckclaw.mcp_connector_oauth import persist_mcp_connector_oauth_tokens
 
@@ -466,23 +512,12 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             bearer_token=fresh,
             refresh_token=new_refresh,
         )
-    except Exception:
-        if not getattr(db, "_read_only", False):
-            try:
-                from duckclaw.write_handlers.mcp_connectors import _apply_set_mcp_connector_auth
+    except Exception as exc:
+        import logging
 
-                _apply_set_mcp_connector_auth(
-                    db,
-                    {
-                        "tenant_id": tenant_id,
-                        "actor_email": owner or "system",
-                        "connector_id": connector_id,
-                        "bearer_token": fresh,
-                        "refresh_token": new_refresh,
-                    },
-                )
-            except Exception:
-                pass
+        logging.getLogger(__name__).warning(
+            "OAuth refresh persist failed connector=%s (kept in-process): %s", connector_id, exc
+        )
     return fresh
 
 

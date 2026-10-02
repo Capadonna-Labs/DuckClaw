@@ -32,6 +32,14 @@ def _isolate_test_env_from_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
     isolate_test_env_from_dotenv(monkeypatch)
 
 
+@pytest.fixture(autouse=True)
+def _clear_refreshed_oauth_cache() -> None:
+    """Process-level OAuth token cache must not leak between tests."""
+    from duckclaw.admin_mcp_connectors import _REFRESHED_OAUTH
+
+    _REFRESHED_OAUTH.clear()
+
+
 @pytest.fixture
 def owner_user_id() -> str:
     """``DUCKCLAW_OWNER_ID`` / ``DUCKCLAW_ADMIN_CHAT_ID`` desde .env."""

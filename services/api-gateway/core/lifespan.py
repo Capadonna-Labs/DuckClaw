@@ -155,6 +155,11 @@ async def lifespan(app: FastAPI):
         )
     else:
         app.state.redis = redis.from_url(str(gw_settings.resolved_redis_url()), decode_responses=True)
+        from core.admin_chat_heartbeat import close_orphaned_admin_turns
+
+        _orphans = await close_orphaned_admin_turns(app.state.redis)
+        if _orphans:
+            _log.info("Admin chat: closed %d turn(s) interrupted by the restart", _orphans)
     app.state.goals_ticker_task = None
     app.state.knowledge_auto_sync_task = None
     _normalize_local_artifacts_to_db()

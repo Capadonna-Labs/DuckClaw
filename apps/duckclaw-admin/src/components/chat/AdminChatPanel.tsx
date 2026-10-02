@@ -587,7 +587,7 @@ export function AdminChatPanel({
           className={`absolute right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface ${
             showSuggestions
               ? suggestionsOpen
-                ? 'bottom-[23rem] sm:bottom-[22rem]'
+                ? 'bottom-[21.5rem] sm:bottom-[20.5rem]'
                 : 'bottom-[12.5rem] sm:bottom-[12.75rem]'
               : // No suggestions bar (e.g. while a turn runs): clear the composer (~88pt tall).
                 'bottom-[9rem] sm:bottom-[9.25rem]'

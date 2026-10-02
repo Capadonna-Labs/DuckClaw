@@ -98,6 +98,19 @@ _MAX_RETRIES_DEFAULT = 3
 _TMP_BASE = Path(tempfile.gettempdir()) / "duckclaw_sandbox"
 
 
+def _file_sig(f: Path) -> tuple[int, int]:
+    st = f.stat()
+    return (st.st_mtime_ns, st.st_size)
+
+
+def _output_snapshot(out_dir: Path) -> dict[str, tuple[int, int]]:
+    """name -> (mtime_ns, size) of files already in the session output dir."""
+    try:
+        return {f.name: _file_sig(f) for f in out_dir.iterdir() if f.is_file()}
+    except OSError:
+        return {}
+
+
 @dataclass
 class ExecutionResult:
     exit_code: int
@@ -489,6 +502,9 @@ class StrixSandboxManager:
         Execution + Monitoring + Artifact Retrieval.
         """
         data_dir, out_dir = self._session_dirs(session_id)
+        # /workspace/output persists per session: only files this run creates or
+        # rewrites are its artifacts (else old charts resurface on every later run).
+        output_before = _output_snapshot(out_dir)
 
         try:
             container = self._get_or_create_container(
@@ -580,6 +596,7 @@ class StrixSandboxManager:
             tenant_id=tenant_id,
             worker_id=worker_id,
             exit_code=int(exec_result.exit_code or 0),
+            output_before=output_before,
         )
 
         return ExecutionResult(
@@ -602,10 +619,16 @@ class StrixSandboxManager:
         tenant_id: str = "default",
         worker_id: str = "default",
         exit_code: int = 0,
+        output_before: dict[str, tuple[int, int]] | None = None,
     ) -> tuple[list[str], str | None, list[str]]:
         """Copia artefactos a scratch por chat (manifest) y legacy ``output/sandbox/default/``."""
         del session_id
-        source_files = [f for f in out_dir.iterdir() if f.is_file()]
+        before = output_before or {}
+        source_files = [
+            f
+            for f in out_dir.iterdir()
+            if f.is_file() and before.get(f.name) != _file_sig(f)
+        ]
         artifacts: list[str] = []
         plots_dir = Path("output") / "sandbox" / "default"
         plots_dir.mkdir(parents=True, exist_ok=True)

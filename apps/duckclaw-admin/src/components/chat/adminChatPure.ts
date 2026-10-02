@@ -171,28 +171,29 @@ export function suggestionsExchangeKey(
   return `${chatId}:${userText}\0${assistantText.slice(0, 500)}`;
 }
 
-/** Último par user→assistant usable para regenerar chips (historial o post-turno). */
+/**
+ * Último par user→assistant usable para regenerar chips (historial o post-turno).
+ * Salta acks de config (/loop off, …): sin esto el último comando dejaba la barra vacía.
+ */
 export function lastUserAssistantExchange(
   messages: ChatMsg[]
 ): { userText: string; assistantText: string } | null {
   let assistantText = '';
-  let userText = '';
   for (let i = messages.length - 1; i >= 0; i -= 1) {
     const m = messages[i];
-    if (!assistantText && m.role === 'assistant') {
+    if (m.role === 'assistant') {
       const t = (m.text || '').trim();
-      if (t && !m.streaming) assistantText = t;
+      if (t && !m.streaming && !assistantText) assistantText = t;
       continue;
     }
-    if (assistantText && !userText && m.role === 'user') {
-      const t = (m.text || '').trim();
-      if (t) userText = t;
-      break;
+    if (m.role !== 'user' || !assistantText) continue;
+    const userText = (m.text || '').trim();
+    if (userText && shouldFetchChatSuggestions(userText, assistantText, false)) {
+      return { userText, assistantText };
     }
+    assistantText = '';
   }
-  if (!userText || !assistantText) return null;
-  if (!shouldFetchChatSuggestions(userText, assistantText, false)) return null;
-  return { userText, assistantText };
+  return null;
 }
 
 /** Detached turns may lose the exact optimistic text after iOS/PWA reload. */

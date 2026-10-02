@@ -134,6 +134,19 @@ describe('lastUserAssistantExchange', () => {
     expect(lastUserAssistantExchange(messages)).toBeNull();
   });
 
+  it('salta el ack de un fly config y usa el intercambio real anterior', () => {
+    const messages: ChatMsg[] = [
+      { role: 'user', text: 'Analiza la noticia' },
+      { role: 'assistant', text: 'Veredicto: sin señales' },
+      { role: 'user', text: '/loop off' },
+      { role: 'assistant', text: 'Modo /loop detenido' },
+    ];
+    expect(lastUserAssistantExchange(messages)).toEqual({
+      userText: 'Analiza la noticia',
+      assistantText: 'Veredicto: sin señales',
+    });
+  });
+
   it('devuelve el par tras slash agente con respuesta', () => {
     const messages: ChatMsg[] = [
       { role: 'user', text: '/execute-broker-signals --cancel-ocas' },

@@ -174,7 +174,7 @@ def run_manual_context_fold(
     except Exception as exc:
         return None, str(exc), empty_meta
 
-    provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
+    provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id, tenant_id=tid)
     pruning = normalized_context_pruning(spec, provider=provider)
     if not pruning.get("enabled"):
         return None, (

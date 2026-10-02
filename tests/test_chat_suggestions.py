@@ -22,7 +22,7 @@ class _FakeLLM:
 def _patch_triplet(monkeypatch) -> None:
     monkeypatch.setattr(
         "duckclaw.commands.chat_suggestions._effective_llm_triplet_for_chat_ui",
-        lambda db, chat_id: ("openai", "gpt-4o-mini", ""),
+        lambda db, chat_id, tenant_id="default": ("openai", "gpt-4o-mini", ""),
     )
 
 
@@ -213,3 +213,22 @@ def test_generate_followup_suggestions_disabled_by_env(monkeypatch) -> None:
         object(), "chat-1", last_user_text="hola", last_assistant_text="ok"
     )
     assert out == {"suggestions": [], "recommended_index": 0}
+
+
+def test_suggestions_use_the_chat_tenant_model(monkeypatch) -> None:
+    """Chips must run on the model the selector shows (chat's tenant), not tenant 'default'."""
+    seen: dict = {}
+
+    def _triplet(db, chat_id, *, tenant_id="default"):  # noqa: ANN001
+        seen["tenant_id"] = tenant_id
+        return ("openrouter", "deepseek/deepseek-v4-flash", "")
+
+    monkeypatch.setattr("duckclaw.commands.chat_suggestions._effective_llm_triplet_for_chat_ui", _triplet)
+    monkeypatch.setattr(
+        "duckclaw.integrations.llm_providers.build_llm",
+        lambda *a, **k: _FakeLLM('{"suggestions": ["a"], "recommended_index": 0}'),
+    )
+    generate_followup_suggestions(
+        object(), "c1", tenant_id="user-x", last_user_text="hola", last_assistant_text="ok"
+    )
+    assert seen["tenant_id"] == "user-x"

@@ -139,7 +139,8 @@ def generate_followup_suggestions(
 
         from duckclaw.integrations.llm_providers import build_llm
 
-        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
+        # Chat's tenant: reading only "default" ran chips on another model than the selector shows.
+        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id, tenant_id=tenant_id)
         llm = build_llm(provider, model, base_url, db=db, tenant_id=tenant_id)
         if llm is None:
             return empty

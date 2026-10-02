@@ -579,7 +579,8 @@ export function AdminChatPanel({
         editFromMessage={editFromMessage}
       />
 
-      {showScrollButton && showSuggestions && isStudioCompose && showStudioHeader && !showHeader ? (
+      {/* Also while a turn runs: suggestions hide then, and the list's own FAB is off in studio. */}
+      {showScrollButton && isStudioCompose && showStudioHeader && !showHeader ? (
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}

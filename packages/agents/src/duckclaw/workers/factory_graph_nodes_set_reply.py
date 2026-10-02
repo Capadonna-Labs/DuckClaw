@@ -404,7 +404,9 @@ def make_set_reply_node(ctx: WorkerGraphContext):
         )
         if _need_fb and msgs:
             _spec_lid_fb = _spec_logical_worker_id(spec)
-            if _gmail_fb and llm is not None:
+            # Empty final answer after tools: synthesize from the tool evidence. The
+            # deterministic one-liner ("Homeostasis con desviaciones…") is the last resort.
+            if llm is not None:
                 _repaired_fb = _repair_tool_response_egress_reply(
                     llm,
                     spec,

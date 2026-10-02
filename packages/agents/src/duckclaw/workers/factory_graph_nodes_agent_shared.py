@@ -53,6 +53,13 @@ def log_llm_usage(
             "llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f | truncated=max_tokens completion_tokens=%s",
             worker_label, phase, elapsed_ms, usage,
         )
+    elif phase == "writing" and not str(getattr(response, "content", "") or "").strip():
+        # Final answer with no text (seen on reasoning models after big tool payloads).
+        log.warning(
+            "llm_usage: worker=%s | phase=writing | elapsed_ms=%.0f | empty_content finish_reason=%s completion_tokens=%s",
+            worker_label, elapsed_ms, meta.get("finish_reason") or meta.get("stop_reason"),
+            (meta.get("token_usage") or {}).get("completion_tokens"),
+        )
     else:
         log.info("llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f", worker_label, phase, elapsed_ms)
     _publish_llm_row(

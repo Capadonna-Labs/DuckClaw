@@ -55,3 +55,26 @@ def test_session_output_dir_is_writable_by_non_root_sandbox_user(tmp_path, monke
     mgr = sb.StrixSandboxManager.__new__(sb.StrixSandboxManager)
     _data, out = mgr._session_dirs("s1")
     assert stat.S_IMODE(os.stat(out).st_mode) & 0o002  # world-writable
+
+
+def test_only_files_written_by_this_run_are_artifacts(tmp_path, monkeypatch) -> None:
+    """Session output persists across runs; an old chart must not resurface on a later run."""
+    import os
+
+    from duckclaw.graphs import sandbox as sb
+
+    monkeypatch.chdir(tmp_path)
+    out = tmp_path / "out"
+    out.mkdir()
+    old = out / "equity_curve.png"
+    old.write_bytes(b"old")
+    rewritten = out / "report.csv"
+    rewritten.write_text("v1")
+    before = sb._output_snapshot(out)
+    (out / "new.png").write_bytes(b"new")
+    rewritten.write_text("v2-longer")
+    os.utime(rewritten, ns=(before["report.csv"][0] + 10**9,) * 2)
+
+    mgr = sb.StrixSandboxManager.__new__(sb.StrixSandboxManager)
+    artifacts, _rid, _ids = mgr._collect_artifacts(out, output_before=before)
+    assert sorted(os.path.basename(a) for a in artifacts) == ["new.png", "report.csv"]

@@ -353,12 +353,19 @@ async def run_chat_graph(
 
         t0 = time.monotonic()
         admin_pg_vault_prev = os.environ.get("DUCKCLAW_ADMIN_PLAYGROUND_VAULT")
-        from core.chat_history import compute_turn_user_index
+        from core.chat_history import compute_turn_user_index, redis_load_chat_history
 
-        turn_user_index = compute_turn_user_index(
-            prepared.history_for_model,
-            is_system_prompt=prepared.is_system_prompt,
-        )
+        index_history = prepared.history_for_model
+        if prepared.is_system_prompt and not index_history:
+            # Loop/cron turns run without history, yet persist append to the stored
+            # one; without it every loop tool box landed under the chat's 1st message.
+            try:
+                index_history = await redis_load_chat_history(
+                    redis_client, prepared.tenant_id, session_id
+                )
+            except Exception:
+                index_history = []
+        turn_user_index = compute_turn_user_index(index_history)
         heartbeat_turn_token = None
         try:
             from duckclaw.graphs.chat_heartbeat import (

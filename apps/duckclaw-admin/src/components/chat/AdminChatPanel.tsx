@@ -589,7 +589,8 @@ export function AdminChatPanel({
               ? suggestionsOpen
                 ? 'bottom-[18rem] sm:bottom-[17rem]'
                 : 'bottom-[12.5rem] sm:bottom-[12.75rem]'
-              : 'bottom-[4.75rem] sm:bottom-24'
+              : // No suggestions bar (e.g. while a turn runs): clear the composer (~88pt tall).
+                'bottom-[9rem] sm:bottom-[9.25rem]'
           }`}
           aria-label="Ir al final de la conversación"
           title="Ir abajo"

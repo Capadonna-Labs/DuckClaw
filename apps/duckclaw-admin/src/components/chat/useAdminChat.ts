@@ -240,6 +240,9 @@ export function useAdminChat({
   }, [chatId, finalizeCancelledGeneration]);
 
   const suggestionsExchangeKeyRef = useRef('');
+  /** Exchange whose chips are wanted now / being fetched (generation takes ~15 s). */
+  const suggestionsWantedKeyRef = useRef('');
+  const suggestionsInFlightKeyRef = useRef('');
 
   useEffect(() => {
     setLastTurnUsage(null);
@@ -249,6 +252,8 @@ export function useAdminChat({
     setRecommendedSuggestionIndex(0);
     setSuggestionsAutoEnabled(null);
     suggestionsExchangeKeyRef.current = '';
+    suggestionsWantedKeyRef.current = '';
+    suggestionsInFlightKeyRef.current = '';
   }, [chatId]);
 
   /**
@@ -263,12 +268,21 @@ export function useAdminChat({
       suggestionsExchangeKeyRef.current = '';
       return;
     }
-    if (!enabled || !chatId || loading || historyLoading || thinking) return;
+    if (loading || thinking) {
+      // A new turn clears chips; a late answer for the old exchange must not refill them.
+      suggestionsWantedKeyRef.current = '';
+      return;
+    }
+    if (!enabled || !chatId || historyLoading) return;
     const exchange = lastUserAssistantExchange(messages);
     if (!exchange) return;
     const key = suggestionsExchangeKey(chatId, exchange.userText, exchange.assistantText);
-    if (suggestionsExchangeKeyRef.current === key) return;
-    let cancelled = false;
+    suggestionsWantedKeyRef.current = key;
+    // No effect cleanup cancel: `messages` changes (history polling, heartbeats) kept
+    // aborting the ~15 s generation, so chips never landed. Key refs dedupe instead.
+    if (suggestionsExchangeKeyRef.current === key || suggestionsInFlightKeyRef.current === key) return;
+    suggestionsInFlightKeyRef.current = key;
+    const stale = () => suggestionsWantedKeyRef.current !== key;
     void adminService
       .getChatSuggestions({
         chat_id: chatId,
@@ -278,7 +292,8 @@ export function useAdminChat({
         vault_db_path: vaultPath || undefined,
       })
       .then((r) => {
-        if (cancelled) return;
+        if (suggestionsInFlightKeyRef.current === key) suggestionsInFlightKeyRef.current = '';
+        if (stale()) return;
         const next = (r.suggestions ?? []).map((s) => s.trim()).filter(Boolean);
         setSuggestions(next);
         const rawIdx = Number(r.recommended_index ?? 0);
@@ -292,18 +307,15 @@ export function useAdminChat({
         if (typeof r.suggestions_auto_enabled === 'boolean') {
           setSuggestionsAutoEnabled(r.suggestions_auto_enabled);
         }
-        // Only lock the exchange after a successful apply — if this effect was
-        // cancelled mid-flight, a later mount must be free to refetch.
+        // Only lock the exchange after a successful apply, so an empty answer can refetch.
         suggestionsExchangeKeyRef.current = next.length > 0 ? key : '';
       })
       .catch(() => {
-        if (cancelled) return;
+        if (suggestionsInFlightKeyRef.current === key) suggestionsInFlightKeyRef.current = '';
+        if (stale()) return;
         // Transient BFF timeout after a long turn — retry next effect cycle.
         suggestionsExchangeKeyRef.current = '';
       });
-    return () => {
-      cancelled = true;
-    };
   }, [
     enabled,
     suggestionsEnabled,

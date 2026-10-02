@@ -183,3 +183,36 @@ def test_sandbox_artifacts_survive_backlog_and_sse() -> None:
     assert parsed["artifact_ids"] == ["a1", "a2"] and parsed["sandbox_run_id"] == "r9"
     sse = sse_heartbeat("Sandbox: 2 artefactos", kind="visual", artifact_ids=["a1"], sandbox_run_id="r9")
     assert '"artifact_ids": ["a1"]' in sse and '"sandbox_run_id": "r9"' in sse
+
+
+def test_startup_closes_turns_killed_by_restart() -> None:
+    """A restart kills in-flight turns; detached clients wait for turn_done, so startup must emit it."""
+    import asyncio
+    import json
+
+    from core.admin_chat_heartbeat import admin_heartbeat_backlog_key, close_orphaned_admin_turns
+
+    running = admin_heartbeat_backlog_key("c-running")
+    done = admin_heartbeat_backlog_key("c-done")
+
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.lists = {
+                running: ['{"text": "🔄 Usando: x", "kind": "tool", "tool_name": "x", "tool_phase": "start"}'],
+                done: ['{"text": "turn done", "kind": "turn_done"}'],
+            }
+
+        async def scan_iter(self, match: str):
+            for k in list(self.lists):
+                yield k
+
+        async def lrange(self, key: str, start: int, end: int) -> list[str]:
+            return self.lists[key][start:] if start < 0 else self.lists[key]
+
+        async def rpush(self, key: str, value: str) -> None:
+            self.lists[key].append(value)
+
+    r = FakeRedis()
+    assert asyncio.run(close_orphaned_admin_turns(r)) == 1
+    assert json.loads(r.lists[running][-1])["kind"] == "turn_done"
+    assert len(r.lists[done]) == 1

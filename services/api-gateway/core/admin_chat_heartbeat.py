@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -152,6 +153,34 @@ async def reset_admin_heartbeat_backlog(redis_client: Any, chat_id: str) -> None
         await redis_client.delete(admin_heartbeat_backlog_key(chat_id))
     except Exception as exc:
         _log.debug("admin heartbeat backlog reset failed chat_id=%r: %s", chat_id, exc)
+
+
+async def close_orphaned_admin_turns(redis_client: Any) -> int:
+    """At gateway startup, end every turn a restart killed mid-flight.
+
+    A killed turn never publishes ``turn_done``, so a detached (iOS/PWA) client
+    kept polling for up to 4 h with the composer locked. Any backlog whose last
+    event is not ``turn_done`` belonged to this (now dead) process.
+    ponytail: assumes one gateway process; with several, track the owner pid.
+    """
+    if redis_client is None:
+        return 0
+    closed = 0
+    try:
+        async for key in redis_client.scan_iter(match=f"{ADMIN_HEARTBEAT_BACKLOG_PREFIX}*"):
+            last = await redis_client.lrange(key, -1, -1)
+            raw = last[0] if last else ""
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="replace")
+            parsed = parse_admin_heartbeat_payload(str(raw or ""))
+            if parsed is None or parsed.get("kind") == TURN_DONE_KIND:
+                continue
+            payload = {"text": "turn interrupted", "kind": TURN_DONE_KIND, "ts": time.time() * 1000}
+            await redis_client.rpush(key, json.dumps(payload))
+            closed += 1
+    except Exception as exc:
+        _log.debug("close_orphaned_admin_turns failed: %s", exc)
+    return closed
 
 
 async def list_admin_heartbeat_backlog(

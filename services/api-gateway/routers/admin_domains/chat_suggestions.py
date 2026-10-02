@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -186,7 +187,13 @@ async def post_chat_suggestions(body: ChatSuggestionsBody, request: Request) -> 
         finally:
             db.close()
 
+    t0 = time.monotonic()
     payload = await asyncio.to_thread(_load_suggestions)
+    _n = len(payload.get("suggestions") or []) if isinstance(payload, dict) else len(payload or [])
+    logging.getLogger(__name__).info(
+        "chat_suggestions: chat=%s n=%d elapsed_ms=%.0f user=%r",
+        body.chat_id, _n, (time.monotonic() - t0) * 1000, (body.last_user_message or "")[:60],
+    )
     if isinstance(payload, dict):
         suggestions = payload.get("suggestions") if isinstance(payload.get("suggestions"), list) else []
         try:

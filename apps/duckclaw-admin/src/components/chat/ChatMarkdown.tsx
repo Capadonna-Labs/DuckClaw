@@ -1,5 +1,6 @@
 'use client';
 
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { Components } from 'react-markdown';
@@ -228,7 +229,7 @@ type ChatMarkdownProps = {
  * Renderiza Markdown (GFM: tablas, listas, código, enlaces) para burbujas del chat.
  * Seguro por defecto: sin HTML crudo (react-markdown).
  */
-export function ChatMarkdown({
+function ChatMarkdownImpl({
   content,
   className = '',
   variant = 'assistant',
@@ -257,3 +258,7 @@ export function ChatMarkdown({
     </div>
   );
 }
+
+// Every composer keystroke re-renders the whole list; without memo each one
+// re-parsed the markdown of every message (~200 in long chats) and typing lagged.
+export const ChatMarkdown = memo(ChatMarkdownImpl);

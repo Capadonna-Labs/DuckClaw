@@ -91,6 +91,49 @@ NEW_WEIGHT_BRANCH = '''        ticker = plan.ticker
         contract = Stock(ticker, "SMART", "USD")
         await ib.qualifyContractsAsync(contract)'''
 
+# Capadonna _plan_from_db also coerced unknown types (incl. BRACKET) → ENTRY.
+OLD_DB_NORM = '''    st_norm = st.strip().upper()
+    if st_norm in ("SELL", "EXIT"):
+        st_norm = "EXIT"
+    elif st_norm in ("BUY", "ENTRY"):
+        st_norm = "ENTRY"
+    else:
+        st_norm = "ENTRY"
+    return _WeightPlan(ticker=tkr, signal_type=st_norm, weight_pct=w)'''
+
+NEW_DB_NORM = '''    st_norm = st.strip().upper()
+    # duckclaw.BLOCKED_PROTECTIVE_ORDER_ROUTE — DB path must not coerce BRACKET→ENTRY
+    _protective = {
+        "BRACKET", "OCA", "PROTECTIVE", "PROTECT", "PROTECTIVE_OCA",
+        "PROTECT_OCA", "TP_SL", "TPSL",
+    }
+    if st_norm in _protective or "BRACKET" in st_norm or "PROTECT" in st_norm:
+        _emit(
+            {
+                "status": "error",
+                "error": "BLOCKED_PROTECTIVE_ORDER_ROUTE",
+                "signal_type": st_norm,
+                "message": (
+                    f"signal_type={st_norm} is protective OCA (TP/SL only), not a "
+                    "market entry. Refuse DB-path coercion to ENTRY."
+                ),
+            },
+            rc=1,
+        )
+    if st_norm in ("SELL", "EXIT"):
+        st_norm = "EXIT"
+    elif st_norm in ("BUY", "ENTRY"):
+        st_norm = "ENTRY"
+    else:
+        _emit(
+            {
+                "status": "error",
+                "message": f"signal_type desconocido desde DB: {st_norm} (solo ENTRY|EXIT)",
+            },
+            rc=1,
+        )
+    return _WeightPlan(ticker=tkr, signal_type=st_norm, weight_pct=w)'''
+
 
 def _candidates(root: Path) -> list[Path]:
     return [
@@ -120,7 +163,7 @@ def main() -> int:
     changed = 0
     for target in targets:
         text = target.read_text(encoding="utf-8")
-        if MARKER in text and "BLOCKED_PROTECTIVE_ORDER_ROUTE" in text:
+        if MARKER in text and "Refuse DB-path coercion" in text and "never coerce BRACKET" in text:
             print(f"OK (already patched): {target}")
             continue
         orig = text
@@ -128,6 +171,8 @@ def main() -> int:
             text = text.replace(OLD_COERCE, NEW_COERCE, 1)
         if OLD_WEIGHT_BRANCH in text and "Refuse market order for protective" not in text:
             text = text.replace(OLD_WEIGHT_BRANCH, NEW_WEIGHT_BRANCH, 1)
+        if OLD_DB_NORM in text:
+            text = text.replace(OLD_DB_NORM, NEW_DB_NORM, 1)
         if text == orig:
             print(f"WARN: no known coercion snippet in {target} — manual review needed")
             continue
@@ -136,7 +181,9 @@ def main() -> int:
         print(f"PATCHED: {target}")
 
     print(f"done: {changed} file(s) patched")
-    return 0 if changed or any(MARKER in p.read_text(encoding="utf-8") for p in targets) else 1
+    return 0 if changed or any(
+        "BLOCKED_PROTECTIVE_ORDER_ROUTE" in p.read_text(encoding="utf-8") for p in targets
+    ) else 1
 
 
 if __name__ == "__main__":

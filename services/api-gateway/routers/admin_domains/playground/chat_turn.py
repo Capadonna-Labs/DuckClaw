@@ -83,15 +83,37 @@ def resolve_playground_actor_turn(
                     )
                 except PermissionError as exc:
                     raise problem(403, str(exc), wid) from exc
+                # Project membership already ACL'd the worker — do not also require
+                # personal catalog ownership (that false-403'd team/project chats).
+                catalog_allowed = True
                 project_context = project_context_for_actor(
                     db,
                     actor_email=actor,
                     project_id=project_id_clean,
                 )
-            if get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
+            elif get_visible_worker_for_actor(db, actor_email=actor, worker_id=wid):
                 catalog_allowed = True
-    except FileNotFoundError:
-        pass
+    except FileNotFoundError as exc:
+        raise problem(503, "Gateway DuckDB no disponible", "catalog") from exc
+    except Exception as exc:
+        # Re-raise FastAPI/Starlette HTTP errors from problem() unchanged.
+        if type(exc).__name__ == "HTTPException" or getattr(exc, "status_code", None):
+            raise
+        # DuckDB "different configuration than existing connections" during
+        # Gateway restart must not surface as a false ACL denial.
+        msg = str(exc)
+        if "Connection Error" in msg or type(exc).__name__ == "ConnectionException":
+            _log.warning("playground catalog ACL deferred: %s", msg)
+            raise problem(503, "Gateway DuckDB ocupada; reintenta en unos segundos", wid) from exc
+        raise
+    if not catalog_allowed:
+        _log.warning(
+            "playground catalog deny actor=%r worker_id=%r project_id=%r chat_id=%r",
+            actor,
+            wid,
+            project_id_clean,
+            chat_id,
+        )
     eff_tenant = str(profile.get("tenant_id") or "").strip() or gateway_effective_tenant_id("default")
     scope = "platform"
     try:

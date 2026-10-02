@@ -168,7 +168,7 @@ export function AdminChatPanel({
 
   const isCompact = variant === 'compact';
   const showSuggestions = shouldShowSuggestionChips(suggestions, loading, input);
-  const [suggestionsOpen, setSuggestionsOpen] = useState(true);
+  const [, setSuggestionsOpen] = useState(true);
 
   // When Sugerencias appear, the glass composer grows — re-pin scroll so the last
   // line of the reply is not trapped under the chips bar.
@@ -579,25 +579,6 @@ export function AdminChatPanel({
         editFromMessage={editFromMessage}
       />
 
-      {/* Also while a turn runs: suggestions hide then, and the list's own FAB is off in studio. */}
-      {showScrollButton && isStudioCompose && showStudioHeader && !showHeader ? (
-        <button
-          type="button"
-          onClick={() => scrollToBottom('smooth')}
-          className={`absolute right-3 z-30 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface ${
-            showSuggestions
-              ? suggestionsOpen
-                ? 'bottom-[21.5rem] sm:bottom-[20.5rem]'
-                : 'bottom-[12.5rem] sm:bottom-[12.75rem]'
-              : // No suggestions bar (e.g. while a turn runs): clear the composer (~88pt tall).
-                'bottom-[9rem] sm:bottom-[9.25rem]'
-          }`}
-          aria-label="Ir al final de la conversación"
-          title="Ir abajo"
-        >
-          <ChevronDown size={20} aria-hidden />
-        </button>
-      ) : null}
 
       <div
         className={
@@ -607,7 +588,20 @@ export function AdminChatPanel({
         }
       >
         {isStudioCompose ? <div className="studio-glass-fade-bottom" aria-hidden /> : null}
-        <div className={isStudioCompose ? 'pointer-events-auto' : undefined}>
+        <div className={isStudioCompose ? 'pointer-events-auto relative' : undefined}>
+          {/* Anchored to the top of chips+composer, so it always sits just above them
+              whatever their height (chips wrap to 1-3 rows, hidden while a turn runs). */}
+          {showScrollButton && isStudioCompose && showStudioHeader && !showHeader ? (
+            <button
+              type="button"
+              onClick={() => scrollToBottom('smooth')}
+              className="absolute bottom-full right-3 z-30 mb-3 flex h-9 w-9 items-center justify-center rounded-full bg-gov-blue-700 text-white shadow-lg ring-2 ring-white/80 hover:bg-gov-blue-800 dark:ring-dark-surface"
+              aria-label="Ir al final de la conversación"
+              title="Ir abajo"
+            >
+              <ChevronDown size={20} aria-hidden />
+            </button>
+          ) : null}
           <AdminChatComposeFooter
             isStudioCompose={isStudioCompose}
             isCompact={isCompact}

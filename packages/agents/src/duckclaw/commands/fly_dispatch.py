@@ -191,11 +191,11 @@ def _dispatch_fly_command(
     if name in ("prompt", "system_prompt", "system"):
         return execute_prompt(db, chat_id, args)
     if name in ("model", "provider", "llm"):
-        return execute_model(db, chat_id, args)
+        return execute_model(db, chat_id, args, tenant_id=str(tenant_id or "default"))
     if name in ("models",):
-        return execute_models(db, chat_id, args)
+        return execute_models(db, chat_id, args, tenant_id=str(tenant_id or "default"))
     if name == "setup":
-        return _execute_setup(db, chat_id, args)
+        return _execute_setup(db, chat_id, args, tenant_id=str(tenant_id or "default"))
     if name == "goals":
         return execute_homeostasis_goals(
             db,

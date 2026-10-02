@@ -351,21 +351,21 @@ def resolve_llm_triplet_for_chat_invocation(
     return None
 
 
-def _apply_provider_defaults(db: Any, chat_id: Any, provider: str) -> None:
+def _apply_provider_defaults(db: Any, chat_id: Any, provider: str, *, tenant_id: str = "default") -> None:
     if provider == "mlx":
         from duckclaw.integrations.llm_providers import mlx_openai_compatible_base_url
 
-        _set_llm_runtime_value(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url())
+        _set_llm_runtime_value(db, chat_id, "llm_base_url", mlx_openai_compatible_base_url(), tenant_id=tenant_id)
         mid = (os.environ.get("MLX_MODEL_ID") or os.environ.get("MLX_MODEL_PATH") or "").strip()
-        _set_llm_runtime_value(db, chat_id, "llm_model", mid)
+        _set_llm_runtime_value(db, chat_id, "llm_model", mid, tenant_id=tenant_id)
         return
     default_model = _DEFAULT_MODEL_BY_PROVIDER.get(provider, "")
-    _set_llm_runtime_value(db, chat_id, "llm_model", default_model)
+    _set_llm_runtime_value(db, chat_id, "llm_model", default_model, tenant_id=tenant_id)
     default_url = _DEFAULT_BASE_URL_BY_PROVIDER.get(provider, "")
-    _set_llm_runtime_value(db, chat_id, "llm_base_url", default_url if default_url else "")
+    _set_llm_runtime_value(db, chat_id, "llm_base_url", default_url if default_url else "", tenant_id=tenant_id)
 
 
-def execute_model(db: Any, chat_id: Any, args: str) -> str:
+def execute_model(db: Any, chat_id: Any, args: str, *, tenant_id: str = "default") -> str:
     """/model [provider=mlx] [model=...] [base_url=...]: change chat LLM settings."""
     _debug_log_model_config(
         hypothesis_id="H_write_apply",
@@ -374,7 +374,7 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
         data={"chat_id": str(chat_id), "args": (args or "")[:180]},
     )
     if not args or not args.strip():
-        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id)
+        provider, model, base_url = _effective_llm_triplet_for_chat_ui(db, chat_id, tenant_id=tenant_id)
         provider = provider or "—"
         model = model or "—"
         u_show = base_url or "—"
@@ -392,10 +392,10 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
             pv = v.lower()
             if pv in ("or", "router"):
                 pv = "openrouter"
-            ok, err = _set_llm_runtime_value(db, chat_id, "llm_provider", pv)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_provider", pv, tenant_id=tenant_id)
             if not ok:
                 return f"No se pudo guardar: {err}"
-            _apply_provider_defaults(db, chat_id, pv)
+            _apply_provider_defaults(db, chat_id, pv, tenant_id=tenant_id)
             _debug_log_model_config(
                 hypothesis_id="H_write_apply",
                 location="model_setup.execute_model",
@@ -408,14 +408,14 @@ def execute_model(db: Any, chat_id: Any, args: str) -> str:
                 },
             )
         elif k == "model":
-            ok, err = _set_llm_runtime_value(db, chat_id, "llm_model", v)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_model", v, tenant_id=tenant_id)
             if not ok:
                 return f"No se pudo guardar: {err}"
         elif k == "base_url":
-            ok, err = _set_llm_runtime_value(db, chat_id, "llm_base_url", v)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_base_url", v, tenant_id=tenant_id)
             if not ok:
                 return f"No se pudo guardar: {err}"
-    _p, _m, _u = _effective_llm_triplet_for_chat_ui(db, chat_id)
+    _p, _m, _u = _effective_llm_triplet_for_chat_ui(db, chat_id, tenant_id=tenant_id)
     _debug_log_model_config(
         hypothesis_id="H_write_apply",
         location="model_setup.execute_model",
@@ -484,12 +484,12 @@ def _gemini_models_list_from_api(api_key: str) -> tuple[list[str], str | None]:
     return dedup, None
 
 
-def execute_models(db: Any, chat_id: Any, args: str) -> str:
+def execute_models(db: Any, chat_id: Any, args: str, *, tenant_id: str = "default") -> str:
     """/models provider=gemini: list provider models."""
     kv = _parse_pipe_kv_args(args)
     provider = (kv.get("provider") or "").strip().lower()
     if not provider:
-        provider = (_effective_llm_triplet_for_chat_ui(db, chat_id)[0] or "").strip().lower()
+        provider = (_effective_llm_triplet_for_chat_ui(db, chat_id, tenant_id=tenant_id)[0] or "").strip().lower()
     if not provider:
         return "Uso: /models provider=gemini"
     if provider != "gemini":
@@ -546,11 +546,11 @@ def execute_prompt(db: Any, chat_id: Any, args: str) -> str:
     return f"System prompt de {worker_id}:\n{preview}\n\nPara cambiar: /prompt {worker_id} --change <texto>"
 
 
-def execute_setup(db: Any, chat_id: Any, args: str) -> str:
+def execute_setup(db: Any, chat_id: Any, args: str, *, tenant_id: str = "default") -> str:
     """/setup [key=value | key=value]: Telegram-compatible config command."""
     if not args or not args.strip():
-        p = _llm_runtime_value(db, chat_id, "llm_provider") or _get_global_config(db, "llm_provider")
-        m = _llm_runtime_value(db, chat_id, "llm_model") or _get_global_config(db, "llm_model")
+        p = _llm_runtime_value(db, chat_id, "llm_provider", tenant_id=tenant_id) or _get_global_config(db, "llm_provider")
+        m = _llm_runtime_value(db, chat_id, "llm_model", tenant_id=tenant_id) or _get_global_config(db, "llm_model")
         wid = get_chat_state(db, chat_id, "worker_id")
         prompt = get_effective_system_prompt(db, "default") or ""
         return (
@@ -570,16 +570,16 @@ def execute_setup(db: Any, chat_id: Any, args: str) -> str:
             provider = v.lower()
             if provider in ("or", "router"):
                 provider = "openrouter"
-            ok, err = _set_llm_runtime_value(db, chat_id, "llm_provider", provider)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_provider", provider, tenant_id=tenant_id)
             if not ok:
                 return f"No se pudo guardar: {err}"
-            _apply_provider_defaults(db, chat_id, provider)
+            _apply_provider_defaults(db, chat_id, provider, tenant_id=tenant_id)
         elif k in ("llm_model", "model"):
-            ok, err = _set_llm_runtime_value(db, chat_id, "llm_model", v)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_model", v, tenant_id=tenant_id)
             if not ok:
                 return f"No se pudo guardar: {err}"
         elif k in ("llm_base_url", "base_url"):
-            ok, err = _set_llm_runtime_value(db, chat_id, "llm_base_url", v)
+            ok, err = _set_llm_runtime_value(db, chat_id, "llm_base_url", v, tenant_id=tenant_id)
             if not ok:
                 return f"No se pudo guardar: {err}"
         elif k in ("system_prompt", "prompt"):

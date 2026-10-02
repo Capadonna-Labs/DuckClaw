@@ -11,7 +11,8 @@ from duckclaw.commands.chat_state import get_chat_state, set_chat_state
 
 _log = logging.getLogger(__name__)
 
-LlmTripletResolver = Callable[[Any, Any], tuple[str, str, str]]
+# (db, chat_id, *, tenant_id) -> (provider, model, base_url); chat tenant, not "default".
+LlmTripletResolver = Callable[..., tuple[str, str, str]]
 VaultUserIdResolver = Callable[..., str]
 
 _goals_llm_triplet_resolver: LlmTripletResolver | None = None
@@ -176,7 +177,9 @@ def _extract_json_object(content: str) -> str:
     return content
 
 
-def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Optional[dict]:
+def _natural_language_goal_to_params(
+    db: Any, chat_id: Any, text: str, *, tenant_id: str = "default"
+) -> Optional[dict]:
     """Convierte un objetivo en lenguaje natural a parámetros homeostasis con el LLM configurado."""
     text = (text or "").strip()[:500]
     if not text or _goals_llm_triplet_resolver is None:
@@ -185,7 +188,7 @@ def _natural_language_goal_to_params(db: Any, chat_id: Any, text: str) -> Option
         from duckclaw.integrations.llm_providers import build_llm
         from langchain_core.messages import HumanMessage
 
-        provider, model, base_url = _goals_llm_triplet_resolver(db, chat_id)
+        provider, model, base_url = _goals_llm_triplet_resolver(db, chat_id, tenant_id=tenant_id)
         llm = build_llm(provider, model, base_url, prefer_env_provider=False)
         if llm is None:
             return None
@@ -701,7 +704,9 @@ def execute_homeostasis_goals(
                 anchor_setting_key=str(getattr(belief, "anchor_setting_key", "") or "").strip(),
             )
         else:
-            params = _natural_language_goal_to_params(db, chat_id, raw)
+            params = _natural_language_goal_to_params(
+                db, chat_id, raw, tenant_id=str(tenant_id or "default")
+            )
             if params:
                 new_goal = DomainGoal(
                     belief_key=params["belief_key"],

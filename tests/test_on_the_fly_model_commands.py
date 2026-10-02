@@ -55,3 +55,15 @@ def test_execute_models_requires_key(monkeypatch) -> None:
     db = duckclaw.DuckClaw(":memory:")
     out = execute_models(db, "chat1", "provider=gemini")
     assert "GOOGLE_API_KEY" in out
+
+
+def test_execute_model_writes_and_reads_the_chat_tenant() -> None:
+    """/model must change the model the selector shows (chat tenant), not tenant 'default'."""
+    from duckclaw.commands.model_setup import resolve_llm_triplet_for_chat_invocation
+
+    db = duckclaw.DuckClaw(":memory:")
+    execute_model(db, "chat1", "provider=or | model=deepseek/deepseek-v4-flash", tenant_id="user-x")
+    assert "model: deepseek/deepseek-v4-flash" in execute_model(db, "chat1", "", tenant_id="user-x")
+    # Nothing written to "default": a turn of this chat resolves the user's tenant.
+    assert "deepseek/deepseek-v4-flash" not in execute_model(db, "chat1", "", tenant_id="default")
+    assert resolve_llm_triplet_for_chat_invocation(db, "chat1", tenant_id="user-x")[1] == "deepseek/deepseek-v4-flash"

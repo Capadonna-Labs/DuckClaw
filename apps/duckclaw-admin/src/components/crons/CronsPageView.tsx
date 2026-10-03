@@ -18,7 +18,7 @@ function formatUptime(pmUptime: number | null, status: string | null): string {
   return `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
-function StatusBadge({ status }: { status: string | null }) {
+function StatusBadge({ status, label }: { status: string | null; label?: string }) {
   const s = status ?? 'unknown';
   const classes =
     s === 'online'
@@ -27,7 +27,7 @@ function StatusBadge({ status }: { status: string | null }) {
         ? 'bg-gov-gray-100 text-gov-gray-600 dark:bg-dark-bg dark:text-dark-muted'
         : 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300';
   return (
-    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${classes}`}>{s}</span>
+    <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${classes}`}>{label ?? s}</span>
   );
 }
 
@@ -281,9 +281,11 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
             <table className="w-full text-sm">
               <thead className="bg-gov-gray-50 text-left dark:bg-dark-bg">
                 <tr>
+                  <th className="px-4 py-2 text-xs font-semibold">Nombre</th>
+                  <th className="px-4 py-2 text-xs font-semibold">Descripción</th>
+                  <th className="px-4 py-2 text-xs font-semibold">Estado</th>
                   <th className="px-4 py-2 text-xs font-semibold">Horario</th>
                   <th className="px-4 py-2 text-xs font-semibold">Envía</th>
-                  <th className="px-4 py-2 text-xs font-semibold">Chat</th>
                   <th className="px-4 py-2 text-xs font-semibold">Última vez</th>
                   <th className="px-4 py-2 text-xs font-semibold">Quitar con</th>
                 </tr>
@@ -291,20 +293,26 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
               <tbody>
                 {chatSchedules.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-gov-gray-500 dark:text-dark-muted">
+                    <td colSpan={7} className="px-4 py-6 text-center text-sm text-gov-gray-500 dark:text-dark-muted">
                       Ningún chat tiene programaciones con /crons.
                     </td>
                   </tr>
                 )}
                 {chatSchedules.map((s) => (
                   <tr key={`${s.source}:${s.chat_id}:${s.kind}`} className="border-t dark:border-dark-border">
-                    <td className="px-4 py-2 text-xs">{s.schedule}</td>
-                    <td className="px-4 py-2 font-mono text-xs">{s.prompt}</td>
-                    <td className="max-w-[12rem] truncate px-4 py-2 font-mono text-xs text-gov-gray-500 dark:text-dark-muted" title={`${s.chat_id} · ${s.source}`}>
-                      {s.chat_id}
+                    <td className="max-w-[12rem] px-4 py-2 text-xs font-medium text-gov-gray-900 dark:text-dark-text" title={`${s.chat_id} · ${s.source}`}>
+                      {s.name || s.chat_id}
                     </td>
+                    <td className="max-w-[16rem] px-4 py-2 text-xs text-gov-gray-700 dark:text-dark-text" title={s.description}>
+                      {s.description || '—'}
+                    </td>
+                    <td className="px-4 py-2" title={s.status_detail}>
+                      <StatusBadge status={s.status === 'activo' ? 'online' : 'stopped'} label={s.status} />
+                    </td>
+                    <td className="px-4 py-2 text-xs">{s.schedule.replace(/^Horario de reloj:?\s*/, '')}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{s.prompt}</td>
                     <td className="px-4 py-2 text-xs text-gov-gray-500 dark:text-dark-muted">
-                      {s.last_fire_epoch ? new Date(s.last_fire_epoch * 1000).toLocaleString() : '—'}
+                      {s.last_fire_epoch ? new Date(s.last_fire_epoch * 1000).toLocaleString() : 'Aún no'}
                     </td>
                     <td className="px-4 py-2 font-mono text-xs text-gov-gray-500 dark:text-dark-muted">{s.remove_hint}</td>
                   </tr>

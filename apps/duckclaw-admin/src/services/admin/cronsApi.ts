@@ -24,6 +24,13 @@ export interface ChatSchedule {
   remove_hint: string;
   last_fire_epoch: number | null;
   source: string;
+  /** Conversation title (falls back to chat_id). */
+  name: string;
+  description: string;
+  /** Whether the heartbeat can fire it (worker + tenant present). */
+  status: 'activo' | 'inactivo';
+  status_detail: string;
+  worker_id: string;
 }
 
 export interface CronActionResult {

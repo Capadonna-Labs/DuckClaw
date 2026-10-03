@@ -274,6 +274,20 @@ def wall_schedule_should_fire(
     return False
 
 
+_WEEKDAY_NAMES = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábados", "domingos")
+
+
+def _weekdays_human(wds: list) -> str:
+    """[6] → 'domingos'; [0..4] → 'lunes a viernes' (0 = lunes, como datetime.weekday)."""
+    days = sorted({int(d) for d in wds if str(d).lstrip("-").isdigit() and 0 <= int(d) <= 6})
+    if days == [0, 1, 2, 3, 4]:
+        return "lunes a viernes"
+    if days == [5, 6]:
+        return "fines de semana"
+    names = [_WEEKDAY_NAMES[d] for d in days]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " y " + names[-1]
+
+
 def format_cron_wall_human(spec: dict[str, Any]) -> str:
     try:
         tz = str(spec.get("tz") or default_cron_wall_tz())
@@ -288,7 +302,7 @@ def format_cron_wall_human(spec: dict[str, Any]) -> str:
             h, mi = int(spec["every_h"]), int(spec["every_mi"])
             wds = spec.get("weekdays")
             if isinstance(wds, list) and len(wds) > 0:
-                return f"Horario de reloj: cada {h:02d}:{mi:02d} ({tz}) días {list(wds)}"
+                return f"Horario de reloj: {_weekdays_human(wds)} a las {h:02d}:{mi:02d} ({tz})"
             return f"Horario de reloj: cada día a {h:02d}:{mi:02d} ({tz})"
     except (KeyError, TypeError, ValueError):
         pass

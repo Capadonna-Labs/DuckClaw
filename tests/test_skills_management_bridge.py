@@ -231,3 +231,23 @@ def test_dispatch_skill_command_never_claims_success_on_timeout(monkeypatch) -> 
     )
     assert ok is False
     assert "task-456" in err
+
+
+def test_list_skills_fits_the_tool_output_cap_with_many_long_directives(monkeypatch) -> None:
+    """Full 1 KB directive texts pushed the listing past the 8 KB pruning cap and the
+    alphabetical tail (newest skills) vanished; the agent then reported them as unsaved."""
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
+        lambda db: ("juan@example.com", "/tmp/hub.duckdb"),
+    )
+    rows = [{"name": f"skill_{i:02d}", "skill_type": "directive", "description": "x" * 1024} for i in range(15)]
+
+    class _Db:
+        def query(self, sql: str) -> str:
+            return json.dumps(rows)
+
+    monkeypatch.setattr("duckclaw.forge.skills.skills_management_bridge._open_hub_read_only", lambda path: _Db())
+    raw = _list_skills_impl(object(), "default")
+    out = json.loads(raw)
+    assert len(raw) < 8000
+    assert out["count"] == 15 and out["skills"][-1]["name"] == "skill_14"

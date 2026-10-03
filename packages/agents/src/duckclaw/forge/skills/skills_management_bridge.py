@@ -34,6 +34,7 @@ _log = logging.getLogger(__name__)
 # create/edit/deactivate needs a real yes/no, so this always polls with its
 # own fixed timeout regardless of that env var.
 _WRITE_CONFIRM_TIMEOUT_SEC = 10.0
+_LIST_DESCRIPTION_CHARS = 160
 
 _PYTHON_METADATA_NOTE = (
     "skill_type='python' solo registra metadata en el catálogo (visible en la UI admin); "
@@ -153,7 +154,15 @@ def _list_skills_impl(db: Any, tenant_id: str = "default") -> str:
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)[:500]}, ensure_ascii=False)
-    return json.dumps({"ok": True, "skills": rows}, ensure_ascii=False)
+    # Full directive texts (≤1 KB each) pushed this past the 8 KB tool-output cap
+    # of context pruning; the alphabetical tail (new skills) was cut and the agent
+    # concluded they were never saved. A listing only needs a short excerpt.
+    for row in rows:
+        if isinstance(row, dict):
+            desc = str(row.get("description") or "")
+            if len(desc) > _LIST_DESCRIPTION_CHARS:
+                row["description"] = desc[:_LIST_DESCRIPTION_CHARS] + "…"
+    return json.dumps({"ok": True, "count": len(rows), "skills": rows}, ensure_ascii=False)
 
 
 def _deactivate_skill_impl(db: Any, name: str, tenant_id: str = "default") -> str:

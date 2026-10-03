@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyLastTurnTokenDisplay,
   isKnownSlashCommand,
   lastUserAssistantExchange,
   matchingSlashCommands,
@@ -222,5 +223,21 @@ describe('slashMenuEntryFromCatalogSkill', () => {
       '/trading_session --status',
     ]);
     expect(matchingSlashCommands('/trading_session --status ', extra)).toEqual([]);
+  });
+});
+
+describe('applyLastTurnTokenDisplay', () => {
+  it('keeps the last real numbers when a turn carries no tokens (fly command)', () => {
+    let usage: unknown = 'prev';
+    let ctx: number | null = 1234;
+    applyLastTurnTokenDisplay(
+      (v) => (usage = v),
+      (v) => (ctx = v),
+      { usage_tokens: null, context_estimated_tokens: null }
+    );
+    expect(usage).toBe('prev');
+    expect(ctx).toBe(1234);
+    applyLastTurnTokenDisplay((v) => (usage = v), (v) => (ctx = v), { context_estimated_tokens: 50 });
+    expect(ctx).toBe(50);
   });
 });

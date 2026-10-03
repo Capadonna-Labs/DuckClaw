@@ -380,6 +380,12 @@ export const chatApi = {
         sandbox_run_id?: string;
       }[];
       server_ts?: number;
+      /** Last turn's token meta (header "Ventana de contexto"), kept across reloads. */
+      last_turn_tokens?: {
+        usage_tokens?: Record<string, number> | null;
+        context_estimated_tokens?: number | null;
+        context_token_breakdown?: Record<string, number> | null;
+      };
     }>(`/playground/chat/activity?${q.toString()}`);
   },
 

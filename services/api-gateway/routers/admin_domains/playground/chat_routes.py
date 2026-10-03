@@ -32,12 +32,16 @@ async def playground_chat_activity(chat_id: str, request: Request, limit: int = 
     session_id = (chat_id or "").strip()
     if not session_id:
         raise problem(400, "chat_id vacío", chat_id)
-    from core.admin_chat_heartbeat import list_admin_heartbeat_backlog
+    from core.admin_chat_heartbeat import list_admin_heartbeat_backlog, load_admin_turn_tokens
 
     redis_client = getattr(request.app.state, "redis", None)
     events = await list_admin_heartbeat_backlog(redis_client, session_id, limit=limit)
     # server_ts lets the client map event ts onto its own clock (phone/VPS skew).
-    return {"ok": True, "chat_id": session_id, "events": events, "server_ts": time.time() * 1000}
+    out: dict[str, Any] = {"ok": True, "chat_id": session_id, "events": events, "server_ts": time.time() * 1000}
+    tokens = await load_admin_turn_tokens(redis_client, session_id)
+    if tokens:
+        out["last_turn_tokens"] = tokens
+    return out
 
 
 @router.post("/playground/chat", dependencies=[Depends(require_admin_key)])

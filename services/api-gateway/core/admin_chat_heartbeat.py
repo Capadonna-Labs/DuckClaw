@@ -183,6 +183,35 @@ async def close_orphaned_admin_turns(redis_client: Any) -> int:
     return closed
 
 
+ADMIN_TURN_TOKENS_PREFIX = "duckclaw:admin-turn-tokens:"
+_TURN_TOKEN_FIELDS = ("usage_tokens", "context_estimated_tokens", "context_token_breakdown")
+
+
+async def save_admin_turn_tokens(redis_client: Any, chat_id: str, payload: dict[str, Any]) -> None:
+    """Keep the last turn's token meta so the header survives reloads and detached
+    (iOS) turns, which finish from history and never see the turn response."""
+    meta = {k: payload[k] for k in _TURN_TOKEN_FIELDS if payload.get(k) not in (None, {}, "")}
+    if redis_client is None or not meta or not (chat_id or "").strip():
+        return
+    try:
+        await redis_client.set(
+            f"{ADMIN_TURN_TOKENS_PREFIX}{chat_id}", json.dumps(meta), ex=30 * 24 * 3600
+        )
+    except Exception as exc:
+        _log.debug("admin turn tokens save failed chat_id=%r: %s", chat_id, exc)
+
+
+async def load_admin_turn_tokens(redis_client: Any, chat_id: str) -> dict[str, Any] | None:
+    if redis_client is None or not (chat_id or "").strip():
+        return None
+    try:
+        raw = await redis_client.get(f"{ADMIN_TURN_TOKENS_PREFIX}{chat_id}")
+        data = json.loads(raw) if raw else None
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 async def list_admin_heartbeat_backlog(
     redis_client: Any,
     chat_id: str,

@@ -478,6 +478,11 @@ export function applyLastTurnTokenDisplay(
 ): void {
   const usage = normalizeUsageTokens(meta.usage_tokens);
   const breakdown = normalizeContextTokenBreakdown(meta.context_token_breakdown ?? null);
+  const ctxRaw = meta.context_estimated_tokens;
+  if (!usage && !breakdown && !(ctxRaw != null && Number.isFinite(ctxRaw) && ctxRaw >= 0)) {
+    // Fly commands (/loop off, …) carry no tokens: keep the last real turn's numbers.
+    return;
+  }
   if (usage) {
     setLastTurnUsage(usage);
   } else {

@@ -382,6 +382,9 @@ async def finalize_chat_response(
         breakdown = result.get("context_token_breakdown")
         if isinstance(breakdown, dict) and breakdown:
             out_resp["context_token_breakdown"] = breakdown
+    from core.admin_chat_heartbeat import save_admin_turn_tokens
+
+    await save_admin_turn_tokens(redis_client, session_id, out_resp)
     if telegram_parts["parts_count"] > 1:
         out_resp["response_parts"] = telegram_parts["parts_count"]
     if telegram_parts["head"] is not None and (telegram_parts["tail"] or "").strip():

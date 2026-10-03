@@ -216,3 +216,29 @@ def test_startup_closes_turns_killed_by_restart() -> None:
     assert asyncio.run(close_orphaned_admin_turns(r)) == 1
     assert json.loads(r.lists[running][-1])["kind"] == "turn_done"
     assert len(r.lists[done]) == 1
+
+
+def test_last_turn_tokens_roundtrip() -> None:
+    """Context-window header data survives reloads/detached turns via Redis."""
+    import asyncio
+
+    from core.admin_chat_heartbeat import load_admin_turn_tokens, save_admin_turn_tokens
+
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.kv: dict = {}
+
+        async def set(self, key, value, ex=None):  # noqa: ANN001
+            self.kv[key] = value
+
+        async def get(self, key):  # noqa: ANN001
+            return self.kv.get(key)
+
+    r = FakeRedis()
+    asyncio.run(save_admin_turn_tokens(r, "c1", {"response": "hola"}))  # fly ack: nothing saved
+    assert asyncio.run(load_admin_turn_tokens(r, "c1")) is None
+    asyncio.run(save_admin_turn_tokens(r, "c1", {"usage_tokens": {"input_tokens": 900}, "context_estimated_tokens": 1200}))
+    assert asyncio.run(load_admin_turn_tokens(r, "c1")) == {
+        "usage_tokens": {"input_tokens": 900},
+        "context_estimated_tokens": 1200,
+    }

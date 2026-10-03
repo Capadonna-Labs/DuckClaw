@@ -21,8 +21,6 @@ _log = logging.getLogger(__name__)
 
 _GIT_REPO = "git+https://github.com/jkawamoto/mcp-youtube-transcript"
 _DEFAULT_RESPONSE_LIMIT = 15000
-# ponytail: uvx may resolve mcp 2.x; FastMCP removed from mcp.server — pin 1.x for this MCP
-_MCP_UVX_PIN = "mcp>=1.9,<2"
 
 _READ_ONLY_TOOL_NAMES = frozenset({
     "get_transcript",
@@ -137,8 +135,8 @@ def youtube_transcript_mcp_server_params(
     args = [
         "--from",
         _GIT_REPO,
-        "--with",
-        _MCP_UVX_PIN,
+        # No mcp pin: upstream 0.8.0 requires mcp>=2 and the old `mcp<2` pin made
+        # uvx fail to resolve, so youtube_transcript never started.
         "mcp-youtube-transcript",
         "--response-limit",
         str(limit),

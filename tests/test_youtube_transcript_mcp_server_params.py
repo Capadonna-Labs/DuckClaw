@@ -14,8 +14,7 @@ def test_youtube_transcript_mcp_server_params_default_uvx() -> None:
     assert params.args == [
         "--from",
         "git+https://github.com/jkawamoto/mcp-youtube-transcript",
-        "--with",
-        "mcp>=1.9,<2",
+        # No `--with mcp<2`: upstream 0.8.0 needs mcp>=2 and the pin broke resolution.
         "mcp-youtube-transcript",
         "--response-limit",
         "12000",

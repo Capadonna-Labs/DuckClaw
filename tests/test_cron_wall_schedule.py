@@ -192,3 +192,57 @@ def test_execute_goals_rm_unknown_id(tmp_path: Path) -> None:
     with DuckClaw(db_path, read_only=False) as db:
         out = execute_goals(db, 1, "--rm foobar", tenant_id="default")
     assert "desconocido" in (out or "").lower()
+
+
+def test_execute_goals_timestamp_with_prompt_stores_it(tmp_path: Path) -> None:
+    import json
+
+    import duckdb
+
+    from duckclaw import DuckClaw
+    from duckclaw.graphs.on_the_fly_commands import _GOALS_CRON_WALL_KEY, execute_goals, get_chat_state
+
+    db_path = str(tmp_path / "tsp.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        "CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT, "
+        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    con.execute("INSERT INTO agent_config (key, value) VALUES (?, ?)", ["chat_23_worker_id", "quant_analyst"])
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        out = execute_goals(db, 23, '--timestamp every 09:00 weekdays --prompt "/defense_watch"', tenant_id="default")
+    assert "Enviará: /defense_watch" in (out or "")
+    with DuckClaw(db_path, read_only=True) as db:
+        j = json.loads(get_chat_state(db, 23, _GOALS_CRON_WALL_KEY) or "{}")
+    assert j.get("prompt") == "/defense_watch" and j.get("weekdays") == [0, 1, 2, 3, 4]
+
+
+def test_expand_directive_skill_tenant_scope() -> None:
+    import duckdb
+
+    from duckclaw.directive_skills import expand_directive_skill
+
+    con = duckdb.connect()
+    con.execute("CREATE SCHEMA IF NOT EXISTS main")
+    con.execute(
+        "CREATE TABLE main.admin_skills (name TEXT, description TEXT, skill_type TEXT, "
+        "tenant_id TEXT, visibility TEXT, owner_email TEXT, active BOOLEAN)"
+    )
+    con.execute(
+        "INSERT INTO main.admin_skills VALUES ('defense_watch','Busca noticias de defensa','directive','t1','private','a@x',true)"
+    )
+    msg, rest = expand_directive_skill(con, "/defense_watch", tenant_id="t1")
+    assert msg.startswith("[DIRECTIVA ACTIVA: /defense_watch]") and rest == ""
+    assert expand_directive_skill(con, "/defense_watch", tenant_id="t2") == ("/defense_watch", None)
+    # Interactive actor: private skills of someone else stay hidden.
+    assert expand_directive_skill(con, "/defense_watch", tenant_id="t1", actor_email="b@x")[1] is None
+
+
+def test_every_schedule_never_expires() -> None:
+    """Recurring specs have no once_* fields; they used to read as expired and got deleted."""
+    from duckclaw.runtime.scheduling.cron_wall_schedule import parse_cron_wall_tokens
+
+    spec, _ = parse_cron_wall_tokens(["every", "09:00"])
+    assert wall_once_expired(spec, 4_000_000_000.0) is False

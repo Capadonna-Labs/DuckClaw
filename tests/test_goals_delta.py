@@ -894,3 +894,59 @@ def test_crons_list_custom_meta_with_delta_300(tmp_path: Path) -> None:
     assert "cron-id delta" in (out12 or "")
     assert "context_id" not in (out12 or "")
     assert long_context_id not in (out13 or "")
+
+
+def test_wall_schedule_with_prompt_sends_that_prompt(tmp_path: Path, monkeypatch: Any) -> None:
+    """/crons --timestamp … --prompt "/skill": the clock schedule fires the prompt, not /goals."""
+    import duckdb
+
+    db_path = str(tmp_path / "vault_wall_prompt.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        "CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT, "
+        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    from duckclaw.runtime.scheduling.cron_wall_schedule import parse_cron_wall_tokens
+
+    spec, _err = parse_cron_wall_tokens(["every", "09:00"])
+    spec["prompt"] = "/defense_watch"
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?)",
+        [
+            "chat_88_goals_cron_wall", json.dumps(spec),
+            "chat_88_worker_id", "quant_analyst",
+            "chat_88_goals_proactive_tenant_id", "user-x",
+            "chat_88_goals", json.dumps([]),
+        ],
+    )
+    con.close()
+
+    posts: list[dict[str, Any]] = []
+
+    class Resp:
+        status_code = 200
+        text = "ok"
+
+    class DummyClient:
+        async def __aenter__(self) -> "DummyClient":
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def post(self, *a: Any, **kw: Any) -> Resp:
+            posts.append(kw)
+            return Resp()
+
+    monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
+    monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
+    monkeypatch.setattr(heartbeat, "wall_schedule_should_fire", lambda *a, **k: True)
+    monkeypatch.setattr(heartbeat, "_scheduled_prompt_message", lambda p, t: f"EXPANDED<{p}|{t}>")
+
+    asyncio.run(heartbeat._run_goals_proactive_tick())
+
+    assert len(posts) == 1
+    body = posts[0]["json"]
+    assert body["message"] == "EXPANDED</defense_watch|user-x>"
+    assert body["user_incoming"] == "[Cron] /defense_watch"

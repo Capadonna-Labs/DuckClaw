@@ -309,6 +309,25 @@ async def _evaluate_homeostasis() -> List[Dict[str, Any]]:
             pass
 
 
+def _scheduled_prompt_message(prompt: str, tenant_id: str) -> str:
+    """Scheduled ``/skill`` prompts arrive via the agent endpoint, which doesn't expand
+    directive skills (only the admin chat does), so expand them here from the hub."""
+    if not prompt.startswith("/"):
+        return prompt
+    hub = (get_gateway_db_path() or "").strip()
+    if not hub:
+        return prompt
+    try:
+        from duckclaw.directive_skills import expand_directive_skill
+
+        with duckclaw_open_for_read_scan(hub) as db:
+            expanded, _rest = expand_directive_skill(db, prompt, tenant_id=tenant_id)
+        return expanded
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("goals_proactive_wall: no se pudo expandir %r: %s", prompt[:60], exc)
+        return prompt
+
+
 async def _run_goals_proactive_tick() -> None:
     """Escanea agent_config y dispara SYSTEM_EVENT de revisiÃ³n /crons cuando toca."""
     now = time.time()
@@ -642,7 +661,9 @@ async def _run_goals_proactive_tick_one_db(
             tenant_id = (get_chat_state(db, chat_id_w, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
             worker_id = (get_chat_state(db, chat_id_w, "worker_id") or "").strip()
             _gw_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "goals_wall"
-            allow_empty_goals = bool(not goals and _gw_trigger)
+            # /crons --timestamp … --prompt "…": a scheduled prompt doesn't need /goals.
+            scheduled_prompt = str(wall_spec.get("prompt") or "").strip()
+            allow_empty_goals = bool(not goals and (_gw_trigger or scheduled_prompt))
             if not goals and not allow_empty_goals:
                 logger.info("goals_proactive: chat=%s sin goals; limpiando wall", chat_id_w)
                 try:
@@ -689,7 +710,11 @@ async def _run_goals_proactive_tick_one_db(
                         meta = maybe_meta
                 except Exception:
                     meta = {}
-            message = build_goals_proactive_system_event_message(goals)
+            message = (
+                _scheduled_prompt_message(scheduled_prompt, tenant_id)
+                if scheduled_prompt
+                else build_goals_proactive_system_event_message(goals)
+            )
 
         chat_id = chat_id_w
         payload = {
@@ -702,6 +727,9 @@ async def _run_goals_proactive_tick_one_db(
             "is_system_prompt": True,
             "skip_session_lock": True,
         }
+        if scheduled_prompt:
+            # What the chat history shows as the "user" line of this turn.
+            payload["user_incoming"] = f"[Cron] {scheduled_prompt}"
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
         try:
             async with httpx.AsyncClient() as client:

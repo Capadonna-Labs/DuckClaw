@@ -457,9 +457,11 @@ def _goals_cron_wall_listing_note(db: Any, chat_id: Any) -> str:
         return ""
     if not isinstance(spec, dict):
         return ""
+    prompt = str(spec.get("prompt") or "").strip()
     return (
         "\n"
         + format_cron_wall_human(spec)
+        + (f" · prompt: {prompt[:80]}" if prompt else "")
         + f" · cron-id: {CRON_SCHEDULE_ID_WALL} (/crons --rm {CRON_SCHEDULE_ID_WALL})"
     )
 
@@ -683,11 +685,21 @@ def execute_crons_schedule(
         )
 
     if toks and toks[0] == "--timestamp":
+        # Optional --prompt "<texto o /skill>": at that time the chat gets this prompt
+        # (e.g. /defense_watch) instead of the /goals review. Everything after the flag.
+        prompt = ""
+        pm = re.search(r"\s--prompt\s+(.+)$", " " + raw, re.DOTALL)
+        if pm:
+            prompt = pm.group(1).strip().strip("\"'“”").strip()[:2000]
+            toks = (" " + raw)[: pm.start()].split()
+            if not prompt:
+                return 'Falta el texto de --prompt (p. ej. --prompt "/defense_watch").'
         rest = toks[1:]
         if not rest:
             return (
                 "Uso: /crons --timestamp once 2026-05-12T14:45 · "
-                "/crons --timestamp every 14:45 [weekdays|lun mar …] · /crons --timestamp off\n"
+                "/crons --timestamp every 14:45 [weekdays|lun mar …] [--prompt \"/skill o texto\"] · "
+                "/crons --timestamp off\n"
                 "Zona: America/Bogota por defecto (env DUCKCLAW_CRONS_WALL_TZ). "
                 "Exclusivo con /crons --delta: al activar uno se desactiva el otro."
             )
@@ -699,6 +711,8 @@ def execute_crons_schedule(
         spec, terr = parse_cron_wall_tokens(rest)
         if terr or not spec:
             return terr or "No se pudo interpretar --timestamp."
+        if prompt:
+            spec["prompt"] = prompt
         persist_err = clear_interval_schedule_only(db, chat_id, tenant_id=tid)
         if persist_err:
             return f"No se pudo guardar: {persist_err}"
@@ -722,8 +736,9 @@ def execute_crons_schedule(
         ok, persist_err = _set_chat_state_entries(db, chat_id, wall_updates, tenant_id=tid)
         if not ok:
             return f"No se pudo guardar: {persist_err}"
+        what = f" Enviará: {prompt}." if prompt else ""
         return (
-            f"Programación por reloj guardada. {format_cron_wall_human(spec)} "
+            f"Programación por reloj guardada. {format_cron_wall_human(spec)}.{what} "
             "Usa /crons para listar. /crons --timestamp off para cancelar."
             f"{_queued_write_suffix(persist_err)}"
         )

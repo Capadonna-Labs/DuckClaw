@@ -140,7 +140,9 @@ def test_crons_delta_with_read_only_handle_queues_typed_agent_config_command(
     assert primary_commands >= 1
     assert merged_entries[_chat_key("chat1", "goals_delta_seconds")] == "3600"
     assert merged_entries[_chat_key("chat1", "goals_proactive_tenant_id")] == "tenant-a"
-    assert merged_entries[_chat_key("chat1", "goals_cron_wall")] == ""
+    # --delta only replaces a clock /goals review; with none stored it leaves the
+    # clock list (prompt crons) untouched instead of wiping it.
+    assert _chat_key("chat1", "goals_cron_wall") not in merged_entries
     assert db.direct_writes == []
     assert db.released >= 1
     assert db.resumed == db.released

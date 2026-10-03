@@ -307,3 +307,51 @@ def format_cron_wall_human(spec: dict[str, Any]) -> str:
     except (KeyError, TypeError, ValueError):
         pass
     return "Horario de reloj (configuración presente)."
+
+
+# --- Several clock schedules per chat --------------------------------------
+# agent_config ``chat_<id>_goals_cron_wall`` holds a JSON *list* of specs, each with
+# an ``id`` (c1, c2, …), optional ``prompt`` and its own ``last_fire``. A legacy
+# single-spec dict is read as a one-item list, so existing schedules keep working.
+
+
+def load_wall_items(raw: str | None) -> list[dict[str, Any]]:
+    import json
+
+    text = (raw or "").strip()
+    if not text:
+        return []
+    try:
+        data = json.loads(text)
+    except (TypeError, ValueError):
+        return []
+    items = data if isinstance(data, list) else [data] if isinstance(data, dict) else []
+    out: list[dict[str, Any]] = []
+    for item in items:
+        if isinstance(item, dict) and item.get("kind"):
+            out.append(item)
+    used = {str(i.get("id")) for i in out if i.get("id")}
+    for item in out:
+        if not item.get("id"):
+            item["id"] = next_wall_item_id(used)
+            used.add(item["id"])
+    return out
+
+
+def dump_wall_items(items: list[dict[str, Any]]) -> str:
+    import json
+
+    return json.dumps(items, ensure_ascii=False) if items else ""
+
+
+def next_wall_item_id(used: Any) -> str:
+    ids = {str(u) for u in used}
+    n = 1
+    while f"c{n}" in ids:
+        n += 1
+    return f"c{n}"
+
+
+def is_goals_review_item(item: dict[str, Any]) -> bool:
+    """No prompt = the /goals review (exclusive with --delta); prompt crons are independent."""
+    return not str(item.get("prompt") or "").strip()

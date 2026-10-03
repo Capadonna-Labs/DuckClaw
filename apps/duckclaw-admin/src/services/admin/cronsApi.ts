@@ -19,6 +19,8 @@ export interface CronProcess {
 export interface ChatSchedule {
   chat_id: string;
   kind: 'reloj' | 'intervalo';
+  /** c1, c2… for clock crons; 'delta' for the interval review. */
+  cron_id: string;
   schedule: string;
   prompt: string;
   remove_hint: string;

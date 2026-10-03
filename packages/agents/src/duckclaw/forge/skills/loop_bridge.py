@@ -366,10 +366,11 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 name="manage_chat_schedule",
                 description=(
                     "Programaciones /crons de ESTE chat (las dispara el heartbeat). command = lo mismo que /crons: "
-                    "'' lista; '--timestamp every 09:00 dom --prompt \"/defense_watch\"' programa un prompt o skill "
-                    "por reloj (dias: lun mar mie jue vie sab dom o weekdays; 'once 2026-10-10T09:00' una vez); "
-                    "'--timestamp off' o '--rm wall' lo quita; '--delta 4h' / '--delta off' revisión de /goals por intervalo. "
-                    "Un solo horario de reloj por chat: programar otro reemplaza el actual. Confirma con el texto devuelto."
+                    "'' lista (cada cron con su cron-id c1, c2…); "
+                    "'--timestamp every 09:00 dom --prompt \"texto o /skill\"' agrega un cron por reloj "
+                    "(días: lun mar mie jue vie sab dom o weekdays; 'once 2026-10-10T09:00' una sola vez); "
+                    "puede haber varios por chat. '--rm c2' quita uno; '--rm wall' quita todos los de reloj; "
+                    "'--delta 4h' / '--delta off' revisión de /goals por intervalo. Confirma con el texto devuelto."
                 ),
             )
         )

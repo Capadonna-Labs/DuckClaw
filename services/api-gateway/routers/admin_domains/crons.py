@@ -140,7 +140,7 @@ def _load_chat_schedules() -> list[dict[str, Any]]:
     )
     from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
     from duckclaw.gateway_db import iter_goals_ticker_duckdb_paths
-    from duckclaw.runtime.scheduling.cron_wall_schedule import format_cron_wall_human
+    from duckclaw.runtime.scheduling.cron_wall_schedule import format_cron_wall_human, load_wall_items
 
     out: list[dict[str, Any]] = []
     for path in iter_goals_ticker_duckdb_paths():
@@ -159,50 +159,60 @@ def _load_chat_schedules() -> list[dict[str, Any]]:
         for key, value in kv.items():
             if not value:
                 continue
-            item: dict[str, Any] | None = None
+            entries: list[dict[str, Any]] = []
             if (cid := chat_id_from_goals_cron_wall_key(key)) is not None:
-                try:
-                    spec = json.loads(value)
-                except json.JSONDecodeError:
-                    continue
-                item = {
-                    "chat_id": cid,
-                    "kind": "reloj",
-                    "schedule": format_cron_wall_human(spec),
-                    "prompt": str(spec.get("prompt") or "") or "Revisión de /goals",
-                    "remove_hint": "/crons --timestamp off",
-                }
+                for spec in load_wall_items(value):
+                    entries.append(
+                        {
+                            "chat_id": cid,
+                            "kind": "reloj",
+                            "cron_id": str(spec.get("id") or ""),
+                            "schedule": format_cron_wall_human(spec),
+                            "prompt": str(spec.get("prompt") or "") or "Revisión de /goals",
+                            "remove_hint": f"/crons --rm {spec.get('id')}",
+                            "_last": spec.get("last_fire"),
+                        }
+                    )
             elif (cid := chat_id_from_goals_delta_config_key(key)) is not None:
                 try:
                     secs = int(value)
                 except ValueError:
                     continue
-                if secs <= 0:
-                    continue
-                item = {
-                    "chat_id": cid,
-                    "kind": "intervalo",
-                    "schedule": f"Cada {format_goals_delta_interval_human(secs)}",
-                    "prompt": "Revisión de /goals",
-                    "remove_hint": "/crons --delta off",
-                }
-            if item is None:
-                continue
-            cid_key = f"chat_{item['chat_id']}"
-            last = kv.get(f"{cid_key}_goals_proactive_last_fire_epoch") or ""
-            item["last_fire_epoch"] = float(last) if last.replace(".", "", 1).isdigit() else None
-            item["source"] = Path(path).name
-            item["tenant_id"] = kv.get(f"{cid_key}_goals_proactive_tenant_id") or ""
-            item["worker_id"] = kv.get(f"{cid_key}_worker_id") or ""
-            # Same gates the heartbeat applies before firing (services/heartbeat/main.py).
-            if not item["worker_id"] or item["worker_id"].lower() == "manager":
-                item["status"], item["status_detail"] = "inactivo", "el chat no tiene un worker asignado"
-            elif not item["tenant_id"]:
-                item["status"], item["status_detail"] = "inactivo", "falta el tenant de la programación"
-            else:
-                item["status"], item["status_detail"] = "activo", f"worker {item['worker_id']}"
-            out.append(item)
+                if secs > 0:
+                    entries.append(
+                        {
+                            "chat_id": cid,
+                            "kind": "intervalo",
+                            "cron_id": "delta",
+                            "schedule": f"Cada {format_goals_delta_interval_human(secs)}",
+                            "prompt": "Revisión de /goals",
+                            "remove_hint": "/crons --delta off",
+                            "_last": None,
+                        }
+                    )
+            for item in entries:
+                _append_schedule(out, item, kv, path)
     return out
+
+
+def _append_schedule(out: list[dict[str, Any]], item: dict[str, Any], kv: dict[str, str], path: str) -> None:
+    from pathlib import Path
+
+    cid_key = f"chat_{item['chat_id']}"
+    # Per-cron last run (multi-cron); legacy single schedules used the shared key.
+    last = str(item.pop("_last", None) or kv.get(f"{cid_key}_goals_proactive_last_fire_epoch") or "")
+    item["last_fire_epoch"] = float(last) if last.replace(".", "", 1).isdigit() else None
+    item["source"] = Path(path).name
+    item["tenant_id"] = kv.get(f"{cid_key}_goals_proactive_tenant_id") or ""
+    item["worker_id"] = kv.get(f"{cid_key}_worker_id") or ""
+    # Same gates the heartbeat applies before firing (services/heartbeat/main.py).
+    if not item["worker_id"] or item["worker_id"].lower() == "manager":
+        item["status"], item["status_detail"] = "inactivo", "el chat no tiene un worker asignado"
+    elif not item["tenant_id"]:
+        item["status"], item["status_detail"] = "inactivo", "falta el tenant de la programación"
+    else:
+        item["status"], item["status_detail"] = "activo", f"worker {item['worker_id']}"
+    out.append(item)
 
 
 def _skill_descriptions(items: list[dict[str, Any]]) -> None:

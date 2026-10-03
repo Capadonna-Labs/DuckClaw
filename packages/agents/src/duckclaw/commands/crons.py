@@ -18,7 +18,11 @@ from duckclaw.commands.chat_state import (
     set_chat_state,
 )
 from duckclaw.runtime.scheduling.cron_wall_schedule import (
+    dump_wall_items,
     format_cron_wall_human,
+    is_goals_review_item,
+    load_wall_items,
+    next_wall_item_id,
     parse_cron_wall_tokens,
 )
 from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
@@ -47,13 +51,26 @@ def _queued_write_suffix(note: str) -> str:
 
 
 def _normalize_cron_rm_id(token: str) -> Optional[str]:
-    """``delta`` / ``interval`` → intervalo; ``wall`` / ``timestamp`` → reloj."""
+    """``delta`` / ``interval`` → intervalo; ``wall`` / ``timestamp`` → todos los de reloj;
+    ``c1``, ``c2``… → ese cron de reloj."""
     t = (token or "").strip().lower()
     if t in (CRON_SCHEDULE_ID_DELTA, "interval"):
         return CRON_SCHEDULE_ID_DELTA
     if t in (CRON_SCHEDULE_ID_WALL, "timestamp"):
         return CRON_SCHEDULE_ID_WALL
+    if re.fullmatch(r"c\d+", t):
+        return t
     return None
+
+
+def _save_wall_items(db: Any, chat_id: Any, items: list[dict[str, Any]], *, tenant_id: str) -> str:
+    """Persist the chat's clock-schedule list ('' clears it). Returns an error or ''."""
+    if not items:
+        return clear_goals_cron_wall_storage(db, chat_id, tenant_id=tenant_id)
+    ok, err = _set_chat_state_entries(
+        db, chat_id, {_GOALS_CRON_WALL_KEY: dump_wall_items(items)}, tenant_id=tenant_id
+    )
+    return "" if ok else (err or "no se pudo guardar")
 
 
 def _extract_crons_delta_options(toks: list[str]) -> tuple[list[str], dict[str, Any], Optional[str]]:
@@ -448,22 +465,13 @@ def clear_interval_schedule_only(db: Any, chat_id: Any, *, tenant_id: str = "def
 
 
 def _goals_cron_wall_listing_note(db: Any, chat_id: Any) -> str:
-    raw = (get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY) or "").strip()
-    if not raw:
-        return ""
-    try:
-        spec = json.loads(raw)
-    except Exception:
-        return ""
-    if not isinstance(spec, dict):
-        return ""
-    prompt = str(spec.get("prompt") or "").strip()
-    return (
-        "\n"
-        + format_cron_wall_human(spec)
-        + (f" · prompt: {prompt[:80]}" if prompt else "")
-        + f" · cron-id: {CRON_SCHEDULE_ID_WALL} (/crons --rm {CRON_SCHEDULE_ID_WALL})"
-    )
+    items = load_wall_items(get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY))
+    lines = []
+    for item in items:
+        prompt = str(item.get("prompt") or "").strip()
+        what = f" · prompt: {prompt[:80]}" if prompt else " · revisión de /goals"
+        lines.append(f"\n{format_cron_wall_human(item)}{what} · cron-id: {item['id']} (/crons --rm {item['id']})")
+    return "".join(lines)
 
 
 def clear_goals_cron_wall_storage(db: Any, chat_id: Any, *, tenant_id: str = "default") -> str:
@@ -635,7 +643,10 @@ def execute_crons_schedule(
             if persist_err:
                 return f"No se pudo guardar: {persist_err}"
             return "Intervalo de revisión desactivado (/crons --delta off). Horario de reloj (--timestamp) no se modifica."
-        persist_err = clear_goals_cron_wall_storage(db, chat_id, tenant_id=tid)
+        # The interval review replaces the clock review only; prompt crons stay.
+        _items = load_wall_items(get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY))
+        _kept = [i for i in _items if not is_goals_review_item(i)]
+        persist_err = _save_wall_items(db, chat_id, _kept, tenant_id=tid) if len(_kept) != len(_items) else ""
         if persist_err:
             return f"No se pudo guardar: {persist_err}"
         from duckclaw.homeostasis.goals_alignment import (
@@ -701,7 +712,8 @@ def execute_crons_schedule(
                 "/crons --timestamp every 14:45 [weekdays|lun mar …] [--prompt \"/skill o texto\"] · "
                 "/crons --timestamp off\n"
                 "Zona: America/Bogota por defecto (env DUCKCLAW_CRONS_WALL_TZ). "
-                "Exclusivo con /crons --delta: al activar uno se desactiva el otro."
+                "Puedes tener varios con --prompt (cada uno con su cron-id). La revisión de /goals "
+                "por reloj (sin --prompt) es única y excluye /crons --delta."
             )
         if rest[0].lower() == "off":
             persist_err = clear_goals_cron_wall_storage(db, chat_id, tenant_id=tid)
@@ -711,14 +723,21 @@ def execute_crons_schedule(
         spec, terr = parse_cron_wall_tokens(rest)
         if terr or not spec:
             return terr or "No se pudo interpretar --timestamp."
+        items = load_wall_items(get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY))
         if prompt:
+            # Prompt crons are independent: several per chat, alongside --delta.
             spec["prompt"] = prompt
-        persist_err = clear_interval_schedule_only(db, chat_id, tenant_id=tid)
-        if persist_err:
-            return f"No se pudo guardar: {persist_err}"
+        else:
+            # The clock /goals review stays single and exclusive with --delta.
+            persist_err = clear_interval_schedule_only(db, chat_id, tenant_id=tid)
+            if persist_err:
+                return f"No se pudo guardar: {persist_err}"
+            items = [i for i in items if not is_goals_review_item(i)]
+        spec["id"] = next_wall_item_id(i["id"] for i in items)
+        items.append(spec)
         mraw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
         wall_updates: dict[str, Any] = {
-            _GOALS_CRON_WALL_KEY: json.dumps(spec, ensure_ascii=False),
+            _GOALS_CRON_WALL_KEY: dump_wall_items(items),
             _GOALS_PROACTIVE_TENANT_KEY: tid,
         }
         try:
@@ -738,15 +757,15 @@ def execute_crons_schedule(
             return f"No se pudo guardar: {persist_err}"
         what = f" Enviará: {prompt}." if prompt else ""
         return (
-            f"Programación por reloj guardada. {format_cron_wall_human(spec)}.{what} "
-            "Usa /crons para listar. /crons --timestamp off para cancelar."
+            f"Programación por reloj guardada (cron-id {spec['id']}). {format_cron_wall_human(spec)}.{what} "
+            f"Usa /crons para listar. /crons --rm {spec['id']} para quitarla."
             f"{_queued_write_suffix(persist_err)}"
         )
 
     if toks and toks[0] == "--rm":
         if len(toks) < 2:
             return (
-                "Uso: /crons --rm delta · /crons --rm wall\n"
+                "Uso: /crons --rm c2 (un horario de reloj) · /crons --rm wall (todos) · /crons --rm delta\n"
                 "Equivale a /crons --delta off (intervalo) o /crons --timestamp off (reloj). "
                 "Los cron-id salen en /crons junto a cada programación (alias: interval, timestamp)."
             )
@@ -754,7 +773,7 @@ def execute_crons_schedule(
         if cid is None:
             return (
                 f"Cron-id desconocido `{toks[1]}`. Usa `{CRON_SCHEDULE_ID_DELTA}` (intervalo) o "
-                f"`{CRON_SCHEDULE_ID_WALL}` (horario de reloj); alias: interval, timestamp."
+                f"`{CRON_SCHEDULE_ID_WALL}` (todos los de reloj) o el id de uno (c1, c2…); alias: interval, timestamp."
             )
         if cid == CRON_SCHEDULE_ID_DELTA:
             try:
@@ -773,17 +792,23 @@ def execute_crons_schedule(
                 "Programación por intervalo eliminada (/crons --rm "
                 f"{CRON_SCHEDULE_ID_DELTA}). Horario de reloj (--timestamp) no se modifica."
             )
-        raw_wm = (get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY) or "").strip()
-        if not raw_wm:
-            return (
-                f"No hay horario de reloj activo (cron-id `{CRON_SCHEDULE_ID_WALL}`). "
-                "Ejecuta /crons para ver el listado."
-            )
+        items = load_wall_items(get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY))
+        if not items:
+            return "No hay horarios de reloj en este chat. Ejecuta /crons para ver el listado."
+        if cid != CRON_SCHEDULE_ID_WALL:
+            kept = [i for i in items if str(i.get("id")) != cid]
+            if len(kept) == len(items):
+                ids = ", ".join(str(i.get("id")) for i in items)
+                return f"No existe el cron `{cid}` en este chat (hay: {ids})."
+            persist_err = _save_wall_items(db, chat_id, kept, tenant_id=tid)
+            if persist_err:
+                return f"No se pudo guardar: {persist_err}"
+            return f"Cron {cid} eliminado. Quedan {len(kept)} horario(s) de reloj."
         persist_err = clear_goals_cron_wall_storage(db, chat_id, tenant_id=tid)
         if persist_err:
             return f"No se pudo guardar: {persist_err}"
         return (
-            f"Horario de reloj eliminado (/crons --rm {CRON_SCHEDULE_ID_WALL}). "
+            f"Todos los horarios de reloj eliminados (/crons --rm {CRON_SCHEDULE_ID_WALL}). "
             "El intervalo (/crons --delta) no se modifica."
         )
 

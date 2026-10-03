@@ -950,3 +950,60 @@ def test_wall_schedule_with_prompt_sends_that_prompt(tmp_path: Path, monkeypatch
     body = posts[0]["json"]
     assert body["message"] == "EXPANDED</defense_watch|user-x>"
     assert body["user_incoming"] == "[Cron] /defense_watch"
+
+
+def test_heartbeat_fires_each_due_cron_and_keeps_its_own_last_fire(tmp_path: Path, monkeypatch: Any) -> None:
+    import duckdb
+
+    from duckclaw.runtime.scheduling.cron_wall_schedule import parse_cron_wall_tokens
+
+    every, _ = parse_cron_wall_tokens(["every", "09:00"])
+    once, _ = parse_cron_wall_tokens(["once", "2026-10-06T15:45"])
+    items = [{**every, "id": "c1", "prompt": "/defense_watch"}, {**once, "id": "c2", "prompt": "earnings PENG"}]
+    db_path = str(tmp_path / "vault_multi.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        "CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT, "
+        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?)",
+        [
+            "chat_89_goals_cron_wall", json.dumps(items),
+            "chat_89_worker_id", "quant_analyst",
+            "chat_89_goals_proactive_tenant_id", "user-x",
+        ],
+    )
+    con.close()
+    posts: list[dict[str, Any]] = []
+
+    class Resp:
+        status_code = 200
+        text = "ok"
+
+    class DummyClient:
+        async def __aenter__(self) -> "DummyClient":
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def post(self, *a: Any, **kw: Any) -> Resp:
+            posts.append(kw)
+            return Resp()
+
+    monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
+    monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
+    monkeypatch.setattr(heartbeat, "wall_schedule_should_fire", lambda *a, **k: True)
+    monkeypatch.setattr(heartbeat, "wall_once_expired", lambda *a, **k: False)
+    monkeypatch.setattr(heartbeat, "_scheduled_prompt_message", lambda p, t: p)
+
+    asyncio.run(heartbeat._run_goals_proactive_tick())
+
+    assert sorted(p["json"]["user_incoming"] for p in posts) == ["[Cron] /defense_watch", "[Cron] earnings PENG"]
+    con2 = duckdb.connect(db_path)
+    stored = json.loads(con2.execute("SELECT value FROM agent_config WHERE key='chat_89_goals_cron_wall'").fetchone()[0])
+    con2.close()
+    # The one-shot cron is consumed; the weekly one stays with its own last_fire.
+    assert [i["id"] for i in stored] == ["c1"] and stored[0]["last_fire"] > 0

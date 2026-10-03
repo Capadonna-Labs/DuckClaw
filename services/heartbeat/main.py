@@ -30,7 +30,13 @@ from duckclaw.db_write_queue import enqueue_typed_command, poll_task_status_sync
 from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
 from duckclaw.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths
-from duckclaw.runtime.scheduling.cron_wall_schedule import wall_once_expired, wall_schedule_should_fire
+from duckclaw.runtime.scheduling.cron_wall_schedule import (
+    dump_wall_items,
+    is_goals_review_item,
+    load_wall_items,
+    wall_once_expired,
+    wall_schedule_should_fire,
+)
 from duckclaw.commands.goals import get_manager_goals
 from duckclaw.graphs.on_the_fly_commands import (
     _GOALS_CRON_WALL_KEY,
@@ -443,7 +449,6 @@ async def _run_goals_proactive_tick_one_db(
                         ("goals_proactive_tenant_id", ""),
                         ("goals_delta_anchor", ""),
                         ("goals_delta_meta", ""),
-                        ("goals_cron_wall", ""),
                     ):
                         await _enqueue_chat_state_write(
                             db_path=db_path,
@@ -609,114 +614,87 @@ async def _run_goals_proactive_tick_one_db(
     for wrow in wrows or []:
         if not isinstance(wrow, dict):
             continue
-        wkey = str(wrow.get("key") or "")
-        chat_id_w = chat_id_from_goals_cron_wall_key(wkey)
+        chat_id_w = chat_id_from_goals_cron_wall_key(str(wrow.get("key") or ""))
         if not chat_id_w:
             continue
-        wall_raw = str(wrow.get("value") or "").strip()
-        if not wall_raw:
+        items = load_wall_items(str(wrow.get("value") or ""))
+        if not items:
+            continue
+        await _run_wall_items_for_chat(
+            db_path, chat_id_w, items, now=now, wall_poll=wall_poll, headers=headers
+        )
+
+
+async def _run_wall_items_for_chat(
+    db_path: str,
+    chat_id: str,
+    items: List[Dict[str, Any]],
+    *,
+    now: float,
+    wall_poll: float,
+    headers: Dict[str, str],
+) -> None:
+    """Fire every due clock schedule of one chat (several per chat since multi-cron).
+
+    Each item keeps its own ``last_fire``; legacy single specs fall back to the shared
+    goals_proactive_last_fire key. The list is written back once if anything changed.
+    """
+    with duckclaw_open_for_read_scan(db_path) as db:
+        try:
+            ds = int(str(get_chat_state(db, chat_id, "goals_delta_seconds") or "0").strip() or "0")
+        except ValueError:
+            ds = 0
+        tenant_id = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
+        worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
+        goals = get_manifest_goals_for_chat(db, chat_id, tenant_id=tenant_id or None)
+        if not goals:
+            goals = get_manager_goals(db, chat_id)
+        meta_raw = (get_chat_state(db, chat_id, _GOALS_DELTA_META_KEY) or "").strip()
+        legacy_last_raw = (get_chat_state(db, chat_id, _GOALS_PROACTIVE_LAST_FIRE_KEY) or "").strip()
+    try:
+        meta = json.loads(meta_raw) if meta_raw else {}
+    except Exception:
+        meta = {}
+    goals_wall_trigger = isinstance(meta, dict) and str(meta.get("trigger") or "").strip().lower() == "goals_wall"
+    try:
+        legacy_last = float(legacy_last_raw) if legacy_last_raw else 0.0
+    except ValueError:
+        legacy_last = 0.0
+
+    kept: List[Dict[str, Any]] = []
+    changed = False
+    for item in items:
+        prompt = str(item.get("prompt") or "").strip()
+        is_review = is_goals_review_item(item)
+        if wall_once_expired(item, now):
+            changed = True  # one-shot slot already passed: drop it
+            continue
+        if is_review and ds > 0:
+            kept.append(item)  # the interval review (--delta) owns /goals reviews
+            continue
+        if is_review and not goals and not goals_wall_trigger:
+            logger.info("goals_proactive_wall: chat=%s sin goals; quitando revisión por reloj", chat_id)
+            changed = True
+            continue
+        if not worker_id or worker_id.lower() == "manager" or not tenant_id:
+            logger.debug(
+                "goals_proactive_wall: omitiendo chat=%s (worker_id=%r tenant_id=%r)", chat_id, worker_id, tenant_id
+            )
+            kept.append(item)
             continue
         try:
-            wall_spec: Dict[str, Any] = json.loads(wall_raw)
-        except Exception:
-            continue
-        if not isinstance(wall_spec, dict):
-            continue
-
-        with duckclaw_open_for_read_scan(db_path) as db_chk:
-            try:
-                ds_chk = int(str(get_chat_state(db_chk, chat_id_w, "goals_delta_seconds") or "0").strip() or "0")
-            except ValueError:
-                ds_chk = 0
-        if ds_chk > 0:
+            last_fire = float(item.get("last_fire") or 0.0) or legacy_last
+        except (TypeError, ValueError):
+            last_fire = legacy_last
+        if not wall_schedule_should_fire(now, item, last_fire, wall_poll):
+            kept.append(item)
             continue
 
-        if wall_once_expired(wall_spec, now):
-            try:
-                await _enqueue_chat_state_write(
-                    db_path=db_path,
-                    chat_id=chat_id_w,
-                    tenant_id="default",
-                    key=_GOALS_CRON_WALL_KEY,
-                    value="",
-                )
-            except Exception as _wexc:
-                logger.debug("goals_proactive: limpiar wall expirado chat=%s: %s", chat_id_w, _wexc)
-            continue
-
-        with duckclaw_open_for_read_scan(db_path) as db:
-            tenant_id_w = (get_chat_state(db, chat_id_w, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
-            goals = get_manifest_goals_for_chat(db, chat_id_w, tenant_id=tenant_id_w or None)
-            if not goals:
-                goals = get_manager_goals(db, chat_id_w)
-            meta_raw_pre = (get_chat_state(db, chat_id_w, _GOALS_DELTA_META_KEY) or "").strip()
-            meta_pre: Dict[str, Any] = {}
-            if meta_raw_pre:
-                try:
-                    _mp = json.loads(meta_raw_pre)
-                    if isinstance(_mp, dict):
-                        meta_pre = _mp
-                except Exception:
-                    meta_pre = {}
-            tenant_id = (get_chat_state(db, chat_id_w, _GOALS_PROACTIVE_TENANT_KEY) or "").strip()
-            worker_id = (get_chat_state(db, chat_id_w, "worker_id") or "").strip()
-            _gw_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "goals_wall"
-            # /crons --timestamp … --prompt "…": a scheduled prompt doesn't need /goals.
-            scheduled_prompt = str(wall_spec.get("prompt") or "").strip()
-            allow_empty_goals = bool(not goals and (_gw_trigger or scheduled_prompt))
-            if not goals and not allow_empty_goals:
-                logger.info("goals_proactive: chat=%s sin goals; limpiando wall", chat_id_w)
-                try:
-                    await _enqueue_chat_state_write(
-                        db_path=db_path,
-                        chat_id=chat_id_w,
-                        tenant_id="default",
-                        key=_GOALS_CRON_WALL_KEY,
-                        value="",
-                    )
-                except Exception as _exc:
-                    logger.warning("goals_proactive: error al limpiar wall chat=%s: %s", chat_id_w, _exc)
-                continue
-
-            if not worker_id or worker_id.lower() == "manager":
-                logger.debug(
-                    "goals_proactive_wall: omitiendo chat=%s (worker_id=%r tenant_id=%r)",
-                    chat_id_w,
-                    worker_id,
-                    tenant_id,
-                )
-                continue
-
-            if not tenant_id:
-                logger.warning(
-                    "goals_proactive_wall: chat=%s sin goals_proactive_tenant_id",
-                    chat_id_w,
-                )
-                continue
-
-            last_raw = (get_chat_state(db, chat_id_w, _GOALS_PROACTIVE_LAST_FIRE_KEY) or "").strip()
-            try:
-                last_fire = float(last_raw) if last_raw else 0.0
-            except ValueError:
-                last_fire = 0.0
-            if not wall_schedule_should_fire(now, wall_spec, last_fire, wall_poll):
-                continue
-            meta_raw = (get_chat_state(db, chat_id_w, _GOALS_DELTA_META_KEY) or "").strip()
-            meta: Dict[str, Any] = {}
-            if meta_raw:
-                try:
-                    maybe_meta = json.loads(meta_raw)
-                    if isinstance(maybe_meta, dict):
-                        meta = maybe_meta
-                except Exception:
-                    meta = {}
-            message = (
-                _scheduled_prompt_message(scheduled_prompt, tenant_id)
-                if scheduled_prompt
-                else build_goals_proactive_system_event_message(goals)
-            )
-
-        chat_id = chat_id_w
+        message = (
+            _scheduled_prompt_message(prompt, tenant_id)
+            if prompt
+            else build_goals_proactive_system_event_message(goals)
+        )
         payload = {
             "message": message,
             "chat_id": str(chat_id),
@@ -727,66 +705,52 @@ async def _run_goals_proactive_tick_one_db(
             "is_system_prompt": True,
             "skip_session_lock": True,
         }
-        if scheduled_prompt:
+        if prompt:
             # What the chat history shows as the "user" line of this turn.
-            payload["user_incoming"] = f"[Cron] {scheduled_prompt}"
-        url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
+            payload["user_incoming"] = f"[Cron] {prompt}"
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    url,
+                    _agent_chat_url_for_worker(GATEWAY_URL, worker_id),
                     params={"tenant_id": tenant_id, "deliver_outbound": "1"},
                     json=payload,
                     headers=headers,
                     timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
                 )
         except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "goals_proactive_wall: error HTTP chat=%s worker=%s: %s",
-                chat_id,
-                worker_id,
-                exc,
+            logger.exception("goals_proactive_wall: error HTTP chat=%s cron=%s: %s", chat_id, item.get("id"), exc)
+            kept.append(item)
+            continue
+        if not (200 <= resp.status_code < 300):
+            logger.warning(
+                "goals_proactive_wall: HTTP %s chat=%s cron=%s body=%s",
+                resp.status_code, chat_id, item.get("id"), (resp.text or "")[:200],
             )
+            kept.append(item)
             continue
 
-        if 200 <= resp.status_code < 300:
+        changed = True
+        if str(item.get("kind") or "").strip().lower() != "once":
+            kept.append({**item, "last_fire": now})
+        logger.info("goals_proactive_wall: tick OK chat=%s cron=%s worker=%s", chat_id, item.get("id"), worker_id)
+        await _send_web_push_notification(
+            title="DuckClaw",
+            body=f"Cron completado: {prompt[:80]}" if prompt else "Recordatorio programado completado.",
+            url="/admin/playground",
+            tag=f"duckclaw-goals-wall-{chat_id}-{item.get('id')}",
+        )
+
+    if changed:
+        try:
             await _enqueue_chat_state_write(
                 db_path=db_path,
                 chat_id=chat_id,
                 tenant_id=tenant_id or "default",
-                key=_GOALS_PROACTIVE_LAST_FIRE_KEY,
-                value=str(now),
+                key=_GOALS_CRON_WALL_KEY,
+                value=dump_wall_items(kept),
             )
-            if str(wall_spec.get("kind") or "").strip().lower() == "once":
-                try:
-                    await _enqueue_chat_state_write(
-                        db_path=db_path,
-                        chat_id=chat_id,
-                        tenant_id=tenant_id or "default",
-                        key=_GOALS_CRON_WALL_KEY,
-                        value="",
-                    )
-                except Exception as _oce:
-                    logger.debug("goals_proactive_wall: limpiar once chat=%s: %s", chat_id, _oce)
-            logger.info(
-                "goals_proactive_wall: tick OK chat=%s worker=%s",
-                chat_id,
-                worker_id,
-            )
-            await _send_web_push_notification(
-                title="DuckClaw",
-                body="Recordatorio programado completado.",
-                url="/admin/playground",
-                tag=f"duckclaw-goals-wall-{chat_id}",
-            )
-        else:
-            logger.warning(
-                "goals_proactive_wall: HTTP %s chat=%s body=%s",
-                resp.status_code,
-                chat_id,
-                (resp.text or "")[:200],
-            )
-
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("goals_proactive_wall: no se pudo guardar la lista chat=%s: %s", chat_id, exc)
 
 async def _run_loop_proactive_tick() -> None:
     """Escanea agent_config y dispara auto-mejora meditate (SYSTEM_EVENT al worker)."""

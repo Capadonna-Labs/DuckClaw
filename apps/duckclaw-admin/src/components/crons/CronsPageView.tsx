@@ -299,7 +299,7 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
                   </tr>
                 )}
                 {chatSchedules.map((s) => (
-                  <tr key={`${s.source}:${s.chat_id}:${s.kind}`} className="border-t dark:border-dark-border">
+                  <tr key={`${s.source}:${s.chat_id}:${s.cron_id}`} className="border-t dark:border-dark-border">
                     <td className="max-w-[12rem] px-4 py-2 text-xs font-medium text-gov-gray-900 dark:text-dark-text" title={`${s.chat_id} · ${s.source}`}>
                       {s.name || s.chat_id}
                     </td>

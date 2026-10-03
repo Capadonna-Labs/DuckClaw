@@ -13,6 +13,16 @@ function reportPwaPresence(visible: boolean) {
   }).catch(() => undefined);
 }
 
+/** Opening the app = alerts seen: clear the icon badge and the delivered notifications. */
+function clearAppBadge() {
+  const nav = navigator as Navigator & { clearAppBadge?: () => Promise<void> };
+  void nav.clearAppBadge?.().catch(() => undefined);
+  void navigator.serviceWorker?.ready
+    .then((reg) => reg.getNotifications())
+    .then((list) => list.forEach((n) => n.close()))
+    .catch(() => undefined);
+}
+
 export function PwaServiceWorker() {
   useEffect(() => {
     if (!('serviceWorker' in navigator)) return;
@@ -30,7 +40,10 @@ export function PwaServiceWorker() {
 
   useEffect(() => {
     const visible = () => document.visibilityState === 'visible';
-    const sync = () => reportPwaPresence(visible());
+    const sync = () => {
+      reportPwaPresence(visible());
+      if (visible()) clearAppBadge();
+    };
     sync();
     const timer = window.setInterval(() => {
       if (visible()) reportPwaPresence(true);

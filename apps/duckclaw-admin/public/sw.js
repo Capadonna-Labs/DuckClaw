@@ -11,6 +11,16 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Home-screen icon badge = notifications not opened yet (iOS 16.4+ PWA, Android, desktop).
+// The page clears it when the app comes to the foreground (PwaServiceWorker.tsx).
+function syncAppBadge() {
+  if (!self.navigator || !self.navigator.setAppBadge) return Promise.resolve();
+  return self.registration
+    .getNotifications()
+    .then((list) => (list.length ? self.navigator.setAppBadge(list.length) : self.navigator.clearAppBadge()))
+    .catch(() => undefined);
+}
+
 self.addEventListener('push', (event) => {
   let payload = {};
   try {
@@ -34,7 +44,7 @@ self.addEventListener('push', (event) => {
       .then((clients) => {
         const visible = clients.some((client) => client.visibilityState === 'visible');
         if (visible) return undefined;
-        return self.registration.showNotification(title, options);
+        return self.registration.showNotification(title, options).then(syncAppBadge);
       })
   );
 });
@@ -42,5 +52,5 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const url = event.notification.data && event.notification.data.url ? event.notification.data.url : '/login';
-  event.waitUntil(clients.openWindow(url));
+  event.waitUntil(Promise.all([syncAppBadge(), clients.openWindow(url)]));
 });

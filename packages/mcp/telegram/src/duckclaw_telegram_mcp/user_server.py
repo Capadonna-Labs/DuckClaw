@@ -185,6 +185,23 @@ class TelegramUserService:
         _log.info("telegram_user action=read chat=%s returned=%d", get_peer_id(entity), len(messages))
         return _ok(chat=str(get_peer_id(entity)), name=get_display_name(entity), messages=messages)
 
+    async def mark_read(self, chat: str, max_id: int = 0) -> str:
+        """Mark a readable chat as read (up to ``max_id``, or everything when 0).
+
+        Only changes the user's own read state, so it follows the read allowlist.
+        """
+        from telethon.utils import get_peer_id
+
+        entity = await self._resolve(chat)
+        if not self.policy.can_read(self._keys(entity)):
+            _log.warning("telegram_user action=mark_read DENIED chat=%s", get_peer_id(entity))
+            return _err("Chat fuera de TELEGRAM_USER_READ_ALLOW")
+        client = await self.client()
+        mid = int(max_id or 0)
+        await client.send_read_acknowledge(entity, max_id=mid or None)
+        _log.info("telegram_user action=mark_read chat=%s max_id=%s", get_peer_id(entity), mid or "all")
+        return _ok(chat=str(get_peer_id(entity)), marked_read_up_to=mid or "all")
+
     async def send_message(self, chat: str, text: str) -> str:
         from telethon import functions
         from telethon.utils import get_peer_id
@@ -245,6 +262,11 @@ def build_user_mcp_app(service: TelegramUserService | None = None) -> Any:
     async def telegram_read_messages(chat: str, limit: int = 20, before_id: int = 0) -> str:
         """Lee los mensajes más recientes de un chat permitido. chat = id de telegram_list_chats, @usuario o 'me'. before_id pagina hacia atrás."""
         return await _guard(svc.read_messages(chat, limit, before_id))
+
+    @mcp.tool()
+    async def telegram_mark_read(chat: str, max_id: int = 0) -> str:
+        """Marca como leídos los mensajes de un chat permitido (hasta max_id; 0 = todos). Solo cambia tu estado de lectura."""
+        return await _guard(svc.mark_read(chat, max_id))
 
     @mcp.tool()
     async def telegram_send_message(chat: str, text: str) -> str:

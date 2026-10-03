@@ -170,3 +170,20 @@ def test_parse_chat_ref() -> None:
     assert user_server._parse_chat_ref("alice") == "@alice"
     with pytest.raises(ValueError):
         user_server._parse_chat_ref("  ")
+
+
+def test_mark_read_follows_read_allowlist() -> None:
+    alice, bob = _user(10, "alice"), _user(20, "bob")
+    client = _FakeClient({"@alice": alice, "@bob": bob})
+    acks: list = []
+
+    async def _ack(entity, max_id=None):
+        acks.append((entity.id, max_id))
+
+    client.send_read_acknowledge = _ack
+    svc = _service({"TELEGRAM_USER_READ_ALLOW": "@alice"}, client)
+    assert _run(svc.mark_read("bob"))["ok"] is False
+    out = _run(svc.mark_read("alice"))
+    assert out["ok"] is True and out["marked_read_up_to"] == "all"
+    assert _run(svc.mark_read("alice", 55))["marked_read_up_to"] == 55
+    assert acks == [(10, None), (10, 55)]

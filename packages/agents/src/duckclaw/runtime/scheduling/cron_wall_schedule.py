@@ -198,7 +198,13 @@ def wall_once_datetime_local(spec: dict[str, Any]) -> Optional[datetime]:
 
 
 def wall_once_expired(spec: dict[str, Any], now_epoch: float) -> bool:
-    """True si el slot ``once`` ya no es disparable (pasó el minuto objetivo sin ser el minuto actual)."""
+    """True si el slot ``once`` ya no es disparable (pasó el minuto objetivo sin ser el minuto actual).
+
+    Recurring specs (``every``) never expire: before this guard their missing ``once_*``
+    fields read as "expired" and the heartbeat deleted every ``--timestamp every`` schedule.
+    """
+    if str(spec.get("kind") or "").strip().lower() != "once":
+        return False
     dt = wall_once_datetime_local(spec)
     if dt is None:
         return True

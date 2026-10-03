@@ -15,6 +15,17 @@ export interface CronProcess {
   pm_uptime: number | null;
 }
 
+/** /crons schedules saved per chat (clock or interval), fired by the heartbeat. */
+export interface ChatSchedule {
+  chat_id: string;
+  kind: 'reloj' | 'intervalo';
+  schedule: string;
+  prompt: string;
+  remove_hint: string;
+  last_fire_epoch: number | null;
+  source: string;
+}
+
 export interface CronActionResult {
   ok: boolean;
   stdout: string;
@@ -29,6 +40,7 @@ export interface CronLogsResult {
 
 export const cronsApi = {
   list: () => adminFetch<{ crons: CronProcess[] }>('/crons'),
+  chatSchedules: () => adminFetch<{ schedules: ChatSchedule[] }>('/crons/chat-schedules'),
   runNow: (name: string) =>
     adminFetch<CronActionResult>(`/crons/${encodeURIComponent(name)}/run`, { method: 'POST' }),
   stop: (name: string) =>

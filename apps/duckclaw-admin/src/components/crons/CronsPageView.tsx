@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Play, RefreshCw, Square, Terminal } from 'lucide-react';
-import { cronsApi, type CronProcess } from '@/services/admin/cronsApi';
+import { cronsApi, type ChatSchedule, type CronProcess } from '@/services/admin/cronsApi';
 import { useAuthStore } from '@/store/authStore';
 import { ViewChrome, type EmbeddedViewProps } from '@/components/admin/embeddedView';
 
@@ -36,6 +36,7 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
   const canWrite = usuario?.rol === 'admin';
 
   const [crons, setCrons] = useState<CronProcess[]>([]);
+  const [chatSchedules, setChatSchedules] = useState<ChatSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
@@ -52,6 +53,10 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
       .then((r) => setCrons(r.crons ?? []))
       .catch((e) => setError(e instanceof Error ? e.message : 'Error cargando crons'))
       .finally(() => setLoading(false));
+    cronsApi
+      .chatSchedules()
+      .then((r) => setChatSchedules(r.schedules ?? []))
+      .catch(() => setChatSchedules([]));
   }, []);
 
   useEffect(() => {
@@ -256,6 +261,52 @@ export default function CronsPageView({ embedded = false }: EmbeddedViewProps) {
                         </div>
                       </td>
                     )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section className="rounded-xl border border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface">
+          <div className="border-b border-gov-gray-100 px-4 py-3 dark:border-dark-border">
+            <h2 className="text-base font-semibold text-gov-gray-900 dark:text-dark-text">
+              Programaciones de chat (/crons)
+            </h2>
+            <p className="mt-0.5 text-xs text-gov-gray-500 dark:text-dark-muted">
+              Prompts y revisiones que el heartbeat envía a un chat. Se crean y quitan desde el chat.
+            </p>
+          </div>
+          <div className="scrollbar-hide overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gov-gray-50 text-left dark:bg-dark-bg">
+                <tr>
+                  <th className="px-4 py-2 text-xs font-semibold">Horario</th>
+                  <th className="px-4 py-2 text-xs font-semibold">Envía</th>
+                  <th className="px-4 py-2 text-xs font-semibold">Chat</th>
+                  <th className="px-4 py-2 text-xs font-semibold">Última vez</th>
+                  <th className="px-4 py-2 text-xs font-semibold">Quitar con</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chatSchedules.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-6 text-center text-sm text-gov-gray-500 dark:text-dark-muted">
+                      Ningún chat tiene programaciones con /crons.
+                    </td>
+                  </tr>
+                )}
+                {chatSchedules.map((s) => (
+                  <tr key={`${s.source}:${s.chat_id}:${s.kind}`} className="border-t dark:border-dark-border">
+                    <td className="px-4 py-2 text-xs">{s.schedule}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{s.prompt}</td>
+                    <td className="max-w-[12rem] truncate px-4 py-2 font-mono text-xs text-gov-gray-500 dark:text-dark-muted" title={`${s.chat_id} · ${s.source}`}>
+                      {s.chat_id}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gov-gray-500 dark:text-dark-muted">
+                      {s.last_fire_epoch ? new Date(s.last_fire_epoch * 1000).toLocaleString() : '—'}
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-gov-gray-500 dark:text-dark-muted">{s.remove_hint}</td>
                   </tr>
                 ))}
               </tbody>

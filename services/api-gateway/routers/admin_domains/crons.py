@@ -128,6 +128,77 @@ async def list_crons() -> dict[str, Any]:
     return {"crons": await _list_cron_processes()}
 
 
+def _load_chat_schedules() -> list[dict[str, Any]]:
+    """/crons schedules stored per chat in agent_config (hub + vaults), the same rows the
+    heartbeat scans. Read-only; PM2 crons are a different thing (list_crons)."""
+    from pathlib import Path
+
+    from duckclaw.commands.crons import (
+        chat_id_from_goals_cron_wall_key,
+        chat_id_from_goals_delta_config_key,
+        format_goals_delta_interval_human,
+    )
+    from duckclaw.duckdb_read_compat import duckclaw_open_for_read_scan
+    from duckclaw.gateway_db import iter_goals_ticker_duckdb_paths
+    from duckclaw.runtime.scheduling.cron_wall_schedule import format_cron_wall_human
+
+    out: list[dict[str, Any]] = []
+    for path in iter_goals_ticker_duckdb_paths():
+        try:
+            with duckclaw_open_for_read_scan(path) as db:
+                raw = db.query(
+                    "SELECT key, value FROM agent_config "
+                    "WHERE key LIKE 'chat_%_goals_cron_wall' OR key LIKE 'chat_%_goals_delta_seconds' "
+                    "OR key LIKE 'chat_%_goals_proactive_last_fire_epoch'"
+                )
+        except Exception:
+            continue  # vault locked/missing agent_config: skip, like the heartbeat
+        rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        kv = {str(r.get("key")): str(r.get("value") or "").strip() for r in rows if isinstance(r, dict)}
+        for key, value in kv.items():
+            if not value:
+                continue
+            item: dict[str, Any] | None = None
+            if (cid := chat_id_from_goals_cron_wall_key(key)) is not None:
+                try:
+                    spec = json.loads(value)
+                except json.JSONDecodeError:
+                    continue
+                item = {
+                    "chat_id": cid,
+                    "kind": "reloj",
+                    "schedule": format_cron_wall_human(spec),
+                    "prompt": str(spec.get("prompt") or "") or "Revisión de /goals",
+                    "remove_hint": "/crons --timestamp off",
+                }
+            elif (cid := chat_id_from_goals_delta_config_key(key)) is not None:
+                try:
+                    secs = int(value)
+                except ValueError:
+                    continue
+                if secs <= 0:
+                    continue
+                item = {
+                    "chat_id": cid,
+                    "kind": "intervalo",
+                    "schedule": f"Cada {format_goals_delta_interval_human(secs)}",
+                    "prompt": "Revisión de /goals",
+                    "remove_hint": "/crons --delta off",
+                }
+            if item is None:
+                continue
+            last = kv.get(f"chat_{item['chat_id']}_goals_proactive_last_fire_epoch") or ""
+            item["last_fire_epoch"] = float(last) if last.replace(".", "", 1).isdigit() else None
+            item["source"] = Path(path).name
+            out.append(item)
+    return out
+
+
+@router.get("/chat-schedules", dependencies=[Depends(require_admin_key)])
+async def list_chat_schedules() -> dict[str, Any]:
+    return {"schedules": await asyncio.to_thread(_load_chat_schedules)}
+
+
 @router.post("/{name}/run", dependencies=[Depends(require_admin_key)])
 async def run_cron_now(name: str, actor: str = Depends(actor_from_header)) -> dict[str, Any]:
     await _guard_known_cron(name)

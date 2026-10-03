@@ -19,7 +19,7 @@ _ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 def _strip_ansi(text: str) -> str:
     return _ANSI_ESCAPE_RE.sub("", text or "")
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Request
 
 from duckclaw.ops.toolchain import ToolchainError, run_pm2
 from routers.admin_domains.admin_common import admin_audit, problem
@@ -149,7 +149,8 @@ def _load_chat_schedules() -> list[dict[str, Any]]:
                 raw = db.query(
                     "SELECT key, value FROM agent_config "
                     "WHERE key LIKE 'chat_%_goals_cron_wall' OR key LIKE 'chat_%_goals_delta_seconds' "
-                    "OR key LIKE 'chat_%_goals_proactive_last_fire_epoch'"
+                    "OR key LIKE 'chat_%_goals_proactive_last_fire_epoch' "
+                    "OR key LIKE 'chat_%_goals_proactive_tenant_id' OR key LIKE 'chat_%_worker_id'"
                 )
         except Exception:
             continue  # vault locked/missing agent_config: skip, like the heartbeat
@@ -187,16 +188,63 @@ def _load_chat_schedules() -> list[dict[str, Any]]:
                 }
             if item is None:
                 continue
-            last = kv.get(f"chat_{item['chat_id']}_goals_proactive_last_fire_epoch") or ""
+            cid_key = f"chat_{item['chat_id']}"
+            last = kv.get(f"{cid_key}_goals_proactive_last_fire_epoch") or ""
             item["last_fire_epoch"] = float(last) if last.replace(".", "", 1).isdigit() else None
             item["source"] = Path(path).name
+            item["tenant_id"] = kv.get(f"{cid_key}_goals_proactive_tenant_id") or ""
+            item["worker_id"] = kv.get(f"{cid_key}_worker_id") or ""
+            # Same gates the heartbeat applies before firing (services/heartbeat/main.py).
+            if not item["worker_id"] or item["worker_id"].lower() == "manager":
+                item["status"], item["status_detail"] = "inactivo", "el chat no tiene un worker asignado"
+            elif not item["tenant_id"]:
+                item["status"], item["status_detail"] = "inactivo", "falta el tenant de la programación"
+            else:
+                item["status"], item["status_detail"] = "activo", f"worker {item['worker_id']}"
             out.append(item)
     return out
 
 
+def _skill_descriptions(items: list[dict[str, Any]]) -> None:
+    """Description column: the directive skill's own text for "/skill" prompts."""
+    from core.admin_identity import open_gateway_db
+    from duckclaw.directive_skills import expand_directive_skill
+
+    for item in items:
+        prompt = str(item.get("prompt") or "")
+        if item["kind"] == "intervalo":
+            item["description"] = "Revisión periódica de las metas de /goals"
+            continue
+        if not prompt.startswith("/"):
+            item["description"] = prompt[:160]
+            continue
+        try:
+            with open_gateway_db(read_only=True) as db:
+                _msg, rest = expand_directive_skill(db, prompt, tenant_id=item.get("tenant_id") or "default")
+                expanded = _msg if rest is not None else ""
+        except Exception:
+            expanded = ""
+        # Expanded = "[DIRECTIVA ACTIVA: /x]\n<texto>": the description is the text.
+        body = expanded.split("\n", 1)[1].strip() if "\n" in expanded else ""
+        item["description"] = (body[:160] + "…") if len(body) > 160 else (body or "Skill no encontrado en el catálogo")
+
+
 @router.get("/chat-schedules", dependencies=[Depends(require_admin_key)])
-async def list_chat_schedules() -> dict[str, Any]:
-    return {"schedules": await asyncio.to_thread(_load_chat_schedules)}
+async def list_chat_schedules(request: Request) -> dict[str, Any]:
+    items = await asyncio.to_thread(_load_chat_schedules)
+    await asyncio.to_thread(_skill_descriptions, items)
+    from core.admin_conversations import get_conversation_meta
+
+    redis_client = getattr(request.app.state, "redis", None)
+    for item in items:
+        title = ""
+        try:
+            meta = await get_conversation_meta(redis_client, item.get("tenant_id") or "default", item["chat_id"])
+            title = str(getattr(meta, "title", "") or "").strip() if meta else ""
+        except Exception:
+            title = ""
+        item["name"] = title or item["chat_id"]
+    return {"schedules": items}
 
 
 @router.post("/{name}/run", dependencies=[Depends(require_admin_key)])

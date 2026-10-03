@@ -119,3 +119,27 @@ def test_register_loop_skill_enable(monkeypatch: pytest.MonkeyPatch) -> None:
     data = json.loads(raw)
     assert data["status"] == "ok"
     assert data.get("enabled") is True
+
+
+def test_manage_chat_schedule_runs_crons_for_this_chat(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The agent can't type /crons; this tool runs the same command for its own chat."""
+    seen: dict = {}
+
+    def _crons(db, chat_id, args, *, tenant_id=None, vault_user_id=None):
+        seen.update(chat_id=chat_id, args=args, tenant_id=tenant_id)
+        return "Programación por reloj guardada."
+
+    monkeypatch.setattr("duckclaw.commands.crons.execute_crons_schedule", _crons)
+    tools: list = []
+    register_loop_skill(tools, _FakeDb())
+    tool = next(t for t in tools if t.name == "manage_chat_schedule")
+
+    set_goals_tool_chat_id("chat-9")
+    set_goals_tool_tenant_id("tenant-a")
+    out = json.loads(tool.invoke({"command": '--timestamp every 09:00 dom --prompt "/defense_watch"'}))
+    assert out["status"] == "ok" and "guardada" in out["result"]
+    assert seen == {
+        "chat_id": "chat-9",
+        "args": '--timestamp every 09:00 dom --prompt "/defense_watch"',
+        "tenant_id": "tenant-a",
+    }

@@ -101,6 +101,20 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 )
             return json.dumps(applied, ensure_ascii=False)
 
+        def manage_chat_schedule(command: str = "") -> str:
+            """Lista, crea o quita las programaciones /crons de este chat (mismos argumentos que /crons)."""
+            cid = get_goals_tool_chat_id()
+            if not cid:
+                return json.dumps(
+                    {"status": "error", "error": "chat_id no disponible en este turno"},
+                    ensure_ascii=False,
+                )
+            from duckclaw.commands.crons import execute_crons_schedule
+
+            use_db = _resolve_tool_db(db, get_goals_tool_db_path())
+            out = execute_crons_schedule(use_db, cid, (command or "").strip(), tenant_id=get_goals_tool_tenant_id())
+            return json.dumps({"status": "ok", "result": out}, ensure_ascii=False)
+
         def get_loop_homeostasis_status() -> str:
             """Devuelve JSON con schedule meditate y snapshot del manifiesto /goals."""
             cid = get_goals_tool_chat_id()
@@ -343,6 +357,19 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                     "interval='off' o '10min'/'4h'. mode='clock' (reloj) o 'idle' (silencio desde último mensaje). "
                     "Al cerrar un tema o despedir, usa interval='off' (o pause_chat_autonomy). "
                     "Revisión ligera al usuario: /crons --delta."
+                ),
+            )
+        )
+        tools_list.append(
+            StructuredTool.from_function(
+                manage_chat_schedule,
+                name="manage_chat_schedule",
+                description=(
+                    "Programaciones /crons de ESTE chat (las dispara el heartbeat). command = lo mismo que /crons: "
+                    "'' lista; '--timestamp every 09:00 dom --prompt \"/defense_watch\"' programa un prompt o skill "
+                    "por reloj (dias: lun mar mie jue vie sab dom o weekdays; 'once 2026-10-10T09:00' una vez); "
+                    "'--timestamp off' o '--rm wall' lo quita; '--delta 4h' / '--delta off' revisión de /goals por intervalo. "
+                    "Un solo horario de reloj por chat: programar otro reemplaza el actual. Confirma con el texto devuelto."
                 ),
             )
         )

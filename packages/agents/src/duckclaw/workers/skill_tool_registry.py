@@ -123,13 +123,6 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         empty_config_registers=True,
     ),
     SkillToolRegistrar(
-        skill_name="ibkr_bracket_orders",
-        phase="post_llm",
-        registrar_path="duckclaw.forge.skills.ibkr_bracket_orders_bridge:register_ibkr_bracket_orders_skill",
-        empty_config_registers=True,
-        keyword_context={"vault_db_path": "vault_db_path"},
-    ),
-    SkillToolRegistrar(
         skill_name="jev_decide",
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.jev_decide_bridge:register_jev_decide_skill",
@@ -184,7 +177,6 @@ def register_post_llm_skill_tools(
     db: Any,
     llm: Any,
     tenant_id: str = "default",
-    vault_db_path: str | None = None,
 ) -> None:
     """Register configured skill tools that may depend on db or llm handles."""
     _register_configured_skill_tools(
@@ -199,7 +191,6 @@ def register_post_llm_skill_tools(
             "research_config": worker_skill_config(spec, "research"),
             "worker_id": str(getattr(spec, "worker_id", None) or ""),
             "tenant_id": str(tenant_id or "default"),
-            "vault_db_path": str(vault_db_path or "").strip() or None,
         },
     )
 

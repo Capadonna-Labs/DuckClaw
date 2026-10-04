@@ -201,16 +201,6 @@ def make_tools_node(ctx: WorkerGraphContext):
                 )
             if sandbox_toggle_bypasses_harness(tool_name, sandbox_enabled=sandbox_enabled):
                 return None
-            try:
-                from duckclaw.workers.protective_order_route_guard import (
-                    blocked_protective_broker_route as _prot_block,
-                )
-                blocked = _prot_block(tool_name, args, db=db)
-                if blocked is not None:
-                    _harness_stats["risk_denied"] += 1
-                    return blocked
-            except Exception:
-                _log.debug("protective order route guard skipped", exc_info=True)
             risk = classify_tool_risk(tool_name)
             if approval_blocks_execution(risk, _approval_mode):  # type: ignore[arg-type]
                 _harness_stats["risk_denied"] += 1

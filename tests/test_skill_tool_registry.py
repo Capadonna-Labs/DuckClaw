@@ -122,24 +122,17 @@ def test_post_llm_registry_registers_empty_default_skills(monkeypatch) -> None:
 
     llm = object()
     db = object()
-    vault_db_path = "/tmp/quant.duckdb"
     spec = _spec_with_skill_configs()
 
-    registry.register_post_llm_skill_tools(
-        [],
-        spec,
-        db=db,
-        llm=llm,
-        vault_db_path=vault_db_path,
-    )
+    registry.register_post_llm_skill_tools([], spec, db=db, llm=llm, tenant_id="t1")
 
     by_path = {path: (config, args, kwargs) for path, config, args, kwargs in calls}
-    config, args, kwargs = by_path[
-        "duckclaw.forge.skills.ibkr_bracket_orders_bridge:register_ibkr_bracket_orders_skill"
-    ]
+    config, args, kwargs = by_path["duckclaw.forge.skills.jev_decide_bridge:register_jev_decide_skill"]
     assert config == {}
     assert args == ()
-    assert kwargs == {"vault_db_path": vault_db_path}
+    assert kwargs == {"db": db, "tenant_id": "t1"}
+    # Vertical skills (e.g. broker order execution) register from extensions, never the core registry.
+    assert not any("ibkr" in path for path in by_path)
 
 
 def test_fal_is_in_skill_tool_registry() -> None:

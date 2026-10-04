@@ -225,22 +225,17 @@ DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
     # Opt-in quant / IBKR vertical surfaces (not forge legacy packages).
     "packages/agents/src/duckclaw/workers/worker_invoke.py": "worker id aliases include quant-trader template id",
     "packages/agents/src/duckclaw/workers/template_registry.py": "template registry lists quant-trader opt-in worker",
-    "packages/shared/src/duckclaw/signal_execution_bridge.py": "IBKR/quant signal bridge opt-in extension",
     "packages/shared/src/duckclaw/trade_signals_ledger.py": "dual-schema trade_signals resolve/update helper",
     "packages/shared/src/duckclaw/write_commands.py": "typed commands for quant_core.ibkr_orders",
     "packages/shared/src/duckclaw/schema_migrations.py": "schema seeds + quant_core.ibkr_orders migration",
     "packages/shared/src/duckclaw/admin_worker_catalog.py": "catalog helpers mention quant worker family",
-    "packages/shared/src/duckclaw/ibkr_order_monitor.py": "IBKR order monitor opt-in extension",
-    "packages/agents/src/duckclaw/workers/protective_order_route_guard.py": "tools_node guard: refuse BRACKET via market-entry broker tools",
     "packages/shared/src/duckclaw/write_handlers/ibkr_orders.py": "DB-writer handler for quant_core.ibkr_orders",
     "packages/shared/src/duckclaw/write_handlers/closed_trades.py": "DB-writer handler for quant_core.closed_trades",
     "packages/shared/src/duckclaw/closed_trade_enqueue.py": "enqueue helper for verified closed trades",
     "scripts/backfill_closed_trades_jsonl.py": "ops backfill for quant_core.closed_trades via write queue",
     "scripts/patch_capadonna_closed_trade_enqueue.py": "ops patch Capadonna fly enqueue → InsertClosedTradeCommand",
-    "scripts/patch_capadonna_broker_execute_bracket.py": "ops patch Capadonna broker hook: refuse BRACKET→ENTRY market",
     "services/api-gateway/routers/admin_domains/worker_capabilities.py": "skill→tool satisfaction map includes quant_schema_reference opt-in",
     "services/api-gateway/routers/admin_domains/workspace_managed_draft.py": "managed draft policy labels include finance/finanzas locales",
-    "scripts/place_protective_gtc_brackets.py": "ops script for IBKR protective brackets",
 }
 DOMAIN_VERTICAL_RUNTIME_ALLOWLIST = frozenset(DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS)
 CAPADONNA_DRILLER_IMPORT_ALLOWLIST = frozenset()

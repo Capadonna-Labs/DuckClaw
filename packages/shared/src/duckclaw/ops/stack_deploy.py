@@ -177,7 +177,9 @@ def run_uv_sync(*, repo_root: Path, print_fn: PrintFn) -> bool:
     if proc.returncode != 0:
         print_fn("ERROR: uv sync falló")
         return False
-    return True
+    from duckclaw.extensions.python_requirements import install_extension_python_requirements
+
+    return install_extension_python_requirements(repo_root=repo_root, print_fn=print_fn)
 
 
 def run_pm2_stop_stack(*, print_fn: PrintFn, repo_root: Path | None = None) -> bool:

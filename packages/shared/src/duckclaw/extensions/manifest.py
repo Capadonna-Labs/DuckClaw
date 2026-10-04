@@ -31,6 +31,8 @@ class FlyExtensionManifest:
     reply_audit_hooks: tuple[str, ...] = ()
     # Skill → tool names that satisfy it at runtime (capabilities gap check).
     skill_tools: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    # requirements.txt files (relative to the manifest) installed after every uv sync.
+    python_requirements: tuple[str, ...] = ()
     read_only_commands: tuple[str, ...] = ()
     help_entries: tuple[tuple[str, str], ...] = ()
     state_delta_handlers: tuple[StateDeltaHandlerEntry, ...] = ()
@@ -126,6 +128,7 @@ def _parse_manifest_dict(data: dict[str, Any], *, source: Path | None) -> FlyExt
         worker_tool_context_hooks=_parse_hook_list(tool_context_hooks_raw),
         reply_audit_hooks=_parse_hook_list(data.get("reply_audit_hooks") or []),
         skill_tools=_parse_skill_tools(data.get("skill_tools")),
+        python_requirements=_parse_hook_list(data.get("python_requirements") or []),
         read_only_commands=tuple(read_only),
         help_entries=_parse_help_entries(data.get("help_entries")),
         state_delta_handlers=_parse_state_delta_handlers(state_delta_raw),

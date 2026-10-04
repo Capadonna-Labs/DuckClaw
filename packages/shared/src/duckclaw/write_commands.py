@@ -647,69 +647,6 @@ class RevokeWorkerMcpConnectorCommand(WriteCommand):
 
 
 # ---------------------------------------------------------------------------
-# IBKR Trading commands
-# ---------------------------------------------------------------------------
-
-class InsertIbkrOrderCommand(WriteCommand):
-    """Insert new IBKR order record into quant_core.ibkr_orders."""
-
-    command_type: Literal["insert_ibkr_order"] = "insert_ibkr_order"
-    order_id: int
-    ticker: str
-    side: Literal["BUY", "SELL"]
-    quantity: int
-    order_type: Literal["MARKET", "LIMIT", "STOP"]
-    limit_price: float | None = None
-    stop_price: float | None = None
-    parent_order_id: int | None = None
-    status: str = "submitted"
-    submitted_at: str = ""  # ISO datetime
-    trade_signal_id: str = ""
-    notes: str = ""
-
-
-class UpdateIbkrOrderStatusCommand(WriteCommand):
-    """Update IBKR order status (filled, cancelled, etc) from order monitor."""
-
-    command_type: Literal["update_ibkr_order_status"] = "update_ibkr_order_status"
-    order_id: int
-    status: Literal["submitted", "partial", "filled", "cancelled", "inactive", "unknown"]
-    filled_qty: int = 0
-    filled_price: float | None = None
-    filled_at: str = ""  # ISO datetime (only if status=filled)
-    cancelled_at: str = ""  # ISO datetime (only if status=cancelled)
-
-
-class UpdateTradeSignalExecutedCommand(WriteCommand):
-    """Mark trade signal as executed with timestamp."""
-
-    command_type: Literal["update_trade_signal_executed"] = "update_trade_signal_executed"
-    signal_id: str
-    executed_at: str = ""  # ISO datetime
-
-
-class InsertClosedTradeCommand(WriteCommand):
-    """Insert a verified round-trip close into quant_core.closed_trades.
-
-    Idempotent on (ticker, closed_at, qty, fill_id). Capadonna fill path
-    (trading_session_fly) enqueues this after match_closing_fills succeeds.
-    """
-
-    command_type: Literal["insert_closed_trade"] = "insert_closed_trade"
-    ticker: str = Field(..., min_length=1, max_length=32)
-    fill_id: str = Field(..., min_length=1, max_length=512)
-    closed_at: str = Field(..., min_length=8, max_length=64)  # ISO / broker timestamp
-    qty: float  # signed (LONG > 0, SHORT < 0)
-    entry_px: float = Field(..., gt=0)
-    exit_px: float = Field(..., gt=0)
-    pnl: float
-    ret_pct: float
-    side: Literal["LONG", "SHORT"]
-    session_uid: str = ""
-    signal_id: str = ""  # UUID string when known; empty → NULL
-
-
-# ---------------------------------------------------------------------------
 # Raw SQL (legacy — keep for admin_sql tool)
 # ---------------------------------------------------------------------------
 

@@ -731,7 +731,9 @@ def run_uv_sync(repo_root: Path, print_fn: PrintFn = _default_print) -> bool:
     if code != 0:
         print_fn(f"ERROR uv sync: fallo con codigo {code}. Revisa red o permisos de escritura.")
         return False
-    return True
+    from duckclaw.extensions.python_requirements import install_extension_python_requirements
+
+    return install_extension_python_requirements(repo_root=repo_root, print_fn=print_fn)
 
 
 def _install_missing_tools(

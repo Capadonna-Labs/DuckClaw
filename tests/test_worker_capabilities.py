@@ -113,17 +113,21 @@ def test_worker_capabilities_gaps_sandbox_alias_and_mcp_github() -> None:
     assert isinstance(integration, list)
 
 
-def test_worker_capabilities_understands_runtime_skill_aliases() -> None:
+def test_worker_capabilities_understands_runtime_skill_aliases(monkeypatch) -> None:
+    from duckclaw.extensions import manifest as ext_manifest
     from routers.admin_domains.worker_capabilities import _compute_gaps
+
+    # Vertical skills map to tools through the extension manifest, not core.
+    monkeypatch.setattr(
+        ext_manifest,
+        "load_fly_extension_manifest",
+        lambda: ext_manifest.FlyExtensionManifest(skill_tools=(("ext_skill", ("ext_tool_a", "ext_tool_b")),)),
+    )
 
     gaps, _ = _compute_gaps(
         skills_effective=[
             "infra_freshness",
-            "ibkr",
-            "fmp",
-            "macro_pgq_context",
-            "quant_schema_reference",
-            "position_metrics",
+            "ext_skill",
             "slm_eval",
         ],
         tools_runtime=[
@@ -138,18 +142,13 @@ def test_worker_capabilities_understands_runtime_skill_aliases() -> None:
             "export_docx_to_pdf",
             "assess_cron_registered",
             "assess_table_freshness",
-            "get_ibkr_portfolio",
-            "fetch_market_data",
-            "describe_pgq_macro_schema",
-            "inspect_macro_pgq",
-            "describe_quant_schema",
-            "calculate_tp_sl_distance",
+            "ext_tool_b",
             "execute_slm",
             "record_slm_eval_lesson",
         ],
         sandbox_registered=False,
         docker_ok=True,
-        manifest_data={"allowed_delegates": ["quant_reporter"]},
+        manifest_data={"allowed_delegates": ["worker_b"]},
         optional={},
     )
 

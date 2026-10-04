@@ -284,16 +284,13 @@ def make_set_reply_node(ctx: WorkerGraphContext):
         try:
             from duckclaw.egress.evidence_validator import (
                 VISUAL_EVIDENCE_RETRY_REASON,
-                enforce_position_metrics_evidence_rule,
                 enforce_visual_evidence_rule,
-                market_price_consistency_audit,
-                position_metrics_retry_system_message,
                 visual_evidence_retry_system_message,
             )
-            from duckclaw.position_metrics import POSITION_METRICS_RETRY_REASON
 
-            # Turnos /context (SUMMARIZE_*): sin auditorías cuánticas/VLM que puedan sustituir el resumen.
-            if reply and not incoming_has_context_summarize_directive(_rescind_incoming):
+            # Turnos /context (SUMMARIZE_*): sin auditorías (VLM / extensiones) que sustituyan el resumen.
+            _summarize_turn = incoming_has_context_summarize_directive(_rescind_incoming)
+            if reply and not _summarize_turn:
                 new_v, vreason = enforce_visual_evidence_rule(
                     incoming=(state.get("incoming") or ""),
                     messages=msgs,
@@ -352,51 +349,26 @@ def make_set_reply_node(ctx: WorkerGraphContext):
                     _log.warning("Visual evidence audit: %s", vreason)
                     reply = new_v
 
-                # Mechanical TP/SL rewrite + breach alerts + evidence retry.
-                try:
-                    from duckclaw.workers.factory_graph_nodes_set_reply_tp_sl import (
-                        apply_tp_sl_rewrite_and_breach_alerts,
-                        enforce_position_metrics_with_optional_retry,
-                    )
+            # Extension reply audits (domain rules live in the extension, not here).
+            if not _summarize_turn:
+                from duckclaw.extensions.reply_audit import invoke_extension_reply_audit_hooks
 
-                    reply, state = apply_tp_sl_rewrite_and_breach_alerts(
-                        reply=reply or "", messages=msgs, state=state
-                    )
-                    reply, _pm_retry_out = enforce_position_metrics_with_optional_retry(
-                        reply=reply,
-                        messages=msgs,
-                        state=state,
-                        spec=spec,
-                        rescind_incoming=str(_rescind_incoming or ""),
-                        identity_fields=_identity_fields,
-                        enforce_rule=enforce_position_metrics_evidence_rule,
-                        retry_reason=POSITION_METRICS_RETRY_REASON,
-                        retry_system_message=position_metrics_retry_system_message,
-                    )
-                    if _pm_retry_out is not None:
-                        return _pm_retry_out
-                except Exception:
-                    pass
-
-                new_r, price_reason = market_price_consistency_audit(db, spec, reply, messages=msgs)
-                if price_reason:
-                    _log.warning("Market price audit: %s", price_reason)
-                    reply = new_r
+                reply, state, _audit_retry = invoke_extension_reply_audit_hooks(
+                    reply=reply or "", messages=msgs, state=state, spec=spec, db=db
+                )
+                if _audit_retry:
+                    out_audit: dict = {
+                        **state,
+                        "messages": list(msgs) + _audit_retry,
+                        "reply": "",
+                        "internal_reply": "",
+                        "audit_graph_retry": True,
+                    }
+                    out_audit.update(_identity_fields(state))
+                    return out_audit
         except Exception:
             pass
         reply = sanitize_worker_reply_text(reply or "")
-        # Empty after PM retry: restore draft (minus TP/SL % claims) instead of stub summary.
-        if (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) and msgs:
-            _draft_pm = (state.get("position_metrics_draft_reply") or "").strip()
-            if _draft_pm and int(state.get("position_metrics_retry_count") or 0) >= 1:
-                try:
-                    from duckclaw.position_metrics import strip_tp_sl_pct_claims
-
-                    _restored = strip_tp_sl_pct_claims(_draft_pm)
-                    if _restored:
-                        reply = sanitize_worker_reply_text(_restored)
-                except Exception:
-                    pass
         _lh_fb = _last_human_message_index(list(msgs)) if msgs else -1
         _gmail_fb = bool(msgs) and _messages_have_gmail_tools_since(list(msgs), _lh_fb)
         _need_fb = (not reply or reply.strip().lower() in ("sin respuesta.", "sin respuesta")) or (

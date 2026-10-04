@@ -38,7 +38,9 @@ def _manifest_for_roots() -> Optional[FlyExtensionManifest]:
         return None
 
 
-def _hook_specs() -> list[tuple[str, str | None, str | None]]:
+def _hook_specs(
+    manifest_attr: str = "worker_skill_hooks", env_name: str = "DUCKCLAW_WORKER_SKILL_HOOKS"
+) -> list[tuple[str, str | None, str | None]]:
     """Return (entrypoint, package_name, lib_path) tuples from manifest + env."""
     manifest = _manifest_for_roots()
     specs: list[str] = []
@@ -47,8 +49,8 @@ def _hook_specs() -> list[tuple[str, str | None, str | None]]:
     if manifest is not None:
         pkg = manifest.package_name or None
         lib_path = manifest.lib_path or None
-        specs.extend(list(manifest.worker_skill_hooks))
-    env_specs = _split_list_env("DUCKCLAW_WORKER_SKILL_HOOKS")
+        specs.extend(list(getattr(manifest, manifest_attr, ()) or ()))
+    env_specs = _split_list_env(env_name)
     if env_specs:
         if not specs:
             specs = env_specs
@@ -61,12 +63,15 @@ def _hook_specs() -> list[tuple[str, str | None, str | None]]:
     return [(s, pkg, lib_path) for s in specs]
 
 
-def _build_hooks() -> list[Callable[..., Any]]:
+def _build_hooks(
+    manifest_attr: str = "worker_skill_hooks", env_name: str = "DUCKCLAW_WORKER_SKILL_HOOKS"
+) -> list[Callable[..., Any]]:
+    """Resolve the extension callables listed under ``manifest_attr`` (or ``env_name``)."""
     roots = extension_roots()
     if not roots:
         return []
     hooks: list[Callable[..., Any]] = []
-    for entrypoint, package_name, lib_path in _hook_specs():
+    for entrypoint, package_name, lib_path in _hook_specs(manifest_attr, env_name):
         bound: Callable[..., Any] | None = None
         for root in roots:
             fn = resolve_callable_entrypoint(
@@ -81,7 +86,7 @@ def _build_hooks() -> list[Callable[..., Any]]:
         if bound is not None:
             hooks.append(bound)
         else:
-            _log.warning("worker skill extension hook not found: %s", entrypoint)
+            _log.warning("extension hook not found (%s): %s", manifest_attr, entrypoint)
     return hooks
 
 

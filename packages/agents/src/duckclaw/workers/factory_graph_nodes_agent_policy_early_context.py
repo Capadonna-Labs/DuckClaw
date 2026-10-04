@@ -242,10 +242,7 @@ def apply_terminal_force_tool_overrides(
             "admin_sql",
             "inspect_schema",
             "evaluate_homeostasis",
-            "get_ibkr_portfolio",
-            "get_ibkr_open_orders",
-            "get_ibkr_order_history",
-        ) or orch.startswith(("mcp__", "android_")):
+        ) or orch.startswith(("mcp__", "android_", "get_")):
             force_orch_tool = None
 
     # Normal turns: after N read_sql/admin_sql, stop re-forcing SQL (LLM thrash).

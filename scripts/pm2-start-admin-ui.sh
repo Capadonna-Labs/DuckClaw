@@ -44,7 +44,7 @@ set -a
 set +a
 
 if [[ -z "${DUCKCLAW_EXTENSION_ROOT:-}" || -z "${DUCKCLAW_REPO_ROOT:-}" ]] && [[ -f "${ROOT}/.env" ]]; then
-  # ponytail: VPS gateway .env has the Capadonna vault root; admin .env.local
+  # ponytail: VPS gateway .env has the extension vault root; admin .env.local
   # often only has API key. Selective grep avoids HOSTNAME/port collisions.
   while IFS= read -r line || [[ -n "${line}" ]]; do
     case "${line}" in

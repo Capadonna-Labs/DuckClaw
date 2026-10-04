@@ -44,7 +44,7 @@ def effective_primary_duckdb_relpath(draft: SovereignDraft) -> str:
 
 
 def shared_attach_relpath(draft: SovereignDraft) -> str | None:
-    """Segunda base (Leila / grants). None si no hay o si ya es la principal."""
+    """Segunda base compartida (p. ej. de otro equipo). None si no hay o si ya es la principal."""
     shared = (draft.duckdb_shared_path or "").strip()
     if not shared:
         return None
@@ -789,7 +789,7 @@ def materialize(
     if team_raw:
         updates["DUCKCLAW_TEAM_MEMBERS"] = team_raw
     updates["DUCKCLAW_GATEWAY_DB_PATH"] = primary_rel
-    # Gateways no-Finanz con tenant propio: bóveda inicial por slug de worker.
+    # Gateways con tenant propio: bóveda inicial por slug de worker.
     if _dw and _dw != "default":
         updates["DUCKCLAW_MULTI_VAULT_INITIAL_VAULT_ID"] = (draft.default_worker_id or "").strip()
     else:

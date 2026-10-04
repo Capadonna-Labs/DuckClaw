@@ -20,8 +20,8 @@ describe('loop outbound polling helpers', () => {
     const miss: ChatMsg = {
       role: 'heartbeat',
       heartbeatKind: 'status',
-      text: "Worker 'quant_analyst' not found in catalog for tenant 'user-x'",
-      workerId: 'quant_analyst',
+      text: "Worker 'worker_a' not found in catalog for tenant 'user-x'",
+      workerId: 'worker_a',
     };
     expect(stripThinkingStatusHeartbeats([miss, { role: 'assistant', text: 'ok' }])).toEqual([
       { role: 'assistant', text: 'ok' },

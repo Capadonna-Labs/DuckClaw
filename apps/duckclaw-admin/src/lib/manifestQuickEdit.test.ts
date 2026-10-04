@@ -6,8 +6,8 @@ import {
   MAX_TOOL_ROUNDS_CEILING,
 } from '@/lib/manifestQuickEdit';
 
-const base = `id: finanz-1
-name: Finanz 1
+const base = `id: worker-1
+name: Worker 1
 tool_profile: general
 skills: []
 `;

@@ -43,10 +43,10 @@ def parse_homeostasis_tool_payload(content: str) -> Optional[dict[str, Any]]:
 
 
 def _canonicalize_deviations(deviations: Any) -> Any:
-    """Collapse noisy numeric jitter so stuck streaks survive mark-to-market noise.
+    """Collapse noisy numeric jitter so stuck streaks survive small metric noise.
 
     ponytail: fingerprint keys + coarse buckets, not raw floats — otherwise a
-    0.01% PnL tick resets the streak and /loop burns another evaluate forever.
+    0.01 metric tick resets the streak and /loop burns another evaluate forever.
     """
     if isinstance(deviations, list):
         out: list[Any] = []
@@ -55,7 +55,7 @@ def _canonicalize_deviations(deviations: Any) -> Any:
                 out.append(
                     {
                         "k": str(
-                            item.get("ticker")
+                            item.get("key")
                             or item.get("metric")
                             or item.get("id")
                             or item.get("name")
@@ -99,34 +99,10 @@ def fingerprint_homeostasis_payload(data: dict[str, Any]) -> str:
         "deviations": _canonicalize_deviations(data.get("deviations")),
         "loop_mode_hint": data.get("loop_mode_hint"),
     }
-    # Prefer compact alert ids when present under tp_sl_monitor / deviations.
-    monitor = data.get("tp_sl_monitor")
-    if isinstance(monitor, dict):
-        levels = monitor.get("levels")
-        if isinstance(levels, list):
-            slice_["level_ids"] = [
-                {
-                    "ticker": (lv.get("ticker") or lv.get("symbol") or ""),
-                    "breached": lv.get("breached"),
-                    # Round prices so tiny mark redraws do not reset the streak.
-                    "sl": round(float(lv["sl"]), 2)
-                    if isinstance(lv.get("sl"), (int, float))
-                    else (
-                        round(float(lv["stop_loss"]), 2)
-                        if isinstance(lv.get("stop_loss"), (int, float))
-                        else (lv.get("sl") or lv.get("stop_loss"))
-                    ),
-                    "tp": round(float(lv["tp"]), 2)
-                    if isinstance(lv.get("tp"), (int, float))
-                    else (
-                        round(float(lv["take_profit"]), 2)
-                        if isinstance(lv.get("take_profit"), (int, float))
-                        else (lv.get("tp") or lv.get("take_profit"))
-                    ),
-                }
-                for lv in levels
-                if isinstance(lv, dict)
-            ][:24]
+    # Sensors may add their own stable reading id (e.g. rounded alert levels) so tiny
+    # redraws of the same reading do not reset the streak.
+    if data.get("stuck_fingerprint") is not None:
+        slice_["sensor_fingerprint"] = data.get("stuck_fingerprint")
     blob = json.dumps(slice_, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
 
@@ -245,7 +221,7 @@ def build_stuck_nudge_message(*, streak: int, corrective_tools: list[str], escal
             "[SYSTEM_EVENT: LOOP_HOMEOSTASIS_STUCK] "
             f"evaluate_homeostasis devolvió el mismo resultado misaligned {streak} veces "
             "sin hitl_required. NO vuelvas a llamar evaluate_homeostasis ni abras cascadas "
-            "de read_sql/Android/IBKR en este tick. "
+            "de read_sql/Android/consultas del dominio en este tick. "
             "Escala: llama request_homeostasis_validation con escalate_stuck=true "
             "(explica desviaciones al usuario) o pause_chat_autonomy si no hay acción segura. "
             f"Herramientas correctivas sugeridas (próximo ciclo, no ahora): {tools_txt}."
@@ -272,7 +248,7 @@ def build_loop_homeostasis_detente_message(payload: dict[str, Any]) -> str:
             "[SYSTEM_EVENT: LOOP_HOMEOSTASIS_DETENTE] "
             "evaluate_homeostasis ya corrió en este tick con métricas alineadas. "
             "Si aún no pediste HITL: llama request_homeostasis_validation y DETENTE. "
-            "No llames read_sql, Android MCP, IBKR ni evaluate_homeostasis otra vez. "
+            "No llames read_sql, Android MCP, tools de consulta del dominio ni evaluate_homeostasis otra vez. "
             "Responde en prosa corta al usuario."
         )
     return (
@@ -280,12 +256,9 @@ def build_loop_homeostasis_detente_message(payload: dict[str, Any]) -> str:
         "evaluate_homeostasis ya corrió en este tick (métricas NO alineadas). "
         "REPORTA desviaciones en prosa corta (máx ~15 líneas) y DETENTE. "
         "Prohibido en este tick: cascadas de read_sql (no inventes columnas), "
-        "Android MCP, get_ibkr_portfolio, ni re-llamar evaluate_homeostasis. "
-        "Correcciones de host/infra van al próximo ciclo /loop o las pide el usuario. "
-        "fluid_state usa columna timestamp (no updated_at). "
-        "Si ohlcv_data está fresco y fluid_state atrasado: refresca CFD, "
-        "no reinicies /root/.../services desde sandbox ni declares trading inseguro "
-        "solo por Permission denied."
+        "Android MCP, tools de consulta del dominio, ni re-llamar evaluate_homeostasis. "
+        "Correcciones de host/infra van al próximo ciclo /loop o las pide el usuario; "
+        "no reinicies servicios del host desde sandbox por un Permission denied."
     )
 
 

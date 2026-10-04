@@ -68,7 +68,7 @@ def _cron_processes_from_jlist(stdout: str) -> list[dict[str, Any]]:
                 "name": name,
                 "pm_id": p.get("pm_id"),
                 "cron": cron,
-                "description": _describe_cron_process(str(name), str(script or "")),
+                "description": _describe_cron_process(str(name), str(script or ""), env),
                 "status": env.get("status"),
                 "restarts": env.get("restart_time"),
                 "unstable_restarts": env.get("unstable_restarts"),
@@ -82,18 +82,13 @@ def _cron_processes_from_jlist(stdout: str) -> list[dict[str, Any]]:
     return out
 
 
-def _describe_cron_process(name: str, script: str) -> str:
+def _describe_cron_process(name: str, script: str, pm2_env: dict[str, Any] | None = None) -> str:
+    """The process may describe itself via DUCKCLAW_CRON_DESCRIPTION (set when it was created)."""
+    env = pm2_env or {}
+    described = env.get("DUCKCLAW_CRON_DESCRIPTION") or (env.get("env") or {}).get("DUCKCLAW_CRON_DESCRIPTION")
+    if described:
+        return str(described).strip()
     clean = str(name or "").strip()
-    match = re.fullmatch(
-        r"[a-z]+-([a-z0-9_.-]+)-(buy|sell)-([0-9]+)(?:-shares)?(?:-open)?-([0-9]{8})",
-        clean,
-        flags=re.IGNORECASE,
-    )
-    if match:
-        ticker, action, quantity, raw_date = match.groups()
-        date = f"{raw_date[:4]}-{raw_date[4:6]}-{raw_date[6:]}"
-        action_label = "BUY" if action.lower() == "buy" else "SELL"
-        return f"{action_label} {quantity} {ticker.upper()} en apertura {date}"
     if script:
         return str(script).rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
     return clean or "Cron PM2"

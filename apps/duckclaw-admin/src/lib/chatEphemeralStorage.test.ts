@@ -51,7 +51,7 @@ assert.equal(
       {
         role: 'heartbeat',
         heartbeatKind: 'status',
-        text: "Worker 'quant_analyst' not found in catalog for tenant 'user-x'",
+        text: "Worker 'worker_a' not found in catalog for tenant 'user-x'",
       },
     ],
     [toolA]
@@ -65,7 +65,7 @@ assert.equal(
       {
         role: 'heartbeat',
         heartbeatKind: 'status',
-        text: "Worker 'quant_analyst' not found in catalog for tenant 'user-x'",
+        text: "Worker 'worker_a' not found in catalog for tenant 'user-x'",
       },
     ],
     [toolA]
@@ -92,17 +92,17 @@ assert.equal(filtered[0]?.toolName, 'fetch_market_data');
 // Nested invoke_worker labels must stay with the caller worker.
 const nestedHb: ChatMsg = {
   ...toolA,
-  workerId: 'quant_analyst->quant-trader',
-  toolName: 'propose_trade_signal',
+  workerId: 'worker_a->worker-b',
+  toolName: 'propose_change',
 };
-assert.equal(workerMatches('quant_analyst->quant-trader', 'quant_analyst'), true);
-assert.equal(workerMatches('quant_analyst', 'quant_analyst->quant-trader'), true);
-assert.equal(workerMatches('quant_analyst->quant-trader', 'quant_reporter'), false);
+assert.equal(workerMatches('worker_a->worker-b', 'worker_a'), true);
+assert.equal(workerMatches('worker_a', 'worker_a->worker-b'), true);
+assert.equal(workerMatches('worker_a->worker-b', 'worker_c'), false);
 const nestedKept = filterEphemeralForWorker(
   [orchestratorHb, nestedHb],
-  'quant_analyst'
+  'worker_a'
 );
 assert.equal(nestedKept.length, 1);
-assert.equal(nestedKept[0]?.toolName, 'propose_trade_signal');
+assert.equal(nestedKept[0]?.toolName, 'propose_change');
 
 console.log('chatEphemeralStorage.test.ts: ok');

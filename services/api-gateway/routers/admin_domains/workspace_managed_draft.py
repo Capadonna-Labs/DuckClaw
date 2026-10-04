@@ -280,8 +280,6 @@ def _fold_ascii(text: str) -> str:
 
 
 _SKILL_SYNONYMS: dict[str, set[str]] = {
-    "finance": {"finanza", "finanzas", "presupuesto", "gastos", "ingresos", "budget", "money", "dinero"},
-    "budget": {"presupuesto", "gastos", "finanza", "finanzas"},
     "excel": {"hoja", "sheets", "spreadsheet", "csv", "tabla"},
     "sql": {"duckdb", "query", "consulta", "base", "datos"},
     "report": {"reporte", "informe", "dashboard"},

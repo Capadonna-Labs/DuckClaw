@@ -392,18 +392,9 @@ def _resolve_binder_column_context(
 _COMMON_COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "qty": ("quantity", "qty"),
     "quantity": ("qty", "quantity"),
-    "fill_price": ("filled_price",),
-    "filled_price": ("fill_price",),
-    "last_close": ("close",),
-    "proposed_qty": ("proposed_weight", "quantity", "qty"),
-    "position_qty": ("qty", "quantity"),
-    "tickers": ("ticker", "symbol"),
-    "ticker": ("symbol", "tickers"),
     "created_at": ("computed_at", "updated_at", "cancelled_at", "timestamp", "fired_at"),
     "updated_at": ("computed_at", "created_at", "timestamp", "fired_at"),
     "timestamp": ("updated_at", "computed_at", "created_at", "fired_at"),
-    "price_source": ("current_price",),
-    "mandate_type": ("mandate_id",),
 }
 
 

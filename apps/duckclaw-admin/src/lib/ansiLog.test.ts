@@ -27,15 +27,15 @@ describe('ansiLogParse', () => {
     ).toBe('text-yellow-700 dark:text-yellow-300');
     expect(
       colorizePlainLogLine(
-        '2026-09-29 16:20:27 | [user:x] | tool_usage: worker=quant_analyst | tool=read_sql | phase=done | elapsed_ms=452',
+        '2026-09-29 16:20:27 | [user:x] | tool_usage: worker=worker_a | tool=read_sql | phase=done | elapsed_ms=452',
       ).className,
     ).toBe('text-yellow-700 dark:text-yellow-300');
     expect(
-      colorizePlainLogLine('2026-09-30 14:10:02 | [user:x] | llm_usage: worker=quant_analyst | phase=thinking')
+      colorizePlainLogLine('2026-09-30 14:10:02 | [user:x] | llm_usage: worker=worker_a | phase=thinking')
         .className,
     ).toBe('text-yellow-700 dark:text-yellow-300');
     expect(
-      colorizePlainLogLine("[quant_analyst] tool=read_sql | result_len=595 | preview='...'").className,
+      colorizePlainLogLine("[worker_a] tool=read_sql | result_len=595 | preview='...'").className,
     ).toBe('text-yellow-700 dark:text-yellow-300');
     expect(
       colorizePlainLogLine(
@@ -50,7 +50,7 @@ describe('ansiLogParse', () => {
     // line type had its own check — harness_metric must win first.
     expect(
       colorizePlainLogLine(
-        "[quant_analyst] harness_metric {'approval_mode': 'suggest', 'circuit_blocks': 0, 'risk_denied': 0, 'failures': 0, 'truncated_results': 0, 'fail_counts': {}}",
+        "[worker_a] harness_metric {'approval_mode': 'suggest', 'circuit_blocks': 0, 'risk_denied': 0, 'failures': 0, 'truncated_results': 0, 'fail_counts': {}}",
       ).className,
     ).toBe('text-emerald-700 dark:text-emerald-300');
   });

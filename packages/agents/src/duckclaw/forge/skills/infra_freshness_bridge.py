@@ -161,14 +161,14 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
             table: str,
             timestamp_column: str = "timestamp",
             max_age_hours: float = 48.0,
-            ticker_column: str = "",
-            tickers: str = "",
+            key_column: str = "",
+            keys: str = "",
         ) -> str:
-            """Compara MAX(timestamp_column) contra umbral; opcionalmente filtra por tickers.
+            """Compara MAX(timestamp_column) contra umbral; opcionalmente filtra por claves.
 
-            tickers: lista separada por comas. Si se pasa, exige ticker_column
-            (p.ej. 'ticker') y calcula MAX solo sobre esas filas — evita que un
-            símbolo fresco oculte otros stale en la misma tabla.
+            keys: lista separada por comas (match sin mayúsculas/minúsculas sobre
+            key_column). Calcula MAX solo sobre esas filas — evita que una clave
+            fresca oculte otras stale en la misma tabla.
             """
             tbl, err = _safe_ident(table, _TABLE_RE, label="table")
             if err:
@@ -181,17 +181,14 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
             except (TypeError, ValueError):
                 threshold_h = 48.0
 
-            ticker_list = [t.strip().upper() for t in (tickers or "").split(",") if t.strip()]
-            tcol = (ticker_column or "").strip()
+            key_list = [k.strip().upper() for k in (keys or "").split(",") if k.strip()]
             where_sql = ""
-            if ticker_list:
-                if not tcol:
-                    tcol = "ticker"
-                tcol_safe, err3 = _safe_ident(tcol, _COLUMN_RE, label="ticker_column")
+            if key_list:
+                kcol_safe, err3 = _safe_ident((key_column or "").strip(), _COLUMN_RE, label="key_column")
                 if err3:
                     return json.dumps({"error": err3}, ensure_ascii=False)
-                esc = ",".join("'" + t.replace("'", "''") + "'" for t in ticker_list)
-                where_sql = f" WHERE UPPER(TRIM({tcol_safe})) IN ({esc})"
+                esc = ",".join("'" + k.replace("'", "''") + "'" for k in key_list)
+                where_sql = f" WHERE UPPER(TRIM({kcol_safe})) IN ({esc})"
 
             try:
                 raw = db.query(f"SELECT MAX({col}) AS latest FROM {tbl}{where_sql}")
@@ -210,7 +207,7 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                         "table": tbl,
                         "latest_timestamp": None,
                         "within_threshold": False,
-                        "tickers_filter": ticker_list or None,
+                        "keys_filter": key_list or None,
                         "message": "Sin filas o valor nulo.",
                     },
                     ensure_ascii=False,
@@ -236,7 +233,7 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                     "age_hours": round(age_hours, 2),
                     "threshold_hours": threshold_h,
                     "within_threshold": age_hours <= threshold_h,
-                    "tickers_filter": ticker_list or None,
+                    "keys_filter": key_list or None,
                 },
                 ensure_ascii=False,
             )
@@ -260,10 +257,9 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                 name="assess_table_freshness",
                 description=(
                     "Compara MAX(timestamp) de una tabla ('schema.tabla') vs umbral en horas "
-                    "(default 48). Opcional: tickers='XLU,META' + ticker_column='ticker' para "
-                    "no dejar que un símbolo fresco oculte otros stale. "
-                    "Para fluid_state usa timestamp_column='timestamp' (no updated_at). "
-                    "Si fluid_state está viejo pero ohlcv fresco: refresca CFD, no reinicies host."
+                    "(default 48). Opcional: keys='A,B' + key_column='<columna>' para "
+                    "no dejar que una clave fresca oculte otras stale. "
+                    "Usa la columna de tiempo real de la tabla (verifica el esquema)."
                 ),
             )
         )

@@ -1,4 +1,4 @@
-# DuckClaw Full stack (generic platform — no Quant-Trader / quant_core).
+# DuckClaw Full stack (generic platform — no vertical extensions).
 # Usage (from this directory):
 #   cp .env.example .env
 #   docker compose up -d --build

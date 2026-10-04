@@ -210,7 +210,7 @@ REMOVED_GATEWAY_WAR_ROOM_MARKERS = frozenset(
 )
 REMOVED_DOMAIN_VERTICAL_MARKERS_RE = re.compile(
     r"(?i)(?<![a-z0-9])("
-    r"quant(?:[_-]?(?:trader|core|state|tool|market|price|bracket|trading|cfd|hrp|moc|visual))?"
+    r"quant(?:[_-]?(?:trader|core|state|tool|market|price|bracket|trading|cfd|hrp|moc|visual|analyst|reporter))?"
     r"|finanz(?:as)?"
     r"|finance(?:_worker|_ledger)?"
     r"|pqrsd"
@@ -218,17 +218,16 @@ REMOVED_DOMAIN_VERTICAL_MARKERS_RE = re.compile(
     r"|leila"
     r"|war_room"
     r"|wr_"
+    # Trading vocabulary: broker, orders, signals and market data belong to the extension.
+    r"|ibkr|ib_insync|ib_async"
+    r"|trade_signals?|tp_sl|closed_trades?|position_metrics|bracket_orders?|oca_group"
+    r"|stop_loss|take_profit|ohlcv(?:_data)?|fluid_state"
+    r"|capadonna(?!-labs)(?:[_-]?driller)?"
     r")(?![a-z0-9])"
 )
-DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS = {
-    "packages/agents/src/duckclaw/state_delta_enqueue.py": "transversal state-delta router without product imports",
-    # Opt-in quant / IBKR vertical surfaces (not forge legacy packages).
-    "packages/agents/src/duckclaw/workers/worker_invoke.py": "worker id aliases include quant-trader template id",
-    "packages/agents/src/duckclaw/workers/template_registry.py": "template registry lists quant-trader opt-in worker",
-    "packages/shared/src/duckclaw/admin_worker_catalog.py": "catalog helpers mention quant worker family",
-    "services/api-gateway/routers/admin_domains/worker_capabilities.py": "skill→tool satisfaction map includes quant_schema_reference opt-in",
-    "services/api-gateway/routers/admin_domains/workspace_managed_draft.py": "managed draft policy labels include finance/finanzas locales",
-}
+# Must stay empty: vertical logic lives in its extension repo and reaches core only
+# through extension points (skill/reply-audit hooks, state deltas, DB policies).
+DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS: dict[str, str] = {}
 DOMAIN_VERTICAL_RUNTIME_ALLOWLIST = frozenset(DOMAIN_VERTICAL_RUNTIME_ALLOWLIST_REASONS)
 CAPADONNA_DRILLER_IMPORT_ALLOWLIST = frozenset()
 CAPADONNA_DRILLER_IMPORT_MARKERS = (
@@ -850,10 +849,15 @@ def test_core_framework_domain_vertical_markers_are_confined_to_explicit_allowli
     scan_roots = (
         REPO_ROOT / "packages" / "agents" / "src" / "duckclaw",
         REPO_ROOT / "packages" / "shared" / "src" / "duckclaw",
-        REPO_ROOT / "services" / "api-gateway",
-        REPO_ROOT / "services" / "db-writer",
+        REPO_ROOT / "packages" / "core" / "src",
+        REPO_ROOT / "packages" / "duckops",
+        REPO_ROOT / "services",
+        REPO_ROOT / "harness_core",
         REPO_ROOT / "scripts",
+        REPO_ROOT / "deploy",
+        REPO_ROOT / "apps" / "duckclaw-admin" / "src",
     )
+    suffixes = SCAN_SUFFIXES | {".ts", ".tsx", ".js", ".sh"}
     ignored_script_dirs = {"deployment", "data_prep"}
     current_test = Path(__file__).resolve()
     offenders: list[str] = []
@@ -865,7 +869,7 @@ def test_core_framework_domain_vertical_markers_are_confined_to_explicit_allowli
                 continue
             if root.name == "scripts" and any(part in ignored_script_dirs for part in path.parts):
                 continue
-            if not path.is_file() or path.suffix not in SCAN_SUFFIXES:
+            if not path.is_file() or path.suffix not in suffixes or ".test." in path.name:
                 continue
             rel_path = _rel(path)
             if rel_path in DOMAIN_VERTICAL_RUNTIME_ALLOWLIST:

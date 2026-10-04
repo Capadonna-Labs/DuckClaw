@@ -61,8 +61,6 @@ def dedupe_tools_by_name(tools: list[Any]) -> list[Any]:
 _MLX_BIND_PRIORITY_TOOL_NAMES: tuple[str, ...] = (
     "read_sql",
     "admin_sql",
-    "get_ibkr_order_history",
-    "get_ibkr_portfolio",
     "inspect_schema",
     "get_schema_info",
     "tavily_search",

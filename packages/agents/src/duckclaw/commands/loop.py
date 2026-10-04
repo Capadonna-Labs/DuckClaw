@@ -344,32 +344,21 @@ def build_loop_self_system_event_message(
         priority_note = (
             " Atiende metas en orden de prioridad (P1 antes que P2; menor número primero). "
         )
-    metrics_note = (
-        " Para distancias SL/TP y % PnL por ticker: el grafo inyecta "
-        "calculate_tp_sl_distance sobre niveles ACTIVE; "
-        "prohibido inventar o invertir signos de % en prosa. "
-        "En tablas de precio/TP/SL etiqueta SIEMPRE la fuente "
-        "(IBKR mark paper/live vs OHLCV last close vs vault portfolio_positions) "
-        "y la sesión (RTH/premarket/AH); no presentes marks IBKR como si fueran "
-        "el cierre de TradingView u otra UI. Si discrepan, muestra ambas cifras. "
-    )
     return (
         f"[SYSTEM_EVENT: {hitl_prefix}Ciclo de auto-mejora {trigger}. Metas (/goals): {summary}.{priority_note} "
-        "1) Preferí evaluate_homeostasis si tu worker la expone (TP/SL, OCA, OHLCV, exposición); "
-        "assess_crons_alignment solo cubre metas /goals persistidas y NO basta para breach SL "
-        "ni OHLCV stale. Reporta desviaciones en el chat. "
+        "1) Preferí evaluate_homeostasis si tu worker la expone (sensores del dominio); "
+        "assess_crons_alignment solo cubre metas /goals persistidas y no reemplaza esos sensores. "
+        "Reporta desviaciones en el chat. "
         "2) Si métricas alineadas (sin desviaciones), llama request_homeostasis_validation "
         "y DETENTE — pregunta confirmación HITL; no declares homeostasis hasta /loop-approve. "
         "3) Si hay desviaciones: REPORTA en prosa corta (máx ~15 líneas) y DETENTE en este tick, "
         "salvo las acciones que evaluate_homeostasis marque mandatory (loop_monitor_actions): "
         "ejecútalas igual en este tick (una desviación de infraestructura no las bloquea). "
-        "Prohibido cascadas de read_sql/Android/IBKR inventando columnas; "
-        "fluid_state usa timestamp (no updated_at). "
-        "fluid_state stale ≠ sync/IB caídos: si ohlcv_data está fresco, "
-        "refresca CFD (script weekly / record_fluid) — no reinicies servicios "
-        "host desde run_sandbox ni pauses trading por Permission denied. "
-        "Correcciones de host van al próximo ciclo o las pide el usuario. "
-        f"{metrics_note}Metas solo vía /goals o manage_homeostasis_goals.{wait_note}]"
+        "Prohibido encadenar consultas inventando columnas: verifica el esquema antes. "
+        "No reinicies servicios del host desde run_sandbox; las correcciones de host van al "
+        "próximo ciclo o las pide el usuario. Cifras derivadas: cópialas de la tool que las "
+        "calcula, no las recalcules en prosa. "
+        f"Metas solo vía /goals o manage_homeostasis_goals.{wait_note}]"
     )
 
 

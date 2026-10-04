@@ -28,7 +28,7 @@ from duckclaw.workers.factory_tool_builder import _build_worker_tools
 from duckclaw.workers.identity import load_worker_runtime_policy
 from duckclaw.prompt_policies.system_prompt import (
     append_android_mcp_directive_if_tools,
-    append_trade_signals_directive_if_tools,
+    append_tool_triggered_directives,
     resolve_effective_system_prompt_for_worker,
 )
 from duckclaw.workers.loader import append_domain_closure_block
@@ -221,7 +221,7 @@ def initialize_worker_graph_context(
     tools_by_name = {t.name: t for t in tools}
 
     system_prompt = append_android_mcp_directive_if_tools(policy_db, system_prompt, tools)
-    system_prompt = append_trade_signals_directive_if_tools(policy_db, system_prompt, tools)
+    system_prompt = append_tool_triggered_directives(policy_db, system_prompt, tools)
 
     try:
         from duckclaw.extensions.skills import invoke_extension_worker_skill_hooks

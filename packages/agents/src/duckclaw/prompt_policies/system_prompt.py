@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -143,29 +144,6 @@ def worker_has_android_mcp_tools(tools: list[Any] | None) -> bool:
     return False
 
 
-_TRADE_SIGNAL_TOOL_MARKERS = frozenset(
-    {
-        "propose_trade_signal",
-        "cancel_trade_signal",
-        "execute_approved_signal",
-        "execute_broker_signals_batch",
-        "execute_signal_with_bracket",
-    }
-)
-
-
-def worker_has_trade_signal_tools(tools: list[Any] | None) -> bool:
-    for tool in tools or []:
-        name = str(getattr(tool, "name", "") or "").strip().lower()
-        if name in _TRADE_SIGNAL_TOOL_MARKERS:
-            return True
-        if "trade_signal" in name:
-            return True
-        if name.endswith("_signal_cycle") and name.startswith("run_"):
-            return True
-    return False
-
-
 def append_android_mcp_directive_if_tools(
     db: Any,
     base: str,
@@ -176,14 +154,42 @@ def append_android_mcp_directive_if_tools(
     return _append_framework_directive(db, base, "android_mcp")
 
 
-def append_trade_signals_directive_if_tools(
-    db: Any,
-    base: str,
-    tools: list[Any] | None,
-) -> str:
-    if not worker_has_trade_signal_tools(tools):
-        return (base or "").strip()
-    return _append_framework_directive(db, base, "trade_signals_ledger")
+def append_tool_triggered_directives(db: Any, base: str, tools: list[Any] | None) -> str:
+    """Append active directives whose ``metadata_json.when_tools`` matches a bound tool.
+
+    Each pattern matches as a substring of the tool name. Extensions ship their own
+    directives as DB policies this way instead of core hardcoding their tool names.
+    """
+    body = (base or "").strip()
+    names = [str(getattr(t, "name", "") or "").strip().lower() for t in tools or []]
+    if not body or not names or db is None:
+        return body
+    try:
+        result = db.execute(
+            """
+            SELECT policy_name, metadata_json
+            FROM main.prompt_policy_registry
+            WHERE policy_type = 'directive' AND active = true AND status = 'active'
+              AND metadata_json LIKE '%when_tools%'
+            ORDER BY policy_name, version DESC
+            """
+        )
+        rows = result.fetchall() if hasattr(result, "fetchall") else list(result or [])
+    except Exception:
+        return body
+    appended: set[str] = set()
+    for policy_name, metadata_json in rows:
+        if policy_name in appended:
+            continue
+        try:
+            patterns = json.loads(metadata_json or "{}").get("when_tools") or []
+        except (TypeError, ValueError, AttributeError):
+            continue
+        pats = [str(p).strip().lower() for p in patterns if str(p).strip()]
+        if any(p in n for p in pats for n in names):
+            appended.add(policy_name)
+            body = _append_framework_directive(db, body, policy_name)
+    return body
 
 
 def _append_framework_directive(db: Any, base: str, directive_name: str) -> str:

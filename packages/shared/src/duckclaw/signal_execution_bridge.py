@@ -80,6 +80,17 @@ _PROTECTIVE_KEYWORD_RE = re.compile(
 )
 
 
+def _connect_vault_ro(vault_db_path: str):
+    """Read-only vault connection that waits out DB-Writer's lock (~5 s, see db_bridge).
+
+    Several orders in one turn (e.g. trailing SL on 4 tickers) used to fail after the
+    first: DB-Writer was still saving its rows and a single connect gave up at once.
+    """
+    from duckclaw.db_bridge import _duckdb_python_connect_with_retry
+
+    return _duckdb_python_connect_with_retry(vault_db_path, read_only=True)
+
+
 def is_protective_signal_type(signal_type: str | None) -> bool:
     """True when ``signal_type`` means place TP/SL only (no new market entry)."""
     st = str(signal_type or "").strip().upper().replace("-", "_")
@@ -288,7 +299,7 @@ def _daily_loss_limit_status(vault_db_path: str) -> dict:
     import duckdb
 
     try:
-        con = duckdb.connect(vault_db_path, read_only=True)
+        con = _connect_vault_ro(vault_db_path)
     except Exception as exc:
         return {"ok": False, "error": f"PRE_FLIGHT_RISK_DB_UNAVAILABLE: {exc}"}
     try:
@@ -481,7 +492,7 @@ def _read_active_tp_sl(vault_db_path: str, ticker: str) -> tuple[Optional[float]
     import duckdb
 
     try:
-        con = duckdb.connect(vault_db_path, read_only=True)
+        con = _connect_vault_ro(vault_db_path)
         try:
             tp_sl = con.execute(
                 """

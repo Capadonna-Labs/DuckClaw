@@ -95,7 +95,10 @@ async def sync_order_status(
 
     # 1. Leer órdenes pending del vault
     try:
-        con = duckdb.connect(vault_db_path, read_only=True)
+        from duckclaw.db_bridge import _duckdb_python_connect_with_retry
+
+        # Waits out DB-Writer's lock (~5 s) instead of failing the sync on contention.
+        con = _duckdb_python_connect_with_retry(vault_db_path, read_only=True)
         pending = con.execute(
             """
             SELECT order_id, ticker, side, quantity, order_type

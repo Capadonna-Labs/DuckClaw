@@ -3,15 +3,72 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+import duckdb
+
+from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.prompt_policies.framework_fallbacks import (
     framework_fallback_content,
     is_framework_policy_key,
 )
 
 _log = logging.getLogger(__name__)
+
+
+def _registry_readable(db: Any) -> bool:
+    try:
+        db.execute("SELECT 1 FROM main.prompt_policy_registry LIMIT 0")
+    except Exception:
+        return False
+    return True
+
+
+def _distinct_hub_path(vault_path: str) -> str:
+    hub = (get_gateway_db_path() or "").strip()
+    if not hub or not os.path.isfile(hub):
+        return ""
+    try:
+        if Path(vault_path).resolve() == Path(hub).resolve():
+            return ""
+    except OSError:
+        return ""
+    return hub
+
+
+class _EphemeralHubPolicyDb:
+    """Lee el hub y cierra. Un RO persistente bloquea el lock de DB-Writer."""
+
+    __slots__ = ("_path", "_read_only")
+
+    def __init__(self, path: str) -> None:
+        self._path = path
+        self._read_only = True
+
+    def execute(self, sql: str, params: Any = None) -> list[Any]:
+        con = duckdb.connect(self._path, read_only=True)
+        try:
+            cursor = con.execute(sql, params) if params is not None else con.execute(sql)
+            return cursor.fetchall()
+        finally:
+            con.close()
+
+
+def prompt_policy_source_db(db: Any) -> Any:
+    """Policies live on the hub. A playground vault does not have the registry."""
+    vault_path = str(getattr(db, "_path", "") or "").strip()
+    if db is None or not vault_path or vault_path == ":memory:":
+        return db
+    if _registry_readable(db):
+        return db
+    hub = _distinct_hub_path(vault_path)
+    if not hub:
+        return db
+    _log.info("prompt policies: vault %s has no registry; using hub", vault_path)
+    return _EphemeralHubPolicyDb(hub)
 
 
 def normalize_policy_type(policy_type: str) -> str:

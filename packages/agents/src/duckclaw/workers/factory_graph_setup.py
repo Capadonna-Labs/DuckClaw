@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Literal, Optional
 
 from duckclaw.prompt_policies import PromptPolicyResolver
+from duckclaw.prompt_policies.resolver import prompt_policy_source_db
 from duckclaw.workers.context_monitor import (
     build_context_monitor_node as _build_context_monitor_node,
     build_summary_llm as _build_summary_llm,
@@ -134,10 +135,11 @@ def initialize_worker_graph_context(
         shared_attach_read_only=True,
         skip_private_attach=skip_private_attach,
     )
-    prompt_policies = PromptPolicyResolver(db=db)
+    policy_db = prompt_policy_source_db(db)
+    prompt_policies = PromptPolicyResolver(db=policy_db)
 
     system_prompt = resolve_effective_system_prompt_for_worker(
-        db,
+        policy_db,
         spec,
         tenant_id=tenant_id,
     )
@@ -222,8 +224,8 @@ def initialize_worker_graph_context(
         append_trade_signals_directive_if_tools,
     )
 
-    system_prompt = append_android_mcp_directive_if_tools(db, system_prompt, tools)
-    system_prompt = append_trade_signals_directive_if_tools(db, system_prompt, tools)
+    system_prompt = append_android_mcp_directive_if_tools(policy_db, system_prompt, tools)
+    system_prompt = append_trade_signals_directive_if_tools(policy_db, system_prompt, tools)
 
     try:
         from duckclaw.extensions.skills import invoke_extension_worker_skill_hooks

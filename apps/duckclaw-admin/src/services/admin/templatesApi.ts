@@ -6,7 +6,7 @@ import type {
 } from '@/types/admin';
 
 import { parseApiErrorDetail } from '@/lib/adminErrors';
-import { adminFetch, adminFetchOptional } from './http';
+import { adminFetch, adminFetchOptional, adminFormFetch } from './http';
 
 export interface UserAgentDraft {
   display_name: string;
@@ -268,37 +268,22 @@ export const templatesApi = {
       `/agents/${encodeURIComponent(workerId)}/a2a-discoverable`,
       { method: 'PATCH', body: JSON.stringify({ discoverable }) }
     ),
-  previewSpawnPackage: async (file: File) => {
+  previewSpawnPackage: (file: File) => {
     const form = new FormData();
     form.append('file', file);
-    const res = await fetch('/api/admin/agents/spawn-package/preview', {
-      method: 'POST',
-      body: form,
-      credentials: 'include',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(parseApiErrorDetail(body, res.status) || res.statusText);
-    }
-    return res.json() as Promise<{ ok: boolean; preview: SpawnPackagePreview; manifest_id?: string }>;
+    return adminFormFetch<{ ok: boolean; preview: SpawnPackagePreview; manifest_id?: string }>(
+      '/agents/spawn-package/preview',
+      form
+    );
   },
-  importSpawnPackage: async (
+  importSpawnPackage: (
     file: File,
     options: { confirm_high_risk?: boolean; worker_id_override?: string }
   ) => {
     const form = new FormData();
     form.append('file', file);
     form.append('options_json', JSON.stringify(options));
-    const res = await fetch('/api/admin/agents/spawn-package/import', {
-      method: 'POST',
-      body: form,
-      credentials: 'include',
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      throw new Error(parseApiErrorDetail(body, res.status) || res.statusText);
-    }
-    return res.json();
+    return adminFormFetch<unknown>('/agents/spawn-package/import', form);
   },
   downloadSpawnPackage: async (workerId: string) => {
     const res = await fetch(

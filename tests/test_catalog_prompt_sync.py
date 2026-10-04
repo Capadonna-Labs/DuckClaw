@@ -1,6 +1,30 @@
 from __future__ import annotations
 
 
+def test_sync_accepts_duckclaw_execute_returning_list() -> None:
+    from duckclaw.catalog_prompt_sync import sync_worker_system_prompt_policy
+
+    class ListDb:
+        def execute(self, sql: str, params: object = None) -> list:
+            del params
+            compact = " ".join(sql.split())
+            if compact.startswith("SELECT 1"):
+                return [(1,)]
+            if compact.startswith("SELECT checksum"):
+                return []
+            if compact.startswith("SELECT COALESCE(MAX(version)"):
+                return [(0,)]
+            return []
+
+    written = sync_worker_system_prompt_policy(
+        ListDb(),
+        worker_id="youtube-analyst",
+        files={"system_prompt.md": "hola"},
+        actor_email="admin@test.local",
+    )
+    assert written is True
+
+
 def test_build_system_prompt_content_from_files_merges_soul_and_system() -> None:
     from duckclaw.catalog_prompt_sync import build_system_prompt_content_from_files
 

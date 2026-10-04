@@ -9,6 +9,8 @@ import re
 import time
 from typing import Any, Optional, Sequence
 
+from duckclaw.integrations.deepseek_chat import DeepSeekChatOpenAI
+
 
 def _ensure_duckclaw_llm_env_from_legacy_llm_vars() -> None:
     """
@@ -1407,7 +1409,6 @@ def build_llm(
 
     if p == "deepseek":
         try:
-            from langchain_openai import ChatOpenAI
             from duckclaw.llm_bootstrap import resolve_llm_api_key
 
             api_key = resolve_llm_api_key(
@@ -1418,14 +1419,16 @@ def build_llm(
             )
             if not api_key:
                 raise RuntimeError("DeepSeek requiere DEEPSEEK_API_KEY (Integraciones o .env).")
-            return ChatOpenAI(
+            return DeepSeekChatOpenAI(
                 model=m or "deepseek-chat",
                 temperature=0,
                 base_url=url or "https://api.deepseek.com/v1",
                 api_key=api_key,
             )
-        except Exception:
-            raise RuntimeError("DeepSeek requiere DEEPSEEK_API_KEY (Integraciones o .env).")
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            raise RuntimeError(f"No se pudo inicializar DeepSeek: {exc}") from exc
 
     if p == "groq":
         from duckclaw.llm_bootstrap import resolve_llm_api_key

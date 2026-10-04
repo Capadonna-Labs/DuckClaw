@@ -18,6 +18,7 @@ class ToolInvocationDecision:
     tool_name: str | None = None
     reason: str = ""
     direct_tool_call: bool = False
+    as_context: bool = False
     tool_args: Mapping[str, Any] = field(default_factory=dict)
     requires_heuristic_first_tool: bool = True
 
@@ -233,7 +234,7 @@ def decide_current_time_tool_invocation(
     return ToolInvocationDecision(
         tool_name="get_current_time",
         reason="clock_anchor.get_current_time",
-        direct_tool_call=True,
+        as_context=True,
         tool_args={},
     )
 

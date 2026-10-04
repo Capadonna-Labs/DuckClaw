@@ -7,6 +7,22 @@ from zoneinfo import ZoneInfo
 from duckclaw.forge.skills import time_context
 
 
+def test_clock_context_is_a_system_message_not_a_tool_call() -> None:
+    from langchain_core.messages import SystemMessage
+
+    from duckclaw.forge.skills.time_context import (
+        clock_context_message,
+        turn_has_clock_context,
+    )
+
+    note = clock_context_message()
+
+    assert isinstance(note, SystemMessage)
+    assert not getattr(note, "tool_calls", None)
+    assert turn_has_clock_context([note])
+    assert not turn_has_clock_context([])
+
+
 def test_get_current_time_returns_valid_json() -> None:
     raw = time_context.get_current_time.invoke({})  # type: ignore[attr-defined]
     data = json.loads(raw)

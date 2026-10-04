@@ -62,7 +62,7 @@ describe('shouldFetchChatSuggestions', () => {
     expect(
       shouldFetchChatSuggestions(
         '/execute-broker-signals --cancel-ocas',
-        'No hay señales human_approved. Revisé historial IBKR.',
+        'No hay señales human_approved. Revisé historial del broker.',
         false
       )
     ).toBe(true);
@@ -151,11 +151,11 @@ describe('lastUserAssistantExchange', () => {
   it('devuelve el par tras slash agente con respuesta', () => {
     const messages: ChatMsg[] = [
       { role: 'user', text: '/execute-broker-signals --cancel-ocas' },
-      { role: 'assistant', text: 'Sin señales elegibles; historial IBKR revisado.' },
+      { role: 'assistant', text: 'Sin señales elegibles; historial del broker revisado.' },
     ];
     expect(lastUserAssistantExchange(messages)).toEqual({
       userText: '/execute-broker-signals --cancel-ocas',
-      assistantText: 'Sin señales elegibles; historial IBKR revisado.',
+      assistantText: 'Sin señales elegibles; historial del broker revisado.',
     });
   });
 
@@ -167,12 +167,12 @@ describe('lastUserAssistantExchange', () => {
         role: 'user',
         text: '[SYSTEM_EVENT: Ciclo de auto-mejora modo conversación activa /loop on. Metas…]',
       },
-      { role: 'assistant', text: '## Reporte /loop — CEG mark IBKR' },
+      { role: 'assistant', text: '## Reporte /loop — CEG mark broker' },
     ];
     expect(lastUserAssistantExchange(messages)).toEqual({
       userText:
         '[SYSTEM_EVENT: Ciclo de auto-mejora modo conversación activa /loop on. Metas…]',
-      assistantText: '## Reporte /loop — CEG mark IBKR',
+      assistantText: '## Reporte /loop — CEG mark broker',
     });
   });
 });

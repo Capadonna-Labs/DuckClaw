@@ -200,7 +200,7 @@ def sanitize_catalog_worker_id(worker_id: str) -> str:
 
 
 def catalog_worker_id_variants(worker_id: str) -> tuple[str, ...]:
-    """Hyphen/underscore aliases (``quant_reporter`` ↔ ``quant-reporter``)."""
+    """Hyphen/underscore aliases (``worker_b`` ↔ ``worker-b``)."""
     base = sanitize_catalog_worker_id(worker_id)
     out: list[str] = []
     for candidate in (base, base.replace("_", "-"), base.replace("-", "_")):

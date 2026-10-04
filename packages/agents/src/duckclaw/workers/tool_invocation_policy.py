@@ -320,7 +320,7 @@ def decide_loop_homeostasis_tool_invocation(
 
     Prompt text alone is not enough: db-first / orchestration often steal hop 1
     with ``read_sql``, and the agent then reports false "0 desviaciones" from
-    ``assess_crons_alignment`` alone (missing SL breach / OCA / OHLCV sensors).
+    ``assess_crons_alignment`` alone (missing the worker's domain sensors).
 
     When ``homeostasis_streak`` already hit the stuck limit, do **not** force
     another identical sensor call — the tools node injects nudge/escalate instead.

@@ -35,8 +35,8 @@ assert.deepEqual(
     {
       role: 'heartbeat',
       heartbeatKind: 'status',
-      text: "Worker 'quant_analyst' not found in catalog for tenant 'user-x'",
-      workerId: 'quant_analyst',
+      text: "Worker 'worker_a' not found in catalog for tenant 'user-x'",
+      workerId: 'worker_a',
     },
     { role: 'assistant', text: 'ok' },
   ]),

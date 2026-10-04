@@ -82,7 +82,7 @@ def build_alias_index(templates_root: Path | None = None) -> dict[str, str]:
 
 
 def template_id_match_variants(user_input: str) -> tuple[str, ...]:
-    """Hyphen/underscore aliases (``quant_trader`` ↔ ``quant-trader``)."""
+    """Hyphen/underscore aliases (``worker_a`` ↔ ``worker-a``)."""
     base = (user_input or "").strip().lower()
     if not base:
         return ()

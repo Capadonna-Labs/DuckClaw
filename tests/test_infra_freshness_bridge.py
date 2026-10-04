@@ -1,4 +1,4 @@
-"""infra_freshness_bridge: cron between-fires + ticker-filtered freshness."""
+"""infra_freshness_bridge: cron between-fires + key-filtered freshness."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class _FakeDb:
         return self._rows
 
 
-def test_assess_table_freshness_filters_tickers():
+def test_assess_table_freshness_filters_keys():
     from duckclaw.forge.skills.infra_freshness_bridge import register_infra_freshness_skill
 
     now = datetime.now(timezone.utc)
@@ -27,18 +27,18 @@ def test_assess_table_freshness_filters_tickers():
     out = json.loads(
         by_name["assess_table_freshness"].invoke(
             {
-                "table": "quant_core.ohlcv_data",
+                "table": "main.readings",
                 "timestamp_column": "timestamp",
                 "max_age_hours": 48,
-                "tickers": "META,XLU",
-                "ticker_column": "ticker",
+                "keys": "sensor_a,SENSOR_B",
+                "key_column": "sensor",
             }
         )
     )
     assert out["within_threshold"] is True
-    assert out["tickers_filter"] == ["META", "XLU"]
+    assert out["keys_filter"] == ["SENSOR_A", "SENSOR_B"]
     assert "IN (" in db.last_sql.upper()
-    assert "META" in db.last_sql.upper()
+    assert "SENSOR_A" in db.last_sql.upper()
 
 
 def test_assess_cron_marks_stopped_with_cron_as_ok(monkeypatch):
@@ -49,7 +49,7 @@ def test_assess_cron_marks_stopped_with_cron_as_ok(monkeypatch):
         stdout = json.dumps(
             [
                 {
-                    "name": "quant-hrp-weekly",
+                    "name": "ext-weekly-job",
                     "pm2_env": {"status": "stopped", "cron_restart": "0 20 * * 5"},
                 }
             ]
@@ -67,7 +67,7 @@ def test_assess_cron_marks_stopped_with_cron_as_ok(monkeypatch):
     tools: list = []
     bridge.register_infra_freshness_skill(tools, _FakeDb([]))
     by_name = {t.name: t for t in tools}
-    out = json.loads(by_name["assess_cron_registered"].invoke({"pm2_name": "quant-hrp-weekly"}))
+    out = json.loads(by_name["assess_cron_registered"].invoke({"pm2_name": "ext-weekly-job"}))
     assert out["found"] is True
     assert out["has_cron"] is True
     assert out["between_fires_ok"] is True
@@ -87,8 +87,8 @@ def test_assess_cron_falls_back_to_crontab_when_pm2_missing(monkeypatch):
         lambda *a, **k: Proc(),
     )
     cron_blob = (
-        "0 20 * * 5 /venv/bin/python /app/scripts/quant/hrp_weekly_job.py "
-        ">> /var/log/quant-hrp-weekly.log 2>&1\n"
+        "0 20 * * 5 /venv/bin/python /app/scripts/ext/weekly_job.py "
+        ">> /var/log/ext-weekly-job.log 2>&1\n"
     )
     monkeypatch.setattr(
         "subprocess.check_output",
@@ -99,14 +99,14 @@ def test_assess_cron_falls_back_to_crontab_when_pm2_missing(monkeypatch):
     by_name = {t.name: t for t in tools}
     out = json.loads(
         by_name["assess_cron_registered"].invoke(
-            {"pm2_name": "quant-hrp-weekly", "crontab_pattern": "hrp_weekly_job"}
+            {"pm2_name": "ext-weekly-job", "crontab_pattern": "weekly_job"}
         )
     )
     assert out["found"] is True
     assert out["has_cron"] is True
     assert out["source"] == "crontab"
     assert out["between_fires_ok"] is True
-    assert any("hrp_weekly_job" in line for line in out["crontab_lines"])
+    assert any("weekly_job" in line for line in out["crontab_lines"])
 
 
 def test_assess_cron_pm2_name_matches_crontab_log_path(monkeypatch):
@@ -125,14 +125,14 @@ def test_assess_cron_pm2_name_matches_crontab_log_path(monkeypatch):
     monkeypatch.setattr(
         "subprocess.check_output",
         lambda *a, **k: (
-            "0 20 * * 5 python hrp_weekly_job.py >> /var/log/quant-hrp-weekly.log\n"
+            "0 20 * * 5 python weekly_job.py >> /var/log/ext-weekly-job.log\n"
         ),
     )
     tools: list = []
     bridge.register_infra_freshness_skill(tools, _FakeDb([]))
     by_name = {t.name: t for t in tools}
     out = json.loads(
-        by_name["assess_cron_registered"].invoke({"pm2_name": "quant-hrp-weekly"})
+        by_name["assess_cron_registered"].invoke({"pm2_name": "ext-weekly-job"})
     )
     assert out["found"] is True
     assert out["source"] == "crontab"

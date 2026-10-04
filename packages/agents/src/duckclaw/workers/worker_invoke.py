@@ -23,7 +23,7 @@ _parent_vault_lock: ContextVar[threading.RLock | None] = ContextVar(
     default=None,
 )
 _MAX_DELEGATE_DEPTH = 1
-# ponytail: Quant Trader OCA/HITL/IBKR + sandbox RSI routinely need >15m;
+# ponytail: delegates doing broker/HITL calls + sandbox analysis routinely need >15m;
 # 900s was cutting mid-synthesis. Align default with manager worker wall (1800s).
 # Override via DUCKCLAW_DELEGATE_INVOKE_TIMEOUT_SEC (floor 60).
 _DELEGATE_INVOKE_TIMEOUT_SEC = max(
@@ -81,8 +81,8 @@ def _normalize_delegate_id(worker_id: str, templates_root: Path | None) -> str:
 def _delegate_id_match_keys(worker_id: str, templates_root: Path | None) -> set[str]:
     """Match keys for allowlists: template resolve + hyphen/underscore aliases.
 
-    Catalog workers often live as ``quant-trader`` while manifests/prompts still
-    say ``quant_trader``. When filesystem templates are absent, resolve returns
+    Catalog workers often live as ``worker-a`` while manifests/prompts still
+    say ``worker_a``. When filesystem templates are absent, resolve returns
     None and exact-string allowlist checks falsely reject the alias.
     """
     from duckclaw.workers.template_registry import template_id_match_variants
@@ -416,7 +416,7 @@ def invoke_delegated_worker(
             limit_s = int(_DELEGATE_INVOKE_TIMEOUT_SEC)
             msg = (
                 f"Delegación a {target} cortada a {limit_s}s (timeout). "
-                "Reintenta con una tarea más acotada (1 ticker / 1 acción) "
+                "Reintenta con una tarea más acotada (1 elemento / 1 acción) "
                 "o pide un status parcial en vez de un flujo largo."
             )
         log_sys(

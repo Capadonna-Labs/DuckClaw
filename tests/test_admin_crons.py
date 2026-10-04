@@ -51,20 +51,23 @@ def test_filters_to_processes_with_cron_restart_only() -> None:
     assert "DuckClaw-Gateway" not in names
 
 
-def test_describes_deterministic_order_cron_name() -> None:
+def test_cron_description_comes_from_process_env_else_script() -> None:
     from routers.admin_domains.crons import _cron_processes_from_jlist
 
     raw = _jlist(
         _proc(
-            "quant-mu-sell-15-open-20260929",
+            "ext-job-20260929",
             "30 13 29 9 *",
-            pm_exec_path="/root/Capadonna-Driller/tasks/pm2/quant-mu-sell-15-open-20260929.sh",
-        )
+            pm_exec_path="/opt/ext/tasks/pm2/ext-job-20260929.sh",
+            DUCKCLAW_CRON_DESCRIPTION="Exporta el reporte diario",
+        ),
+        _proc("plain-job", "0 7 * * 1-5", pm_exec_path="/opt/ext/tasks/plain_job.py"),
     )
 
-    [cron] = _cron_processes_from_jlist(raw)
+    by_name = {c["name"]: c for c in _cron_processes_from_jlist(raw)}
 
-    assert cron["description"] == "SELL 15 MU en apertura 2026-09-29"
+    assert by_name["ext-job-20260929"]["description"] == "Exporta el reporte diario"
+    assert by_name["plain-job"]["description"] == "plain_job.py"
 
 
 def test_empty_cron_restart_string_excluded() -> None:

@@ -198,8 +198,8 @@ async def _attach_fly_charts(
 
 
 def _run_fly_command_sync(vpath: str, message: str, **kwargs: Any) -> tuple[str | None, int]:
-    """Runs off the event loop: fly commands may block for seconds (IBKR, worker builds)."""
-    loop = asyncio.new_event_loop()  # ib_insync sync calls need a loop in this thread
+    """Runs off the event loop: fly commands may block for seconds (broker calls, worker builds)."""
+    loop = asyncio.new_event_loop()  # sync clients used by fly commands need a loop in this thread
     asyncio.set_event_loop(loop)
     fly_db = None
     try:

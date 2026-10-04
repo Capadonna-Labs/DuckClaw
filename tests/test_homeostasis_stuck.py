@@ -93,7 +93,7 @@ def test_decide_loop_skips_force_when_streak_at_limit(monkeypatch) -> None:
 
 
 def test_build_stuck_nudge_message_mentions_escalate() -> None:
-    msg = build_stuck_nudge_message(streak=3, corrective_tools=["calculate_tp_sl_distance"], escalate=True)
+    msg = build_stuck_nudge_message(streak=3, corrective_tools=["fix_sensor"], escalate=True)
     assert "LOOP_HOMEOSTASIS_STUCK" in msg
     assert "escalate_stuck=true" in msg
 
@@ -105,9 +105,15 @@ def test_build_loop_homeostasis_detente_misaligned() -> None:
     assert "LOOP_HOMEOSTASIS_DETENTE" in msg
     assert "DETENTE" in msg
     assert "read_sql" in msg
-    assert "timestamp" in msg
-    assert "run_sandbox" in msg or "sandbox" in msg
-    assert "trading" in msg
+    assert "sandbox" in msg
+
+
+def test_sensor_fingerprint_changes_streak_identity() -> None:
+    base = _payload()
+    a = fingerprint_homeostasis_payload({**base, "stuck_fingerprint": "levels-v1"})
+    b = fingerprint_homeostasis_payload({**base, "stuck_fingerprint": "levels-v1"})
+    c = fingerprint_homeostasis_payload({**base, "stuck_fingerprint": "levels-v2"})
+    assert a == b != c
 
 
 def test_build_loop_homeostasis_detente_aligned() -> None:

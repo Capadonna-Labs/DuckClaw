@@ -7,8 +7,8 @@ describe('workersTooltipLabel', () => {
   });
 
   it('joins active worker ids', () => {
-    expect(workersTooltipLabel(['Quant-Trader', 'quant-analyst'])).toBe(
-      'Quant-Trader, quant-analyst'
+    expect(workersTooltipLabel(['Worker-B', 'worker-a'])).toBe(
+      'Worker-B, worker-a'
     );
   });
 });

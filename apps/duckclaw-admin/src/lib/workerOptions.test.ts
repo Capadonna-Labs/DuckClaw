@@ -14,9 +14,9 @@ const legacy = stripChatIdentityNoise('Worker A 5\n\nRespuesta', {
 });
 assert.equal(legacy, 'Respuesta');
 
-assert.equal(workerMatches('quant_analyst', 'quant_analyst'), true);
-assert.equal(workerMatches('quant_analyst->quant-trader', 'quant_analyst'), true);
-assert.equal(workerMatches('quant_analyst', 'quant_analyst->quant-trader'), true);
-assert.equal(workerMatches('quant_analyst->quant-trader', 'quant_reporter'), false);
+assert.equal(workerMatches('worker_a', 'worker_a'), true);
+assert.equal(workerMatches('worker_a->worker-b', 'worker_a'), true);
+assert.equal(workerMatches('worker_a', 'worker_a->worker-b'), true);
+assert.equal(workerMatches('worker_a->worker-b', 'worker_c'), false);
 
 console.log('workerOptions.test.ts OK');

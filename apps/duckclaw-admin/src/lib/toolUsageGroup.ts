@@ -146,7 +146,7 @@ export interface GroupedToolInvocation {
   averageMs: number | null;
   isRunning: boolean;
   isError: boolean;
-  /** Worker that ran it (last hop of "manager->quant_analyst"), '' if unknown. */
+  /** Worker that ran it (last hop of "manager->worker_a"), '' if unknown. */
   worker: string;
   errorCount: number;
   /** Message of the most recent failed call, if the gateway sent one. */
@@ -154,7 +154,7 @@ export interface GroupedToolInvocation {
   messages: ChatMsg[];
 }
 
-/** "quant_analyst->quant-trader" → "quant-trader". */
+/** "worker_a->worker-b" → "worker-b". */
 export function toolWorkerLabel(m: ChatMsg | undefined, fallback = ''): string {
   const raw = (m?.workerId || '').trim();
   return (raw.split('->').pop() || '').trim() || fallback.trim();

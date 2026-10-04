@@ -107,7 +107,7 @@ export function workerMatches(a: string, b: string): boolean {
   if (!ka || !kb) return true;
   if (ka === kb) return true;
   // Heartbeats de invoke_worker: "caller->delegate" pertenecen al turno del caller.
-  // Sin esto filterEphemeralForWorker tira read_sql/propose_* del quant-trader y
+  // Sin esto filterEphemeralForWorker tira read_sql/propose_* del delegado y
   // la caja Tool Usage se queda solo con get_current_time + invoke_worker.
   const aHead = a.split('->')[0]?.trim() || '';
   const bHead = b.split('->')[0]?.trim() || '';

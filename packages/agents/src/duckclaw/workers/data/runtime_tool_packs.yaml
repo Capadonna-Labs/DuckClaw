@@ -49,9 +49,6 @@ packs:
         - get_loop_homeostasis_status
         - configure_suggestions_auto
         - pause_chat_autonomy
-        - calculate_tp_sl_distance
-        - calculate_pnl_contribution
-        - calculate_deleveraging_tranche
       prefixes: []
     activation_signals:
       - /loop
@@ -59,7 +56,6 @@ packs:
       - assess_crons_alignment
       - request_homeostasis_validation
       - manage_homeostasis_goals
-      - calculate_tp_sl_distance
       - auto-mejora
       - ciclo loop
       - pause_chat_autonomy

@@ -108,7 +108,6 @@ _SKILL_RUNTIME_TOOLS: dict[str, frozenset[str]] = {
     "report_engine": _REPORT_ENGINE_TOOLS,
     "reports": _REPORT_ENGINE_TOOLS,
     "infra_freshness": frozenset({"assess_cron_registered", "assess_table_freshness"}),
-    "macro_pgq_context": frozenset({"describe_pgq_macro_schema", "inspect_macro_pgq"}),
     "slm_eval": frozenset({"execute_slm", "record_slm_eval_lesson"}),
 }
 
@@ -117,11 +116,22 @@ _SKILL_SATISFIED_BY_TOOLS: dict[str, frozenset[str]] = {
     "execute_sandbox_script": frozenset({"run_sandbox", "execute_sandbox_script"}),
     "run_sandbox": frozenset({"run_sandbox", "execute_sandbox_script"}),
     "openweather": frozenset({"openweather_current_city", "openweather"}),
-    "ibkr": frozenset({"get_ibkr_portfolio", "get_ibkr_order_history"}),
-    "fmp": frozenset({"fetch_market_data"}),
-    "quant_schema_reference": frozenset({"describe_quant_schema"}),
-    "position_metrics": frozenset({"calculate_tp_sl_distance"}),
 }
+
+
+def _skill_alias_tools(skill: str) -> frozenset[str]:
+    """Core aliases plus the ones an extension declares under ``skill_tools``."""
+    tools = set(_SKILL_SATISFIED_BY_TOOLS.get(skill) or ())
+    try:
+        from duckclaw.extensions.manifest import load_fly_extension_manifest
+
+        manifest = load_fly_extension_manifest()
+    except Exception:
+        manifest = None
+    for name, ext_tools in getattr(manifest, "skill_tools", ()) or ():
+        if name == skill:
+            tools.update(ext_tools)
+    return frozenset(tools)
 
 # Skill → prefijos de tools MCP en runtime (mcp__{id}__).
 # Solo connectors admin (mcp_connector_bridge / github). google_trends/reddit
@@ -332,7 +342,7 @@ def _compute_gaps(
         normalized = skill.strip().lower().replace("-", "_")
         if normalized in runtime_set:
             continue
-        alias_tools = _SKILL_SATISFIED_BY_TOOLS.get(normalized)
+        alias_tools = _skill_alias_tools(normalized)
         if alias_tools and alias_tools & runtime_set:
             continue
         if normalized in {"time_context"}:

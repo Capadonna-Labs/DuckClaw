@@ -117,12 +117,6 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         keyword_context={"db": "db"},
     ),
     SkillToolRegistrar(
-        skill_name="position_metrics",
-        phase="pre_llm",
-        registrar_path="duckclaw.forge.skills.position_metrics_bridge:register_position_metrics_skill",
-        empty_config_registers=True,
-    ),
-    SkillToolRegistrar(
         skill_name="jev_decide",
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.jev_decide_bridge:register_jev_decide_skill",

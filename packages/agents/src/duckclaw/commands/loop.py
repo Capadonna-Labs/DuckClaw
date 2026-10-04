@@ -288,35 +288,6 @@ def build_loop_active_user_continuation(
     )
 
 
-def _worker_has_position_metrics(
-    db: Any,
-    chat_id: Any,
-    *,
-    tenant_id: str,
-    entry_worker_id: str | None = None,
-) -> bool:
-    """True when bound worker declares skill ``position_metrics``."""
-    try:
-        wid = _resolve_loop_worker_id(
-            db, chat_id, tenant_id=tenant_id, entry_worker_id=entry_worker_id
-        )
-        if not wid:
-            return False
-        from duckclaw.workers.manifest import load_manifest
-
-        spec = load_manifest(wid, db=db, tenant_id=tenant_id)
-        configs = getattr(spec, "skill_configs", None) or {}
-        if "position_metrics" in configs:
-            cfg = configs.get("position_metrics")
-            if isinstance(cfg, dict) and cfg.get("enabled") is False:
-                return False
-            return True
-        skills = getattr(spec, "skills_list", None) or []
-        return any(str(s).strip().lower().replace("-", "_") == "position_metrics" for s in skills)
-    except Exception:
-        return False
-
-
 def build_loop_self_system_event_message(
     db: Any,
     chat_id: Any,

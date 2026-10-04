@@ -28,6 +28,9 @@ class FlyExtensionManifest:
     fly_dispatchers: tuple[str, ...] = ()
     worker_skill_hooks: tuple[str, ...] = ()
     worker_tool_context_hooks: tuple[str, ...] = ()
+    reply_audit_hooks: tuple[str, ...] = ()
+    # Skill → tool names that satisfy it at runtime (capabilities gap check).
+    skill_tools: tuple[tuple[str, tuple[str, ...]], ...] = ()
     read_only_commands: tuple[str, ...] = ()
     help_entries: tuple[tuple[str, str], ...] = ()
     state_delta_handlers: tuple[StateDeltaHandlerEntry, ...] = ()
@@ -61,6 +64,16 @@ def _parse_hook_list(raw: Any) -> tuple[str, ...]:
         if text:
             out.append(text)
     return tuple(out)
+
+
+def _parse_skill_tools(raw: Any) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    if not isinstance(raw, dict):
+        return ()
+    return tuple(
+        (str(skill).strip().lower().replace("-", "_"), _parse_hook_list(tools))
+        for skill, tools in raw.items()
+        if str(skill).strip()
+    )
 
 
 def _parse_state_delta_handlers(raw: Any) -> tuple[StateDeltaHandlerEntry, ...]:
@@ -111,6 +124,8 @@ def _parse_manifest_dict(data: dict[str, Any], *, source: Path | None) -> FlyExt
         fly_dispatchers=tuple(dispatchers),
         worker_skill_hooks=_parse_hook_list(hooks_raw),
         worker_tool_context_hooks=_parse_hook_list(tool_context_hooks_raw),
+        reply_audit_hooks=_parse_hook_list(data.get("reply_audit_hooks") or []),
+        skill_tools=_parse_skill_tools(data.get("skill_tools")),
         read_only_commands=tuple(read_only),
         help_entries=_parse_help_entries(data.get("help_entries")),
         state_delta_handlers=_parse_state_delta_handlers(state_delta_raw),

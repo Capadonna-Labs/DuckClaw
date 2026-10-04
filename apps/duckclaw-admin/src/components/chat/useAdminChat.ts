@@ -26,9 +26,9 @@ import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
 import { useDetachedTurnResume } from './useDetachedTurnResume';
+import { useLastTurnTokens } from './useLastTurnTokens';
 
 import {
-  applyLastTurnTokenDisplay,
   lastUserAssistantExchange,
   readStoredWorker,
   revokeMessageImagePreviews,
@@ -257,27 +257,9 @@ export function useAdminChat({
     suggestionsInFlightKeyRef.current = '';
   }, [chatId]);
 
-  // Context-window header: restore the last turn's tokens on open and after every
-  // turn. Detached (iOS) turns finish from history and never see the done payload.
-  useEffect(() => {
-    if (!enabled || !chatId || loading) return;
-    let cancelled = false;
-    void adminService
-      .getPlaygroundChatActivity(chatId, 1)
-      .then((a) => {
-        if (cancelled || !a.last_turn_tokens) return;
-        applyLastTurnTokenDisplay(
-          setLastTurnUsage,
-          setContextEstimatedTokens,
-          a.last_turn_tokens,
-          setContextTokenBreakdown
-        );
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, chatId, loading]);
+  useLastTurnTokens({
+    enabled, chatId, loading, setLastTurnUsage, setContextEstimatedTokens, setContextTokenBreakdown,
+  });
 
   /**
    * Regenerar chips cuando cambia el último intercambio user→assistant

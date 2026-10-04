@@ -7,8 +7,7 @@ import os
 from pathlib import Path
 from typing import Any, Literal, Optional
 
-from duckclaw.prompt_policies import PromptPolicyResolver
-from duckclaw.prompt_policies.resolver import prompt_policy_source_db
+from duckclaw.prompt_policies.resolver import PromptPolicyResolver, prompt_policy_source_db
 from duckclaw.workers.context_monitor import (
     build_context_monitor_node as _build_context_monitor_node,
     build_summary_llm as _build_summary_llm,
@@ -27,7 +26,11 @@ from duckclaw.workers.factory_graph_agent_bind import build_agent_llm_bind
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.factory_tool_builder import _build_worker_tools
 from duckclaw.workers.identity import load_worker_runtime_policy
-from duckclaw.prompt_policies.system_prompt import resolve_effective_system_prompt_for_worker
+from duckclaw.prompt_policies.system_prompt import (
+    append_android_mcp_directive_if_tools,
+    append_trade_signals_directive_if_tools,
+    resolve_effective_system_prompt_for_worker,
+)
 from duckclaw.workers.loader import append_domain_closure_block
 from duckclaw.workers.manifest import load_manifest
 from duckclaw.workers.provider_input_budget import (
@@ -218,11 +221,6 @@ def initialize_worker_graph_context(
         tools, spec, db=db, llm=llm, tenant_id=tenant_id, vault_db_path=str(path or "")
     )
     tools_by_name = {t.name: t for t in tools}
-
-    from duckclaw.prompt_policies.system_prompt import (
-        append_android_mcp_directive_if_tools,
-        append_trade_signals_directive_if_tools,
-    )
 
     system_prompt = append_android_mcp_directive_if_tools(policy_db, system_prompt, tools)
     system_prompt = append_trade_signals_directive_if_tools(policy_db, system_prompt, tools)

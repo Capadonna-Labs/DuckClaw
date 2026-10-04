@@ -31,10 +31,20 @@ def test_llm_usage_flags_replies_cut_by_max_tokens(caplog) -> None:
     from duckclaw.workers.factory_graph_nodes_agent_shared import log_llm_usage
 
     cut = AIMessage(content="", response_metadata={"finish_reason": "length", "token_usage": {"completion_tokens": 2048}})
-    with caplog.at_level(logging.INFO):
+    # Listen on the logger itself: other tests in the suite turn off its propagation,
+    # so caplog's root handler alone missed the record (green alone, red in CI).
+    log = logging.getLogger("duckclaw.workers.factory_graph_nodes_agent_invoke")
+    log.addHandler(caplog.handler)
+    prev_level = log.level
+    log.setLevel(logging.INFO)
+    try:
         log_llm_usage("quant_analyst", 0.0, response=cut)
         log_llm_usage("quant_analyst", 0.0, response=AIMessage(content="ok", response_metadata={"finish_reason": "stop"}))
-    warned = [r for r in caplog.records if "truncated=max_tokens" in r.getMessage()]
+    finally:
+        log.removeHandler(caplog.handler)
+        log.setLevel(prev_level)
+    # Distinct records: with propagation on, caplog sees the same record twice.
+    warned = list({id(r): r for r in caplog.records if "truncated=max_tokens" in r.getMessage()}.values())
     assert len(warned) == 1 and "completion_tokens=2048" in warned[0].getMessage()
 
 

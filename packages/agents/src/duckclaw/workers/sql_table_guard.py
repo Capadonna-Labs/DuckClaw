@@ -1,8 +1,8 @@
 """Manifest ``allowed_tables`` enforcement for worker SQL tools (read_sql / admin_sql).
 
 Every table the statement references must be allowed. The previous check passed
-as soon as *any* allowed name appeared anywhere in the text, so e.g.
-``CREATE TABLE x AS SELECT * FROM quant_core.ohlcv_data`` slipped through, and
+as soon as *any* allowed name appeared anywhere in the text, so e.g. a
+create-table-as-select reading a non-allowed schema slipped through, and
 mentioning ``information_schema`` in a comment disabled the check entirely.
 
 ponytail: lightweight tokenizer, not a SQL parser — covers FROM (incl. comma

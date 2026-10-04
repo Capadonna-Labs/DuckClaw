@@ -8,6 +8,23 @@ from typing import Any
 from duckclaw.admin_worker_catalog import get_latest_worker_version
 
 
+def _fetchone(result: Any) -> Any | None:
+    """DuckClaw.execute returns a list; a DuckDB cursor exposes fetchone()."""
+    if hasattr(result, "fetchone"):
+        return result.fetchone()
+    if isinstance(result, list):
+        return result[0] if result else None
+    return None
+
+
+def _fetchall(result: Any) -> list[Any]:
+    if hasattr(result, "fetchall"):
+        return list(result.fetchall())
+    if isinstance(result, list):
+        return result
+    return []
+
+
 def build_system_prompt_content_from_files(files: dict[str, str]) -> str:
     """Merge ``soul.md`` + ``system_prompt.md`` like ``load_system_prompt``."""
 
@@ -34,7 +51,8 @@ def _active_policy_checksum(db: Any, policy_type: str, policy_name: str) -> str:
         LIMIT 1
         """,
         [policy_type, policy_name],
-    ).fetchone()
+    )
+    row = _fetchone(row)
     if not row:
         return ""
     if isinstance(row, dict):
@@ -51,8 +69,8 @@ def _catalog_worker_exists(db: Any, worker_id: str) -> bool:
         LIMIT 1
         """,
         [worker_id],
-    ).fetchone()
-    return row is not None
+    )
+    return _fetchone(row) is not None
 
 
 def sync_worker_system_prompt_policy(
@@ -94,7 +112,8 @@ def sync_worker_system_prompt_policy(
         WHERE policy_type = 'system_prompt' AND policy_name = ?
         """,
         [wid],
-    ).fetchone()
+    )
+    version_row = _fetchone(version_row)
     next_version = int(version_row[0] if version_row else 0) + 1
 
     db.execute(
@@ -144,7 +163,8 @@ def sync_all_catalog_worker_prompts(
         WHERE active = true AND worker_id != 'default'
         ORDER BY worker_id
         """
-    ).fetchall()
+    )
+    rows = _fetchall(rows)
 
     for row in rows:
         if isinstance(row, dict):

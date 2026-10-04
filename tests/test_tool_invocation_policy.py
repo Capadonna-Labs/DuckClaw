@@ -84,7 +84,8 @@ def test_local_ledger_current_time_decision_is_direct_tool_call_once_per_turn() 
     )
 
     assert decision.tool_name == "get_current_time"
-    assert decision.direct_tool_call
+    assert decision.as_context
+    assert not decision.direct_tool_call
     assert decision.tool_args == {}
     assert decision.reason == "clock_anchor.get_current_time"
 
@@ -107,7 +108,8 @@ def test_current_time_forced_without_local_ledger_or_time_keywords() -> None:
         called_tools_since_last_human=set(),
     )
     assert decision.tool_name == "get_current_time"
-    assert decision.direct_tool_call
+    assert decision.as_context
+    assert not decision.direct_tool_call
     assert decision.reason == "clock_anchor.get_current_time"
 
     system_event = policy.decide_current_time_tool_invocation(

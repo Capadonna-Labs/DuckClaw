@@ -11,6 +11,7 @@ try:
 except ImportError:
     RunnableConfig = Any  # type: ignore[misc, assignment]
 
+from duckclaw.forge.skills.time_context import clock_context_message, turn_has_clock_context
 from duckclaw.workers.factory_agent_node_helpers import _identity_fields, _last_human_message_index
 from duckclaw.workers.runtime_policy_helpers import (
     worker_has_runtime_capability as _worker_has_runtime_capability,
@@ -152,28 +153,19 @@ def make_agent_policy_late(ctx: WorkerGraphContext):
                     summarize_directive=telegram_context_summarize_directive,
                     orchestration_active=bool(_orch),
                 )
-                if current_time_tool_decision.direct_tool_call and current_time_tool_decision.tool_name:
-                    _forced_tid_current_time = f"call_policy_{current_time_tool_decision.tool_name}_{int(time.time() * 1000)}"
-                    _forced_tc_current_time = [
-                        {
-                            "name": current_time_tool_decision.tool_name,
-                            "args": dict(current_time_tool_decision.tool_args),
-                            "id": _forced_tid_current_time,
-                            "type": "tool_call",
+                if current_time_tool_decision.as_context and current_time_tool_decision.tool_name:
+                    if not turn_has_clock_context(state.get("messages") or []):
+                        _log.info(
+                            "[%s] runtime policy → %s reason=%s",
+                            _wl,
+                            current_time_tool_decision.tool_name,
+                            current_time_tool_decision.reason,
+                        )
+                        state = {
+                            **state,
+                            "messages": [*state["messages"], clock_context_message()],
                         }
-                    ]
-                    _log.info(
-                        "[%s] runtime policy → %s reason=%s",
-                        _wl,
-                        current_time_tool_decision.tool_name,
-                        current_time_tool_decision.reason,
-                    )
-                    _out_current_time = {
-                        **state,
-                        "messages": state["messages"] + [AIMessage(content="", tool_calls=_forced_tc_current_time)],
-                    }
-                    _out_current_time.update(_identity_fields(state))
-                    return _out_current_time
+                        ctx.agent_turn["state"] = state
 
                 sandbox_enabled = _sandbox_enabled_for_state(state)
 

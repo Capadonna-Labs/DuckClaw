@@ -1,4 +1,7 @@
-"""Carga y caché de LLM / metadatos para ``graph_server`` (sin abrir el vault del gateway)."""
+"""Carga y caché de LLM / metadatos para ``graph_server``.
+
+La API key se lee en solo lectura desde Integraciones y, si no hay fila, desde .env.
+"""
 
 from __future__ import annotations
 
@@ -14,8 +17,18 @@ def get_graph_state() -> dict[str, Any]:
     return _graph_state
 
 
+def _graph_llm_secret_db() -> Any | None:
+    """RO efímero para leer claves de Integraciones. No deja el hub abierto."""
+    from duckclaw.gateway_db import GatewayDbEphemeralReadonly, get_gateway_db_path
+
+    path = (get_gateway_db_path() or "").strip()
+    if not path or not os.path.isfile(path):
+        return None
+    return GatewayDbEphemeralReadonly(path)
+
+
 def _ensure_llm_config() -> None:
-    """Carga y cachea LLM y metadatos. No abre el .duckdb del gateway."""
+    """Carga y cachea LLM. Lee la API key en Integraciones y, si no hay fila, en .env."""
     from duckclaw.integrations.llm_providers import (
         _ensure_duckclaw_llm_env_from_legacy_llm_vars,
         build_llm,
@@ -54,7 +67,13 @@ def _ensure_llm_config() -> None:
         "Eres un asistente útil con acceso a una base de datos.",
     ).strip()
 
-    llm = build_llm(provider, model, base_url)
+    llm = build_llm(
+        provider,
+        model,
+        base_url,
+        db=_graph_llm_secret_db(),
+        actor_email=(os.environ.get("DUCKCLAW_ADMIN_EMAIL") or "").strip(),
+    )
     if llm is None:
         raise RuntimeError(
             "No se pudo inicializar el LLM. "

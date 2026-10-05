@@ -1619,11 +1619,15 @@ _M038_ADMIN_CONVERSATIONS_META_V2: list[str] = [
 ]
 
 # Versions 39-40 were retired (vertical tables moved to their extension); existing
-# hubs keep those rows, so never reuse them — the next migration is 41.
+# hubs keep those rows, so never reuse them — the next migration is 42.
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
     (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),
     (36, "worker_a2a_discoverable", _M004_A2A_DISCOVERABLE),
     (37, "managed_workspace_draft_policy_v2", _M037_MANAGED_WORKSPACE_DRAFT_POLICY_V2),
     (38, "admin_conversations_meta_v2", _M038_ADMIN_CONVERSATIONS_META_V2),
+    # Hubs migrated before the baseline squash already hold an older "version 2"
+    # (worker_versions), so v2 above was skipped and the table never existed there.
+    # Idempotent: a no-op on hubs that got v2.
+    (41, "productivity_artifacts_ensure", _M002_PRODUCTIVITY_ARTIFACTS),
 ]

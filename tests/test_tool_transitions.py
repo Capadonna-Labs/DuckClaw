@@ -90,3 +90,26 @@ def test_dataset_merges_live_and_backfill_without_duplicates(tmp_path: Path) -> 
     rows = mod.collect(tmp_path / "traces", tmp_path / "tr", since="")
     assert len(rows) == 1 and rows[0]["source"] == "live"
     assert "transitions=1 errors=0" in mod.report(rows)
+
+
+def test_allowed_tables_columns_hint(monkeypatch) -> None:
+    from duckclaw.workers import read_pool
+
+    cols = {"main.orders": ["id", "side", "timestamp"], "main.notes": ["id", "body"]}
+
+    def run_query(sql: str) -> str:
+        for table, names in cols.items():
+            schema, name = table.split(".")
+            if f"table_schema = '{schema}'" in sql and f"table_name = '{name}'" in sql:
+                return json.dumps([{"column_name": c} for c in names])
+        return "[]"
+
+    hint = read_pool.allowed_tables_columns_hint(run_query, ["main.orders", "main.missing", "main.notes"])
+    assert "main.orders(id, side, timestamp)" in hint and "main.notes(id, body)" in hint
+    assert "missing" not in hint
+    monkeypatch.setenv("DUCKCLAW_SQL_SCHEMA_HINT_MAX_CHARS", "40")
+    capped = read_pool.allowed_tables_columns_hint(run_query, ["main.orders", "main.notes"])
+    assert "main.orders" in capped and "main.notes(" not in capped and "inspect_schema" in capped
+    monkeypatch.setenv("DUCKCLAW_SQL_SCHEMA_HINT_MAX_CHARS", "0")
+    assert read_pool.allowed_tables_columns_hint(run_query, ["main.orders"]) == ""
+    assert read_pool.allowed_tables_columns_hint(run_query, []) == ""

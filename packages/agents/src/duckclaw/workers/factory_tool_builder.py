@@ -120,11 +120,15 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         READ_SQL_DESCRIPTION,
     )
 
+    try:
+        _columns_hint = read_pool.allowed_tables_columns_hint(lambda qq: db.query(qq), spec.allowed_tables)
+    except Exception:
+        _columns_hint = ""
     tools.append(
         StructuredTool.from_function(
             _read_sql_worker,
             name="read_sql",
-            description=READ_SQL_DESCRIPTION,
+            description=READ_SQL_DESCRIPTION + _columns_hint,
         )
     )
 
@@ -225,7 +229,7 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
             StructuredTool.from_function(
                 _admin_sql_worker,
                 name="admin_sql",
-                description=ADMIN_SQL_DESCRIPTION,
+                description=ADMIN_SQL_DESCRIPTION + _columns_hint,
             )
         )
 

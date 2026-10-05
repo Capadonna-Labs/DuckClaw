@@ -608,3 +608,25 @@ def _columns(con, table: str) -> set[str]:
             [table],
         ).fetchall()
     }
+
+
+def test_pre_squash_hub_gets_productivity_table(tmp_path: Path) -> None:
+    """Hubs migrated before the baseline squash hold another 'version 2' (worker_versions),
+    so productivity_artifacts_v1 was skipped; migration 41 must still create the table."""
+    import duckdb
+
+    from duckclaw.schema_migrations import run_pending_migrations
+
+    con = duckdb.connect(str(tmp_path / "hub.duckdb"))
+    run_pending_migrations(con)
+    con.execute("DROP TABLE main.admin_productivity_artifacts")
+    con.execute("DELETE FROM main.schema_migrations WHERE version >= 2")
+    con.execute("INSERT INTO main.schema_migrations (version, name, checksum) VALUES (2, 'worker_versions', 'old')")
+
+    applied = run_pending_migrations(con)
+
+    assert "041_productivity_artifacts_ensure" in applied
+    assert con.execute(
+        "SELECT count(*) FROM information_schema.tables WHERE table_name = 'admin_productivity_artifacts'"
+    ).fetchone()[0] == 1
+    con.close()

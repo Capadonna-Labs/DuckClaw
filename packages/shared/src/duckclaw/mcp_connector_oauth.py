@@ -76,9 +76,23 @@ async def start_mcp_connector_oauth(
     connector = get_mcp_connector(db, connector_id=connector_id, tenant_id=tenant_id)
     if not connector:
         raise ValueError(f"connector not found: {connector_id}")
-    from duckclaw.mcp_connector_presets import is_google_workspace_preset, resolve_preset_id
+    from duckclaw.mcp_connector_presets import (
+        is_google_workspace_preset,
+        preset_uses_mcp_dcr,
+        resolve_preset_id,
+    )
 
     preset_id = resolve_preset_id(str(connector.get("preset_id") or ""))
+    if preset_uses_mcp_dcr(preset_id) and preset_id != "notion":
+        from duckclaw.mcp_dcr_oauth import start_dcr_oauth
+
+        return await start_dcr_oauth(
+            db,
+            connector_id=connector_id,
+            tenant_id=tenant_id,
+            actor_email=actor_email,
+            redirect_uri=redirect_uri,
+        )
     if preset_id == "notion":
         from duckclaw.mcp_notion_oauth import start_notion_oauth
 
@@ -132,9 +146,22 @@ async def start_mcp_connector_oauth(
 
 
 async def exchange_mcp_oauth_code_for_token(*, code: str, pending: dict[str, Any]) -> dict[str, str]:
-    from duckclaw.mcp_connector_presets import is_google_workspace_preset, resolve_preset_id
+    from duckclaw.mcp_connector_presets import (
+        is_google_workspace_preset,
+        preset_payload,
+        preset_uses_mcp_dcr,
+        resolve_preset_id,
+    )
 
     preset_id = resolve_preset_id(str(pending.get("preset_id") or ""))
+    if preset_uses_mcp_dcr(preset_id) and preset_id != "notion":
+        from duckclaw.mcp_dcr_oauth import exchange_dcr_code_for_token
+
+        endpoint = str(pending.get("endpoint_url") or "").strip()
+        if not endpoint:
+            payload = preset_payload(preset_id) or {}
+            endpoint = str(payload.get("endpoint_url") or "").strip()
+        return await exchange_dcr_code_for_token(code=code, pending=pending, endpoint_url=endpoint)
     if preset_id == "notion":
         from duckclaw.mcp_notion_oauth import exchange_notion_code_for_token
 

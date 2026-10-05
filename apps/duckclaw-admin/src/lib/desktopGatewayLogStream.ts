@@ -106,5 +106,5 @@ export function startDesktopGatewayLogStream(
     },
   });
 
-  return { stream, kill: () => signal.abort() };
+  return { stream, kill() {} };
 }

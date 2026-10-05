@@ -60,5 +60,5 @@ export function startSystemdGatewayLogStream(
     },
   });
 
-  return { stream, kill: () => signal.abort() };
+  return { stream, kill() {} };
 }

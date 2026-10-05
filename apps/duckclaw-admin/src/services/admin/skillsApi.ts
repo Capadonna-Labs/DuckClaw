@@ -85,7 +85,7 @@ export const skillsApi = {
     adminFetch<SkillCategoriesCatalogResponse>('/catalog/skill-categories'),
   getIntegrationCatalog: () => adminFetch<IntegrationCatalogResponse>('/integrations/catalog'),
   createSkill: (body: CreateSkillInput) =>
-    adminFetch<{ ok: boolean; skill: SkillCatalogItem }>('/catalog/skills', {
+    adminFetch<{ ok: boolean; skill: SkillCatalogItem; task_id?: string }>('/catalog/skills', {
       method: 'POST',
       body: JSON.stringify(body),
     }),

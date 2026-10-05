@@ -112,6 +112,7 @@ def test_list_mcp_connector_presets_includes_all_bundled_ids() -> None:
         "mcp_fetch",
         "mcp_time",
         "spotify",
+        "nexlev",
     }.issubset(presets)
 
 

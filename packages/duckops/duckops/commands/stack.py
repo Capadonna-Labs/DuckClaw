@@ -12,6 +12,7 @@ from typing import Any
 
 import typer
 
+from duckops.host_serve import run_serve_mac
 
 app = typer.Typer()
 
@@ -225,6 +226,13 @@ def stack_deploy(
         health_timeout=timeout_seconds,
         full=full,
     )
+    raise typer.Exit(code)
+
+
+@app.command("serve-mac")
+def serve_mac() -> None:
+    """Backend PM2, admin de producción en :3001 y correo de estado cada 3 horas."""
+    code = run_serve_mac(repo_root=_repo_root(), print_fn=typer.echo)
     raise typer.Exit(code)
 
 

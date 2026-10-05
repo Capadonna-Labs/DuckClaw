@@ -65,7 +65,7 @@ const COPY = {
   },
 } as const;
 
-export type VaultUiCopy = (typeof COPY)['es'];
+export type VaultUiCopy = (typeof COPY)[VaultUiLocale];
 
 export function resolveVaultUiLocale(raw?: string | null): VaultUiLocale {
   const value = (raw || '').toLowerCase();

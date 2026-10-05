@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import logging
 from typing import Any
 
@@ -55,6 +56,13 @@ def execute_slm_http(
         "messages": [{"role": "user", "content": request.prompt}],
         "temperature": float(request.temperature),
         "max_tokens": int(request.max_tokens),
+        # Thinking models (Qwen3.x) otherwise spend the whole max_tokens reasoning and
+        # _message_text falls back to a truncated chain of thought. Servers that do not
+        # know chat_template_kwargs ignore it.
+        "chat_template_kwargs": {
+            "enable_thinking": os.environ.get("DUCKCLAW_SLM_ENABLE_THINKING", "").strip().lower()
+            in ("1", "true", "yes")
+        },
     }
     try:
         with httpx.Client(timeout=timeout_sec) as client:

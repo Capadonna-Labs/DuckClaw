@@ -72,3 +72,22 @@ def test_execute_slm_http_http_error() -> None:
     with patch("duckclaw.slm.client.httpx.Client", return_value=mock_client):
         out = execute_slm_http(req, base_url="http://127.0.0.1:8080/v1", model="gemma4")
     assert "HTTP 503" in out
+
+
+@pytest.mark.parametrize(("env", "expected"), [(None, False), ("true", True)])
+def test_execute_slm_http_disables_thinking_by_default(monkeypatch, env, expected) -> None:
+    if env is None:
+        monkeypatch.delenv("DUCKCLAW_SLM_ENABLE_THINKING", raising=False)
+    else:
+        monkeypatch.setenv("DUCKCLAW_SLM_ENABLE_THINKING", env)
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+    mock_client = MagicMock()
+    mock_client.__enter__ = MagicMock(return_value=mock_client)
+    mock_client.__exit__ = MagicMock(return_value=False)
+    mock_client.post.return_value = mock_response
+    with patch("duckclaw.slm.client.httpx.Client", return_value=mock_client):
+        execute_slm_http(ExecuteSLMRequest(prompt="x", max_tokens=8), base_url="http://h:8080/v1", model="m")
+    sent = mock_client.post.call_args.kwargs["json"]
+    assert sent["chat_template_kwargs"] == {"enable_thinking": expected}

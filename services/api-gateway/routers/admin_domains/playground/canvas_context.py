@@ -20,7 +20,7 @@ def sanitize_tool_error_detail(detail: str) -> str:
 
 
 def enrich_message_with_canvas_context(*, msg: str, chat_id: str, vault_path: str) -> str:
-    """Antepone estado del dashboard HTML cuando la fila en DB está ausente o inválida."""
+    """Antepone el estado del dashboard HTML solo cuando existe pero es inválido."""
     cid = (chat_id or "").strip()
     vp = (vault_path or "").strip()
     if not cid.startswith("admin-conv-") or not vp:
@@ -39,7 +39,10 @@ def enrich_message_with_canvas_context(*, msg: str, chat_id: str, vault_path: st
         _log.debug("canvas context skip chat_id=%r: %s", cid, exc)
         return msg
     status = str(payload.get("status") or "")
-    if status == "valid":
+    # Only a dashboard that exists but is broken needs the agent's attention. "missing"
+    # (the chat never had one) used to prepend this block to every user message: noise in
+    # every turn, carried in the history, even for workers that cannot publish dashboards.
+    if status != "invalid":
         return msg
     block = (
         "[LIENZO_HTML_ESTADO] El dashboard HTML de esta conversación NO se puede renderizar.\n"

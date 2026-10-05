@@ -259,8 +259,7 @@ export default function PlaygroundPage() {
           (fromServer && fromServer !== 'default') ||
             (storedTrim && storedTrim !== 'default')
         );
-        const shouldSyncWorker = Boolean(chatId && nextWorker && !hasPerChatWorker);
-        if (shouldSyncWorker) {
+        if (chatId && nextWorker && !hasPerChatWorker) {
           void adminService
             .setPlaygroundWorker({
               chat_id: chatId,

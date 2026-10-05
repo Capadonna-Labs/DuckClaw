@@ -73,6 +73,12 @@ def preset_google_oauth_scopes(preset_id: str) -> list[str] | None:
     return scopes or None
 
 
+def preset_uses_mcp_dcr(preset_id: str) -> bool:
+    """Hosted MCP cuyo cliente OAuth se registra al conectar (Notion, Nexlev)."""
+    key = resolve_preset_id(preset_id)
+    return key == "notion" or preset_oauth_provider(key) == "mcp_dcr"
+
+
 def is_google_workspace_preset(preset_id: str) -> bool:
     key = resolve_preset_id(preset_id)
     if key in ("google_workspace",) or key.startswith("google_"):

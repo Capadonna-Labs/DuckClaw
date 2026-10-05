@@ -9,6 +9,10 @@ type BootstrapState = {
   loading: boolean;
 };
 
+type BootstrapController = BootstrapState & {
+  refresh: (opts?: { nocache?: boolean }) => Promise<void>;
+};
+
 const POLL_UNHEALTHY_MS = 5_000;
 const POLL_HEALTHY_MS = 60_000;
 
@@ -17,7 +21,7 @@ function pollIntervalMs(status: AdminBootstrapStatus | null): number {
   return status.canAttemptLogin && status.code === 'ready' ? POLL_HEALTHY_MS : POLL_UNHEALTHY_MS;
 }
 
-export function useAdminBootstrapStatus(): BootstrapState {
+export function useAdminBootstrapStatus(): BootstrapController {
   const [state, setState] = useState<BootstrapState>({ status: null, loading: true });
 
   const refresh = useCallback(async (opts?: { nocache?: boolean }) => {

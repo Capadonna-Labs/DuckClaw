@@ -88,7 +88,7 @@ async function runAdb(args: string[]): Promise<{ code: number; stdout: string; s
     const { stdout, stderr } = await execFileAsync('adb', args, { timeout: 15_000 });
     return { code: 0, stdout: stdout || '', stderr: stderr || '' };
   } catch (err: unknown) {
-    const e = err as { code?: number; stdout?: string; stderr?: string; message?: string };
+    const e = err as { code?: number | string; stdout?: string; stderr?: string; message?: string };
     if (e.code === 'ENOENT') return { code: 127, stdout: '', stderr: 'adb not found in PATH' };
     return {
       code: typeof e.code === 'number' ? e.code : 1,

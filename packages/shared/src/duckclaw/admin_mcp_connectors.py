@@ -307,9 +307,9 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
                 break
 
     preset_id = str(connector.get("preset_id") or "").strip().lower()
-    from duckclaw.mcp_connector_presets import is_google_workspace_preset
+    from duckclaw.mcp_connector_presets import is_google_workspace_preset, preset_uses_mcp_dcr
 
-    needs_oauth_refresh = is_google_workspace_preset(preset_id) or preset_id == "notion"
+    needs_oauth_refresh = is_google_workspace_preset(preset_id) or preset_uses_mcp_dcr(preset_id)
     if not needs_oauth_refresh:
         return token
 
@@ -336,7 +336,7 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
     # Tokens refreshed by this process win over the hub: their DB-Writer write may
     # not have landed yet, and the rotated refresh token is the only valid one.
     cache_key = (tenant_id, connector_id)
-    fresh_window = 1800 if preset_id == "notion" else 3000
+    fresh_window = 1800 if preset_uses_mcp_dcr(preset_id) else 3000
     cached = _REFRESHED_OAUTH.get(cache_key)
     if cached and time.time() - cached[2] < fresh_window:
         return cached[0]
@@ -351,8 +351,8 @@ def resolve_connector_bearer_token(db: Any, connector: dict[str, Any]) -> str:
             from datetime import datetime, timezone
 
             age_s = (datetime.now(timezone.utc) - parsed_updated).total_seconds()
-            # Notion tokens are short-lived; refresh earlier than Google's ~1h window.
-            stale_after = 1800 if preset_id == "notion" else 3000
+            # DCR tokens (Notion, Nexlev) are short-lived; refresh earlier than Google's ~1h window.
+            stale_after = 1800 if preset_uses_mcp_dcr(preset_id) else 3000
             stale = age_s > stale_after
         except Exception:
             stale = True
@@ -418,7 +418,9 @@ def _refresh_connector_oauth(
     fresh = ""
     new_refresh = refresh
     try:
-        if preset_id == "notion":
+        from duckclaw.mcp_connector_presets import preset_uses_mcp_dcr
+
+        if preset_uses_mcp_dcr(preset_id):
             from duckclaw.mcp_notion_oauth import (
                 refresh_notion_access_token,
                 resolve_notion_redirect_uri,
@@ -450,7 +452,7 @@ def _refresh_connector_oauth(
                         tenant_id=tenant_id,
                         actor_email=actor,
                         domain="mcp_oauth",
-                        key="notion.client_id",
+                        key=f"{preset_id}.client_id",
                     )
                     client_id = str(resolved.get("value") or "").strip()
                     meta = resolved.get("value_json")
@@ -458,13 +460,14 @@ def _refresh_connector_oauth(
                         redirect_uri = str(meta.get("redirect_uri") or "").strip()
                     if client_id:
                         break
-            if not client_id:
+            if not client_id and preset_id.replace("_", "").isalnum():
                 row = _fetchone(
                     db.execute(
                         "SELECT value_text, value_json FROM main.admin_runtime_settings "
-                        "WHERE active = true AND domain = 'mcp_oauth' AND key = 'notion.client_id' "
+                        "WHERE active = true AND domain = 'mcp_oauth' AND key = ? "
                         "AND length(trim(coalesce(value_text, ''))) > 0 "
-                        "ORDER BY updated_at DESC LIMIT 1"
+                        "ORDER BY updated_at DESC LIMIT 1",
+                        [f"{preset_id}.client_id"],
                     )
                 )
                 if row:
@@ -485,11 +488,24 @@ def _refresh_connector_oauth(
                                 redirect_uri = str(parsed.get("redirect_uri") or "").strip()
                         except Exception:
                             pass
-            tokens = refresh_notion_access_token(
-                refresh,
-                client_id=client_id,
-                redirect_uri=redirect_uri or resolve_notion_redirect_uri(),
-            )
+            if preset_id == "notion":
+                tokens = refresh_notion_access_token(
+                    refresh,
+                    client_id=client_id,
+                    redirect_uri=redirect_uri or resolve_notion_redirect_uri(),
+                )
+            else:
+                from duckclaw.mcp_connector_presets import preset_payload
+                from duckclaw.mcp_dcr_oauth import refresh_dcr_access_token
+                from duckclaw.mcp_higgsfield_oauth import resolve_oauth_redirect_uri
+
+                endpoint = str((preset_payload(preset_id) or {}).get("endpoint_url") or "").strip()
+                tokens = refresh_dcr_access_token(
+                    refresh,
+                    endpoint_url=endpoint,
+                    client_id=client_id,
+                    redirect_uri=redirect_uri or resolve_oauth_redirect_uri(),
+                )
             fresh = str(tokens.get("access_token") or "").strip()
             new_refresh = str(tokens.get("refresh_token") or "").strip() or refresh
         else:

@@ -73,7 +73,7 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
     setErr(null);
     try {
       let res;
-      let successMsg = copy.savedManifest;
+      let successMsg: string = copy.savedManifest;
       if (!selected) {
         res = await adminService.putTemplateVaultBinding(workerId, { scope: '' });
         successMsg = copy.unbound;

@@ -72,6 +72,22 @@ presets:
       manifest_skill_id: notion
       docs_url: https://developers.notion.com/docs/mcp
 
+  # Cursor mcpServers.nexlev.url — OAuth descubierto, sin command ni API key.
+  # El grant de Admin aplica a cualquier worker, incluido youtube-analyst.
+  nexlev:
+    display_name: Nexlev
+    transport: streamable_http
+    endpoint_url: https://prod.dashboard.nexlev.io/api/mcp
+    auth_kind: bearer
+    read_only: false
+    egress_hosts: [prod.dashboard.nexlev.io]
+    metadata:
+      oauth_pkce: true
+      oauth_provider: mcp_dcr
+      manifest_skill_id: nexlev
+      admin_label: HTTP remoto · OAuth descubierto
+      docs_url: https://docs.nexlev.io/docs/mcp/quickstart
+
   google_workspace:
     display_name: Google Workspace
     transport: streamable_http

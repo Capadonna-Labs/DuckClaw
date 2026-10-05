@@ -60,6 +60,8 @@ Procesos PM2: DB-Writer → Knowledge-Indexer → Heartbeat → Gateway.
 
 Admin **Reiniciar stack** incluye Knowledge-Indexer y Heartbeat.
 
+`uv run duckops stack serve-mac` hace ese deploy, construye el admin standalone y lo deja en PM2 en el puerto 3001 (`duckclaw-admin-ui`). Tailscale Serve `:8443` apunta a ese puerto. El mismo comando deja `DuckClaw-Host-Status`: cada 3 horas manda por Resend la RAM, el disco y el estado de Gateway, DB-Writer, Indexer, Heartbeat, admin, Redis y Tailscale. No escribe DuckDB y no corre dentro del Gateway.
+
 ## Pendiente (otros subsistemas)
 
 - UI Admin: poll genérico write-tasks tras CRUD

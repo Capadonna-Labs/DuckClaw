@@ -315,6 +315,20 @@ async def _evaluate_homeostasis() -> List[Dict[str, Any]]:
             pass
 
 
+def _attach_scanned_vault(payload: Dict[str, Any], db_path: str) -> None:
+    """Run the turn on the vault the chat state was read from (like /loop ticks).
+
+    Without it the gateway resolves a per-chat-id vault (private/<chat>/default) and the
+    worker sees an empty DB. The hub is never passed: it is not a worker vault.
+    """
+    try:
+        is_hub = Path(db_path).resolve() == Path(get_gateway_db_path() or "").resolve()
+    except OSError:
+        is_hub = False
+    if db_path and not is_hub:
+        payload["vault_db_path"] = db_path
+
+
 def _scheduled_prompt_message(prompt: str, tenant_id: str) -> str:
     """Scheduled ``/skill`` prompts arrive via the agent endpoint, which doesn't expand
     directive skills (only the admin chat does), so expand them here from the hub."""
@@ -564,6 +578,7 @@ async def _run_goals_proactive_tick_one_db(
             "skip_session_lock": True,
             "notify_channel": notify_channel,
         }
+        _attach_scanned_vault(payload, db_path)
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
         try:
             async with httpx.AsyncClient() as client:
@@ -705,6 +720,7 @@ async def _run_wall_items_for_chat(
             "is_system_prompt": True,
             "skip_session_lock": True,
         }
+        _attach_scanned_vault(payload, db_path)
         if prompt:
             # What the chat history shows as the "user" line of this turn.
             payload["user_incoming"] = f"[Cron] {prompt}"

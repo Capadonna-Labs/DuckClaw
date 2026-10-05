@@ -366,7 +366,8 @@ def test_run_goals_proactive_finds_delta_in_sibling_vault_duckdb(
 
     assert len(posts) == 1
     assert "BI-Analyst" in posts[0]["args"][0]
-    assert "vault_db_path" not in posts[0]["kwargs"]["json"]
+    # Sibling vault (not the hub): the turn must run on it, not on a per-chat-id vault.
+    assert posts[0]["kwargs"]["json"]["vault_db_path"] == vault
     con2 = duckdb.connect(vault, read_only=True)
     row = con2.execute(
         "SELECT value FROM agent_config WHERE key = 'chat_77_goals_proactive_last_fire_epoch'"

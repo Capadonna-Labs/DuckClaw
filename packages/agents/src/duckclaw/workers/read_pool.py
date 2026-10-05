@@ -353,6 +353,40 @@ def _fetch_columns_for_table(run_query: Callable[[str], str], table_ref: str) ->
     return cols
 
 
+def allowed_tables_columns_hint(run_query: Callable[[str], str], allowed_tables: Any) -> str:
+    """Exact columns of the worker's allowed tables, appended to the SQL tool descriptions.
+
+    Binder errors were ~14% of read_sql calls and were semantic, not typos ("action" for
+    "side", "date" for "timestamp"), so edit-distance autocorrect could not fix them and
+    each cost an extra LLM round. Showing the real names up front avoids that round.
+    ``DUCKCLAW_SQL_SCHEMA_HINT_MAX_CHARS`` caps the size (0 disables).
+    """
+    try:
+        max_chars = int(os.environ.get("DUCKCLAW_SQL_SCHEMA_HINT_MAX_CHARS", "6000"))
+    except ValueError:
+        max_chars = 6000
+    if max_chars <= 0 or not allowed_tables:
+        return ""
+    lines: list[str] = []
+    used = 0
+    for table in allowed_tables:
+        cols = _fetch_columns_for_table(run_query, str(table))
+        if not cols:
+            continue
+        line = f"{table}({', '.join(cols)})"
+        if used + len(line) > max_chars:
+            lines.append("… (resto: usa inspect_schema)")
+            break
+        lines.append(line)
+        used += len(line) + 1
+    if not lines:
+        return ""
+    return (
+        "\n\nColumnas exactas de las tablas permitidas (usa SOLO estos nombres, no inventes columnas):\n"
+        + "\n".join(lines)
+    )
+
+
 def _resolve_binder_column_context(
     run_query: Callable[[str], str],
     spec: WorkerSpec,

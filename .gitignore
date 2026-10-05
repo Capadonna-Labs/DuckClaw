@@ -127,3 +127,5 @@ _vps_*.py
 _probe_*.py
 _debug_*.py
 _verify_*.js
+packages/agents/train/tool_transitions/
+

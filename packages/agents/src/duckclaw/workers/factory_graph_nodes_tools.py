@@ -551,6 +551,9 @@ def make_tools_node(ctx: WorkerGraphContext):
                 new_msgs.append(ToolMessage(content=content, tool_call_id=tid, name=name))
         from duckclaw.workers.homeostasis_stuck import maybe_append_homeostasis_stuck_nudge
 
+        from duckclaw.traces.tool_transitions import record_tool_round
+
+        record_tool_round(new_msgs, len(messages), state=state, worker_id=worker_id)
         new_msgs = maybe_append_homeostasis_stuck_nudge(new_msgs, db=db, state=state)
         out: dict[str, Any] = {
             **state,

@@ -38,3 +38,17 @@ def test_attachment_turn_with_explicit_db_question_still_plans_db_task():
 def test_plain_db_question_without_attachments_still_plans_db_task():
     planned, _ = _plan_task("cual es el nombre de la base de datos", "finanz-expert")
     assert "get_db_path" in planned
+
+
+def test_long_brief_mentioning_nombre_and_datos_is_not_rewritten() -> None:
+    """A 1.5k-char instruction with 'el nombre de la raíz' and 'datos de 2022' became
+    'TAREA: el usuario quiere saber qué base de datos se está usando'."""
+    brief = (
+        "Revisé los logs. `root_hint` acepta el nombre de la raíz y la tool sugiere rutas. "
+        "Para la tabla de parámetros: 1. Deja solo los tickers con datos de 2022 (SPY, TLT, XLE). "
+        + "Detalle adicional del plan y sus restricciones. " * 8
+    )
+    planned, _ = _plan_task(brief, "finanz-expert")
+    assert planned == brief.strip()
+    short, _ = _plan_task("cual es el nombre de la base de datos", "finanz-expert")
+    assert short != "cual es el nombre de la base de datos"

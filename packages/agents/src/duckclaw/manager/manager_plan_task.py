@@ -66,6 +66,10 @@ def _db_tool_pressure_task(
         return text
     return f"{policy}\n\n--- Mensaje del usuario ---\n{text}"
 
+
+_KEYWORD_REWRITE_MAX_CHARS = 280
+
+
 def _plan_task(
     incoming: str,
     worker_id: str,
@@ -127,6 +131,12 @@ def _plan_task(
             ), None
     except Exception:
         pass
+    # The keyword rewrites below REPLACE the message with a canned task. They exist for short
+    # questions ("¿cuál es el nombre de la db?"); a long message carries its own instructions
+    # and a stray "nombre" + "datos" anywhere in it turned a 1.5k-char brief into "which
+    # database do you use". ponytail: length gate, an intent classifier if short ones misfire.
+    if len(user_request_text(text).strip()) > _KEYWORD_REWRITE_MAX_CHARS:
+        return text, None
     _explicit_duckdb_schema_request = explicit_duckdb_schema_request(text)
     # BI Analyst: preguntas meta (qué puedes hacer, quién eres) → el modelo a veces ignora soul.md y copia
     # el tono genérico «Agente de Investigación Activa»; la tarea explícita lo corrige sin depender del historial.
@@ -142,16 +152,16 @@ def _plan_task(
             t_plain,
         ):
             return load_guardrail("manager_tasks", "bi_analyst_capabilities_question"), None
+    # Whole words: substring "datos" matched "candidatos", "db" matched "dbt"…
+    _names_db = bool(re.search(r"\bnombre\b", t) and re.search(r"\b(db|base|datos)\b", t))
     is_db_intent = bool(
         _explicit_duckdb_schema_request
         or re.search(r"\b(db|esquema|schema|estructura|disponibles)\b", t)
-        or ("nombre" in t and ("db" in t or "base" in t or "datos" in t))
+        or _names_db
     )
 
     # Nombre de la db / base de datos
-    if re.search(r"\b(nombre\s+de\s+la\s+db|nombre\s+db|cual\s+es\s+el\s+nombre|nombre\s+de\s+la\s+base)\b", t) or (
-        "nombre" in t and ("db" in t or "base" in t or "datos" in t)
-    ):
+    if re.search(r"\b(nombre\s+de\s+la\s+db|nombre\s+db|cual\s+es\s+el\s+nombre|nombre\s+de\s+la\s+base)\b", t) or _names_db:
         return load_guardrail("manager_tasks", "duckdb_name_query"), override
     # Contenido de una tabla concreta
     is_table_content_intent = bool(

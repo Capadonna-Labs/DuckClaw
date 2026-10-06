@@ -338,6 +338,18 @@ def identical_call_envelope(tool_name: str, prior: int) -> str:
     )
 
 
+def identical_call_block(messages: list[Any], tool_name: str, args: Any) -> str | None:
+    """Envelope when this exact call already hit the per-turn limit; ``None`` to run it."""
+    limit = max_identical_tool_calls()
+    if not limit:
+        return None
+    prior = identical_prior_calls(messages, tool_name, args)
+    if prior < limit:
+        return None
+    _log.info("harness identical-call block tool=%s prior=%d", tool_name, prior)
+    return identical_call_envelope(tool_name, prior)
+
+
 def circuit_block_envelope(tool_name: str, fail_count: int) -> str:
     return tool_result_envelope(
         ok=False,

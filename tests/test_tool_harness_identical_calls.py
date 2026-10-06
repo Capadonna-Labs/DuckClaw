@@ -7,6 +7,7 @@ import json
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from duckclaw.workers.tool_harness import (
+    identical_call_block,
     identical_call_envelope,
     identical_prior_calls,
     max_identical_tool_calls,
@@ -38,3 +39,14 @@ def test_limit_env_and_envelope(monkeypatch) -> None:
     assert max_identical_tool_calls() == 0
     env = json.loads(identical_call_envelope("search", 3))
     assert env["ok"] is False and env["code"] == "harness_identical_call"
+
+
+def test_block_from_the_limit_on(monkeypatch) -> None:
+    msgs = [HumanMessage("now")]
+    for i in range(2):
+        msgs += _round("search", {"q": 1}, i)
+    assert identical_call_block(msgs, "search", {"q": 1}) is None  # 3rd run allowed
+    msgs += _round("search", {"q": 1}, 2)
+    assert json.loads(identical_call_block(msgs, "search", {"q": 1}))["code"] == "harness_identical_call"
+    monkeypatch.setenv("DUCKCLAW_MAX_IDENTICAL_TOOL_CALLS", "0")
+    assert identical_call_block(msgs, "search", {"q": 1}) is None

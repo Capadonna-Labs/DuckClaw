@@ -124,6 +124,15 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         keyword_context={"db": "db", "tenant_id": "tenant_id"},
     ),
     SkillToolRegistrar(
+        # Opt-in only (a paid, minutes-long call): the manifest must declare
+        # ``consult_claude: {enabled: true}``; a bare name or absence registers nothing.
+        skill_name="consult_claude",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.consult_claude_bridge:register_consult_claude_skill",
+        empty_config_registers=False,
+        keyword_context={"tenant_id": "tenant_id"},
+    ),
+    SkillToolRegistrar(
         skill_name="skills_management",
         phase="post_llm",
         registrar_path=(

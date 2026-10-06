@@ -389,16 +389,24 @@ def resolve_readable_document_path(*, relative_path: str, root_hint: str = "") -
             or is_tenant_inbound_artifact_path(resolved)
         ):
             return resolved
-        raise ValueError(f"Ruta absoluta fuera de raíces permitidas o inexistente: {cleaned}")
+        hits = find_files_named(resolved.name, roots) if roots else []
+        hint_text = f" ¿Quisiste decir: {', '.join(str(h) for h in hits)}?" if hits else ""
+        raise ValueError(f"Ruta absoluta fuera de raíces permitidas o inexistente: {cleaned}.{hint_text}")
 
     if not roots:
         raise ValueError("No hay raíces de conocimiento configuradas")
 
     cleaned = cleaned.lstrip("/")
     if root_hint.strip():
-        bases = [Path(root_hint).expanduser().resolve()]
+        # Agents pass the root's name ("Capadonna-Driller"), which resolved against the
+        # process cwd and was rejected as outside the roots.
+        hint = root_hint.strip().strip("/")
+        by_name = [r for r in roots if r.name == hint]
+        bases = by_name or [Path(root_hint).expanduser().resolve()]
         if not path_under_any_root(bases[0], roots):
-            raise ValueError("root_hint fuera de raíces permitidas")
+            raise ValueError(
+                "root_hint fuera de raíces permitidas; raíces: " + ", ".join(str(r) for r in roots)
+            )
     else:
         if len(roots) == 1:
             bases = [roots[0]]
@@ -411,7 +419,36 @@ def resolve_readable_document_path(*, relative_path: str, root_hint: str = "") -
         if candidate.is_file() and path_under_any_root(candidate, roots):
             return candidate
 
-    raise ValueError(f"No existe el archivo legible: {cleaned}")
+    hits = find_files_named(Path(cleaned).name, roots)
+    hint_text = f" ¿Quisiste decir: {', '.join(str(h) for h in hits)}?" if hits else ""
+    raise ValueError(f"No existe el archivo legible: {cleaned}.{hint_text}")
+
+
+_SKIP_DIRS = frozenset({".git", ".venv", "venv", "node_modules", "__pycache__", ".pnpm-store", "build", "dist"})
+
+
+def find_files_named(name: str, roots: list[Path], *, limit: int = 5, max_dirs: int = 20000) -> list[Path]:
+    """Up to ``limit`` files called ``name`` under the roots (skips vendored/cache dirs).
+
+    Lets a wrong relative path ("lib/x.py" for "workers/app/lib/x.py") come back with the
+    real location instead of a bare "no existe" that the agent retries until the circuit
+    breaker trips. ponytail: bounded walk, an index if roots grow past ~20k dirs.
+    """
+    if not name:
+        return []
+    hits: list[Path] = []
+    seen_dirs = 0
+    for root in roots:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if d not in _SKIP_DIRS and not d.startswith(".")]
+            seen_dirs += 1
+            if name in filenames:
+                hits.append(Path(dirpath) / name)
+                if len(hits) >= limit:
+                    return hits
+            if seen_dirs >= max_dirs:
+                return hits
+    return hits
 
 
 def project_convert_output_relative(*, source: Path, output_format: str) -> str:

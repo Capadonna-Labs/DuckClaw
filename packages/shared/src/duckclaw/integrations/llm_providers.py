@@ -146,6 +146,7 @@ def build_openrouter_llm(
         _mt = max(256, min(int(_or_out), 32768))
     except ValueError:
         _mt = 8192
+    _rt = openrouter_reasoning_max_tokens(_mt)
     llm = ChatOpenAI(
         model=resolved_model,
         temperature=0,
@@ -153,8 +154,26 @@ def build_openrouter_llm(
         api_key=key,
         max_tokens=_mt,
         default_headers=dict(OPENROUTER_ATTRIBUTION_HEADERS),
+        **({"extra_body": {"reasoning": {"max_tokens": _rt}}} if _rt else {}),
     )
     return ensure_openrouter_attribution_headers(llm)
+
+
+def openrouter_reasoning_max_tokens(max_output_tokens: int) -> int:
+    """Reasoning budget sent to OpenRouter; 0 = no cap (provider default).
+
+    Uncapped, DeepSeek v4-flash spent 16,049 of 16,384 output tokens reasoning (8 min) and
+    the answer was cut (finish_reason=length); with 4,000 it finished in 71 s. Defaults to
+    half the output cap (at most 6,000) so the answer always keeps room.
+    ``DUCKCLAW_OPENROUTER_REASONING_MAX_TOKENS`` overrides (0 disables).
+    """
+    default = min(6000, max_output_tokens // 2)
+    raw = (os.environ.get("DUCKCLAW_OPENROUTER_REASONING_MAX_TOKENS") or str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError:
+        value = default
+    return max(0, min(value, max_output_tokens - 1024))
 
 
 def mlx_openai_compatible_base_url() -> str:

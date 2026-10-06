@@ -170,3 +170,19 @@ def test_build_openrouter_llm_accepts_glm_display_label(monkeypatch: pytest.Monk
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
     llm = build_openrouter_llm("GLM 5.2")
     assert getattr(llm, "model_name", None) == "z-ai/glm-5.2"
+
+
+def test_openrouter_reasoning_budget_leaves_room_for_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Uncapped, DeepSeek v4-flash spent 16k of 16k output tokens reasoning and the answer was cut."""
+    from duckclaw.integrations.llm_providers import openrouter_reasoning_max_tokens
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
+    monkeypatch.setenv("DUCKCLAW_OPENROUTER_MAX_OUTPUT_TOKENS", "16384")
+    monkeypatch.delenv("DUCKCLAW_OPENROUTER_REASONING_MAX_TOKENS", raising=False)
+    llm = build_openrouter_llm("deepseek/deepseek-v4-flash")
+    assert (getattr(llm, "extra_body", None) or {}).get("reasoning") == {"max_tokens": 6000}
+    assert openrouter_reasoning_max_tokens(8192) == 4096
+    monkeypatch.setenv("DUCKCLAW_OPENROUTER_REASONING_MAX_TOKENS", "0")
+    assert not (getattr(build_openrouter_llm("deepseek/deepseek-v4-flash"), "extra_body", None) or {})
+    monkeypatch.setenv("DUCKCLAW_OPENROUTER_REASONING_MAX_TOKENS", "99999")
+    assert openrouter_reasoning_max_tokens(16384) == 16384 - 1024

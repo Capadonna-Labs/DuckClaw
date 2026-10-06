@@ -84,7 +84,10 @@ def project_context_message(
                 ]
             )
         )
-    elif scope_allows_retrieval(scope, project_id=project_id):
+    elif scope_allows_retrieval(scope, project_id=project_id) and knowledge_blocks:
+        # Only when something was retrieved. With 0 chunks the line "usa el conocimiento
+        # recuperado" made short follow-ups ("implementa el bloque condicional") look for an
+        # empty retrieval and ignore the chat history that defined them.
         blocks.append(
             "\n".join(
                 [

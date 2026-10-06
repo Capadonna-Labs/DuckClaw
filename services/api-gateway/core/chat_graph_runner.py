@@ -258,6 +258,20 @@ async def run_chat_graph(
             from duckclaw.graphs.on_the_fly_commands import parse_command
 
             cmd_name, cmd_args = parse_command(fly_message)
+            from duckclaw.commands.fly_dispatch import is_human_only_fly_command
+
+            if prepared.is_system_prompt and is_human_only_fly_command(cmd_name):
+                _gateway_log.warning(
+                    "blocked human-only fly command in system turn chat=%s cmd=/%s",
+                    format_chat_id_for_terminal(session_id),
+                    cmd_name,
+                )
+                return {
+                    "response": f"/{cmd_name} solo lo puede ejecutar una persona, no un turno automático.",
+                    "session_id": session_id,
+                    "worker_id": worker_id,
+                    "elapsed_ms": 0,
+                }, time.monotonic()
             if cmd_name == "summarize":
                 from duckclaw.commands.context_summarize import execute_summarize_with_meta
 

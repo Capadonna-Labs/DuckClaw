@@ -46,6 +46,24 @@ from duckclaw.extensions.fly import dispatch_extension_fly_command
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_fly, structured_log_context
 
 
+# Human-in-the-loop approvals. A system turn (cron, heartbeat, /loop) can carry a prompt that
+# starts with "/", and an agent may be able to write those prompts: such a turn must never
+# approve anything on the human's behalf.
+HUMAN_ONLY_FLY_COMMANDS = frozenset(
+    {
+        "approve_code", "approve-code", "reject_code", "reject-code",
+        "loop_approve", "loop-approve", "loop_reject", "loop-reject",
+        "meditate_approve", "meditate-approve", "meditate_reject", "meditate-reject",
+        "approve_model", "approve-model",
+        "resolve_uncertainty", "resolve-uncertainty",
+    }
+)
+
+
+def is_human_only_fly_command(name: str) -> bool:
+    return (name or "").strip().lower() in HUMAN_ONLY_FLY_COMMANDS
+
+
 def parse_command(text: str) -> Tuple[str, str]:
     """Parse /command or /command args. Returns (name, args)."""
     if not text or not text.strip().startswith("/"):

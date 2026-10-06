@@ -54,6 +54,9 @@ from duckclaw.workers.tool_harness import (
     resolve_harness_config,
     truncate_tool_result,
     harness_max_chars_for_tool,
+    identical_call_envelope,
+    identical_prior_calls,
+    max_identical_tool_calls,
 )
 from langchain_core.messages import ToolMessage
 
@@ -169,7 +172,9 @@ def make_tools_node(ctx: WorkerGraphContext):
             "risk_denied": 0,
             "failures": 0,
             "truncated_results": 0,
+            "identical_blocks": 0,
         }
+        _max_identical = max_identical_tool_calls()
 
         def _apply_harness_post(
             tool_name: str,
@@ -199,6 +204,11 @@ def make_tools_node(ctx: WorkerGraphContext):
                 return circuit_block_envelope(
                     tool_name, int(_fail_counts.get(tool_name) or _max_fail)
                 )
+            if _max_identical:
+                _prior = identical_prior_calls(messages[:-1], tool_name, args)
+                if _prior >= _max_identical:
+                    _harness_stats["identical_blocks"] += 1
+                    return identical_call_envelope(tool_name, _prior)
             if sandbox_toggle_bypasses_harness(tool_name, sandbox_enabled=sandbox_enabled):
                 return None
             risk = classify_tool_risk(tool_name)

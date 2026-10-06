@@ -292,6 +292,52 @@ def destructive_gate_envelope(tool_name: str, approval_mode: ApprovalMode) -> st
     )
 
 
+def max_identical_tool_calls() -> int:
+    """Identical (tool, args) executions allowed per turn; 0 disables the guard."""
+    import os
+
+    raw = (os.environ.get("DUCKCLAW_MAX_IDENTICAL_TOOL_CALLS") or "3").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 3
+
+
+def _call_fingerprint(tool_name: str, args: Any) -> str:
+    return f"{(tool_name or '').strip()}|{json.dumps(args or {}, sort_keys=True, ensure_ascii=False, default=str)}"
+
+
+def identical_prior_calls(messages: list[Any], tool_name: str, args: Any) -> int:
+    """How many times this exact (tool, args) was already requested since the last user message.
+
+    The circuit breaker only counts failures: a call that keeps succeeding with the same result
+    looped 204 times in one turn (a Gmail search, 15 min) until the prompt passed the model's
+    1M-token window. Pass the messages *before* the current tool-call batch.
+    """
+    target = _call_fingerprint(tool_name, args)
+    n = 0
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") == "human":
+            break
+        for tc in getattr(msg, "tool_calls", None) or []:
+            if _call_fingerprint(tc.get("name") or "", tc.get("args")) == target:
+                n += 1
+    return n
+
+
+def identical_call_envelope(tool_name: str, prior: int) -> str:
+    return tool_result_envelope(
+        ok=False,
+        error=f"«{tool_name}» ya se ejecutó {prior} veces en este turno con exactamente los mismos argumentos",
+        hint=(
+            "No se ejecutó de nuevo: el resultado sería el mismo que ya tienes arriba. Usa ese "
+            "resultado, cambia los argumentos (p. ej. otra query o página) o responde al usuario."
+        ),
+        retry=False,
+        code="harness_identical_call",
+    )
+
+
 def circuit_block_envelope(tool_name: str, fail_count: int) -> str:
     return tool_result_envelope(
         ok=False,

@@ -50,3 +50,16 @@ def test_scope_preamble_with_retrieved_chunks(monkeypatch) -> None:
     _patch_retrieval(monkeypatch, rag_block="[RAG]\nchunk\n[/RAG]")
     out = _call("¿qué dice el doc?")
     assert out.startswith("[KNOWLEDGE_SCOPE]") and "[RAG]" in out and out.endswith("¿qué dice el doc?")
+
+
+def test_project_context_drops_the_retrieval_line_without_chunks(monkeypatch) -> None:
+    _patch_retrieval(monkeypatch, rag_block="")
+    out, _n = prc.project_context_message(
+        msg="Implementa el bloque condicional",
+        project_context={"name": "P", "description": "d", "agents": [{"worker_id": "w"}]},
+        worker_id="w",
+        tenant_id="t",
+        project_id="p1",
+        knowledge_scope="both",
+    )
+    assert "[PROJECT_CONTEXT]" in out and "conocimiento recuperado" not in out

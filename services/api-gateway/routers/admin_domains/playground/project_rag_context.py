@@ -78,7 +78,11 @@ def project_context_message(
                     f"Nombre: {project_context.get('name') or ''}",
                     f"Descripción: {project_context.get('description') or ''}",
                     f"Agentes activos: {', '.join(agent_ids) if agent_ids else 'ninguno'}",
-                    "Usa el conocimiento recuperado para responder la pregunta del usuario antes de hablar de configuración interna.",
+                    *(
+                        ["Usa el conocimiento recuperado para responder la pregunta del usuario antes de hablar de configuración interna."]
+                        if knowledge_blocks
+                        else []
+                    ),
                     "Usa esta descripción solo para orientar al usuario, proponer próximos pasos y pedir datos faltantes.",
                     "[/PROJECT_CONTEXT]",
                 ]

@@ -524,6 +524,23 @@ def latest_tool_json_since(messages: list[Any], from_idx: int, tool_name: str) -
     return {}
 
 
+TRUNCATED_REPLY_NOTICE = (
+    "⚠️ La respuesta del modelo se cortó por el límite de salida "
+    "(DUCKCLAW_OPENROUTER_MAX_OUTPUT_TOKENS). Lo que sigue es solo un resumen de las "
+    "herramientas, sin el análisis: pide la respuesta de nuevo o en partes más cortas."
+)
+
+
+def last_reply_hit_output_limit(messages: list[Any]) -> bool:
+    """True when the last model message stopped on the output-token cap."""
+    for message in reversed(messages or []):
+        if getattr(message, "type", "") == "ai":
+            meta = getattr(message, "response_metadata", None) or {}
+            reason = str(meta.get("finish_reason") or meta.get("stop_reason") or "").lower()
+            return reason in ("length", "max_tokens")
+    return False
+
+
 def repair_tool_response_egress_reply(
     llm: Any,
     spec: Any,
@@ -534,7 +551,36 @@ def repair_tool_response_egress_reply(
     skip_llm_synthesis: bool = False,
     worker_display_name: str | None = None,
 ) -> str:
-    """Fallback synthesis when enabled workers return empty text or raw tool JSON."""
+    """Fallback synthesis when enabled workers return empty text or raw tool JSON.
+
+    When the model's reply was cut by the output cap, the fallback (a summary of tool
+    results, without the conversation) is prefixed with a notice: unlabeled, stubs like
+    "4 registros." read as the agent having forgotten the conversation.
+    """
+    out = _repair_tool_response_egress_reply_body(
+        llm,
+        spec,
+        incoming,
+        reply,
+        messages,
+        skip_llm_synthesis=skip_llm_synthesis,
+        worker_display_name=worker_display_name,
+    )
+    if out and out != reply and last_reply_hit_output_limit(messages):
+        return f"{TRUNCATED_REPLY_NOTICE}\n\n{out}"
+    return out
+
+
+def _repair_tool_response_egress_reply_body(
+    llm: Any,
+    spec: Any,
+    incoming: str,
+    reply: str,
+    messages: list[Any],
+    *,
+    skip_llm_synthesis: bool,
+    worker_display_name: str | None,
+) -> str:
     from duckclaw.egress.user_reply_nl_synthesis import synthesize_user_visible_reply
     from langchain_core.messages import ToolMessage
 
@@ -624,6 +670,7 @@ def repair_tool_response_egress_reply(
 __all__ = [
     "clock_only_lone_url_no_repair",
     "deterministic_tool_response_summary",
+    "last_reply_hit_output_limit",
     "extract_gmail_evidence_for_synthesis",
     "last_human_index",
     "latest_tool_json_since",

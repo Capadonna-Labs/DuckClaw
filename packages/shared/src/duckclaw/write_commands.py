@@ -67,7 +67,9 @@ class UpsertCatalogSkillCommand(WriteCommand):
 
     command_type: Literal["upsert_catalog_skill"] = "upsert_catalog_skill"
     name: str = Field(..., min_length=2, max_length=128)
-    description: str = Field(default="", max_length=1024)
+    # A directive skill enters the prompt only when invoked (/name); 1024 was too small
+    # for routines like /apertura with several steps.
+    description: str = Field(default="", max_length=4096)
     skill_type: str = Field(default="python", max_length=64)
     implementation_ref: str = Field(..., min_length=3, max_length=512)
     visibility: Literal["private", "public"] = "private"

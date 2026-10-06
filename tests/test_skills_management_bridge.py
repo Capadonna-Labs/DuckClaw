@@ -251,3 +251,25 @@ def test_list_skills_fits_the_tool_output_cap_with_many_long_directives(monkeypa
     out = json.loads(raw)
     assert len(raw) < 8000
     assert out["count"] == 15 and out["skills"][-1]["name"] == "skill_14"
+
+
+def test_list_skills_by_name_returns_the_full_text(monkeypatch) -> None:
+    """edit_skill replaces the whole description; appending needs the untruncated text."""
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
+        lambda db: ("juan@example.com", "/tmp/hub.duckdb"),
+    )
+    full = "1. paso\n" * 400
+    rows = [
+        {"name": "apertura", "skill_type": "directive", "description": full},
+        {"name": "cierre", "skill_type": "directive", "description": "y" * 900},
+    ]
+
+    class _Db:
+        def query(self, sql: str) -> str:
+            return json.dumps(rows)
+
+    monkeypatch.setattr("duckclaw.forge.skills.skills_management_bridge._open_hub_read_only", lambda path: _Db())
+    out = json.loads(_list_skills_impl(object(), "default", "/Apertura"))
+    assert out["count"] == 1 and out["skills"][0]["description"] == full
+    assert json.loads(_list_skills_impl(object(), "default"))["skills"][0]["description"].endswith("…")

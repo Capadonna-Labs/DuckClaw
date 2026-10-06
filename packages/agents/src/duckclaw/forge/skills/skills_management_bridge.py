@@ -131,7 +131,7 @@ def _upsert_skill_impl(
     )
 
 
-def _list_skills_impl(db: Any, tenant_id: str = "default") -> str:
+def _list_skills_impl(db: Any, tenant_id: str = "default", name: str = "") -> str:
     actor, hub_path = _actor_and_db_path(db)
     if not hub_path:
         return json.dumps({"ok": False, "error": "No se pudo resolver la ruta del hub."}, ensure_ascii=False)
@@ -154,6 +154,12 @@ def _list_skills_impl(db: Any, tenant_id: str = "default") -> str:
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)[:500]}, ensure_ascii=False)
+    wanted = (name or "").strip().lstrip("/").lower()
+    if wanted:
+        # One skill, full text: edit_skill replaces the whole description, so the agent
+        # needs the complete current text to append to it.
+        rows = [r for r in rows if isinstance(r, dict) and str(r.get("name") or "").lower() == wanted]
+        return json.dumps({"ok": True, "count": len(rows), "skills": rows}, ensure_ascii=False)
     # Full directive texts (≤1 KB each) pushed this past the 8 KB tool-output cap
     # of context pruning; the alphabetical tail (new skills) was cut and the agent
     # concluded they were never saved. A listing only needs a short excerpt.
@@ -193,7 +199,7 @@ class CreateSkillInput(BaseModel):
     description: str = Field(
         ...,
         min_length=1,
-        max_length=1024,
+        max_length=4096,
         description="Para skill_type='directive': el texto exacto que se inyecta al invocar /nombre.",
     )
     skill_type: Literal["directive", "python"] = Field(
@@ -207,7 +213,11 @@ class EditSkillInput(CreateSkillInput):
 
 
 class ListSkillsInput(BaseModel):
-    pass
+    name: str = Field(
+        default="",
+        max_length=128,
+        description="Opcional: nombre de un skill para obtener su texto COMPLETO (sin él, la lista trae extractos).",
+    )
 
 
 class DeactivateSkillInput(BaseModel):
@@ -233,8 +243,8 @@ def register_skills_management_skill(
     def _edit_skill(name: str, description: str, skill_type: str = "directive") -> str:
         return _upsert_skill_impl(db, name, description, skill_type, tenant_id)
 
-    def _list_skills() -> str:
-        return _list_skills_impl(db, tenant_id)
+    def _list_skills(name: str = "") -> str:
+        return _list_skills_impl(db, tenant_id, name)
 
     def _deactivate_skill(name: str) -> str:
         return _deactivate_skill_impl(db, name, tenant_id)
@@ -263,7 +273,8 @@ def register_skills_management_skill(
                 name="edit_skill",
                 description=(
                     "Edita (upsert) un skill que ya creaste — mismos parámetros que create_skill. "
-                    "Reemplaza description/skill_type del skill existente con ese name."
+                    "REEMPLAZA la description completa: para añadir a un skill, lee antes su texto "
+                    "completo con list_skills(name=...) y envía el texto entero modificado."
                 ),
                 args_schema=EditSkillInput,
             )
@@ -275,7 +286,8 @@ def register_skills_management_skill(
                 name="list_skills",
                 description=(
                     "Lista los skills activos visibles para ti (públicos del tenant + privados "
-                    "tuyos): name, skill_type, description, visibility, owner_email."
+                    "tuyos): name, skill_type, description (extracto), visibility, owner_email. "
+                    "Con name='x' devuelve solo ese skill con su description COMPLETA."
                 ),
                 args_schema=ListSkillsInput,
             )

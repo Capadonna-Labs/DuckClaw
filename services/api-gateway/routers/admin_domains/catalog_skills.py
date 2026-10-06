@@ -27,7 +27,7 @@ router = APIRouter(prefix="/catalog", tags=["admin-catalog-skills"])
 
 class CatalogSkillCreateBody(BaseModel):
     name: str = Field(..., min_length=2, max_length=128)
-    description: str = Field(default="", max_length=1024)
+    description: str = Field(default="", max_length=4096)
     skill_type: str = Field(default="python", max_length=64)
     implementation_ref: str = Field(..., min_length=3, max_length=512)
     visibility: str = Field(default="private", max_length=32)

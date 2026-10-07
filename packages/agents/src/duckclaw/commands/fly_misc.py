@@ -40,10 +40,27 @@ def execute_tasks(db: Any, chat_id: Any) -> str:
     return f"{icon} {status}{elapsed_s}{worker_s}\n" + task_preview
 
 
+def fly_help_entries() -> list[tuple[str, str]]:
+    """Core /help rows plus the extension manifest's ``help_entries`` (they were parsed but never listed)."""
+    entries = list(load_guardrail_pipe_table("fly_commands", "help_entries"))
+    seen = {cmd.split()[0].lstrip("/").replace("_", "-").lower() for cmd, _ in entries}
+    try:
+        from duckclaw.extensions.manifest import load_fly_extension_manifest
+
+        manifest = load_fly_extension_manifest()
+    except Exception:
+        manifest = None
+    for name, desc in manifest.help_entries if manifest else ():
+        if name not in seen:
+            seen.add(name)
+            entries.append((f"/{name}", desc))
+    return entries
+
+
 def execute_help(db: Any, chat_id: Any) -> str:
     """/help: lista los fly commands disponibles."""
     _ = db, chat_id
-    entries = list(load_guardrail_pipe_table("fly_commands", "help_entries"))
+    entries = fly_help_entries()
     block = "\n".join(f"- {cmd} — {desc}" for cmd, desc in entries)
     return f"{load_guardrail('fly_commands', 'help_header')}\n{block}"
 

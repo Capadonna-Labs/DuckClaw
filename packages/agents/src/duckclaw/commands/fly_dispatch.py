@@ -42,7 +42,7 @@ from duckclaw.commands.team_access import execute_team_whitelist
 from duckclaw.commands.team_templates import _resolve_template_id, execute_team
 from duckclaw.commands.vaults import execute_vault
 from duckclaw.commands.workers import _DEFAULT_WORKER, execute_roles, execute_skills_list
-from duckclaw.extensions.fly import dispatch_extension_fly_command
+from duckclaw.extensions.fly import dispatch_extension_fly_command, extension_fly_human_only_command_names
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_fly, structured_log_context
 
 
@@ -61,7 +61,8 @@ HUMAN_ONLY_FLY_COMMANDS = frozenset(
 
 
 def is_human_only_fly_command(name: str) -> bool:
-    return (name or "").strip().lower() in HUMAN_ONLY_FLY_COMMANDS
+    norm = (name or "").strip().lower()
+    return norm in HUMAN_ONLY_FLY_COMMANDS or norm in extension_fly_human_only_command_names()
 
 
 def parse_command(text: str) -> Tuple[str, str]:

@@ -33,6 +33,14 @@ class TavilySearchInput(BaseModel):
         ),
     )
 
+class TavilyExtractInput(BaseModel):
+    url: str = Field(..., description="URL completa (https://...) de una página ya encontrada con una búsqueda.")
+
+
+# Agents found the right URL in search snippets but had no light way to read it, so they
+# re-searched in loops until the tool-step limit (2026-10-07: an earnings release seen 4x, never read).
+_EXTRACT_MAX_CHARS = 12000
+
 _TAVILY_ENV = "TAVILY_API_KEY"
 
 
@@ -210,7 +218,8 @@ def _tavily_search_tool(
     desc_parts = [
         "Busca en internet con Tavily (hasta varias decenas de candidatos según configuración; "
         "resultados resumidos sin raw HTML para ahorrar contexto). "
-        "Parámetro: query (consulta; usa términos concretos en español cuando aplique).",
+        "Parámetro: query (consulta; usa términos concretos en español cuando aplique). "
+        "Si un resultado ya es la fuente que necesitas, léela con tavily_extract en vez de repetir la búsqueda.",
     ]
     if include_domains:
         desc_parts.append(
@@ -222,6 +231,53 @@ def _tavily_search_tool(
         name="tavily_search",
         description="".join(desc_parts),
         args_schema=TavilySearchInput,
+    )
+
+
+def _tavily_extract_tool(
+    config: Optional[dict] = None,
+    *,
+    db: Any | None = None,
+    tenant_id: str = "default",
+    actor_email: str = "",
+) -> Optional[Any]:
+    """StructuredTool ``tavily_extract``: text of one URL (same Tavily key; ``tavily_extract_enabled``)."""
+    cfg = config or {}
+    if cfg.get("tavily_enabled") is False or cfg.get("tavily_extract_enabled") is False:
+        return None
+    api_key = _resolve_tavily_api_key(db=db, tenant_id=tenant_id, actor_email=actor_email)
+    if not api_key or not _tavily_available(db=db, tenant_id=tenant_id, actor_email=actor_email):
+        return None
+
+    from langchain_core.tools import StructuredTool
+    from tavily import TavilyClient
+
+    def _extract(url: str) -> str:
+        u = (url or "").strip()
+        if urlparse(u).scheme not in ("http", "https"):
+            return "URL inválida: usa una URL http(s) completa."
+        try:
+            response = TavilyClient(api_key=api_key).extract(urls=[u])
+        except Exception as e:
+            return f"Error Tavily extract: {e}"
+        results = response.get("results", []) if isinstance(response, dict) else []
+        if not results:
+            failed = response.get("failed_results") if isinstance(response, dict) else None
+            return f"No se pudo leer {u}: {failed or 'sin contenido'}"
+        text = str(results[0].get("raw_content") or "").strip()
+        cut = len(text) > _EXTRACT_MAX_CHARS
+        return f"## Contenido de {u}\n\n{text[:_EXTRACT_MAX_CHARS]}" + (
+            f"\n\n[truncado a {_EXTRACT_MAX_CHARS} caracteres]" if cut else ""
+        )
+
+    return StructuredTool.from_function(
+        _extract,
+        name="tavily_extract",
+        description=(
+            "Lee el texto de una página web (comunicados, notas de prensa, filings) a partir de su URL. "
+            "Úsala cuando una búsqueda ya mostró la fuente: los snippets de búsqueda no traen las cifras completas."
+        ),
+        args_schema=TavilyExtractInput,
     )
 
 
@@ -306,6 +362,9 @@ def register_research_skill(
         tavily_tool = _tavily_search_tool(research_config, db=db, tenant_id=tenant_id)
         if tavily_tool:
             tools_list.append(tavily_tool)
+            extract_tool = _tavily_extract_tool(research_config, db=db, tenant_id=tenant_id)
+            if extract_tool:
+                tools_list.append(extract_tool)
         elif research_config.get("tavily_enabled", True) and not local_tool:
             _log.warning(
                 "research: sin web_search ni tavily_search "

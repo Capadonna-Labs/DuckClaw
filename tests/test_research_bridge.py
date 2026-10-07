@@ -89,3 +89,29 @@ def test_register_research_skill_adds_web_search_without_tavily(
     assert "web_search" in names
     assert "tavily_search" not in names
 
+
+
+def test_tavily_extract_reads_one_url_and_truncates(monkeypatch) -> None:
+    import sys
+    import types
+
+    from duckclaw.forge.skills import research_bridge as rb
+
+    calls: list = []
+
+    class FakeClient:
+        def __init__(self, api_key: str) -> None:
+            pass
+
+        def extract(self, urls):
+            calls.append(urls)
+            return {"results": [{"url": urls[0], "raw_content": "x" * (rb._EXTRACT_MAX_CHARS + 5)}]}
+
+    monkeypatch.setitem(sys.modules, "tavily", types.SimpleNamespace(TavilyClient=FakeClient))
+    monkeypatch.setattr(rb, "_resolve_tavily_api_key", lambda **_: "k")
+    tool = rb._tavily_extract_tool({})
+    out = tool.invoke({"url": "https://ir.acme.com/q1"})
+    assert calls == [["https://ir.acme.com/q1"]]
+    assert "[truncado" in out and out.count("x") == rb._EXTRACT_MAX_CHARS
+    assert "inválida" in tool.invoke({"url": "file:///etc/passwd"})
+    assert rb._tavily_extract_tool({"tavily_extract_enabled": False}) is None

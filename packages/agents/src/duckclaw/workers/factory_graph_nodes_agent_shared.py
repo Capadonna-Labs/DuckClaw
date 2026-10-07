@@ -49,9 +49,13 @@ def log_llm_usage(
         # Output budget exhausted (reasoning models count thinking tokens): the reply
         # is cut or empty and the UI falls back to a tool summary ("N registros.").
         usage = (meta.get("token_usage") or {}).get("completion_tokens")
+        # reasoning vs answer split: tells a runaway reasoning budget from a runaway answer.
+        details = (meta.get("token_usage") or {}).get("completion_tokens_details") or {}
         log.warning(
-            "llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f | truncated=max_tokens completion_tokens=%s",
-            worker_label, phase, elapsed_ms, usage,
+            "llm_usage: worker=%s | phase=%s | elapsed_ms=%.0f | truncated=max_tokens completion_tokens=%s "
+            "reasoning_tokens=%s content_chars=%d model=%s",
+            worker_label, phase, elapsed_ms, usage, details.get("reasoning_tokens"),
+            len(str(getattr(response, "content", "") or "")), meta.get("model_name"),
         )
     elif phase == "writing" and not str(getattr(response, "content", "") or "").strip():
         # Final answer with no text (seen on reasoning models after big tool payloads).

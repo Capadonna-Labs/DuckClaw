@@ -131,6 +131,16 @@ def extension_fly_read_only_command_names() -> frozenset[str]:
     return _READ_ONLY_CACHE
 
 
+def extension_fly_human_only_command_names() -> frozenset[str]:
+    """Manifest ``human_only_commands`` (both ``-`` and ``_`` spellings)."""
+    manifest = _manifest_for_roots()
+    if manifest is None:
+        return frozenset()
+    return frozenset(
+        n for c in manifest.human_only_commands for n in (c, c.replace("-", "_"))
+    )
+
+
 def invalidate_extension_fly_cache() -> None:
     """Reset cached dispatchers/read-only sets (tests)."""
     global _DISPATCHER_CACHE, _READ_ONLY_CACHE

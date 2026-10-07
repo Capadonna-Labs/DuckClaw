@@ -34,6 +34,8 @@ class FlyExtensionManifest:
     # requirements.txt files (relative to the manifest) installed after every uv sync.
     python_requirements: tuple[str, ...] = ()
     read_only_commands: tuple[str, ...] = ()
+    # Approval commands a system turn (cron, heartbeat, /loop) must never run.
+    human_only_commands: tuple[str, ...] = ()
     help_entries: tuple[tuple[str, str], ...] = ()
     state_delta_handlers: tuple[StateDeltaHandlerEntry, ...] = ()
     source_path: Optional[Path] = None
@@ -130,6 +132,9 @@ def _parse_manifest_dict(data: dict[str, Any], *, source: Path | None) -> FlyExt
         skill_tools=_parse_skill_tools(data.get("skill_tools")),
         python_requirements=_parse_hook_list(data.get("python_requirements") or []),
         read_only_commands=tuple(read_only),
+        human_only_commands=tuple(
+            c for c in (_normalize_command_name(x) for x in _parse_hook_list(data.get("human_only_commands") or [])) if c
+        ),
         help_entries=_parse_help_entries(data.get("help_entries")),
         state_delta_handlers=_parse_state_delta_handlers(state_delta_raw),
         source_path=source,

@@ -277,7 +277,7 @@ def test_multiple_prompt_crons_per_chat(tmp_path: Path) -> None:
             return json.loads(get_chat_state(db, 24, _GOALS_CRON_WALL_KEY) or "[]")
 
     with DuckClaw(db_path, read_only=False) as db:
-        out = execute_goals(db, 24, '--timestamp once 2026-10-06T15:45 --prompt "Busca earnings PENG"', tenant_id="t")
+        out = execute_goals(db, 24, '--timestamp once 2099-10-06T15:45 --prompt "Busca earnings PENG"', tenant_id="t")
     assert "cron-id c2" in out
     assert [(i["id"], i["prompt"]) for i in items()] == [("c1", "/defense_watch"), ("c2", "Busca earnings PENG")]
 

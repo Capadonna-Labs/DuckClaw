@@ -959,7 +959,7 @@ def test_heartbeat_fires_each_due_cron_and_keeps_its_own_last_fire(tmp_path: Pat
     from duckclaw.runtime.scheduling.cron_wall_schedule import parse_cron_wall_tokens
 
     every, _ = parse_cron_wall_tokens(["every", "09:00"])
-    once, _ = parse_cron_wall_tokens(["once", "2026-10-06T15:45"])
+    once, _ = parse_cron_wall_tokens(["once", "2099-10-06T15:45"])
     items = [{**every, "id": "c1", "prompt": "/defense_watch"}, {**once, "id": "c2", "prompt": "earnings PENG"}]
     db_path = str(tmp_path / "vault_multi.duckdb")
     con = duckdb.connect(db_path)

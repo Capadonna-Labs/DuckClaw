@@ -398,7 +398,7 @@ def resolve_readable_document_path(*, relative_path: str, root_hint: str = "") -
 
     cleaned = cleaned.lstrip("/")
     if root_hint.strip():
-        # Agents pass the root's name ("Capadonna-Driller"), which resolved against the
+        # Agents pass the root's name (e.g. "My-Repo"), which resolved against the
         # process cwd and was rejected as outside the roots.
         hint = root_hint.strip().strip("/")
         by_name = [r for r in roots if r.name == hint]

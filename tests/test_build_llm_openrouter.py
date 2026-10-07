@@ -186,3 +186,17 @@ def test_openrouter_reasoning_budget_leaves_room_for_the_answer(monkeypatch: pyt
     assert not (getattr(build_openrouter_llm("deepseek/deepseek-v4-flash"), "extra_body", None) or {})
     monkeypatch.setenv("DUCKCLAW_OPENROUTER_REASONING_MAX_TOKENS", "99999")
     assert openrouter_reasoning_max_tokens(16384) == 16384 - 1024
+
+
+def test_reasoning_can_be_turned_off_per_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """deepseek-v4.1-flash ignores reasoning.max_tokens; 'enabled: false' is the lever that works."""
+    from duckclaw.integrations.llm_providers import openrouter_reasoning_param
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
+    monkeypatch.setenv("DUCKCLAW_OPENROUTER_MAX_OUTPUT_TOKENS", "16384")
+    monkeypatch.delenv("DUCKCLAW_OPENROUTER_REASONING_MAX_TOKENS", raising=False)
+    monkeypatch.setenv("DUCKCLAW_OPENROUTER_REASONING_OFF_MODELS", "deepseek/deepseek-v4.1-flash")
+    assert openrouter_reasoning_param(16384, "deepseek/deepseek-v4.1-flash") == {"enabled": False}
+    assert openrouter_reasoning_param(16384, "deepseek/deepseek-v4-flash") == {"max_tokens": 6000}
+    llm = build_openrouter_llm("deepseek/deepseek-v4.1-flash")
+    assert (getattr(llm, "extra_body", None) or {}).get("reasoning") == {"enabled": False}

@@ -146,7 +146,7 @@ def build_openrouter_llm(
         _mt = max(256, min(int(_or_out), 32768))
     except ValueError:
         _mt = 8192
-    _rt = openrouter_reasoning_max_tokens(_mt)
+    _reasoning = openrouter_reasoning_param(_mt, resolved_model)
     llm = ChatOpenAI(
         model=resolved_model,
         temperature=0,
@@ -154,9 +154,25 @@ def build_openrouter_llm(
         api_key=key,
         max_tokens=_mt,
         default_headers=dict(OPENROUTER_ATTRIBUTION_HEADERS),
-        **({"extra_body": {"reasoning": {"max_tokens": _rt}}} if _rt else {}),
+        **({"extra_body": {"reasoning": _reasoning}} if _reasoning else {}),
     )
     return ensure_openrouter_attribution_headers(llm)
+
+
+def openrouter_reasoning_param(max_output_tokens: int, model: str = "") -> dict[str, Any] | None:
+    """``reasoning`` body for OpenRouter: off, a token cap, or None (provider default).
+
+    Some models ignore the cap: deepseek-v4.1-flash reasoned 10,220 tokens with
+    max_tokens=3000 and 8,385 with effort=low, and in production spent all 16,384 output
+    tokens reasoning with no answer. It does honor ``enabled: false``.
+    ``DUCKCLAW_OPENROUTER_REASONING_OFF_MODELS``: comma-separated model ids (or "*") sent
+    with reasoning disabled; everything else gets the token cap.
+    """
+    off = {m.strip().lower() for m in (os.environ.get("DUCKCLAW_OPENROUTER_REASONING_OFF_MODELS") or "").split(",") if m.strip()}
+    if "*" in off or (model or "").strip().lower() in off:
+        return {"enabled": False}
+    cap = openrouter_reasoning_max_tokens(max_output_tokens)
+    return {"max_tokens": cap} if cap else None
 
 
 def openrouter_reasoning_max_tokens(max_output_tokens: int) -> int:

@@ -45,6 +45,11 @@ def extension_sandbox(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
               - fake-cmd
             human_only_commands:
               - fake_approve
+            help_entries:
+              - name: fake-cmd
+                description: "Comando de prueba"
+              - name: team
+                description: "duplicado del core: se ignora"
             """
         ).strip()
         + "\n",
@@ -83,6 +88,14 @@ def test_human_only_commands_from_manifest(extension_sandbox: Path) -> None:
     assert is_human_only_fly_command("fake-approve")
     assert is_human_only_fly_command("FAKE_APPROVE")
     assert not is_human_only_fly_command("fake-cmd")
+
+
+def test_help_lists_extension_commands(extension_sandbox: Path) -> None:
+    from duckclaw.commands.fly_misc import fly_help_entries
+
+    entries = fly_help_entries()
+    assert ("/fake-cmd", "Comando de prueba") in entries
+    assert sum(1 for cmd, _ in entries if cmd.split()[0] == "/team") == 1
 
 
 def test_env_only_dispatcher(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

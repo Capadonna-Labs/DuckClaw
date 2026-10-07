@@ -31,6 +31,7 @@ import { PlaygroundChatStudioHeader } from '@/components/playground/PlaygroundCh
 import { useComposeClipboard } from '@/components/chat/useComposeClipboard';
 import { shouldShowSuggestionChips, slashMenuEntryFromCatalogSkill } from '@/components/chat/adminChatPure';
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
+import { adminService } from '@/services/adminService';
 
 export type AdminChatPanelProps = {
   chatId: string;
@@ -101,12 +102,32 @@ export function AdminChatPanel({
   // Directive skills (instrucciones invocables con "/nombre") del catálogo global —
   // los tool skills "python" no aplican aquí, no son texto invocable en el chat.
   const { globalSkills, loadSkills } = useSkillsCatalog();
+  // Fly commands del gateway (core + extensiones, p. ej. /macro): la lista fija del
+  // composer solo traía los genéricos, así que los de extensión nunca se sugerían.
+  const [flyCommands, setFlyCommands] = useState<{ cmd: string; description: string }[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    adminService
+      .listFlyCommands()
+      .then((res) => {
+        if (cancelled) return;
+        setFlyCommands(
+          (res.commands ?? []).map((c) => ({ cmd: c.cmd.split(/\s+/)[0], description: c.description }))
+        );
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const directiveSkills = useMemo(
-    () =>
-      globalSkills
+    () => [
+      ...globalSkills
         .map(slashMenuEntryFromCatalogSkill)
         .filter((e): e is { cmd: string; description: string } => e !== null),
-    [globalSkills]
+      ...flyCommands,
+    ],
+    [globalSkills, flyCommands]
   );
   const internalChat = useAdminChat({
     chatId,

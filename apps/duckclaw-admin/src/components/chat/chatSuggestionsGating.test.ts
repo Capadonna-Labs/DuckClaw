@@ -38,6 +38,16 @@ describe('shouldFetchChatSuggestions', () => {
     expect(matchingSlashCommands('/loop ')).toEqual([]);
   });
 
+  it('menú "/": suma fly commands del gateway (extensiones) sin duplicar', () => {
+    const extra = [
+      { cmd: '/macro', description: 'Estado del régimen' },
+      { cmd: '/loop', description: 'duplicado del genérico' },
+      { cmd: '/macro', description: 'duplicado skill/fly' },
+    ];
+    expect(matchingSlashCommands('/macr', extra)).toEqual([{ cmd: '/macro', description: 'Estado del régimen' }]);
+    expect(matchingSlashCommands('/lo', extra).map((c) => c.cmd)).toEqual(['/loop']);
+  });
+
   it('isKnownSlashCommand: genéricos + directive skills instalados, no cualquier /texto', () => {
     expect(isKnownSlashCommand('/loop')).toBe(true);
     expect(isKnownSlashCommand('/LOOP')).toBe(true);

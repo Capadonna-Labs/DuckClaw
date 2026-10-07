@@ -128,11 +128,13 @@ export function matchingSlashCommands(
   const t = (input || '').replace(/^\s+/, '');
   if (!t.startsWith('/') || /\s/.test(t)) return [];
   const prefix = t.toLowerCase();
-  const seen = new Set(GENERIC_FLY_SLASH_COMMANDS.map((c) => c.cmd));
-  const all = [
-    ...GENERIC_FLY_SLASH_COMMANDS,
-    ...extraCommands.filter((c) => !seen.has(c.cmd)),
-  ];
+  const seen = new Set<string>();
+  const all = [...GENERIC_FLY_SLASH_COMMANDS, ...extraCommands].filter((c) => {
+    const key = c.cmd.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   return all.filter((c) => c.cmd.toLowerCase().startsWith(prefix));
 }
 

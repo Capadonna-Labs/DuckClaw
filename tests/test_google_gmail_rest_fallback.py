@@ -180,3 +180,44 @@ def test_get_message_rejects_gmail_web_link() -> None:
     assert "19f6fa44a4dec1eb" in out
     assert "Seeking Alpha" in out
     assert "Do NOT invent" in out
+
+
+def test_compact_gmail_message_decodes_body_and_drops_raw_parts() -> None:
+    import base64
+
+    from duckclaw.forge.skills.google_gmail_rest import compact_gmail_message
+
+    def b64(s: str) -> str:
+        return base64.urlsafe_b64encode(s.encode()).decode().rstrip("=")
+
+    html_body = (
+        "<html><head><style>.x{color:red}</style></head><body><p>Nvidia: the top AI stock</p>"
+        "<p>Forward P/E near decade lows &amp; growing.</p>"
+        '<a href="https://links.example.com/' + "t" * 300 + '">Read</a></body></html>'
+    )
+    msg = {
+        "id": "m1",
+        "threadId": "t1",
+        "labelIds": ["UNREAD"],
+        "snippet": "Nvidia &amp; more",
+        "payload": {
+            "headers": [{"name": "From", "value": "SA <a@sa.com>"}, {"name": "Subject", "value": "Nvidia"}],
+            "mimeType": "multipart/alternative",
+            "parts": [{"mimeType": "text/html", "body": {"data": b64(html_body)}}],
+        },
+    }
+    out = compact_gmail_message(msg)
+    assert out["from"] == "SA <a@sa.com>" and out["subject"] == "Nvidia" and out["snippet"] == "Nvidia & more"
+    assert "Forward P/E near decade lows & growing." in out["body"]
+    assert "color:red" not in out["body"] and "<p>" not in out["body"]
+    assert "payload" not in out
+    # text/plain wins over html when present
+    msg["payload"]["parts"].insert(0, {"mimeType": "text/plain", "body": {"data": b64("Plain version")}})
+    assert compact_gmail_message(msg)["body"] == "Plain version"
+
+
+def test_harness_gives_mail_reads_a_larger_budget() -> None:
+    from duckclaw.workers.tool_harness import harness_max_chars_for_tool
+
+    assert harness_max_chars_for_tool("mcp__google_gmail__get_thread", 12000) == 40000
+    assert harness_max_chars_for_tool("mcp__google_gmail__search_threads", 12000) == 12000

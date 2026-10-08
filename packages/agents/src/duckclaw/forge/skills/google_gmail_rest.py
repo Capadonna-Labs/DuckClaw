@@ -8,6 +8,7 @@ Keep MCP tools/list; execute tools over Gmail API v1.
 from __future__ import annotations
 
 import base64
+import html
 import json
 import re
 from email.mime.multipart import MIMEMultipart
@@ -94,6 +95,71 @@ def _label_from_gmail_url(raw: str) -> tuple[str | None, str | None]:
     if head in ("all", "category", "search"):
         return None, "in:anywhere"
     return "INBOX", None
+
+
+_URL_RE = re.compile(r"https?://[^\s<>\"')\]]+")
+
+
+def _b64url_text(data: str) -> str:
+    try:
+        return base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _html_to_text(raw: str) -> str:
+    text = re.sub(r"(?is)<(script|style|head)[^>]*>.*?</\1>", " ", raw)
+    text = re.sub(r"(?i)<br\s*/?>|</(p|div|tr|li|h[1-6])>", "\n", text)
+    text = html.unescape(re.sub(r"(?s)<[^>]+>", " ", text))
+    return text
+
+
+def _shorten_urls(text: str) -> str:
+    """Newsletter tracking links run to hundreds of chars; keep the host, not the token soup."""
+    def _short(m: re.Match[str]) -> str:
+        url = m.group(0)
+        return url if len(url) <= 100 else f"{urlparse(url).scheme}://{urlparse(url).netloc}/…"
+    return _URL_RE.sub(_short, text)
+
+
+def _message_body_text(payload: dict[str, Any] | None) -> str:
+    """Decoded body: text/plain if any part has it, else text/html converted to text."""
+    plain: list[str] = []
+    htmls: list[str] = []
+
+    def walk(part: dict[str, Any]) -> None:
+        mime = str(part.get("mimeType") or "").lower()
+        data = str(((part.get("body") or {}).get("data")) or "")
+        if data and mime == "text/plain":
+            plain.append(_b64url_text(data))
+        elif data and mime == "text/html":
+            htmls.append(_b64url_text(data))
+        for sub in part.get("parts") or []:
+            if isinstance(sub, dict):
+                walk(sub)
+
+    walk(payload or {})
+    text = "\n".join(plain) if any(p.strip() for p in plain) else _html_to_text("\n".join(htmls))
+    text = _shorten_urls(text)
+    text = re.sub(r"[ \t\u00a0\u200c\u034f]+", " ", text)
+    return re.sub(r"\n\s*\n+", "\n\n", text).strip()
+
+
+def compact_gmail_message(msg: dict[str, Any]) -> dict[str, Any]:
+    """Readable message for the LLM instead of the raw API resource (base64 parts + all headers)."""
+    payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+    hdrs = _header_map(payload)
+    return {
+        "id": msg.get("id"),
+        "threadId": msg.get("threadId"),
+        "labelIds": msg.get("labelIds") or [],
+        "from": hdrs.get("From", ""),
+        "to": hdrs.get("To", ""),
+        "date": hdrs.get("Date", ""),
+        "subject": hdrs.get("Subject", ""),
+        "snippet": html.unescape(str(msg.get("snippet") or "")),
+        "body": _message_body_text(payload),
+    }
 
 
 def _header_map(payload: dict[str, Any] | None) -> dict[str, str]:
@@ -373,9 +439,17 @@ async def call_google_gmail_rest(
         if not resp.content:
             return json.dumps({"ok": True}, ensure_ascii=False)
         try:
-            return json.dumps(resp.json(), ensure_ascii=False)
+            data = resp.json()
         except Exception:
             return resp.text
+        if name == "get_message" and isinstance(data, dict):
+            data = compact_gmail_message(data)
+        elif name == "get_thread" and isinstance(data, dict):
+            data = {
+                "id": data.get("id"),
+                "messages": [compact_gmail_message(m) for m in data.get("messages") or [] if isinstance(m, dict)],
+            }
+        return json.dumps(data, ensure_ascii=False)
 
 
 def uses_google_gmail_rest_fallback(connector: dict[str, Any]) -> bool:

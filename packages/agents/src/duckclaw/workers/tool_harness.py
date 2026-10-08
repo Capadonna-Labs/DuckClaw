@@ -201,6 +201,9 @@ def harness_max_chars_for_tool(tool_name: str, default_max: int) -> int:
     name = (tool_name or "").strip().lower()
     if name.endswith("__get_ui_dump"):
         return max(default_max, 48_000)
+    # Full email bodies (newsletters/research) are the point of reading a message.
+    if name.endswith(("gmail__get_thread", "gmail__get_message")):
+        return max(default_max, 40_000)
     if name.endswith("__get_screenshot"):
         return default_max  # compacted to artifact JSON in tools_node
     return default_max

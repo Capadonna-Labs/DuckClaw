@@ -38,4 +38,13 @@ export const platformApi = {
     adminFetch<{ header: string; commands: FlyCommandEntry[] }>(
       '/fly-commands'
     ),
+  listWorkerLlm: (tenantId?: string) =>
+    adminFetch<{ tenant_id: string; overrides: Record<string, string> }>(
+      `/worker-llm?tenant_id=${encodeURIComponent(tenantId || 'default')}`
+    ),
+  setWorkerLlm: (body: { worker_id: string; model: string; tenant_id: string }) =>
+    adminFetch<{ accepted: boolean; task_id: string }>('/worker-llm', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
 };

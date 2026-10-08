@@ -312,6 +312,17 @@ def invoke_delegated_worker(
         except Exception:
             pass
 
+        from duckclaw.worker_llm_overrides import apply_worker_llm_override
+
+        llm, llm_provider, llm_model, llm_base_url = apply_worker_llm_override(
+            db,
+            tenant_id=tenant_s,
+            worker_id=target,
+            llm=llm,
+            llm_provider=llm_provider or "",
+            llm_model=llm_model or "",
+            llm_base_url=llm_base_url or "",
+        )
         worker_cache_key = build_worker_cache_key(
             tenant_id=tenant_s,
             assigned=target,

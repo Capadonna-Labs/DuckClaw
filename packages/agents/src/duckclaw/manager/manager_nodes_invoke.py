@@ -157,9 +157,22 @@ def build_invoke_worker_node(
         try:
             slot_token, run_label_n = acquire_subagent_slot(tenant_id, assigned, str(chat_id or ""))
             agent_instance_label = f"{assigned} {run_label_n}".strip()
+            from duckclaw.worker_llm_overrides import apply_worker_llm_override
+
+            _w_llm, _w_provider, _w_model, _w_base_url = apply_worker_llm_override(
+                db,
+                tenant_id=tenant_id,
+                worker_id=assigned,
+                llm=llm,
+                llm_provider=llm_provider or "",
+                llm_model=llm_model or "",
+                llm_base_url=llm_base_url or "",
+            )
+            if _w_llm is not llm:
+                _log.info("worker_llm override worker=%s model=%s", assigned, _w_model)
             worker_cache_key = (
                 f"{tenant_id}::{assigned}::{vault_db_path or db_path or ''}::{shared_db_path}"
-                f"::{(llm_provider or '').strip()}::{(llm_model or '').strip()}::{(llm_base_url or '').strip()}"
+                f"::{_w_provider.strip()}::{_w_model.strip()}::{_w_base_url.strip()}"
             )
             if _visual_lite_mcp:
                 worker_cache_key = f"{worker_cache_key}::vis_gen"
@@ -270,11 +283,11 @@ def build_invoke_worker_node(
                 worker_graph = _build_worker_graph(
                     assigned,
                     vault_db_path or db_path,
-                    llm,
+                    _w_llm,
                     templates_root=troot,  # None => forge/templates
-                    llm_provider=llm_provider or "",
-                    llm_model=llm_model or "",
-                    llm_base_url=llm_base_url or "",
+                    llm_provider=_w_provider,
+                    llm_model=_w_model,
+                    llm_base_url=_w_base_url,
                     instance_name=tenant_id,  # Aislar por tenant (Forge/WorkerFactory)
                     shared_db_path=shared_db_path or None,
                     reuse_db=db,

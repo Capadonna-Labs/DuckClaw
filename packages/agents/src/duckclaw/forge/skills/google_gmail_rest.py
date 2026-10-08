@@ -154,6 +154,17 @@ _SKIP_LINK_RE = re.compile(
 _MAX_LINKS = 12
 
 
+def _unwrap_tracking_url(url: str) -> str:
+    """Click-tracking redirects often carry the destination base64-encoded in a path segment
+    (e.g. email-st.seekingalpha.com/click/<id>/aHR0cHM6Ly9…): return that destination."""
+    for seg in urlparse(url).path.split("/"):
+        if len(seg) > 16 and seg.startswith("aHR0c"):
+            target = _b64url_text(seg)
+            if target.startswith(("http://", "https://")):
+                return target
+    return url
+
+
 def _message_links(payload: dict[str, Any] | None) -> list[dict[str, str]]:
     """Anchor text + full URL of the content links in the HTML part (articles behind teasers).
     The body text shortens tracking URLs, so the agent needs these to open the article."""
@@ -172,7 +183,7 @@ def _message_links(payload: dict[str, Any] | None) -> list[dict[str, str]]:
     seen: set[str] = set()
     for href, inner in _LINK_RE.findall("\n".join(htmls)):
         text = re.sub(r"\s+", " ", html.unescape(re.sub(r"(?s)<[^>]+>", " ", inner))).strip()
-        url = html.unescape(href).strip()
+        url = _unwrap_tracking_url(html.unescape(href).strip())
         if not text or len(text) < 4 or not url.lower().startswith("http") or _SKIP_LINK_RE.search(f"{text} {url}"):
             continue
         if text.lower() in seen:

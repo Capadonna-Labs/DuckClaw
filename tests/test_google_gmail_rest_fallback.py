@@ -235,3 +235,14 @@ def test_message_links_skip_footer_links() -> None:
     data = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
     out = compact_gmail_message({"payload": {"mimeType": "text/html", "body": {"data": data}}})
     assert out["links"] == [{"text": "Nvidia: Micron Just Gave It Away", "url": "https://sa.com/article/123"}]
+
+
+def test_tracking_redirect_is_unwrapped_to_destination() -> None:
+    import base64
+
+    from duckclaw.forge.skills.google_gmail_rest import _unwrap_tracking_url
+
+    dest = "https://seekingalpha.com/article/4952602-nvidia?mr_free_article=true"
+    seg = base64.urlsafe_b64encode(dest.encode()).decode().rstrip("=")
+    assert _unwrap_tracking_url(f"https://email-st.seekingalpha.com/click/47853852.735244/{seg}/6") == dest
+    assert _unwrap_tracking_url("https://example.com/a/b") == "https://example.com/a/b"

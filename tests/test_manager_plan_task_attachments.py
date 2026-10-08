@@ -6,7 +6,7 @@ from duckclaw.manager.manager_plan_task import _plan_task
 
 _ATTACHMENT_TURN = (
     "[PROJECT_CONTEXT]\n"
-    "Nombre: Finanz 1\n"
+    "Nombre: Agente 1\n"
     "Descripcion: analisis financiero\n\n"
     "[DOCUMENTOS_ADJUNTOS]\n"
     "[Documento adjunto: 2026 MOVIMIENTOS CONTABILIDAD.xlsx "
@@ -19,7 +19,7 @@ _ATTACHMENT_TURN = (
 
 
 def test_attachment_turn_keeps_user_message():
-    planned, override = _plan_task(_ATTACHMENT_TURN, "finanz-expert")
+    planned, override = _plan_task(_ATTACHMENT_TURN, "demo-expert")
     assert override is None
     assert planned == _ATTACHMENT_TURN.strip()
     assert "get_db_path" not in planned
@@ -31,12 +31,12 @@ def test_attachment_turn_with_explicit_db_question_still_plans_db_task():
         "revisa este archivo excel",
         "que tablas hay en la base de datos duckdb",
     )
-    planned, _ = _plan_task(turn, "finanz-expert")
+    planned, _ = _plan_task(turn, "demo-expert")
     assert planned != turn.strip()
 
 
 def test_plain_db_question_without_attachments_still_plans_db_task():
-    planned, _ = _plan_task("cual es el nombre de la base de datos", "finanz-expert")
+    planned, _ = _plan_task("cual es el nombre de la base de datos", "demo-expert")
     assert "get_db_path" in planned
 
 
@@ -48,7 +48,7 @@ def test_long_brief_mentioning_nombre_and_datos_is_not_rewritten() -> None:
         "Para la tabla de parámetros: 1. Deja solo los tickers con datos de 2022 (SPY, TLT, XLE). "
         + "Detalle adicional del plan y sus restricciones. " * 8
     )
-    planned, _ = _plan_task(brief, "finanz-expert")
+    planned, _ = _plan_task(brief, "demo-expert")
     assert planned == brief.strip()
-    short, _ = _plan_task("cual es el nombre de la base de datos", "finanz-expert")
+    short, _ = _plan_task("cual es el nombre de la base de datos", "demo-expert")
     assert short != "cual es el nombre de la base de datos"

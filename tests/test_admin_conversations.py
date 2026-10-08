@@ -88,14 +88,14 @@ async def _test_upsert_and_list_conversations_impl():
         session_id=sid,
         actor="admin@duckclaw.local",
         section="playground",
-        last_worker_id="Quant-Trader",
+        last_worker_id="Research-Agent",
         user_message="hola macro",
         assistant_message="resumen macro",
     )
     assert meta is not None
     assert meta.title == "hola macro"
     assert meta.section == "playground"
-    assert "Quant-Trader" in meta.workers
+    assert "Research-Agent" in meta.workers
 
     items, total = await list_conversations(redis, "Orchestrator", section="playground")
     assert total >= 1

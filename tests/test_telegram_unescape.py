@@ -39,17 +39,17 @@ def test_roundtrip_plain() -> None:
 
 
 def test_execute_tasks_shows_worker_without_backslash_before_hyphen(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Nombre SIATA-Analyst en /tasks: espacio en lugar de guion para no exigir \\- en MarkdownV2."""
+    """Nombre Acme-Analyst en /tasks: espacio en lugar de guion para no exigir \\- en MarkdownV2."""
 
     def _fake_get_activity(_chat_id: object) -> dict:
         return {
             "status": "BUSY",
             "task": "Scrapeo radar",
-            "worker_id": "SIATA-Analyst",
+            "worker_id": "Acme-Analyst",
             "started_at": int(time.time()) - 3,
         }
 
     monkeypatch.setattr("duckclaw.graphs.activity.get_activity", _fake_get_activity)
     out = execute_tasks(None, TELEGRAM_TEST_USER_ID)
-    assert "SIATA\\-Analyst" not in out
-    assert "SIATA Analyst" in out or "SIATA" in unescape_telegram_markdown_v2_layers(out)
+    assert "Acme\\-Analyst" not in out
+    assert "Acme Analyst" in out or "ACME" in unescape_telegram_markdown_v2_layers(out)

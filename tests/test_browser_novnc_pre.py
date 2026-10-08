@@ -86,11 +86,11 @@ def test_schedule_run_browser_novnc_skips_admin_ui_sse(monkeypatch: pytest.Monke
         "tenant_id": "default",
         "chat_id": "admin-conv-test-novnc",
         "user_id": "admin@duckclaw.local",
-        "subagent_instance_label": "Quant-Trader 1",
+        "subagent_instance_label": "Research-Agent 1",
     }
     fac._schedule_run_browser_novnc_tool_heartbeat(
         state,
-        routing_worker_id="Quant-Trader",
+        routing_worker_id="Research-Agent",
         vnc_url="https://example/vnc",
         novnc_session_id="admin_conv_test",
     )

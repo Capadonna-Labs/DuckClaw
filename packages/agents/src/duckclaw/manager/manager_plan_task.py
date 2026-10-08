@@ -138,20 +138,6 @@ def _plan_task(
     if len(user_request_text(text).strip()) > _KEYWORD_REWRITE_MAX_CHARS:
         return text, None
     _explicit_duckdb_schema_request = explicit_duckdb_schema_request(text)
-    # BI Analyst: preguntas meta (qué puedes hacer, quién eres) → el modelo a veces ignora soul.md y copia
-    # el tono genérico «Agente de Investigación Activa»; la tarea explícita lo corrige sin depender del historial.
-    if (worker_id or "").strip().lower() == "bi-analyst":
-        t_plain = (incoming or "").strip().lower()
-        if re.search(
-            r"\b(qué\s+puedes|que\s+puedes|qué\s+haces|que\s+haces|"
-            r"en\s+qué\s+puedes|en\s+que\s+puedes|"
-            r"qué\s+sabes\s+hacer|que\s+sabes\s+hacer|"
-            r"capacidades|qué\s+ofreces|que\s+ofreces|"
-            r"quién\s+eres|quien\s+eres|presentate|preséntate|"
-            r"para\s+qué\s+estás|para\s+que\s+estás)\b",
-            t_plain,
-        ):
-            return load_guardrail("manager_tasks", "bi_analyst_capabilities_question"), None
     # Whole words: substring "datos" matched "candidatos", "db" matched "dbt"…
     _names_db = bool(re.search(r"\bnombre\b", t) and re.search(r"\b(db|base|datos)\b", t))
     is_db_intent = bool(

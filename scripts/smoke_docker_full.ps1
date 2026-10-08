@@ -96,7 +96,7 @@ try {
     if (-not $email -or -not $pass) { throw "Admin credentials missing in .env" }
     Write-Host "Admin email: $email (password length $($pass.Length))"
 
-    Write-Host "==> assert no quant_core in empty vault (duckdb inside gateway)"
+    Write-Host "==> assert only core schemas in empty vault (duckdb inside gateway)"
     $py = @'
 import os
 import duckdb
@@ -104,18 +104,18 @@ p = os.environ.get("DUCKCLAW_GATEWAY_DB_PATH", "/data/duckclaw.duckdb")
 con = duckdb.connect(p, read_only=True)
 rows = con.execute(
     "SELECT table_schema||'.'||table_name FROM information_schema.tables "
-    "WHERE lower(table_schema) LIKE '%quant%' OR lower(table_name) LIKE '%quant%'"
+    "WHERE table_schema NOT IN ('main', 'information_schema', 'pg_catalog')"
 ).fetchall()
-print("quant_matches", len(rows))
+print("extra_schema_tables", len(rows))
 for r in rows:
     print(r[0])
 raise SystemExit(0 if len(rows) == 0 else 2)
 '@
-    $pyFile = Join-Path $env:TEMP "duckclaw_smoke_quant_check.py"
+    $pyFile = Join-Path $env:TEMP "duckclaw_smoke_schema_check.py"
     Set-Content -Path $pyFile -Value $py -Encoding UTF8
     Get-Content $pyFile | & docker compose -f docker-compose.yml exec -T gateway python -
-    if ($LASTEXITCODE -ne 0) { throw "quant_core or quant tables present in base DB" }
-    Write-Host "OK no quant schemas in base DB"
+    if ($LASTEXITCODE -ne 0) { throw "non-core schemas present in base DB" }
+    Write-Host "OK only core schemas in base DB"
 
     Write-Host "==> second compose up (warm)"
     [void](Invoke-Docker @("compose", "-f", "docker-compose.yml", "stop"))
@@ -143,14 +143,14 @@ Host: $env:COMPUTERNAME
 | admin /login | OK |
 | Containers (gateway, db-writer, redis, knowledge-indexer, heartbeat, admin) | OK |
 | Login credentials present in .env | OK ($email) |
-| No quant_core / quant tables in base DB | OK |
+| No vertical schemas in base DB | OK |
 | Manual .env / console edits | None required |
 
 ## Notes
 
 - Stack path: ``deploy/docker``
 - Auth: ``DUCKCLAW_ADMIN_EMAIL`` / ``DUCKCLAW_ADMIN_PASSWORD`` from ``.env``
-- Quant-Trader / quant_core intentionally absent (import via worker zip = paso 2)
+- Vertical worker schemas intentionally absent (import via worker zip = paso 2)
 - Tailscale not required for this smoke (localhost only)
 
 ## Verdict

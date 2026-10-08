@@ -62,10 +62,10 @@ def test_invoke_delegated_worker_rejects_not_in_allowlist() -> None:
 def test_is_target_allowed_matches_hyphen_underscore_aliases() -> None:
     from duckclaw.workers.worker_invoke import _is_target_allowed
 
-    caller_spec = SimpleNamespace(allowed_delegates=("quant_trader", "quant_reporter"))
-    assert _is_target_allowed(caller_spec, "quant-trader", None) is True
-    assert _is_target_allowed(caller_spec, "quant_trader", None) is True
-    assert _is_target_allowed(caller_spec, "quant-reporter", None) is True
+    caller_spec = SimpleNamespace(allowed_delegates=("research_agent", "report_writer"))
+    assert _is_target_allowed(caller_spec, "research-agent", None) is True
+    assert _is_target_allowed(caller_spec, "research_agent", None) is True
+    assert _is_target_allowed(caller_spec, "report-writer", None) is True
     assert _is_target_allowed(caller_spec, "youtube-analyst", None) is False
 
 
@@ -295,8 +295,8 @@ def test_build_worker_tools_omits_write_output_for_html_publisher() -> None:
     from duckclaw.workers.factory_tool_builder import _build_worker_tools
 
     spec = WorkerSpec(
-        worker_id="quant_reporter",
-        logical_worker_id="quant_reporter",
+        worker_id="report_writer",
+        logical_worker_id="report_writer",
         name="qr",
         schema_name="finance_worker",
         llm_required=None,

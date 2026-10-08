@@ -42,9 +42,9 @@ def test_sanitize_worker_reply_strips_html_escaped_eot() -> None:
 
 
 def test_sanitize_worker_reply_strips_tool_section_headers() -> None:
-    raw = "platform-orchestrator 2\n\n### get_ibkr_portfolio\nEstado: conectado."
+    raw = "platform-orchestrator 2\n\n### get_broker_portfolio\nEstado: conectado."
     out = sanitize_worker_reply_text(raw)
-    assert "get_ibkr_portfolio" not in out
+    assert "get_broker_portfolio" not in out
     assert "Estado: conectado" in out
 
 
@@ -114,9 +114,9 @@ def test_sanitize_worker_reply_keeps_text_after_gemma_channel_separator() -> Non
 
 
 def test_sanitize_worker_reply_phase1_keeps_tool_headers() -> None:
-    raw = "### get_ibkr_portfolio\nEstado: ok"
+    raw = "### get_broker_portfolio\nEstado: ok"
     out = sanitize_worker_reply_phase1(raw)
-    assert "get_ibkr_portfolio" in out
+    assert "get_broker_portfolio" in out
     assert "Estado: ok" in out
 
 
@@ -137,12 +137,12 @@ def test_coerce_json_tool_invoke_parameters_and_arguments_string() -> None:
 
 def test_extract_embedded_json_tool_invokes_semicolon_separated_pair() -> None:
     raw = (
-        '{"name": "get_ibkr_portfolio", "parameters": {}}; '
+        '{"name": "get_broker_portfolio", "parameters": {}}; '
         '{"name": "read_sql", "parameters": {"query": "SELECT * FROM finance_worker.cuentas"}}'
     )
     got = extract_embedded_json_tool_invokes(raw)
     assert got == [
-        ("get_ibkr_portfolio", {}),
+        ("get_broker_portfolio", {}),
         ("read_sql", {"query": "SELECT * FROM finance_worker.cuentas"}),
     ]
 
@@ -171,7 +171,7 @@ def test_extract_dsml_tool_invokes_deepseek_markup() -> None:
 
 def test_sanitize_worker_reply_strips_dsml_tool_markup() -> None:
     raw = (
-        "Quant-Trader 1\n\n"
+        "Research-Agent 1\n\n"
         "<｜DSML｜tool_calls>\n"
         '<｜DSML｜invoke name="read_sql">\n'
         '<｜DSML｜parameter name="query" string="true">SELECT 1</｜DSML｜parameter>\n'
@@ -181,7 +181,7 @@ def test_sanitize_worker_reply_strips_dsml_tool_markup() -> None:
     out = sanitize_worker_reply_text(raw)
     assert "DSML" not in out
     assert "invoke" not in out.lower()
-    assert "Quant-Trader 1" in out
+    assert "Research-Agent 1" in out
 
 
 def test_reply_contains_dsml_tool_markup() -> None:

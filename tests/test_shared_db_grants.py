@@ -42,7 +42,7 @@ def test_user_may_access_denied_when_grants_exist_and_no_match(tmp_path, monkeyp
     shared_file = shared_dir / "c.duckdb"
     shared_file.write_bytes(b"x")
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
-    monkeypatch.setenv("DUCKCLAW_SHARED_DB_PATH", "/no/existe/leila.duckdb")
+    monkeypatch.setenv("DUCKCLAW_SHARED_DB_PATH", "/no/existe/shared.duckdb")
     upsert_shared_grant(db, tenant_id="example-store", user_id="u1", resource_key="default")
     assert not user_may_access_shared_path(
         db,

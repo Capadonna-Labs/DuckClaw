@@ -11,7 +11,7 @@ def test_approval_commands_are_human_only() -> None:
     for text in ("/approve-code 123", "/APPROVE_CODE 1", "/loop-approve x", "/approve-model a", "/reject-code 1"):
         name, _ = parse_command(text)
         assert is_human_only_fly_command(name), text
-    for text in ("/help", "/trading_session --status", "/goals"):
+    for text in ("/help", "/session_report --status", "/goals"):
         assert not is_human_only_fly_command(parse_command(text)[0]), text
 
 

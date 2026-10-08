@@ -65,7 +65,7 @@ def test_pause_chat_autonomy_disables_loop_and_suggestions(
     register_loop_skill(tools, _FakeDb())
     set_goals_tool_chat_id("chat-pause")
     set_goals_tool_tenant_id("t1")
-    set_goals_tool_worker_id("quant_analyst")
+    set_goals_tool_worker_id("data_analyst")
     pause = next(t for t in tools if t.name == "pause_chat_autonomy")
     raw = pause.invoke({})
     data = json.loads(raw)

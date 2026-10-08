@@ -53,13 +53,13 @@ def test_idle_tick_success_clears_pending_and_reanchors(
 ) -> None:
     now = 1_700_000_000.0
     delta = 1500
-    chat_id = "quant11"
+    chat_id = "chat11"
     rows = {
         _chat_key(chat_id, "loop_delta_seconds"): str(delta),
         _chat_key(chat_id, "loop_delta_idle"): "1",
         _chat_key(chat_id, "loop_last_activity_epoch"): str(now - float(delta) - 5.0),
         _chat_key(chat_id, "loop_pending_tick"): "0",
-        _chat_key(chat_id, "loop_worker_id"): "quant-worker",
+        _chat_key(chat_id, "loop_worker_id"): "demo-worker",
         _chat_key(chat_id, "loop_tenant_id"): "default",
     }
     writes: list[tuple[str, str]] = []
@@ -104,13 +104,13 @@ def test_busy_due_tick_sets_catchup_and_skips_post(
 ) -> None:
     now = 1_700_000_000.0
     delta = 1500
-    chat_id = "quant11"
+    chat_id = "chat11"
     rows = {
         _chat_key(chat_id, "loop_delta_seconds"): str(delta),
         _chat_key(chat_id, "loop_delta_idle"): "1",
         _chat_key(chat_id, "loop_last_activity_epoch"): str(now - float(delta) - 5.0),
         _chat_key(chat_id, "loop_pending_tick"): "0",
-        _chat_key(chat_id, "loop_worker_id"): "quant-worker",
+        _chat_key(chat_id, "loop_worker_id"): "demo-worker",
         _chat_key(chat_id, "loop_tenant_id"): "default",
     }
     writes: list[tuple[str, str]] = []
@@ -153,7 +153,7 @@ def test_catchup_due_fires_even_when_silence_short(
 ) -> None:
     now = 1_700_000_000.0
     delta = 1500
-    chat_id = "quant11"
+    chat_id = "chat11"
     rows = {
         _chat_key(chat_id, "loop_delta_seconds"): str(delta),
         _chat_key(chat_id, "loop_delta_idle"): "1",
@@ -161,7 +161,7 @@ def test_catchup_due_fires_even_when_silence_short(
         _chat_key(chat_id, "loop_last_activity_epoch"): str(now - 10.0),
         _chat_key(chat_id, "loop_catchup_due"): "1",
         _chat_key(chat_id, "loop_pending_tick"): "0",
-        _chat_key(chat_id, "loop_worker_id"): "quant-worker",
+        _chat_key(chat_id, "loop_worker_id"): "demo-worker",
         _chat_key(chat_id, "loop_tenant_id"): "default",
     }
     writes: list[tuple[str, str]] = []
@@ -199,13 +199,13 @@ def test_catchup_due_fires_even_when_silence_short(
 
     now = 1_700_000_000.0
     delta = 1500
-    chat_id = "quant11"
+    chat_id = "chat11"
     rows = {
         _chat_key(chat_id, "loop_delta_seconds"): str(delta),
         _chat_key(chat_id, "loop_delta_idle"): "1",
         _chat_key(chat_id, "loop_last_activity_epoch"): str(now - float(delta) - 5.0),
         _chat_key(chat_id, "loop_pending_tick"): "0",
-        _chat_key(chat_id, "loop_worker_id"): "quant-worker",
+        _chat_key(chat_id, "loop_worker_id"): "demo-worker",
         _chat_key(chat_id, "loop_tenant_id"): "default",
     }
     writes: list[tuple[str, str]] = []
@@ -248,14 +248,14 @@ def test_pending_gate_skips_until_two_intervals(
     """While pending=1 (in-flight / stale), require silence >= 2× delta before re-fire."""
     now = 1_700_000_000.0
     delta = 1500
-    chat_id = "quant11"
+    chat_id = "chat11"
     rows = {
         _chat_key(chat_id, "loop_delta_seconds"): str(delta),
         _chat_key(chat_id, "loop_delta_idle"): "1",
         # silence == 1.5× delta → enough for normal fire, not for pending gate
         _chat_key(chat_id, "loop_last_activity_epoch"): str(now - float(delta) * 1.5),
         _chat_key(chat_id, "loop_pending_tick"): "1",
-        _chat_key(chat_id, "loop_worker_id"): "quant-worker",
+        _chat_key(chat_id, "loop_worker_id"): "demo-worker",
         _chat_key(chat_id, "loop_tenant_id"): "default",
     }
     posts: list[dict[str, Any]] = []

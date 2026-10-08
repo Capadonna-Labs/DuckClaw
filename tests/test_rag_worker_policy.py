@@ -87,7 +87,7 @@ def test_document_turn_ignores_db_words_from_injected_context_and_attachment() -
     """Only the user's own request decides storage intent for an attachment turn."""
     incoming = (
         "[PROJECT_CONTEXT]\n"
-        "Nombre: Finanz 1\n"
+        "Nombre: Agente 1\n"
         "Descripción: tablas contables en la base de datos del área\n"
         "[/PROJECT_CONTEXT]\n\n"
         "[DOCUMENTOS_ADJUNTOS] El usuario adjuntó 1 archivo(s).\n"

@@ -107,10 +107,8 @@ storage/artifacts/**
 output/
 
 # External local bundles (not part of duckclaw monorepo)
-/Leila/
 
 # Local staging patches
-_quant_reports_fix/
 _auto_publish_fix/
 _reports_fix_staging/
 _reports_staging/

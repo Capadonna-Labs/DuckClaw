@@ -15,14 +15,14 @@ Host: DESKTOP-6NCBEF1
 | admin /login | OK |
 | Containers (gateway, db-writer, redis, knowledge-indexer, heartbeat, admin) | OK |
 | Login credentials present in .env | OK (admin@duckclaw.local) |
-| No quant_core / quant tables in base DB | OK |
+| No vertical schemas in base DB | OK |
 | Manual .env / console edits | None required |
 
 ## Notes
 
 - Stack path: `deploy/docker`
 - Auth: `DUCKCLAW_ADMIN_EMAIL` / `DUCKCLAW_ADMIN_PASSWORD` from `.env`
-- Quant-Trader / quant_core intentionally absent (import via worker zip = paso 2)
+- Vertical worker schemas intentionally absent (import via worker zip = paso 2)
 - Tailscale not required for this smoke (localhost only)
 
 ## Verdict

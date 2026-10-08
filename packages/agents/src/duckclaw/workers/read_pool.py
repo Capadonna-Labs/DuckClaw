@@ -571,7 +571,7 @@ def validate_worker_read_sql(spec: WorkerSpec, query: str) -> Optional[str]:
                 {
                     "error": (
                         "Incluye LIMIT (p. ej. LIMIT 30) en consultas con read_json / read_json_auto "
-                        "hacia el SIATA. Sin LIMIT el JSON completo excede el contexto del modelo. "
+                        "sobre fuentes JSON externas. Sin LIMIT el JSON completo excede el contexto del modelo. "
                         "COUNT(*) está permitido sin LIMIT."
                     )
                 }

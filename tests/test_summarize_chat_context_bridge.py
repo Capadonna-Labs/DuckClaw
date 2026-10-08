@@ -49,7 +49,7 @@ def test_summarize_chat_context_impl_compacts_and_sets_override(
 
     monkeypatch.setattr(gtc, "get_goals_tool_chat_id", lambda: "admin-conv-test")
     monkeypatch.setattr(gtc, "get_goals_tool_tenant_id", lambda: "default")
-    monkeypatch.setattr(gtc, "get_goals_tool_worker_id", lambda: "quant_analyst")
+    monkeypatch.setattr(gtc, "get_goals_tool_worker_id", lambda: "data_analyst")
     monkeypatch.setattr(gtc, "get_goals_tool_db_path", lambda: "/tmp/vault.duckdb")
     monkeypatch.setattr(bridge, "_resolve_history_session_id", lambda cid: cid)
 

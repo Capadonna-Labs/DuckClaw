@@ -38,8 +38,8 @@ def test_llm_usage_flags_replies_cut_by_max_tokens(caplog) -> None:
     prev_level = log.level
     log.setLevel(logging.INFO)
     try:
-        log_llm_usage("quant_analyst", 0.0, response=cut)
-        log_llm_usage("quant_analyst", 0.0, response=AIMessage(content="ok", response_metadata={"finish_reason": "stop"}))
+        log_llm_usage("data_analyst", 0.0, response=cut)
+        log_llm_usage("data_analyst", 0.0, response=AIMessage(content="ok", response_metadata={"finish_reason": "stop"}))
     finally:
         log.removeHandler(caplog.handler)
         log.setLevel(prev_level)

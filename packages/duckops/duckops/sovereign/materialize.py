@@ -33,7 +33,7 @@ def effective_primary_duckdb_relpath(draft: SovereignDraft) -> str:
     Ruta .duckdb principal del gateway.
 
     Si la bóveda sigue en el valor por defecto soberano y el usuario solo rellenó
-    «DuckDB shared», esa ruta pasa a ser la principal (BI-Analyst no usa ATTACH
+    «DuckDB shared», esa ruta pasa a ser la principal (el worker no usa ATTACH
     compartido; necesita la ruta hub en ``DUCKCLAW_*_DB_PATH`` / ``DUCKDB_PATH``).
     """
     vault = (draft.duckdb_vault_path or "").strip() or DEFAULT_SOVEREIGN_VAULT

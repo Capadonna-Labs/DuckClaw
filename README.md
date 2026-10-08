@@ -84,7 +84,7 @@ Límites de proceso: [`GATEWAY_PROCESS_BOUNDARIES.md`](docs/architecture/GATEWAY
 | **Quién escribe** | Solo **DB-Writer** en rutas normales. Gateway/agentes/indexer: `read_only=True`. |
 | **Cómo mutar** | `duckclaw.write_commands` (Pydantic) → `enqueue_write_command` / `enqueue_typed_command` → DB-Writer → `write_handlers/*`. |
 | **Dónde vive la verdad** | Tablas `main.admin_*`, `prompt_policy_registry`, knowledge, grants — no Markdown runtime ni `if worker_id == "…"`. |
-| **Verticales** | Quant, Finanz, PQRSD, Leila/Telegram bot legacy, etc. **fuera del core** (extensiones opt-in). |
+| **Verticales** | Viven **fuera del core**, en el repo de cada extensión (opt-in). Este repo es genérico. |
 | **Telegram** | Integración opt-in; no arranca con el stack core. Ver Integraciones en admin. |
 | **Airbag framework** | 4 policies con fallback en código (`FRAMEWORK_POLICY_PACK`); el resto exige fila en DB. |
 | **RAG carpetas** | Gateway **solo encola**; ingest pesado en `DuckClaw-Knowledge-Indexer` + progreso Redis `duckclaw:knowledge_sync_status:{job_id}`. |

@@ -42,7 +42,7 @@ Desktop credentials: `%LOCALAPPDATA%\DuckClaw\desktop.env` (stable `DUCKCLAW_ADM
 - SQLite queue (`duckclaw/core/queue/` — **do not create**)
 - Separate MCP HTTP server
 - Knowledge indexer consumer
-- Trading / vertical product strings or Capadonna-specific paths
+- Vertical product strings or extension-specific paths
 
 ## Packaging
 
@@ -97,7 +97,7 @@ Until then: YAGNI; Spawn inline is the queue bypass.
 4. Tauri spawns/kills sidecar **and** admin Node without residual processes.
 5. Webview opens admin login (`:3000/login`), not gateway JSON root.
 6. Signed auto-update from GitHub Releases updates shell + sidecar + admin bundle; user DB/env persist.
-7. No trading-vertical product code in diff.
+7. No vertical product code in diff.
 
 ## Related
 

@@ -1,6 +1,6 @@
 # DuckClaw Full on Windows (Docker + launcher)
 
-Generic **full** stack (not Desktop Lite). No Quant-Trader / `quant_core` — those arrive later via worker `.zip` import.
+Generic **full** stack (not Desktop Lite). No vertical worker schemas — those arrive later via worker `.zip` import.
 
 ## What you get
 
@@ -72,7 +72,7 @@ Report: [`SMOKE_DOCKER_FULL_REPORT.md`](SMOKE_DOCKER_FULL_REPORT.md) (generated)
 
 ## Paso 2 (out of scope here)
 
-Import Quant-Trader worker `.zip` (includes its own `schema.sql`). Do **not** bake `quant_core` into this base image.
+Import a vertical worker `.zip` (includes its own `schema.sql`). Do **not** bake vertical schemas into this base image.
 
 ## Troubleshooting
 

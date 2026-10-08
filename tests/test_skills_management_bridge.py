@@ -158,7 +158,7 @@ def test_skills_target_gateway_hub_not_worker_vault(monkeypatch) -> None:
     )
 
     class _VaultDb:
-        _path = "/data/private/1/quant_traderdb1.duckdb"
+        _path = "/data/private/1/demo_db1.duckdb"
 
     _, path = _actor_and_db_path(_VaultDb())
     assert path == "/data/hub/duckclaw.duckdb"

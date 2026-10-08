@@ -17,7 +17,7 @@ def test_resolve_yaml_deny_ignores_chat_true(monkeypatch: pytest.MonkeyPatch) ->
         "duckclaw.forge.schema.load_security_policy",
         lambda _wid, worker_dir=None: base,
     )
-    eff, meta = resolve_sandbox_network_policy("Quant-Trader", "true")
+    eff, meta = resolve_sandbox_network_policy("Research-Agent", "true")
     assert meta["yaml_default"] == "deny"
     assert meta["effective"] == "deny"
     assert meta["toggle_available"] is False

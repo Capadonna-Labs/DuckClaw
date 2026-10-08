@@ -32,7 +32,7 @@ def test_record_operational_lesson_persists_with_lesson_type(monkeypatch) -> Non
     )
     out = json.loads(
         _record_operational_lesson_impl(
-            "Nunca citar qty sin snapshot IBKR",
+            "Nunca citar qty sin snapshot del bróker",
             context_trigger="audit mismatch AAPL",
             lesson_type="broker_position_hallucination",
             confidence_score=0.95,

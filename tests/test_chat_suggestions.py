@@ -93,7 +93,7 @@ def test_generate_followup_suggestions_human_prompt_flags_assistant_question(
         last_user_text="¿Sigue el bug?",
         last_assistant_text=(
             "El bug sigue activo.\n"
-            "¿Quieres que documente esto como issue en el repo de Capadonna-Driller?"
+            "¿Quieres que documente esto como issue en el repo de la extensión?"
         ),
     )
     assert out["suggestions"][0].startswith("Sí")

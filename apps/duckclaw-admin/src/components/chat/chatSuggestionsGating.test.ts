@@ -212,12 +212,12 @@ describe('slashMenuEntryFromCatalogSkill', () => {
   it('command skills insert the exact command from implementation_ref (args included)', () => {
     expect(
       slashMenuEntryFromCatalogSkill({
-        id: 'trading_session',
+        id: 'session_report',
         skill_type: 'command',
-        path: 'command:///trading_session --status',
+        path: 'command:///session_report --status',
         description: 'Estado de la sesión',
       })
-    ).toEqual({ cmd: '/trading_session --status', description: 'Estado de la sesión' });
+    ).toEqual({ cmd: '/session_report --status', description: 'Estado de la sesión' });
     expect(
       slashMenuEntryFromCatalogSkill({ id: 'foo', skill_type: 'command', path: 'x' })?.cmd
     ).toBe('/foo');
@@ -228,11 +228,11 @@ describe('slashMenuEntryFromCatalogSkill', () => {
   });
 
   it('a command entry autocompletes from a prefix and closes once args are typed', () => {
-    const extra = [{ cmd: '/trading_session --status', description: '' }];
-    expect(matchingSlashCommands('/trad', extra).map((c) => c.cmd)).toEqual([
-      '/trading_session --status',
+    const extra = [{ cmd: '/session_report --status', description: '' }];
+    expect(matchingSlashCommands('/sess', extra).map((c) => c.cmd)).toEqual([
+      '/session_report --status',
     ]);
-    expect(matchingSlashCommands('/trading_session --status ', extra)).toEqual([]);
+    expect(matchingSlashCommands('/session_report --status ', extra)).toEqual([]);
   });
 });
 

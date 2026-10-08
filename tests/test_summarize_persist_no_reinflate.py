@@ -46,7 +46,7 @@ def test_persist_uses_compacted_history_base(monkeypatch: pytest.MonkeyPatch) ->
         session_id="chat-1",
         is_system_prompt=False,
         user_incoming="/summarize",
-        worker_id="quant_analyst",
+        worker_id="data_analyst",
         vault_db_path="",
         message="/summarize",
     )
@@ -56,7 +56,7 @@ def test_persist_uses_compacted_history_base(monkeypatch: pytest.MonkeyPatch) ->
             prepared=prepared,
             redis_client=object(),
             reply_plain_for_storage="✅ compactado",
-            effective_worker_id="quant_analyst",
+            effective_worker_id="data_analyst",
             history_for_model=compact,  # finalize should pass compacted, not fat
             message="/summarize",
             username="admin",

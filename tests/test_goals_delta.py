@@ -915,7 +915,7 @@ def test_wall_schedule_with_prompt_sends_that_prompt(tmp_path: Path, monkeypatch
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?)",
         [
             "chat_88_goals_cron_wall", json.dumps(spec),
-            "chat_88_worker_id", "quant_analyst",
+            "chat_88_worker_id", "data_analyst",
             "chat_88_goals_proactive_tenant_id", "user-x",
             "chat_88_goals", json.dumps([]),
         ],
@@ -971,7 +971,7 @@ def test_heartbeat_fires_each_due_cron_and_keeps_its_own_last_fire(tmp_path: Pat
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?)",
         [
             "chat_89_goals_cron_wall", json.dumps(items),
-            "chat_89_worker_id", "quant_analyst",
+            "chat_89_worker_id", "data_analyst",
             "chat_89_goals_proactive_tenant_id", "user-x",
         ],
     )

@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 # PM2 entrypoint for duckclaw-admin-ui (Next.js standalone).
-# Spec: docs/deploy/GITHUB_ACTIONS_CD.md
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

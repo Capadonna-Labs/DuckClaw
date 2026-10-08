@@ -189,8 +189,7 @@ def _tavily_context_notes(
         return []
     place = f"{city}, {country}" if country else city
     query = (
-        f"{place} lluvia accidentes inundaciones movilidad cierres vias alerta clima hoy "
-        f"site:gov.co OR site:siata.gov.co OR site:medellin.gov.co"
+        f"{place} lluvia accidentes inundaciones movilidad cierres vias alerta clima hoy"
     )
     try:
         client = TavilyClient(api_key=api_key)

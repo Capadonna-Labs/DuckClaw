@@ -115,10 +115,10 @@ def test_capabilities_fast_reply_formats_tenant_id_placeholder() -> None:
     )
 
     assert _capabilities_fast_reply_text(
-        "axis-maestro",
+        "demo-maestro",
         tenant_id="acme",
         prompt_policies=PromptPolicyResolver(con),
-    ) == "Worker axis-maestro in tenant acme"
+    ) == "Worker demo-maestro in tenant acme"
 
 
 def test_manager_graph_capabilities_shortcut_uses_prompt_policy_resolver_db_first(monkeypatch) -> None:

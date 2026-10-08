@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     && rm -rf /var/lib/apt/lists/*
 
-# Soporte CUDA opcional para VPS con GPU NVIDIA
+# Soporte CUDA opcional para servidores con GPU NVIDIA
 RUN if [ "$USE_CUDA" = "1" ]; then \
     apt-get update && apt-get install -y --no-install-recommends nvidia-cuda-toolkit; \
     fi

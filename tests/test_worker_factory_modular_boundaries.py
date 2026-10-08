@@ -74,11 +74,11 @@ def test_filesystem_worker_layout_exposes_only_default_template(tmp_path: Path) 
 
     templates_root = tmp_path / "seed"
     _write_worker_manifest(templates_root, "default")
-    _write_worker_manifest(templates_root, "axis-coder")
+    _write_worker_manifest(templates_root, "demo-coder")
 
     assert list_template_ids(templates_root) == ["default"]
     assert build_alias_index(templates_root) == {"default": "default"}
-    assert resolve_template_id_global("axis-coder", templates_root) is None
+    assert resolve_template_id_global("demo-coder", templates_root) is None
 
 
 def test_load_manifest_rejects_non_default_filesystem_worker(tmp_path: Path) -> None:
@@ -87,10 +87,10 @@ def test_load_manifest_rejects_non_default_filesystem_worker(tmp_path: Path) -> 
     legacy_root = tmp_path / "legacy"
     workers_root = legacy_root / "templates" / "workers"
     _write_worker_manifest(workers_root, "default")
-    _write_worker_manifest(workers_root, "axis-coder")
+    _write_worker_manifest(workers_root, "demo-coder")
 
     with pytest.raises(FileNotFoundError, match="Only the default filesystem worker"):
-        load_manifest("axis-coder", templates_root=legacy_root)
+        load_manifest("demo-coder", templates_root=legacy_root)
 
 
 def test_factory_list_workers_exposes_only_default_from_filesystem_layout(tmp_path: Path) -> None:
@@ -99,7 +99,7 @@ def test_factory_list_workers_exposes_only_default_from_filesystem_layout(tmp_pa
     legacy_root = tmp_path / "legacy"
     workers_root = legacy_root / "templates" / "workers"
     _write_worker_manifest(workers_root, "default")
-    _write_worker_manifest(workers_root, "axis-coder")
+    _write_worker_manifest(workers_root, "demo-coder")
 
     assert list_workers(legacy_root) == ["default"]
 

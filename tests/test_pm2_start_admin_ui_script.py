@@ -16,6 +16,6 @@ def test_pm2_start_admin_ui_lifts_vault_roots_from_monorepo_env() -> None:
     assert 'ADMIN}/.env.local"' in text or "${ADMIN}/.env.local" in text
     assert 'source "${ROOT}/.env"' not in text
     assert ". \"${ROOT}/.env\"" not in text
-    # Selective lift when admin env omitted vault roots (VPS Capadonna layout).
+    # Selective lift when admin env omitted vault roots (extension vault layout).
     assert "grep -E '^(DUCKCLAW_EXTENSION_ROOT|DUCKCLAW_REPO_ROOT)=" in text
     assert "HOSTNAME=\"${DUCKCLAW_ADMIN_BIND_HOST:-0.0.0.0}\"" in text

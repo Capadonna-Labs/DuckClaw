@@ -153,7 +153,7 @@ def test_classify_prompt_policy_health_marks_catalog_worker_without_row_as_inher
         con,
         owner_email="ops@duckclaw.local",
         worker_id="team-lead",
-        display_name="Axis Maestro",
+        display_name="Demo Maestro",
     )
 
     classification = classify_prompt_policy_health(

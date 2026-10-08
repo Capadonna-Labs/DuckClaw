@@ -242,7 +242,7 @@ def suggest_default_worker_id(
     picks: list[WorkerPick],
     current: str,
     *,
-    prefer: tuple[str, ...] = ("axis-maestro", "platform-orchestrator"),
+    prefer: tuple[str, ...] = ("platform-orchestrator",),
 ) -> str:
     """Mantiene el borrador si es válido; si no, elige el primer preferido presente en catálogo."""
     cur = (current or "").strip()

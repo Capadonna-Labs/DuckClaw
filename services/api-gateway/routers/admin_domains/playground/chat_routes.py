@@ -36,7 +36,7 @@ async def playground_chat_activity(chat_id: str, request: Request, limit: int = 
 
     redis_client = getattr(request.app.state, "redis", None)
     events = await list_admin_heartbeat_backlog(redis_client, session_id, limit=limit)
-    # server_ts lets the client map event ts onto its own clock (phone/VPS skew).
+    # server_ts lets the client map event ts onto its own clock (phone/server skew).
     out: dict[str, Any] = {"ok": True, "chat_id": session_id, "events": events, "server_ts": time.time() * 1000}
     tokens = await load_admin_turn_tokens(redis_client, session_id)
     if tokens:

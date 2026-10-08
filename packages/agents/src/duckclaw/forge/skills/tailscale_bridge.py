@@ -136,7 +136,7 @@ def _tailscale_status_tool(config: Optional[dict] = None) -> Optional[Any]:
     return StructuredTool.from_function(
         lambda: _tailscale_status_impl(),
         name="tailscale_status",
-        description="Verifica el estado de la red Tailscale Mesh. Retorna ConnectionStatus (Active/Down) y lista de peers conectados. Usa para diagnosticar conectividad entre Mac Mini y VPS.",
+        description="Verifica el estado de la red Tailscale Mesh. Retorna ConnectionStatus (Active/Down) y lista de peers conectados. Usa para diagnosticar conectividad entre nodos de la red (p. ej. Mac Mini y servidor).",
     )
 
 

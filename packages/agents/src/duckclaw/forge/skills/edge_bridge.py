@@ -116,7 +116,7 @@ def poll_edge_device(port: str, baud_rate: int, emit_interval_sec: float, tenant
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--port", type=str, required=True, help="Puerto serial o 'system' para VPS stats"
+        "--port", type=str, required=True, help="Puerto serial o 'system' para stats del host"
     )
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--interval", type=float, default=5.0)

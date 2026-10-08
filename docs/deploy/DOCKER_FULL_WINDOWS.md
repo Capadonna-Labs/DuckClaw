@@ -84,22 +84,22 @@ Import Quant-Trader worker `.zip` (includes its own `schema.sql`). Do **not** ba
 | Port 8000/3001 busy | Stop local PM2 / Desktop Lite; or change host ports in compose |
 | Tailscale | `docker compose --profile tailscale up -d` after setting `TS_AUTHKEY` |
 
-## Persistent VPS runtime
+## Persistent server runtime
 
-The Docker Full stack is also the production runtime for a VPS. The launcher
+The Docker Full stack is also the production runtime for a server. The launcher
 and browser are clients; closing either one must not stop the containers. Use
 `restart: unless-stopped`, keep state in Docker volumes or explicit host
 mounts, and stop the stack only with an explicit `docker compose stop/down`.
 
-For a PM2 → Docker Full VPS migration, use a short controlled cutover (the
-actual cutover script is VPS/vertical-specific and lives in the ops repo that
-owns that VPS, not in this generic repo):
+For a PM2 → Docker Full migration, use a short controlled cutover (the
+actual cutover script is deployment-specific and lives in the ops repo that
+owns that server, not in this generic repo):
 
 1. Back up the current DuckDB vaults and `.env`.
 2. Generate Web Push VAPID keys for phone/watch notifications:
    `uv run python scripts/generate_web_push_vapid.py --subject mailto:admin@example.com`.
 3. Put `WEB_PUSH_VAPID_PUBLIC_KEY`, `WEB_PUSH_VAPID_PRIVATE_KEY`, and
-   `WEB_PUSH_SUBJECT` in the VPS Docker Full `.env`.
+   `WEB_PUSH_SUBJECT` in the server's Docker Full `.env`.
 4. Serve Admin over HTTPS or Tailscale HTTPS. Browser Push only works on secure
    origins, except `localhost` during development.
 5. Stop the PM2 core processes.

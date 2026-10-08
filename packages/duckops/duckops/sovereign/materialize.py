@@ -452,7 +452,7 @@ def load_telegram_creator_hint_from_repo_env(repo_root: Path) -> str:
     return ""
 
 
-# Orden alineado con gateway_db (sin DUCKCLAW_DB_PATH ni legacy AXIS).
+# Orden alineado con gateway_db (sin DUCKCLAW_DB_PATH).
 _ENV_PRIMARY_DUCKDB_KEYS: tuple[str, ...] = (
     "DUCKCLAW_GATEWAY_DB_PATH",
     "DUCKCLAW_TENANT_DB_PATH",

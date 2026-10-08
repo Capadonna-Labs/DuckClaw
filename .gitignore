@@ -121,9 +121,8 @@ tauri_build.log
 # Windows Next standalone build workaround (scripts/build_desktop.ps1 creates transiently)
 apps/duckclaw-admin/.npmrc
 
-# VPS-only: deploy patches, probes, host-specific ops (never commit)
-_vps_local/
-_vps_*.py
+# Host-specific ops: deploy patches, probes (never commit)
+_ops_local/
 _probe_*.py
 _debug_*.py
 _verify_*.js

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 
-from duckops.db_vault_ops import fresh_dev_platform, migrate_legacy_axis_vault
+from duckops.db_vault_ops import fresh_dev_platform
 from duckops.paths import repo_root
 
 app = typer.Typer()
@@ -89,10 +89,3 @@ def fresh_dev(
     """Bóveda default limpia: down, rm vault, migrate, stack deploy."""
     raise typer.Exit(fresh_dev_platform(dry_run=dry_run))
 
-
-@app.command("migrate-legacy-axis")
-def migrate_legacy_axis(
-    dry_run: bool = typer.Option(False, "--dry-run", help="Muestra el plan sin ejecutarlo."),
-) -> None:
-    """Renombra axis.duckdb → duckclaw.duckdb y limpia .env legacy."""
-    raise typer.Exit(migrate_legacy_axis_vault(dry_run=dry_run))

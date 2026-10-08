@@ -5,7 +5,7 @@ export const INTEGRACIONES_TABS = [
   {
     id: 'dispositivos',
     label: 'Dispositivos',
-    hint: 'Monitoreo físico Android (ADB) e infra VPS de producción',
+    hint: 'Monitoreo físico Android (ADB) e infra del servidor de producción',
   },
   { id: 'sensory', label: 'Sensory node', hint: 'STT/TTS y laboratorio de voz' },
   { id: 'telegram', label: 'Telegram', hint: 'Canal opcional y webhook ingress' },

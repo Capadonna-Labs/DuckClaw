@@ -17,10 +17,10 @@ def test_migrate_stop_includes_heartbeat_and_indexer() -> None:
     assert "DuckClaw-Knowledge-Indexer" in MIGRATE_STOP_PM2_NAMES
 
 
-def test_duckdb_paths_includes_private_axis_glob(tmp_path: Path) -> None:
+def test_duckdb_paths_includes_private_vault_glob(tmp_path: Path) -> None:
     vault = tmp_path / "db" / "private" / "7822026745"
     vault.mkdir(parents=True)
-    axis = vault / "duckclaw.duckdb"
-    axis.write_text("stub", encoding="utf-8")
+    vault_file = vault / "duckclaw.duckdb"
+    vault_file.write_text("stub", encoding="utf-8")
     paths = duckdb_paths_to_unlock(tmp_path)
-    assert axis.resolve() in [p.resolve() for p in paths]
+    assert vault_file.resolve() in [p.resolve() for p in paths]

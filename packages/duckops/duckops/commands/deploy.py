@@ -1,4 +1,4 @@
-"""Comando deploy: despliegue en VPS/Mac (PM2, systemd, Windows)."""
+"""Comando deploy: despliegue en servidor/Mac (PM2, systemd, Windows)."""
 
 from __future__ import annotations
 

@@ -1,7 +1,7 @@
 """
 Proxy REST hacia sensory_node en Mac mini (Tailscale).
 
-El gateway VPS expone la misma interfaz que el microservicio edge para admin,
+El gateway del servidor expone la misma interfaz que el microservicio edge para admin,
 playground y clientes HTTP sin acoplar Telegram en esta fase.
 """
 

@@ -37,7 +37,7 @@ function androidStatusLabel(status: AndroidDeviceStatus | null): string {
   return 'Conectado';
 }
 
-function vpsTone(healthy: boolean | null, recovering: boolean): DeviceStatusTone {
+function serverTone(healthy: boolean | null, recovering: boolean): DeviceStatusTone {
   if (recovering) return 'warn';
   if (healthy === true) return 'ok';
   if (healthy === false) return 'bad';
@@ -358,7 +358,7 @@ export default function DispositivosPageView({ embedded = false }: EmbeddedViewP
           <DeviceStatusCard
             title="Host gateway"
             subtitle="Estado básico del stack"
-            tone={vpsTone(gatewayOk, recovering)}
+            tone={serverTone(gatewayOk, recovering)}
             statusLabel={
               recovering ? 'Recuperando…' : gatewayOk ? 'Saludable' : healthError ? 'Offline' : '—'
             }

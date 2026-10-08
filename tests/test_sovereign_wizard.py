@@ -39,7 +39,6 @@ from duckops.sovereign.telegram_set_webhook import (
 from duckops.sovereign.duckdb_catalog import (
     build_neutral_duckdb_picker,
     discover_duckdb_files,
-    find_legacy_axis_vault_in_repo,
     suggest_duckdb_vault_path,
 )
 from duckops.sovereign.duckdb_health import audit_duckdb, format_duckdb_health_rich, human_bytes
@@ -213,13 +212,6 @@ def test_build_neutral_duckdb_picker(tmp_path: Path) -> None:
     assert any("a.duckdb" in v for v in values)
     assert NEUTRAL_DUCKDB_VAULT in values
     assert "← sugerido" not in "\n".join(labels)
-
-
-def test_find_legacy_axis_vault_in_repo() -> None:
-    root = Path(__file__).resolve().parents[1]
-    hit = find_legacy_axis_vault_in_repo(root)
-    if hit:
-        assert hit.endswith("axis.duckdb")
 
 
 def test_suggest_duckdb_prefers_workspace_over_siata(tmp_path: Path) -> None:

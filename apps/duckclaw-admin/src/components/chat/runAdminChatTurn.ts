@@ -517,7 +517,7 @@ const pollDetachedActivity = (epoch: number) => {
   scheduleDetachedPoll(epoch, DETACHED_ACTIVITY_POLL_MS, async () => {
     const data = await adminService.getPlaygroundChatActivity(chatId, 80);
     if (epoch !== detachedPollEpoch) return true;
-    // Map server event times onto this device's clock (phone/VPS skew).
+    // Map server event times onto this device's clock (phone/server skew).
     const skew = data.server_ts != null ? Date.now() - data.server_ts : 0;
     for (const ev of data.events || []) {
       if (ev.kind === 'turn_done') continue; // end marker, handled by the completion poll

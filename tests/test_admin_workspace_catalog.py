@@ -624,7 +624,7 @@ def test_contexts_skills_and_capabilities_are_many_to_many(gateway_db: Path) -> 
         mirror = create_worker(
             adapter,
             owner_email="alice@test.local",
-            worker_id="axis-mirror",
+            worker_id="demo-mirror",
             display_name="Ops Mirror",
         )
         add_worker_context(adapter, worker_uid=coder["worker_uid"], title="Dominio", content_md="# Dominio", sort_order=20)
@@ -733,7 +733,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-radar",
+            worker_id="demo-radar",
             display_name="Ops Radar",
         )
     finally:
@@ -752,11 +752,11 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
     assigned = gateway_admin_client.post(
         f"/api/v1/admin/workspace/projects/{project_id}/agents",
         headers=headers,
-        json={"worker_id": "axis-radar", "role": "coordinator", "sort_order": 10},
+        json={"worker_id": "demo-radar", "role": "coordinator", "sort_order": 10},
     )
     assert assigned.status_code == 200
     assert assigned.json()["task_id"]
-    assert assigned.json()["agent"]["worker_id"] == "axis-radar"
+    assert assigned.json()["agent"]["worker_id"] == "demo-radar"
     assert assigned.json()["agent"]["role"] == "coordinator"
 
     listed = gateway_admin_client.get(
@@ -764,7 +764,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
         headers=headers,
     )
     assert listed.status_code == 200
-    assert [agent["worker_id"] for agent in listed.json()["agents"]] == ["axis-radar"]
+    assert [agent["worker_id"] for agent in listed.json()["agents"]] == ["demo-radar"]
 
     projects = gateway_admin_client.get("/api/v1/admin/workspace/projects", headers=headers)
     assert projects.status_code == 200
@@ -772,7 +772,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
     assert visible[project_id]["agent_count"] == 1
 
     removed = gateway_admin_client.delete(
-        f"/api/v1/admin/workspace/projects/{project_id}/agents/axis-radar",
+        f"/api/v1/admin/workspace/projects/{project_id}/agents/demo-radar",
         headers=headers,
     )
     assert removed.status_code == 200
@@ -813,7 +813,7 @@ def test_gateway_workspace_projects_assign_and_remove_catalog_workers(
             [project_id],
         ).fetchone()[0]
         worker_count = con.execute(
-            "SELECT COUNT(*) FROM main.admin_worker_catalog WHERE worker_id = 'axis-radar'",
+            "SELECT COUNT(*) FROM main.admin_worker_catalog WHERE worker_id = 'demo-radar'",
         ).fetchone()[0]
     finally:
         con.close()
@@ -1374,7 +1374,7 @@ def test_admin_health_uses_actor_visible_db_first_workers(
         create_worker(
             db,
             owner_email="other@test.local",
-            worker_id="axis-other",
+            worker_id="demo-other",
             display_name="Other Worker",
         )
     finally:
@@ -1424,7 +1424,7 @@ def test_playground_config_for_console_actor_does_not_mix_legacy_team_ids_with_c
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-radar",
+            worker_id="demo-radar",
             display_name="RADAR",
         )
     finally:
@@ -1438,7 +1438,7 @@ def test_playground_config_for_console_actor_does_not_mix_legacy_team_ids_with_c
     assert response.status_code == 200
     ids = [item["id"] for item in response.json()["workers"]]
     assert "bi-analyst" in ids
-    assert "axis-radar" in ids
+    assert "demo-radar" in ids
     assert "BI-Analyst" not in ids
     assert "BI-Analyst" not in ids
     assert len(ids) == len(set(ids))
@@ -1472,13 +1472,13 @@ def test_playground_config_and_chat_support_db_first_project_scope(
         radar = create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-radar",
+            worker_id="demo-radar",
             display_name="Ops Radar",
         )
         create_worker(
             db,
             owner_email="admin@test.local",
-            worker_id="axis-sentinel",
+            worker_id="demo-sentinel",
             display_name="Ops Sentinel",
         )
         project = create_project(
@@ -1500,7 +1500,7 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     assert config.status_code == 200
     projects = {item["project_id"]: item for item in config.json()["projects"]}
     assert projects[project["project_id"]]["name"] == "Proyecto Alpha"
-    assert [agent["worker_id"] for agent in projects[project["project_id"]]["agents"]] == ["axis-radar"]
+    assert [agent["worker_id"] for agent in projects[project["project_id"]]["agents"]] == ["demo-radar"]
 
     captured: dict[str, str] = {}
 
@@ -1515,14 +1515,14 @@ def test_playground_config_and_chat_support_db_first_project_scope(
         headers=headers,
         json={
             "project_id": project["project_id"],
-            "worker_id": "axis-radar",
+            "worker_id": "demo-radar",
             "message": "hola",
             "chat_id": "project-playground",
         },
     )
     assert chat.status_code == 200
     assert chat.json()["project_id"] == project["project_id"]
-    assert chat.json()["worker_id"] == "axis-radar"
+    assert chat.json()["worker_id"] == "demo-radar"
     assert "[PROJECT_CONTEXT]" in captured["message"]
     assert "Proyecto Alpha" in captured["message"]
     assert "Scope para Playground" in captured["message"]
@@ -1540,11 +1540,11 @@ def test_playground_config_and_chat_support_db_first_project_scope(
     )
     assert default_project_chat.status_code == 200
     assert default_project_chat.json()["project_id"] == project["project_id"]
-    assert default_project_chat.json()["worker_id"] == "axis-radar"
+    assert default_project_chat.json()["worker_id"] == "demo-radar"
     assert "[PROJECT_CONTEXT]" in captured["message"]
     assert "Proyecto Alpha" in captured["message"]
     assert "Ops Radar" not in captured["message"]
-    assert "axis-radar" in captured["message"]
+    assert "demo-radar" in captured["message"]
     assert "guíame" in captured["message"]
 
     rejected = gateway_admin_client.post(
@@ -1552,7 +1552,7 @@ def test_playground_config_and_chat_support_db_first_project_scope(
         headers=headers,
         json={
             "project_id": project["project_id"],
-            "worker_id": "axis-sentinel",
+            "worker_id": "demo-sentinel",
             "message": "hola",
             "chat_id": "project-playground",
         },

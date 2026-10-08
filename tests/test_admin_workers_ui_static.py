@@ -29,8 +29,6 @@ def test_workers_ui_uses_generic_catalog_import_and_no_folder_delete_language() 
     assert "Eliminar definitivo" in page
     assert "Se borrará la carpeta" not in page
     assert "rmtree" not in page
-    assert "import_axis" not in page
-    assert "import_axis" not in service
     assert "font-black" not in page
     assert "rounded-3xl" not in page
 

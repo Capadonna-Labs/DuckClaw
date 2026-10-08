@@ -6,6 +6,7 @@ export default defineConfig({
     environment: 'node',
     include: [
       'src/lib/opsSubprocessEnv.test.ts',
+      'src/lib/workerLlmKey.test.ts',
       'src/lib/pollWriteTask.test.ts',
       'src/lib/modelContextWindow.test.ts',
       'src/lib/bffGatewayTimeouts.test.ts',

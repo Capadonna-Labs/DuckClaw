@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import { ChatLlmSelectors } from '@/components/chat/ChatLlmSelectors';
 import { ChatSlmSelector } from '@/components/chat/ChatSlmSelector';
+import { WorkerLlmOverrides } from '@/components/chat/WorkerLlmOverrides';
 import { ConversationVaultSelector } from '@/components/chat/ConversationVaultSelector';
 import { MarkdownSnippetPanel } from '@/components/chat/MarkdownSnippetPanel';
 import { workerOptionIds } from '@/lib/workerOptions';
@@ -128,6 +129,19 @@ export function PlaygroundSettingsDialogs({
                   onUpdated={onConfigUpdated}
                   disabled={config?.authorized === false || chatLoading}
                   size="modal"
+                />
+              </div>
+              <div className="space-y-3 border-t dark:border-dark-border pt-4">
+                <p className="text-xs font-black uppercase tracking-wider text-gov-gray-500">
+                  Modelo por agente
+                </p>
+                <p className="text-xs text-gov-gray-500">
+                  OpenRouter. Aplica en todos los chats; &quot;Heredar del chat&quot; usa el LLM de arriba.
+                </p>
+                <WorkerLlmOverrides
+                  tenantId={config?.effective_tenant_id || profileTenantId}
+                  workers={config?.workers ?? []}
+                  disabled={config?.authorized === false}
                 />
               </div>
               <div className="space-y-3 border-t dark:border-dark-border pt-4">

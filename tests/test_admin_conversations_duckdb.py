@@ -71,7 +71,7 @@ def test_duckdb_conversation_survives_redis_wipe(gateway_db):
             actor="admin@duckclaw.local",
             section="playground",
             title="Conversación 2026-08-16",
-            last_worker_id="finanz-1",
+            last_worker_id="agent-1",
             user_message="Hola presupuesto",
             assistant_message="Claro, veamos tus gastos",
             message_count=2,

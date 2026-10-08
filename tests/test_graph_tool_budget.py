@@ -30,7 +30,7 @@ def test_resolve_graph_recursion_limit_env(monkeypatch) -> None:
 
 def test_get_tracing_config_includes_recursion_limit(monkeypatch) -> None:
     monkeypatch.delenv("DUCKCLAW_GRAPH_RECURSION_LIMIT", raising=False)
-    cfg = get_tracing_config("t1", "quant-trader", "chat-1")
+    cfg = get_tracing_config("t1", "research-agent", "chat-1")
     assert cfg["recursion_limit"] == DEFAULT_GRAPH_RECURSION_LIMIT
 
 

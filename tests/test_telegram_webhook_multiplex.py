@@ -106,20 +106,20 @@ def test_multiplex_vault_db_env_resolves_path(
             "secret": "hdr-fin",
             "worker_id": "platform-orchestrator",
             "tenant_id": "Orchestrator",
-            "bot_token_env": "TELEGRAM_FINANZ_TOKEN",
+            "bot_token_env": "TELEGRAM_DEMO_TOKEN",
             "vault_db_env": "DUCKCLAW_VAULT_DB_PATH",
         }
     ]
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", repo)
     monkeypatch.setenv("DUCKCLAW_TELEGRAM_WEBHOOK_ROUTES", json.dumps(routes))
-    monkeypatch.setenv("TELEGRAM_FINANZ_TOKEN", "tok-f")
+    monkeypatch.setenv("TELEGRAM_DEMO_TOKEN", "tok-f")
     monkeypatch.setenv("DUCKCLAW_VAULT_DB_PATH", "db/fin.duckdb")
     m._cached_bindings = None
     m._cached_bindings_error = None
     out = m.telegram_webhook_resolve_dispatch(
         "hdr-fin",
-        default_worker_id="siata_analyst",
-        default_tenant_id="SIATA",
+        default_worker_id="acme_analyst",
+        default_tenant_id="ACME",
         default_bot_token="tok-s",
     )
     assert isinstance(out, m.TelegramWebhookResolvedDispatch)

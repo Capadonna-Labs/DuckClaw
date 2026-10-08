@@ -23,7 +23,6 @@ _REQUIRED = [
     ("errors", "llm_failure_deepseek"),
     ("errors", "llm_failure_openai"),
     ("errors", "llm_failure_generic"),
-    ("manager_tasks", "bi_analyst_capabilities_question"),
     ("manager_tasks", "duckdb_name_query"),
     ("manager_tasks", "table_content_named"),
     ("manager_tasks", "table_content_generic"),

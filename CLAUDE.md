@@ -48,9 +48,9 @@ uv run duckops stack up
 uv run duckops stack status
 ```
 
-## Current handoff: Docker Full persistent VPS runtime
+## Current handoff: Docker Full persistent server runtime
 
-Codex started the migration away from loose VPS PM2 processes toward the full
+Codex started the migration away from loose PM2 processes toward the full
 Docker/.exe runtime. The intended production shape is: Docker Full owns the
 long-running processes, while the browser, desktop launcher, and mobile/PWA
 clients are only clients. Closing any UI must not stop Gateway, DB-Writer,
@@ -63,11 +63,11 @@ Relevant changes to review:
 - `docker/gateway/Dockerfile` now bundles `services/heartbeat`.
 - Admin has a PWA/Web Push base: manifest, service worker registration, push
   subscription registration, Gateway persistence, and Heartbeat delivery hooks.
-- The controlled VPS cutover helper (validates compose before stopping PM2,
+- The controlled cutover helper (validates compose before stopping PM2,
   backs up legacy state, starts Docker Full, checks Gateway/Admin health,
-  prints rollback instructions on failure) lives in the vertical/ops repo that
-  owns the VPS, not in `duckclaw` — `duckclaw` stays the generic harness with
-  no vertical- or VPS-specific paths or scripts.
+  prints rollback instructions on failure) lives in the ops repo that owns the
+  deployment, not in `duckclaw` — `duckclaw` stays the generic harness with no
+  vertical- or host-specific paths or scripts.
 - Web Push subscriptions are stored DB-first in `admin_runtime_settings` under
   `domain=web_push`; Gateway writes through DB-Writer and Heartbeat reads in
   read-only mode.
@@ -93,11 +93,10 @@ Known caveat: `pnpm --dir apps/duckclaw-admin lint` currently fails on existing
 unrelated lint debt in the admin app. Do not treat that as caused by this PWA
 change unless the touched files show new lint errors.
 
-Notion handoff task: `CLAUDE review - Docker Full persistente + corte VPS`
-https://app.notion.com/p/3e02edf2496f81eca3acd5f2e2e30362?pvs=204
+
 ## Architecture
 
-DuckClaw is a **DB-first, multi-tenant, multi-agent platform** built on generic LangGraph/LangChain — no vertical-specific logic hardcoded in the core Python. Verticals (Quant, PQRSD, Telegram bot, etc.) are opt-in extensions that live outside `packages/agents` core.
+DuckClaw is a **DB-first, multi-tenant, multi-agent platform** built on generic LangGraph/LangChain — no vertical-specific logic hardcoded in the core Python. Verticals are opt-in extensions that live in their own repos, outside this one; nothing vertical-specific (names, schemas, paths, hosts) belongs here.
 
 ### Non-negotiable rule: only DB-Writer writes
 
@@ -115,7 +114,7 @@ Other state-delta Redis queues follow the same fire-and-forget pattern, each wit
 | `DuckClaw-Heartbeat` | Proactive ticks / homeostasis | No, enqueues deltas |
 | `duckclaw-admin` | Next.js BFF, proxies to gateway, secrets stay server-side | No |
 
-There is one canonical hub DuckDB file and one schema (`main`, plus DuckDB-internal `information_schema`/`pg_catalog`) — legacy files (`db/duckclaw.duckdb` in repo root, `db/system.duckdb`, `db/telegram.duckdb`, `axis.duckdb`) must not be used. Migrations are sequential and live in `packages/shared/src/duckclaw/schema_migrations.py` (33+ versions); bootstrap DDL in `bootstrap_core.py` is idempotent and never uses `ALTER TABLE ADD COLUMN`.
+There is one canonical hub DuckDB file and one schema (`main`, plus DuckDB-internal `information_schema`/`pg_catalog`) — legacy files (`db/duckclaw.duckdb` in repo root, `db/system.duckdb`, `db/telegram.duckdb`) must not be used. Migrations are sequential and live in `packages/shared/src/duckclaw/schema_migrations.py` (33+ versions); bootstrap DDL in `bootstrap_core.py` is idempotent and never uses `ALTER TABLE ADD COLUMN`.
 
 ### Control plane (tables that matter)
 

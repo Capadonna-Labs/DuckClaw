@@ -7,9 +7,9 @@ from duckclaw_sensory_node.models import STTRequest, TTSRequest
 
 
 _BANNED_CORE_VOICE_IDS = {
-    "leila_assistant",
-    "finanz_alert",
-    "quant_trader_brief",
+    "assistant_reply",
+    "finance_alert",
+    "market_brief",
 }
 
 

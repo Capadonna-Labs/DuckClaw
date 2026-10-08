@@ -78,7 +78,7 @@ def test_list_active_swarm_slots_two_parallel(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.delenv("DUCKCLAW_REDIS_URL", raising=False)
     tid = f"tenant-{id(monkeypatch)}"
-    w = "Quant-Trader"
+    w = "Research-Agent"
     ta, na = m.acquire_subagent_slot(tid, w)
     tb, nb = m.acquire_subagent_slot(tid, w)
     assert {na, nb} == {1, 2}

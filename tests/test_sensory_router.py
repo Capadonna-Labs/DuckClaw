@@ -55,6 +55,6 @@ def test_transcribe_proxy(sensory_app):
 def test_synthesize_rejects_ref_audio(sensory_app):
     r = sensory_app.post(
         "/api/v1/sensory/synthesize",
-        json={"text": "hola", "voice_id": "leila_assistant", "ref_audio": "x.wav"},
+        json={"text": "hola", "voice_id": "assistant_voice", "ref_audio": "x.wav"},
     )
     assert r.status_code == 422

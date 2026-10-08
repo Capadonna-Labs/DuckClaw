@@ -184,7 +184,7 @@ def apply_terminal_force_tool_overrides(
     gmail_search_tool = (
         find_gmail_mcp_search_tool(tools_by_name) if email_intent else None
     )
-    # On /loop ticks, never force Gmail — trading sensors first.
+    # On /loop ticks, never force Gmail — domain sensors first.
     if _is_loop_or_proactive_system_event(incoming):
         gmail_search_tool = None
     if (

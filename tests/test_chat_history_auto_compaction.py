@@ -53,12 +53,12 @@ def test_trim_fallback_keeps_newest_within_budget_starting_on_user(monkeypatch) 
     assert history_estimated_tokens(kept) <= 5000
 
 
-def _prepared(history: list[dict[str, Any]], vault: str = "/v/quant.duckdb"):
+def _prepared(history: list[dict[str, Any]], vault: str = "/v/demo.duckdb"):
     from core.chat_invoke_prepare import PreparedChatInvoke
 
     return PreparedChatInvoke(
         payload=SimpleNamespace(),
-        worker_id="quant_analyst",
+        worker_id="data_analyst",
         session_id="admin-conv-1",
         tenant_id="t1",
         message="hola",

@@ -132,17 +132,17 @@ def test_vault_fly_uses_session_duckdb_path_over_gateway_env(tmp_path, monkeypat
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(tmp_path))
     fin = tmp_path / "hubdb1.duckdb"
     fin.write_bytes(b"x" * 100)
-    siata = tmp_path / "siatadb1.duckdb"
-    siata.write_bytes(b"y" * 100)
+    acme = tmp_path / "acmedb1.duckdb"
+    acme.write_bytes(b"y" * 100)
     monkeypatch.setenv("DUCKCLAW_GATEWAY_DB_PATH", str(fin))
     monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "DuckClaw-Gateway")
 
     db = _DummyDB()
-    db._path = str(siata.resolve())
-    out = handle_command(db, "c1", "/vault", tenant_id="SIATA", vault_user_id="u1", requester_id="u1")
-    assert out and "siatadb1.duckdb" in out
+    db._path = str(acme.resolve())
+    out = handle_command(db, "c1", "/vault", tenant_id="ACME", vault_user_id="u1", requester_id="u1")
+    assert out and "acmedb1.duckdb" in out
     assert "hubdb1.duckdb" not in out
-    assert "Tenant: SIATA" in out
+    assert "Tenant: ACME" in out
 
 
 def test_vault_default_tenant_label_uses_db_first_runtime_setting(

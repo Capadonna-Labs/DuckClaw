@@ -35,13 +35,13 @@ def test_policy_defaults_are_closed_and_send_is_draft() -> None:
 def test_policy_matches_by_id_username_or_me() -> None:
     policy = load_policy(
         {
-            "TELEGRAM_USER_READ_ALLOW": "-100555,@quantsignals,me",
+            "TELEGRAM_USER_READ_ALLOW": "-100555,@marketsignals,me",
             "TELEGRAM_USER_SEND_ALLOW": "me",
             "TELEGRAM_USER_SEND_MODE": "direct",
         }
     )
     assert policy.can_read(entity_keys(-100555)) is True
-    assert policy.can_read(entity_keys(-100999, "QuantSignals")) is True
+    assert policy.can_read(entity_keys(-100999, "MarketSignals")) is True
     assert policy.can_read(entity_keys(42)) is False
     assert policy.can_send(entity_keys(42, is_self=True)) is True
     assert policy.can_send(entity_keys(-100555)) is False

@@ -62,7 +62,7 @@ def apply_db_path_from_api_gateways_pm2() -> tuple[bool, str | None]:
 
     Returns:
         (telegram_token_from_json, matched_app_name) — nombre PM2 del bloque elegido (p. ej.
-        ``BI-Analyst-Gateway``), útil si ``DUCKCLAW_PM2_PROCESS_NAME`` no está en el entorno
+        ``Acme-Gateway``), útil si ``DUCKCLAW_PM2_PROCESS_NAME`` no está en el entorno
         (uvicorn directo por puerto).
     """
     cfg = _REPO_ROOT / "config" / "api_gateways_pm2.json"

@@ -17,8 +17,8 @@ def test_folder_name_case_insensitive() -> None:
 
 
 def test_hyphen_underscore_alias_resolves_against_available() -> None:
-    available = ["default", "quant-trader", "quant_reporter"]
-    assert resolve_template_id(available, "quant_trader") == "quant-trader"
-    assert resolve_template_id(available, "quant-trader") == "quant-trader"
-    assert resolve_template_id(available, "quant_reporter") == "quant_reporter"
-    assert resolve_template_id(available, "quant-reporter") == "quant_reporter"
+    available = ["default", "research-agent", "report_writer"]
+    assert resolve_template_id(available, "research_agent") == "research-agent"
+    assert resolve_template_id(available, "research-agent") == "research-agent"
+    assert resolve_template_id(available, "report_writer") == "report_writer"
+    assert resolve_template_id(available, "report-writer") == "report_writer"

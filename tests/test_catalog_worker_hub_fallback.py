@@ -33,13 +33,13 @@ class _Adapter:
 def test_catalog_worker_id_variants_hyphen_underscore() -> None:
     from duckclaw.admin_worker_catalog import catalog_worker_id_variants
 
-    assert catalog_worker_id_variants("quant_reporter") == (
-        "quant_reporter",
-        "quant-reporter",
+    assert catalog_worker_id_variants("report_writer") == (
+        "report_writer",
+        "report-writer",
     )
-    assert catalog_worker_id_variants("quant-reporter") == (
-        "quant-reporter",
-        "quant_reporter",
+    assert catalog_worker_id_variants("report-writer") == (
+        "report-writer",
+        "report_writer",
     )
 
 
@@ -57,15 +57,15 @@ def test_get_worker_by_tenant_worker_id_resolves_underscore_alias(
         create_worker(
             con,
             owner_email="owner@test.com",
-            worker_id="quant-reporter",
-            display_name="Quant Reporter",
+            worker_id="report-writer",
+            display_name="Report Writer",
             source_kind="template_import",
         )
         row = get_worker_by_tenant_worker_id(
-            con, tenant_id=profile["tenant_id"], worker_id="quant_reporter"
+            con, tenant_id=profile["tenant_id"], worker_id="report_writer"
         )
         assert row is not None
-        assert row["worker_id"] == "quant-reporter"
+        assert row["worker_id"] == "report-writer"
     finally:
         con.close()
 
@@ -138,8 +138,8 @@ def test_load_manifest_falls_back_to_default_tenant_when_user_tenant_misses(
         worker = create_worker(
             hub,
             owner_email="system@duckclaw.local",
-            worker_id="quant-analyst",
-            display_name="Quant Analyst",
+            worker_id="data-analyst",
+            display_name="Data Analyst",
         )
         hub_con.execute(
             "UPDATE main.admin_worker_catalog SET tenant_id = 'default' WHERE worker_uid = ?",
@@ -149,8 +149,8 @@ def test_load_manifest_falls_back_to_default_tenant_when_user_tenant_misses(
             hub,
             worker_uid=worker["worker_uid"],
             created_by="system@duckclaw.local",
-            manifest_snapshot={"id": "quant-analyst", "skills": []},
-            files_snapshot={"manifest.yaml": "id: quant-analyst\nskills: []\n"},
+            manifest_snapshot={"id": "data-analyst", "skills": []},
+            files_snapshot={"manifest.yaml": "id: data-analyst\nskills: []\n"},
             change_note="test",
         )
         hub_con.close()
@@ -167,10 +167,10 @@ def test_load_manifest_falls_back_to_default_tenant_when_user_tenant_misses(
         # Underscore alias + user-* tenant (the production failure shape).
         spec = load_manifest_from_catalog(
             hub_ro,
-            "quant_analyst",
+            "data_analyst",
             tenant_id="user-juanjoarevalo57-79c5ca60b91d4f3e",
         )
-        assert getattr(spec, "worker_id", None) == "quant-analyst"
+        assert getattr(spec, "worker_id", None) == "data-analyst"
     finally:
         try:
             hub_con.close()
@@ -190,15 +190,15 @@ def test_load_manifest_falls_back_to_active_row_on_other_hub_tenant(
         worker = create_worker(
             hub,
             owner_email=profile["email"],
-            worker_id="quant-analyst",
-            display_name="Quant Analyst",
+            worker_id="data-analyst",
+            display_name="Data Analyst",
         )
         add_worker_version(
             hub,
             worker_uid=worker["worker_uid"],
             created_by=profile["email"],
-            manifest_snapshot={"id": "quant-analyst", "skills": []},
-            files_snapshot={"manifest.yaml": "id: quant-analyst\nskills: []\n"},
+            manifest_snapshot={"id": "data-analyst", "skills": []},
+            files_snapshot={"manifest.yaml": "id: data-analyst\nskills: []\n"},
             change_note="test",
         )
         assert worker["tenant_id"] != "default"
@@ -211,10 +211,10 @@ def test_load_manifest_falls_back_to_active_row_on_other_hub_tenant(
         hub_ro = GatewayDbEphemeralReadonly(str(hub_path))
         spec = load_manifest_from_catalog(
             hub_ro,
-            "quant_analyst",
+            "data_analyst",
             tenant_id="user-other-tenant-aaaaaaaaaaaaaaaa",
         )
-        assert getattr(spec, "worker_id", None) == "quant-analyst"
+        assert getattr(spec, "worker_id", None) == "data-analyst"
     finally:
         try:
             hub_con.close()

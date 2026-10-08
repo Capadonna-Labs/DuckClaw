@@ -26,7 +26,7 @@ def test_chat_schedules_lists_clock_prompt_and_interval(tmp_path, monkeypatch) -
             "chat_admin-conv-1_goals_cron_wall", json.dumps(spec),
             "chat_admin-conv-1_goals_proactive_last_fire_epoch", "1790000000.5",
             "chat_admin-conv-1_goals_proactive_tenant_id", "user-x",
-            "chat_admin-conv-1_worker_id", "quant_analyst",
+            "chat_admin-conv-1_worker_id", "data_analyst",
             "chat_42_goals_delta_seconds", "1800",
             "chat_43_goals_delta_seconds", "0",
         ],

@@ -361,7 +361,7 @@ def test_pm2_json_lists_gateways_with_explicit_db_path(
     (root / "config").mkdir(parents=True)
     cfg = {
         "apps": [
-            {"name": "SIATA-Gateway", "env": {"DUCKCLAW_GATEWAY_DB_PATH": "/x/s.duckdb"}},
+            {"name": "Acme-Gateway", "env": {"DUCKCLAW_GATEWAY_DB_PATH": "/x/s.duckdb"}},
             {"name": "BI-Analyst-Gateway", "env": {"DUCKDB_PATH": "/x/bi.duckdb"}},
         ]
     }
@@ -369,7 +369,7 @@ def test_pm2_json_lists_gateways_with_explicit_db_path(
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(root))
     clear_pm2_gateway_db_cache()
     names = pm2_gateway_names_with_explicit_db_path()
-    assert "SIATA-Gateway" in names
+    assert "Acme-Gateway" in names
     assert "BI-Analyst-Gateway" in names
 
 
@@ -386,7 +386,7 @@ def test_dedicated_gateway_vault_matches_pm2_db_path(
     cfg = {
         "apps": [
             {
-                "name": "SIATA-Gateway",
+                "name": "Acme-Gateway",
                 "port": 9001,
                 "env": {"DUCKDB_PATH": str(dbf)},
             }
@@ -396,7 +396,7 @@ def test_dedicated_gateway_vault_matches_pm2_db_path(
     monkeypatch.setenv("DUCKCLAW_REPO_ROOT", str(root))
     clear_pm2_gateway_db_cache()
     _clear_multiplex_db_env(monkeypatch)
-    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "SIATA-Gateway")
+    monkeypatch.setenv("DUCKCLAW_PM2_PROCESS_NAME", "Acme-Gateway")
     monkeypatch.setenv("DUCKDB_PATH", str(dbf))
     assert gateway_main._dedicated_gateway_vault_db_path() == str(dbf.resolve())
 

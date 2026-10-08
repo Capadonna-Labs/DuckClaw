@@ -78,10 +78,10 @@ def test_build_worker_tools_skips_github_skill_when_mcp_github_granted(
     monkeypatch.setattr("duckclaw.github.mcp_bridge.register_github_skill", _fake_register_github)
 
     spec = SimpleNamespace(
-        worker_id="quant_analyst",
-        logical_worker_id="quant_analyst",
-        worker_slug="quant_analyst",
-        name="Quant Analyst",
+        worker_id="data_analyst",
+        logical_worker_id="data_analyst",
+        worker_slug="data_analyst",
+        name="Data Analyst",
         schema_name="main",
         allowed_tables=[],
         read_only=True,

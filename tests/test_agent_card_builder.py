@@ -44,11 +44,11 @@ def test_build_a2a_agent_card_required_fields() -> None:
 def test_build_a2a_agent_card_allows_update_system_prompt_skill() -> None:
     """Regression: skill id ``update_system_prompt`` must not trip prompt-leak scan."""
     manifest = {
-        "id": "finanz-1",
+        "id": "agent-1",
         "skills": ["research", "admin_sql", "update_system_prompt"],
     }
     files = {"soul.md": "Assistant for personal finance."}
-    card = build_a2a_agent_card("finanz-1", manifest=manifest, files=files)
+    card = build_a2a_agent_card("agent-1", manifest=manifest, files=files)
     skill_ids = {s["id"] for s in card["skills"]}
     assert "update_system_prompt" in skill_ids
 

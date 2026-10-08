@@ -68,7 +68,7 @@ def _parse_env_file(path: Path) -> dict[str, str]:
 
 
 def _draft_from_dotenv(repo_root: Path, cfg: "GatewayChatConfig") -> SovereignDraft:
-    """Bóveda/tenant/worker del chat desde ``.env`` (no borrador viejo SIATA/Geo)."""
+    """Bóveda/tenant/worker del chat desde ``.env`` (no un borrador viejo)."""
     env = _parse_env_file(repo_root / ".env")
     vault = (env.get("DUCKDB_PATH") or env.get("DUCKCLAW_DB_PATH") or "").strip()
     return SovereignDraft(

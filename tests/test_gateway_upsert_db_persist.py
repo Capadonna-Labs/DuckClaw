@@ -8,7 +8,7 @@ from duckclaw.ops.manager import _upsert_gateway_app
 def test_upsert_preserves_db_path_when_incoming_env_differs() -> None:
     apps: list[dict] = [
         {
-            "name": "Finanz-Gateway",
+            "name": "Demo-Gateway",
             "host": "0.0.0.0",
             "port": 8000,
             "env": {
@@ -26,7 +26,7 @@ def test_upsert_preserves_db_path_when_incoming_env_differs() -> None:
     }
     out = _upsert_gateway_app(
         apps,
-        name="Finanz-Gateway",
+        name="Demo-Gateway",
         host="0.0.0.0",
         port=8000,
         env_vars=env_vars,
@@ -42,7 +42,7 @@ def test_upsert_preserves_db_path_when_incoming_env_differs() -> None:
 def test_upsert_forced_env_overrides_persisted_db_paths() -> None:
     apps: list[dict] = [
         {
-            "name": "Finanz-Gateway",
+            "name": "Demo-Gateway",
             "host": "0.0.0.0",
             "port": 8000,
             "env": {"DUCKCLAW_GATEWAY_DB_PATH": "/a/old.duckdb"},
@@ -51,7 +51,7 @@ def test_upsert_forced_env_overrides_persisted_db_paths() -> None:
     env_vars = {"DUCKCLAW_GATEWAY_DB_PATH": "/b/from_dotenv.duckdb"}
     out = _upsert_gateway_app(
         apps,
-        name="Finanz-Gateway",
+        name="Demo-Gateway",
         host="0.0.0.0",
         port=8000,
         env_vars=env_vars,
@@ -87,7 +87,7 @@ def test_upsert_new_gateway_uses_incoming_db_path() -> None:
 def test_upsert_fills_empty_persisted_db_path_from_incoming() -> None:
     apps: list[dict] = [
         {
-            "name": "Finanz-Gateway",
+            "name": "Demo-Gateway",
             "host": "0.0.0.0",
             "port": 8000,
             "env": {"DUCKCLAW_GATEWAY_DB_PATH": ""},
@@ -95,7 +95,7 @@ def test_upsert_fills_empty_persisted_db_path_from_incoming() -> None:
     ]
     out = _upsert_gateway_app(
         apps,
-        name="Finanz-Gateway",
+        name="Demo-Gateway",
         host="0.0.0.0",
         port=8000,
         env_vars={"DUCKCLAW_GATEWAY_DB_PATH": "/fill/in.duckdb", "DUCKDB_PATH": "/fill/in.duckdb"},

@@ -242,7 +242,7 @@ def test_run_inspect_schema_worker_lists_columns() -> None:
     def run_query(sql: str) -> str:
         upper = sql.upper()
         if "FROM INFORMATION_SCHEMA.TABLES" in upper:
-            return json.dumps([{"table_schema": "quant_core", "table_name": "portfolio_positions"}])
+            return json.dumps([{"table_schema": "demo_core", "table_name": "portfolio_positions"}])
         if "FROM INFORMATION_SCHEMA.COLUMNS" in upper:
             return json.dumps(
                 [
@@ -254,6 +254,6 @@ def test_run_inspect_schema_worker_lists_columns() -> None:
         return "[]"
 
     out = run_inspect_schema_worker(run_query)
-    assert "quant_core.portfolio_positions" in out
+    assert "demo_core.portfolio_positions" in out
     assert "qty" in out
     assert "current_price" in out

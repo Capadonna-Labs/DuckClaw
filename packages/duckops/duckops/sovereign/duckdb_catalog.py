@@ -68,8 +68,7 @@ def suggest_duckdb_vault_path(
     if draft is not None:
         cur = (draft.duckdb_vault_path or "").strip()
         if cur and resolve_duckdb_path(repo_root, cur).is_file():
-            if "siata" not in cur.lower():
-                return cur
+            return cur
     env_hint = load_duckdb_vault_hint_from_repo_env(repo_root)
     if env_hint:
         return env_hint

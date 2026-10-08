@@ -274,7 +274,7 @@ def test_workers_fly_command_opens_read_only_duckclaw(monkeypatch, tmp_path: Pat
 
 
 def test_slow_fly_command_does_not_block_event_loop(monkeypatch, tmp_path: Path) -> None:
-    """A slow command (e.g. /trading_session --status hitting IBKR) must not freeze /health."""
+    """A slow command (e.g. /session_report --status hitting a broker API) must not freeze /health."""
     import time
 
     from core import fly_command_invocation
@@ -305,7 +305,7 @@ def test_slow_fly_command_does_not_block_event_loop(monkeypatch, tmp_path: Path)
 
         task = asyncio.create_task(ticker())
         response = await fly_command_invocation.invoke_legacy_fly_command(
-            message="/trading_session --status",
+            message="/session_report --status",
             session_id="chat1",
             worker_id="manager",
             tenant_id="tenant-a",

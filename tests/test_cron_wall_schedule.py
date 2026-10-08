@@ -208,7 +208,7 @@ def test_execute_goals_timestamp_with_prompt_stores_it(tmp_path: Path) -> None:
         "CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT, "
         "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
     )
-    con.execute("INSERT INTO agent_config (key, value) VALUES (?, ?)", ["chat_23_worker_id", "quant_analyst"])
+    con.execute("INSERT INTO agent_config (key, value) VALUES (?, ?)", ["chat_23_worker_id", "data_analyst"])
     con.close()
 
     with DuckClaw(db_path, read_only=False) as db:
@@ -268,7 +268,7 @@ def test_multiple_prompt_crons_per_chat(tmp_path: Path) -> None:
               "weekdays": [6], "prompt": "/defense_watch"}
     con.execute(
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?)",
-        ["chat_24_worker_id", "quant_analyst", "chat_24_goals_cron_wall", json.dumps(legacy)],
+        ["chat_24_worker_id", "data_analyst", "chat_24_goals_cron_wall", json.dumps(legacy)],
     )
     con.close()
 

@@ -145,7 +145,6 @@ def format_worker_reply(
 ) -> str:
     reply = raw_worker_reply
     label_reply = f"{assigned} {run_label_n}".strip()
-    crm = str(chat_id or "").strip().lower().startswith("crm-ticket-")
     if visual_lite_mcp and isinstance(worker_invoke, dict):
         vis_b64 = (worker_invoke.get("sandbox_photo_base64") or "").strip()
         vis_aid = (worker_invoke.get("visual_artifact_id") or "").strip()
@@ -154,8 +153,7 @@ def format_worker_reply(
             if not short_vis or len(short_vis) > 240:
                 short_vis = "Imagen generada."
             reply = short_vis
-    if not crm:
-        reply = _prepend_subagent_label_once(reply, label_reply)
+    reply = _prepend_subagent_label_once(reply, label_reply)
     return reply
 
 

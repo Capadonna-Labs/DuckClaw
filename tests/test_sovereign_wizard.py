@@ -214,18 +214,6 @@ def test_build_neutral_duckdb_picker(tmp_path: Path) -> None:
     assert "← sugerido" not in "\n".join(labels)
 
 
-def test_suggest_duckdb_prefers_workspace_over_siata(tmp_path: Path) -> None:
-    db = tmp_path / "db" / "private" / "u"
-    db.mkdir(parents=True)
-    workspace = db / "duckclaw.duckdb"
-    workspace.write_bytes(b"")
-    siata = tmp_path / "db" / "private" / "u" / "siatadb1.duckdb"
-    siata.write_bytes(b"")
-    d = SovereignDraft(duckdb_vault_path="db/private/u/siatadb1.duckdb")
-    got = suggest_duckdb_vault_path(tmp_path, d)
-    assert "duckclaw.duckdb" in got
-
-
 def test_discover_duckdb_files(tmp_path: Path) -> None:
     p = tmp_path / "db" / "system.duckdb"
     p.parent.mkdir(parents=True)

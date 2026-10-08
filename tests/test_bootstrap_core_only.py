@@ -1,4 +1,4 @@
-"""Bootstrap --core-only: esquema genérico sin dominios quant/finance."""
+"""Bootstrap --core-only: esquema genérico sin dominios verticales."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def test_bootstrap_core_schema_creates_tables_no_domain_schemas(tmp_path: Path, 
 
         from duckclaw.bootstrap_core import core_unexpected_schemas_present
 
-        # quant_core may exist after migrations (IBKR); finance/harness must not.
+        # Vertical schemas belong to extensions; they must not be created by core bootstrap.
         assert core_unexpected_schemas_present(con, ("finance_worker", "harness_core")) == []
     finally:
         con.close()

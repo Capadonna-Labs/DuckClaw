@@ -9,11 +9,11 @@ def test_tailscale_status_parse_json_active() -> None:
     """Parse JSON output returns Active when peers exist."""
     from duckclaw.forge.skills.tailscale_bridge import _parse_status_output
 
-    raw = '{"Self":{"Online":true},"Peer":{"1":{"HostName":"vps","TailscaleIPs":["100.64.0.2"]}}}'
+    raw = '{"Self":{"Online":true},"Peer":{"1":{"HostName":"server","TailscaleIPs":["100.64.0.2"]}}}'
     status, peers = _parse_status_output(raw)
     assert status == "Active"
     assert "100.64.0.2" in str(peers)
-    assert "vps" in str(peers)
+    assert "server" in str(peers)
 
 
 def test_tailscale_status_parse_json_down() -> None:
@@ -39,10 +39,10 @@ def test_tailscale_status_impl_with_mock() -> None:
     """_tailscale_status_impl returns Active when tailscale status --json succeeds."""
     import duckclaw.forge.skills.tailscale_bridge as m
 
-    with patch.object(m, "_run_tailscale_status", return_value='{"Self":{"Online":true},"Peer":{"1":{"HostName":"vps","TailscaleIPs":["100.64.0.2"]}}}'):
+    with patch.object(m, "_run_tailscale_status", return_value='{"Self":{"Online":true},"Peer":{"1":{"HostName":"server","TailscaleIPs":["100.64.0.2"]}}}'):
         result = m._tailscale_status_impl()
         assert "ConnectionStatus: Active" in result
-        assert "100.64.0.2" in result or "vps" in result
+        assert "100.64.0.2" in result or "server" in result
 
 
 def test_register_tailscale_skill_no_config() -> None:

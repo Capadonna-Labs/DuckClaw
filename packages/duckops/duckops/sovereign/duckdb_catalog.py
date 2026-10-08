@@ -11,7 +11,6 @@ from duckops.sovereign.duckdb_health import human_bytes, resolve_duckdb_path
 from duckops.sovereign.materialize import load_duckdb_vault_hint_from_repo_env
 
 WORKSPACE_VAULT_BASENAME = "duckclaw.duckdb"
-LEGACY_VAULT_BASENAME = "axis.duckdb"
 DEFAULT_WORKSPACE_REL = DEFAULT_SESSION_DB_RELPATH
 
 
@@ -47,17 +46,6 @@ def discover_duckdb_files(repo_root: Path) -> list[DuckDbPick]:
     return picks
 
 
-def find_legacy_axis_vault_in_repo(repo_root: Path) -> str | None:
-    """Primera ruta ``**/axis.duckdb`` bajo ``db/`` (solo migración legacy)."""
-    db_dir = repo_root / "db"
-    if not db_dir.is_dir():
-        return None
-    hits = sorted(db_dir.rglob(LEGACY_VAULT_BASENAME))
-    if not hits:
-        return None
-    return str(hits[0].relative_to(repo_root))
-
-
 def find_workspace_vault_in_repo(repo_root: Path) -> str | None:
     """Primera ruta ``**/duckclaw.duckdb`` bajo ``db/``."""
     db_dir = repo_root / "db"
@@ -75,7 +63,7 @@ def suggest_duckdb_vault_path(
 ) -> str:
     """
     Prioridad: borrador válido → claves gateway en ``.env`` → ``duckclaw.duckdb`` en disco
-    → legacy ``axis.duckdb`` → ruta por defecto bajo ``db/private/``.
+    → ruta por defecto bajo ``db/private/``.
     """
     if draft is not None:
         cur = (draft.duckdb_vault_path or "").strip()
@@ -88,9 +76,6 @@ def suggest_duckdb_vault_path(
     found = find_workspace_vault_in_repo(repo_root)
     if found:
         return found
-    legacy = find_legacy_axis_vault_in_repo(repo_root)
-    if legacy:
-        return legacy
     owner = ""
     if draft is not None:
         owner = (draft.wizard_creator_telegram_user_id or "").strip()
@@ -155,8 +140,6 @@ def format_duckdb_picker_block(
         mark = ""
         if p.suggested or p.rel_path == hid:
             mark = " [bold cyan]← sugerido[/]"
-        elif p.rel_path.endswith(LEGACY_VAULT_BASENAME):
-            mark = " [dim](legacy)[/]"
         ex = f"[green]{p.size_human}[/]" if p.exists else "[dim]nuevo[/]"
         lines.append(f"  [dim]{i:2}.[/] [bold]{p.rel_path}[/] · {ex}{mark}")
     extra = len(picks) - max_lines

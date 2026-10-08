@@ -164,7 +164,7 @@ def test_load_manifest_falls_back_to_default_tenant_when_user_tenant_misses(
         )
 
         hub_ro = GatewayDbEphemeralReadonly(str(hub_path))
-        # Underscore alias + user-* tenant (the VPS failure shape).
+        # Underscore alias + user-* tenant (the production failure shape).
         spec = load_manifest_from_catalog(
             hub_ro,
             "quant_analyst",

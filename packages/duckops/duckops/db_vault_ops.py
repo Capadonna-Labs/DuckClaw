@@ -1,4 +1,4 @@
-"""Operaciones de bóveda DuckDB (fresh dev, migración legacy axis)."""
+"""Operaciones de bóveda DuckDB (fresh dev)."""
 
 from __future__ import annotations
 
@@ -8,58 +8,6 @@ import sys
 from pathlib import Path
 
 from duckops.paths import repo_root
-
-
-def migrate_legacy_axis_vault(*, dry_run: bool = False) -> int:
-    """Renombra axis.duckdb → duckclaw.duckdb y limpia .env legacy."""
-    root = repo_root()
-    if dry_run:
-        print("DRY-RUN: migrate legacy axis vault")
-    renamed = 0
-    for legacy in sorted(root.glob("db/**/axis.duckdb")):
-        if not legacy.is_file():
-            continue
-        target = legacy.with_name("duckclaw.duckdb")
-        if target.exists():
-            print(f"SKIP (dest exists): {legacy}")
-            continue
-        if dry_run:
-            print(f"DRY-RUN RENAME: {legacy} -> {target}")
-        else:
-            legacy.rename(target)
-            print(f"RENAMED: {legacy} -> {target}")
-        renamed += 1
-
-    env_path = root / ".env"
-    if env_path.is_file():
-        text = env_path.read_text(encoding="utf-8")
-        if "DUCKCLAW_AXIS_DB_PATH" in text:
-            if dry_run:
-                print("DRY-RUN: remove DUCKCLAW_AXIS_DB_PATH from .env")
-            else:
-                lines = [ln for ln in text.splitlines() if not ln.strip().startswith("DUCKCLAW_AXIS_DB_PATH=")]
-                env_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-                print("Removed DUCKCLAW_AXIS_DB_PATH from .env")
-        for key in ("DUCKCLAW_GATEWAY_DB_PATH", "DUCKCLAW_VAULT_DB_PATH", "DUCKDB_PATH"):
-            marker = f"{key}=.*axis\\.duckdb"
-            if dry_run:
-                if f"axis.duckdb" in text and key in text:
-                    print(f"DRY-RUN: update {key} axis.duckdb → duckclaw.duckdb")
-            else:
-                import re
-
-                new_text, n = re.subn(
-                    rf"({key}=.*?)axis\.duckdb",
-                    r"\1duckclaw.duckdb",
-                    text,
-                )
-                if n:
-                    env_path.write_text(new_text, encoding="utf-8")
-                    print(f"Updated {key} axis.duckdb → duckclaw.duckdb in .env")
-                    text = new_text
-
-    print(f"Done. Vaults renamed: {renamed}. Run: uv run duckops stack deploy")
-    return 0
 
 
 def fresh_dev_platform(*, dry_run: bool = False) -> int:

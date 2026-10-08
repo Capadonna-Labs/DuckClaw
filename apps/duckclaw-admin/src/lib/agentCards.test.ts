@@ -35,7 +35,7 @@ assert.deepEqual(
 
 assert.deepEqual(
   agentMetadata({ id: 'team-lead', name: 'Team Lead', schema_name: 'team_lead_worker' }),
-  [{ label: 'Schema', value: 'axis_maestro_worker' }]
+  [{ label: 'Schema', value: 'demo_maestro_worker' }]
 );
 
 console.log('agentCards.test.ts: ok');

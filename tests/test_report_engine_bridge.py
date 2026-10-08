@@ -16,7 +16,7 @@ def test_open_hub_db_reuses_worker_connection(monkeypatch: pytest.MonkeyPatch) -
     from duckclaw.forge.skills.report_engine_bridge import _open_hub_db
     from duckclaw.forge.skills.report_engine_hub_context import set_report_engine_hub_db
 
-    hub = "/tmp/hub-axis.duckdb"
+    hub = "/tmp/hub-demo.duckdb"
     worker_db = DuckClaw(hub, read_only=False, engine="python")
     monkeypatch.setattr("duckclaw.forge.skills.report_engine_bridge._hub_db_path", lambda: hub)
     set_report_engine_hub_db(worker_db)

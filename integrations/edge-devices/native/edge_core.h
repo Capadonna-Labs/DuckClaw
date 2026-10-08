@@ -18,7 +18,7 @@ typedef struct {
 } EdgeTelemetry;
 
 /**
- * @brief Lee métricas del sistema host (VPS/Mac) usando llamadas POSIX.
+ * @brief Lee métricas del sistema host (servidor/Mac) usando llamadas POSIX.
  * @param output Puntero a la estructura de telemetría.
  * @return int 0 si es exitoso.
  */

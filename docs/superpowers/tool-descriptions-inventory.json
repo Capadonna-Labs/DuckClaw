@@ -389,7 +389,7 @@
     "lane": "skills",
     "status": "needs_prefix",
     "file": "tailscale_bridge.py",
-    "description": "Verifica el estado de la red Tailscale Mesh. Retorna ConnectionStatus (Active/Down) y lista de peers conectados. Usa para diagnosticar conectividad entre Mac Mini y VPS."
+    "description": "Verifica el estado de la red Tailscale Mesh. Retorna ConnectionStatus (Active/Down) y lista de peers conectados. Usa para diagnosticar conectividad entre nodos de la red (p. ej. Mac Mini y servidor)."
   },
   {
     "name": "update_my_system_prompt",

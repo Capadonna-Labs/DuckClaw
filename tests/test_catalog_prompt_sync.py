@@ -73,14 +73,14 @@ def test_sync_worker_system_prompt_policy_writes_registry(gateway_db) -> None:
         worker = create_worker(
             con,
             owner_email="admin@test.local",
-            worker_id="axis-maestro",
-            display_name="Axis Maestro",
+            worker_id="demo-maestro",
+            display_name="Demo Maestro",
             source_kind="template_import",
             source_template_id="default",
         )
         written = sync_worker_system_prompt_policy(
             con,
-            worker_id="axis-maestro",
+            worker_id="demo-maestro",
             files={"system_prompt.md": "# Worker prompt\nHola."},
             actor_email="admin@test.local",
             worker_uid=str(worker.get("worker_uid") or ""),
@@ -89,7 +89,7 @@ def test_sync_worker_system_prompt_policy_writes_registry(gateway_db) -> None:
             """
             SELECT content, active
             FROM main.prompt_policy_registry
-            WHERE policy_type = 'system_prompt' AND policy_name = 'axis-maestro'
+            WHERE policy_type = 'system_prompt' AND policy_name = 'demo-maestro'
             ORDER BY version DESC
             LIMIT 1
             """

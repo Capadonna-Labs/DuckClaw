@@ -147,10 +147,6 @@ def duckdb_paths_to_unlock(repo: Path) -> list[Path]:
         for vault_db in sorted(private.glob(f"*/{workspace_name}")):
             if vault_db.is_file():
                 paths.append(vault_db)
-        legacy_name = "axis.duckdb"
-        for vault_db in sorted(private.glob(f"*/{legacy_name}")):
-            if vault_db.is_file():
-                paths.append(vault_db)
     # Dedup preservando orden
     seen: set[str] = set()
     out: list[Path] = []

@@ -81,7 +81,7 @@ int read_sensor_frame(int fd, EdgeTelemetry* output) {
 }
 
 int read_system_frame(EdgeTelemetry* output) {
-    std::strcpy(output->device_id, "VPS-CORE-01");
+    std::strcpy(output->device_id, "HOST-CORE-01");
 
     double loadavg[3];
     getloadavg(loadavg, 3);

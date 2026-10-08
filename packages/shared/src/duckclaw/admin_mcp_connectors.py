@@ -599,7 +599,7 @@ def tool_allowed_by_policy(connector: dict[str, Any], tool_name: str) -> bool:
     if not name:
         return False
     preset = str(connector.get("preset_id") or "").strip().lower()
-    # ponytail: workspacemcp search_corpus fails TaskGroup on VPS; Gmail REST covers email.
+    # ponytail: workspacemcp search_corpus fails TaskGroup on the server; Gmail REST covers email.
     if name.lower() == "search_corpus" and (
         preset == "google_workspace"
         or "workspacemcp.googleapis.com" in str(connector.get("endpoint_url") or "").lower()

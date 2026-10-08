@@ -189,7 +189,7 @@ def test_playground_config_uses_actor_runtime_defaults(
         "/api/v1/admin/user-agents",
         headers=headers,
         json={
-            "worker_id": "axis_bot",
+            "worker_id": "demo_bot",
             "display_name": "Demo Bot",
             "source_template_id": "default",
             "system_prompt": (
@@ -217,7 +217,7 @@ def test_playground_config_uses_actor_runtime_defaults(
                 {
                     "domain": "playground",
                     "key": "default_worker_id",
-                    "value": "axis_bot",
+                    "value": "demo_bot",
                     "scope": "actor",
                 },
                 {
@@ -240,6 +240,6 @@ def test_playground_config_uses_actor_runtime_defaults(
         "base_url": "https://api.groq.com/openai/v1",
         "scope": "runtime",
     }
-    assert body["selected_worker_id"] == "axis_bot"
+    assert body["selected_worker_id"] == "demo_bot"
     assert body["vault"]["effective_path"] == str(vault_path)
     assert body["vault"]["scope"] == "runtime"

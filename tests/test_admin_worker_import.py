@@ -55,9 +55,9 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
     )
 
     templates_root = tmp_path / "templates"
-    axis_template = _write_template(templates_root, "BI-Analyst", display_name="BI Analyst")
+    bi_template = _write_template(templates_root, "BI-Analyst", display_name="BI Analyst")
     other_template = _write_template(templates_root, "Other-Dev", display_name="Other Dev")
-    before_axis_files = sorted(p.relative_to(axis_template) for p in axis_template.rglob("*") if p.is_file())
+    before_files = sorted(p.relative_to(bi_template) for p in bi_template.rglob("*") if p.is_file())
     before_other_files = sorted(p.relative_to(other_template) for p in other_template.rglob("*") if p.is_file())
 
     con = duckdb.connect(str(gateway_db))
@@ -76,12 +76,12 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
             include_prefixes=("BI-",),
         )
         visible = list_visible_workers_for_actor(adapter, actor_email="admin@test.local")
-        axis_worker = next(worker for worker in visible if worker["id"] == "bi-analyst")
-        contexts = list_worker_contexts(adapter, worker_uid=axis_worker["worker_uid"])
-        capabilities = list_worker_capabilities(adapter, worker_uid=axis_worker["worker_uid"])
+        bi_worker = next(worker for worker in visible if worker["id"] == "bi-analyst")
+        contexts = list_worker_contexts(adapter, worker_uid=bi_worker["worker_uid"])
+        capabilities = list_worker_capabilities(adapter, worker_uid=bi_worker["worker_uid"])
         version_count = con.execute(
             "SELECT COUNT(*) FROM main.admin_worker_versions WHERE worker_uid = ?",
-            [axis_worker["worker_uid"]],
+            [bi_worker["worker_uid"]],
         ).fetchone()[0]
         policy_row = con.execute(
             """
@@ -94,7 +94,7 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
     finally:
         con.close()
 
-    after_axis_files = sorted(p.relative_to(axis_template) for p in axis_template.rglob("*") if p.is_file())
+    after_files = sorted(p.relative_to(bi_template) for p in bi_template.rglob("*") if p.is_file())
     after_other_files = sorted(p.relative_to(other_template) for p in other_template.rglob("*") if p.is_file())
 
     assert [item["worker_id"] for item in first["imported"]] == ["bi-analyst"]
@@ -106,7 +106,7 @@ def test_import_templates_to_catalog_is_selective_idempotent_and_non_destructive
     assert version_count == 1
     assert policy_row is not None
     assert "Sistema" in str(policy_row[0])
-    assert before_axis_files == after_axis_files
+    assert before_files == after_files
     assert before_other_files == after_other_files
 
 
@@ -170,7 +170,7 @@ def test_template_import_script_apply_import_uses_db_path_and_templates_root(
     assert "bi-analyst" in {worker["id"] for worker in visible}
 
 
-def test_template_import_module_and_script_do_not_hardcode_axis() -> None:
+def test_template_import_module_and_script_do_not_hardcode_bi() -> None:
     import inspect
 
     import duckops.import_templates_cli as cli
@@ -180,9 +180,7 @@ def test_template_import_module_and_script_do_not_hardcode_axis() -> None:
     cli_source = inspect.getsource(cli)
 
     assert "BI" not in module_source
-    assert "import_axis" not in module_source
     assert "BI" not in cli_source
-    assert "import_axis" not in cli_source
 
 
 def test_gateway_import_templates_endpoint_imports_selected_prefix_without_deleting_folders(

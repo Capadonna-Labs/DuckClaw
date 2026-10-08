@@ -2,7 +2,7 @@
 Pool de sesión MCP streamable HTTP (Android-MCP, etc.).
 
 Cada ``mcp_http_call_tool`` efímero abre transport + initialize + terminate.
-Este módulo reutiliza la sesión ~120s entre llamadas al mismo endpoint.
+Este módulo reutiliza una sesión por endpoint (url + headers) ~120s entre llamadas.
 """
 
 from __future__ import annotations
@@ -57,23 +57,32 @@ def _format_call_tool_result(result: Any) -> str:
     return str(result)
 
 
+class _Slot:
+    """One live MCP session (per url + headers)."""
+
+    def __init__(self) -> None:
+        self.http_client: Any = None
+        self.transport_cm: Any = None
+        self.session_cm: Any = None
+        self.session: Any = None
+        self.last_used = 0.0
+
+
 class _McpHttpPool:
+    """One session per (url, headers) on a dedicated event-loop thread.
+
+    It used to hold a single session: each connector evicted the previous one, so every turn
+    reconnected all connectors, and two concurrent tool builds (a chat turn and the admin
+    capabilities probe) closed each other's session mid ``list_tools`` (empty-message errors).
+    """
+
     def __init__(self) -> None:
         self._thread_lock = threading.Lock()
-        self._connect_lock: Optional[asyncio.Lock] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
-        self._session_key: str | None = None
-        self._url: str | None = None
-        self._headers: dict[str, str] = {}
-        self._http_client: Any = None
-        self._transport_cm: Any = None
-        self._read_stream: Any = None
-        self._write_stream: Any = None
-        self._session_cm: Any = None
-        self._session: Any = None
-        self._last_used = 0.0
+        self._slots: dict[str, _Slot] = {}
+        self._locks: dict[str, asyncio.Lock] = {}
 
     def _start_loop_thread(self) -> None:
         if self._loop is not None and self._thread is not None and self._thread.is_alive():
@@ -100,36 +109,35 @@ class _McpHttpPool:
             fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return fut.result(timeout=timeout)
 
-    async def _disconnect_async(self) -> None:
-        if self._session_cm is not None:
+    async def _close_slot_async(self, key: str) -> None:
+        slot = self._slots.pop(key, None)
+        if slot is None:
+            return
+        for cm in (slot.session_cm, slot.transport_cm):
+            if cm is not None:
+                try:
+                    await cm.__aexit__(None, None, None)
+                except Exception:
+                    pass
+        if slot.http_client is not None:
             try:
-                await self._session_cm.__aexit__(None, None, None)
+                await slot.http_client.aclose()
             except Exception:
                 pass
-            self._session_cm = None
-            self._session = None
-        if self._transport_cm is not None:
-            try:
-                await self._transport_cm.__aexit__(None, None, None)
-            except Exception:
-                pass
-            self._transport_cm = None
-            self._read_stream = None
-            self._write_stream = None
-        if self._http_client is not None:
-            try:
-                await self._http_client.aclose()
-            except Exception:
-                pass
-            self._http_client = None
-        self._session_key = None
-        self._url = None
-        self._headers = {}
 
-    def _connect_lock_for_loop(self) -> asyncio.Lock:
-        if self._connect_lock is None:
-            self._connect_lock = asyncio.Lock()
-        return self._connect_lock
+    def _lock_for(self, key: str) -> asyncio.Lock:
+        # Created and used only on the pool's loop thread.
+        lock = self._locks.get(key)
+        if lock is None:
+            lock = self._locks[key] = asyncio.Lock()
+        return lock
+
+    def _fresh(self, key: str) -> Any:
+        slot = self._slots.get(key)
+        if slot is not None and slot.session is not None and (time.monotonic() - slot.last_used) < _IDLE_TTL_S:
+            slot.last_used = time.monotonic()
+            return slot.session
+        return None
 
     async def _ensure_connected_async(self, url: str, headers: dict[str, str]) -> Any:
         import httpx
@@ -137,49 +145,39 @@ class _McpHttpPool:
         from mcp.client.streamable_http import streamable_http_client
 
         key = _session_key(url, headers)
-        now = time.monotonic()
-        if (
-            self._session is not None
-            and self._session_key == key
-            and (now - self._last_used) < _IDLE_TTL_S
-        ):
-            self._last_used = now
-            return self._session
-
-        async with self._connect_lock_for_loop():
-            now = time.monotonic()
-            if (
-                self._session is not None
-                and self._session_key == key
-                and (now - self._last_used) < _IDLE_TTL_S
-            ):
-                self._last_used = now
-                return self._session
-
-            await self._disconnect_async()
+        session = self._fresh(key)
+        if session is not None:
+            return session
+        async with self._lock_for(key):
+            session = self._fresh(key)
+            if session is not None:
+                return session
+            await self._close_slot_async(key)
             t0 = time.perf_counter()
-            self._url = url
-            self._headers = dict(headers)
-            self._http_client = httpx.AsyncClient(headers=headers or {}, timeout=60.0)
-            self._transport_cm = streamable_http_client(url, http_client=self._http_client)
-            self._read_stream, self._write_stream, _get_session_id = await self._transport_cm.__aenter__()
+            slot = _Slot()
+            slot.http_client = httpx.AsyncClient(headers=headers or {}, timeout=60.0)
+            slot.transport_cm = streamable_http_client(url, http_client=slot.http_client)
+            read_stream, write_stream, _get_session_id = await slot.transport_cm.__aenter__()
             del _get_session_id
-            self._session_cm = ClientSession(self._read_stream, self._write_stream)
-            self._session = await self._session_cm.__aenter__()
-            await self._session.initialize()
-            self._session_key = key
-            self._last_used = time.monotonic()
+            slot.session_cm = ClientSession(read_stream, write_stream)
+            slot.session = await slot.session_cm.__aenter__()
+            await slot.session.initialize()
+            slot.last_used = time.monotonic()
+            self._slots[key] = slot
             _log.info(
                 "mcp HTTP pool: sesión lista en %.2fs url=%s",
                 time.perf_counter() - t0,
                 url,
             )
-            return self._session
+            return slot.session
 
     async def _list_tools_async(self, url: str, headers: dict[str, str]) -> List[Any]:
         session = await self._ensure_connected_async(url, headers)
-        tools_result = await session.list_tools()
-        self._last_used = time.monotonic()
+        try:
+            tools_result = await session.list_tools()
+        except Exception:
+            await self._close_slot_async(_session_key(url, headers))
+            raise
         return list(getattr(tools_result, "tools", []) or [])
 
     async def _call_tool_async(
@@ -189,29 +187,23 @@ class _McpHttpPool:
         name: str,
         arguments: Optional[dict[str, Any]],
     ) -> str:
+        key = _session_key(url, headers)
         session = await self._ensure_connected_async(url, headers)
         t0 = time.perf_counter()
         try:
             result = await session.call_tool(name, arguments or {})
             out = _format_call_tool_result(result)
-            _log.debug(
-                "mcp HTTP pool: tool=%s ok in %.2fs reuse=%s",
-                name,
-                time.perf_counter() - t0,
-                self._session_key == _session_key(url, headers),
-            )
+            _log.debug("mcp HTTP pool: tool=%s ok in %.2fs", name, time.perf_counter() - t0)
             return out
         except Exception as exc:
             _log.warning(
-                "mcp HTTP pool: tool=%s failed in %.2fs: %s",
+                "mcp HTTP pool: tool=%s failed in %.2fs: %r",
                 name,
                 time.perf_counter() - t0,
                 exc,
             )
-            await self._disconnect_async()
-            return f"Error MCP ({name}): {exc}"
-        finally:
-            self._last_used = time.monotonic()
+            await self._close_slot_async(key)
+            return f"Error MCP ({name}): {exc!r}"
 
     def list_tools(self, url: str, *, headers: dict[str, str] | None = None) -> List[Any]:
         hdr = dict(headers or {})

@@ -145,6 +145,45 @@ def _message_body_text(payload: dict[str, Any] | None) -> str:
     return re.sub(r"\n\s*\n+", "\n\n", text).strip()
 
 
+_LINK_RE = re.compile(r"""(?is)<a\b[^>]*href=["']([^"']+)["'][^>]*>(.*?)</a>""")
+_SKIP_LINK_RE = re.compile(
+    r"(?i)unsubscribe|preferences|manage\s*(your\s*)?(email|subscription)|privacy|terms|"
+    r"view\s*(in|this\s*email\s*in)\s*(your\s*)?browser|download\s*the\s*app|app\s*store|google\s*play|"
+    r"facebook|twitter|linkedin|instagram|youtube"
+)
+_MAX_LINKS = 12
+
+
+def _message_links(payload: dict[str, Any] | None) -> list[dict[str, str]]:
+    """Anchor text + full URL of the content links in the HTML part (articles behind teasers).
+    The body text shortens tracking URLs, so the agent needs these to open the article."""
+    htmls: list[str] = []
+
+    def walk(part: dict[str, Any]) -> None:
+        data = str(((part.get("body") or {}).get("data")) or "")
+        if data and str(part.get("mimeType") or "").lower() == "text/html":
+            htmls.append(_b64url_text(data))
+        for sub in part.get("parts") or []:
+            if isinstance(sub, dict):
+                walk(sub)
+
+    walk(payload or {})
+    out: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for href, inner in _LINK_RE.findall("\n".join(htmls)):
+        text = re.sub(r"\s+", " ", html.unescape(re.sub(r"(?s)<[^>]+>", " ", inner))).strip()
+        url = html.unescape(href).strip()
+        if not text or len(text) < 4 or not url.lower().startswith("http") or _SKIP_LINK_RE.search(f"{text} {url}"):
+            continue
+        if text.lower() in seen:
+            continue
+        seen.add(text.lower())
+        out.append({"text": text[:160], "url": url})
+        if len(out) >= _MAX_LINKS:
+            break
+    return out
+
+
 def compact_gmail_message(msg: dict[str, Any]) -> dict[str, Any]:
     """Readable message for the LLM instead of the raw API resource (base64 parts + all headers)."""
     payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
@@ -159,6 +198,7 @@ def compact_gmail_message(msg: dict[str, Any]) -> dict[str, Any]:
         "subject": hdrs.get("Subject", ""),
         "snippet": html.unescape(str(msg.get("snippet") or "")),
         "body": _message_body_text(payload),
+        "links": _message_links(payload),
     }
 
 

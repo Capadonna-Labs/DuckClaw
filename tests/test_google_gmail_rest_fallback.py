@@ -211,6 +211,7 @@ def test_compact_gmail_message_decodes_body_and_drops_raw_parts() -> None:
     assert "Forward P/E near decade lows & growing." in out["body"]
     assert "color:red" not in out["body"] and "<p>" not in out["body"]
     assert "payload" not in out
+    assert out["links"] == [{"text": "Read", "url": "https://links.example.com/" + "t" * 300}]  # full URL kept
     # text/plain wins over html when present
     msg["payload"]["parts"].insert(0, {"mimeType": "text/plain", "body": {"data": b64("Plain version")}})
     assert compact_gmail_message(msg)["body"] == "Plain version"
@@ -221,3 +222,16 @@ def test_harness_gives_mail_reads_a_larger_budget() -> None:
 
     assert harness_max_chars_for_tool("mcp__google_gmail__get_thread", 12000) == 40000
     assert harness_max_chars_for_tool("mcp__google_gmail__search_threads", 12000) == 12000
+
+
+def test_message_links_skip_footer_links() -> None:
+    import base64
+
+    from duckclaw.forge.skills.google_gmail_rest import compact_gmail_message
+
+    body = ('<a href="https://sa.com/article/123">Nvidia: Micron Just Gave It Away</a>'
+            '<a href="https://sa.com/unsubscribe?x=1">Unsubscribe</a>'
+            '<a href="https://twitter.com/sa">Follow us</a><a href="https://sa.com/a"><img src="x"></a>')
+    data = base64.urlsafe_b64encode(body.encode()).decode().rstrip("=")
+    out = compact_gmail_message({"payload": {"mimeType": "text/html", "body": {"data": data}}})
+    assert out["links"] == [{"text": "Nvidia: Micron Just Gave It Away", "url": "https://sa.com/article/123"}]

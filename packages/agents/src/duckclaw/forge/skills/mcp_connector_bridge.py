@@ -260,7 +260,7 @@ async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: 
             specs = await _list_connector_tools(db, connector)
         except Exception as exc:
             _log.warning(
-                "MCP connector list_tools failed connector=%s: %s",
+                "MCP connector list_tools failed connector=%s: %r",
                 connector.get("connector_id"),
                 exc,
             )

@@ -8,6 +8,7 @@ ChatOpenAI/MLX puede omitir la tool en bind_tools (ver llm_providers.bind_tools_
 from __future__ import annotations
 
 import re
+import warnings
 from typing import Any, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -100,4 +101,8 @@ def mcp_input_schema_to_args_model(
     if not field_defs:
         return create_model(cls_name, __config__=cfg)  # type: ignore[call-overload]
 
-    return create_model(cls_name, __config__=cfg, **field_defs)  # type: ignore[call-overload]
+    # MCP tools may name a parameter like a BaseModel attribute (Notion's create_database has
+    # `schema`). The field still validates and is sent as-is; only the shadowing warning is noise.
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message=r'Field name ".*" in ".*" shadows an attribute in parent')
+        return create_model(cls_name, __config__=cfg, **field_defs)  # type: ignore[call-overload]

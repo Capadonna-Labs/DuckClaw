@@ -2,7 +2,7 @@
 
 Plataforma multi-agente **DB-first**: DuckDB es el *control plane* (workers, políticas, proyectos, runtime, RAG, conectores MCP). El **API Gateway** y los **agentes** leen en `read_only=True`; las mutaciones van por **comandos tipados** → cola Redis → **DB-Writer** (singleton ACID).
 
-Core genérico LangGraph/LangChain — sin verticales hardcodeadas en Python. Multi-tenant · Windows / Linux / macOS · Docs de arquitectura en `docs/architecture/`.
+Core genérico LangGraph/LangChain. Multi-tenant · Windows / Linux / macOS · Docs de arquitectura en `docs/architecture/`.
 
 ---
 

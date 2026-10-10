@@ -6,7 +6,7 @@ Core genérico LangGraph/LangChain. Multi-tenant · Windows / Linux / macOS · D
 
 ---
 
-## Arquitectura DB-first (canonical)
+## Arquitectura DB-first
 
 **Fuente de verdad:** [`docs/architecture/system_overview.md`](docs/architecture/system_overview.md) · límites: [`GATEWAY_DB_WRITER_BOUNDARIES.md`](docs/architecture/GATEWAY_DB_WRITER_BOUNDARIES.md)
 

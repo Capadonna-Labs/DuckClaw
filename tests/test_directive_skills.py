@@ -98,3 +98,10 @@ def test_framework_directive_skills_seed_once_and_apply_to_any_tenant() -> None:
     con.execute("UPDATE main.admin_skills SET name = 'debug' WHERE name = 'debug_fw'")
     msg, _ = expand_directive_skill(con, "/debug x", tenant_id="t1", actor_email="a@b.com")
     assert msg.startswith("[DIRECTIVA ACTIVA: /debug]\nMIO")
+
+
+def test_dedupe_by_name_keeps_first_row_case_insensitive() -> None:
+    from duckclaw.directive_skills import dedupe_by_name
+
+    rows = [{"name": "debug", "description": "MIO"}, {"name": "Debug", "description": "framework"}, ("other", 1)]
+    assert dedupe_by_name(rows) == [{"name": "debug", "description": "MIO"}, ("other", 1)]

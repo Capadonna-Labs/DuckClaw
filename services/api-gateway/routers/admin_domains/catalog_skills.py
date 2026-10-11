@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, field_validator
 from core.admin_identity import effective_actor_email, open_gateway_db
 from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.admin_worker_catalog import get_latest_worker_version, list_visible_workers_for_actor
+from duckclaw.directive_skills import FRAMEWORK_TENANT, dedupe_by_name
 from duckclaw.gateway_enqueue import enqueue_admin_command
 from duckclaw.skill_catalog import skill_categories_api_payload
 from duckclaw.write_commands import (
@@ -97,11 +98,16 @@ async def catalog_skills(actor: str = Depends(actor_from_header)) -> dict[str, A
                     SELECT name, implementation_ref, description, skill_type
                     FROM main.admin_skills
                     WHERE active = true
-                      AND tenant_id = ?
+                      AND tenant_id IN (?, ?)
                       AND (owner_email = ? OR visibility = 'public')
-                    ORDER BY name
+                    ORDER BY name, tenant_id = ?
                     """,
-                    [str(profile.get("tenant_id") or "default"), str(profile.get("email") or actor_email)],
+                    [
+                        str(profile.get("tenant_id") or "default"),
+                        FRAMEWORK_TENANT,
+                        str(profile.get("email") or actor_email),
+                        FRAMEWORK_TENANT,
+                    ],
                 )
             )
             global_skills = [
@@ -111,7 +117,7 @@ async def catalog_skills(actor: str = Depends(actor_from_header)) -> dict[str, A
                     description=str(description or ""),
                     skill_type=str(skill_type or ""),
                 )
-                for name, implementation_ref, description, skill_type in rows
+                for name, implementation_ref, description, skill_type in dedupe_by_name(rows)
                 if str(name or "").strip()
             ]
             workers = list_visible_workers_for_actor(db, actor_email=actor_email)

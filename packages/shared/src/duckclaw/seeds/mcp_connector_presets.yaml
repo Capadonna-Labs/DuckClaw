@@ -556,3 +556,22 @@ presets:
       manifest_skill_id: android
       admin_label: Android · ADB wireless + MCP
       env_vars: [ANDROID_ADB_HOST, ANDROID_MCP_PORT, ANDROID_MCP_COMMAND]
+
+  # ═══════════════════════════════════════════
+  # Ingeniería inversa
+  # ═══════════════════════════════════════════
+
+  # REA (https://github.com/morluto/rea, MIT). Binarios (Hopper/Ghidra/IDA), Electron/JS, .NET, APK, web, firmware.
+  # Versión FIJA a propósito: publica casi a diario (6.x en 5 días) y arrastra playwright/node-pty. Subir a mano.
+  # OJO: read_only de DuckClaw solo filtra nombres create_/delete_/update_/push_/write_/remove_/merge_; la captura
+  # en runtime de REA corre con los permisos del usuario. No concederlo a ningún worker por defecto.
+  rea:
+    profile: stdio_npx_ro
+    display_name: REA (reverse engineering)
+    launch_args: ["-y", "rea-agents@6.4.0", "mcp"]
+    metadata:
+      install: npx -y rea-agents@6.4.0 mcp
+      manifest_skill_id: rea
+      admin_label: REA · ingeniería inversa (local stdio, versión fija)
+      docs_url: https://github.com/morluto/rea
+      env_vars: [GHIDRA_INSTALL_DIR, JAVA_HOME]

@@ -51,6 +51,15 @@ def test_stdio_profile_merges_into_preset() -> None:
     assert payload["tool_allowlist"] == ["*"]
 
 
+def test_rea_preset_is_stdio_and_pinned_to_an_exact_version() -> None:
+    payload = preset_payload("rea")
+    assert payload is not None
+    assert payload["transport"] == "stdio" and payload["launch_command"] == "npx"
+    pkg = payload["launch_args"][1]
+    assert pkg.startswith("rea-agents@") and pkg != "rea-agents@latest" and pkg.split("@")[1][0].isdigit()
+    assert payload["launch_args"][-1] == "mcp"
+
+
 def test_env_override_loads_custom_presets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     custom = tmp_path / "custom_presets.yaml"
     custom.write_text(

@@ -102,3 +102,21 @@ def test_publish_custom_report_accepts_matching_chat_id(
     assert data["status"] == "success"
     assert pushed
     assert pushed[0]["mutation"]["report_id"] == "admin-conv-smoke3-abc"
+
+
+def test_custom_report_tools_have_typed_schemas() -> None:
+    """Untyped lambdas produce args without "type"; a forced tool_choice call then gets refused
+    (publish_custom_report, 2026-09-06). Every tool registered here must have typed args."""
+    from types import SimpleNamespace
+
+    from langchain_core.utils.function_calling import convert_to_openai_tool
+
+    from duckclaw.forge.skills.custom_reports_bridge import register_custom_reports_skill
+
+    tools: list = []
+    register_custom_reports_skill(tools, object(), SimpleNamespace(skills_list=["publish_custom_report"]), force_publish=True)
+    names = {t.name for t in tools}
+    assert {"publish_custom_report", "inspect_custom_report", "update_custom_report_title"} <= names
+    for t in tools:
+        props = convert_to_openai_tool(t)["function"]["parameters"]["properties"]
+        assert all(v.get("type") for v in props.values()), (t.name, props)

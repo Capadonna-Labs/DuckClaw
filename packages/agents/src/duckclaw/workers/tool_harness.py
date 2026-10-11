@@ -328,16 +328,46 @@ def identical_prior_calls(messages: list[Any], tool_name: str, args: Any) -> int
     return n
 
 
-def identical_call_envelope(tool_name: str, prior: int) -> str:
+_PREVIOUS_RESULT_CHARS = 4000
+
+
+def previous_identical_result(messages: list[Any], tool_name: str, args: Any) -> str | None:
+    """Content of the latest ToolMessage answering this exact (tool, args) in the current turn."""
+    target = _call_fingerprint(tool_name, args)
+    ids: set[str] = set()
+    for msg in messages:
+        for tc in getattr(msg, "tool_calls", None) or []:
+            if tc.get("id") and _call_fingerprint(tc.get("name") or "", tc.get("args")) == target:
+                ids.add(str(tc["id"]))
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") == "human":
+            break
+        if getattr(msg, "type", "") == "tool" and str(getattr(msg, "tool_call_id", "")) in ids:
+            content = getattr(msg, "content", "")
+            text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
+            if '"code": "harness_identical_call"' not in text:
+                return text[:_PREVIOUS_RESULT_CHARS]
+    return None
+
+
+def identical_call_envelope(tool_name: str, prior: int, previous_result: str | None = None) -> str:
+    # The previous result rides along: context pruning can drop the earlier ToolMessage while
+    # keeping the call, and a model that cannot see the result re-calls forever ("use the result
+    # above" then points at nothing — a cron /defense_watch looped jev_decide 41 times).
+    extra: dict[str, Any] = {"previous_result": previous_result} if previous_result else {}
     return tool_result_envelope(
         ok=False,
         error=f"«{tool_name}» ya se ejecutó {prior} veces en este turno con exactamente los mismos argumentos",
         hint=(
-            "No se ejecutó de nuevo: el resultado sería el mismo que ya tienes arriba. Usa ese "
+            "No se ejecutó de nuevo. Usa previous_result (el resultado de esa misma llamada), "
+            "cambia los argumentos (p. ej. otra query o página) o responde al usuario."
+            if previous_result
+            else "No se ejecutó de nuevo: el resultado sería el mismo que ya tienes arriba. Usa ese "
             "resultado, cambia los argumentos (p. ej. otra query o página) o responde al usuario."
         ),
         retry=False,
         code="harness_identical_call",
+        **extra,
     )
 
 
@@ -350,7 +380,7 @@ def identical_call_block(messages: list[Any], tool_name: str, args: Any) -> str 
     if prior < limit:
         return None
     _log.info("harness identical-call block tool=%s prior=%d", tool_name, prior)
-    return identical_call_envelope(tool_name, prior)
+    return identical_call_envelope(tool_name, prior, previous_identical_result(messages, tool_name, args))
 
 
 def circuit_block_envelope(tool_name: str, fail_count: int) -> str:

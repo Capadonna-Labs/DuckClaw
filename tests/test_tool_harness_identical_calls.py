@@ -50,3 +50,23 @@ def test_block_from_the_limit_on(monkeypatch) -> None:
     assert json.loads(identical_call_block(msgs, "search", {"q": 1}))["code"] == "harness_identical_call"
     monkeypatch.setenv("DUCKCLAW_MAX_IDENTICAL_TOOL_CALLS", "0")
     assert identical_call_block(msgs, "search", {"q": 1}) is None
+
+
+def test_block_carries_the_previous_result_even_after_earlier_blocks() -> None:
+    args = {"state": "EU defense +8.6%", "questions": [{"type": "score"}]}
+    msgs = [HumanMessage("/defense_watch")]
+    for i in range(3):
+        msgs += [
+            AIMessage(content="", tool_calls=[{"name": "jev_decide", "args": args, "id": f"j{i}"}]),
+            ToolMessage(content=json.dumps({"ok": True, "score": 0.7 + i / 100}), tool_call_id=f"j{i}", name="jev_decide"),
+        ]
+    first = json.loads(identical_call_block(msgs, "jev_decide", args))
+    assert first["code"] == "harness_identical_call"
+    assert json.loads(first["previous_result"])["score"] == 0.72  # latest real result
+    # The block itself becomes a ToolMessage; the next block must still point at the real result.
+    msgs += [
+        AIMessage(content="", tool_calls=[{"name": "jev_decide", "args": args, "id": "j3"}]),
+        ToolMessage(content=json.dumps(first), tool_call_id="j3", name="jev_decide"),
+    ]
+    second = json.loads(identical_call_block(msgs, "jev_decide", args))
+    assert json.loads(second["previous_result"])["score"] == 0.72

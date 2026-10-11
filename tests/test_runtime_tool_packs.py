@@ -39,6 +39,7 @@ def test_default_catalog_is_multi_agent_sota() -> None:
     assert "sandbox" in ids
     assert catalog.packs_for_tool("assess_crons_alignment") == frozenset({"homeostasis"})
     assert catalog.packs_for_tool("request_homeostasis_validation") == frozenset({"homeostasis"})
+    assert catalog.packs_for_tool("manage_host_crontab") == frozenset({"core"})
     # Umbrella mcp no posee members: la membresía es por conector (dinámica).
     assert catalog.packs_for_tool("mcp__github__list_issues") == frozenset()
     enriched = enrich_catalog_with_mcp_connectors(
@@ -59,6 +60,7 @@ def test_default_catalog_is_multi_agent_sota() -> None:
     )
     assert catalog.packs_for_tool("create_blank_document") == frozenset({"reports"})
     assert catalog.packs_for_tool("list_tool_packs") == frozenset({"core"})
+    assert catalog.packs_for_tool("read_system_prompt") == frozenset({"core"})
     assert catalog.packs_for_tool("update_system_prompt") == frozenset({"core"})
 
 
@@ -70,7 +72,9 @@ def test_update_system_prompt_always_bound_in_core() -> None:
         _tool("get_project_context"),
         _tool("read_sql"),
         _tool("admin_sql"),
+        _tool("manage_host_crontab"),
         _tool("list_tool_packs"),
+        _tool("read_system_prompt"),
         _tool("update_system_prompt"),
         _tool("update_my_system_prompt"),
         _tool("record_operational_lesson"),
@@ -81,9 +85,11 @@ def test_update_system_prompt_always_bound_in_core() -> None:
         intent_text="portfolio shy bonds",
         messages=[],
     )
+    assert "read_system_prompt" in result.bound_names
     assert "update_system_prompt" in result.bound_names
     assert "update_my_system_prompt" in result.bound_names
     assert "admin_sql" in result.bound_names
+    assert "manage_host_crontab" in result.bound_names
     assert "core" in result.active_packs
     assert "prompt_meta" not in result.active_packs
 
@@ -441,6 +447,7 @@ def test_android_pack_fits_full_notification_surface() -> None:
         _tool("request_homeostasis_validation"),
         _tool("android_expand_notifications"),
         _tool("android_collapse_notifications"),
+        _tool("android_review_and_dismiss_notifications"),
     ]
     for name in (
         "list_devices",
@@ -464,6 +471,7 @@ def test_android_pack_fits_full_notification_surface() -> None:
         messages=[],
     )
     assert "android_expand_notifications" in result.bound_names
+    assert "android_review_and_dismiss_notifications" in result.bound_names
     assert "mcp__android__get_ui_dump" in result.bound_names
     assert "mcp__android__swipe_screen" in result.bound_names
     assert result.truncated is False

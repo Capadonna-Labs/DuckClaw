@@ -25,9 +25,11 @@ packs:
         - get_project_context
         - read_sql
         - admin_sql
+        - manage_host_crontab
         - inspect_schema
         - list_tool_packs
         - unlock_tool_pack
+        - read_system_prompt
         - update_system_prompt
         - update_my_system_prompt
         - record_operational_lesson

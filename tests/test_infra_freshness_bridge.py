@@ -136,3 +136,59 @@ def test_assess_cron_pm2_name_matches_crontab_log_path(monkeypatch):
     )
     assert out["found"] is True
     assert out["source"] == "crontab"
+
+
+def test_manage_host_crontab_updates_only_schedule(monkeypatch):
+    from duckclaw.forge.skills import infra_freshness_bridge as bridge
+
+    cron_blob = (
+        "0 20 * * 5 /opt/app/run_job.sh scripts/weekly_job.py "
+        ">> /var/log/weekly.log 2>&1\n"
+    )
+    written = {}
+
+    monkeypatch.setattr("subprocess.check_output", lambda *a, **k: cron_blob)
+
+    def _run(cmd, *, input=None, text=None, timeout=None, check=None):
+        written["cmd"] = cmd
+        written["input"] = input
+
+    monkeypatch.setattr("subprocess.run", _run)
+    tools: list = []
+    bridge.register_infra_freshness_skill(tools, _FakeDb([]))
+    by_name = {t.name: t for t in tools}
+    out = json.loads(
+        by_name["manage_host_crontab"].invoke(
+            {
+                "action": "set",
+                "pattern": "weekly_job.py",
+                "cron_expression": "15 20 * * 5",
+                "dry_run": False,
+            }
+        )
+    )
+    assert out["ok"] is True
+    assert out["before"].startswith("0 20 * * 5 ")
+    assert out["after"].startswith("15 20 * * 5 ")
+    assert "/opt/app/run_job.sh" in out["after"]
+    assert written["cmd"] == ["crontab", "-"]
+    assert written["input"].startswith("15 20 * * 5 ")
+
+
+def test_manage_host_crontab_rejects_ambiguous_pattern(monkeypatch):
+    from duckclaw.forge.skills import infra_freshness_bridge as bridge
+
+    monkeypatch.setattr(
+        "subprocess.check_output",
+        lambda *a, **k: "0 20 * * 5 python a.py\n15 20 * * 5 python b.py\n",
+    )
+    tools: list = []
+    bridge.register_infra_freshness_skill(tools, _FakeDb([]))
+    by_name = {t.name: t for t in tools}
+    out = json.loads(
+        by_name["manage_host_crontab"].invoke(
+            {"action": "set", "pattern": "python", "cron_expression": "15 20 * * 5"}
+        )
+    )
+    assert out["ok"] is False
+    assert "exactamente 1" in out["error"]

@@ -6,7 +6,9 @@ import json
 from unittest.mock import MagicMock, patch
 
 from duckclaw.forge.skills.update_worker_system_prompt_bridge import (
+    _read_system_prompt_impl,
     _update_system_prompt_impl,
+    read_system_prompt,
     register_update_system_prompt_tools,
     update_system_prompt,
 )
@@ -135,13 +137,69 @@ def test_update_system_prompt_uses_gateway_get_db_without_vault_path() -> None:
     assert payload["mode"] == "replace"
 
 
+def test_read_system_prompt_reuses_bound_worker_db_on_same_vault_path() -> None:
+    mock_bound = MagicMock()
+    mock_bound._path = _VAULT_PATH
+    mock_bound._read_only = False
+
+    with patch(
+        "duckclaw.forge.skills.goals_tool_context.get_goals_tool_worker_id",
+        return_value=_WORKER_ID,
+    ):
+        with patch(
+            "duckclaw.forge.skills.goals_tool_context.get_goals_tool_db_path",
+            return_value=_VAULT_PATH,
+        ):
+            with patch("duckclaw.DuckClaw") as duck_ctor:
+                with patch(
+                    "duckclaw.commands.model_setup.get_effective_system_prompt",
+                    return_value="base prompt",
+                ) as get_prompt:
+                    raw = _read_system_prompt_impl(mock_bound)
+
+    duck_ctor.assert_not_called()
+    get_prompt.assert_called_once_with(mock_bound, _WORKER_ID)
+    payload = json.loads(raw)
+    assert payload == {
+        "ok": True,
+        "worker_id": _WORKER_ID,
+        "chars": len("base prompt"),
+        "content": "base prompt",
+    }
+
+
+def test_read_system_prompt_can_return_metadata_only() -> None:
+    mock_db = MagicMock()
+    mock_db.close = MagicMock()
+
+    with patch(
+        "duckclaw.forge.skills.goals_tool_context.get_goals_tool_worker_id",
+        return_value=_WORKER_ID,
+    ):
+        with patch(
+            "duckclaw.forge.skills.goals_tool_context.get_goals_tool_db_path",
+            return_value=_VAULT_PATH,
+        ):
+            with patch("duckclaw.DuckClaw", return_value=mock_db):
+                with patch(
+                    "duckclaw.commands.model_setup.get_effective_system_prompt",
+                    return_value="base prompt",
+                ):
+                    raw = read_system_prompt(include_content=False)
+
+    mock_db.close.assert_called_once()
+    payload = json.loads(raw)
+    assert payload == {"ok": True, "worker_id": _WORKER_ID, "chars": len("base prompt")}
+
+
 def test_register_update_system_prompt_tools_exposes_canonical_and_alias() -> None:
     tools: list = []
     register_update_system_prompt_tools(tools, MagicMock())
     names = {getattr(t, "name", "") for t in tools}
+    assert "read_system_prompt" in names
     assert "update_system_prompt" in names
     assert "update_my_system_prompt" in names
-    assert len(tools) == 2
+    assert len(tools) == 3
 
 
 def test_update_system_prompt_requires_worker_id() -> None:

@@ -24,6 +24,13 @@ class UpdateMySystemPromptInput(UpdateSystemPromptInput):
     pass
 
 
+class ReadSystemPromptInput(BaseModel):
+    include_content: bool = Field(
+        default=True,
+        description="Si false, devuelve solo metadata (worker_id y cantidad de caracteres).",
+    )
+
+
 def _same_db_path(left: str, right: str) -> bool:
     if not left or not right:
         return False
@@ -116,9 +123,44 @@ def _update_system_prompt_impl(bound_db: Any, instructions: str, mode: str = "ap
                 pass
 
 
+def _read_system_prompt_impl(bound_db: Any, include_content: bool = True) -> str:
+    """Lee el system prompt efectivo del worker activo sin modificar estado."""
+    from duckclaw.commands.model_setup import get_effective_system_prompt
+    from duckclaw.forge.skills.goals_tool_context import get_goals_tool_worker_id
+
+    worker_id = (get_goals_tool_worker_id() or "").strip()
+    if not worker_id:
+        return json.dumps({"ok": False, "error": "No hay worker activo en este turno."}, ensure_ascii=False)
+
+    db, close_after = _resolve_prompt_db(bound_db, writable=False)
+    try:
+        content = get_effective_system_prompt(db, worker_id) or ""
+        payload: dict[str, Any] = {
+            "ok": True,
+            "worker_id": worker_id,
+            "chars": len(content),
+        }
+        if include_content:
+            payload["content"] = content
+        return json.dumps(payload, ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({"ok": False, "error": str(exc)[:500]}, ensure_ascii=False)
+    finally:
+        if close_after:
+            try:
+                db.close()
+            except Exception:
+                pass
+
+
 def update_system_prompt(instructions: str, mode: str = "append") -> str:
     """Backward-compatible entry without bound db (gateway/tests only)."""
     return _update_system_prompt_impl(None, instructions, mode)
+
+
+def read_system_prompt(include_content: bool = True) -> str:
+    """Backward-compatible entry without bound db (gateway/tests only)."""
+    return _read_system_prompt_impl(None, include_content=include_content)
 
 
 def update_my_system_prompt(instructions: str, mode: str = "append") -> str:
@@ -149,12 +191,26 @@ def _maybe_sync_catalog_file(*, db_path: str, worker_id: str, actor: str, conten
 def register_update_system_prompt_tools(tools_list: list[Any], db: Any = None) -> None:
     """Register canonical update_system_prompt plus deprecated update_my_system_prompt alias."""
 
+    def _read_system_prompt(include_content: bool = True) -> str:
+        return _read_system_prompt_impl(db, include_content=include_content)
+
     def _update_system_prompt(instructions: str, mode: str = "append") -> str:
         return _update_system_prompt_impl(db, instructions, mode)
 
     def _update_my_system_prompt(instructions: str, mode: str = "append") -> str:
         return _update_system_prompt(instructions, mode)
 
+    tools_list.append(
+        StructuredTool.from_function(
+            func=_read_system_prompt,
+            name="read_system_prompt",
+            description=(
+                "Lee el system prompt efectivo del worker activo antes de hacer reemplazos seguros. "
+                "No modifica estado. Usa include_content=false para solo metadata."
+            ),
+            args_schema=ReadSystemPromptInput,
+        )
+    )
     tools_list.append(
         StructuredTool.from_function(
             func=_update_system_prompt,

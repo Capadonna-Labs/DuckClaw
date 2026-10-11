@@ -17,6 +17,19 @@ FRAMEWORK_TENANT = "framework"
 _PACK = Path(__file__).resolve().parent / "seeds" / "framework_directive_skills_v1.json"
 
 
+def dedupe_by_name(rows: list) -> list:
+    """Keep the first row per skill name (case-insensitive); callers order the tenant's own
+    rows before framework defaults. Rows are dicts with 'name' or tuples starting with it."""
+    seen: set[str] = set()
+    out = []
+    for r in rows:
+        key = str((r.get("name") if isinstance(r, dict) else r[0]) or "").lower()
+        if key not in seen:
+            seen.add(key)
+            out.append(r)
+    return out
+
+
 def seed_framework_directive_skills(db: Any) -> int:
     """Insert bundled directive skills whose name is not taken yet. Never overwrites an
     existing row (an edited or user-owned skill with the same name stays). DB-Writer only."""

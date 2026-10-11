@@ -114,7 +114,7 @@ def test_list_skills_queries_admin_skills_scoped_to_tenant_and_actor(monkeypatch
     class _Db:
         def query(self, sql: str) -> str:
             assert "admin_skills" in sql
-            assert "tenant_id = 'default'" in sql
+            assert "tenant_id IN ('default', 'framework')" in sql
             assert "owner_email = 'juan@example.com'" in sql
             return json.dumps([{"name": "radar_watchlist", "skill_type": "directive"}])
 

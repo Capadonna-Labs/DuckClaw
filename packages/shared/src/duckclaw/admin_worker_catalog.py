@@ -914,8 +914,9 @@ def _visible_catalog_skills_for_worker(
         db,
         "SELECT skill_id, name, owner_email, visibility "
         "FROM main.admin_skills "
-        f"WHERE active = true AND tenant_id = '{_sql_lit(tenant, 128)}' "
-        f"AND (owner_email = '{_sql_lit(owner, 256)}' OR visibility = 'public')",
+        f"WHERE active = true AND tenant_id IN ('{_sql_lit(tenant, 128)}', 'framework') "
+        f"AND (owner_email = '{_sql_lit(owner, 256)}' OR visibility = 'public') "
+        "ORDER BY tenant_id <> 'framework'",  # framework first: the tenant's own row overwrites it below
     )
     out: dict[str, dict[str, str]] = {}
     for row in rows:

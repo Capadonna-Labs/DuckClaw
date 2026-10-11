@@ -22,6 +22,8 @@ import json
 import logging
 from typing import Any, Literal, Optional
 
+from duckclaw.directive_skills import FRAMEWORK_TENANT, dedupe_by_name
+
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
@@ -143,9 +145,9 @@ def _list_skills_impl(db: Any, tenant_id: str = "default", name: str = "") -> st
             raw = hub.query(
                 "SELECT name, skill_type, description, visibility, owner_email "
                 "FROM main.admin_skills "
-                f"WHERE tenant_id = '{tid}' AND active "
+                f"WHERE tenant_id IN ('{tid}', '{FRAMEWORK_TENANT}') AND active "
                 f"AND (visibility = 'public' OR owner_email = '{esc_actor}') "
-                "ORDER BY name"
+                f"ORDER BY name, tenant_id = '{FRAMEWORK_TENANT}'"
             )
         finally:
             close = getattr(hub, "close", None)
@@ -154,6 +156,7 @@ def _list_skills_impl(db: Any, tenant_id: str = "default", name: str = "") -> st
         rows = json.loads(raw) if isinstance(raw, str) else (raw or [])
     except Exception as exc:
         return json.dumps({"ok": False, "error": str(exc)[:500]}, ensure_ascii=False)
+    rows = dedupe_by_name(rows)
     wanted = (name or "").strip().lstrip("/").lower()
     if wanted:
         # One skill, full text: edit_skill replaces the whole description, so the agent

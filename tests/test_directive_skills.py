@@ -73,3 +73,28 @@ def test_db_error_fails_open_without_raising() -> None:
         msg, rest = extract_directive_skill("/ponytail x", tenant_id="t1", actor_email="a@b.com")
     assert msg == "/ponytail x"
     assert rest is None
+
+
+def test_framework_directive_skills_seed_once_and_apply_to_any_tenant() -> None:
+    import duckdb
+
+    from duckclaw.directive_skills import expand_directive_skill, seed_framework_directive_skills
+
+    con = duckdb.connect()
+    con.execute(
+        "CREATE TABLE main.admin_skills (skill_id VARCHAR, name VARCHAR, description VARCHAR, skill_type VARCHAR, "
+        "implementation_ref VARCHAR, owner_email VARCHAR, tenant_id VARCHAR, visibility VARCHAR, active BOOLEAN)"
+    )
+    assert seed_framework_directive_skills(con) == 2
+    assert seed_framework_directive_skills(con) == 0  # idempotent, never overwrites
+    assert con.execute("SELECT max(length(description)) FROM main.admin_skills").fetchone()[0] <= 4096
+
+    msg, rest = expand_directive_skill(con, "/debug el login falla", tenant_id="t1", actor_email="a@b.com")
+    assert msg.startswith("[DIRECTIVA ACTIVA: /debug]") and "Bucle de feedback" in msg and rest == "el login falla"
+
+    # A tenant's own skill with the same name wins over the framework default.
+    con.execute("UPDATE main.admin_skills SET name = 'debug_fw' WHERE name = 'debug'")
+    con.execute("INSERT INTO main.admin_skills VALUES ('s1','debug','MIO','directive','directive://debug','a@b.com','t1','private',true)")
+    con.execute("UPDATE main.admin_skills SET name = 'debug' WHERE name = 'debug_fw'")
+    msg, _ = expand_directive_skill(con, "/debug x", tenant_id="t1", actor_email="a@b.com")
+    assert msg.startswith("[DIRECTIVA ACTIVA: /debug]\nMIO")

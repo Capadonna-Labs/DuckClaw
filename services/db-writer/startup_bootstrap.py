@@ -31,6 +31,14 @@ def run_startup_bootstrap() -> None:
         seeded = seed_catalog_if_empty(db)
         if seeded:
             logger.info("catalog seeded from templates on hub db")
+        try:
+            from duckclaw.directive_skills import seed_framework_directive_skills
+
+            n = seed_framework_directive_skills(db)
+            if n:
+                logger.info("seeded %d framework directive skills", n)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("framework directive skills seed skipped: %s", exc)
     except Exception as exc:  # noqa: BLE001
         logger.warning("startup bootstrap failed: %s", exc)
     finally:

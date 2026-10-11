@@ -273,3 +273,21 @@ def test_list_skills_by_name_returns_the_full_text(monkeypatch) -> None:
     out = json.loads(_list_skills_impl(object(), "default", "/Apertura"))
     assert out["count"] == 1 and out["skills"][0]["description"] == full
     assert json.loads(_list_skills_impl(object(), "default"))["skills"][0]["description"].endswith("…")
+
+
+def test_upsert_skill_rejects_oversized_text_with_exact_overflow(monkeypatch) -> None:
+    from duckclaw.forge.skills.skills_management_bridge import _upsert_skill_impl
+
+    dispatched = []
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.skills_management_bridge._dispatch_skill_command",
+        lambda *a, **k: dispatched.append(a) or (True, ""),
+    )
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
+        lambda db: ("juan@example.com", "/tmp/hub.duckdb"),
+    )
+    out = json.loads(_upsert_skill_impl(object(), "radar", "x" * 4855))
+    assert out["ok"] is False and out["length"] == 4855 and out["max_length"] == 4096 and out["over_by"] == 759
+    assert dispatched == []  # nothing enqueued
+    assert json.loads(_upsert_skill_impl(object(), "radar", "x" * 4096))["ok"] is True

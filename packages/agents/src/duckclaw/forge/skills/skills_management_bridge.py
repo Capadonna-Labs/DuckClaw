@@ -103,6 +103,26 @@ def _upsert_skill_impl(
     text = (description or "").strip()
     if not text:
         return json.dumps({"ok": False, "error": "description vacío"}, ensure_ascii=False)
+    # Measured here, not by the agent: a sandbox len() check returned a stale number and the
+    # agent retried a 4,855-char text blind until the circuit breaker cut edit_skill.
+    max_len = next(
+        m.max_length
+        for m in UpsertCatalogSkillCommand.model_fields["description"].metadata
+        if getattr(m, "max_length", None)
+    )
+    if len(text) > max_len:
+        over = len(text) - max_len
+        return json.dumps(
+            {
+                "ok": False,
+                "error": f"description mide {len(text)} caracteres; el máximo es {max_len} (sobran {over}). No se guardó.",
+                "length": len(text),
+                "max_length": max_len,
+                "over_by": over,
+                "hint": f"Recorta al menos {over} caracteres (quita lo redundante o lo menos usado) y llama una sola vez más.",
+            },
+            ensure_ascii=False,
+        )
     st = (skill_type or "directive").strip().lower()
     if st not in ("directive", "python"):
         st = "directive"
@@ -203,7 +223,10 @@ class CreateSkillInput(BaseModel):
         ...,
         min_length=1,
         max_length=4096,
-        description="Para skill_type='directive': el texto exacto que se inyecta al invocar /nombre.",
+        description=(
+            "Para skill_type='directive': el texto exacto que se inyecta al invocar /nombre. "
+            "Máximo 4096 caracteres; si te pasas, la respuesta dice cuántos sobran."
+        ),
     )
     skill_type: Literal["directive", "python"] = Field(
         default="directive",

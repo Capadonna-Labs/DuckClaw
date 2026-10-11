@@ -20,6 +20,7 @@ from langchain_core.tools import StructuredTool
 # SQL al interpolar table/columna (los identificadores no son parametrizables).
 _TABLE_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)?$")
 _COLUMN_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_CRON_TOKEN_RE = re.compile(r"^[A-Za-z0-9_*/,\-]+$")
 
 
 def _safe_ident(raw: str, pattern: re.Pattern[str], *, label: str) -> tuple[str | None, str | None]:
@@ -27,6 +28,11 @@ def _safe_ident(raw: str, pattern: re.Pattern[str], *, label: str) -> tuple[str 
     if not ident or len(ident) > 128 or not pattern.fullmatch(ident):
         return None, f"{label} inválido: solo letras/números/guion_bajo (tabla admite un 'schema.tabla')."
     return ident, None
+
+
+def _valid_cron_expr(expr: str) -> bool:
+    parts = (expr or "").strip().split()
+    return len(parts) == 5 and all(_CRON_TOKEN_RE.fullmatch(part or "") for part in parts)
 
 
 def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
@@ -157,6 +163,72 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                 ensure_ascii=False,
             )
 
+        def manage_host_crontab(
+            action: str = "list",
+            pattern: str = "",
+            cron_expression: str = "",
+            dry_run: bool = True,
+        ) -> str:
+            """Lista crontab o cambia solo la expresión cron de una línea existente.
+
+            Guardrail: no crea comandos nuevos ni edita el comando; requiere un patrón
+            que encuentre exactamente una línea activa y solo reemplaza los 5 campos de
+            horario. dry_run=true por defecto.
+            """
+            import subprocess
+
+            mode = (action or "list").strip().lower()
+            needle = (pattern or "").strip()
+            try:
+                raw = subprocess.check_output(["crontab", "-l"], stderr=subprocess.DEVNULL, text=True, timeout=10)
+            except subprocess.CalledProcessError:
+                raw = ""
+            except Exception as exc:
+                return json.dumps({"ok": False, "error": f"No se pudo leer crontab: {str(exc)[:300]}"}, ensure_ascii=False)
+
+            lines = raw.splitlines()
+            active = [line for line in lines if line.strip() and not line.lstrip().startswith("#")]
+            if mode in ("list", "read"):
+                matches = [line for line in active if not needle or needle.lower() in line.lower()]
+                return json.dumps({"ok": True, "action": "list", "pattern": needle or None, "lines": matches}, ensure_ascii=False)
+
+            if mode not in ("set", "update"):
+                return json.dumps({"ok": False, "error": "action debe ser list o set"}, ensure_ascii=False)
+            if not needle or len(needle) < 3:
+                return json.dumps({"ok": False, "error": "pattern requerido (mín. 3 chars)"}, ensure_ascii=False)
+            if not _valid_cron_expr(cron_expression):
+                return json.dumps({"ok": False, "error": "cron_expression inválido: usa 5 campos cron"}, ensure_ascii=False)
+
+            matches = [idx for idx, line in enumerate(lines) if line.strip() and not line.lstrip().startswith("#") and needle.lower() in line.lower()]
+            if len(matches) != 1:
+                return json.dumps(
+                    {
+                        "ok": False,
+                        "error": f"pattern debe matchear exactamente 1 línea activa; encontró {len(matches)}",
+                        "matches": [lines[i] for i in matches[:10]],
+                    },
+                    ensure_ascii=False,
+                )
+            idx = matches[0]
+            original = lines[idx]
+            parts = original.split(maxsplit=5)
+            if len(parts) < 6:
+                return json.dumps({"ok": False, "error": "La línea crontab no tiene comando preservable", "line": original}, ensure_ascii=False)
+            updated = f"{cron_expression.strip()} {parts[5]}"
+            if original == updated:
+                return json.dumps({"ok": True, "changed": False, "line": original}, ensure_ascii=False)
+            if dry_run:
+                return json.dumps(
+                    {"ok": True, "dry_run": True, "changed": True, "before": original, "after": updated},
+                    ensure_ascii=False,
+                )
+            new_text = "\n".join([updated if i == idx else line for i, line in enumerate(lines)]).rstrip() + "\n"
+            try:
+                subprocess.run(["crontab", "-"], input=new_text, text=True, timeout=10, check=True)
+            except Exception as exc:
+                return json.dumps({"ok": False, "error": f"No se pudo escribir crontab: {str(exc)[:300]}"}, ensure_ascii=False)
+            return json.dumps({"ok": True, "dry_run": False, "changed": True, "before": original, "after": updated}, ensure_ascii=False)
+
         def assess_table_freshness(
             table: str,
             timestamp_column: str = "timestamp",
@@ -248,6 +320,18 @@ def register_infra_freshness_skill(tools_list: List[Any], db: Any) -> None:
                     "job no es proceso PM2 permanente. JSON: found, has_cron, source "
                     "(pm2|crontab), between_fires_ok. status=stopped con has_cron=true es normal "
                     "entre fires — no lo trates como cron perdido."
+                ),
+            )
+        )
+        tools_list.append(
+            StructuredTool.from_function(
+                manage_host_crontab,
+                name="manage_host_crontab",
+                description=(
+                    "Lee o ajusta el crontab del host con guardrails. action=list lista líneas "
+                    "activas por pattern. action=set reemplaza SOLO los 5 campos cron de una línea "
+                    "existente que matchee exactamente el pattern, preservando el comando. "
+                    "dry_run=true por defecto; usa dry_run=false solo con autorización explícita."
                 ),
             )
         )

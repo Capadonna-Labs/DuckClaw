@@ -144,3 +144,40 @@ def test_android_collapse_statusbar_runs_adb() -> None:
     assert out["action"] == "collapse"
     run.assert_called_once()
     assert "collapse" in run.call_args[0][0]
+
+
+def test_android_review_and_dismiss_notifications_batches_visible_rows() -> None:
+    from duckclaw.mcp_android_adb import android_review_and_dismiss_notifications
+
+    raw_with_notification = (
+        '<hierarchy bounds="[0,0][1080,2400]">'
+        '<node text="Bloomberg" bounds="[44,300][240,340]" />'
+        '<node text="OpenAI risk alert" bounds="[44,350][980,390]" />'
+        "</hierarchy>"
+    )
+    raw_empty = '<hierarchy bounds="[0,0][1080,2400]"></hierarchy>'
+    calls: list[list[str]] = []
+
+    def fake_run(args: list[str], *, timeout: float = 15.0):
+        calls.append(args)
+        if "expand-notifications" in args:
+            return 0, "", ""
+        if "uiautomator" in args:
+            return 0, "UI hierchary dumped", ""
+        if "cat" in args:
+            cat_calls = sum(1 for call in calls if "cat" in call)
+            return 0, raw_with_notification if cat_calls == 1 else raw_empty, ""
+        if "input" in args and "swipe" in args:
+            return 0, "", ""
+        if "collapse" in args:
+            return 0, "", ""
+        return 0, "", ""
+
+    with patch("duckclaw.mcp_android_adb.primary_adb_serial", return_value="serial1"):
+        with patch("duckclaw.mcp_android_adb._run_adb", side_effect=fake_run):
+            out = android_review_and_dismiss_notifications(max_dismiss=3)
+
+    assert out["ok"] is True
+    assert out["processed_count"] == 1
+    assert out["processed"][0]["title"] == "Bloomberg"
+    assert any(call[:5] == ["-s", "serial1", "shell", "input", "swipe"] for call in calls)

@@ -126,3 +126,7 @@ _debug_*.py
 _verify_*.js
 packages/agents/train/tool_transitions/
 
+
+# pnpm (root installs)
+node_modules/
+.pnpm-store/

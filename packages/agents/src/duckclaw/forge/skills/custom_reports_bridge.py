@@ -855,10 +855,18 @@ def register_custom_reports_skill(
             )
         )
 
+    # Typed like _publish_custom_report_worker: untyped lambdas give args with no "type" in the
+    # tool schema, which a forced tool_choice call can refuse.
+    def _inspect_custom_report_worker(report_id: str) -> str:
+        return _inspect_custom_report_impl(db, report_id=report_id)
+
+    def _update_custom_report_title_worker(report_id: str, title: str) -> str:
+        return _update_custom_report_title_impl(db, report_id=report_id, title=title)
+
     if "inspect_custom_report" not in existing:
         tools_list.append(
             StructuredTool.from_function(
-                lambda report_id: _inspect_custom_report_impl(db, report_id=report_id),
+                _inspect_custom_report_worker,
                 name="inspect_custom_report",
                 description=(
                     "Diagnóstico del dashboard HTML en main.custom_reports: bytes, validación, "
@@ -871,11 +879,7 @@ def register_custom_reports_skill(
         if "update_custom_report_title" not in existing:
             tools_list.append(
                 StructuredTool.from_function(
-                    lambda report_id, title: _update_custom_report_title_impl(
-                        db,
-                        report_id=report_id,
-                        title=title,
-                    ),
+                    _update_custom_report_title_worker,
                     name="update_custom_report_title",
                     description=(
                         "Actualiza solo el título de un reporte en main.custom_reports (UPSERT StateDelta). "

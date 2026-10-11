@@ -2163,6 +2163,19 @@ class TestCommandHandlers:
         ).fetchone()
         assert policy_row is not None and policy_row[0] is True
 
+    def test_catalog_skill_handler_keeps_directive_text_up_to_4096(self, db_with_migrations) -> None:
+        from duckclaw.write_command_handlers import dispatch_command
+
+        con = db_with_migrations
+        text = "x" * 3000
+        dispatch_command(con, {
+            "command_type": "upsert_catalog_skill", "command_version": 1, "task_id": "task-skill-long",
+            "tenant_id": "default", "actor_email": "test@d.local", "name": "long_directive",
+            "description": text, "skill_type": "directive", "implementation_ref": "directive://long_directive",
+        })
+        got = con.execute("SELECT description FROM main.admin_skills WHERE name = 'long_directive'").fetchone()[0]
+        assert got == text
+
     def test_catalog_skill_handler_upserts_and_deactivates_idempotently(self, db_with_migrations) -> None:
         from duckclaw.write_command_handlers import dispatch_command
 

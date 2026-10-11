@@ -337,7 +337,7 @@ def _apply_upsert_catalog_skill(conn: Any, payload: dict) -> None:
         raise ValueError(f"Tenant mismatch for actor: {actor}")
 
     name = _catalog_skill_name(payload.get("name"))
-    description = str(payload.get("description") or "").strip()[:1024]
+    description = str(payload.get("description") or "").strip()[:4096]
     skill_type = str(payload.get("skill_type") or "python").strip()[:64] or "python"
     implementation_ref = str(payload.get("implementation_ref") or "").strip()[:512]
     if not implementation_ref:

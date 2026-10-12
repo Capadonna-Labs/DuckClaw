@@ -16,7 +16,9 @@ export function SlashCommandMenu({
   const matches = matchingSlashCommands(input, extraCommands);
   if (matches.length === 0) return null;
   return (
-    <div className="overflow-hidden rounded-xl border border-gov-gray-200 bg-white/90 shadow-sm dark:border-dark-border dark:bg-dark-surface/90">
+    // Scrollable: with every directive skill listed, an uncapped list grew past the
+    // viewport (mobile) and overflow-hidden clipped the rest with no way to reach it.
+    <div className="max-h-[40vh] overflow-y-auto overscroll-contain rounded-xl border border-gov-gray-200 bg-white/90 shadow-sm dark:border-dark-border dark:bg-dark-surface/90">
       <ul role="listbox" className="divide-y divide-gov-gray-100 dark:divide-dark-border">
         {matches.map((c) => (
           <li key={c.cmd}>

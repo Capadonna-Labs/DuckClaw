@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import random
+import re
 import time
 import uuid
 from pathlib import Path
@@ -204,6 +205,29 @@ def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
     base = gateway_url.rstrip("/").rsplit("/", 1)[0]
     return f"{base}/{quote(worker_id, safe='')}/chat?deliver_outbound=1"
 
+
+
+def _loop_push_summary(raw_body: Any) -> str:
+    """First ~140 chars of the loop reply; the push used to say only "ciclo ejecutado",
+    so from the phone there was no way to tell whether a tick needed attention."""
+    text = ""
+    raw = str(raw_body or "")
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            text = str(data.get("response") or data.get("reply") or "")
+    except ValueError:
+        m = re.search(r'"(?:response|reply)"\s*:\s*"((?:[^"\\]|\\.)*)', raw)  # truncated JSON
+        if m:
+            frag = m.group(1).rstrip("\\")  # cut may land mid-escape
+            try:
+                text = json.loads(f'"{frag}"')
+            except ValueError:
+                text = frag
+    text = re.sub(r"[*#`_>|]+", "", re.sub(r"\s+", " ", text)).strip()
+    if not text:
+        return "Ciclo proactivo ejecutado."
+    return text if len(text) <= 140 else text[:139] + "…"
 
 
 async def _send_web_push_notification(*, title: str, body: str, url: str = "/", tag: str = "duckclaw") -> None:
@@ -962,8 +986,8 @@ async def _run_loop_proactive_tick_one_db(
                 value="0",
             )
             await _send_web_push_notification(
-                title="DuckClaw",
-                body="Ciclo proactivo de trabajo ejecutado.",
+                title="DuckClaw · ciclo /loop",
+                body=_loop_push_summary(result.get("body")),
                 url="/admin/playground",
                 tag=f"duckclaw-loop-{chat_id}",
             )

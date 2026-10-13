@@ -97,6 +97,84 @@ _MAX_RETRIES_DEFAULT = 3
 # Directorio base de sesiones en el host
 _TMP_BASE = Path(tempfile.gettempdir()) / "duckclaw_sandbox"
 
+# Zombie reaper. Containers are reused per session and only removed by an explicit
+# cleanup; random-id runs (crons) and gateway restarts (the in-memory registry is lost)
+# left them alive for days. Idle is measured from Docker + disk, so it survives restarts.
+_LAST_USED_MARK = ".last_used"
+_REAP_EVERY_SEC = 600.0
+_last_reap_at = 0.0
+
+
+def _sandbox_idle_ttl_sec() -> float:
+    """Idle time before a sandbox container is removed. Never below the per-run ceiling,
+    so a long backtest is not reaped mid-run (its mark is touched at start)."""
+    try:
+        ttl = float((os.environ.get("DUCKCLAW_SANDBOX_IDLE_TTL_SEC") or "7200").strip())
+    except ValueError:
+        ttl = 7200.0
+    return max(ttl, _sandbox_max_timeout_sec() + 300.0)
+
+
+def _touch_session(session_id: str) -> None:
+    try:
+        d = _TMP_BASE / session_id
+        d.mkdir(parents=True, exist_ok=True)
+        (d / _LAST_USED_MARK).touch()
+    except OSError:
+        pass
+
+
+def _container_last_used(container: Any, session_id: str) -> float:
+    """Epoch of the last run: the session mark, else the container creation time."""
+    try:
+        return (_TMP_BASE / session_id / _LAST_USED_MARK).stat().st_mtime
+    except OSError:
+        pass
+    from datetime import datetime  # noqa: PLC0415
+
+    created = str((getattr(container, "attrs", None) or {}).get("Created") or "")
+    try:
+        # Docker: '2026-10-07T02:00:06.123456789Z' -> trim nanoseconds for fromisoformat.
+        base = created.rstrip("Z").split(".")[0]
+        return datetime.fromisoformat(base + "+00:00").timestamp()
+    except ValueError:
+        return 0.0
+
+
+def reap_idle_sandboxes(*, keep: str | None = None, now: float | None = None, force: bool = False) -> list[str]:
+    """Remove strix_sandbox_* containers idle longer than the TTL (or already exited).
+
+    Throttled to once per _REAP_EVERY_SEC unless ``force``. ``keep`` is the session
+    about to run. Returns the reaped session ids. Never raises.
+    """
+    global _last_reap_at
+    t = time.time() if now is None else now
+    if not force and t - _last_reap_at < _REAP_EVERY_SEC:
+        return []
+    _last_reap_at = t
+    reaped: list[str] = []
+    try:
+        client = _docker_client()
+        containers = client.containers.list(all=True, filters={"name": "strix_sandbox_"})
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("sandbox reaper skipped: %s", exc)
+        return reaped
+    ttl = _sandbox_idle_ttl_sec()
+    for c in containers:
+        name = str(getattr(c, "name", "") or "")
+        if not name.startswith("strix_sandbox_"):
+            continue
+        sid = name[len("strix_sandbox_"):]
+        if sid == keep:
+            continue
+        exited = str(getattr(c, "status", "")) in ("exited", "dead", "created")
+        if exited or t - _container_last_used(c, sid) > ttl:
+            _get_manager().cleanup(sid)
+            reaped.append(sid)
+    if reaped:
+        _log.info("sandbox reaper removed %d idle container(s): %s", len(reaped), ", ".join(reaped))
+    return reaped
+
 
 def _file_sig(f: Path) -> tuple[int, int]:
     st = f.stat()
@@ -366,6 +444,7 @@ class StrixSandboxManager:
     ) -> Any:
         import docker  # noqa: PLC0415
 
+        _touch_session(session_id)  # every run and browser open goes through here
         container_name = f"strix_sandbox_{session_id}"
         client = _docker_client()
         desired_image = (image_override or self.image).strip()
@@ -1102,6 +1181,9 @@ def run_in_sandbox(
         policy = load_security_policy(wid)
     secret_env = _load_allowed_secrets(policy)
     timeout_sec = _sandbox_effective_timeout_sec(policy, image_override=image_override)
+
+    _touch_session(sid)
+    reap_idle_sandboxes(keep=sid)
 
     # Protocolo de firewall: inyectar datos si se requiere
     if data_sql:

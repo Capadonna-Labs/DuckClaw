@@ -1146,6 +1146,15 @@ async def run_heartbeat() -> None:
                 logger.exception("GitHub MCP health: tick fallÃ³: %s", exc)
             last_github_health = now_mono
 
+        try:
+            # Sandbox zombies: the gateway reaps on use; this covers days with no runs.
+            # Throttled inside (every 10 min); no-op without Docker access.
+            from duckclaw.graphs.sandbox import reap_idle_sandboxes
+
+            await asyncio.to_thread(reap_idle_sandboxes)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("sandbox reaper: %s", exc)
+
         now = time.time()
         if now - last_homeo >= interval:
             logger.info("Iniciando ciclo de evaluaciÃ³n de Homeostasis...")

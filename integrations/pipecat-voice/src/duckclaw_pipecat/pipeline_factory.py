@@ -123,7 +123,8 @@ async def run_voice_pipeline(
         if not key:
             raise RuntimeError("ELEVENLABS_API_KEY required when DUCKCLAW_VOICE_STT_PROVIDER=elevenlabs")
         http_session = aiohttp.ClientSession()
-        terms = [t.strip() for t in cfg.duckclaw_voice_stt_keyterms.split(",") if t.strip()]
+        # Value is quoted in .env (it has spaces); start_voice.sh passes the quotes through.
+        terms = [t.strip(" \"'") for t in cfg.duckclaw_voice_stt_keyterms.split(",") if t.strip(" \"'")]
         stt = ElevenLabsSTTService(
             api_key=key,
             aiohttp_session=http_session,
@@ -154,15 +155,23 @@ async def run_voice_pipeline(
             resolve_voice_id=_resolve_tts_voice_id,
         )
     elif cfg.duckclaw_voice_tts_provider.strip().lower() == "elevenlabs":
-        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+        # HTTP, not the websocket service: with a multi-sentence reply the websocket context
+        # was closed at end of turn and only the first sentence was heard.
+        import aiohttp
+        from pipecat.services.elevenlabs.tts import ElevenLabsHttpTTSService, ElevenLabsHttpTTSSettings
 
         key = cfg.elevenlabs_api_key.strip()
         if not key:
             raise RuntimeError("ELEVENLABS_API_KEY required when DUCKCLAW_VOICE_TTS_PROVIDER=elevenlabs")
-        tts = ElevenLabsTTSService(
+        if http_session is None:
+            http_session = aiohttp.ClientSession()
+        tts = ElevenLabsHttpTTSService(
             api_key=key,
-            voice_id=cfg.elevenlabs_voice_id.strip() or _elevenlabs_first_voice(key),
-            model=cfg.elevenlabs_tts_model.strip() or "eleven_flash_v2_5",
+            aiohttp_session=http_session,
+            settings=ElevenLabsHttpTTSSettings(
+                voice=cfg.elevenlabs_voice_id.strip() or _elevenlabs_first_voice(key),
+                model=cfg.elevenlabs_tts_model.strip() or "eleven_flash_v2_5",
+            ),
         )
     else:
         from pipecat.services.cartesia.tts import CartesiaTTSService

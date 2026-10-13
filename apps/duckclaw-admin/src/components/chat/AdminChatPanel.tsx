@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   Bot,
@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { usePipecatLiveVoice } from '@/components/chat/usePipecatLiveVoice';
 import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
+import { clearPendingDetachedTurn, writePendingDetachedTurn } from '@/lib/detachedTurnState';
 import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
 import type { ConversationManagePanelProps } from '@/components/chat/ConversationManagePanel';
 import { useAuthStore } from '@/store/authStore';
@@ -161,6 +162,7 @@ export function AdminChatPanel({
     contextTokenBreakdown,
     reloadConfig,
     reloadHistory,
+    setMessages,
   } = chat;
 
   // Agents can create directive skills mid-conversation (create_skill), so the
@@ -196,20 +198,41 @@ export function AdminChatPanel({
   // Live voice: show the spoken turn (user bubble, tool usage, reply) while the call is on,
   // not only after hanging up. Poll history while the agent works, then once more when done.
   const [voiceGraphBusy, setVoiceGraphBusy] = useState(false);
+  const voiceUserTextRef = useRef('');
   const liveVoice = usePipecatLiveVoice({
     enabled: liveVoiceAvailable,
     onDisconnected: () => {
       setVoiceGraphBusy(false);
+      clearPendingDetachedTurn(chatId);
       reloadHistory();
     },
     onGraphPhaseChange: (phase) => {
       const busy = phase === 'graph';
       setVoiceGraphBusy(busy);
+      const spoken = voiceUserTextRef.current.trim();
+      if (busy && spoken) {
+        // Show the spoken turn now (it is only persisted with the reply) so its tool
+        // bubbles anchor to it instead of piling onto the previous turn's block.
+        writePendingDetachedTurn({
+          chatId,
+          tenantId: (config?.effective_tenant_id || 'default').trim() || 'default',
+          workerId,
+          text: spoken,
+          startedAt: Date.now(),
+        });
+        setMessages((prev) => [...prev, { role: 'user', text: spoken }]);
+      }
       reloadHistory({ force: true });
       // The turn is persisted right after the reply; a second read catches a slow write.
-      if (!busy) window.setTimeout(() => reloadHistory({ force: true }), 1500);
+      if (!busy) {
+        window.setTimeout(() => {
+          clearPendingDetachedTurn(chatId);
+          reloadHistory({ force: true });
+        }, 1500);
+      }
     },
   });
+  voiceUserTextRef.current = liveVoice.userSubtitle;
   // ponytail: 2 s polling while the agent works; push via SSE if it ever feels laggy.
   useVisibilityAwareInterval(() => reloadHistory({ force: true }), voiceGraphBusy ? 2000 : null);
   // During a call keep the newest bubble in view above the voice bar (unless the user scrolled up).

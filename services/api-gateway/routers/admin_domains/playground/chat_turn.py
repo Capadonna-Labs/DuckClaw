@@ -351,6 +351,22 @@ async def prepare_playground_chat_turn(
             # Matchéo un directive skill: ya no es fly command, es un turno normal
             # (con adjuntos/RAG habilitados) cuyo texto real es "directive_rest".
             fly_check_incoming = directive_rest
+    elif msg.startswith("[Canal voz en vivo") and (body.user_incoming or "").strip():
+        # Live voice: "skill/comando <nombre>" spoken instead of typed "/nombre".
+        from core.admin_identity import effective_actor_email
+        from routers.admin_domains.playground.directive_skills import extract_spoken_directive_skill
+
+        spoken = body.user_incoming.strip()
+        expanded, directive_rest = await asyncio.to_thread(
+            extract_spoken_directive_skill,
+            spoken,
+            tenant_id=turn.eff_tenant,
+            actor_email=effective_actor_email(actor),
+        )
+        if directive_rest is not None:
+            # Keep the voice-channel prefix (short spoken reply) ahead of the directive.
+            msg = msg[: len(msg) - len(spoken)] + expanded if msg.endswith(spoken) else expanded
+            fly_check_incoming = directive_rest
     is_fly = _playground_message_is_fly_command(
         user_incoming=fly_check_incoming,
         message=msg,

@@ -744,5 +744,6 @@ export function useAdminChat({
     contextTokenBreakdown,
     reloadConfig: loadConfig,
     reloadHistory,
+    setMessages,
   };
 }

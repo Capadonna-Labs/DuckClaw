@@ -33,6 +33,9 @@ if [[ -f .env ]]; then
   export DUCKCLAW_TTS_VOICE_MAP="$(_read_env DUCKCLAW_TTS_VOICE_MAP)"
   export DEEPGRAM_API_KEY="$(_read_env DEEPGRAM_API_KEY)"
   export CARTESIA_API_KEY="$(_read_env CARTESIA_API_KEY)"
+  export ELEVENLABS_API_KEY="$(_read_env ELEVENLABS_API_KEY)"
+  export DUCKCLAW_ELEVENLABS_VOICE_ID="$(_read_env DUCKCLAW_ELEVENLABS_VOICE_ID)"
+  export DUCKCLAW_ELEVENLABS_TTS_MODEL="$(_read_env DUCKCLAW_ELEVENLABS_TTS_MODEL eleven_flash_v2_5)"
 fi
 
 ENABLED="${DUCKCLAW_VOICE_ENABLED:-false}"

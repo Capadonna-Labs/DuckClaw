@@ -40,6 +40,10 @@ class VoiceSettings(BaseSettings):
 
     deepgram_api_key: str = Field(default="", alias="DEEPGRAM_API_KEY")
     cartesia_api_key: str = Field(default="", alias="CARTESIA_API_KEY")
+    # Same keys the gateway uses for voice notes (core/sensory_client.py).
+    elevenlabs_api_key: str = Field(default="", alias="ELEVENLABS_API_KEY")
+    elevenlabs_voice_id: str = Field(default="", alias="DUCKCLAW_ELEVENLABS_VOICE_ID")
+    elevenlabs_tts_model: str = Field(default="eleven_flash_v2_5", alias="DUCKCLAW_ELEVENLABS_TTS_MODEL")
 
     daily_api_key: str = Field(default="", alias="DAILY_API_KEY")
     daily_room_url: str = Field(default="", alias="DAILY_ROOM_URL")

@@ -1363,6 +1363,14 @@ def execute_loop(
     """/loop on | on 4h | on --delta | --delta | off."""
     _ = vault_user_id
     tid = str(tenant_id or "default").strip() or "default"
+    # "/loop reject <id>" used to fall through to "start a cycle" (2026-10-13): route the
+    # spaced forms to /loop-reject and /loop-approve.
+    head, _, rest = (args or "").strip().partition(" ")
+    if head.lower() in ("reject", "approve"):
+        from duckclaw.commands.hitl import execute_loop_approve, execute_loop_reject
+
+        fn = execute_loop_reject if head.lower() == "reject" else execute_loop_approve
+        return fn(db, chat_id, rest, tenant_id=tid)
     parsed = _parse_loop_args(args or "")
     if parsed.get("error"):
         return str(parsed["error"])

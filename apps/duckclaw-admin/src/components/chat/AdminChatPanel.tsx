@@ -212,6 +212,11 @@ export function AdminChatPanel({
   });
   // ponytail: 2 s polling while the agent works; push via SSE if it ever feels laggy.
   useVisibilityAwareInterval(() => reloadHistory({ force: true }), voiceGraphBusy ? 2000 : null);
+  // During a call keep the newest bubble in view above the voice bar (unless the user scrolled up).
+  useEffect(() => {
+    if (!liveVoice.isActive || showScrollButton) return;
+    requestAnimationFrame(() => scrollToBottom('smooth'));
+  }, [liveVoice.isActive, messages.length, showScrollButton, scrollToBottom]);
 
   const voiceAppState = useMemo(
     () => ({
@@ -591,6 +596,7 @@ export function AdminChatPanel({
         isCompact={isCompact}
         studioChromePad={isStudioCompose && showStudioHeader && !showHeader}
         padForSuggestions={showSuggestions}
+        padForLiveVoice={liveVoice.isActive}
         scrollRef={scrollRef}
         showScrollButton={showScrollButton}
         onScroll={onScroll}

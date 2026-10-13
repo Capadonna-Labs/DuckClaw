@@ -44,6 +44,9 @@ class VoiceSettings(BaseSettings):
     elevenlabs_api_key: str = Field(default="", alias="ELEVENLABS_API_KEY")
     elevenlabs_voice_id: str = Field(default="", alias="DUCKCLAW_ELEVENLABS_VOICE_ID")
     elevenlabs_tts_model: str = Field(default="eleven_flash_v2_5", alias="DUCKCLAW_ELEVENLABS_TTS_MODEL")
+    elevenlabs_stt_model: str = Field(default="scribe_v1", alias="DUCKCLAW_ELEVENLABS_STT_MODEL")
+    # Comma list biasing STT (skill names, tickers, jargon) when STT provider = elevenlabs.
+    duckclaw_voice_stt_keyterms: str = Field(default="", alias="DUCKCLAW_VOICE_STT_KEYTERMS")
 
     daily_api_key: str = Field(default="", alias="DAILY_API_KEY")
     daily_room_url: str = Field(default="", alias="DAILY_ROOM_URL")

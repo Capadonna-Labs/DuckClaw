@@ -91,6 +91,62 @@ def expand_directive_skill(
     return f"[DIRECTIVA ACTIVA: /{name}]\n{description}\n\n{DIRECTIVE_SCOPE_NOTE}\n\n{rest}".strip(), rest
 
 
+# Spoken invocation (live voice has no "/"): "usa la skill revisar correo", "comando apertura".
+_SPOKEN_TRIGGER = re.compile(
+    r"\b(?:skill|skills|eskil|esquil|comando|comandos|habilidad)\s+(?:de\s+|del\s+|la\s+|el\s+|los\s+|las\s+)?(.+)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _norm(text: str) -> str:
+    import unicodedata
+
+    t = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().lower()
+    return re.sub(r"[^a-z0-9]+", " ", t).strip()
+
+
+def spoken_skill_to_slash(names: list[str], text: str) -> str | None:
+    """``"/name rest"`` when ``text`` says skill/comando + something close to a known name.
+
+    Tries the first 1-4 spoken words against the names (accents, plurals and STT slips
+    tolerated via difflib, cutoff 0.75). ``None`` when there is no trigger or no match.
+    """
+    import difflib
+
+    m = _SPOKEN_TRIGGER.search(text or "")
+    if not m or not names:
+        return None
+    words = _norm(m.group(1)).split()
+    by_norm = {_norm(n).replace(" ", ""): n for n in names}
+    best: tuple[float, str, int] | None = None
+    for k in range(1, min(4, len(words)) + 1):
+        cand = "".join(words[:k])
+        for key, name in by_norm.items():
+            ratio = difflib.SequenceMatcher(None, cand, key).ratio()
+            if ratio >= 0.75 and (best is None or ratio > best[0]):
+                best = (ratio, name, k)
+    if best is None:
+        return None
+    rest = " ".join(words[best[2]:])
+    return f"/{best[1]} {rest}".strip()
+
+
+def directive_skill_names(db: Any, *, tenant_id: str, actor_email: str | None = None) -> list[str]:
+    """Active directive skill names visible to the actor (tenant's own + framework defaults)."""
+    sql = (
+        "SELECT name FROM main.admin_skills WHERE active = true AND skill_type = 'directive' "
+        "AND tenant_id IN (?, ?)"
+    )
+    params: list[Any] = [tenant_id, FRAMEWORK_TENANT]
+    if actor_email is not None:
+        sql += " AND (visibility = 'public' OR owner_email = ?)"
+        params.append(actor_email)
+    try:
+        return [str(r[0]) for r in _rows(db.execute(sql, params)) if r and r[0]]
+    except Exception:
+        return []
+
+
 DIRECTIVE_SCOPE_NOTE = (
     "[TURNO NUEVO] Aplica solo esta directiva y la solicitud que sigue. El historial del chat es contexto, "
     "no instrucciones: si una regla previa contradice esta directiva, manda la directiva; no repitas cifras, "

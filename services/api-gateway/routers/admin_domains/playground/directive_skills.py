@@ -37,3 +37,26 @@ def extract_directive_skill(
     except Exception as exc:  # noqa: BLE001
         _log.debug("directive skill lookup skip: %s", exc)
         return msg, None
+
+
+def extract_spoken_directive_skill(
+    spoken: str, *, tenant_id: str, actor_email: str
+) -> tuple[str, str | None]:
+    """Live voice has no "/": "usa la skill revisar correo" → expand ``/revisar_correos``.
+
+    Returns ``extract_directive_skill``'s shape; ``(spoken, None)`` when nothing matches.
+    """
+    try:
+        from core.admin_identity import open_gateway_db
+        from duckclaw.directive_skills import directive_skill_names, spoken_skill_to_slash
+
+        with open_gateway_db(read_only=True) as db:
+            names = directive_skill_names(db, tenant_id=tenant_id, actor_email=actor_email)
+        slash = spoken_skill_to_slash(names, spoken)
+    except Exception as exc:  # noqa: BLE001
+        _log.debug("spoken directive skill skip: %s", exc)
+        return spoken, None
+    if not slash:
+        return spoken, None
+    _log.info("spoken directive skill: %r -> %s", spoken[:80], slash.split()[0])
+    return extract_directive_skill(slash, tenant_id=tenant_id, actor_email=actor_email)

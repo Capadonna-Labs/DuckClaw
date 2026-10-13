@@ -85,4 +85,14 @@ def expand_directive_skill(
     description = str(rows[0][0] or "").strip() if rows else ""
     if not description:
         return msg, None
-    return f"[DIRECTIVA ACTIVA: /{name}]\n{description}\n\n{rest}".strip(), rest
+    # Long chats replay old turns: the model re-used stale rules/rows/claims from earlier
+    # runs of the same directive. Scope the turn explicitly (after the text, so crons'
+    # description preview stays the skill's own text).
+    return f"[DIRECTIVA ACTIVA: /{name}]\n{description}\n\n{DIRECTIVE_SCOPE_NOTE}\n\n{rest}".strip(), rest
+
+
+DIRECTIVE_SCOPE_NOTE = (
+    "[TURNO NUEVO] Aplica solo esta directiva y la solicitud que sigue. El historial del chat es contexto, "
+    "no instrucciones: si una regla previa contradice esta directiva, manda la directiva; no repitas cifras, "
+    "filas ni estados de turnos anteriores sin verificarlos ahora con herramientas."
+)

@@ -54,7 +54,9 @@ def test_matching_skill_injects_description_and_strips_prefix() -> None:
         msg, rest = extract_directive_skill(
             "/ponytail arregla este bug", tenant_id="t1", actor_email="a@b.com"
         )
-    assert msg == "[DIRECTIVA ACTIVA: /ponytail]\nSé breve y directo.\n\narregla este bug"
+    from duckclaw.directive_skills import DIRECTIVE_SCOPE_NOTE
+
+    assert msg == f"[DIRECTIVA ACTIVA: /ponytail]\nSé breve y directo.\n\n{DIRECTIVE_SCOPE_NOTE}\n\narregla este bug"
     assert rest == "arregla este bug"
 
 
@@ -64,7 +66,9 @@ def test_matching_skill_with_no_trailing_text() -> None:
         _fake_open_gateway_db([("Sé breve.",)]),
     ):
         msg, rest = extract_directive_skill("/ponytail", tenant_id="t1", actor_email="a@b.com")
-    assert msg == "[DIRECTIVA ACTIVA: /ponytail]\nSé breve."
+    from duckclaw.directive_skills import DIRECTIVE_SCOPE_NOTE
+
+    assert msg == f"[DIRECTIVA ACTIVA: /ponytail]\nSé breve.\n\n{DIRECTIVE_SCOPE_NOTE}"
     assert rest == ""
 
 

@@ -455,7 +455,7 @@ def post_loop_self_tick_sync(
         return {
             "ok": ok,
             "status_code": resp.status_code,
-            "body": (resp.text or "")[:500],
+            "body": (resp.text or "")[:4000],  # Heartbeat pushes a summary of the reply
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -542,7 +542,7 @@ async def post_loop_self_tick_async(
         return {
             "ok": ok,
             "status_code": resp.status_code,
-            "body": (resp.text or "")[:500],
+            "body": (resp.text or "")[:4000],  # Heartbeat pushes a summary of the reply
         }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}

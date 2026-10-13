@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from duckclaw_pipecat.client_actions import CLIENT_MSG_APP_STATE, parse_app_state
@@ -14,7 +15,14 @@ from duckclaw_pipecat.voice_runtime_state import VoiceRuntimeState
 
 _log = logging.getLogger(__name__)
 
-_VAD_PARAMS = dict(confidence=0.5, start_secs=0.2, stop_secs=0.6, min_volume=0.4)
+# stop_secs 0.6 cut a sentence at every natural pause and min_volume 0.4 dropped quiet
+# phone speech, so STT got fragments ("¿No?", "Podemos hablar"). Env-tunable per device.
+_VAD_PARAMS = dict(
+    confidence=float(os.environ.get("DUCKCLAW_VOICE_VAD_CONFIDENCE", "0.5")),
+    start_secs=float(os.environ.get("DUCKCLAW_VOICE_VAD_START_SECS", "0.2")),
+    stop_secs=float(os.environ.get("DUCKCLAW_VOICE_VAD_STOP_SECS", "1.2")),
+    min_volume=float(os.environ.get("DUCKCLAW_VOICE_VAD_MIN_VOLUME", "0.25")),
+)
 
 
 def warmup_voice_runtime() -> None:

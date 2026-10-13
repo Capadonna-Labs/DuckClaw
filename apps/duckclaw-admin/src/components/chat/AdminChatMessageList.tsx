@@ -29,6 +29,8 @@ export type AdminChatMessageListProps = {
   studioChromePad?: boolean;
   /** Reserva espacio extra cuando el dropdown Sugerencias está sobre el composer. */
   padForSuggestions?: boolean;
+  /** Reserva espacio para la barra de voz en vivo sobre el composer. */
+  padForLiveVoice?: boolean;
   scrollRef: RefObject<HTMLDivElement>;
   showScrollButton: boolean;
   onScroll: () => void;
@@ -101,6 +103,7 @@ export function AdminChatMessageList({
   isCompact,
   studioChromePad = false,
   padForSuggestions = false,
+  padForLiveVoice = false,
   scrollRef,
   showScrollButton,
   onScroll,
@@ -118,7 +121,10 @@ export function AdminChatMessageList({
   };
 
   const studioPadClass = studioChromePad
-    ? padForSuggestions
+    ? padForLiveVoice
+      ? // Live voice bar (+ Sugerencias) sits on top of the composer.
+        'pt-16 pb-[19rem] sm:pt-[4.5rem] sm:pb-72'
+      : padForSuggestions
       ? // Composer + Sugerencias overlay — keep the last bubble above the footer.
         'pt-16 pb-[12.25rem] sm:pt-[4.5rem] sm:pb-48'
       : 'pt-16 pb-[8.5rem] sm:pt-[4.5rem] sm:pb-36'

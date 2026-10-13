@@ -124,6 +124,28 @@ async def _run_context_fold_fly_command(
     return (result_payload, time.monotonic())
 
 
+LIVE_VOICE_MARKER = "[Canal voz en vivo"  # prefix set by integrations/pipecat-voice graph_bridge
+
+
+def _trim_history_for_live_voice(prepared: Any) -> Any:
+    """Live voice turns get only the recent history (default ~6k tokens) sent to the graph.
+
+    Replaying the whole chat (~40k tokens × several tool rounds) made spoken replies take
+    30-70 s. The stored history is untouched; only this turn's graph input is trimmed.
+    """
+    from dataclasses import replace
+
+    from core.chat_history import trim_history_to_budget
+
+    if not (prepared.message or "").lstrip().startswith(LIVE_VOICE_MARKER) or not prepared.history_for_graph:
+        return prepared
+    try:
+        target = int(os.environ.get("DUCKCLAW_VOICE_HISTORY_TOKENS", "6000"))
+    except ValueError:
+        target = 6000
+    return replace(prepared, history_for_graph=trim_history_to_budget(prepared.history_for_graph, target_tokens=target))
+
+
 async def _auto_compact_history_if_needed(
     prepared: PreparedChatInvoke,
     *,
@@ -364,6 +386,7 @@ async def run_chat_graph(
         prepared, auto_compacted, auto_summary = await _auto_compact_history_if_needed(
             prepared, redis_client=redis_client
         )
+        prepared = _trim_history_for_live_voice(prepared)
 
         t0 = time.monotonic()
         admin_pg_vault_prev = os.environ.get("DUCKCLAW_ADMIN_PLAYGROUND_VAULT")

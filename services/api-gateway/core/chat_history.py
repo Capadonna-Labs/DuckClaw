@@ -97,10 +97,13 @@ def history_needs_compaction(items: list[dict[str, Any]] | None) -> bool:
     return history_estimated_tokens(items) >= chat_history_token_budget() * chat_history_compact_at()
 
 
-def trim_history_to_budget(items: list[dict[str, Any]], fraction: float = 0.5) -> list[dict[str, Any]]:
+def trim_history_to_budget(
+    items: list[dict[str, Any]], fraction: float = 0.5, *, target_tokens: int | None = None
+) -> list[dict[str, Any]]:
     """Fallback when the LLM fold isn't possible (no vault / fold disabled): keep the
-    newest messages that fit in ``fraction`` of the budget, starting on a user turn."""
-    target = int(chat_history_token_budget() * fraction)
+    newest messages that fit in ``fraction`` of the budget (or ``target_tokens``),
+    starting on a user turn."""
+    target = int(target_tokens if target_tokens is not None else chat_history_token_budget() * fraction)
     kept: list[dict[str, Any]] = []
     total = 0
     for item in reversed(items):

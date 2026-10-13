@@ -39,6 +39,19 @@ def extract_directive_skill(
         return msg, None
 
 
+def _voice_skill_aliases() -> dict[str, str]:
+    """``DUCKCLAW_VOICE_SKILL_ALIASES``: JSON of what STT hears → skill, e.g. {"ps": "setups"}."""
+    import json
+    import os
+
+    try:
+        raw = json.loads(os.environ.get("DUCKCLAW_VOICE_SKILL_ALIASES") or "{}")
+        return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+    except ValueError:
+        _log.warning("DUCKCLAW_VOICE_SKILL_ALIASES is not valid JSON; ignored")
+        return {}
+
+
 def extract_spoken_directive_skill(
     spoken: str, *, tenant_id: str, actor_email: str
 ) -> tuple[str, str | None]:
@@ -52,7 +65,7 @@ def extract_spoken_directive_skill(
 
         with open_gateway_db(read_only=True) as db:
             names = directive_skill_names(db, tenant_id=tenant_id, actor_email=actor_email)
-        slash = spoken_skill_to_slash(names, spoken)
+        slash = spoken_skill_to_slash(names, spoken, _voice_skill_aliases())
     except Exception as exc:  # noqa: BLE001
         _log.debug("spoken directive skill skip: %s", exc)
         return spoken, None

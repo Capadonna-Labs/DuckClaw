@@ -105,11 +105,15 @@ def _norm(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", t).strip()
 
 
-def spoken_skill_to_slash(names: list[str], text: str) -> str | None:
+def spoken_skill_to_slash(
+    names: list[str], text: str, aliases: dict[str, str] | None = None
+) -> str | None:
     """``"/name rest"`` when ``text`` says skill/comando + something close to a known name.
 
-    Tries the first 1-4 spoken words against the names (accents, plurals and STT slips
-    tolerated via difflib, cutoff 0.75). ``None`` when there is no trigger or no match.
+    ``aliases`` maps what STT tends to hear to a skill (``{"ps": "setups"}``); checked
+    first. Then the first 1-4 spoken words are fuzzy-matched against the names (accents,
+    plurals and STT slips tolerated via difflib, cutoff 0.75). ``None`` when there is no
+    trigger or no match.
     """
     import difflib
 
@@ -118,6 +122,11 @@ def spoken_skill_to_slash(names: list[str], text: str) -> str | None:
         return None
     words = _norm(m.group(1)).split()
     by_norm = {_norm(n).replace(" ", ""): n for n in names}
+    alias_map = {_norm(k).replace(" ", ""): _norm(v).replace(" ", "") for k, v in (aliases or {}).items()}
+    for k in range(min(4, len(words)), 0, -1):
+        target = alias_map.get("".join(words[:k]))
+        if target in by_norm:
+            return f"/{by_norm[target]} {' '.join(words[k:])}".strip()
     best: tuple[float, str, int] | None = None
     for k in range(1, min(4, len(words)) + 1):
         cand = "".join(words[:k])

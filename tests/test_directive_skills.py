@@ -113,6 +113,10 @@ def test_spoken_skill_maps_to_slash() -> None:
     assert spoken_skill_to_slash(names, "ejecuta la skill radar watchlist") == "/radar_watchlist"
     assert spoken_skill_to_slash(names, "Usa el revisar correo.") is None  # no trigger word
     assert spoken_skill_to_slash(names, "comando inexistente xyz") is None
+    # STT heard "setups" (said in Spanish) as "PS": an alias maps it.
+    assert spoken_skill_to_slash(names, "Ejecuta el comando PS", {"ps": "setups"}) is None  # not in names
+    assert spoken_skill_to_slash(names + ["setups"], "Ejecuta el comando PS", {"ps": "setups"}) == "/setups"
+    assert spoken_skill_to_slash(names + ["setups"], "comando P S de hoy", {"ps": "setups"}) == "/setups de hoy"
 
 
 def test_dedupe_by_name_keeps_first_row_case_insensitive() -> None:

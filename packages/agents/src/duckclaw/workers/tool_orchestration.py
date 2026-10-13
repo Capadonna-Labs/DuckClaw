@@ -494,6 +494,9 @@ def _resolve_intent_force_first_tool(
             and not already_tool
             and text
             and "[system_directive:" not in text.lower()
+            # Live voice small talk: the forced clock lookup added a tool round to every
+            # spoken sentence. Intents (e.g. email) still force their first tool below.
+            and not text.startswith("[Canal voz en vivo")
             and not orch.clock_before_intents
         ):
             return anchor

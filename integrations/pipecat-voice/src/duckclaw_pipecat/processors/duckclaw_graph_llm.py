@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from duckclaw_pipecat.client_actions import build_update_state
@@ -16,6 +17,21 @@ if TYPE_CHECKING:
     from pipecat.processors.frame_processor import FrameDirection
 
 _log = logging.getLogger(__name__)
+
+# Whisper on noise/silence loops one letter or token ("Hvadilllllll…") and that reached the
+# agent as a user message. ponytail: heuristic (char run / giant word / few distinct chars);
+# tune the thresholds if real speech ever gets dropped.
+_STT_LOOP_RE = re.compile(r"(.)\1{9,}|(\S{1,8}\s*)\2{5,}")
+
+
+def looks_like_stt_garbage(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    if _STT_LOOP_RE.search(t) or max(len(w) for w in t.split()) > 40:
+        return True
+    letters = [c.lower() for c in t if c.isalpha()]
+    return len(letters) > 30 and len(set(letters)) <= 4
 
 
 def _require_pipecat():
@@ -76,7 +92,7 @@ class DuckClawGraphLLM:
                     return
 
                 text = (frame.text or "").strip()
-                if not text:
+                if not text or looks_like_stt_garbage(text):
                     return
                 if hasattr(frame, "finalized") and not frame.finalized:
                     return

@@ -276,7 +276,9 @@ export function useAdminChatHistory({
   useVisibilityAwareInterval(() => {
     if (!enabled || !chatId || loadingRef.current || configRef.current === null) return;
     reloadHistory({ force: true });
-  }, loopPollingActive && enabled ? 30_000 : null);
+    // Always poll (slower when no loop is detected): the text heuristic loses the loop as soon as
+    // newer replies push it out or mention "detenido", and server-side tick replies stop showing.
+  }, enabled ? (loopPollingActive ? 30_000 : 60_000) : null);
 
   useEffect(() => {
     return () => {

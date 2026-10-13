@@ -50,7 +50,11 @@ class VoiceSettings(BaseSettings):
 
     duckclaw_voice_graph_timeout_sec: float = Field(default=120.0, alias="DUCKCLAW_VOICE_GRAPH_TIMEOUT_SEC")
     duckclaw_voice_progress_phrase: str = Field(
-        default="Un momento, estoy consultando datos.",
+        # "|"-separated: one is picked at random per turn.
+        default=(
+            "Déjame revisar.|Ya lo miro.|Un segundo.|Dame un momento.|"
+            "Lo estoy consultando.|Ya te digo.|Reviso y te cuento."
+        ),
         alias="DUCKCLAW_VOICE_PROGRESS_PHRASE",
     )
 
@@ -62,7 +66,8 @@ class VoiceSettings(BaseSettings):
         default="Worker no disponible.",
         alias="DUCKCLAW_VOICE_GATEWAY_REJECTED_PHRASE",
     )
-    duckclaw_voice_progress_delay_sec: float = Field(default=3.0, alias="DUCKCLAW_VOICE_PROGRESS_DELAY_SEC")
+    # 5 s: quick replies now land before the filler, so it only plays on real lookups.
+    duckclaw_voice_progress_delay_sec: float = Field(default=5.0, alias="DUCKCLAW_VOICE_PROGRESS_DELAY_SEC")
 
     @property
     def enabled(self) -> bool:

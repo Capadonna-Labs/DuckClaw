@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import random
 from collections.abc import Awaitable, Callable
 
 from duckclaw_pipecat.graph_bridge import GraphBridgeOutcome
@@ -29,7 +30,9 @@ async def invoke_graph_with_progress(
             await asyncio.sleep(max(0.1, delay_sec))
             if not invoke_task.done() and on_progress is not None and not progress_emitted:
                 progress_emitted = True
-                result = on_progress(progress_phrase)
+                # "a|b|c" → one at random, so the filler doesn't sound the same every turn.
+                options = [p.strip() for p in progress_phrase.split("|") if p.strip()] or [progress_phrase]
+                result = on_progress(random.choice(options))
                 if asyncio.iscoroutine(result):
                     await result
         except asyncio.CancelledError:

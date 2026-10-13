@@ -113,7 +113,9 @@ class DuckClawGraphLLM:
                         chat_id=session.chat_id,
                         transcript=text,
                         timeout_sec=settings.duckclaw_voice_graph_timeout_sec,
-                        progress_phrase=settings.duckclaw_voice_progress_phrase,
+                        # Spoken as the final reply on a gateway transport error: say so plainly
+                        # (the progress filler is now a random "|" list, wrong as an answer).
+                        progress_phrase="No pude conectar con el agente, intenta de nuevo.",
                         empty_reply_phrase=settings.duckclaw_voice_empty_reply_phrase,
                         gateway_rejected_phrase=settings.duckclaw_voice_gateway_rejected_phrase,
                         actor=session.actor_email,

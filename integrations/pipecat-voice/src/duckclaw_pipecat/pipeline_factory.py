@@ -18,10 +18,12 @@ _log = logging.getLogger(__name__)
 # stop_secs 0.6 cut a sentence at every natural pause and min_volume 0.4 dropped quiet
 # phone speech, so STT got fragments ("¿No?", "Podemos hablar"). Env-tunable per device.
 _VAD_PARAMS = dict(
-    confidence=float(os.environ.get("DUCKCLAW_VOICE_VAD_CONFIDENCE", "0.5")),
-    start_secs=float(os.environ.get("DUCKCLAW_VOICE_VAD_START_SECS", "0.2")),
+    # 0.25 / 0.5 then picked up background noise as speech in a silent room: back to the
+    # original volume floor, with a stricter speech-probability threshold.
+    confidence=float(os.environ.get("DUCKCLAW_VOICE_VAD_CONFIDENCE", "0.7")),
+    start_secs=float(os.environ.get("DUCKCLAW_VOICE_VAD_START_SECS", "0.3")),
     stop_secs=float(os.environ.get("DUCKCLAW_VOICE_VAD_STOP_SECS", "1.2")),
-    min_volume=float(os.environ.get("DUCKCLAW_VOICE_VAD_MIN_VOLUME", "0.25")),
+    min_volume=float(os.environ.get("DUCKCLAW_VOICE_VAD_MIN_VOLUME", "0.4")),
 )
 
 
@@ -132,6 +134,7 @@ async def run_voice_pipeline(
                 model=cfg.elevenlabs_stt_model.strip() or "scribe_v1",
                 language=Language.ES,
                 keyterms=terms or None,
+                tag_audio_events=False,  # no "[risa]" / "[música]" turned into user text
             ),
         )
     else:

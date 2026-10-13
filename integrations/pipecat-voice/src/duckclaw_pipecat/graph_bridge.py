@@ -22,9 +22,12 @@ PLAYGROUND_CHAT_PATH = "/api/v1/admin/playground/chat"
 
 # Prepended only for Pipecat realtime voice — tells the worker that local TTS is external.
 _VOICE_REALTIME_PREFIX = (
-    "[Canal voz en vivo: responde en texto breve; la síntesis la realiza el pipeline "
-    "local del cliente. No indiques que careces de TTS ni pidas configurar servicios cloud "
-    "de voz.]\n\n"
+    "[Canal voz en vivo: es una conversación hablada, prioriza responder rápido. "
+    "Responde en 1 a 3 frases naturales, sin markdown, tablas, listas, IDs ni cifras largas. "
+    "No uses herramientas para saludos, agradecimientos o charla; úsalas solo si el usuario "
+    "pide un dato actual o una acción, y entonces la mínima necesaria. No repitas pendientes "
+    "ni resúmenes de turnos anteriores salvo que te los pidan. La voz la sintetiza el cliente: "
+    "no menciones TTS ni pidas configurar servicios de voz.]\n\n"
 )
 
 

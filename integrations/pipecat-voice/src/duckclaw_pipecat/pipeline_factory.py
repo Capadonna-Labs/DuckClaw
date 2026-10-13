@@ -98,11 +98,33 @@ async def run_voice_pipeline(
             voice_map_json=cfg.duckclaw_tts_voice_map,
         )
 
+    http_session = None  # owned here, closed when the call ends
     if cfg.uses_sensory_stt:
         sensory_url = cfg.sensory_base_url_normalized
         if not sensory_url:
             raise RuntimeError("DUCKCLAW_SENSORY_BASE_URL required for sensory STT")
         stt = SensorySegmentedSTT.build(base_url=sensory_url)
+    elif cfg.duckclaw_voice_stt_provider.strip().lower() == "elevenlabs":
+        # Scribe: far more accurate than the local model on short Spanish turns (which
+        # produced 'K-O-K-O-L' / 'Instagram MQL5' from noise). Keyterms bias skill names.
+        import aiohttp
+        from pipecat.services.elevenlabs.stt import ElevenLabsSTTService, ElevenLabsSTTSettings
+        from pipecat.transcriptions.language import Language
+
+        key = cfg.elevenlabs_api_key.strip()
+        if not key:
+            raise RuntimeError("ELEVENLABS_API_KEY required when DUCKCLAW_VOICE_STT_PROVIDER=elevenlabs")
+        http_session = aiohttp.ClientSession()
+        terms = [t.strip() for t in cfg.duckclaw_voice_stt_keyterms.split(",") if t.strip()]
+        stt = ElevenLabsSTTService(
+            api_key=key,
+            aiohttp_session=http_session,
+            settings=ElevenLabsSTTSettings(
+                model=cfg.elevenlabs_stt_model.strip() or "scribe_v1",
+                language=Language.ES,
+                keyterms=terms or None,
+            ),
+        )
     else:
         from pipecat.services.deepgram.stt import DeepgramSTTService
 
@@ -195,6 +217,8 @@ async def run_voice_pipeline(
     try:
         await runner.run(task)
     finally:
+        if http_session is not None:
+            await http_session.close()
         elapsed_ms = int((time.monotonic() - started_at) * 1000)
         _log.info(
             "voice pipeline end session=%s elapsed_ms=%s app_state_keys=%s",

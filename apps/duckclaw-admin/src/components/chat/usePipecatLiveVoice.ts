@@ -117,7 +117,13 @@ export function usePipecatLiveVoice({
     appStateRef.current = appState;
     const client = clientRef.current;
     if (!client) return;
-    client.sendClientMessage('app_state', appState);
+    try {
+      client.sendClientMessage('app_state', appState);
+    } catch {
+      // Transport dropped (voice server restarted / network): this throws synchronously and
+      // used to crash the whole admin via the error boundary. The state is kept in
+      // appStateRef and re-sent on the next connect.
+    }
   }, []);
 
   const endCall = useCallback(async () => {

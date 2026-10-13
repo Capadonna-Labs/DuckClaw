@@ -33,6 +33,19 @@ def warmup_voice_runtime() -> None:
     _log.info("voice runtime warmup complete")
 
 
+def _elevenlabs_first_voice(key: str) -> str:
+    """Account's first voice — same fallback the gateway uses for voice notes."""
+    import json
+    import urllib.request
+
+    req = urllib.request.Request("https://api.elevenlabs.io/v1/voices", headers={"xi-api-key": key})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        voices = json.load(resp).get("voices") or []
+    if not voices:
+        raise RuntimeError("ElevenLabs: la cuenta no tiene voces; define DUCKCLAW_ELEVENLABS_VOICE_ID")
+    return str(voices[0].get("voice_id") or "")
+
+
 def _build_vad_processor():
     from pipecat.audio.vad.silero import SileroVADAnalyzer
     from pipecat.audio.vad.vad_analyzer import VADParams
@@ -109,6 +122,17 @@ async def run_voice_pipeline(
         tts = SensoryTTSService.build(
             base_url=sensory_url,
             resolve_voice_id=_resolve_tts_voice_id,
+        )
+    elif cfg.duckclaw_voice_tts_provider.strip().lower() == "elevenlabs":
+        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+
+        key = cfg.elevenlabs_api_key.strip()
+        if not key:
+            raise RuntimeError("ELEVENLABS_API_KEY required when DUCKCLAW_VOICE_TTS_PROVIDER=elevenlabs")
+        tts = ElevenLabsTTSService(
+            api_key=key,
+            voice_id=cfg.elevenlabs_voice_id.strip() or _elevenlabs_first_voice(key),
+            model=cfg.elevenlabs_tts_model.strip() or "eleven_flash_v2_5",
         )
     else:
         from pipecat.services.cartesia.tts import CartesiaTTSService

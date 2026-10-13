@@ -203,8 +203,11 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
                     db_path=resolved,
                     user_id=uid,
                 )
-                poll_sec = write_poll_timeout_sec()
-                st = wait_write_task(task_id, timeout_sec=poll_sec) if poll_sec > 0 else None
+                # Agent tool, not an HTTP handler: like skills/report_engine bridges it always
+                # waits for the real writer status, else a rejected INSERT looked "pending"
+                # and the agent never saw the error.
+                poll_sec = write_poll_timeout_sec() or 10.0
+                st = wait_write_task(task_id, timeout_sec=poll_sec)
             except Exception as e:
                 return json.dumps({"error": str(e)})
             finally:
@@ -219,7 +222,8 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
                 return json.dumps({"status": "success"})
             if st is not None and st.status == "failed":
                 return json.dumps({"status": "failed", "detail": st.detail or "writer failed"})
-            return json.dumps({"status": "enqueued_pending_confirmation"})
+            return json.dumps({"status": "enqueued_pending_confirmation", "task_id": task_id,
+                               "note": f"Sin confirmación del db-writer en {poll_sec:.0f}s; verifica con read_sql antes de afirmar que se guardó."})
         except Exception as e:
             return json.dumps({"error": str(e)})
 

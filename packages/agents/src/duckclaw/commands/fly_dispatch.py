@@ -249,7 +249,8 @@ def _dispatch_fly_command(
             )
         if first in ("--self", "--now") or not args_norm:
             return execute_loop_immediate(db, chat_id, **loop_kwargs)
-        if first in ("on", "off") or first == "--delta":
+        # "/loop reject|approve <id>" fell to the catch-all below and started a cycle.
+        if first in ("on", "off", "reject", "approve") or first == "--delta":
             return execute_loop(db, chat_id, args, **loop_kwargs)
         return execute_loop_immediate(db, chat_id, **loop_kwargs)
     if name == "meditate":

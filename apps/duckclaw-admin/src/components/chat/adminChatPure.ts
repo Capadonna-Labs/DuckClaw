@@ -428,7 +428,14 @@ export function conversationIndicatesLoopScheduling(messages: ChatMsg[]): boolea
     if (t.includes('modo /loop:** inactivo') || t.includes('modo /loop: inactivo')) {
       return false;
     }
-    if (t.includes('modo /loop activo') || t.includes('próximo ciclo /loop')) {
+    // "/loop on 1h" answers "Próximo ciclo auto-mejora meditate…": without matching it the
+    // chat never polled, so hourly tick replies (saved server-side) never showed up.
+    if (
+      t.includes('modo /loop activo') ||
+      t.includes('próximo ciclo /loop') ||
+      t.includes('próximo ciclo auto-mejora') ||
+      t.includes('ciclo /loop')
+    ) {
       return true;
     }
     if (t.includes('/loop off') || t.includes('detenido')) {

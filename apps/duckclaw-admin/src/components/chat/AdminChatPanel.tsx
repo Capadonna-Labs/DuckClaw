@@ -12,6 +12,7 @@ import {
   Settings2,
 } from 'lucide-react';
 import { usePipecatLiveVoice } from '@/components/chat/usePipecatLiveVoice';
+import { useVisibilityAwareInterval } from '@/hooks/useVisibilityAwareInterval';
 import { useVoiceNoteRecorder } from '@/components/chat/useVoiceNoteRecorder';
 import type { ConversationManagePanelProps } from '@/components/chat/ConversationManagePanel';
 import { useAuthStore } from '@/store/authStore';
@@ -192,10 +193,25 @@ export function AdminChatPanel({
     [config?.workers, workerId, workerDisplayName]
   );
 
+  // Live voice: show the spoken turn (user bubble, tool usage, reply) while the call is on,
+  // not only after hanging up. Poll history while the agent works, then once more when done.
+  const [voiceGraphBusy, setVoiceGraphBusy] = useState(false);
   const liveVoice = usePipecatLiveVoice({
     enabled: liveVoiceAvailable,
-    onDisconnected: () => reloadHistory(),
+    onDisconnected: () => {
+      setVoiceGraphBusy(false);
+      reloadHistory();
+    },
+    onGraphPhaseChange: (phase) => {
+      const busy = phase === 'graph';
+      setVoiceGraphBusy(busy);
+      reloadHistory({ force: true });
+      // The turn is persisted right after the reply; a second read catches a slow write.
+      if (!busy) window.setTimeout(() => reloadHistory({ force: true }), 1500);
+    },
   });
+  // ponytail: 2 s polling while the agent works; push via SSE if it ever feels laggy.
+  useVisibilityAwareInterval(() => reloadHistory({ force: true }), voiceGraphBusy ? 2000 : null);
 
   const voiceAppState = useMemo(
     () => ({

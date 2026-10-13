@@ -952,6 +952,13 @@ async def _run_loop_proactive_tick_one_db(
                 value="1",
             )
 
+        # Push at start too: a tick takes ~1-2 min, the user wants to know it is running.
+        await _send_web_push_notification(
+            title="DuckClaw · ciclo /loop",
+            body=f"Iniciando ciclo de revisión ({worker_id}).",
+            url="/admin/playground",
+            tag=f"duckclaw-loop-start-{chat_id}",
+        )
         try:
             result = await post_loop_self_tick_async(
                 chat_id=chat_id,

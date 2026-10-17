@@ -231,11 +231,14 @@ def _loop_push_summary(raw_body: Any) -> str:
 
 
 async def _send_web_push_notification(*, title: str, body: str, url: str = "/", tag: str = "duckclaw") -> None:
+    # Every outcome is logged: success and the silent skips used to leave no trace, so a
+    # missing notification could not be told apart from one that was never sent.
     try:
         if REDIS_URL:
             r = redis.from_url(REDIS_URL)
             try:
                 if await r.exists("duckclaw:admin:pwa_visible"):
+                    logger.info("web_push: omitida tag=%s (PWA abierta en pantalla)", tag)
                     return
             finally:
                 await r.aclose()
@@ -245,6 +248,7 @@ async def _send_web_push_notification(*, title: str, body: str, url: str = "/", 
         db_path = str(get_gateway_db_path())
         subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path)
         if not subscriptions:
+            logger.warning("web_push: omitida tag=%s (sin suscripciones)", tag)
             return
         result = await asyncio.to_thread(
             send_web_push_notifications,
@@ -254,12 +258,15 @@ async def _send_web_push_notification(*, title: str, body: str, url: str = "/", 
             url=url,
             tag=tag,
         )
-        if result.error:
-            logger.warning("web_push: skipped=%s error=%s", result.skipped, result.error)
-        elif result.failed:
-            logger.warning("web_push: sent=%s failed=%s", result.sent, result.failed)
+        if result.error or result.failed:
+            logger.warning(
+                "web_push: tag=%s sent=%s failed=%s skipped=%s error=%s",
+                tag, result.sent, result.failed, result.skipped, result.error,
+            )
+        else:
+            logger.info("web_push: enviada tag=%s sent=%s", tag, result.sent)
     except Exception as exc:  # noqa: BLE001
-        logger.debug("web_push: notification skipped: %s", exc)
+        logger.warning("web_push: omitida tag=%s (%s: %s)", tag, type(exc).__name__, exc)
 async def check_cooldown(r: redis.Redis, tenant_id: str, alert_type: str) -> bool:
     """Verifica si ya enviamos esta alerta recientemente (Anti-Spam)."""
     key = f"cooldown:{tenant_id}:{alert_type}"

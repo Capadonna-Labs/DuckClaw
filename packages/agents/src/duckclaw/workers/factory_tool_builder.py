@@ -380,10 +380,6 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
         register_worker_delegate_tools(tools, db=db, spec=spec, tenant_id=str(tenant_id or "default"))
     except Exception:
         _log.warning("worker delegate tools registration skipped", exc_info=True)
-    from duckclaw.workers.tool_surface_policy import restrict_mcp_connector_tools
-
-    # After every registration path: GitHub MCP tools also arrive outside the connector bridge.
-    tools[:] = restrict_mcp_connector_tools(tools, spec)
     from duckclaw.workers.tool_binding import dedupe_tools_by_name
 
     return dedupe_tools_by_name(tools)

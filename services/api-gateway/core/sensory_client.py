@@ -86,7 +86,7 @@ async def _elevenlabs_voices(key: str) -> list[dict[str, Any]]:
 async def _elevenlabs_voice_id(key: str, requested: str) -> str:
     """Worker map / env voice, else the first voice of the account."""
     vid = (requested or "").strip()
-    # The worker map also serves the local sensory node (names like 'quant_trader_brief');
+    # The worker map also serves the local sensory node (names like '<worker>_brief');
     # only a real ElevenLabs id (20 alphanumerics) may override the env voice.
     if re.fullmatch(r"[A-Za-z0-9]{20}", vid):
         return vid

@@ -156,6 +156,7 @@ DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "services/api-gateway/routers/admin_domains/playground_chat.py": "authorized admin playground conversation mutators",
     "services/db-writer/context_injection_handler.py": "DB-writer context mutations",
     "services/db-writer/main.py": "singleton DB-writer",
+    "services/db-writer/db_writer_ops.py": "DB-writer shared RW connect with lock retry",
     "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate mutations",
     "services/db-writer/loop_state_delta_handler.py": "DB-writer loop mutations (meditate rename)",
     "services/db-writer/vlm_state_delta_handler.py": "DB-writer VLM mutations",

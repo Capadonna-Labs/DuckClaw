@@ -362,7 +362,10 @@ def initialize_worker_graph_context(
 
     # Last step before binding: MCP tools arrive from the connector bridge and from skill
     # registration (github), so the per-worker cut has to see the complete list.
-    tools[:] = restrict_mcp_connector_tools(tools, spec)
+    from duckclaw.workers.tool_binding import dedupe_tools_by_name
+
+    # GitHub arrives from both the connector and the github skill: drop same-name copies.
+    tools[:] = dedupe_tools_by_name(restrict_mcp_connector_tools(tools, spec))
     tools_by_name = {t.name: t for t in tools}
     tools_sandbox_off = filter_tools_for_sandbox(tools, enabled=False)
     tools_by_name_sandbox_off = {t.name: t for t in tools_sandbox_off}

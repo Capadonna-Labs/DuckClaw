@@ -12,9 +12,11 @@ from duckclaw.admin_worker_catalog import (
     deactivate_visible_worker_for_actor,
     ensure_admin_worker_catalog_schema,
     get_visible_worker_for_actor,
+    get_worker_by_tenant_worker_id,
     hard_delete_visible_worker_for_actor,
     reactivate_visible_worker_for_actor,
     sanitize_catalog_worker_id,
+    set_worker_a2a_discoverable,
     update_catalog_worker_file,
 )
 
@@ -451,6 +453,36 @@ def _apply_update_catalog_worker_file(conn: Any, payload: dict) -> None:
         _bump_worker_capabilities_catalog_cache(worker_id)
 
 
+def _apply_set_worker_a2a_discoverable(conn: Any, payload: dict) -> None:
+    tenant_id = str(payload.get("tenant_id") or "default").strip() or "default"
+    worker_id = _catalog_worker_id(payload)
+    worker = get_worker_by_tenant_worker_id(conn, tenant_id=tenant_id, worker_id=worker_id)
+    if not worker:
+        raise ValueError(f"Worker not found in catalog: {worker_id}")
+    set_worker_a2a_discoverable(
+        conn, worker_uid=str(worker["worker_uid"]), discoverable=bool(payload.get("discoverable"))
+    )
+
+
+def _apply_import_spawn_package(conn: Any, payload: dict) -> None:
+    from duckclaw.spawn_package_import import import_spawn_package_to_catalog
+
+    actor = _catalog_worker_actor(payload)
+    manifest = payload.get("manifest")
+    files = payload.get("files")
+    if not isinstance(manifest, dict) or not isinstance(files, dict):
+        raise ValueError("import_spawn_package requires manifest and files objects")
+    profile = ensure_profile_for_user(conn, email=actor)
+    import_spawn_package_to_catalog(
+        conn,
+        owner_email=profile["email"],
+        manifest=manifest,
+        files={str(k): str(v) for k, v in files.items()},
+        worker_id_override=str(payload.get("worker_id_override") or "").strip() or None,
+        force_read_only=True,
+    )
+
+
 def _apply_deactivate_catalog_worker(conn: Any, payload: dict) -> None:
     actor = _catalog_worker_actor(payload)
     worker_id = _catalog_worker_id(payload)
@@ -845,6 +877,8 @@ register_handler("deactivate_catalog_skill", _apply_deactivate_catalog_skill)
 register_handler("hard_delete_catalog_skill", _apply_hard_delete_catalog_skill)
 register_handler("deactivate_worker", _apply_deactivate_worker)
 register_handler("update_catalog_worker_file", _apply_update_catalog_worker_file)
+register_handler("set_worker_a2a_discoverable", _apply_set_worker_a2a_discoverable)
+register_handler("import_spawn_package", _apply_import_spawn_package)
 register_handler("deactivate_catalog_worker", _apply_deactivate_catalog_worker)
 register_handler("reactivate_catalog_worker", _apply_reactivate_catalog_worker)
 register_handler("hard_delete_catalog_worker", _apply_hard_delete_catalog_worker)

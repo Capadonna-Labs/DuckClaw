@@ -276,22 +276,15 @@ async def finalize_chat_response(
                         )
 
                         if is_loop_active_mode(vdb, _loop_footer_chat_id(prepared)):
-                            # Reabrir write-capable para marcar awaiting (misma vault).
-                            vdb.close()
-                            vdb_w = DuckClaw(vpath, read_only=False, engine="python")
-                            try:
-                                set_loop_awaiting_user(
-                                    vdb_w,
-                                    _loop_footer_chat_id(prepared),
-                                    True,
-                                    tenant_id=(prepared.tenant_id or "default"),
-                                )
-                            finally:
-                                try:
-                                    vdb_w.close()
-                                except Exception:
-                                    pass
-                            vdb = None  # already closed
+                            from duckclaw.gateway_db import GatewayDbEphemeralReadonly
+
+                            # Read-only handle: the write goes to the DB-Writer queue.
+                            set_loop_awaiting_user(
+                                GatewayDbEphemeralReadonly(vpath),
+                                _loop_footer_chat_id(prepared),
+                                True,
+                                tenant_id=(prepared.tenant_id or "default"),
+                            )
                     except Exception:
                         pass
                 finally:

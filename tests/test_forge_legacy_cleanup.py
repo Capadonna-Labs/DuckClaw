@@ -164,10 +164,7 @@ DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "services/db-writer/reports_state_delta_handler.py": "DB-writer reports mutations",
     "services/db-writer/visual_state_delta_handler.py": "DB-writer visual mutations",
     "services/api-gateway/core/chat_graph_runner.py": "legacy fly/chat graph bridge pending typed-command migration",
-    "services/api-gateway/core/chat_history_persist.py": "loop activity touch via DuckClaw RW compat path",
-    "services/api-gateway/core/chat_invoke_finalize.py": "chat finalize loop footer RW compat path",
     "services/api-gateway/core/admin_conversations_db.py": "admin conversation durable meta writes",
-    "services/api-gateway/routers/admin_domains/agent_spawn.py": "authorized admin agent spawn mutators",
 }
 DB_FIRST_READ_WRITE_ALLOWLIST = frozenset(DB_FIRST_READ_WRITE_ALLOWLIST_REASONS)
 

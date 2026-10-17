@@ -96,6 +96,23 @@ class DeactivateWorkerCommand(WriteCommand):
     worker_id: str
 
 
+class SetWorkerA2aDiscoverableCommand(WriteCommand):
+    """Toggle A2A discovery for a catalog worker (worker_id + tenant_id)."""
+
+    command_type: Literal["set_worker_a2a_discoverable"] = "set_worker_a2a_discoverable"
+    worker_id: str
+    discoverable: bool
+
+
+class ImportSpawnPackageCommand(WriteCommand):
+    """Import an analyzed spawn package into the actor's catalog (always read-only)."""
+
+    command_type: Literal["import_spawn_package"] = "import_spawn_package"
+    manifest: dict[str, Any]
+    files: dict[str, str] = Field(default_factory=dict)
+    worker_id_override: str = ""
+
+
 class UpdateCatalogWorkerFileCommand(WriteCommand):
     """Update one DB-backed catalog worker file snapshot through the writer."""
 

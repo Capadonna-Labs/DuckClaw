@@ -3,6 +3,7 @@
 import { useCallback, useState } from 'react';
 import { Download, Globe, Package } from 'lucide-react';
 import { adminService } from '@/services/adminService';
+import { pollWriteTask } from '@/lib/pollWriteTask';
 
 function errorMessage(e: unknown, fallback: string): string {
   if (e instanceof Error && e.message.trim()) return e.message;
@@ -73,7 +74,12 @@ export function WorkerSpawnActions({
     setError(null);
     try {
       const next = !a2aDiscoverable;
-      await adminService.setA2aDiscoverable(workerId, next);
+      const res = await adminService.setA2aDiscoverable(workerId, next);
+      // The DB-Writer applies it; show the new state only once it is persisted.
+      if (res.task_id) {
+        const polled = await pollWriteTask(res.task_id, { intervalMs: 400, maxAttempts: 60 });
+        if (polled.state === 'failed') throw new Error(polled.detail || 'Error al persistir en DuckDB');
+      }
       onDiscoverableChange?.(next);
     } catch (e) {
       setError(errorMessage(e, 'Error al actualizar discovery'));

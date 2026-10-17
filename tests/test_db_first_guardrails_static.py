@@ -28,10 +28,7 @@ def _fly_command_set(source: str, name: str) -> set[str]:
 
 
 def test_gateway_structured_writes_have_explicit_read_write_allowlist() -> None:
-    allowed: set[tuple[str, str]] = {
-        ("services/api-gateway/routers/admin_domains/agent_spawn.py", "import_spawn_package"),
-        ("services/api-gateway/routers/admin_domains/agent_spawn.py", "patch_a2a_discoverable"),
-    }
+    allowed: set[tuple[str, str]] = set()
     found: set[tuple[str, str]] = set()
     for path in _py_files():
         source = path.read_text(encoding="utf-8")
@@ -53,10 +50,7 @@ def test_gateway_manual_transactions_have_explicit_allowlist() -> None:
 
 
 def test_gateway_duckclaw_read_write_is_limited_to_explicit_runtime_compat() -> None:
-    allowed: set[tuple[str, str]] = {
-        ("services/api-gateway/core/chat_history_persist.py", "_touch_loop_activity_if_configured"),
-        ("services/api-gateway/core/chat_invoke_finalize.py", "finalize_chat_response"),
-    }
+    allowed: set[tuple[str, str]] = set()
     found: set[tuple[str, str]] = set()
     pattern = re.compile(r"DuckClaw\([^)]*read_only=False", re.DOTALL)
     for path in _py_files():

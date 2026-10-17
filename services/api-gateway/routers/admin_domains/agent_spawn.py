@@ -13,15 +13,12 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.admin_identity import effective_actor_email, open_gateway_db
-from duckclaw.admin_user_profiles import ensure_profile_for_user
 from duckclaw.admin_worker_catalog import (
     get_visible_worker_for_actor,
     get_worker_by_tenant_worker_id,
-    set_worker_a2a_discoverable,
 )
 from duckclaw.agent_card_builder import build_a2a_agent_card_from_db
 from duckclaw.spawn_package_builder import analyze_spawn_package_from_bytes, build_spawn_package_bytes
-from duckclaw.spawn_package_import import import_spawn_package_to_catalog
 from routers.admin_domains.admin_common import actor_from_header, problem, require_admin_key
 
 router = APIRouter(prefix="/agents", tags=["admin-agent-spawn"])
@@ -142,23 +139,31 @@ async def patch_a2a_discoverable(
     if not cat and wid == "default":
         raise problem(400, "default worker no está en catálogo", wid)
 
-    def _sync_set_a2a_discoverable() -> None:
-        with open_gateway_db(read_only=False) as db:
-            cat = get_worker_by_tenant_worker_id(db, tenant_id=tenant_id, worker_id=wid)
-            if not cat:
-                raise problem(404, "Worker no encontrado", wid)
-            set_worker_a2a_discoverable(
-                db, worker_uid=str(cat["worker_uid"]), discoverable=body.discoverable
-            )
+    from duckclaw.gateway_enqueue import enqueue_admin_command
+    from duckclaw.write_commands import SetWorkerA2aDiscoverableCommand
 
-    await asyncio.to_thread(_sync_set_a2a_discoverable)
+    # Gateway stays read-only: the DB-Writer applies it (client polls /admin/write-tasks/{id}).
+    task_id = enqueue_admin_command(
+        SetWorkerA2aDiscoverableCommand(
+            tenant_id=tenant_id,
+            actor_email=effective_actor_email(actor),
+            worker_id=wid,
+            discoverable=body.discoverable,
+        )
+    )
     _admin_audit(
         "a2a_discoverable",
         wid,
-        f"discoverable={body.discoverable}",
+        f"discoverable={body.discoverable} task_id={task_id}",
         actor=actor,
     )
-    return {"ok": True, "worker_id": wid, "a2a_discoverable": body.discoverable}
+    return {
+        "ok": True,
+        "accepted": True,
+        "task_id": task_id,
+        "worker_id": wid,
+        "a2a_discoverable": body.discoverable,
+    }
 
 
 @router.post("/spawn-package/preview", dependencies=[Depends(require_admin_key)])
@@ -221,24 +226,21 @@ async def import_spawn_package(
 
     actor_email = effective_actor_email(actor)
 
-    def _sync_import_spawn_package() -> dict[str, Any]:
-        with open_gateway_db(read_only=False) as db:
-            profile = ensure_profile_for_user(db, email=actor_email)
-            return import_spawn_package_to_catalog(
-                db,
-                owner_email=profile["email"],
-                manifest=manifest,
-                files=files,
-                worker_id_override=opts.worker_id_override,
-                force_read_only=True,
-            )
+    from duckclaw.gateway_enqueue import enqueue_admin_command
+    from duckclaw.write_commands import ImportSpawnPackageCommand
 
-    result = await asyncio.to_thread(_sync_import_spawn_package)
-
+    task_id = enqueue_admin_command(
+        ImportSpawnPackageCommand(
+            actor_email=actor_email,
+            manifest=manifest,
+            files={str(k): str(v) for k, v in files.items()},
+            worker_id_override=(opts.worker_id_override or "").strip(),
+        )
+    )
     _admin_audit(
         "spawn_import",
-        str(result.get("worker_id") or ""),
-        f"confirm_high_risk={opts.confirm_high_risk} findings={analysis.high_risk_findings}",
+        str(opts.worker_id_override or manifest.get("id") or ""),
+        f"confirm_high_risk={opts.confirm_high_risk} findings={analysis.high_risk_findings} task_id={task_id}",
         actor=actor,
     )
-    return {"ok": True, "result": result, "preview": analysis.to_dict()}
+    return {"ok": True, "accepted": True, "task_id": task_id, "preview": analysis.to_dict()}

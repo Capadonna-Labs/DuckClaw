@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Upload, X } from 'lucide-react';
 import { adminService, type SpawnPackagePreview } from '@/services/adminService';
+import { pollWriteTask } from '@/lib/pollWriteTask';
 
 export type SpawnPackageAttachResult = {
   file: File;
@@ -80,9 +81,14 @@ export function ImportSpawnPackageDialog({
     setBusy(true);
     setError(null);
     try {
-      await adminService.importSpawnPackage(file, {
+      const res = await adminService.importSpawnPackage(file, {
         confirm_high_risk: confirmHighRisk,
       });
+      // The DB-Writer imports it; refresh the catalog only once it is persisted.
+      if (res.task_id) {
+        const polled = await pollWriteTask(res.task_id, { intervalMs: 400, maxAttempts: 60 });
+        if (polled.state === 'failed') throw new Error(polled.detail || 'Import falló en DuckDB');
+      }
       onImported?.();
       close();
     } catch (e) {

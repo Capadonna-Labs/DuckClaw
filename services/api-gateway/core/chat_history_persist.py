@@ -111,21 +111,16 @@ async def _touch_loop_activity_if_configured(prepared: PreparedChatInvoke, sessi
     except Exception:
         pass
     try:
-        from duckclaw import DuckClaw
         from duckclaw.commands.loop import touch_loop_last_activity
+        from duckclaw.gateway_db import GatewayDbEphemeralReadonly
 
-        vdb = DuckClaw(vpath, read_only=False, engine="python")
-        try:
-            touch_loop_last_activity(
-                vdb,
-                session_id,
-                tenant_id=(prepared.tenant_id or "default"),
-            )
-        finally:
-            try:
-                vdb.close()
-            except Exception:
-                pass
+        # Read-only handle: the chat-state write goes to the DB-Writer queue (fire-and-forget)
+        # instead of the gateway opening the vault RW on every turn.
+        touch_loop_last_activity(
+            GatewayDbEphemeralReadonly(vpath),
+            session_id,
+            tenant_id=(prepared.tenant_id or "default"),
+        )
     except Exception:
         pass
 

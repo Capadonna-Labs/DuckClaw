@@ -264,7 +264,7 @@ export const templatesApi = {
   fetchAgentCard: (workerId: string) =>
     adminFetch<Record<string, unknown>>(`/agents/${encodeURIComponent(workerId)}/agent-card`),
   setA2aDiscoverable: (workerId: string, discoverable: boolean) =>
-    adminFetch<{ ok: boolean; a2a_discoverable: boolean }>(
+    adminFetch<{ ok: boolean; a2a_discoverable: boolean; task_id?: string }>(
       `/agents/${encodeURIComponent(workerId)}/a2a-discoverable`,
       { method: 'PATCH', body: JSON.stringify({ discoverable }) }
     ),
@@ -283,7 +283,7 @@ export const templatesApi = {
     const form = new FormData();
     form.append('file', file);
     form.append('options_json', JSON.stringify(options));
-    return adminFormFetch<unknown>('/agents/spawn-package/import', form);
+    return adminFormFetch<{ ok: boolean; task_id?: string }>('/agents/spawn-package/import', form);
   },
   downloadSpawnPackage: async (workerId: string) => {
     const res = await fetch(

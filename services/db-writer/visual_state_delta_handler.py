@@ -33,30 +33,7 @@ CREATE TABLE IF NOT EXISTS main.visual_assets (
 """
 
 
-def _is_duckdb_lock_error(exc: BaseException) -> bool:
-    msg = str(exc).lower()
-    return "lock" in msg or "conflicting" in msg
-
-
-def _connect_duckdb_writable(
-    path: str,
-    *,
-    attempts: int = 12,
-    base_sleep_s: float = 0.25,
-) -> duckdb.DuckDBPyConnection:
-    last: BaseException | None = None
-    for i in range(attempts):
-        try:
-            return duckdb.connect(path, read_only=False)
-        except Exception as exc:  # noqa: BLE001
-            last = exc
-            if _is_duckdb_lock_error(exc) and i < attempts - 1:
-                time.sleep(base_sleep_s * (i + 1))
-                continue
-            raise
-    if last is not None:
-        raise last
-    raise RuntimeError("connect duckdb failed")
+from db_writer_ops import connect_duckdb_writable as _connect_duckdb_writable
 
 
 def _ensure_visual_assets_schema(con: duckdb.DuckDBPyConnection) -> None:

@@ -160,43 +160,7 @@ def _ledger_insert_completed(
     )
 
 
-def _is_duckdb_lock_error(exc: BaseException) -> bool:
-    msg = str(exc).lower()
-    return "lock" in msg or "conflicting" in msg
-
-
-def _connect_duckdb_writable(
-    path: str,
-    *,
-    attempts: int = 12,
-    base_sleep_s: float = 0.25,
-) -> duckdb.DuckDBPyConnection:
-    """
-    Abre DuckDB RW con reintentos ante lock del gateway (RO/RW en el mismo archivo).
-
-    During a chat turn the gateway may hold a hub handle; the writer retries
-    until the lock clears instead of failing the ledger write.
-    """
-    last: BaseException | None = None
-    for i in range(max(1, attempts)):
-        try:
-            return duckdb.connect(path, read_only=False)
-        except Exception as exc:
-            last = exc
-            if _is_duckdb_lock_error(exc):
-                delay = base_sleep_s * min(i + 1, 8)
-                logger.warning(
-                    "db-writer DuckDB lock intento %s/%s, reintento en %.2fs: %s",
-                    i + 1,
-                    attempts,
-                    delay,
-                    exc,
-                )
-                time.sleep(delay)
-                continue
-            raise
-    assert last is not None
-    raise last
+from db_writer_ops import connect_duckdb_writable as _connect_duckdb_writable
 
 
 def _migrate_once(conn: duckdb.DuckDBPyConnection, path: str) -> None:

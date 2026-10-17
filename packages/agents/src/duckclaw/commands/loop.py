@@ -45,6 +45,7 @@ from duckclaw.commands.history import _infer_user_id_for_audit_queue
 LOOP_DELTA_MIN_SECONDS = 60
 LOOP_DELTA_MAX_SECONDS = 7 * 24 * 3600
 LOOP_SELF_HTTP_TIMEOUT = float(os.environ.get("DUCKCLAW_GOALS_PROACTIVE_HTTP_TIMEOUT", "300"))
+LOOP_SELF_RESTART_RETRY_S = 30.0
 # Legacy /loop on 4h (Heartbeat reloj). /loop on sin args = turnos agent↔user.
 LOOP_DEFAULT_INTERVAL_SECONDS = 15 * 60
 LOOP_SYSTEM_USER_LABEL = "[Ciclo loop]"
@@ -530,22 +531,33 @@ async def post_loop_self_tick_async(
         vault_db_path=vault_db_path,
     )
     hdrs = dict(headers or {})
-    try:
-        async with httpx.AsyncClient(timeout=LOOP_SELF_HTTP_TIMEOUT) as client:
-            resp = await client.post(
-                url,
-                params={"tenant_id": tid, "deliver_outbound": "1"},
-                json=payload,
-                headers=hdrs,
-            )
-        ok = 200 <= resp.status_code < 300
-        return {
-            "ok": ok,
-            "status_code": resp.status_code,
-            "body": (resp.text or "")[:4000],  # Heartbeat pushes a summary of the reply
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+    import asyncio
+
+    # A deploy restarts the gateway mid-turn ("Server disconnected"); the turn died with it,
+    # so one retry after the restart is safe and keeps the tick from being lost.
+    for attempt in (1, 2):
+        try:
+            async with httpx.AsyncClient(timeout=LOOP_SELF_HTTP_TIMEOUT) as client:
+                resp = await client.post(
+                    url,
+                    params={"tenant_id": tid, "deliver_outbound": "1"},
+                    json=payload,
+                    headers=hdrs,
+                )
+            ok = 200 <= resp.status_code < 300
+            return {
+                "ok": ok,
+                "status_code": resp.status_code,
+                "body": (resp.text or "")[:4000],  # Heartbeat pushes a summary of the reply
+            }
+        except (httpx.RemoteProtocolError, httpx.ConnectError) as exc:
+            if attempt == 2:
+                return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+            await asyncio.sleep(LOOP_SELF_RESTART_RETRY_S)
+        except Exception as exc:
+            # httpx timeouts stringify to "" — keep the type so the log says what happened.
+            return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {"ok": False, "error": "unreachable"}
 
 
 def _persist_loop_chat_state(

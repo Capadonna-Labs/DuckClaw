@@ -67,41 +67,8 @@ def chunk_context_raw_text(raw: str, max_chunk: int = MAX_CHUNK_CHARS) -> list[s
     return [c for c in chunks if c]
 
 
-def _is_duckdb_lock_error(exc: BaseException) -> bool:
-    msg = str(exc).lower()
-    return "lock" in msg or "conflicting" in msg
-
-
-def _connect_duckdb_writable(
-    path: str,
-    *,
-    attempts: int = 12,
-    base_sleep_s: float = 0.25,
-) -> duckdb.DuckDBPyConnection:
-    """
-    Abre DuckDB en escritura con reintentos ante lock (p. ej. gateway con RO abierto).
-    Tras agotar intentos, relanza la última excepción para que el caller pueda reencolar.
-    """
-    last: BaseException | None = None
-    for i in range(max(1, attempts)):
-        try:
-            return duckdb.connect(path, read_only=False)
-        except Exception as exc:  # noqa: BLE001
-            last = exc
-            if _is_duckdb_lock_error(exc):
-                delay = base_sleep_s * min(i + 1, 8)
-                logger.warning(
-                    "CONTEXT_INJECTION DuckDB lock intento %s/%s, reintento en %.2fs: %s",
-                    i + 1,
-                    attempts,
-                    delay,
-                    exc,
-                )
-                time.sleep(delay)
-                continue
-            raise
-    assert last is not None
-    raise last
+from db_writer_ops import connect_duckdb_writable as _connect_duckdb_writable
+from db_writer_ops import is_duckdb_lock_error as _is_duckdb_lock_error
 
 
 def _embed_chunk(text: str) -> tuple[list[float] | None, bool]:

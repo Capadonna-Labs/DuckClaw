@@ -19,39 +19,8 @@ from models.loop_state_delta import LoopStateDelta
 logger = logging.getLogger("db-writer.loop_state_delta")
 
 
-def _is_duckdb_lock_error(exc: BaseException) -> bool:
-    msg = str(exc).lower()
-    return "lock" in msg or "conflicting" in msg
-
-
-def _connect_duckdb_writable(
-    path: str,
-    *,
-    attempts: int = 24,
-    base_sleep_s: float = 0.35,
-) -> duckdb.DuckDBPyConnection:
-    """Open vault RW; gateway often holds RW for a whole agent turn."""
-    last: BaseException | None = None
-    for i in range(max(1, attempts)):
-        try:
-            return duckdb.connect(path, read_only=False)
-        except Exception as exc:  # noqa: BLE001
-            last = exc
-            if _is_duckdb_lock_error(exc) and i < attempts - 1:
-                delay = base_sleep_s * min(i + 1, 10)
-                logger.warning(
-                    "loop_state_delta DuckDB lock %s/%s, sleep %.2fs path=%s",
-                    i + 1,
-                    attempts,
-                    delay,
-                    path,
-                )
-                time.sleep(delay)
-                continue
-            raise
-    if last is not None:
-        raise last
-    raise RuntimeError("connect duckdb failed")
+from db_writer_ops import connect_duckdb_writable as _connect_duckdb_writable
+from db_writer_ops import is_duckdb_lock_error as _is_duckdb_lock_error
 
 
 def _apply_purge_stale(con: duckdb.DuckDBPyConnection, delta: LoopStateDelta) -> None:

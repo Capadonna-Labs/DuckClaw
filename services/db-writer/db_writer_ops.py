@@ -20,6 +20,36 @@ PROCESSING_SUFFIX = ":processing"
 LEASE_KEY_PREFIX = "db_writer:processing:lease:"
 
 
+def is_duckdb_lock_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "lock" in msg or "conflicting" in msg
+
+
+def connect_duckdb_writable(path: str):
+    """Open DuckDB RW, retrying while another process holds the file lock.
+
+    Gateway turns and extension jobs can hold a vault for tens of seconds; the old 12 tries
+    (~17 s) gave up too early. Budget: DUCKCLAW_DB_WRITER_LOCK_WAIT_S (default 60 s).
+    """
+    import os
+
+    import duckdb
+
+    budget = float(os.environ.get("DUCKCLAW_DB_WRITER_LOCK_WAIT_S", "60") or 60)
+    deadline = time.monotonic() + max(0.0, budget)
+    i = 0
+    while True:
+        try:
+            return duckdb.connect(path, read_only=False)
+        except Exception as exc:  # noqa: BLE001
+            if not is_duckdb_lock_error(exc) or time.monotonic() >= deadline:
+                raise
+            i += 1
+            delay = min(0.25 * i, 2.0)
+            logger.warning("db-writer DuckDB lock intento %s, reintento en %.2fs path=%s", i, delay, path)
+            time.sleep(delay)
+
+
 def processing_queue_key(source_queue: str) -> str:
     return f"{source_queue.rstrip()}{PROCESSING_SUFFIX}"
 

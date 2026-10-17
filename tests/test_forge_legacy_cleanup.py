@@ -146,23 +146,11 @@ DB_FIRST_DDL_ALLOWLIST_REASONS = {
 DB_FIRST_DDL_ALLOWLIST = frozenset(DB_FIRST_DDL_ALLOWLIST_REASONS)
 
 DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
-    "packages/agents/src/duckclaw/graphs/graph_server.py": "legacy graph command handler awaiting DB-writer migration",
     "packages/agents/src/duckclaw/graphs/graph_server_ephemeral.py": "ephemeral DuckDB open/invoke helpers split from graph_server",
     "packages/agents/src/duckclaw/graphs/graph_server_studio.py": "LangGraph Studio :memory: bootstrap (DuckDB forbids in-memory read_only)",
-    "services/api-gateway/core/fly_command_invocation.py": "legacy slash/fly command bridge pending typed-command migration",
-    "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
-    "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",
-    "services/api-gateway/routers/admin_domains/playground_chat.py": "authorized admin playground conversation mutators",
-    "services/db-writer/context_injection_handler.py": "DB-writer context mutations",
-    "services/db-writer/main.py": "singleton DB-writer",
     "services/db-writer/db_writer_ops.py": "DB-writer shared RW connect with lock retry",
-    "services/db-writer/meditate_state_delta_handler.py": "DB-writer meditate mutations",
-    "services/db-writer/loop_state_delta_handler.py": "DB-writer loop mutations (meditate rename)",
     "services/db-writer/vlm_state_delta_handler.py": "DB-writer VLM mutations",
     "services/db-writer/startup_bootstrap.py": "DB-writer startup schema bootstrap",
-    "services/db-writer/reports_state_delta_handler.py": "DB-writer reports mutations",
-    "services/db-writer/visual_state_delta_handler.py": "DB-writer visual mutations",
-    "services/api-gateway/core/chat_graph_runner.py": "legacy fly/chat graph bridge pending typed-command migration",
     "services/api-gateway/core/admin_conversations_db.py": "admin conversation durable meta writes",
 }
 DB_FIRST_READ_WRITE_ALLOWLIST = frozenset(DB_FIRST_READ_WRITE_ALLOWLIST_REASONS)

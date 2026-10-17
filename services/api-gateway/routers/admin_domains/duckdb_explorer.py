@@ -511,11 +511,14 @@ async def duckdb_pgq_bootstrap(
         con.close()
 
     # The gateway stays read-only: the DB-Writer creates the schema (client polls the task).
-    task_id = enqueue_typed_command(
-        EnsureGraphRagSchemaCommand(tenant_id=scope["tenant_id"], actor_email=scope["actor_email"]),
-        db_path=resolved,
-        user_id=scope["vault_user_id"],
-    )
+    try:
+        task_id = enqueue_typed_command(
+            EnsureGraphRagSchemaCommand(tenant_id=scope["tenant_id"], actor_email=scope["actor_email"]),
+            db_path=resolved,
+            user_id=scope["vault_user_id"],
+        )
+    except ValueError as exc:  # path outside the user's vaults: the DB-Writer would refuse it
+        raise _problem(403, "Vault no admite escrituras", str(exc)) from exc
     _admin_audit(
         "duckdb.pgq.bootstrap",
         resolved,

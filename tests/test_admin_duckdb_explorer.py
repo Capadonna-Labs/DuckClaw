@@ -500,6 +500,11 @@ def test_duckdb_pgq_bootstrap(
     assert before.status_code == 200
     assert before.json().get("warning")
 
+    enqueued: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "duckclaw.db_write_queue.enqueue_typed_command",
+        lambda command, db_path, user_id="default": enqueued.append((command.command_type, db_path)) or "task-1",
+    )
     boot = admin_client.post(
         "/api/v1/admin/duckdb/pgq/bootstrap",
         headers=_ADMIN_HEADERS,
@@ -511,7 +516,8 @@ def test_duckdb_pgq_bootstrap(
     assert "memory_nodes" in payload["tables_created"]
     assert "memory_edges" in payload["tables_created"]
     assert isinstance(payload["pgq_available"], bool)
-    assert payload["accepted"] is True and payload["task_id"]
+    assert payload["accepted"] is True and payload["task_id"] == "task-1"
+    assert enqueued == [("ensure_graph_rag_schema", payload["vault_path"])]
 
     # The gateway only enqueues; apply the DB-Writer handler as the writer process would.
     from duckclaw.write_handlers.duckdb_maintenance import _apply_ensure_graph_rag_schema

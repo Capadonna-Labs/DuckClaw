@@ -372,6 +372,9 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
             worker_id=worker_id_for_mcp,
             tenant_id=str(tenant_id or "default"),
         )
+        from duckclaw.workers.tool_surface_policy import restrict_mcp_connector_tools
+
+        tools[:] = restrict_mcp_connector_tools(tools, spec)
     except Exception:
         _log.warning("MCP connector tools registration skipped", exc_info=True)
     try:

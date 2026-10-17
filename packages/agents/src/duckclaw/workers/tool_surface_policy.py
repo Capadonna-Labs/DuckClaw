@@ -126,6 +126,29 @@ def without_privileged_mutation_tools_for_auto_bind(
     return without_tools_named(tools, hidden)
 
 
+def restrict_mcp_connector_tools(tools: Iterable[Any], spec: Any | None = None) -> list[Any]:
+    """Keep only the MCP tools a worker lists in manifest ``tool_surface.mcp_tools``.
+
+    ``mcp_tools: {notion: [notion_search, ...]}`` keys are connector names as they appear in
+    ``mcp__<connector>__<tool>``. Connectors are shared between workers, so the per-worker cut
+    lives here, not in the connector allowlist. Every bound tool schema is sent on every LLM
+    call: 288 tools were ~72k tokens per call for a worker that used a handful of them.
+    """
+    raw = (getattr(spec, "tool_surface_config", None) or {}) if spec is not None else {}
+    limits = raw.get("mcp_tools") if isinstance(raw, dict) else None
+    if not isinstance(limits, dict) or not limits:
+        return list(tools)
+    keep = {str(c).strip(): {str(t).strip() for t in (names or [])} for c, names in limits.items()}
+    out = []
+    for tool in tools:
+        name = str(getattr(tool, "name", "") or "")
+        parts = name.split("__", 2)
+        if len(parts) == 3 and parts[0] == "mcp" and parts[1] in keep and parts[2] not in keep[parts[1]]:
+            continue
+        out.append(tool)
+    return out
+
+
 def explicit_sandbox_intent(text: str | None) -> bool:
     """Return True when the user asks for code, browser, plotting, or sandbox execution."""
 

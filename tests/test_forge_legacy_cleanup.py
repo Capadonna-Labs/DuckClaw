@@ -152,7 +152,6 @@ DB_FIRST_READ_WRITE_ALLOWLIST_REASONS = {
     "services/api-gateway/core/fly_command_invocation.py": "legacy slash/fly command bridge pending typed-command migration",
     "services/api-gateway/routers/admin.py": "authorized admin control-plane mutations",
     "services/api-gateway/routers/admin_db_first.py": "authorized DB-first admin mutators",
-    "services/api-gateway/routers/admin_domains/duckdb_explorer.py": "authorized admin DuckDB maintenance mutators",
     "services/api-gateway/routers/admin_domains/playground_chat.py": "authorized admin playground conversation mutators",
     "services/db-writer/context_injection_handler.py": "DB-writer context mutations",
     "services/db-writer/main.py": "singleton DB-writer",

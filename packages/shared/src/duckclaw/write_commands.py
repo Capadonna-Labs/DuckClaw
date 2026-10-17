@@ -113,6 +113,12 @@ class ImportSpawnPackageCommand(WriteCommand):
     worker_id_override: str = ""
 
 
+class EnsureGraphRagSchemaCommand(WriteCommand):
+    """Create memory_nodes/memory_edges and the duckclaw_kg property graph in a vault."""
+
+    command_type: Literal["ensure_graph_rag_schema"] = "ensure_graph_rag_schema"
+
+
 class UpdateCatalogWorkerFileCommand(WriteCommand):
     """Update one DB-backed catalog worker file snapshot through the writer."""
 

@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { adminService, type PgqGraphNode } from '@/services/adminService';
+import { pollWriteTask } from '@/lib/pollWriteTask';
 
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), { ssr: false });
 
@@ -108,7 +109,12 @@ export function PGQVisualizer({ vaultPath }: Props) {
     setBootstrapping(true);
     setError(null);
     try {
-      await adminService.bootstrapDuckdbPgq(vaultPath);
+      const res = await adminService.bootstrapDuckdbPgq(vaultPath);
+      // The DB-Writer creates the schema; reload once it is persisted.
+      if (res.task_id) {
+        const polled = await pollWriteTask(res.task_id, { intervalMs: 400, maxAttempts: 60 });
+        if (polled.state === 'failed') throw new Error(polled.detail || 'Error creando el grafo PGQ');
+      }
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error inicializando grafo PGQ');

@@ -50,6 +50,20 @@ def _apply_drop_legacy_duckdb_objects(conn: Any, payload: dict) -> None:
             conn.execute(f"DROP SCHEMA {_quote_duckdb_ident(schema)} CASCADE")
 
 
+def _apply_ensure_graph_rag_schema(conn: Any, payload: dict) -> None:
+    del payload
+    from duckclaw.graphs.graph_rag import ensure_graph_rag_schema
+
+    # graph_rag caches "pgq available" per process, but each writer task is a new connection:
+    # load the extension here or CREATE PROPERTY GRAPH fails and is reported as unavailable.
+    try:
+        conn.execute("LOAD duckpgq;")
+    except Exception:
+        pass
+    ensure_graph_rag_schema(conn)
+
+
 from duckclaw.write_handlers.registry import register_handler
 
 register_handler("drop_legacy_duckdb_objects", _apply_drop_legacy_duckdb_objects)
+register_handler("ensure_graph_rag_schema", _apply_ensure_graph_rag_schema)

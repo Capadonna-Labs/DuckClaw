@@ -231,15 +231,6 @@ def _duckdb_readonly_session(vault_path: str | None, *, actor: str | None = None
     return con, path, _duckdb_actor_scope(actor, vault_uid)
 
 
-def _duckdb_writable_session(vault_path: str | None, *, actor: str | None = None):
-    from routers.admin import _open_playground_vault_db
-
-    _con, path, scope = _duckdb_readonly_session(vault_path, actor=actor)
-    _con.close()
-    db = _open_playground_vault_db(path, read_only=False)
-    return db, path, scope
-
-
 @router.get("/tables", dependencies=[Depends(require_admin_key)])
 async def duckdb_list_tables(
     vault_path: str | None = Query(None, description="Ruta .duckdb; default gateway vault"),
@@ -503,33 +494,32 @@ async def duckdb_pgq_bootstrap(
     actor: str = Depends(actor_from_header),
 ) -> dict[str, Any]:
     from core.admin_duckdb_readonly import _table_exists
-    from duckclaw.graphs.graph_rag import ensure_graph_rag_schema
+    from duckclaw.db_write_queue import enqueue_typed_command
+    from duckclaw.graphs.graph_rag import _graph_rag_available
+    from duckclaw.write_commands import EnsureGraphRagSchemaCommand
 
     try:
-        db, resolved, scope = await asyncio.to_thread(_duckdb_writable_session, body.vault_path, actor=actor)
+        con, resolved, scope = await asyncio.to_thread(_duckdb_readonly_session, body.vault_path, actor=actor)
     except FileNotFoundError as exc:
         raise _problem(404, "Vault no encontrado", str(exc)) from exc
     except PermissionError as exc:
         raise _problem(403, "Vault no autorizado", str(exc)) from exc
     try:
-        had_nodes = _table_exists(db, "memory_nodes")
-        had_edges = _table_exists(db, "memory_edges")
-        pgq_available = ensure_graph_rag_schema(db)
-        tables_created = [
-            name
-            for name, existed in (("memory_nodes", had_nodes), ("memory_edges", had_edges))
-            if not existed
-        ]
+        tables_created = [name for name in ("memory_nodes", "memory_edges") if not _table_exists(con, name)]
+        pgq_available = _graph_rag_available(con)
     finally:
-        try:
-            db.close()
-        except Exception:
-            pass
+        con.close()
 
+    # The gateway stays read-only: the DB-Writer creates the schema (client polls the task).
+    task_id = enqueue_typed_command(
+        EnsureGraphRagSchemaCommand(tenant_id=scope["tenant_id"], actor_email=scope["actor_email"]),
+        db_path=resolved,
+        user_id=scope["vault_user_id"],
+    )
     _admin_audit(
         "duckdb.pgq.bootstrap",
         resolved,
-        f"pgq_available={pgq_available}",
+        f"pgq_available={pgq_available} task_id={task_id}",
         actor=actor,
         meta={
             "tenant_id": scope["tenant_id"],
@@ -540,6 +530,8 @@ async def duckdb_pgq_bootstrap(
     )
     return {
         "ok": True,
+        "accepted": True,
+        "task_id": task_id,
         "vault_path": resolved,
         "pgq_available": pgq_available,
         "tables_created": tables_created,

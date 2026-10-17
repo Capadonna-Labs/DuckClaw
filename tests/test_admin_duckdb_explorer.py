@@ -511,6 +511,16 @@ def test_duckdb_pgq_bootstrap(
     assert "memory_nodes" in payload["tables_created"]
     assert "memory_edges" in payload["tables_created"]
     assert isinstance(payload["pgq_available"], bool)
+    assert payload["accepted"] is True and payload["task_id"]
+
+    # The gateway only enqueues; apply the DB-Writer handler as the writer process would.
+    from duckclaw.write_handlers.duckdb_maintenance import _apply_ensure_graph_rag_schema
+
+    con = duckdb.connect(str(empty))
+    try:
+        _apply_ensure_graph_rag_schema(con, {})
+    finally:
+        con.close()
 
     after = admin_client.get(
         f"/api/v1/admin/duckdb/pgq-graph?vault_path={empty}",

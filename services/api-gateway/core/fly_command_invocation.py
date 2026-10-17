@@ -83,23 +83,12 @@ def _truncate_fly_log(text: str, max_len: int = 200) -> str:
 
 def _fly_command_requires_write_access(message: str) -> bool:
     """Subcomandos fly que mutan vault/chat state necesitan DuckClaw read_only=False."""
-    name, args = parse_command(message)
+    name, _args = parse_command(message)
     if not name:
         return False
-    cmd = name.replace("_", "-")
-    if cmd in LEGACY_RW_FLY_COMMANDS:
-        return True
-    args_norm = (args or "").strip().lower()
-    if cmd in ("loop", "meditate"):
-        if not args_norm:
-            return False
-        first = args_norm.split()[0]
-        if first in ("--status", "status"):
-            return False
-        if first in ("on", "off", "--delta", "--self", "--now"):
-            return True
-        return False
-    return False
+    # /loop on|off|--delta used to open the vault RW; its chat-state writes go through
+    # persist_loop_chat_state, which enqueues typed commands on a read-only handle.
+    return name.replace("_", "-") in LEGACY_RW_FLY_COMMANDS
 
 
 def _open_fly_duckclaw(vault_db_path: str, message: str) -> DuckClaw:

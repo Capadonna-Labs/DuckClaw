@@ -67,6 +67,7 @@ export interface PgqGraphResult {
 
 export interface PgqBootstrapResult {
   ok: boolean;
+  task_id?: string;
   vault_path: string;
   pgq_available: boolean;
   tables_created: string[];

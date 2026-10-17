@@ -363,6 +363,8 @@ def test_admin_chat_composer_has_voice_note_button() -> None:
 def test_admin_chat_has_live_voice_menu_item() -> None:
     panel = Path("apps/duckclaw-admin/src/components/chat/AdminChatPanel.tsx").read_text(
         encoding="utf-8"
+    ) + Path("apps/duckclaw-admin/src/components/chat/useAdminChatLiveVoice.ts").read_text(
+        encoding="utf-8"
     )
     media_menu = Path("apps/duckclaw-admin/src/components/chat/MediaAttachMenu.tsx").read_text(
         encoding="utf-8"

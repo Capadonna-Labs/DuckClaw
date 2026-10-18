@@ -48,3 +48,8 @@ def test_push_body_skips_a_table_and_uses_the_detail_line() -> None:
         _body("Veredicto: Tráfico al 68% → API\nTráfico 68% del normal según la status page (18-oct).\n\n" + table)
     )
     assert body == "Tráfico 68% del normal según la status page (18-oct)."
+
+
+def test_push_body_drops_a_detail_label() -> None:
+    _, body = hb._loop_push_parts(_body("Veredicto: API caída → pagos\nDetalle: status page (18-oct), 40 min."))
+    assert body == "status page (18-oct), 40 min."

@@ -236,6 +236,8 @@ def _loop_reply_text(raw_body: Any) -> str:
 
 
 _TABLE_SEP_RE = re.compile(r"^\|?[\s:|-]*-{3,}[\s:|-]*$")
+# Agents often prefix the detail line with a label; on a watch those characters are wasted.
+_BODY_LABEL_RE = re.compile(r"^(detalle|detail|resumen|summary)\s*:\s*", re.IGNORECASE)
 
 
 def _push_body(after: str, clean: Any) -> str:
@@ -252,7 +254,7 @@ def _push_body(after: str, clean: Any) -> str:
             continue
         if rows:
             break
-        return clean(s)
+        return _BODY_LABEL_RE.sub("", clean(s), count=1)
     data = [r for r in rows if not _TABLE_SEP_RE.match(r)]
     if len(data) < 2:
         return ""

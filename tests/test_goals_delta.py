@@ -1207,3 +1207,11 @@ def test_pushed_verdicts_are_fed_back_to_the_next_cron(monkeypatch: Any) -> None
     before, after = asyncio.run(scenario())
     assert before == ""
     assert "YA AVISADO" in after and "Pagos caídos 40 min en EU → checkout" in after
+
+
+def test_slow_db_writer_confirmation_does_not_abort_the_tick(monkeypatch: Any) -> None:
+    """The write is already in the reliable queue: a confirmation slower than 30 s must not
+    raise (it aborted finished /loop ticks before their watch push)."""
+    monkeypatch.setattr(heartbeat, "enqueue_typed_command", lambda *a, **k: "task-1")
+    monkeypatch.setattr(heartbeat, "poll_task_status_sync", lambda *a, **k: None)
+    heartbeat._enqueue_chat_state_write_sync(db_path="v.duckdb", chat_id="c1", tenant_id="t", key="k", value="1")

@@ -150,7 +150,11 @@ def _enqueue_chat_state_write_sync(
     )
     status = poll_task_status_sync(task_id, timeout_sec=30.0)
     if status is None:
-        raise TimeoutError("timeout esperando db-writer")
+        # The command sits in the reliable queue and will still be applied; a slow confirmation
+        # (the writer runs ~2 s tasks back to back on large vaults) used to abort the rest of a
+        # finished tick, including its watch push.
+        logger.warning("chat_state: db-writer sin confirmar en 30 s key=%s task=%s (sigue en cola)", key, task_id)
+        return
     if status.status != "success":
         raise RuntimeError((status.detail or "db-writer failed")[:500])
 

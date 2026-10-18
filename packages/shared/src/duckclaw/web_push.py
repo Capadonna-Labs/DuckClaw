@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -67,31 +66,21 @@ def _subscription_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
     return subscription
 
 
-_LOCK_RETRIES = 10
-_LOCK_RETRY_SLEEP_S = 1.0
-
-
 def list_web_push_subscriptions(db_path: str) -> list[dict[str, Any]]:
     """Read active Web Push subscriptions from the hub DB without taking a write lock.
 
-    The hub is briefly locked while the DB-Writer writes; a failed read used to return [] and
-    the push was dropped as "sin suscripciones". Lock conflicts are retried for ~10 s.
+    The open waits out a DB-Writer lock (db_bridge.connect_with_lock_retry); a read that still
+    fails is logged as such, not silently returned as "no subscriptions".
     """
-    raw: Any = None
-    for attempt in range(_LOCK_RETRIES + 1):
-        try:
-            with duckclaw_open_for_read_scan(db_path) as db:
-                raw = db.query(
-                    "SELECT key, value_json, value_text FROM main.admin_runtime_settings "
-                    "WHERE active = true AND domain = 'web_push' AND key LIKE 'sub_%'"
-                )
-            break
-        except Exception as exc:  # noqa: BLE001
-            if attempt < _LOCK_RETRIES and "lock" in str(exc).lower():
-                time.sleep(_LOCK_RETRY_SLEEP_S)
-                continue
-            logger.warning("web_push: no se pudieron leer las suscripciones de %s: %s", db_path, exc)
-            return []
+    try:
+        with duckclaw_open_for_read_scan(db_path) as db:
+            raw = db.query(
+                "SELECT key, value_json, value_text FROM main.admin_runtime_settings "
+                "WHERE active = true AND domain = 'web_push' AND key LIKE 'sub_%'"
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("web_push: no se pudieron leer las suscripciones de %s: %s", db_path, exc)
+        return []
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in _rows_from_query(raw):

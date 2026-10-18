@@ -99,29 +99,32 @@ def test_playground_chat_turn_attempts_web_push_on_completion() -> None:
     assert "incoming_message=prepared.original_user_message" in chat_turn
 
 
-def test_subscriptions_read_retries_a_locked_hub(monkeypatch) -> None:
-    """A hub briefly locked by the DB-Writer must not read as "no subscriptions" (the push was
-    silently dropped)."""
-    import contextlib
-    import json as _json
 
-    import duckclaw.web_push as wp
+def test_hub_reads_wait_out_a_db_writer_lock(monkeypatch) -> None:
+    """A read during a DB-Writer write must wait for the lock, not fail: a failed read surfaced
+    as "sin suscripciones" (dropped pushes) and "Worker not found" on 18-Oct."""
+    import duckclaw.db_bridge as bridge
 
     calls = {"n": 0}
-    row = {"key": "sub_x", "value_json": _json.dumps({"subscription": {"endpoint": "https://p/1", "keys": {"p256dh": "a", "auth": "b"}}})}
 
-    class _Db:
-        def query(self, _sql):
-            return _json.dumps([row])
-
-    @contextlib.contextmanager
-    def _open(_path):
+    def _connect(path, read_only=False):
         calls["n"] += 1
         if calls["n"] < 3:
             raise OSError('IO Error: Could not set lock on file "hub.duckdb": Conflicting lock is held')
-        yield _Db()
+        return ("conn", path, read_only)
 
-    monkeypatch.setattr(wp, "duckclaw_open_for_read_scan", _open)
-    monkeypatch.setattr(wp, "_LOCK_RETRY_SLEEP_S", 0.0)
-    subs = wp.list_web_push_subscriptions("hub.duckdb")
-    assert calls["n"] == 3 and [s["endpoint"] for s in subs] == ["https://p/1"]
+    monkeypatch.setattr(bridge._duckdb, "connect", _connect)
+    monkeypatch.setattr(bridge.time, "sleep", lambda _s: None)
+    assert bridge.connect_with_lock_retry("hub.duckdb", read_only=True) == ("conn", "hub.duckdb", True)
+    assert calls["n"] == 3
+
+    def _other(path, read_only=False):
+        raise OSError("IO Error: file is not a database")
+
+    monkeypatch.setattr(bridge._duckdb, "connect", _other)
+    try:
+        bridge.connect_with_lock_retry("hub.duckdb", read_only=True)
+    except OSError as exc:
+        assert "not a database" in str(exc)  # non-lock errors are not retried
+    else:
+        raise AssertionError("expected the non-lock error")

@@ -20,8 +20,10 @@ def duckdb_connect_read_with_rw_fallback(db_path: str) -> Any:
     """``duckdb.connect`` para SELECT: intenta RO y cae a RW si ya hay conexión RW al archivo."""
     import duckdb
 
+    from duckclaw.db_bridge import connect_with_lock_retry
+
     try:
-        return duckdb.connect(db_path, read_only=True)
+        return connect_with_lock_retry(db_path, read_only=True)
     except Exception as exc:
         if _is_ro_rw_configuration_conflict(exc):
             return duckdb.connect(db_path, read_only=False)

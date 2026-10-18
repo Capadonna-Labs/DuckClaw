@@ -35,45 +35,35 @@ def _is_duckdb_lock_error(exc: BaseException) -> bool:
     return "lock" in msg or "conflicting" in msg
 
 
-def _duckdb_python_connect_with_retry(db_path: str, *, read_only: bool) -> Any:
-    """
-    Abre duckdb.connect; en solo lectura reintenta ante lock — alineado con
-    ``graph_server._open_duckclaw_readonly_with_retry`` y ``context_injection_handler._connect_duckdb_writable``.
-    """
-    from duckclaw.spawn_profile import effective_hub_read_only
+def connect_with_lock_retry(db_path: str, *, read_only: bool) -> Any:
+    """``duckdb.connect`` that waits out another process's write lock.
 
-    read_only = effective_hub_read_only(db_path, read_only)
-    # 8 attempts ≈ 5.4s ceiling. Writer RW holds are per-transaction (ms); waiting
-    # longer than the BFF timeout only turns contention into "gateway caído" in the UI.
-    raw_attempts = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS") or "8").strip()
-    try:
-        attempts = max(1, min(int(raw_attempts), 80))
-    except ValueError:
-        attempts = 8
-    raw_sleep = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_BASE_SLEEP_S") or "0.15").strip()
-    try:
-        base_sleep_s = float(raw_sleep)
-    except ValueError:
-        base_sleep_s = 0.15
-    base_sleep_s = max(0.05, base_sleep_s)
-
+    Readers poll at a short fixed interval: the DB-Writer runs back-to-back tasks of ~2 s on
+    the large hub/vault files and leaves a short gap between them (see db_writer_ops
+    ``_READER_GAP_S``). A growing backoff kept missing those gaps, and a locked read surfaced
+    upstream as "no data" ("sin suscripciones", "Worker not found"). The wait stays under the
+    admin BFF fast timeout (8 s): ``DUCKCLAW_GATEWAY_RO_LOCK_WAIT_S`` (default 6).
+    """
     if (db_path or "").strip() in ("", ":memory:"):
         return _duckdb.connect(db_path, read_only=read_only)
-
-    last: BaseException | None = None
-    for i in range(attempts):
+    try:
+        wait_s = max(0.0, float((os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_WAIT_S") or "6").strip()))
+    except ValueError:
+        wait_s = 6.0
+    deadline = time.monotonic() + wait_s
+    while True:
         try:
             return _duckdb.connect(db_path, read_only=read_only)
         except BaseException as exc:
-            last = exc
-            if not _is_duckdb_lock_error(exc):
+            if not _is_duckdb_lock_error(exc) or time.monotonic() >= deadline:
                 raise
-            delay = base_sleep_s * min(i + 1, 12)
-            if i + 1 < attempts:
-                time.sleep(delay)
-            continue
-    assert last is not None
-    raise last
+            time.sleep(0.1)
+
+
+def _duckdb_python_connect_with_retry(db_path: str, *, read_only: bool) -> Any:
+    from duckclaw.spawn_profile import effective_hub_read_only
+
+    return connect_with_lock_retry(db_path, read_only=effective_hub_read_only(db_path, read_only))
 
 
 class DuckClaw:

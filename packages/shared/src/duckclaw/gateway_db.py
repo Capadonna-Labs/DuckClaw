@@ -38,9 +38,9 @@ class GatewayDbEphemeralReadonly:
         self._read_only = True
 
     def query(self, sql: str, params: tuple | list | None = None) -> str:
-        import duckdb
+        from duckclaw.db_bridge import connect_with_lock_retry
 
-        con = duckdb.connect(self._path, read_only=True)
+        con = connect_with_lock_retry(self._path, read_only=True)
         try:
             if params is not None:
                 result = con.execute(sql, params)
@@ -63,9 +63,9 @@ class ReadOnlyDbConnection:
     __slots__ = ("_con", "_read_only")
 
     def __init__(self, path: str) -> None:
-        import duckdb
+        from duckclaw.db_bridge import connect_with_lock_retry
 
-        self._con = duckdb.connect(path, read_only=True)
+        self._con = connect_with_lock_retry(path, read_only=True)
         self._read_only = True
 
     def execute(self, sql: str, params: Any = None) -> Any:

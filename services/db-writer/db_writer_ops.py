@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import logging
 import time
 from collections.abc import Awaitable, Callable
@@ -202,6 +203,9 @@ async def reclaim_expired_processing_leases(
     return count
 
 
+_READER_GAP_S = float(os.environ.get("DUCKCLAW_DB_WRITER_READER_GAP_S") or "0.25")
+
+
 async def run_reliable_queue_loop(
     redis_client: redis.Redis,
     source_queue: str,
@@ -220,6 +224,9 @@ async def run_reliable_queue_loop(
             await handler(redis_client, message)
         finally:
             await ack_processing_message(redis_client, source_queue, message)
+        # Leave readers a window between back-to-back writes (they poll every 0.1 s; see
+        # duckclaw.db_bridge.connect_with_lock_retry). Without it a burst kept the file locked.
+        await asyncio.sleep(_READER_GAP_S)
 
 
 async def run_processing_reclaim_loop(

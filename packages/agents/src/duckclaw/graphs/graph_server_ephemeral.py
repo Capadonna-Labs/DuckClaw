@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging as _logging
 import os
-import time
 from pathlib import Path
 from typing import Any
 
@@ -32,44 +31,11 @@ def open_duckclaw_writable_with_retry(db_path: str) -> Any:
 
 
 def open_duckclaw_readonly_with_retry(db_path: str) -> Any:
-    """
-    Abre DuckClaw RO al archivo; reintenta si el db-writer u otro proceso tiene el lock RW.
-    Alineado con el backoff de ``context_injection_handler._connect_duckdb_writable``.
-    """
+    """DuckClaw RO; the lock wait lives in ``db_bridge.connect_with_lock_retry`` (a second
+    retry loop here multiplied the wait to tens of seconds)."""
     from duckclaw import DuckClaw
 
-    raw_attempts = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_ATTEMPTS") or "24").strip()
-    try:
-        attempts = max(1, min(int(raw_attempts), 80))
-    except ValueError:
-        attempts = 24
-    raw_sleep = (os.environ.get("DUCKCLAW_GATEWAY_RO_LOCK_BASE_SLEEP_S") or "0.15").strip()
-    try:
-        base_sleep_s = float(raw_sleep)
-    except ValueError:
-        base_sleep_s = 0.15
-    base_sleep_s = max(0.05, base_sleep_s)
-
-    last: BaseException | None = None
-    for i in range(attempts):
-        try:
-            return DuckClaw(db_path, read_only=True)
-        except Exception as exc:
-            last = exc
-            if is_duckdb_lock_error(exc):
-                delay = base_sleep_s * min(i + 1, 12)
-                _log.warning(
-                    "graph_server: DuckDB RO lock intento %s/%s, reintento en %.2fs: %s",
-                    i + 1,
-                    attempts,
-                    delay,
-                    exc,
-                )
-                time.sleep(delay)
-                continue
-            raise
-    assert last is not None
-    raise last
+    return DuckClaw(db_path, read_only=True)
 
 
 def is_openrouter_chat_provider(provider: str) -> bool:

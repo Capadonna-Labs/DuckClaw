@@ -291,3 +291,25 @@ def test_upsert_skill_rejects_oversized_text_with_exact_overflow(monkeypatch) ->
     assert out["ok"] is False and out["length"] == 4855 and out["max_length"] == 4096 and out["over_by"] == 759
     assert dispatched == []  # nothing enqueued
     assert json.loads(_upsert_skill_impl(object(), "radar", "x" * 4096))["ok"] is True
+
+
+def test_list_skills_in_a_scheduled_turn_sees_the_tenants_private_skills(monkeypatch) -> None:
+    """Crons and /loop run with no interactive actor ("system"): a directive must still be able
+    to open another private skill of the tenant it names (e.g. /radar_watchlist)."""
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
+        lambda db: ("system", "/tmp/hub.duckdb"),
+    )
+
+    class _Db:
+        def query(self, sql: str) -> str:
+            assert "tenant_id IN ('t1', 'framework')" in sql
+            assert "owner_email" not in sql.split("FROM", 1)[1]
+            return json.dumps([{"name": "radar_watchlist", "description": "x" * 900}])
+
+    monkeypatch.setattr(
+        "duckclaw.forge.skills.skills_management_bridge._open_hub_read_only",
+        lambda path: _Db(),
+    )
+    out = json.loads(_list_skills_impl(object(), "t1", "/radar_watchlist"))
+    assert out["count"] == 1 and len(out["skills"][0]["description"]) == 900

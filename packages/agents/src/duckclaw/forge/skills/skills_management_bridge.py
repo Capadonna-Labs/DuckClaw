@@ -159,6 +159,11 @@ def _list_skills_impl(db: Any, tenant_id: str = "default", name: str = "") -> st
         return json.dumps({"ok": False, "error": "No se pudo resolver la ruta del hub."}, ensure_ascii=False)
     tid = (tenant_id or "default").replace("'", "''")
     esc_actor = actor.replace("'", "''")
+    # Scheduled turns (crons, /loop) have no interactive actor ("system"): like the /name
+    # expansion of those turns (expand_directive_skill with actor_email=None) the tenant is
+    # the boundary. Filtering by owner hid every private skill, so a directive could not
+    # open another one it names (e.g. /radar_watchlist) and the agent concluded it was gone.
+    visible = "" if actor == "system" else f"AND (visibility = 'public' OR owner_email = '{esc_actor}') "
     try:
         hub = _open_hub_read_only(hub_path)
         try:
@@ -166,7 +171,7 @@ def _list_skills_impl(db: Any, tenant_id: str = "default", name: str = "") -> st
                 "SELECT name, skill_type, description, visibility, owner_email "
                 "FROM main.admin_skills "
                 f"WHERE tenant_id IN ('{tid}', '{FRAMEWORK_TENANT}') AND active "
-                f"AND (visibility = 'public' OR owner_email = '{esc_actor}') "
+                f"{visible}"
                 f"ORDER BY name, tenant_id = '{FRAMEWORK_TENANT}'"
             )
         finally:
@@ -313,7 +318,9 @@ def register_skills_management_skill(
                 description=(
                     "Lista los skills activos visibles para ti (públicos del tenant + privados "
                     "tuyos): name, skill_type, description (extracto), visibility, owner_email. "
-                    "Con name='x' devuelve solo ese skill con su description COMPLETA."
+                    "Con name='x' devuelve solo ese skill con su description COMPLETA. Si una "
+                    "directiva te pide usar otra skill (/nombre), ábrela con list_skills(name='nombre') "
+                    "y sigue su texto como parte del turno."
                 ),
                 args_schema=ListSkillsInput,
             )

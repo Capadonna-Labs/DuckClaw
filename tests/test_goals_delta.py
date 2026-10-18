@@ -1075,6 +1075,7 @@ def test_crons_delta_prompt_runs_prompt_without_goals_and_pushes_verdict(
     monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
     monkeypatch.setattr(heartbeat, "_scheduled_prompt_message", lambda p, t: f"RUN {p}")
     monkeypatch.setattr(heartbeat, "_send_web_push_notification", _push)
+    monkeypatch.setattr(heartbeat, "REDIS_URL", "")
 
     for _ in range(2):
         con = duckdb.connect(db_path)
@@ -1172,3 +1173,37 @@ def test_scheduled_prompts_ask_for_a_watch_verdict() -> None:
     msg = heartbeat._scheduled_prompt_message("revisa defensa", "t1")
     assert msg.startswith("revisa defensa") and msg.endswith(WATCH_VERDICT_RULE)
     assert "Veredicto: sin novedades" in WATCH_VERDICT_RULE
+
+
+def test_pushed_verdicts_are_fed_back_to_the_next_cron(monkeypatch: Any) -> None:
+    """A verdict already sent to the watch is listed in the next cron prompt as "ya avisado",
+    so the agent stops re-announcing the same event."""
+    store: dict[str, list[str]] = {}
+
+    class _R:
+        async def lpush(self, k: str, v: str) -> None:
+            store.setdefault(k, []).insert(0, v)
+
+        async def ltrim(self, k: str, a: int, b: int) -> None:
+            store[k] = store[k][a : b + 1]
+
+        async def expire(self, *_a: Any) -> None:
+            return None
+
+        async def lrange(self, k: str, a: int, b: int) -> list[bytes]:
+            return [x.encode() for x in store.get(k, [])[a : b + 1]]
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(heartbeat, "REDIS_URL", "redis://fake")
+    monkeypatch.setattr(heartbeat.redis, "from_url", lambda _u: _R())
+
+    async def scenario() -> tuple[str, str]:
+        before = await heartbeat._already_notified_note("c1")
+        await heartbeat._remember_verdict("c1", "Brent 109,86 por ataques en Ormuz → XLE")
+        return before, await heartbeat._already_notified_note("c1")
+
+    before, after = asyncio.run(scenario())
+    assert before == ""
+    assert "YA AVISADO" in after and "Brent 109,86 por ataques en Ormuz → XLE" in after

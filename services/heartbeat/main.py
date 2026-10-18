@@ -294,6 +294,52 @@ async def _spawn_proactive(chat_id: Any, coro: Any, *, after_running: bool = Fal
     task.add_done_callback(_done)
 
 
+# Verdicts already pushed to the watch (48 h): fed back to each cron prompt so the agent does not
+# re-announce the same event. A "don't repeat" rule in the skill relied on the model reading the
+# chat history and failed (the same Ormuz/Brent alert went out 3 times on 18-Oct).
+_VERDICTS_KEY = "duckclaw:watch_verdicts:{}"
+_VERDICTS_TTL_S = 48 * 3600
+_VERDICTS_KEEP = 20
+
+
+async def _remember_verdict(chat_id: Any, verdict: str) -> None:
+    if not REDIS_URL:
+        return
+    try:
+        r = redis.from_url(REDIS_URL)
+        try:
+            key = _VERDICTS_KEY.format(chat_id)
+            await r.lpush(key, f"{time.strftime('%d-%b %H:%M UTC', time.gmtime())} · {verdict}")
+            await r.ltrim(key, 0, _VERDICTS_KEEP - 1)
+            await r.expire(key, _VERDICTS_TTL_S)
+        finally:
+            await r.aclose()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("watch_verdicts: no se pudo guardar chat=%s: %s", chat_id, exc)
+
+
+async def _already_notified_note(chat_id: Any) -> str:
+    if not REDIS_URL:
+        return ""
+    try:
+        r = redis.from_url(REDIS_URL)
+        try:
+            raw = await r.lrange(_VERDICTS_KEY.format(chat_id), 0, _VERDICTS_KEEP - 1)
+        finally:
+            await r.aclose()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("watch_verdicts: no se pudo leer chat=%s: %s", chat_id, exc)
+        return ""
+    lines = [x.decode() if isinstance(x, bytes) else str(x) for x in raw or []]
+    if not lines:
+        return ""
+    return (
+        "\n\n[YA AVISADO AL RELOJ, últimas 48 h] No repitas estos hechos salvo que traigan un dato "
+        "nuevo (cifra distinta, confirmación, desmentido); si no hay nada más, `Veredicto: sin novedades`.\n- "
+        + "\n- ".join(lines)
+    )
+
+
 async def _send_web_push_notification(*, title: str, body: str, url: str = "/", tag: str = "duckclaw") -> None:
     # Every outcome is logged: success and the silent skips used to leave no trace, so a
     # missing notification could not be told apart from one that was never sent.
@@ -628,7 +674,7 @@ async def _run_goals_proactive_tick_one_db(
 
             delta_prompt = str(meta.get("prompt") or "").strip()
             if delta_prompt:
-                message = _scheduled_prompt_message(delta_prompt, tenant_id)
+                message = _scheduled_prompt_message(delta_prompt, tenant_id) + await _already_notified_note(chat_id)
             else:
                 if "mode" in meta and str(meta.get("mode") or "").strip():
                     proactive_mode = normalize_proactive_mode(str(meta.get("mode")))
@@ -748,6 +794,8 @@ async def _deliver_goals_delta_turn(
         logger.info("web_push: omitida tag=duckclaw-goals-%s (veredicto sin novedades)", chat_id)
         return
     has_verdict = parts[0] != "DuckClaw · ciclo /loop"
+    if has_verdict:
+        await _remember_verdict(chat_id, parts[0])
     await _send_web_push_notification(
         title=parts[0] if has_verdict else "DuckClaw",
         body=parts[1] if has_verdict else "Revisión proactiva completada.",
@@ -787,6 +835,8 @@ async def _deliver_wall_cron_turn(
         logger.info("web_push: omitida tag=%s (veredicto sin novedades)", tag)
         return
     has_verdict = parts[0] != "DuckClaw · ciclo /loop"
+    if has_verdict:
+        await _remember_verdict(chat_id, parts[0])
     await _send_web_push_notification(
         title=parts[0] if has_verdict else "DuckClaw",
         body=parts[1] if has_verdict else (f"Cron completado: {prompt[:80]}" if prompt else "Recordatorio programado completado."),
@@ -861,7 +911,7 @@ async def _run_wall_items_for_chat(
             continue
 
         message = (
-            _scheduled_prompt_message(prompt, tenant_id)
+            _scheduled_prompt_message(prompt, tenant_id) + await _already_notified_note(chat_id)
             if prompt
             else build_goals_proactive_system_event_message(goals)
         )

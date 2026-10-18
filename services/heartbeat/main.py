@@ -498,7 +498,8 @@ async def _run_goals_proactive_tick_one_db(
             worker_id = (get_chat_state(db, chat_id, "worker_id") or "").strip()
             _wid_pre = (worker_id or "").strip()
             _gw_trigger = str(meta_pre.get("trigger") or "").strip().lower() == "goals_wall"
-            allow_empty_goals = bool(not goals and _gw_trigger)
+            # A --prompt interval runs its own prompt, so it needs no /goals.
+            allow_empty_goals = bool(not goals and (_gw_trigger or str(meta_pre.get("prompt") or "").strip()))
             if not goals and not allow_empty_goals:
                 logger.info(
                     "goals_proactive: chat=%s sin goals; limpiando delta",
@@ -576,38 +577,42 @@ async def _run_goals_proactive_tick_one_db(
                 normalize_proactive_mode,
             )
 
-            if "mode" in meta and str(meta.get("mode") or "").strip():
-                proactive_mode = normalize_proactive_mode(str(meta.get("mode")))
+            delta_prompt = str(meta.get("prompt") or "").strip()
+            if delta_prompt:
+                message = _scheduled_prompt_message(delta_prompt, tenant_id)
             else:
-                # Schedules legacy (pre GOALS_ALIGNMENT) y tests sin meta.mode: tick periÃ³dico.
-                proactive_mode = "always"
-            report = assess_goals_alignment(db, chat_id, worker_id=_wid_pre)
-            notify_channel = normalize_notify_channel(
-                get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
-            )
-            if proactive_mode == "on_misalignment" and report.aligned:
-                logger.debug(
-                    "goals_proactive: alineado; omitiendo tick chat=%s mode=%s",
-                    chat_id,
-                    proactive_mode,
+                if "mode" in meta and str(meta.get("mode") or "").strip():
+                    proactive_mode = normalize_proactive_mode(str(meta.get("mode")))
+                else:
+                    # Schedules legacy (pre GOALS_ALIGNMENT) y tests sin meta.mode: tick periÃ³dico.
+                    proactive_mode = "always"
+                report = assess_goals_alignment(db, chat_id, worker_id=_wid_pre)
+                notify_channel = normalize_notify_channel(
+                    get_chat_state(db, chat_id, _GOALS_PROACTIVE_NOTIFY_KEY)
                 )
-                continue
-            if not report.aligned:
-                if not await check_alignment_nudge_cooldown(
-                    redis_client, tenant_id or "default", str(chat_id), delta_s
-                ):
+                if proactive_mode == "on_misalignment" and report.aligned:
                     logger.debug(
-                        "goals_proactive: cooldown alineaciÃ³n chat=%s",
+                        "goals_proactive: alineado; omitiendo tick chat=%s mode=%s",
                         chat_id,
+                        proactive_mode,
                     )
                     continue
-                message = build_alignment_nudge_system_event(
-                    report,
-                    chat_id=str(chat_id),
-                    epoch=now,
-                )
-            else:
-                message = build_goals_proactive_system_event_message(goals)
+                if not report.aligned:
+                    if not await check_alignment_nudge_cooldown(
+                        redis_client, tenant_id or "default", str(chat_id), delta_s
+                    ):
+                        logger.debug(
+                            "goals_proactive: cooldown alineaciÃ³n chat=%s",
+                            chat_id,
+                        )
+                        continue
+                    message = build_alignment_nudge_system_event(
+                        report,
+                        chat_id=str(chat_id),
+                        epoch=now,
+                    )
+                else:
+                    message = build_goals_proactive_system_event_message(goals)
 
             if not notify_channel:
                 from duckclaw.homeostasis.goals_alignment import normalize_notify_channel
@@ -627,6 +632,8 @@ async def _run_goals_proactive_tick_one_db(
             "skip_session_lock": True,
             "notify_channel": notify_channel,
         }
+        if delta_prompt:
+            payload["user_incoming"] = f"[Cron] {delta_prompt}"
         _attach_scanned_vault(payload, db_path)
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
         try:
@@ -660,12 +667,18 @@ async def _run_goals_proactive_tick_one_db(
                 chat_id,
                 worker_id,
             )
-            await _send_web_push_notification(
-                title="DuckClaw",
-                body="Revisión proactiva completada.",
-                url="/admin/playground",
-                tag=f"duckclaw-goals-{chat_id}",
-            )
+            # Watch-friendly: "Veredicto:" line as title, nothing on "sin novedades".
+            parts = _loop_push_parts(resp.text)
+            if parts is None:
+                logger.info("web_push: omitida tag=duckclaw-goals-%s (veredicto sin novedades)", chat_id)
+            else:
+                has_verdict = parts[0] != "DuckClaw · ciclo /loop"
+                await _send_web_push_notification(
+                    title=parts[0] if has_verdict else "DuckClaw",
+                    body=parts[1] if has_verdict else "Revisión proactiva completada.",
+                    url="/admin/playground",
+                    tag=f"duckclaw-goals-{chat_id}",
+                )
         else:
             logger.warning(
                 "goals_proactive: HTTP %s chat=%s body=%s",
@@ -798,12 +811,20 @@ async def _run_wall_items_for_chat(
         if str(item.get("kind") or "").strip().lower() != "once":
             kept.append({**item, "last_fire": now})
         logger.info("goals_proactive_wall: tick OK chat=%s cron=%s worker=%s", chat_id, item.get("id"), worker_id)
-        await _send_web_push_notification(
-            title="DuckClaw",
-            body=f"Cron completado: {prompt[:80]}" if prompt else "Recordatorio programado completado.",
-            url="/admin/playground",
-            tag=f"duckclaw-goals-wall-{chat_id}-{item.get('id')}",
-        )
+        # Same watch-friendly push as the loop: the reply's "Veredicto:" line is the title and
+        # "sin novedades" sends nothing; replies without a verdict keep the generic text.
+        parts = _loop_push_parts(resp.text)
+        tag = f"duckclaw-goals-wall-{chat_id}-{item.get('id')}"
+        if parts is None:
+            logger.info("web_push: omitida tag=%s (veredicto sin novedades)", tag)
+        else:
+            has_verdict = parts[0] != "DuckClaw · ciclo /loop"
+            await _send_web_push_notification(
+                title=parts[0] if has_verdict else "DuckClaw",
+                body=parts[1] if has_verdict else (f"Cron completado: {prompt[:80]}" if prompt else "Recordatorio programado completado."),
+                url="/admin/playground",
+                tag=tag,
+            )
 
     if changed:
         try:

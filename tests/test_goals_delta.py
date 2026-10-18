@@ -1008,3 +1008,72 @@ def test_heartbeat_fires_each_due_cron_and_keeps_its_own_last_fire(tmp_path: Pat
     con2.close()
     # The one-shot cron is consumed; the weekly one stays with its own last_fire.
     assert [i["id"] for i in stored] == ["c1"] and stored[0]["last_fire"] > 0
+
+
+def test_crons_delta_prompt_runs_prompt_without_goals_and_pushes_verdict(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """`/crons --delta 1h --prompt "/skill"` stores the prompt; each tick runs it (no /goals
+    needed) and the push uses the reply's "Veredicto:" line, skipping "sin novedades"."""
+    import duckdb
+
+    from duckclaw import DuckClaw
+
+    db_path = str(tmp_path / "delta_prompt.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        "CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT, "
+        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    con.execute("INSERT INTO agent_config (key, value) VALUES ('chat_61_worker_id', 'BI-Analyst')")
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        out = execute_goals(db, 61, '--delta 1h --prompt "/datos_alternativos"', tenant_id="analytics")
+    assert "/datos_alternativos" in (out or "")
+    with DuckClaw(db_path, read_only=True) as db:
+        meta = json.loads(get_chat_state(db, 61, "goals_delta_meta") or "{}")
+    assert meta.get("prompt") == "/datos_alternativos"
+    con = duckdb.connect(db_path)
+    con.execute("UPDATE agent_config SET value = '' WHERE key = 'chat_61_goals_proactive_last_fire_epoch'")
+    con.close()
+
+    posts: list[dict[str, Any]] = []
+    pushes: list[dict[str, Any]] = []
+    replies = iter(["Veredicto: Trump anuncia aranceles al acero\n\nDetalle…", "Veredicto: sin novedades"])
+
+    class Resp:
+        status_code = 200
+
+        def __init__(self) -> None:
+            self.text = json.dumps({"response": next(replies)})
+
+    class DummyClient:
+        async def __aenter__(self) -> DummyClient:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def post(self, *a: Any, **kw: Any) -> Resp:
+            posts.append(kw["json"])
+            return Resp()
+
+    async def _push(**kw: Any) -> None:
+        pushes.append(kw)
+
+    monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
+    monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
+    monkeypatch.setattr(heartbeat, "_scheduled_prompt_message", lambda p, t: f"RUN {p}")
+    monkeypatch.setattr(heartbeat, "_send_web_push_notification", _push)
+
+    for _ in range(2):
+        con = duckdb.connect(db_path)
+        con.execute("UPDATE agent_config SET value = '' WHERE key = 'chat_61_goals_proactive_last_fire_epoch'")
+        con.close()
+        asyncio.run(heartbeat._run_goals_proactive_tick())
+
+    assert [p["message"] for p in posts] == ["RUN /datos_alternativos"] * 2
+    assert posts[0]["user_incoming"] == "[Cron] /datos_alternativos"
+    assert [p["title"] for p in pushes] == ["Trump anuncia aranceles al acero"]

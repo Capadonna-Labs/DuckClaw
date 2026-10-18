@@ -624,6 +624,15 @@ def execute_crons_schedule(
     toks = raw.split()
 
     if toks and toks[0] == "--delta":
+        # Optional --prompt "/skill o texto": each interval runs that prompt instead of the
+        # /goals review (e.g. hourly /datos_alternativos). Everything after the flag.
+        delta_prompt = ""
+        dpm = re.search(r"\s--prompt\s+(.+)$", " " + raw, re.DOTALL)
+        if dpm:
+            delta_prompt = dpm.group(1).strip().strip("\"'“”").strip()[:2000]
+            toks = (" " + raw)[: dpm.start()].split()
+            if not delta_prompt:
+                return 'Falta el texto de --prompt (p. ej. --prompt "/datos_alternativos").'
         if len(toks) < 2:
             return (
                 "Uso: /crons --delta 20min [--notify admin|telegram|both] "
@@ -663,9 +672,11 @@ def execute_crons_schedule(
         _anchor_now = _fire_anchor
         meta_obj: dict[str, Any] = {
             "trigger": "goals_cli",
-            "mode": mode,
+            "mode": "always" if delta_prompt else mode,
             "jitter_ratio": jitter_ratio,
         }
+        if delta_prompt:
+            meta_obj["prompt"] = delta_prompt
         ok, persist_err = _set_chat_state_entries(
             db,
             chat_id,
@@ -683,6 +694,12 @@ def execute_crons_schedule(
         if not ok:
             return f"No se pudo guardar: {persist_err}"
         human = format_goals_delta_interval_human(secs)
+        if delta_prompt:
+            return (
+                f"Cada ~{human} se ejecuta: {delta_prompt[:120]} (canal {notify_ch}). "
+                "/crons --delta off para cancelar."
+                f"{_queued_write_suffix(persist_err)}"
+            )
         goals_note = (
             f"Metas homeostasis cargadas: {goals_count}. Define o edita con /goals."
             if goals_count

@@ -33,3 +33,18 @@ def test_truncated_json_body():
     raw = '{"response": "Veredicto: GLD rompe 2.400 \u2014 revisar stop\n\nmás'
     title, _ = hb._loop_push_parts(raw)
     assert title.startswith("GLD rompe 2.400")
+
+
+def test_push_body_skips_a_table_and_uses_the_detail_line() -> None:
+    """Seen 18-Oct on the watch: the body was the table header and its '-----' separator."""
+    table = (
+        "| hora | fuente | hecho con cifra textual | activo(s) |\n"
+        "|---|---|---|---|\n"
+        "| 18-oct | en-oriente | Ormuz al 68% del flujo normal | XLE |\n"
+    )
+    _, body = hb._loop_push_parts(_body("Veredicto: Ormuz al 68% del flujo normal → XLE\n\n" + table))
+    assert body == "18-oct · en-oriente · Ormuz al 68% del flujo normal · XLE"
+    _, body = hb._loop_push_parts(
+        _body("Veredicto: Ormuz al 68% → XLE\nTráfico 68% del normal según Kpler (18-oct).\n\n" + table)
+    )
+    assert body == "Tráfico 68% del normal según Kpler (18-oct)."

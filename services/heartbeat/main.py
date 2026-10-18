@@ -231,6 +231,30 @@ def _loop_reply_text(raw_body: Any) -> str:
     return ""
 
 
+_TABLE_SEP_RE = re.compile(r"^\|?[\s:|-]*-{3,}[\s:|-]*$")
+
+
+def _push_body(after: str, clean: Any) -> str:
+    """Notification body: the first prose line after the verdict. A markdown table there used to
+    become "hora fuente hecho con cifra ... -------" on the watch; when the reply goes straight
+    into a table, its first data row is used instead (header and separator skipped)."""
+    rows: list[str] = []
+    for line in after.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith("|") or _TABLE_SEP_RE.match(s):
+            rows.append(s)
+            continue
+        if rows:
+            break
+        return clean(s)
+    data = [r for r in rows if not _TABLE_SEP_RE.match(r)]
+    if len(data) < 2:
+        return ""
+    return clean(" · ".join(c.strip() for c in data[1].strip("|").split("|") if c.strip()))
+
+
 def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
     """(title, body) for the loop push, or None when the tick has nothing to report.
 
@@ -245,7 +269,7 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
         verdict = clean(m.group(1).splitlines()[0])
         if _NO_NEWS_RE.search(verdict):
             return None
-        rest = clean(text[m.end():]) or verdict
+        rest = _push_body(text[m.end():], clean) or verdict
         return verdict[:80], rest if len(rest) <= 140 else rest[:139] + "…"
     body = clean(text) or "Ciclo proactivo ejecutado."
     return "DuckClaw · ciclo /loop", body if len(body) <= 140 else body[:139] + "…"

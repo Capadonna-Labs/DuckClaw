@@ -97,3 +97,31 @@ def test_playground_chat_turn_attempts_web_push_on_completion() -> None:
     # real user reference so a suggestion-pick can be recognized and annotated.
     assert "extract_playground_reply(result)" in chat_turn
     assert "incoming_message=prepared.original_user_message" in chat_turn
+
+
+def test_subscriptions_read_retries_a_locked_hub(monkeypatch) -> None:
+    """A hub briefly locked by the DB-Writer must not read as "no subscriptions" (the push was
+    silently dropped)."""
+    import contextlib
+    import json as _json
+
+    import duckclaw.web_push as wp
+
+    calls = {"n": 0}
+    row = {"key": "sub_x", "value_json": _json.dumps({"subscription": {"endpoint": "https://p/1", "keys": {"p256dh": "a", "auth": "b"}}})}
+
+    class _Db:
+        def query(self, _sql):
+            return _json.dumps([row])
+
+    @contextlib.contextmanager
+    def _open(_path):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise OSError('IO Error: Could not set lock on file "hub.duckdb": Conflicting lock is held')
+        yield _Db()
+
+    monkeypatch.setattr(wp, "duckclaw_open_for_read_scan", _open)
+    monkeypatch.setattr(wp, "_LOCK_RETRY_SLEEP_S", 0.0)
+    subs = wp.list_web_push_subscriptions("hub.duckdb")
+    assert calls["n"] == 3 and [s["endpoint"] for s in subs] == ["https://p/1"]

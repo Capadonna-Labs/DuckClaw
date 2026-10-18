@@ -525,8 +525,9 @@ async def post_loop_self_tick_async(
     message: str,
     headers: dict[str, str] | None = None,
     vault_db_path: str | None = None,
+    timeout: float | None = None,
 ) -> dict[str, Any]:
-    """POST async al gateway (Heartbeat ticker)."""
+    """POST async al gateway (Heartbeat ticker). ``timeout`` overrides LOOP_SELF_HTTP_TIMEOUT."""
     import httpx
 
     from duckclaw.env_config import resolve_agent_chat_url
@@ -547,7 +548,7 @@ async def post_loop_self_tick_async(
     # so one retry after the restart is safe and keeps the tick from being lost.
     for attempt in (1, 2):
         try:
-            async with httpx.AsyncClient(timeout=LOOP_SELF_HTTP_TIMEOUT) as client:
+            async with httpx.AsyncClient(timeout=timeout or LOOP_SELF_HTTP_TIMEOUT) as client:
                 resp = await client.post(
                     url,
                     params={"tenant_id": tid, "deliver_outbound": "1"},

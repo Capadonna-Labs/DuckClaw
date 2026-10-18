@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from duckclaw.graphs.on_the_fly_commands import (
     build_goals_proactive_system_event_message,
     chat_id_from_goals_delta_config_key,
@@ -21,6 +23,12 @@ from duckclaw.graphs.proactive_review_markers import (
     proactive_review_event_phrase_in_text,
 )
 import services.heartbeat.main as heartbeat
+
+
+@pytest.fixture(autouse=True)
+def _proactive_turns_inline(monkeypatch: Any) -> None:
+    """Await proactive turns inside the tick so assertions see their effects."""
+    monkeypatch.setattr(heartbeat, "PROACTIVE_TURNS_IN_BACKGROUND", False)
 
 
 def _patch_heartbeat_sync_duckdb_write(monkeypatch: Any) -> None:
@@ -1123,3 +1131,34 @@ def test_delta_tick_timeout_does_not_refire_next_poll(tmp_path: Path, monkeypatc
     asyncio.run(heartbeat._run_goals_proactive_tick())
     asyncio.run(heartbeat._run_goals_proactive_tick())
     assert len(posts) == 1
+
+
+def test_proactive_turns_run_in_background_one_per_chat(monkeypatch: Any) -> None:
+    """A long turn does not block the poller, a due tick for the same chat waits for it, and a
+    wall cron queues behind it instead of overlapping (long-runtime agents)."""
+    monkeypatch.setattr(heartbeat, "PROACTIVE_TURNS_IN_BACKGROUND", True)
+    order: list[str] = []
+
+    async def scenario() -> None:
+        release = asyncio.Event()
+
+        async def long_turn() -> None:
+            order.append("long:start")
+            await release.wait()
+            order.append("long:end")
+
+        async def queued() -> None:
+            order.append("queued")
+
+        await heartbeat._spawn_proactive("c1", long_turn())
+        await asyncio.sleep(0)
+        assert heartbeat._proactive_busy("c1") and not heartbeat._proactive_busy("c2")
+        await heartbeat._spawn_proactive("c1", queued(), after_running=True)
+        await asyncio.sleep(0)
+        assert order == ["long:start"]  # queued waits; the poller was not blocked
+        release.set()
+        await asyncio.gather(*heartbeat._PROACTIVE_IN_FLIGHT.values())
+        assert not heartbeat._proactive_busy("c1")
+
+    asyncio.run(scenario())
+    assert order == ["long:start", "long:end", "queued"]

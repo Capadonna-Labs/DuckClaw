@@ -74,7 +74,10 @@ MEDITATE_DEFAULT_DELTA_SECONDS = int(os.getenv("MEDITATE_DELTA_SECONDS", "14400"
 GITHUB_MCP_HEALTH_SECONDS = float(os.getenv("DUCKCLAW_GITHUB_MCP_HEALTH_SECONDS", "300"))
 _GITHUB_PAT_401_AUDIT_COOLDOWN_KEY = "duckclaw:heartbeat:github_pat_401_audit_v1"
 # POST a /api/v1/agent/chat para jobs proactivos que pueden ejecutar varias tools.
-_GOALS_PROACTIVE_HTTP_TIMEOUT = float(os.environ.get("DUCKCLAW_GOALS_PROACTIVE_HTTP_TIMEOUT", "300"))
+# Proactive turns run in the background (see _spawn_proactive), so this only guards against a
+# hung Gateway; agent turns themselves may legitimately run for hours.
+# ponytail: one fixed cap for every chat; per-worker caps if some agent needs more than 6 h.
+_GOALS_PROACTIVE_HTTP_TIMEOUT = float(os.environ.get("DUCKCLAW_GOALS_PROACTIVE_HTTP_TIMEOUT", "21600"))
 TAILSCALE_AUTH_KEY = os.getenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
 
 # Una advertencia corta por ruta cuando el .duckdb no abre (p. ej. WAL inconsistente); evita spam cada poll.
@@ -246,6 +249,49 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
         return verdict[:80], rest if len(rest) <= 140 else rest[:139] + "…"
     body = clean(text) or "Ciclo proactivo ejecutado."
     return "DuckClaw · ciclo /loop", body if len(body) <= 140 else body[:139] + "…"
+
+
+# One proactive turn per chat at a time, run as a background task: a long turn neither blocks
+# the poll loop (loop ticks, crons, homeostasis) nor stacks a second turn on the same vault lock.
+# The dict also keeps a strong reference so the task is not garbage-collected mid-flight.
+_PROACTIVE_IN_FLIGHT: Dict[str, "asyncio.Task[None]"] = {}
+# Tests flip this to await turns inline.
+PROACTIVE_TURNS_IN_BACKGROUND = True
+
+
+def _proactive_busy(chat_id: Any) -> bool:
+    task = _PROACTIVE_IN_FLIGHT.get(str(chat_id))
+    return task is not None and not task.done()
+
+
+async def _spawn_proactive(chat_id: Any, coro: Any, *, after_running: bool = False) -> None:
+    """Run ``coro`` (a proactive turn + its push) without blocking the poller.
+
+    ``after_running`` queues it behind the chat's running turn instead of overlapping (used by
+    wall crons, which only fire in their exact minute and would otherwise lose the slot).
+    """
+    key = str(chat_id)
+    prev = _PROACTIVE_IN_FLIGHT.get(key) if after_running else None
+
+    async def _run() -> None:
+        if prev is not None and not prev.done():
+            await asyncio.wait({prev})
+        try:
+            await coro
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("proactive turn failed chat=%s: %s", key, exc)
+
+    if not PROACTIVE_TURNS_IN_BACKGROUND:
+        await _run()
+        return
+    task = asyncio.create_task(_run())
+    _PROACTIVE_IN_FLIGHT[key] = task
+
+    def _done(t: "asyncio.Task[None]") -> None:
+        if _PROACTIVE_IN_FLIGHT.get(key) is t:
+            _PROACTIVE_IN_FLIGHT.pop(key, None)
+
+    task.add_done_callback(_done)
 
 
 async def _send_web_push_notification(*, title: str, body: str, url: str = "/", tag: str = "duckclaw") -> None:
@@ -635,10 +681,11 @@ async def _run_goals_proactive_tick_one_db(
         if delta_prompt:
             payload["user_incoming"] = f"[Cron] {delta_prompt}"
         _attach_scanned_vault(payload, db_path)
-        url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
-        # Claim the slot before posting: a turn can outlive the HTTP timeout and still finish in
-        # the Gateway; marking only on success re-fired every poll (45 s) and stacked turns on
-        # the same vault lock. A failed tick now waits for the next interval.
+        if _proactive_busy(chat_id):
+            logger.debug("goals_proactive: chat=%s con turno en curso; espera", chat_id)
+            continue
+        # Claim the slot before posting: a failed tick waits for the next interval instead of
+        # re-firing every poll.
         await _enqueue_chat_state_write(
             db_path=db_path,
             chat_id=chat_id,
@@ -646,49 +693,17 @@ async def _run_goals_proactive_tick_one_db(
             key=_GOALS_PROACTIVE_LAST_FIRE_KEY,
             value=str(now),
         )
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    url,
-                    params={"tenant_id": tenant_id, "deliver_outbound": "1"},
-                    json=payload,
-                    headers=headers,
-                    timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
-                )
-        except Exception as exc:  # noqa: BLE001
-            logger.exception(
-                "goals_proactive: error HTTP chat=%s worker=%s: %s",
-                chat_id,
-                worker_id,
-                exc,
-            )
-            continue
-
-        if 200 <= resp.status_code < 300:
-            logger.info(
-                "goals_proactive: tick OK chat=%s worker=%s",
-                chat_id,
-                worker_id,
-            )
-            # Watch-friendly: "Veredicto:" line as title, nothing on "sin novedades".
-            parts = _loop_push_parts(resp.text)
-            if parts is None:
-                logger.info("web_push: omitida tag=duckclaw-goals-%s (veredicto sin novedades)", chat_id)
-            else:
-                has_verdict = parts[0] != "DuckClaw · ciclo /loop"
-                await _send_web_push_notification(
-                    title=parts[0] if has_verdict else "DuckClaw",
-                    body=parts[1] if has_verdict else "Revisión proactiva completada.",
-                    url="/admin/playground",
-                    tag=f"duckclaw-goals-{chat_id}",
-                )
-        else:
-            logger.warning(
-                "goals_proactive: HTTP %s chat=%s body=%s",
-                resp.status_code,
-                chat_id,
-                (resp.text or "")[:200],
-            )
+        await _spawn_proactive(
+            chat_id,
+            _deliver_goals_delta_turn(
+                url=_agent_chat_url_for_worker(GATEWAY_URL, worker_id),
+                payload=payload,
+                headers=headers,
+                chat_id=chat_id,
+                tenant_id=tenant_id,
+                worker_id=worker_id,
+            ),
+        )
 
     wall_poll = float(GOALS_TICKER_POLL_SECONDS)
     for wrow in wrows or []:
@@ -703,6 +718,78 @@ async def _run_goals_proactive_tick_one_db(
         await _run_wall_items_for_chat(
             db_path, chat_id_w, items, now=now, wall_poll=wall_poll, headers=headers
         )
+
+
+async def _deliver_goals_delta_turn(
+    *, url: str, payload: Dict[str, Any], headers: Dict[str, str], chat_id: Any, tenant_id: str, worker_id: str
+) -> None:
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                params={"tenant_id": tenant_id, "deliver_outbound": "1"},
+                json=payload,
+                headers=headers,
+                timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("goals_proactive: error HTTP chat=%s worker=%s: %s", chat_id, worker_id, exc)
+        return
+    if not (200 <= resp.status_code < 300):
+        logger.warning("goals_proactive: HTTP %s chat=%s body=%s", resp.status_code, chat_id, (resp.text or "")[:200])
+        return
+    logger.info("goals_proactive: tick OK chat=%s worker=%s", chat_id, worker_id)
+    # Watch-friendly: "Veredicto:" line as title, nothing on "sin novedades".
+    parts = _loop_push_parts(resp.text)
+    if parts is None:
+        logger.info("web_push: omitida tag=duckclaw-goals-%s (veredicto sin novedades)", chat_id)
+        return
+    has_verdict = parts[0] != "DuckClaw · ciclo /loop"
+    await _send_web_push_notification(
+        title=parts[0] if has_verdict else "DuckClaw",
+        body=parts[1] if has_verdict else "Revisión proactiva completada.",
+        url="/admin/playground",
+        tag=f"duckclaw-goals-{chat_id}",
+    )
+
+
+async def _deliver_wall_cron_turn(
+    *, payload: Dict[str, Any], headers: Dict[str, str], chat_id: Any, tenant_id: str,
+    worker_id: str, cron_id: Any, prompt: str,
+) -> None:
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                _agent_chat_url_for_worker(GATEWAY_URL, worker_id),
+                params={"tenant_id": tenant_id, "deliver_outbound": "1"},
+                json=payload,
+                headers=headers,
+                timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
+            )
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("goals_proactive_wall: error HTTP chat=%s cron=%s: %s", chat_id, cron_id, exc)
+        return
+    if not (200 <= resp.status_code < 300):
+        logger.warning(
+            "goals_proactive_wall: HTTP %s chat=%s cron=%s body=%s",
+            resp.status_code, chat_id, cron_id, (resp.text or "")[:200],
+        )
+        return
+    logger.info("goals_proactive_wall: tick OK chat=%s cron=%s worker=%s", chat_id, cron_id, worker_id)
+    # Same watch-friendly push as the loop: the reply's "Veredicto:" line is the title and
+    # "sin novedades" sends nothing; replies without a verdict keep the generic text.
+    parts = _loop_push_parts(resp.text)
+    tag = f"duckclaw-goals-wall-{chat_id}-{cron_id}"
+    if parts is None:
+        logger.info("web_push: omitida tag=%s (veredicto sin novedades)", tag)
+        return
+    has_verdict = parts[0] != "DuckClaw · ciclo /loop"
+    await _send_web_push_notification(
+        title=parts[0] if has_verdict else "DuckClaw",
+        body=parts[1] if has_verdict else (f"Cron completado: {prompt[:80]}" if prompt else "Recordatorio programado completado."),
+        url="/admin/playground",
+        tag=tag,
+    )
 
 
 async def _run_wall_items_for_chat(
@@ -789,47 +876,19 @@ async def _run_wall_items_for_chat(
         if prompt:
             # What the chat history shows as the "user" line of this turn.
             payload["user_incoming"] = f"[Cron] {prompt}"
-        try:
-            async with httpx.AsyncClient() as client:
-                resp = await client.post(
-                    _agent_chat_url_for_worker(GATEWAY_URL, worker_id),
-                    params={"tenant_id": tenant_id, "deliver_outbound": "1"},
-                    json=payload,
-                    headers=headers,
-                    timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
-                )
-        except Exception as exc:  # noqa: BLE001
-            resp = None
-            logger.exception("goals_proactive_wall: error HTTP chat=%s cron=%s: %s", chat_id, item.get("id"), exc)
-        # A failed or timed-out run still counts as this slot's run: the Gateway may finish the
-        # turn anyway, and retrying every poll (45 s) stacked turns on the same vault lock.
+        # The slot counts as run once posted (a failed run is not retried: it would re-fire every
+        # poll of this minute). The turn runs in the background, queued behind any running one.
         changed = True
         if str(item.get("kind") or "").strip().lower() != "once":
             kept.append({**item, "last_fire": now})
-        if resp is None:
-            continue
-        if not (200 <= resp.status_code < 300):
-            logger.warning(
-                "goals_proactive_wall: HTTP %s chat=%s cron=%s body=%s",
-                resp.status_code, chat_id, item.get("id"), (resp.text or "")[:200],
-            )
-            continue
-
-        logger.info("goals_proactive_wall: tick OK chat=%s cron=%s worker=%s", chat_id, item.get("id"), worker_id)
-        # Same watch-friendly push as the loop: the reply's "Veredicto:" line is the title and
-        # "sin novedades" sends nothing; replies without a verdict keep the generic text.
-        parts = _loop_push_parts(resp.text)
-        tag = f"duckclaw-goals-wall-{chat_id}-{item.get('id')}"
-        if parts is None:
-            logger.info("web_push: omitida tag=%s (veredicto sin novedades)", tag)
-        else:
-            has_verdict = parts[0] != "DuckClaw · ciclo /loop"
-            await _send_web_push_notification(
-                title=parts[0] if has_verdict else "DuckClaw",
-                body=parts[1] if has_verdict else (f"Cron completado: {prompt[:80]}" if prompt else "Recordatorio programado completado."),
-                url="/admin/playground",
-                tag=tag,
-            )
+        await _spawn_proactive(
+            chat_id,
+            _deliver_wall_cron_turn(
+                payload=payload, headers=headers, chat_id=chat_id, tenant_id=tenant_id,
+                worker_id=worker_id, cron_id=item.get("id"), prompt=prompt,
+            ),
+            after_running=True,
+        )
 
     if changed:
         try:
@@ -991,6 +1050,9 @@ async def _run_loop_proactive_tick_one_db(
             except Exception:
                 pass
 
+        if _proactive_busy(chat_id):
+            logger.debug("meditate_proactive: chat=%s con turno en curso; espera", chat_id)
+            continue
         # In-flight guard for concurrent Heartbeat/Gateway pollers. Cleared on
         # success/failure below — never leave pending=1 after a completed tick
         # (that forced silence >= 2× interval while the footer promised 1×).
@@ -1003,85 +1065,63 @@ async def _run_loop_proactive_tick_one_db(
                 value="1",
             )
 
-        try:
-            result = await post_loop_self_tick_async(
-                chat_id=chat_id,
-                tenant_id=tenant_id,
-                worker_id=worker_id,
-                message=message,
-                headers=headers or {},
-                vault_db_path=db_path,
-            )
-            if not result.get("ok"):
-                logger.warning(
-                    "meditate_proactive: HTTP failed chat=%s status=%s err=%s",
-                    chat_id,
-                    result.get("status_code"),
-                    result.get("error") or result.get("body"),
+        async def _deliver_loop_turn(
+            chat_id: Any, tenant_id: str, worker_id: str, message: str, idle_mode: bool, active_mode: bool
+        ) -> None:
+            try:
+                result = await post_loop_self_tick_async(
+                    chat_id=chat_id,
+                    tenant_id=tenant_id,
+                    worker_id=worker_id,
+                    message=message,
+                    headers=headers or {},
+                    timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
+                    vault_db_path=db_path,
                 )
-                if idle_mode:
-                    await _enqueue_chat_state_write(
-                        db_path=db_path,
-                        chat_id=chat_id,
-                        tenant_id=tenant_id,
-                        key=LOOP_PENDING_TICK_KEY,
-                        value="0",
+                if not result.get("ok"):
+                    logger.warning(
+                        "meditate_proactive: HTTP failed chat=%s status=%s err=%s",
+                        chat_id,
+                        result.get("status_code"),
+                        result.get("error") or result.get("body"),
                     )
-                continue
-            logger.info("meditate_proactive: tick OK chat=%s worker=%s", chat_id, worker_id)
-            await _enqueue_chat_state_write(
-                db_path=db_path,
-                chat_id=chat_id,
-                tenant_id=tenant_id,
-                key=LOOP_CATCHUP_DUE_KEY,
-                value="0",
-            )
-            # One push per tick, verdict as title (watch-friendly); none when nothing new.
-            parts = _loop_push_parts(result.get("body"))
-            if parts is None:
-                logger.info("web_push: omitida tag=duckclaw-loop-%s (veredicto sin novedades)", chat_id)
-            else:
-                await _send_web_push_notification(
-                    title=parts[0],
-                    body=parts[1],
-                    url="/admin/playground",
-                    tag=f"duckclaw-loop-{chat_id}",
-                )
-            if idle_mode:
-                # Re-anchor even when gateway skip persist/touch (Telegram SYSTEM_EVENT).
+                    if idle_mode:
+                        await _enqueue_chat_state_write(
+                            db_path=db_path,
+                            chat_id=chat_id,
+                            tenant_id=tenant_id,
+                            key=LOOP_PENDING_TICK_KEY,
+                            value="0",
+                        )
+                    return
+                logger.info("meditate_proactive: tick OK chat=%s worker=%s", chat_id, worker_id)
                 await _enqueue_chat_state_write(
                     db_path=db_path,
                     chat_id=chat_id,
                     tenant_id=tenant_id,
-                    key=LOOP_LAST_ACTIVITY_KEY,
-                    value=str(time.time()),
-                )
-                await _enqueue_chat_state_write(
-                    db_path=db_path,
-                    chat_id=chat_id,
-                    tenant_id=tenant_id,
-                    key=LOOP_PENDING_TICK_KEY,
+                    key=LOOP_CATCHUP_DUE_KEY,
                     value="0",
                 )
-                if active_mode:
+                # One push per tick, verdict as title (watch-friendly); none when nothing new.
+                parts = _loop_push_parts(result.get("body"))
+                if parts is None:
+                    logger.info("web_push: omitida tag=duckclaw-loop-%s (veredicto sin novedades)", chat_id)
+                else:
+                    await _send_web_push_notification(
+                        title=parts[0],
+                        body=parts[1],
+                        url="/admin/playground",
+                        tag=f"duckclaw-loop-{chat_id}",
+                    )
+                if idle_mode:
+                    # Re-anchor even when gateway skip persist/touch (Telegram SYSTEM_EVENT).
                     await _enqueue_chat_state_write(
                         db_path=db_path,
                         chat_id=chat_id,
                         tenant_id=tenant_id,
-                        key=LOOP_AWAITING_USER_KEY,
-                        value="0",
+                        key=LOOP_LAST_ACTIVITY_KEY,
+                        value=str(time.time()),
                     )
-            else:
-                await _enqueue_chat_state_write(
-                    db_path=db_path,
-                    chat_id=chat_id,
-                    tenant_id=tenant_id,
-                    key=_MEDITATE_LAST_FIRE_KEY,
-                    value=str(now),
-                )
-        except Exception as exc:  # noqa: BLE001
-            if idle_mode:
-                try:
                     await _enqueue_chat_state_write(
                         db_path=db_path,
                         chat_id=chat_id,
@@ -1089,9 +1129,39 @@ async def _run_loop_proactive_tick_one_db(
                         key=LOOP_PENDING_TICK_KEY,
                         value="0",
                     )
-                except Exception:  # noqa: BLE001
-                    pass
-            logger.exception("meditate_proactive: invoke failed chat=%s: %s", chat_id, exc)
+                    if active_mode:
+                        await _enqueue_chat_state_write(
+                            db_path=db_path,
+                            chat_id=chat_id,
+                            tenant_id=tenant_id,
+                            key=LOOP_AWAITING_USER_KEY,
+                            value="0",
+                        )
+                else:
+                    await _enqueue_chat_state_write(
+                        db_path=db_path,
+                        chat_id=chat_id,
+                        tenant_id=tenant_id,
+                        key=_MEDITATE_LAST_FIRE_KEY,
+                        value=str(now),
+                    )
+            except Exception as exc:  # noqa: BLE001
+                if idle_mode:
+                    try:
+                        await _enqueue_chat_state_write(
+                            db_path=db_path,
+                            chat_id=chat_id,
+                            tenant_id=tenant_id,
+                            key=LOOP_PENDING_TICK_KEY,
+                            value="0",
+                        )
+                    except Exception:  # noqa: BLE001
+                        pass
+                logger.exception("meditate_proactive: invoke failed chat=%s: %s", chat_id, exc)
+
+        await _spawn_proactive(
+            chat_id, _deliver_loop_turn(chat_id, tenant_id, worker_id, message, idle_mode, active_mode)
+        )
 
 
 async def _docker_daemon_reachable() -> bool:

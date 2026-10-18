@@ -15,6 +15,12 @@ import pytest
 import services.heartbeat.main as heartbeat
 
 
+@pytest.fixture(autouse=True)
+def _proactive_turns_inline(monkeypatch: Any) -> None:
+    """Await proactive turns inside the tick so assertions see their effects."""
+    monkeypatch.setattr(heartbeat, "PROACTIVE_TURNS_IN_BACKGROUND", False)
+
+
 def test_wall_cron_prompt_posts_the_scanned_vault(monkeypatch: pytest.MonkeyPatch) -> None:
     vault = "/data/private/owner1/worker_db.duckdb"
     state = {"worker_id": "worker_a", heartbeat._GOALS_PROACTIVE_TENANT_KEY: "tenant-x"}

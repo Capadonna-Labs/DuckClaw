@@ -16,6 +16,12 @@ import pytest
 import services.heartbeat.main as heartbeat
 
 
+@pytest.fixture(autouse=True)
+def _proactive_turns_inline(monkeypatch: Any) -> None:
+    """Await proactive turns inside the tick so assertions see their effects."""
+    monkeypatch.setattr(heartbeat, "PROACTIVE_TURNS_IN_BACKGROUND", False)
+
+
 class _ScanDb:
     def __init__(self, rows: dict[str, str]) -> None:
         self._rows = rows

@@ -116,7 +116,7 @@ async def run_voice_pipeline(
         stt = SensorySegmentedSTT.build(base_url=sensory_url)
     elif cfg.duckclaw_voice_stt_provider.strip().lower() == "elevenlabs":
         # Scribe: far more accurate than the local model on short Spanish turns (which
-        # produced 'K-O-K-O-L' / 'Instagram MQL5' from noise). Keyterms bias skill names.
+        # produced 'K-O-K-O-L' / 'Instagram Facebook' from noise). Keyterms bias skill names.
         import aiohttp
         from pipecat.services.elevenlabs.stt import ElevenLabsSTTService, ElevenLabsSTTSettings
         from pipecat.transcriptions.language import Language

@@ -49,7 +49,7 @@ def test_browser_sandbox_accepts_url_without_code(monkeypatch: object) -> None:
 
 
 def test_browser_sandbox_tool_includes_stdout_and_stderr_tails() -> None:
-    payload = '{"extracted": true, "source": "mql5"}\n'
+    payload = '{"extracted": true, "source": "example"}\n'
     fake = ExecutionResult(
         exit_code=0,
         stdout=payload,

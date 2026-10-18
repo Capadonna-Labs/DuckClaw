@@ -8,7 +8,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 
 def _msgs_with_sql(n: int) -> list:
-    out: list = [HumanMessage(content="profundiza NVDA")]
+    out: list = [HumanMessage(content="profundiza ACME")]
     for i in range(n):
         out.append(AIMessage(content="", tool_calls=[{"name": "read_sql", "args": {}, "id": f"c{i}"}]))
         out.append(ToolMessage(content=f"rows {i}", name="read_sql", tool_call_id=f"c{i}"))
@@ -92,9 +92,9 @@ def test_apply_terminal_clears_force_read_sql_on_thrash() -> None:
         force_read,
         *_rest,
     ) = apply_terminal_force_tool_overrides(
-        incoming="profundiza NVDA OHLCV",
-        orch_incoming="profundiza NVDA OHLCV",
-        intent_incoming="profundiza NVDA OHLCV",
+        incoming="profundiza ACME OHLCV",
+        orch_incoming="profundiza ACME OHLCV",
+        intent_incoming="profundiza ACME OHLCV",
         tools_by_name={"read_sql": object(), "tavily_search": object()},
         called_tools_since_last_human={"read_sql"},  # set alone is not enough
         already_has_tool_result=True,

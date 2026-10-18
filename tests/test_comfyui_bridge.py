@@ -225,10 +225,10 @@ def test_state_delta_base_uses_gateway_hub_not_worker_vault(monkeypatch: pytest.
     )
     monkeypatch.setattr(
         "duckclaw.runtime_tool_context.tool_user_id",
-        lambda: "1726618406",
+        lambda: "123456789",
     )
     base = _state_delta_base()
     assert base["target_db_path"] == hub
     assert base["target_db_path"] != worker_vault
     assert base["tenant_id"] == "Cuantitativo"
-    assert base["user_id"] == "1726618406"
+    assert base["user_id"] == "123456789"

@@ -19,7 +19,7 @@ def _err(sql: str):
 @pytest.mark.parametrize(
     "sql",
     [
-        "SELECT * FROM demo_core.ohlcv_data WHERE ticker = 'MU'",
+        "SELECT * FROM demo_core.ohlcv_data WHERE ticker = 'X1'",
         "SELECT a.ticker FROM demo_core.ohlcv_data a JOIN demo_core.backtest_results b ON a.ticker = b.ticker",
         "INSERT INTO demo_core.backtest_results (strategy_name) VALUES ('x')",
         "WITH w AS (SELECT * FROM demo_core.ohlcv_data) SELECT * FROM w",

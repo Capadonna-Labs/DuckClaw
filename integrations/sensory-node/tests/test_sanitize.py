@@ -15,7 +15,7 @@ def test_sanitize_strips_tables_and_bullets():
     raw = """## Resumen
 | Activo | Valor |
 | --- | --- |
-| NVDA | 100 |
+| ACME | 100 |
 - punto uno
 - punto dos
 """
@@ -23,7 +23,7 @@ def test_sanitize_strips_tables_and_bullets():
     assert "|" not in out
     assert "---" not in out
     assert "##" not in out
-    assert "NVDA" in out
+    assert "ACME" in out
     assert "punto uno" in out
 
 

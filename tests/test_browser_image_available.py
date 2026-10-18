@@ -32,7 +32,7 @@ def test_run_browser_sandbox_fast_fail_missing_image(monkeypatch: pytest.MonkeyP
 
     monkeypatch.setattr(sb, "browser_image_available", lambda: False)
     tool = sb.browser_sandbox_tool_factory(db=None, llm=None)
-    raw = tool.invoke({"url": "https://www.mql5.com/es/code/1"})
+    raw = tool.invoke({"url": "https://example.com/es/code/1"})
     import json
 
     payload = json.loads(raw)

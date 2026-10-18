@@ -47,7 +47,7 @@ def test_button_labels_filtered() -> None:
 def test_cluster_full_width_rows() -> None:
     raw = (
         '<node text="WhatsApp" bounds="[0,360][1080,420]"/>'
-        '<node text="Nuevo mensaje de Juan" bounds="[0,420][1080,510]"/>'
+        '<node text="Nuevo mensaje de Ana" bounds="[0,420][1080,510]"/>'
         '<node text="Sí" bounds="[45,179][529,346]"/>'
         '<node text="Sistema Android" bounds="[0,200][1080,350]"/>'
     )
@@ -60,7 +60,7 @@ def test_cluster_full_width_rows() -> None:
     sys_row = next(r for r in rows if r["title"] == "Sistema Android")
     assert sys_row["action"] == "SKIP"
     wa = next(r for r in rows if r["title"] == "WhatsApp")
-    assert "Juan" in (wa.get("body") or "")
+    assert "Ana" in (wa.get("body") or "")
     assert wa["action"] == "DISMISS"
 
 

@@ -111,7 +111,7 @@ def _heartbeat_runtime_db(db: Any = None) -> Any:
 
 def normalize_telegram_chat_id_for_outbound(chat_id: str | None) -> str:
     """
-    Algunos clientes mandan un etiquetado tipo «@Juan (1726618406)».
+    Algunos clientes mandan un etiquetado tipo «@Usuario (123456789)».
     Telegram sendMessage/sendPhoto exige el id numérico; el webhook outbound debe recibirlo así.
     """
     s = str(chat_id or "").strip()

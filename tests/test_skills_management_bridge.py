@@ -35,7 +35,7 @@ def test_create_skill_directive_dispatches_upsert_command(monkeypatch) -> None:
 
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("juan@example.com", "/tmp/vault.duckdb"),
+        lambda db: ("ana@example.com", "/tmp/vault.duckdb"),
     )
 
     def _fake_dispatch(db, command, *, actor, db_path):
@@ -49,32 +49,32 @@ def test_create_skill_directive_dispatches_upsert_command(monkeypatch) -> None:
 
     out = json.loads(
         _upsert_skill_impl(
-            object(), "radar_watchlist", "Vigilar SNX y WOR", "directive", "user-juan-tenant"
+            object(), "team_digest", "Resumen semanal del equipo", "directive", "user-ana-tenant"
         )
     )
 
     assert out["ok"] is True
-    assert out["name"] == "radar_watchlist"
-    assert "/radar_watchlist" in out["message"]
+    assert out["name"] == "team_digest"
+    assert "/team_digest" in out["message"]
     assert len(calls) == 1
     command, actor, db_path = calls[0]
-    assert command.name == "radar_watchlist"
+    assert command.name == "team_digest"
     assert command.skill_type == "directive"
-    assert command.implementation_ref == "directive://radar_watchlist"
-    assert command.description == "Vigilar SNX y WOR"
+    assert command.implementation_ref == "directive://team_digest"
+    assert command.description == "Resumen semanal del equipo"
     # Regression: tenant_id used to be left at the Pydantic default ("default")
     # instead of the caller's real tenant, so DB-Writer rejected every write
     # with "Tenant mismatch for actor" — silently, since dispatch always
     # reported ok=True anyway (see test_dispatch_skill_command_* below).
-    assert command.tenant_id == "user-juan-tenant"
-    assert actor == "juan@example.com"
+    assert command.tenant_id == "user-ana-tenant"
+    assert actor == "ana@example.com"
     assert db_path == "/tmp/vault.duckdb"
 
 
 def test_create_skill_python_notes_metadata_only_limitation(monkeypatch) -> None:
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("juan@example.com", "/tmp/vault.duckdb"),
+        lambda db: ("ana@example.com", "/tmp/vault.duckdb"),
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._dispatch_skill_command",
@@ -94,13 +94,13 @@ def test_upsert_skill_rejects_empty_name_or_description() -> None:
 def test_upsert_skill_reports_dispatch_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("juan@example.com", "/tmp/vault.duckdb"),
+        lambda db: ("ana@example.com", "/tmp/vault.duckdb"),
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._dispatch_skill_command",
-        lambda db, command, *, actor, db_path: (False, "Catalog skill name already exists: radar_watchlist"),
+        lambda db, command, *, actor, db_path: (False, "Catalog skill name already exists: team_digest"),
     )
-    out = json.loads(_upsert_skill_impl(object(), "radar_watchlist", "desc"))
+    out = json.loads(_upsert_skill_impl(object(), "team_digest", "desc"))
     assert out["ok"] is False
     assert "already exists" in out["error"]
 
@@ -108,15 +108,15 @@ def test_upsert_skill_reports_dispatch_failure(monkeypatch) -> None:
 def test_list_skills_queries_admin_skills_scoped_to_tenant_and_actor(monkeypatch) -> None:
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("juan@example.com", "/tmp/vault.duckdb"),
+        lambda db: ("ana@example.com", "/tmp/vault.duckdb"),
     )
 
     class _Db:
         def query(self, sql: str) -> str:
             assert "admin_skills" in sql
             assert "tenant_id IN ('default', 'framework')" in sql
-            assert "owner_email = 'juan@example.com'" in sql
-            return json.dumps([{"name": "radar_watchlist", "skill_type": "directive"}])
+            assert "owner_email = 'ana@example.com'" in sql
+            return json.dumps([{"name": "team_digest", "skill_type": "directive"}])
 
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._open_hub_read_only",
@@ -124,7 +124,7 @@ def test_list_skills_queries_admin_skills_scoped_to_tenant_and_actor(monkeypatch
     )
     out = json.loads(_list_skills_impl(object(), "default"))
     assert out["ok"] is True
-    assert out["skills"] == [{"name": "radar_watchlist", "skill_type": "directive"}]
+    assert out["skills"] == [{"name": "team_digest", "skill_type": "directive"}]
 
 
 def test_list_skills_escapes_single_quotes_in_actor_email(monkeypatch) -> None:
@@ -168,7 +168,7 @@ def test_deactivate_skill_dispatches_deactivate_command(monkeypatch) -> None:
     calls: list = []
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("juan@example.com", "/tmp/vault.duckdb"),
+        lambda db: ("ana@example.com", "/tmp/vault.duckdb"),
     )
 
     def _fake_dispatch(db, command, *, actor, db_path):
@@ -179,10 +179,10 @@ def test_deactivate_skill_dispatches_deactivate_command(monkeypatch) -> None:
         "duckclaw.forge.skills.skills_management_bridge._dispatch_skill_command",
         _fake_dispatch,
     )
-    out = json.loads(_deactivate_skill_impl(object(), "radar_watchlist", "user-juan-tenant"))
+    out = json.loads(_deactivate_skill_impl(object(), "team_digest", "user-ana-tenant"))
     assert out["ok"] is True
-    assert calls[0].name == "radar_watchlist"
-    assert calls[0].tenant_id == "user-juan-tenant"
+    assert calls[0].name == "team_digest"
+    assert calls[0].tenant_id == "user-ana-tenant"
 
 
 def test_dispatch_skill_command_reports_db_writer_failure(monkeypatch) -> None:
@@ -198,12 +198,12 @@ def test_dispatch_skill_command_reports_db_writer_failure(monkeypatch) -> None:
     monkeypatch.setattr(
         "duckclaw.db_write_fire_and_forget.wait_write_task",
         lambda task_id, timeout_sec: DbWriteTaskStatus(
-            status="failed", detail="Tenant mismatch for actor: juan@example.com"
+            status="failed", detail="Tenant mismatch for actor: ana@example.com"
         ),
     )
 
     ok, err = _dispatch_skill_command(
-        object(), object(), actor="juan@example.com", db_path="/tmp/vault.duckdb"
+        object(), object(), actor="ana@example.com", db_path="/tmp/vault.duckdb"
     )
     assert ok is False
     assert "Tenant mismatch" in err
@@ -227,7 +227,7 @@ def test_dispatch_skill_command_never_claims_success_on_timeout(monkeypatch) -> 
     )
 
     ok, err = _dispatch_skill_command(
-        object(), object(), actor="juan@example.com", db_path="/tmp/vault.duckdb"
+        object(), object(), actor="ana@example.com", db_path="/tmp/vault.duckdb"
     )
     assert ok is False
     assert "task-456" in err
@@ -238,7 +238,7 @@ def test_list_skills_fits_the_tool_output_cap_with_many_long_directives(monkeypa
     alphabetical tail (newest skills) vanished; the agent then reported them as unsaved."""
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("juan@example.com", "/tmp/hub.duckdb"),
+        lambda db: ("ana@example.com", "/tmp/hub.duckdb"),
     )
     rows = [{"name": f"skill_{i:02d}", "skill_type": "directive", "description": "x" * 1024} for i in range(15)]
 
@@ -257,7 +257,7 @@ def test_list_skills_by_name_returns_the_full_text(monkeypatch) -> None:
     """edit_skill replaces the whole description; appending needs the untruncated text."""
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("juan@example.com", "/tmp/hub.duckdb"),
+        lambda db: ("ana@example.com", "/tmp/hub.duckdb"),
     )
     full = "1. paso\n" * 400
     rows = [
@@ -285,7 +285,7 @@ def test_upsert_skill_rejects_oversized_text_with_exact_overflow(monkeypatch) ->
     )
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("juan@example.com", "/tmp/hub.duckdb"),
+        lambda db: ("ana@example.com", "/tmp/hub.duckdb"),
     )
     out = json.loads(_upsert_skill_impl(object(), "radar", "x" * 4855))
     assert out["ok"] is False and out["length"] == 4855 and out["max_length"] == 4096 and out["over_by"] == 759
@@ -295,7 +295,7 @@ def test_upsert_skill_rejects_oversized_text_with_exact_overflow(monkeypatch) ->
 
 def test_list_skills_in_a_scheduled_turn_sees_the_tenants_private_skills(monkeypatch) -> None:
     """Crons and /loop run with no interactive actor ("system"): a directive must still be able
-    to open another private skill of the tenant it names (e.g. /radar_watchlist)."""
+    to open another private skill of the tenant it names (e.g. /team_digest)."""
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
         lambda db: ("system", "/tmp/hub.duckdb"),
@@ -305,11 +305,11 @@ def test_list_skills_in_a_scheduled_turn_sees_the_tenants_private_skills(monkeyp
         def query(self, sql: str) -> str:
             assert "tenant_id IN ('t1', 'framework')" in sql
             assert "owner_email" not in sql.split("FROM", 1)[1]
-            return json.dumps([{"name": "radar_watchlist", "description": "x" * 900}])
+            return json.dumps([{"name": "team_digest", "description": "x" * 900}])
 
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._open_hub_read_only",
         lambda path: _Db(),
     )
-    out = json.loads(_list_skills_impl(object(), "t1", "/radar_watchlist"))
+    out = json.loads(_list_skills_impl(object(), "t1", "/team_digest"))
     assert out["count"] == 1 and len(out["skills"][0]["description"]) == 900

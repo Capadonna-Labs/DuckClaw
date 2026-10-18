@@ -47,9 +47,9 @@ def test_resolves_the_actors_real_tenant() -> None:
     import asyncio
 
     result = asyncio.run(
-        _run("juanjoarevalo57@gmail.com", {"tenant_id": "user-juanjoarevalo57-79c5ca60b91d4f3e"})
+        _run("owner@example.com", {"tenant_id": "user-owner-0000"})
     )
-    assert result == "user-juanjoarevalo57-79c5ca60b91d4f3e"
+    assert result == "user-owner-0000"
 
 
 def test_falls_back_to_default_when_profile_has_no_tenant() -> None:

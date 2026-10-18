@@ -76,7 +76,7 @@ class SovereignDraft(BaseModel):
 
     #: Telegram Guard: tu user_id numérico (quien ejecuta el wizard) → role admin al materializar.
     wizard_creator_telegram_user_id: str = ""
-    #: Nombre para mostrar del admin creador (columna username en authorized_users; ej. Juan).
+    #: Nombre para mostrar del admin creador (columna username en authorized_users; ej. Ana).
     wizard_creator_admin_display_name: str = ""
     #: IDs adicionales como admin, separados por coma (opcional).
     wizard_extra_admin_telegram_ids: str = ""

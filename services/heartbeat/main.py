@@ -320,7 +320,7 @@ async def _spawn_proactive(chat_id: Any, coro: Any, *, after_running: bool = Fal
 
 # Verdicts already pushed to the watch (48 h): fed back to each cron prompt so the agent does not
 # re-announce the same event. A "don't repeat" rule in the skill relied on the model reading the
-# chat history and failed (the same Ormuz/Brent alert went out 3 times on 18-Oct).
+# chat history and failed (the same news alert went out 3 times in one day).
 _VERDICTS_KEY = "duckclaw:watch_verdicts:{}"
 _VERDICTS_TTL_S = 48 * 3600
 _VERDICTS_KEEP = 20

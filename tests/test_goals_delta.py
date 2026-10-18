@@ -918,7 +918,7 @@ def test_wall_schedule_with_prompt_sends_that_prompt(tmp_path: Path, monkeypatch
     from duckclaw.runtime.scheduling.cron_wall_schedule import parse_cron_wall_tokens
 
     spec, _err = parse_cron_wall_tokens(["every", "09:00"])
-    spec["prompt"] = "/defense_watch"
+    spec["prompt"] = "/weekly_digest"
     con.execute(
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?), (?, ?), (?, ?)",
         [
@@ -957,8 +957,8 @@ def test_wall_schedule_with_prompt_sends_that_prompt(tmp_path: Path, monkeypatch
 
     assert len(posts) == 1
     body = posts[0]["json"]
-    assert body["message"] == "EXPANDED</defense_watch|user-x>"
-    assert body["user_incoming"] == "[Cron] /defense_watch"
+    assert body["message"] == "EXPANDED</weekly_digest|user-x>"
+    assert body["user_incoming"] == "[Cron] /weekly_digest"
 
 
 def test_heartbeat_fires_each_due_cron_and_keeps_its_own_last_fire(tmp_path: Path, monkeypatch: Any) -> None:
@@ -968,7 +968,7 @@ def test_heartbeat_fires_each_due_cron_and_keeps_its_own_last_fire(tmp_path: Pat
 
     every, _ = parse_cron_wall_tokens(["every", "09:00"])
     once, _ = parse_cron_wall_tokens(["once", "2099-10-06T15:45"])
-    items = [{**every, "id": "c1", "prompt": "/defense_watch"}, {**once, "id": "c2", "prompt": "earnings PENG"}]
+    items = [{**every, "id": "c1", "prompt": "/weekly_digest"}, {**once, "id": "c2", "prompt": "pedidos pendientes"}]
     db_path = str(tmp_path / "vault_multi.duckdb")
     con = duckdb.connect(db_path)
     con.execute(
@@ -1010,7 +1010,7 @@ def test_heartbeat_fires_each_due_cron_and_keeps_its_own_last_fire(tmp_path: Pat
 
     asyncio.run(heartbeat._run_goals_proactive_tick())
 
-    assert sorted(p["json"]["user_incoming"] for p in posts) == ["[Cron] /defense_watch", "[Cron] earnings PENG"]
+    assert sorted(p["json"]["user_incoming"] for p in posts) == ["[Cron] /weekly_digest", "[Cron] pedidos pendientes"]
     con2 = duckdb.connect(db_path)
     stored = json.loads(con2.execute("SELECT value FROM agent_config WHERE key='chat_89_goals_cron_wall'").fetchone()[0])
     con2.close()
@@ -1037,18 +1037,18 @@ def test_crons_delta_prompt_runs_prompt_without_goals_and_pushes_verdict(
     con.close()
 
     with DuckClaw(db_path, read_only=False) as db:
-        out = execute_goals(db, 61, '--delta 1h --prompt "/datos_alternativos"', tenant_id="analytics")
-    assert "/datos_alternativos" in (out or "")
+        out = execute_goals(db, 61, '--delta 1h --prompt "/news_scan"', tenant_id="analytics")
+    assert "/news_scan" in (out or "")
     with DuckClaw(db_path, read_only=True) as db:
         meta = json.loads(get_chat_state(db, 61, "goals_delta_meta") or "{}")
-    assert meta.get("prompt") == "/datos_alternativos"
+    assert meta.get("prompt") == "/news_scan"
     con = duckdb.connect(db_path)
     con.execute("UPDATE agent_config SET value = '' WHERE key = 'chat_61_goals_proactive_last_fire_epoch'")
     con.close()
 
     posts: list[dict[str, Any]] = []
     pushes: list[dict[str, Any]] = []
-    replies = iter(["Veredicto: Trump anuncia aranceles al acero\n\nDetalle…", "Veredicto: sin novedades"])
+    replies = iter(["Veredicto: API de pagos caída 40 min\n\nDetalle…", "Veredicto: sin novedades"])
 
     class Resp:
         status_code = 200
@@ -1083,9 +1083,9 @@ def test_crons_delta_prompt_runs_prompt_without_goals_and_pushes_verdict(
         con.close()
         asyncio.run(heartbeat._run_goals_proactive_tick())
 
-    assert [p["message"] for p in posts] == ["RUN /datos_alternativos"] * 2
-    assert posts[0]["user_incoming"] == "[Cron] /datos_alternativos"
-    assert [p["title"] for p in pushes] == ["Trump anuncia aranceles al acero"]
+    assert [p["message"] for p in posts] == ["RUN /news_scan"] * 2
+    assert posts[0]["user_incoming"] == "[Cron] /news_scan"
+    assert [p["title"] for p in pushes] == ["API de pagos caída 40 min"]
 
 
 def test_delta_tick_timeout_does_not_refire_next_poll(tmp_path: Path, monkeypatch: Any) -> None:
@@ -1201,9 +1201,9 @@ def test_pushed_verdicts_are_fed_back_to_the_next_cron(monkeypatch: Any) -> None
 
     async def scenario() -> tuple[str, str]:
         before = await heartbeat._already_notified_note("c1")
-        await heartbeat._remember_verdict("c1", "Brent 109,86 por ataques en Ormuz → XLE")
+        await heartbeat._remember_verdict("c1", "Pagos caídos 40 min en EU → checkout")
         return before, await heartbeat._already_notified_note("c1")
 
     before, after = asyncio.run(scenario())
     assert before == ""
-    assert "YA AVISADO" in after and "Brent 109,86 por ataques en Ormuz → XLE" in after
+    assert "YA AVISADO" in after and "Pagos caídos 40 min en EU → checkout" in after

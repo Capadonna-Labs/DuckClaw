@@ -54,7 +54,7 @@ def test_block_from_the_limit_on(monkeypatch) -> None:
 
 def test_block_carries_the_previous_result_even_after_earlier_blocks() -> None:
     args = {"state": "EU defense +8.6%", "questions": [{"type": "score"}]}
-    msgs = [HumanMessage("/defense_watch")]
+    msgs = [HumanMessage("/weekly_digest")]
     for i in range(3):
         msgs += [
             AIMessage(content="", tool_calls=[{"name": "jev_decide", "args": args, "id": f"j{i}"}]),

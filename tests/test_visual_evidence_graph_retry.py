@@ -21,7 +21,7 @@ def test_visual_evidence_retry_reason_constant() -> None:
     _, reason = enforce_visual_evidence_rule(
         incoming="x\n[VLM_CONTEXT h=1]",
         messages=[],
-        reply="SPY cotiza 450.25",
+        reply="ACME cotiza 450.25",
     )
     assert reason == VISUAL_EVIDENCE_RETRY_REASON
 

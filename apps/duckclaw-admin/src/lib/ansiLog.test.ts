@@ -84,9 +84,9 @@ describe('ansiLogParse', () => {
     // [TOOL]/[PLAN] rules) never ran — the line rendered in whatever color
     // the ANSI codes left behind, not yellow.
     const toolLine =
-      '2026-09-29 16:54:47 | [default:manager] | \x1b[38;5;133m@juanjoarevalo57@gmail.com\x1b[0m (\x1b[38;5;113madmin-conv-1cbb\x1b[0m) | [TOOL] inspect_custom_report -> OK (231ms)';
+      '2026-09-29 16:54:47 | [default:manager] | \x1b[38;5;133m@owner@example.com\x1b[0m (\x1b[38;5;113madmin-conv-1cbb\x1b[0m) | [TOOL] inspect_custom_report -> OK (231ms)';
     const planLine =
-      '2026-09-29 17:34:52 | [user:x] | \x1b[38;5;133m@juanjoarevalo57@gmail.com\x1b[0m (\x1b[38;5;113madmin-conv-1cbb\x1b[0m) | [PLAN] "Análisis de imagen financiera" | tasks: [...]';
+      '2026-09-29 17:34:52 | [user:x] | \x1b[38;5;133m@owner@example.com\x1b[0m (\x1b[38;5;113madmin-conv-1cbb\x1b[0m) | [PLAN] "Análisis de imagen financiera" | tasks: [...]';
 
     expect(hasAnsiCodes(toolLine)).toBe(true);
     expect(hasAnsiCodes(planLine)).toBe(true);

@@ -7,7 +7,7 @@ user_shared_db_access.
 
 Uso:
   uv run duckops db cleanup-default-tenant-schemas --inspect
-  uv run duckops db cleanup-default-tenant-schemas --path db/private/1726618406/default.duckdb --apply
+  uv run duckops db cleanup-default-tenant-schemas --path db/private/<user_id>/default.duckdb --apply
   uv run duckops db cleanup-default-tenant-schemas --all-defaults --apply
 """
 
@@ -176,7 +176,7 @@ def main() -> int:
     if args.all_defaults:
         paths.extend(_iter_default_duckdb_files())
     if not paths:
-        paths = [_REPO_ROOT / "db" / "private" / "1726618406" / "default.duckdb"]
+        parser.error("indica --path <default.duckdb> o --all-defaults")
 
     resolved = []
     for p in paths:

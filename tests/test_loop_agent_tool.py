@@ -136,10 +136,10 @@ def test_manage_chat_schedule_runs_crons_for_this_chat(monkeypatch: pytest.Monke
 
     set_goals_tool_chat_id("chat-9")
     set_goals_tool_tenant_id("tenant-a")
-    out = json.loads(tool.invoke({"command": '--timestamp every 09:00 dom --prompt "/defense_watch"'}))
+    out = json.loads(tool.invoke({"command": '--timestamp every 09:00 dom --prompt "/weekly_digest"'}))
     assert out["status"] == "ok" and "guardada" in out["result"]
     assert seen == {
         "chat_id": "chat-9",
-        "args": '--timestamp every 09:00 dom --prompt "/defense_watch"',
+        "args": '--timestamp every 09:00 dom --prompt "/weekly_digest"',
         "tenant_id": "tenant-a",
     }

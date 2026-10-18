@@ -121,7 +121,7 @@ export function TemplateVaultPanel({ workerId, canWrite }: TemplateVaultPanelPro
           value={vaultUserId}
           onChange={(e) => setVaultUserId(e.target.value)}
           className="mt-0.5 w-full font-mono text-xs px-2 py-1 rounded-lg border dark:border-dark-border dark:bg-dark-bg"
-          placeholder="1726618406"
+          placeholder="123456789"
         />
       </label>
       <label className="block text-[10px] font-bold text-gov-gray-500">

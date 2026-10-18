@@ -64,9 +64,9 @@ def _prepared(history: list[dict[str, Any]], vault: str = "/v/demo.duckdb"):
         message="hola",
         user_incoming="hola",
         chat_type="private",
-        username="juan",
-        user_id="juan",
-        vault_user_id="juan",
+        username="ana",
+        user_id="ana",
+        vault_user_id="ana",
         vault_db_path=vault,
         telegram_acl_for_guard=None,
         delivery_context=SimpleNamespace(),
@@ -111,17 +111,17 @@ def test_auto_compaction_summarizes_and_replaces_history(monkeypatch) -> None:
     history = _msgs(40, 4000)
     tail = history[-6:]
     saved: dict = {}
-    _patch_io(monkeypatch, fold_result=("resumen SNX/WOR", None, {"kept_history": tail}), saved=saved)
+    _patch_io(monkeypatch, fold_result=("resumen del proyecto", None, {"kept_history": tail}), saved=saved)
 
     new_prepared, compacted, summary = asyncio.run(
         _auto_compact_history_if_needed(_prepared(history), redis_client=object())
     )
 
-    assert summary == "resumen SNX/WOR"
+    assert summary == "resumen del proyecto"
     assert compacted == tail
     assert new_prepared.history_for_model == tail
     assert new_prepared.history_for_graph == tail
-    assert saved["summary"] == "resumen SNX/WOR"
+    assert saved["summary"] == "resumen del proyecto"
     assert saved["redis"] == tail
 
 

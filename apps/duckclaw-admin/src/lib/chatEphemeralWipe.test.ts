@@ -63,7 +63,7 @@ describe('writeEphemeralHeartbeats empty guard', () => {
 
   it('keeps heartbeats whose gateway worker_id differs from the UI worker', () => {
     const chatId = 'admin-conv-mismatch';
-    const hb: ChatMsg = { ...tool('tavily_search'), workerId: 'agent-1726618406' };
+    const hb: ChatMsg = { ...tool('tavily_search'), workerId: 'agent-123456789' };
     writeEphemeralHeartbeats(chatId, 'worker-a', [
       { role: 'user', text: 'busca noticias' },
       hb,

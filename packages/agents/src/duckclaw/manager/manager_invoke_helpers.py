@@ -85,7 +85,7 @@ def build_worker_cache_key(
         worker_cache_key = f"{worker_cache_key}::ctx_syn"
     elif url_research_mcp:
         low_url = (combined or "").strip().lower()
-        url_tag = "reddit" if "reddit.com" in low_url else ("mql5" if "mql5.com" in low_url else "url")
+        url_tag = "reddit" if "reddit.com" in low_url else "url"
         worker_cache_key = f"{worker_cache_key}::url_{url_tag}"
     else:
         low_full = (combined or "").strip().lower()

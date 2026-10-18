@@ -19,7 +19,7 @@ def test_fetch_operational_lessons_scopes_tenant_and_formats_rows() -> None:
     db = _Db(
         [
             {
-                "topic": "tool_skipped/CEG",
+                "topic": "tool_skipped/ACME",
                 "lesson": "Siempre verificar el precio antes de declarar TP.",
             }
         ]
@@ -27,7 +27,7 @@ def test_fetch_operational_lessons_scopes_tenant_and_formats_rows() -> None:
 
     result = fetch_operational_lessons(db, tenant_id="tenant'one")
 
-    assert "[tool_skipped/CEG]" in result
+    assert "[tool_skipped/ACME]" in result
     assert "verificar el precio" in result
     assert "tenant_id = 'tenant''one'" in db.sql
     assert "operational_lesson" in db.sql
@@ -49,7 +49,7 @@ def test_homeostasis_node_injects_lessons_only_for_proactive_ticks() -> None:
     ctx = type(
         "Ctx",
         (),
-        {"db": _Db([{"topic": "tool_skipped/CEG", "lesson": "Verifica el feed."}])},
+        {"db": _Db([{"topic": "tool_skipped/ACME", "lesson": "Verifica el feed."}])},
     )()
     node = make_homeostasis_node(ctx)
 

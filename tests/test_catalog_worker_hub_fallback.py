@@ -168,7 +168,7 @@ def test_load_manifest_falls_back_to_default_tenant_when_user_tenant_misses(
         spec = load_manifest_from_catalog(
             hub_ro,
             "data_analyst",
-            tenant_id="user-juanjoarevalo57-79c5ca60b91d4f3e",
+            tenant_id="user-owner-0000",
         )
         assert getattr(spec, "worker_id", None) == "data-analyst"
     finally:

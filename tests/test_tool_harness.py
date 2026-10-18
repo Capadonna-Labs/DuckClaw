@@ -98,7 +98,7 @@ def test_sandbox_nonzero_exit_counts_as_failure_and_trips_after_budget() -> None
     )
 
     failed = json.dumps({"exit_code": 1, "output": "Error en Sandbox: SyntaxError"})
-    ok = json.dumps({"exit_code": 0, "output": "SPY: 1000 obs"})
+    ok = json.dumps({"exit_code": 0, "output": "ACME: 1000 obs"})
     assert content_indicates_failure(failed)
     assert not content_indicates_failure(ok)
 

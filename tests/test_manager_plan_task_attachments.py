@@ -45,7 +45,7 @@ def test_long_brief_mentioning_nombre_and_datos_is_not_rewritten() -> None:
     'TAREA: el usuario quiere saber qué base de datos se está usando'."""
     brief = (
         "Revisé los logs. `root_hint` acepta el nombre de la raíz y la tool sugiere rutas. "
-        "Para la tabla de parámetros: 1. Deja solo los tickers con datos de 2022 (SPY, TLT, XLE). "
+        "Para la tabla de parámetros: 1. Deja solo los productos con datos de 2022 (A, B, C). "
         + "Detalle adicional del plan y sus restricciones. " * 8
     )
     planned, _ = _plan_task(brief, "demo-expert")

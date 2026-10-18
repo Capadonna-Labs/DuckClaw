@@ -212,11 +212,11 @@ def test_execute_goals_timestamp_with_prompt_stores_it(tmp_path: Path) -> None:
     con.close()
 
     with DuckClaw(db_path, read_only=False) as db:
-        out = execute_goals(db, 23, '--timestamp every 09:00 weekdays --prompt "/defense_watch"', tenant_id="default")
-    assert "Enviará: /defense_watch" in (out or "")
+        out = execute_goals(db, 23, '--timestamp every 09:00 weekdays --prompt "/weekly_digest"', tenant_id="default")
+    assert "Enviará: /weekly_digest" in (out or "")
     with DuckClaw(db_path, read_only=True) as db:
         j = json.loads(get_chat_state(db, 23, _GOALS_CRON_WALL_KEY) or "[{}]")[0]
-    assert j.get("prompt") == "/defense_watch" and j.get("weekdays") == [0, 1, 2, 3, 4]
+    assert j.get("prompt") == "/weekly_digest" and j.get("weekdays") == [0, 1, 2, 3, 4]
 
 
 def test_expand_directive_skill_tenant_scope() -> None:
@@ -231,13 +231,13 @@ def test_expand_directive_skill_tenant_scope() -> None:
         "tenant_id TEXT, visibility TEXT, owner_email TEXT, active BOOLEAN)"
     )
     con.execute(
-        "INSERT INTO main.admin_skills VALUES ('defense_watch','Busca noticias de defensa','directive','t1','private','a@x',true)"
+        "INSERT INTO main.admin_skills VALUES ('weekly_digest','Resume la semana del equipo','directive','t1','private','a@x',true)"
     )
-    msg, rest = expand_directive_skill(con, "/defense_watch", tenant_id="t1")
-    assert msg.startswith("[DIRECTIVA ACTIVA: /defense_watch]") and rest == ""
-    assert expand_directive_skill(con, "/defense_watch", tenant_id="t2") == ("/defense_watch", None)
+    msg, rest = expand_directive_skill(con, "/weekly_digest", tenant_id="t1")
+    assert msg.startswith("[DIRECTIVA ACTIVA: /weekly_digest]") and rest == ""
+    assert expand_directive_skill(con, "/weekly_digest", tenant_id="t2") == ("/weekly_digest", None)
     # Interactive actor: private skills of someone else stay hidden.
-    assert expand_directive_skill(con, "/defense_watch", tenant_id="t1", actor_email="b@x")[1] is None
+    assert expand_directive_skill(con, "/weekly_digest", tenant_id="t1", actor_email="b@x")[1] is None
 
 
 def test_every_schedule_never_expires() -> None:
@@ -265,7 +265,7 @@ def test_multiple_prompt_crons_per_chat(tmp_path: Path) -> None:
     )
     # Legacy single-spec value (before multi-cron) must survive as c1.
     legacy = {"v": 1, "tz": "America/Bogota", "kind": "every", "every_h": 9, "every_mi": 0,
-              "weekdays": [6], "prompt": "/defense_watch"}
+              "weekdays": [6], "prompt": "/weekly_digest"}
     con.execute(
         "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?)",
         ["chat_24_worker_id", "data_analyst", "chat_24_goals_cron_wall", json.dumps(legacy)],
@@ -277,9 +277,9 @@ def test_multiple_prompt_crons_per_chat(tmp_path: Path) -> None:
             return json.loads(get_chat_state(db, 24, _GOALS_CRON_WALL_KEY) or "[]")
 
     with DuckClaw(db_path, read_only=False) as db:
-        out = execute_goals(db, 24, '--timestamp once 2099-10-06T15:45 --prompt "Busca earnings PENG"', tenant_id="t")
+        out = execute_goals(db, 24, '--timestamp once 2099-10-06T15:45 --prompt "Revisa pedidos pendientes"', tenant_id="t")
     assert "cron-id c2" in out
-    assert [(i["id"], i["prompt"]) for i in items()] == [("c1", "/defense_watch"), ("c2", "Busca earnings PENG")]
+    assert [(i["id"], i["prompt"]) for i in items()] == [("c1", "/weekly_digest"), ("c2", "Revisa pedidos pendientes")]
 
     with DuckClaw(db_path, read_only=False) as db:
         execute_goals(db, 24, "--delta 4h", tenant_id="t")
@@ -290,4 +290,4 @@ def test_multiple_prompt_crons_per_chat(tmp_path: Path) -> None:
     assert [i["id"] for i in items()] == ["c2"]
     with DuckClaw(db_path, read_only=False) as db:
         listing = execute_goals(db, 24, "", tenant_id="t")
-    assert "cron-id: c2" in listing and "Busca earnings PENG" in listing
+    assert "cron-id: c2" in listing and "Revisa pedidos pendientes" in listing

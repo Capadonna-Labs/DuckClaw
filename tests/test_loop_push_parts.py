@@ -14,8 +14,8 @@ def _body(text):
 
 
 def test_verdict_becomes_title():
-    title, body = hb._loop_push_parts(_body("quant_analyst 4\n\nVeredicto: ⚠️ XLE −3% tras post de Trump\n\nDetalle **largo** aquí."))
-    assert title == "⚠️ XLE −3% tras post de Trump"
+    title, body = hb._loop_push_parts(_body("worker_a 4\n\nVeredicto: ⚠️ checkout −3% tras el deploy\n\nDetalle **largo** aquí."))
+    assert title == "⚠️ checkout −3% tras el deploy"
     assert body == "Detalle largo aquí."
 
 
@@ -30,21 +30,21 @@ def test_no_verdict_falls_back():
 
 
 def test_truncated_json_body():
-    raw = '{"response": "Veredicto: GLD rompe 2.400 \u2014 revisar stop\n\nmás'
+    raw = '{"response": "Veredicto: cola supera 2.400 \u2014 revisar workers\n\nmás'
     title, _ = hb._loop_push_parts(raw)
-    assert title.startswith("GLD rompe 2.400")
+    assert title.startswith("cola supera 2.400")
 
 
 def test_push_body_skips_a_table_and_uses_the_detail_line() -> None:
     """Seen 18-Oct on the watch: the body was the table header and its '-----' separator."""
     table = (
-        "| hora | fuente | hecho con cifra textual | activo(s) |\n"
+        "| hora | fuente | hecho con cifra textual | servicio(s) |\n"
         "|---|---|---|---|\n"
-        "| 18-oct | en-oriente | Ormuz al 68% del flujo normal | XLE |\n"
+        "| 18-oct | status-page | Tráfico al 68% del normal | API |\n"
     )
-    _, body = hb._loop_push_parts(_body("Veredicto: Ormuz al 68% del flujo normal → XLE\n\n" + table))
-    assert body == "18-oct · en-oriente · Ormuz al 68% del flujo normal · XLE"
+    _, body = hb._loop_push_parts(_body("Veredicto: Tráfico al 68% del normal → API\n\n" + table))
+    assert body == "18-oct · status-page · Tráfico al 68% del normal · API"
     _, body = hb._loop_push_parts(
-        _body("Veredicto: Ormuz al 68% → XLE\nTráfico 68% del normal según Kpler (18-oct).\n\n" + table)
+        _body("Veredicto: Tráfico al 68% → API\nTráfico 68% del normal según la status page (18-oct).\n\n" + table)
     )
-    assert body == "Tráfico 68% del normal según Kpler (18-oct)."
+    assert body == "Tráfico 68% del normal según la status page (18-oct)."

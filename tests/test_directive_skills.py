@@ -107,10 +107,10 @@ def test_framework_directive_skills_seed_once_and_apply_to_any_tenant() -> None:
 def test_spoken_skill_maps_to_slash() -> None:
     from duckclaw.directive_skills import spoken_skill_to_slash
 
-    names = ["revisar_correos", "apertura", "radar_watchlist", "defense_watch", "EWG", "backtest"]
+    names = ["revisar_correos", "apertura", "team_digest", "weekly_digest", "onboarding", "backtest"]
     assert spoken_skill_to_slash(names, "Usa la skill revisar correo.") == "/revisar_correos"
     assert spoken_skill_to_slash(names, "corre el comando apertura de hoy") == "/apertura de hoy"
-    assert spoken_skill_to_slash(names, "ejecuta la skill radar watchlist") == "/radar_watchlist"
+    assert spoken_skill_to_slash(names, "ejecuta la skill team digest") == "/team_digest"
     assert spoken_skill_to_slash(names, "Usa el revisar correo.") is None  # no trigger word
     assert spoken_skill_to_slash(names, "comando inexistente xyz") is None
     # STT heard "setups" (said in Spanish) as "PS": an alias maps it.

@@ -1,7 +1,7 @@
 """Skill bridge: create/edit/list/deactivate catalog skills (admin_skills).
 
-Gives a worker a structured way to persist reusable knowledge — "watch SNX
-for FCF stabilization", a repeatable checklist, a house rule — as a named,
+Gives a worker a structured way to persist reusable knowledge — "review open
+tickets every Monday", a repeatable checklist, a house rule — as a named,
 independently invoked skill, instead of the only alternative being
 ``update_system_prompt`` (which unconditionally injects into every turn and
 only grows, never gets structured or invoked selectively).
@@ -162,7 +162,7 @@ def _list_skills_impl(db: Any, tenant_id: str = "default", name: str = "") -> st
     # Scheduled turns (crons, /loop) have no interactive actor ("system"): like the /name
     # expansion of those turns (expand_directive_skill with actor_email=None) the tenant is
     # the boundary. Filtering by owner hid every private skill, so a directive could not
-    # open another one it names (e.g. /radar_watchlist) and the agent concluded it was gone.
+    # open another one it names (e.g. /team_digest) and the agent concluded it was gone.
     visible = "" if actor == "system" else f"AND (visibility = 'public' OR owner_email = '{esc_actor}') "
     try:
         hub = _open_hub_read_only(hub_path)
@@ -222,7 +222,7 @@ class CreateSkillInput(BaseModel):
         ...,
         min_length=2,
         max_length=128,
-        description="Nombre único del skill, ej. 'radar_watchlist'. Sin espacios; se invoca como /nombre.",
+        description="Nombre único del skill, ej. 'team_digest'. Sin espacios; se invoca como /nombre.",
     )
     description: str = Field(
         ...,

@@ -121,7 +121,7 @@ def test_tool_label_json_echo_triggers_repair_and_uses_tool_evidence() -> None:
         HumanMessage(content="actualiza datos"),
         _tool_message(
             "fetch_external_data",
-            '{"status":"ok","item":"SPY","rows_upserted":3,"last_value":657.25}',
+            '{"status":"ok","item":"ACME","rows_upserted":3,"last_value":657.25}',
         ),
     ]
     spec = SimpleNamespace(worker_id="worker_beta", logical_worker_id="worker_beta")
@@ -130,7 +130,7 @@ def test_tool_label_json_echo_triggers_repair_and_uses_tool_evidence() -> None:
         mod.tool_response_needs_egress_repair(
             messages,
             "actualiza datos",
-            'fetch_external_data: {"status":"ok","item":"SPY"}',
+            'fetch_external_data: {"status":"ok","item":"ACME"}',
             last_human_idx=0,
             repair_enabled=True,
         )
@@ -141,12 +141,12 @@ def test_tool_label_json_echo_triggers_repair_and_uses_tool_evidence() -> None:
         None,
         spec,
         "actualiza datos",
-        'fetch_external_data: {"status":"ok","item":"SPY"}',
+        'fetch_external_data: {"status":"ok","item":"ACME"}',
         messages,
         skip_llm_synthesis=True,
     )
 
-    assert "Operación completada" in out or "SPY" in out
+    assert "Operación completada" in out or "ACME" in out
     assert "fetch_external_data:" not in out
 
 

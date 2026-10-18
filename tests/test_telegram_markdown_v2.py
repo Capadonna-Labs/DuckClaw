@@ -15,9 +15,9 @@ def test_escape_period_for_markdown_v2() -> None:
 
 
 def test_escape_preserves_tg_user_link() -> None:
-    raw = f"[Juan](tg://user?id={TELEGRAM_TEST_USER_ID}) listo."
+    raw = f"[Ana](tg://user?id={TELEGRAM_TEST_USER_ID}) listo."
     assert escape_telegram_markdown_v2(raw) == (
-        f"[Juan](tg://user?id={TELEGRAM_TEST_USER_ID}) listo\\."
+        f"[Ana](tg://user?id={TELEGRAM_TEST_USER_ID}) listo\\."
     )
 
 

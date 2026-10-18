@@ -11,7 +11,7 @@ describe('looksLikeMarkdown', () => {
   });
 
   it('no formatea texto plano corto', () => {
-    expect(looksLikeMarkdown('hola, revisa SPY')).toBe(false);
+    expect(looksLikeMarkdown('hola, revisa el pedido')).toBe(false);
     expect(looksLikeMarkdown('precio: 10 USD')).toBe(false);
   });
 

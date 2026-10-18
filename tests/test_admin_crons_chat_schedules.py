@@ -16,7 +16,7 @@ def test_chat_schedules_lists_clock_prompt_and_interval(tmp_path, monkeypatch) -
     from routers.admin_domains import crons as crons_router
 
     spec, _ = parse_cron_wall_tokens(["every", "09:00", "dom"])
-    spec["prompt"] = "/defense_watch"
+    spec["prompt"] = "/weekly_digest"
     db_path = str(tmp_path / "vault.duckdb")
     con = duckdb.connect(db_path)
     con.execute("CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT)")
@@ -36,7 +36,7 @@ def test_chat_schedules_lists_clock_prompt_and_interval(tmp_path, monkeypatch) -
 
     out = {s["chat_id"]: s for s in crons_router._load_chat_schedules()}
     assert set(out) == {"admin-conv-1", "42"}
-    assert out["admin-conv-1"]["prompt"] == "/defense_watch" and out["admin-conv-1"]["kind"] == "reloj"
+    assert out["admin-conv-1"]["prompt"] == "/weekly_digest" and out["admin-conv-1"]["kind"] == "reloj"
     assert out["admin-conv-1"]["last_fire_epoch"] == 1790000000.5
     assert out["42"]["schedule"] == "Cada 30 min" and out["42"]["prompt"] == "Revisión de /goals"
     # Status mirrors the heartbeat gates: no worker → it would never fire.

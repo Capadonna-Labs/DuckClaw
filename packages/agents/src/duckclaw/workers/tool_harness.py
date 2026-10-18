@@ -353,7 +353,7 @@ def previous_identical_result(messages: list[Any], tool_name: str, args: Any) ->
 def identical_call_envelope(tool_name: str, prior: int, previous_result: str | None = None) -> str:
     # The previous result rides along: context pruning can drop the earlier ToolMessage while
     # keeping the call, and a model that cannot see the result re-calls forever ("use the result
-    # above" then points at nothing — a cron /defense_watch looped jev_decide 41 times).
+    # above" then points at nothing — a scheduled directive looped jev_decide 41 times).
     extra: dict[str, Any] = {"previous_result": previous_result} if previous_result else {}
     return tool_result_envelope(
         ok=False,

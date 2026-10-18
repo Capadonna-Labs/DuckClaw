@@ -180,7 +180,7 @@ def build_invoke_worker_node(
                 worker_cache_key = f"{worker_cache_key}::ctx_syn"
             elif _url_research_mcp:
                 low_url = (_combined or "").strip().lower()
-                _url_tag = "reddit" if "reddit.com" in low_url else ("mql5" if "mql5.com" in low_url else "url")
+                _url_tag = "reddit" if "reddit.com" in low_url else "url"
                 worker_cache_key = f"{worker_cache_key}::url_{_url_tag}"
             else:
                 # No mezclar grafos con Reddit MCP (cold start npx) y turnos sin Reddit.

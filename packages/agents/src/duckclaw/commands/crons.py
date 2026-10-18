@@ -625,14 +625,14 @@ def execute_crons_schedule(
 
     if toks and toks[0] == "--delta":
         # Optional --prompt "/skill o texto": each interval runs that prompt instead of the
-        # /goals review (e.g. hourly /datos_alternativos). Everything after the flag.
+        # /goals review (e.g. an hourly /news_scan). Everything after the flag.
         delta_prompt = ""
         dpm = re.search(r"\s--prompt\s+(.+)$", " " + raw, re.DOTALL)
         if dpm:
             delta_prompt = dpm.group(1).strip().strip("\"'“”").strip()[:2000]
             toks = (" " + raw)[: dpm.start()].split()
             if not delta_prompt:
-                return 'Falta el texto de --prompt (p. ej. --prompt "/datos_alternativos").'
+                return 'Falta el texto de --prompt (p. ej. --prompt "/news_scan").'
         if len(toks) < 2:
             return (
                 "Uso: /crons --delta 20min [--notify admin|telegram|both] "
@@ -714,14 +714,14 @@ def execute_crons_schedule(
 
     if toks and toks[0] == "--timestamp":
         # Optional --prompt "<texto o /skill>": at that time the chat gets this prompt
-        # (e.g. /defense_watch) instead of the /goals review. Everything after the flag.
+        # (e.g. /weekly_digest) instead of the /goals review. Everything after the flag.
         prompt = ""
         pm = re.search(r"\s--prompt\s+(.+)$", " " + raw, re.DOTALL)
         if pm:
             prompt = pm.group(1).strip().strip("\"'“”").strip()[:2000]
             toks = (" " + raw)[: pm.start()].split()
             if not prompt:
-                return 'Falta el texto de --prompt (p. ej. --prompt "/defense_watch").'
+                return 'Falta el texto de --prompt (p. ej. --prompt "/weekly_digest").'
         rest = toks[1:]
         if not rest:
             return (

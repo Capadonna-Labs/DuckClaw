@@ -69,7 +69,7 @@ def test_resolve_meditate_vault_user_id_private_folder(
     monkeypatch: pytest.MonkeyPatch, tmp_path: pytest.TempPathFactory,
 ) -> None:
     monkeypatch.setenv("DUCKCLAW_EXTENSION_ROOT", str(tmp_path))
-    vault = tmp_path / "db" / "private" / "1726618406" / "analyticsdb1.duckdb"
+    vault = tmp_path / "db" / "private" / "123456789" / "analyticsdb1.duckdb"
     vault.parent.mkdir(parents=True)
     vault.touch()
     db = MagicMock()
@@ -78,9 +78,9 @@ def test_resolve_meditate_vault_user_id_private_folder(
         db,
         vault_user_id="admin-conv-53ef9f0b34864d149b3414180625ae02",
         chat_id="admin-conv-53ef9f0b34864d149b3414180625ae02",
-        tenant_id="user-juanjoarevalo57-79c5ca60b91d4f3e",
+        tenant_id="user-owner-0000",
     )
-    assert uid == "1726618406"
+    assert uid == "123456789"
 
 
 def test_build_meditate_self_system_event_message(mock_manifest: None) -> None:

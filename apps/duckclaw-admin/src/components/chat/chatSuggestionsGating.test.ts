@@ -177,12 +177,12 @@ describe('lastUserAssistantExchange', () => {
         role: 'user',
         text: '[SYSTEM_EVENT: Ciclo de auto-mejora modo conversación activa /loop on. Metas…]',
       },
-      { role: 'assistant', text: '## Reporte /loop — CEG mark broker' },
+      { role: 'assistant', text: '## Reporte /loop — estado del servicio' },
     ];
     expect(lastUserAssistantExchange(messages)).toEqual({
       userText:
         '[SYSTEM_EVENT: Ciclo de auto-mejora modo conversación activa /loop on. Metas…]',
-      assistantText: '## Reporte /loop — CEG mark broker',
+      assistantText: '## Reporte /loop — estado del servicio',
     });
   });
 });

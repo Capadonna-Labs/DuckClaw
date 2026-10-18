@@ -22,7 +22,7 @@ _DEFAULT_PLAIN_CHUNK = 3600
 
 
 def normalize_telegram_chat_id_for_bot_api(chat_id: str | None) -> str:
-    """Extrae id numérico si el gateway mandó etiqueta tipo «@User (1726618406)»."""
+    """Extrae id numérico si el gateway mandó etiqueta tipo «@User (123456789)»."""
     s = str(chat_id or "").strip()
     if not s:
         return ""

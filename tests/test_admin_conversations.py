@@ -31,7 +31,7 @@ def test_should_index_admin_conversation():
     assert should_index_admin_conversation("admin-playground")
     assert should_index_admin_conversation("admin-section-kanban")
     assert should_index_admin_conversation(new_admin_conversation_session_id())
-    assert not should_index_admin_conversation("1726618406")
+    assert not should_index_admin_conversation("123456789")
 
 
 def test_derive_section_from_session_id():

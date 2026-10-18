@@ -9,5 +9,5 @@ def test_whisper_loops_are_garbage() -> None:
 
 
 def test_real_speech_passes() -> None:
-    for s in ("Usa el revisar correo.", "Hola, ¿me escuchas?", "¿Cómo va XLE hoy? Revisa los stops.", "Sí."):
+    for s in ("Usa el revisar correo.", "Hola, ¿me escuchas?", "¿Cómo va el pedido hoy? Revisa el envío.", "Sí."):
         assert not looks_like_stt_garbage(s), s

@@ -1077,3 +1077,49 @@ def test_crons_delta_prompt_runs_prompt_without_goals_and_pushes_verdict(
     assert [p["message"] for p in posts] == ["RUN /datos_alternativos"] * 2
     assert posts[0]["user_incoming"] == "[Cron] /datos_alternativos"
     assert [p["title"] for p in pushes] == ["Trump anuncia aranceles al acero"]
+
+
+def test_delta_tick_timeout_does_not_refire_next_poll(tmp_path: Path, monkeypatch: Any) -> None:
+    """A turn that outlives the HTTP timeout still claims its slot: the next poll must not
+    post again (it used to re-fire every 45 s and stack turns on the vault lock)."""
+    import duckdb
+
+    db_path = str(tmp_path / "delta_timeout.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        "CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT, "
+        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    con.executemany(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?)",
+        [
+            ("chat_62_goals_delta_seconds", "3600"),
+            ("chat_62_worker_id", "BI-Analyst"),
+            ("chat_62_goals_proactive_tenant_id", "analytics"),
+            ("chat_62_goals_proactive_last_fire_epoch", ""),
+            ("chat_62_goals_delta_meta", json.dumps({"trigger": "goals_cli", "prompt": "/x"})),
+        ],
+    )
+    con.close()
+
+    posts: list[Any] = []
+
+    class DummyClient:
+        async def __aenter__(self) -> DummyClient:
+            return self
+
+        async def __aexit__(self, *a: Any) -> None:
+            return None
+
+        async def post(self, *a: Any, **kw: Any) -> Any:
+            posts.append(kw)
+            raise TimeoutError("read timeout")
+
+    monkeypatch.setenv("DUCKCLAW_GOALS_TICKER_DB_PATH", db_path)
+    _patch_heartbeat_sync_duckdb_write(monkeypatch)
+    monkeypatch.setattr(heartbeat, "httpx", type("M", (), {"AsyncClient": staticmethod(lambda: DummyClient())}))
+    monkeypatch.setattr(heartbeat, "_scheduled_prompt_message", lambda p, t: p)
+
+    asyncio.run(heartbeat._run_goals_proactive_tick())
+    asyncio.run(heartbeat._run_goals_proactive_tick())
+    assert len(posts) == 1

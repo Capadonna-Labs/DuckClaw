@@ -636,6 +636,16 @@ async def _run_goals_proactive_tick_one_db(
             payload["user_incoming"] = f"[Cron] {delta_prompt}"
         _attach_scanned_vault(payload, db_path)
         url = _agent_chat_url_for_worker(GATEWAY_URL, worker_id)
+        # Claim the slot before posting: a turn can outlive the HTTP timeout and still finish in
+        # the Gateway; marking only on success re-fired every poll (45 s) and stacked turns on
+        # the same vault lock. A failed tick now waits for the next interval.
+        await _enqueue_chat_state_write(
+            db_path=db_path,
+            chat_id=chat_id,
+            tenant_id=tenant_id or "default",
+            key=_GOALS_PROACTIVE_LAST_FIRE_KEY,
+            value=str(now),
+        )
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
@@ -655,13 +665,6 @@ async def _run_goals_proactive_tick_one_db(
             continue
 
         if 200 <= resp.status_code < 300:
-            await _enqueue_chat_state_write(
-                db_path=db_path,
-                chat_id=chat_id,
-                tenant_id=tenant_id or "default",
-                key=_GOALS_PROACTIVE_LAST_FIRE_KEY,
-                value=str(now),
-            )
             logger.info(
                 "goals_proactive: tick OK chat=%s worker=%s",
                 chat_id,
@@ -796,20 +799,22 @@ async def _run_wall_items_for_chat(
                     timeout=_GOALS_PROACTIVE_HTTP_TIMEOUT,
                 )
         except Exception as exc:  # noqa: BLE001
+            resp = None
             logger.exception("goals_proactive_wall: error HTTP chat=%s cron=%s: %s", chat_id, item.get("id"), exc)
-            kept.append(item)
+        # A failed or timed-out run still counts as this slot's run: the Gateway may finish the
+        # turn anyway, and retrying every poll (45 s) stacked turns on the same vault lock.
+        changed = True
+        if str(item.get("kind") or "").strip().lower() != "once":
+            kept.append({**item, "last_fire": now})
+        if resp is None:
             continue
         if not (200 <= resp.status_code < 300):
             logger.warning(
                 "goals_proactive_wall: HTTP %s chat=%s cron=%s body=%s",
                 resp.status_code, chat_id, item.get("id"), (resp.text or "")[:200],
             )
-            kept.append(item)
             continue
 
-        changed = True
-        if str(item.get("kind") or "").strip().lower() != "once":
-            kept.append({**item, "last_fire": now})
         logger.info("goals_proactive_wall: tick OK chat=%s cron=%s worker=%s", chat_id, item.get("id"), worker_id)
         # Same watch-friendly push as the loop: the reply's "Veredicto:" line is the title and
         # "sin novedades" sends nothing; replies without a verdict keep the generic text.

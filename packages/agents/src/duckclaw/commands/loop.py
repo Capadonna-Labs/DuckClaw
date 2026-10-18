@@ -52,7 +52,9 @@ WATCH_VERDICT_RULE = (
     "Empieza tu respuesta con una línea `Veredicto: <máx. 70 caracteres>`: es un AVISO para el "
     "reloj del usuario, no un resumen. Solo si hay algo nuevo que deba ver (desviación, evento "
     "externo relevante, hallazgo) pon el dato concreto; si todo está en orden escribe exactamente "
-    "`Veredicto: sin novedades` (no se envía notificación). Si hay aviso, la línea siguiente es "
+    "`Veredicto: sin novedades` (no se envía notificación). El veredicto no exagera: si la fuente "
+    "dice que algo se evalúa, se rumorea o se baraja, dilo así, no como hecho consumado. "
+    "Si hay aviso, la línea siguiente es "
     "el detalle en una frase (máx. 140 caracteres, dato y fuente): es el texto de la notificación; "
     "tablas y lo demás van después."
 )

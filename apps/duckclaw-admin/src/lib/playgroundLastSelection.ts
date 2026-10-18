@@ -108,10 +108,13 @@ export function resolvePlaygroundWorkerId(input: {
 }
 
 export function playgroundLlmNeedsRestore(
-  server: { provider: string; model: string },
+  server: { provider: string; model: string; scope?: string },
   last: PlaygroundLastLlm | null
 ): boolean {
   if (!last?.provider.trim()) return false;
+  // A chat with its own saved model (scope "chat") is never overwritten from this browser's
+  // last pick: that silently reverted a model changed elsewhere (other device, server-side).
+  if ((server.scope || '').trim() === 'chat') return false;
   const sp = (server.provider || '').trim();
   const sm = (server.model || '').trim();
   return sp !== last.provider.trim() || sm !== (last.model || '').trim();
@@ -124,7 +127,7 @@ export function mergePlaygroundConfigWithLastLlm<T extends {
   if (!last?.provider.trim()) return config;
   const sp = (config.llm?.provider || '').trim();
   const sm = (config.llm?.model || '').trim();
-  if (!playgroundLlmNeedsRestore({ provider: sp, model: sm }, last)) return config;
+  if (!playgroundLlmNeedsRestore({ provider: sp, model: sm, scope: config.llm?.scope }, last)) return config;
   return {
     ...config,
     llm: {

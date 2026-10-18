@@ -80,6 +80,15 @@ describe('playgroundLlmNeedsRestore', () => {
     ).toBe(true);
   });
 
+  it('never overwrites a chat that has its own saved model', () => {
+    expect(
+      playgroundLlmNeedsRestore(
+        { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash-1017', scope: 'chat' },
+        { provider: 'openrouter', model: 'deepseek/deepseek-v4.1-flash' }
+      )
+    ).toBe(false);
+  });
+
   it('skips when already aligned', () => {
     expect(
       playgroundLlmNeedsRestore(

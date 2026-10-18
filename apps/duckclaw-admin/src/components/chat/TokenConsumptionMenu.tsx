@@ -155,10 +155,16 @@ export function TokenConsumptionMenu({
       ];
     }
     const free = Math.max(0, contextWindow - (historyBudget ? messages : accounted));
+    // Budget mode: the budget covers chat history only, so the rows (and their %) are
+    // history + free = 100%; system prompt and tool results are listed apart (fixedRows).
     return [
       { key: 'messages', label: 'Mensajes', tokens: messages, className: 'bg-gov-blue-500' },
-      { key: 'tools', label: 'Herramientas', tokens: tools, className: 'bg-rose-500' },
-      { key: 'system', label: 'System prompt', tokens: system, className: 'bg-amber-500' },
+      ...(historyBudget
+        ? []
+        : [
+            { key: 'tools', label: 'Herramientas', tokens: tools, className: 'bg-rose-500' },
+            { key: 'system', label: 'System prompt', tokens: system, className: 'bg-amber-500' },
+          ]),
       {
         key: 'free',
         label: 'Espacio libre',
@@ -168,6 +174,15 @@ export function TokenConsumptionMenu({
       },
     ].filter((row) => row.tokens > 0 || row.key === 'free');
   }, [contextTokenBreakdown, contextUsed, contextWindow, historyBudget]);
+
+  const fixedRows = useMemo(() => {
+    const bd = contextTokenBreakdown;
+    if (!historyBudget || !bd) return [];
+    return [
+      { key: 'system', label: 'System prompt', tokens: bd.system ?? 0 },
+      { key: 'tool_results', label: 'Resultados de herramientas', tokens: bd.tool_results ?? bd.tools ?? 0 },
+    ].filter((row) => row.tokens > 0);
+  }, [contextTokenBreakdown, historyBudget]);
 
   const contextSegments = useMemo(() => {
     if (!contextWindow || categoryRows.length === 0) {
@@ -292,6 +307,26 @@ export function TokenConsumptionMenu({
                   })}
                 </dl>
               ) : null}
+              {fixedRows.length > 0 ? (
+                <div className="mt-2 space-y-1">
+                  <p className="text-[11px] font-medium text-gov-gray-700 dark:text-dark-muted">
+                    Fijo en cada llamada (fuera del historial)
+                  </p>
+                  <dl className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-1 text-[11px] tabular-nums">
+                    {fixedRows.map((row) => (
+                      <div key={row.key} className="contents">
+                        <dt className="text-gov-gray-600 dark:text-dark-muted">{row.label}</dt>
+                        <dd className="text-gov-gray-900 dark:text-dark-text">
+                          {formatCompactTokenCount(row.tokens)}
+                        </dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="text-[10px] text-gov-gray-400 dark:text-dark-muted">
+                    No incluye los esquemas de herramientas; el Prompt del último turno sí.
+                  </p>
+                </div>
+              ) : null}
               {modelLabel ? (
                 <p
                   className="truncate text-[10px] text-gov-gray-500 dark:text-dark-muted"
@@ -328,7 +363,7 @@ export function TokenConsumptionMenu({
                   <dl className="mt-1 grid grid-cols-[1fr_auto] gap-x-3 gap-y-1 text-[11px] tabular-nums">
                     <dt className="flex items-center gap-1.5 text-gov-gray-500 dark:text-dark-muted">
                       <span className="h-1.5 w-1.5 rounded-full bg-gov-blue-500" aria-hidden />
-                      Prompt
+                      Prompt (todas las llamadas)
                     </dt>
                     <dd className="text-gov-gray-900 dark:text-dark-text">
                       {turnPrompt.toLocaleString('es-CO')}

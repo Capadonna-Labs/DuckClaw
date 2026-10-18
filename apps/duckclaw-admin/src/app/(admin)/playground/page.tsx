@@ -228,6 +228,14 @@ export default function PlaygroundPage() {
         }
         backfillPlaygroundLastFromServer(tenantId, { workerId: fromServer });
 
+        // A chat with its own saved model updates this browser's "last LLM", so new chats start
+        // from the current choice instead of an old one cached here.
+        if ((c.llm?.scope || '').trim() === 'chat' && (c.llm?.provider || '').trim()) {
+          writePlaygroundLastLlm(tenantId, {
+            provider: (c.llm?.provider || '').trim(),
+            model: (c.llm?.model || '').trim(),
+          });
+        }
         const readLastLlm = () =>
           readPlaygroundLastLlm(tenantId) ||
           (profileTenantId && profileTenantId !== tenantId
@@ -277,7 +285,7 @@ export default function PlaygroundPage() {
             if (
               !lastLlm ||
               !playgroundLlmNeedsRestore(
-                { provider: serverProvider, model: serverModel },
+                { provider: serverProvider, model: serverModel, scope: cfg.llm?.scope },
                 lastLlm
               )
             ) {
@@ -306,7 +314,7 @@ export default function PlaygroundPage() {
               const sm = (refreshed.llm?.model || '').trim();
               const lastLlm = readLastLlm();
               const needsRestore = Boolean(
-                lastLlm && playgroundLlmNeedsRestore({ provider: sp, model: sm }, lastLlm)
+                lastLlm && playgroundLlmNeedsRestore({ provider: sp, model: sm, scope: refreshed.llm?.scope }, lastLlm)
               );
               if (!needsRestore) {
                 break;

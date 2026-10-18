@@ -347,6 +347,11 @@ def build_loop_self_system_event_message(
         )
     return (
         f"[SYSTEM_EVENT: {hitl_prefix}Ciclo de auto-mejora {trigger}. Metas (/goals): {summary}.{priority_note} "
+        # The verdict line becomes the push title (what the user reads on a watch); the Heartbeat
+        # skips the push when it says "sin novedades".
+        "0) Empieza tu respuesta con una línea `Veredicto: <máx. 70 caracteres>` con lo más importante "
+        "del ciclo (dato concreto, no genérico), o `Veredicto: sin novedades` si no hay nada que el "
+        "usuario deba ver. "
         "1) Preferí evaluate_homeostasis si tu worker la expone (sensores del dominio); "
         "assess_crons_alignment solo cubre metas /goals persistidas y no reemplaza esos sensores. "
         "Reporta desviaciones en el chat. "

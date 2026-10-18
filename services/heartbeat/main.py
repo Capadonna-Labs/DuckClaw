@@ -207,27 +207,45 @@ def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
 
 
 
-def _loop_push_summary(raw_body: Any) -> str:
-    """First ~140 chars of the loop reply; the push used to say only "ciclo ejecutado",
-    so from the phone there was no way to tell whether a tick needed attention."""
-    text = ""
+_VERDICT_RE = re.compile(r"veredicto\s*:\s*(.+)", re.IGNORECASE)
+_NO_NEWS_RE = re.compile(r"^\W*sin novedad", re.IGNORECASE)
+
+
+def _loop_reply_text(raw_body: Any) -> str:
     raw = str(raw_body or "")
     try:
         data = json.loads(raw)
         if isinstance(data, dict):
-            text = str(data.get("response") or data.get("reply") or "")
+            return str(data.get("response") or data.get("reply") or "")
     except ValueError:
         m = re.search(r'"(?:response|reply)"\s*:\s*"((?:[^"\\]|\\.)*)', raw)  # truncated JSON
         if m:
             frag = m.group(1).rstrip("\\")  # cut may land mid-escape
             try:
-                text = json.loads(f'"{frag}"')
+                return json.loads(f'"{frag}"')
             except ValueError:
-                text = frag
-    text = re.sub(r"[*#`_>|]+", "", re.sub(r"\s+", " ", text)).strip()
-    if not text:
-        return "Ciclo proactivo ejecutado."
-    return text if len(text) <= 140 else text[:139] + "…"
+                return frag
+    return ""
+
+
+def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
+    """(title, body) for the loop push, or None when the tick has nothing to report.
+
+    The tick starts with "Veredicto: ..." (see build_loop_self_system_event_message): it becomes
+    the title, which is what a watch shows. "sin novedades" skips the push; the reply stays in
+    the chat. Replies without a verdict fall back to a generic title and the first ~140 chars.
+    """
+    text = _loop_reply_text(raw_body)
+    clean = lambda s: re.sub(r"[*#`_>|]+", "", re.sub(r"\s+", " ", s)).strip()
+    m = _VERDICT_RE.search(text)
+    if m:
+        verdict = clean(m.group(1).splitlines()[0])
+        if _NO_NEWS_RE.search(verdict):
+            return None
+        rest = clean(text[m.end():]) or verdict
+        return verdict[:80], rest if len(rest) <= 140 else rest[:139] + "…"
+    body = clean(text) or "Ciclo proactivo ejecutado."
+    return "DuckClaw · ciclo /loop", body if len(body) <= 140 else body[:139] + "…"
 
 
 async def _send_web_push_notification(*, title: str, body: str, url: str = "/", tag: str = "duckclaw") -> None:
@@ -959,13 +977,6 @@ async def _run_loop_proactive_tick_one_db(
                 value="1",
             )
 
-        # Push at start too: a tick takes ~1-2 min, the user wants to know it is running.
-        await _send_web_push_notification(
-            title="DuckClaw · ciclo /loop",
-            body=f"Iniciando ciclo de revisión ({worker_id}).",
-            url="/admin/playground",
-            tag=f"duckclaw-loop-start-{chat_id}",
-        )
         try:
             result = await post_loop_self_tick_async(
                 chat_id=chat_id,
@@ -999,12 +1010,17 @@ async def _run_loop_proactive_tick_one_db(
                 key=LOOP_CATCHUP_DUE_KEY,
                 value="0",
             )
-            await _send_web_push_notification(
-                title="DuckClaw · ciclo /loop",
-                body=_loop_push_summary(result.get("body")),
-                url="/admin/playground",
-                tag=f"duckclaw-loop-{chat_id}",
-            )
+            # One push per tick, verdict as title (watch-friendly); none when nothing new.
+            parts = _loop_push_parts(result.get("body"))
+            if parts is None:
+                logger.info("web_push: omitida tag=duckclaw-loop-%s (veredicto sin novedades)", chat_id)
+            else:
+                await _send_web_push_notification(
+                    title=parts[0],
+                    body=parts[1],
+                    url="/admin/playground",
+                    tag=f"duckclaw-loop-{chat_id}",
+                )
             if idle_mode:
                 # Re-anchor even when gateway skip persist/touch (Telegram SYSTEM_EVENT).
                 await _enqueue_chat_state_write(

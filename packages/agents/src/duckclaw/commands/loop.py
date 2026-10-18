@@ -357,6 +357,8 @@ def build_loop_self_system_event_message(
         "Reporta desviaciones en el chat. "
         "2) Si métricas alineadas (sin desviaciones), llama request_homeostasis_validation "
         "y DETENTE — pregunta confirmación HITL; no declares homeostasis hasta /loop-approve. "
+        "Las metas monitor sin sensor numérico ('sin dato', p. ej. revisiones de fuentes externas) "
+        "se atienden en CADA tick, haya o no desviaciones: hazlas antes de detenerte. "
         "3) Si hay desviaciones: REPORTA en prosa corta (máx ~15 líneas) y DETENTE en este tick, "
         "salvo las acciones que evaluate_homeostasis marque mandatory (loop_monitor_actions): "
         "ejecútalas igual en este tick (una desviación de infraestructura no las bloquea). "

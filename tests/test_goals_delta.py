@@ -1162,3 +1162,13 @@ def test_proactive_turns_run_in_background_one_per_chat(monkeypatch: Any) -> Non
 
     asyncio.run(scenario())
     assert order == ["long:start", "long:end", "queued"]
+
+
+def test_scheduled_prompts_ask_for_a_watch_verdict() -> None:
+    """Every cron prompt asks for the "Veredicto:" line, so its push says what was found
+    instead of "Cron completado: /skill"."""
+    from duckclaw.commands.loop import WATCH_VERDICT_RULE
+
+    msg = heartbeat._scheduled_prompt_message("revisa defensa", "t1")
+    assert msg.startswith("revisa defensa") and msg.endswith(WATCH_VERDICT_RULE)
+    assert "Veredicto: sin novedades" in WATCH_VERDICT_RULE

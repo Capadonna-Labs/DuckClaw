@@ -426,21 +426,24 @@ def _attach_scanned_vault(payload: Dict[str, Any], db_path: str) -> None:
 
 def _scheduled_prompt_message(prompt: str, tenant_id: str) -> str:
     """Scheduled ``/skill`` prompts arrive via the agent endpoint, which doesn't expand
-    directive skills (only the admin chat does), so expand them here from the hub."""
-    if not prompt.startswith("/"):
-        return prompt
-    hub = (get_gateway_db_path() or "").strip()
-    if not hub:
-        return prompt
-    try:
-        from duckclaw.directive_skills import expand_directive_skill
+    directive skills (only the admin chat does), so expand them here from the hub.
 
-        with duckclaw_open_for_read_scan(hub) as db:
-            expanded, _rest = expand_directive_skill(db, prompt, tenant_id=tenant_id)
-        return expanded
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("goals_proactive_wall: no se pudo expandir %r: %s", prompt[:60], exc)
-        return prompt
+    Every scheduled prompt also gets the watch verdict rule: without a "Veredicto:" line the
+    push could only say "Cron completado: /skill", which tells the user nothing.
+    """
+    from duckclaw.commands.loop import WATCH_VERDICT_RULE
+
+    message = prompt
+    hub = (get_gateway_db_path() or "").strip() if prompt.startswith("/") else ""
+    if hub:
+        try:
+            from duckclaw.directive_skills import expand_directive_skill
+
+            with duckclaw_open_for_read_scan(hub) as db:
+                message, _rest = expand_directive_skill(db, prompt, tenant_id=tenant_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("goals_proactive_wall: no se pudo expandir %r: %s", prompt[:60], exc)
+    return f"{message}\n\n[AVISO AL RELOJ] {WATCH_VERDICT_RULE}"
 
 
 async def _run_goals_proactive_tick() -> None:

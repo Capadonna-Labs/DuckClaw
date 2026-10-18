@@ -46,6 +46,14 @@ LOOP_DELTA_MIN_SECONDS = 60
 LOOP_DELTA_MAX_SECONDS = 7 * 24 * 3600
 LOOP_SELF_HTTP_TIMEOUT = float(os.environ.get("DUCKCLAW_GOALS_PROACTIVE_HTTP_TIMEOUT", "300"))
 LOOP_SELF_RESTART_RETRY_S = 30.0
+# Proactive replies (loop ticks, crons) start with this line: the Heartbeat turns it into the push
+# title, which is what the user reads on a watch, and sends nothing on "sin novedades".
+WATCH_VERDICT_RULE = (
+    "Empieza tu respuesta con una línea `Veredicto: <máx. 70 caracteres>`: es un AVISO para el "
+    "reloj del usuario, no un resumen. Solo si hay algo nuevo que deba ver (desviación, evento "
+    "externo relevante, hallazgo) pon el dato concreto; si todo está en orden escribe exactamente "
+    "`Veredicto: sin novedades` (no se envía notificación)."
+)
 # Legacy /loop on 4h (Heartbeat reloj). /loop on sin args = turnos agent↔user.
 LOOP_DEFAULT_INTERVAL_SECONDS = 15 * 60
 LOOP_SYSTEM_USER_LABEL = "[Ciclo loop]"
@@ -349,10 +357,7 @@ def build_loop_self_system_event_message(
         f"[SYSTEM_EVENT: {hitl_prefix}Ciclo de auto-mejora {trigger}. Metas (/goals): {summary}.{priority_note} "
         # The verdict line becomes the push title (what the user reads on a watch); the Heartbeat
         # skips the push when it says "sin novedades".
-        "0) Empieza tu respuesta con una línea `Veredicto: <máx. 70 caracteres>`: es un AVISO para el "
-        "reloj del usuario, no un resumen. Solo si hay algo nuevo que deba ver (desviación, evento "
-        "externo relevante) pon el dato concreto; si todo está en orden escribe exactamente "
-        "`Veredicto: sin novedades` (no se envía notificación). "
+        f"0) {WATCH_VERDICT_RULE} "
         "1) Preferí evaluate_homeostasis si tu worker la expone (sensores del dominio); "
         "assess_crons_alignment solo cubre metas /goals persistidas y no reemplaza esos sensores. "
         "Reporta desviaciones en el chat. "

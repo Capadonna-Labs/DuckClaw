@@ -12,7 +12,6 @@ if str(_gw) not in sys.path:
 
 from routers.admin_domains.chat_suggestions import (
     _cache_suggestions,
-    _notify_suggestions_ready,
     _read_cached_suggestions,
 )
 from routers.admin_domains.playground.chat_turn import _suggestion_selected_prefix
@@ -69,61 +68,6 @@ def test_cache_write_swallows_redis_errors() -> None:
 
     # Should not raise — this runs as a fire-and-forget background task.
     asyncio.run(_cache_suggestions(_BrokenRedis(), "chat-1", "tenant-a", ["x"]))
-
-
-def test_suggestions_push_cooldown_dedupes_rapid_calls(monkeypatch) -> None:
-    """Regression: the frontend calls /chat/suggestions 2-3x per turn — only one push."""
-    import duckclaw.web_push as web_push
-
-    send_calls: list[list[str]] = []
-
-    def _fake_list_subs(db_path):  # noqa: ANN001
-        return [{"endpoint": "https://push.example/ep", "keys": {"p256dh": "x", "auth": "y"}}]
-
-    def _fake_send(subs, **kwargs):  # noqa: ANN001
-        send_calls.append(subs)
-        return web_push.WebPushDeliveryResult(sent=len(subs))
-
-    monkeypatch.setattr(web_push, "list_web_push_subscriptions", _fake_list_subs)
-    monkeypatch.setattr(web_push, "send_web_push_notifications", _fake_send)
-    monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: "/tmp/fake.duckdb")
-
-    redis = _FakeRedis()
-
-    async def _run():
-        await _notify_suggestions_ready(redis, "chat-1", ["a", "b", "c"])
-        await _notify_suggestions_ready(redis, "chat-1", ["a", "b", "c"])
-        await _notify_suggestions_ready(redis, "chat-1", ["a", "b", "c"])
-
-    asyncio.run(_run())
-    assert len(send_calls) == 1
-
-
-def test_suggestions_push_cooldown_is_per_chat_id(monkeypatch) -> None:
-    import duckclaw.web_push as web_push
-
-    send_calls: list[list[str]] = []
-
-    monkeypatch.setattr(
-        web_push,
-        "list_web_push_subscriptions",
-        lambda db_path: [{"endpoint": "https://push.example/ep", "keys": {"p256dh": "x", "auth": "y"}}],
-    )
-    monkeypatch.setattr(
-        web_push,
-        "send_web_push_notifications",
-        lambda subs, **kwargs: send_calls.append(subs) or web_push.WebPushDeliveryResult(sent=len(subs)),
-    )
-    monkeypatch.setattr("duckclaw.gateway_db.get_gateway_db_path", lambda: "/tmp/fake.duckdb")
-
-    redis = _FakeRedis()
-
-    async def _run():
-        await _notify_suggestions_ready(redis, "chat-1", ["a", "b", "c"])
-        await _notify_suggestions_ready(redis, "chat-2", ["a", "b", "c"])
-
-    asyncio.run(_run())
-    assert len(send_calls) == 2
 
 
 def test_suggestion_selected_prefix_matches_cached_option() -> None:

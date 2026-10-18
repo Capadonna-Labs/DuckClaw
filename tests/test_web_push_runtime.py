@@ -65,7 +65,8 @@ def test_notifications_only_show_when_pwa_not_visible() -> None:
     assert "reportPwaPresence(visible())" in pwa
     assert 'PWA_VISIBLE_KEY = "duckclaw:admin:pwa_visible"' in gateway_notifications
     assert "async def pwa_visible_recently" in gateway_notifications
-    assert "if await pwa_visible_recently(redis_client):" in suggestions
+    # Suggestions no longer push (iOS cannot reply from a third-party watch; it doubled each alert).
+    assert "send_web_push_notifications" not in suggestions
     assert "if await pwa_visible_recently(redis_client):" in chat_turn
     assert 'await r.exists("duckclaw:admin:pwa_visible")' in heartbeat
     assert "{ requireBackground: true }" in unread

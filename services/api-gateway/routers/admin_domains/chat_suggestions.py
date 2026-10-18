@@ -19,8 +19,6 @@ _log = logging.getLogger("duckclaw.gateway.chat_suggestions")
 
 _SUGGESTIONS_CACHE_PREFIX = "duckclaw:chat_suggestions:"
 _SUGGESTIONS_CACHE_TTL = 600  # 10 min — solo tiene que sobrevivir hasta que el reloj responda.
-_SUGGESTIONS_PUSH_LOCK_PREFIX = "duckclaw:chat_suggestions_push_lock:"
-_SUGGESTIONS_PUSH_COOLDOWN = 15  # segundos — el frontend a veces llama /chat/suggestions 2-3x por turno.
 
 router = APIRouter(tags=["admin-chat-suggestions"])
 
@@ -75,61 +73,6 @@ async def _read_cached_suggestions(redis_client: Any, chat_id: str) -> dict[str,
     except (TypeError, ValueError):
         return None
     return data if isinstance(data, dict) else None
-
-
-async def _notify_suggestions_ready(redis_client: Any, chat_id: str, suggestions: list[str]) -> None:
-    """Push best-effort listando las opciones numeradas — permite elegir desde el reloj.
-
-    El frontend a veces llama a /chat/suggestions 2-3 veces seguidas para el mismo
-    turno (comportamiento previo, antes inofensivo). Sin un cooldown por chat_id,
-    cada llamada dispara su propio push y el usuario recibe la misma notificación
-    varias veces seguidas.
-    """
-    if not suggestions:
-        return
-    if redis_client is not None:
-        try:
-            acquired = await redis_client.set(
-                f"{_SUGGESTIONS_PUSH_LOCK_PREFIX}{chat_id}",
-                "1",
-                ex=_SUGGESTIONS_PUSH_COOLDOWN,
-                nx=True,
-            )
-            if not acquired:
-                return
-        except Exception:
-            _log.warning("suggestions push cooldown check failed, sending anyway", exc_info=True)
-    try:
-        from routers.admin_domains.notifications import pwa_visible_recently
-
-        if await pwa_visible_recently(redis_client):
-            return
-        from duckclaw.gateway_db import get_gateway_db_path
-        from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
-
-        db_path = str(get_gateway_db_path())
-        subs = await asyncio.to_thread(list_web_push_subscriptions, db_path)
-        if not subs:
-            return
-        body = "\n".join(f"{i + 1}) {text}" for i, text in enumerate(suggestions[:3]))
-        result = await asyncio.to_thread(
-            send_web_push_notifications,
-            subs,
-            title="DuckClaw · elegí una sugerencia",
-            body=body,
-            url="/playground",
-            tag=f"duckclaw-suggestions-{chat_id}",
-        )
-        if result.error or result.failed:
-            _log.warning(
-                "suggestions push send incomplete chat_id=%s sent=%s failed=%s error=%s",
-                chat_id,
-                result.sent,
-                result.failed,
-                result.error,
-            )
-    except Exception:
-        _log.warning("suggestions push notification failed", exc_info=True)
 
 
 def _resolve_state_db_path(vault_db_path: str = "") -> str:
@@ -209,7 +152,6 @@ async def post_chat_suggestions(body: ChatSuggestionsBody, request: Request) -> 
     if suggestions:
         redis_client = getattr(request.app.state, "redis", None)
         spawn_background(_cache_suggestions(redis_client, body.chat_id, body.tenant_id, suggestions))
-        spawn_background(_notify_suggestions_ready(redis_client, body.chat_id, suggestions))
     return {
         "suggestions": suggestions,
         "recommended_index": recommended_index,

@@ -362,8 +362,10 @@ async def _already_notified_note(chat_id: Any) -> str:
     if not lines:
         return ""
     return (
-        "\n\n[YA AVISADO AL RELOJ, últimas 48 h] No repitas estos hechos salvo que traigan un dato "
-        "nuevo (cifra distinta, confirmación, desmentido); si no hay nada más, `Veredicto: sin novedades`.\n- "
+        "\n\n[YA AVISADO AL RELOJ, últimas 48 h] No repitas estos hechos, tampoco el mismo evento "
+        "contado con más detalle o con otras palabras. Solo vuelve a avisar si hay un cambio material: "
+        "una decisión nueva, una cifra que cambia la conclusión, la confirmación oficial de lo que era "
+        "rumor o un desmentido. Si no, `Veredicto: sin novedades`.\n- "
         + "\n- ".join(lines)
     )
 

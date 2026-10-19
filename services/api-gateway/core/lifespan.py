@@ -220,6 +220,12 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # noqa: BLE001
         _log.warning("Reddit MCP: warm no iniciado: %s", exc)
 
+    # uv's installer puts uv/uvx in ~/.local/bin, which a PM2/systemd PATH usually lacks;
+    # without it every uvx-based MCP (transcripts, trends, connector presets) silently never starts.
+    uv_bin = os.path.expanduser("~/.local/bin")
+    if os.path.isfile(os.path.join(uv_bin, "uvx")) and uv_bin not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = os.pathsep.join(filter(None, [os.environ.get("PATH", ""), uv_bin]))
+
     try:
         from duckclaw.forge.skills.youtube_transcript_bridge import _uvx_available
 

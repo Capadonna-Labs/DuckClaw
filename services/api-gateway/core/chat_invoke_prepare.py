@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import HTTPException, status
@@ -48,6 +49,8 @@ class PreparedChatInvoke:
     is_owner: bool
     chat_ident: str
     payload_vault: str
+    # When the user's message arrived (a turn can run for minutes before it is persisted).
+    received_at: str = field(default_factory=lambda: datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
 
 
 async def prepare_chat_invoke(

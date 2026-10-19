@@ -62,3 +62,18 @@ def test_compute_turn_user_index_at_max_msgs_cap(monkeypatch) -> None:
     assert compute_turn_user_index(hist) == 2
     # Fórmula ingenua prior+1 daría 3 y desalinea Tool Usage en el cliente.
     assert sum(1 for item in hist if item.get("role") == "user") + 1 == 3
+
+
+def test_history_keeps_message_times_and_stamps_only_the_new_turn() -> None:
+    """Each message carries when it was sent (the UI shows it on swipe); history saved
+    before timestamps existed never gets a fake "now" on its old messages."""
+    from core.chat_history import normalize_history_list, stamp_new_history_items
+
+    legacy = [{"role": "user", "content": "a"}, {"role": "assistant", "content": "b"}]
+    turn = [{"role": "user", "content": "c", "ts": "2026-10-19T04:00:00Z"}, {"role": "assistant", "content": "d"}]
+    out = stamp_new_history_items(normalize_history_list(legacy + turn))
+    assert [m.get("ts") for m in out[:2]] == [None, None]
+    assert out[2]["ts"] == "2026-10-19T04:00:00Z" and out[3]["ts"].endswith("Z")
+    # Next save: already-stamped messages keep their time.
+    again = stamp_new_history_items(normalize_history_list(out))
+    assert again[2]["ts"] == "2026-10-19T04:00:00Z" and again[3]["ts"] == out[3]["ts"]

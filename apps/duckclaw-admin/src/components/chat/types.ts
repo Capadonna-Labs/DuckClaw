@@ -11,6 +11,8 @@ export type ToolHeartbeatPhase = 'start' | 'running' | 'done' | 'error';
 export type ChatMsg = {
   role: 'user' | 'assistant' | 'error' | 'heartbeat';
   text: string;
+  /** When it was sent (UTC ISO, from the gateway history; set locally for live turns). */
+  ts?: string;
   streaming?: boolean;
   interrupted?: boolean;
   heartbeatKind?: 'plan' | 'tool' | 'status' | 'visual' | 'loop_tick';

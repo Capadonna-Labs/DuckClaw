@@ -1,7 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
-import { Check, Copy, Mic, Pencil, RotateCcw, Volume2 } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, Copy, Mic, Pencil, Reply, RotateCcw, Volume2 } from 'lucide-react';
 import { ArtifactImageLightbox } from '@/components/chat/ArtifactImageLightbox';
 import { ChatMarkdown, looksLikeMarkdown } from '@/components/chat/ChatMarkdown';
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
@@ -23,6 +23,20 @@ export function stripHeartbeatBodyPrefix(
   return stripChatIdentityNoise(text, { workerId, displayName });
 }
 
+const SWIPE_MAX_PX = 80;
+const SWIPE_QUOTE_PX = 60;
+
+/** "11:45 p. m." today, "18 oct, 11:45 p. m." otherwise. */
+export function formatMessageTime(iso: string | undefined, now = new Date()): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const time = d.toLocaleTimeString('es-CO', { hour: 'numeric', minute: '2-digit' });
+  return d.toDateString() === now.toDateString()
+    ? time
+    : `${d.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}, ${time}`;
+}
+
 export function ChatBubble({
   message: m,
   onRetry,
@@ -31,8 +45,11 @@ export function ChatBubble({
   canEdit = false,
   identityLabel = '',
   activeWorkerId = '',
+  onQuote,
 }: {
   message: ChatMsg;
+  /** Deslizar a la derecha: cita el mensaje en el input. */
+  onQuote?: () => void;
   /** Reenvía el mensaje de usuario asociado a este turno. */
   onRetry?: () => void;
   canRetry?: boolean;
@@ -73,6 +90,40 @@ export function ChatBubble({
     canCopy || (canRetry && Boolean(onRetry)) || (canEdit && Boolean(onEdit));
   const actionsAlwaysVisible = canCopy && (isAssistant || isError);
   const [copied, setCopied] = useState(false);
+  // Live replies have no server time until the history reloads: stamp when streaming ends.
+  const [liveTs, setLiveTs] = useState<string | undefined>(undefined);
+  const wasStreaming = useRef(Boolean(m.streaming));
+  useEffect(() => {
+    if (wasStreaming.current && !m.streaming) setLiveTs(new Date().toISOString());
+    wasStreaming.current = Boolean(m.streaming);
+  }, [m.streaming]);
+  const timeLabel = formatMessageTime(m.ts || liveTs);
+  const canQuote = Boolean(onQuote) && canCopy;
+  const [swipeX, setSwipeX] = useState(0);
+  const swipeStart = useRef<{ x: number; y: number; axis: 'x' | 'y' | null } | null>(null);
+  const onTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    swipeStart.current = { x: t.clientX, y: t.clientY, axis: null };
+  };
+  const onTouchMove = (e: React.TouchEvent) => {
+    const start = swipeStart.current;
+    if (!start) return;
+    const t = e.touches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (!start.axis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
+      start.axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+    }
+    if (start.axis !== 'x') return;
+    const min = timeLabel ? -SWIPE_MAX_PX : 0;
+    const max = canQuote ? SWIPE_MAX_PX : 0;
+    setSwipeX(Math.max(min, Math.min(max, dx)));
+  };
+  const onTouchEnd = () => {
+    if (swipeX >= SWIPE_QUOTE_PX && canQuote) onQuote?.();
+    swipeStart.current = null;
+    setSwipeX(0);
+  };
   const [lightboxImage, setLightboxImage] = useState<ChatImagePreview | null>(null);
   const openLightbox = useCallback((img: ChatImagePreview) => {
     setLightboxImage(img);
@@ -146,7 +197,33 @@ export function ChatBubble({
 
   return (
     <div
-      className={`group relative max-w-[90%] max-sm:max-w-full max-sm:w-full min-w-0 rounded-2xl px-4 py-3 text-sm overflow-hidden ${
+      className="relative w-full overflow-x-clip [touch-action:pan-y]"
+      onTouchStart={onTouchStart}
+      onTouchMove={onTouchMove}
+      onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
+    >
+    {swipeX > 0 ? (
+      <span
+        className="absolute left-1 top-1/2 -translate-y-1/2 text-gov-gray-400 transition-opacity"
+        style={{ opacity: Math.min(1, swipeX / SWIPE_QUOTE_PX) }}
+        aria-hidden
+      >
+        <Reply size={18} />
+      </span>
+    ) : null}
+    {swipeX < 0 ? (
+      <span
+        className="absolute right-1 top-1/2 -translate-y-1/2 whitespace-nowrap text-[11px] tabular-nums text-gov-gray-500 dark:text-dark-muted"
+        style={{ opacity: Math.min(1, -swipeX / 40) }}
+      >
+        {timeLabel}
+      </span>
+    ) : null}
+    <div
+      title={timeLabel || undefined}
+      style={swipeX ? { transform: `translateX(${swipeX}px)` } : undefined}
+      className={`${swipeStart.current?.axis === 'x' ? '' : 'transition-transform duration-200'} group relative max-w-[90%] max-sm:max-w-full max-sm:w-full min-w-0 rounded-2xl px-4 py-3 text-sm overflow-hidden ${
         isUser
           ? 'ml-auto bg-gov-blue-700 text-white'
           : isError
@@ -352,6 +429,7 @@ export function ChatBubble({
           )}
         </>
       )}
+    </div>
     </div>
   );
 }

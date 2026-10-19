@@ -35,7 +35,9 @@ async def persist_chat_history(
         pass
     if not prepared.is_system_prompt:
         user_for_history = (prepared.user_incoming or message or "").strip()
-        user_item = normalize_history_item({"role": "user", "content": user_for_history})
+        user_item = normalize_history_item(
+            {"role": "user", "content": user_for_history, "ts": getattr(prepared, "received_at", "")}
+        )
         assistant_item = normalize_history_item({"role": "assistant", "content": reply_plain_for_storage})
         if not user_item or not assistant_item:
             return
@@ -61,7 +63,9 @@ async def persist_chat_history(
     if not should_persist_admin_history(notify_ch, session_id):
         return
     user_label = (prepared.user_incoming or "").strip() or "[Revisión proactiva /crons]"
-    user_sys = normalize_history_item({"role": "user", "content": user_label})
+    user_sys = normalize_history_item(
+        {"role": "user", "content": user_label, "ts": getattr(prepared, "received_at", "")}
+    )
     assistant_sys = normalize_history_item({"role": "assistant", "content": reply_plain_for_storage})
     if not user_sys or not assistant_sys:
         return

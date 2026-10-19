@@ -96,7 +96,7 @@ export function preserveImagePreviewsFromPrevious(
 }
 
 export function historyToChatMessages(
-  raw: { role: string; content: string }[] | undefined,
+  raw: { role: string; content: string; ts?: string }[] | undefined,
   tenantId = 'default'
 ): ChatMsg[] {
   if (!raw?.length) return [];
@@ -110,7 +110,7 @@ export function historyToChatMessages(
     if (!role || !text) continue;
     const imagePreviews =
       role === 'assistant' ? artifactPreviewFromMessage(text, tid) : undefined;
-    out.push({ role, text, ...(imagePreviews ? { imagePreviews } : {}) });
+    out.push({ role, text, ...(m.ts ? { ts: m.ts } : {}), ...(imagePreviews ? { imagePreviews } : {}) });
   }
   return out;
 }

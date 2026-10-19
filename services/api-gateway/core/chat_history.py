@@ -63,7 +63,27 @@ def normalize_history_item(h: Any) -> dict[str, str] | None:
     max_len = int(os.environ.get("DUCKCLAW_CHAT_HISTORY_MAX_CHARS", "8000"))
     if len(text) > max_len:
         text = text[:max_len] + "…"
-    return {"role": role, "content": text}
+    out = {"role": role, "content": text}
+    ts = h.get("ts")
+    if isinstance(ts, str) and ts.strip():
+        out["ts"] = ts.strip()
+    return out
+
+
+def stamp_new_history_items(items: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Give a ``ts`` (UTC ISO) to the messages appended since the last stamped one.
+
+    History written before timestamps existed has none: then only the newest turn
+    (last user+assistant pair) gets "now", never the old messages.
+    """
+    from datetime import UTC, datetime
+
+    last = max((i for i, item in enumerate(items) if item.get("ts")), default=None)
+    start = last + 1 if last is not None else max(0, len(items) - 2)
+    now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for item in items[start:]:
+        item.setdefault("ts", now)
+    return items
 
 
 def chat_history_max_msgs() -> int:
@@ -192,7 +212,7 @@ async def redis_save_chat_history(
 ) -> None:
     if not gateway_chat_history_enabled():
         return
-    norm = normalize_history_list(items)
+    norm = stamp_new_history_items(normalize_history_list(items))
     # Durable write first.
     try:
         from core.admin_conversations_db import db_save_messages

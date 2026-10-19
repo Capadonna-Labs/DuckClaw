@@ -280,6 +280,7 @@ setMessages((m) => [
   {
     role: 'user',
     text: userLabel,
+    ts: new Date().toISOString(),
     imagePreviews: userPreviews?.length ? userPreviews : undefined,
     documentNames: docLabels.length ? docLabels : undefined,
   },

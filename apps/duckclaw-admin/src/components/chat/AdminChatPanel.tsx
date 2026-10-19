@@ -149,6 +149,7 @@ export function AdminChatPanel({
     setVoiceResponseMode,
     retryFromMessage,
     editFromMessage,
+    quoteMessage,
     inputRef,
     cancelGeneration,
     imageAttachments,
@@ -564,6 +565,7 @@ export function AdminChatPanel({
         scrollToBottom={scrollToBottom}
         retryFromMessage={retryFromMessage}
         editFromMessage={editFromMessage}
+        quoteMessage={quoteMessage}
       />
 
 

@@ -37,6 +37,7 @@ export type AdminChatMessageListProps = {
   scrollToBottom: (behavior?: ScrollBehavior) => void;
   retryFromMessage: (index: number) => void;
   editFromMessage: (index: number) => void;
+  quoteMessage: (index: number) => void;
 };
 
 function renderMessageBubble(
@@ -48,6 +49,7 @@ function renderMessageBubble(
     labelForWorkerId: (id?: string) => string;
     retryFromMessage: (index: number) => void;
     editFromMessage: (index: number) => void;
+    quoteMessage: (index: number) => void;
   }
 ) {
   const m = messages[i];
@@ -85,6 +87,7 @@ function renderMessageBubble(
       }
       canEdit={!opts.loading && m.role === 'user' && Boolean(m.text?.trim())}
       onEdit={m.role === 'user' ? () => opts.editFromMessage(i) : undefined}
+      onQuote={() => opts.quoteMessage(i)}
     />
   );
 }
@@ -110,6 +113,7 @@ export function AdminChatMessageList({
   scrollToBottom,
   retryFromMessage,
   editFromMessage,
+  quoteMessage,
 }: AdminChatMessageListProps) {
   const displayItems = groupMessagesForDisplay(messages);
   const bubbleOpts = {
@@ -118,6 +122,7 @@ export function AdminChatMessageList({
     labelForWorkerId,
     retryFromMessage,
     editFromMessage,
+    quoteMessage,
   };
 
   const studioPadClass = studioChromePad

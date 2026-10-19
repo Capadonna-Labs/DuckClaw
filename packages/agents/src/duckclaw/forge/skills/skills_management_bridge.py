@@ -163,7 +163,8 @@ def _list_skills_impl(db: Any, tenant_id: str = "default", name: str = "") -> st
     # expansion of those turns (expand_directive_skill with actor_email=None) the tenant is
     # the boundary. Filtering by owner hid every private skill, so a directive could not
     # open another one it names (e.g. /team_digest) and the agent concluded it was gone.
-    visible = "" if actor == "system" else f"AND (visibility = 'public' OR owner_email = '{esc_actor}') "
+    # Those turns resolve the actor to "system" or "chat:<id>" (no email), never an owner.
+    visible = "" if "@" not in actor else f"AND (visibility = 'public' OR owner_email = '{esc_actor}') "
     try:
         hub = _open_hub_read_only(hub_path)
         try:

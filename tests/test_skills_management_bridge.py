@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from duckclaw.forge.skills.skills_management_bridge import (
     _deactivate_skill_impl,
     _list_skills_impl,
@@ -293,12 +295,14 @@ def test_upsert_skill_rejects_oversized_text_with_exact_overflow(monkeypatch) ->
     assert json.loads(_upsert_skill_impl(object(), "radar", "x" * 4096))["ok"] is True
 
 
-def test_list_skills_in_a_scheduled_turn_sees_the_tenants_private_skills(monkeypatch) -> None:
-    """Crons and /loop run with no interactive actor ("system"): a directive must still be able
-    to open another private skill of the tenant it names (e.g. /team_digest)."""
+@pytest.mark.parametrize("actor", ["system", "chat:admin-conv-abc"])
+def test_list_skills_in_a_scheduled_turn_sees_the_tenants_private_skills(monkeypatch, actor) -> None:
+    """Crons and /loop run with no interactive actor ("system", or "chat:<id>" when only the chat
+    is bound): a directive must still be able to open another private skill of the tenant it
+    names (e.g. /team_digest)."""
     monkeypatch.setattr(
         "duckclaw.forge.skills.skills_management_bridge._actor_and_db_path",
-        lambda db: ("system", "/tmp/hub.duckdb"),
+        lambda db: (actor, "/tmp/hub.duckdb"),
     )
 
     class _Db:

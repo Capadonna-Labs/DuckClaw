@@ -132,3 +132,25 @@ def test_broker_integrations_are_tenant_scoped_without_env_fallback() -> None:
     for integration_id in ("alpaca", "alpaca_secret", "alpaca_live", "alpaca_live_secret"):
         spec = get_integration_secret_spec(integration_id)
         assert spec is not None and spec.env_keys == () and spec.default_scope == "tenant"
+
+
+def test_interactive_brokers_optional_login_and_confirmation(monkeypatch: Any) -> None:
+    """Browser login by default (no stored credentials, never the host's); headless only when
+    the user stored both; orders need confirmation."""
+    clear_mcp_connector_presets_cache()
+    ib = {**preset_payload("interactive_brokers"), "connector_id": "mcp_interactive_brokers", "tenant_id": "t1", "metadata": {}}
+    assert ib["launch_env"]["IB_PAPER_TRADING"] == "true"
+    stored: dict[str, str] = {}
+    monkeypatch.setattr(
+        "duckclaw.integration_secrets.resolve_integration_api_key",
+        lambda integration_id, **kw: stored.get(integration_id, ""),
+    )
+    env = guard.apply_integration_env(object(), ib, {"IB_USERNAME": "HOST", "IB_PASSWORD_AUTH": "HOST", "HOME": "/h"})
+    assert "IB_USERNAME" not in env and "IB_PASSWORD_AUTH" not in env and "IB_HEADLESS_MODE" not in env
+    assert env["HOME"] == "/h"
+
+    stored.update({"interactive_brokers_user": "me", "interactive_brokers_password": "pw"})
+    env = guard.apply_integration_env(object(), ib, {})
+    assert env["IB_USERNAME"] == "me" and env["IB_HEADLESS_MODE"] == "true"
+
+    assert guard.needs_confirmation(ib, "place_order") and not guard.needs_confirmation(ib, "get_positions")

@@ -132,5 +132,11 @@ describe('per-user keys from Integraciones', () => {
     expect(presetAuthKindLabel(alpaca)).toBe('Claves en Integraciones');
     expect(presetAuthHint(alpaca)).toContain('ALPACA_API_KEY, ALPACA_SECRET_KEY');
     expect(presetAuthKindLabel(preset({ preset_id: 'mcp_time' }))).toBe('Sin credenciales');
+    const ib = preset({
+      preset_id: 'interactive_brokers',
+      metadata: { integration_env_optional: { IB_USERNAME: 'interactive_brokers_user' } },
+    });
+    expect(presetAuthKindLabel(ib)).toBe('Login del bróker');
+    expect(presetAuthHint(ib)).toContain('https://localhost:5000');
   });
 });

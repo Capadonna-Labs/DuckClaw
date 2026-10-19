@@ -51,9 +51,16 @@ export function presetIntegrationEnvVars(preset: McpConnectorPreset | undefined)
   return env && typeof env === 'object' ? Object.keys(env as Record<string, unknown>) : [];
 }
 
+/** Optional per-user credentials (e.g. a broker login that can also be done in the browser). */
+export function presetOptionalIntegrationEnvVars(preset: McpConnectorPreset | undefined): string[] {
+  const env = preset?.metadata?.integration_env_optional;
+  return env && typeof env === 'object' ? Object.keys(env as Record<string, unknown>) : [];
+}
+
 export function presetAuthKindLabel(preset: McpConnectorPreset): string {
   if (presetUsesOAuthPkce(preset)) return 'OAuth PKCE';
   if (presetIntegrationEnvVars(preset).length) return 'Claves en Integraciones';
+  if (presetOptionalIntegrationEnvVars(preset).length) return 'Login del bróker';
   if (presetUsesAdbDevice(preset)) return 'ADB dispositivo';
   const kind = trimStr(preset.auth_kind || 'none').toLowerCase();
   if (kind === 'bearer') return 'Token Bearer';
@@ -233,6 +240,13 @@ export function presetAuthHint(preset: McpConnectorPreset): string {
     const vars = preset.metadata?.secret_env as string[] | undefined;
     const list = vars?.join(', ') ?? 'connection strings';
     return `Configura los secretos de plataforma: ${list}.`;
+  }
+  const optionalVars = presetOptionalIntegrationEnvVars(preset);
+  if (optionalVars.length && !presetIntegrationEnvVars(preset).length) {
+    return (
+      'Inicia sesión en https://localhost:5000 (o el navegador que se abre). Opcional: carga ' +
+      `${optionalVars.join(', ')} en Integraciones para login automático; el 2FA se aprueba en el celular.`
+    );
   }
   const integrationVars = presetIntegrationEnvVars(preset);
   if (integrationVars.length) {

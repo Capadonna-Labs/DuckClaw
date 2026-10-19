@@ -203,7 +203,9 @@ REMOVED_DOMAIN_VERTICAL_MARKERS_RE = re.compile(
     r"|leila"
     r"|war_room"
     r"|wr_"
-    # Trading vocabulary: broker, orders, signals and market data belong to the extension.
+    # Trading vocabulary: broker logic, orders, signals and market data belong to the extension.
+    # Optional third-party broker MCP connector presets (catalog config only: Alpaca, Interactive
+    # Brokers) are a product feature for new users and may live in the core catalog.
     r"|ibkr|ib_insync|ib_async"
     r"|trade_signals?|tp_sl|closed_trades?|position_metrics|bracket_orders?|oca_group"
     r"|stop_loss|take_profit|ohlcv(?:_data)?|fluid_state"

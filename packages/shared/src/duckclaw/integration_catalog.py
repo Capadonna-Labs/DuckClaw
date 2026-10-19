@@ -14,7 +14,7 @@ IntegrationScope = Literal["tenant", "global", "actor"]
 
 PACK_FILENAME = "framework_integration_secrets_v1.json"
 PACK_SEED = "framework_integration_secrets_v1"
-_SETTING_KEY_RE = re.compile(r"^[a-z0-9_]+\.(api_key|token|secret)$")
+_SETTING_KEY_RE = re.compile(r"^[a-z0-9_]+\.(api_key|token|secret|username|password)$")
 
 
 @dataclass(frozen=True)
@@ -85,7 +85,7 @@ def validate_integration_secrets_pack(data: dict[str, Any]) -> None:
             if not _SETTING_KEY_RE.match(setting_key):
                 raise ValueError(
                     f"integration {integration_id}: setting_key must look like "
-                    "'vendor.api_key' or 'vendor.token'"
+                    "'vendor.api_key', 'vendor.token', 'vendor.secret', 'vendor.username' or 'vendor.password'"
                 )
             if integration_id in seen_ids:
                 raise ValueError(f"duplicate integration id: {integration_id}")

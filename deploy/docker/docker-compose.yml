@@ -65,6 +65,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "8000:8000"
+      # Login page of the broker gateway started by the interactive_brokers MCP preset.
+      # Localhost only: open https://localhost:5000 on this machine to sign in.
+      - "127.0.0.1:5000:5000"
     depends_on:
       redis:
         condition: service_healthy

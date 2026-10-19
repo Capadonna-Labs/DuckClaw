@@ -3,6 +3,9 @@
 - ``metadata.integration_env`` ({ENV_VAR: integration_id}): the stdio server gets the TENANT's
   secret from Integraciones. A host value of those variables is always removed, so a user
   without keys never runs on someone else's account.
+- ``metadata.integration_env_optional``: same, but the connector also works without them (e.g. a
+  broker login done in the browser instead of stored credentials). When all of them are set,
+  ``metadata.env_when_optional_set`` is added (e.g. switch the server to headless login).
 - ``metadata.confirm_tools`` (fnmatch patterns): calling a matching tool stores the call as a
   pending action instead of running it; the human runs it with ``/approve <id>`` or drops it
   with ``/reject <id>``. DuckClaw's read_only filter only knows create_/delete_/update_ names,
@@ -37,11 +40,14 @@ def connector_metadata(connector: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def tenant_integration_env(db: Any, connector: dict[str, Any]) -> tuple[dict[str, str], list[str]]:
+def tenant_integration_env(
+    db: Any, connector: dict[str, Any], mapping: dict[str, Any] | None = None
+) -> tuple[dict[str, str], list[str]]:
     """(env vars resolved for the connector's tenant, env vars mapped but not configured)."""
     from duckclaw.integration_secrets import resolve_integration_api_key
 
-    mapping = connector_metadata(connector).get("integration_env") or {}
+    if mapping is None:
+        mapping = connector_metadata(connector).get("integration_env") or {}
     tenant_id = str(connector.get("tenant_id") or "default")
     resolved: dict[str, str] = {}
     missing: list[str] = []
@@ -55,15 +61,22 @@ def tenant_integration_env(db: Any, connector: dict[str, Any]) -> tuple[dict[str
 
 
 def apply_integration_env(db: Any, connector: dict[str, Any], env: dict[str, str]) -> dict[str, str]:
-    mapping = connector_metadata(connector).get("integration_env") or {}
-    if not mapping:
+    meta = connector_metadata(connector)
+    required = meta.get("integration_env") or {}
+    optional = meta.get("integration_env_optional") or {}
+    if not required and not optional:
         return env
-    out = {k: v for k, v in env.items() if k not in mapping}  # never the host's credentials
-    resolved, missing = tenant_integration_env(db, connector)
+    out = {k: v for k, v in env.items() if k not in required and k not in optional}  # never the host's
+    resolved, missing = tenant_integration_env(db, connector, required)
     if missing:
         label = connector.get("display_name") or connector.get("connector_id")
         raise ValueError(f"{label}: faltan claves en Integraciones ({', '.join(missing)})")
     out.update(resolved)
+    if optional:
+        opt_resolved, opt_missing = tenant_integration_env(db, connector, optional)
+        out.update(opt_resolved)
+        if not opt_missing:
+            out.update({str(k): str(v) for k, v in (meta.get("env_when_optional_set") or {}).items()})
     return out
 
 

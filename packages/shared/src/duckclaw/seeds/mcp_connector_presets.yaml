@@ -621,3 +621,54 @@ presets:
         ALPACA_API_KEY: alpaca_live
         ALPACA_SECRET_KEY: alpaca_live_secret
       confirm_tools: *alpaca_confirm
+
+  # Interactive Brokers (MCP comunitario interactive-brokers-mcp, MIT · stdio · npx, versión fija).
+  # Trae IB Gateway + Java, reutiliza un gateway local si ya hay uno y lo deja vivo entre llamadas.
+  # Login: navegador en https://localhost:5000 (por defecto) o headless si el usuario cargó usuario y
+  # contraseña en Integraciones (el 2FA se aprueba en el celular). La sesión del bróker caduca a diario.
+  interactive_brokers:
+    profile: stdio_npx_rw
+    display_name: Interactive Brokers (paper)
+    launch_args: ["-y", "interactive-brokers-mcp@1.24.1"]
+    launch_env:
+      IB_PAPER_TRADING: "true"
+      IB_READ_ONLY_MODE: "false"
+      IB_GATEWAY_PORT: "5000"
+    metadata:
+      manifest_skill_id: interactive_brokers
+      admin_label: Interactive Brokers paper (local stdio · npx) · login en https://localhost:5000
+      docs_url: https://github.com/code-rabi/interactive-brokers-mcp
+      install: npx -y interactive-brokers-mcp@1.24.1
+      integration_env_optional:
+        IB_USERNAME: interactive_brokers_user
+        IB_PASSWORD_AUTH: interactive_brokers_password
+      env_when_optional_set:
+        IB_HEADLESS_MODE: "true"
+      confirm_tools: &interactive_brokers_confirm
+        - place_*
+        - modify_*
+        - replace_*
+        - cancel_*
+        - close_*
+        - confirm_*
+        - reply_*
+
+  interactive_brokers_live:
+    profile: stdio_npx_rw
+    display_name: Interactive Brokers (live · dinero real)
+    launch_args: ["-y", "interactive-brokers-mcp@1.24.1"]
+    launch_env:
+      IB_PAPER_TRADING: "false"
+      IB_READ_ONLY_MODE: "false"
+      IB_GATEWAY_PORT: "5000"
+    metadata:
+      manifest_skill_id: interactive_brokers_live
+      admin_label: Interactive Brokers LIVE (dinero real) · login en https://localhost:5000
+      docs_url: https://github.com/code-rabi/interactive-brokers-mcp
+      install: npx -y interactive-brokers-mcp@1.24.1
+      integration_env_optional:
+        IB_USERNAME: interactive_brokers_live_user
+        IB_PASSWORD_AUTH: interactive_brokers_live_password
+      env_when_optional_set:
+        IB_HEADLESS_MODE: "true"
+      confirm_tools: *interactive_brokers_confirm

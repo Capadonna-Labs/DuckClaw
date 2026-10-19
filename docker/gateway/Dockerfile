@@ -1,6 +1,9 @@
 # DuckClaw gateway / db-writer / knowledge-indexer runtime image
 # Build: docker build -f docker/gateway/Dockerfile -t duckclaw/gateway:latest .
 
+# Node for MCP presets launched with npx (needs >=20.19; bookworm's apt nodejs is 18).
+FROM node:22.20.0-bookworm-slim AS node
+
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS builder
 
 WORKDIR /app
@@ -38,6 +41,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Local stdio MCP presets launch with npx (Node) or uvx (uv); without them those presets
+# could not start in Docker Full.
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uvx /usr/local/bin/
+
 COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /app/packages /app/packages
 COPY --from=builder /app/services /app/services
@@ -54,7 +64,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
 
 RUN mkdir -p /data && chmod +x /app/entrypoint.sh
 
-EXPOSE 8000
+# 5000: broker login page of an MCP-managed Client Portal Gateway (interactive_brokers preset).
+EXPOSE 8000 5000
 
 ENTRYPOINT ["/bin/sh", "/app/entrypoint.sh"]
 CMD ["python", "services/api-gateway/uvicorn_pm2.py", "main:app", "--host", "0.0.0.0", "--port", "8000", "--app-dir", "services/api-gateway"]

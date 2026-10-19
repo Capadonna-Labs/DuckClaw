@@ -3,6 +3,7 @@
 # precios de yfinance en el sandbox. No opera ni recomienda órdenes.
 # Opcional: se importa desde Admin → Agentes → plantillas; no se crea por defecto.
 name: Portafolio manual
+display_name: Portafolio manual
 id: manual-portfolio
 schema_name: agent_worker
 topology: general

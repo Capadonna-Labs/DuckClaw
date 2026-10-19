@@ -138,6 +138,15 @@ export const templatesApi = {
       `/templates/${encodeURIComponent(workerId)}/validate`,
       { method: 'POST' }
     ),
+  listSeedTemplates: () =>
+    adminFetch<{
+      templates: { template_id: string; worker_id: string; name: string; description: string; imported: boolean }[];
+    }>('/templates/seed'),
+  importSeedTemplate: (templateId: string) =>
+    adminFetch<{ ok: boolean; accepted: boolean; task_id: string }>(
+      `/templates/seed/${encodeURIComponent(templateId)}/import`,
+      { method: 'POST' }
+    ),
   importTemplatesToCatalog: (body: {
     templates_root?: string;
     include_prefixes?: string[];

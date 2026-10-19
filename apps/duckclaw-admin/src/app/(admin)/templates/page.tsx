@@ -10,6 +10,7 @@ import { useAuthStore } from '@/store/authStore';
 import ConfirmDangerModal from '@/components/admin/ConfirmDangerModal';
 import { CreateAgentDialog } from '@/components/templates/CreateAgentDialog';
 import { ImportSpawnPackageDialog } from '@/components/templates/ImportSpawnPackageDialog';
+import { BundledTemplatesPanel } from '@/components/templates/BundledTemplatesPanel';
 import { isAdminRole } from '@/lib/roles';
 import { paginateItems } from '@/lib/pagination';
 import { agentCardSubtitle, agentMetadata, agentWorkerIcon } from '@/lib/agentCards';
@@ -122,6 +123,7 @@ export default function TemplatesPage() {
 
       <CreateAgentDialog open={createOpen} onClose={() => setCreateOpen(false)} onCreated={reload} />
       <ImportSpawnPackageDialog open={importOpen} onClose={() => setImportOpen(false)} onImported={reload} />
+      {canWrite ? <BundledTemplatesPanel onImported={reload} /> : null}
 
       {error ? (
         <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">

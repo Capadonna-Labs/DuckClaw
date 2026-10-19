@@ -56,6 +56,7 @@ from routers.admin_domains.sandbox_sessions import router as sandbox_sessions_ro
 from routers.admin_domains.telegram_routes import router as telegram_routes_router
 from routers.admin_domains.train import router as train_router
 from routers.admin_domains.template_contexts import router as template_contexts_router
+from routers.admin_domains.seed_templates import router as seed_templates_router
 from routers.admin_domains.templates_catalog import router as templates_catalog_router
 from routers.admin_domains.template_lifecycle import (
     FileWriteBody,
@@ -119,6 +120,7 @@ router.include_router(sandbox_artifacts_router)
 router.include_router(sandbox_sessions_router)
 router.include_router(telegram_routes_router)
 router.include_router(train_router)
+router.include_router(seed_templates_router)
 router.include_router(template_contexts_router)
 router.include_router(templates_catalog_router)
 router.include_router(user_agents_router)

@@ -59,3 +59,23 @@ def test_sandbox_can_reach_the_internet_for_prices() -> None:
     policy = load_security_policy("manual-portfolio", worker_dir=TEMPLATE)
     assert security_policy_to_docker_kwargs(policy)["network_mode"] == "bridge"
     assert policy.secrets.allowed_secrets == []
+
+
+def test_admin_lists_bundled_templates_and_imports_only_known_ones(gateway_admin_client, monkeypatch) -> None:  # noqa: ANN001
+    """The admin can list optional seed templates and import one by id; the client never
+    chooses a filesystem path, and unknown ids are rejected."""
+    headers = {"X-Admin-Key": "test-admin-key", "X-Duckclaw-Actor": "admin@duckclaw.local"}
+    res = gateway_admin_client.get("/api/v1/admin/templates/seed", headers=headers)
+    assert res.status_code == 200, res.text
+    items = {t["template_id"]: t for t in res.json()["templates"]}
+    assert "default" not in items  # internal scaffold
+    assert items["manual-portfolio"]["name"] == "Portafolio manual"
+    assert items["manual-portfolio"]["imported"] is False
+
+    sent: list = []
+    monkeypatch.setattr("duckclaw.gateway_enqueue.enqueue_admin_command", lambda cmd, **kw: sent.append(cmd) or "task-1")
+    ok = gateway_admin_client.post("/api/v1/admin/templates/seed/manual-portfolio/import", headers=headers)
+    assert ok.status_code == 200 and ok.json()["task_id"] == "task-1"
+    assert sent[0].include_template_ids == ["manual-portfolio"] and sent[0].templates_root.endswith("seed")
+    bad = gateway_admin_client.post("/api/v1/admin/templates/seed/..%2Fetc/import", headers=headers)
+    assert bad.status_code == 404

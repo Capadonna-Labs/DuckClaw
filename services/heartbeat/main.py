@@ -365,7 +365,8 @@ async def _already_notified_note(chat_id: Any) -> str:
         return ""
     return (
         "\n\n[YA AVISADO AL RELOJ, últimas 48 h] No repitas estos hechos, tampoco el mismo evento "
-        "contado con más detalle o con otras palabras. Solo vuelve a avisar si hay un cambio material: "
+        "contado con más detalle o con otras palabras, ni una desviación que sigue igual y solo cambia "
+        "su cifra (p. ej. la misma métrica unas horas más vieja). Solo vuelve a avisar si hay un cambio material: "
         "una decisión nueva, una cifra que cambia la conclusión, la confirmación oficial de lo que era "
         "rumor o un desmentido. Si no, `Veredicto: sin novedades`.\n- "
         + "\n- ".join(lines)
@@ -706,7 +707,7 @@ async def _run_goals_proactive_tick_one_db(
 
             delta_prompt = str(meta.get("prompt") or "").strip()
             if delta_prompt:
-                message = _scheduled_prompt_message(delta_prompt, tenant_id) + await _already_notified_note(chat_id)
+                message = _scheduled_prompt_message(delta_prompt, tenant_id)
             else:
                 if "mode" in meta and str(meta.get("mode") or "").strip():
                     proactive_mode = normalize_proactive_mode(str(meta.get("mode")))
@@ -740,6 +741,7 @@ async def _run_goals_proactive_tick_one_db(
                     )
                 else:
                     message = build_goals_proactive_system_event_message(goals)
+            message += await _already_notified_note(chat_id)
 
             if not notify_channel:
                 from duckclaw.homeostasis.goals_alignment import normalize_notify_channel
@@ -1192,6 +1194,7 @@ async def _run_loop_proactive_tick_one_db(
                 if parts is None:
                     logger.info("web_push: omitida tag=duckclaw-loop-%s (veredicto sin novedades)", chat_id)
                 else:
+                    await _remember_verdict(chat_id, parts[0])
                     await _send_web_push_notification(
                         title=parts[0],
                         body=parts[1],
@@ -1244,6 +1247,7 @@ async def _run_loop_proactive_tick_one_db(
                         pass
                 logger.exception("meditate_proactive: invoke failed chat=%s: %s", chat_id, exc)
 
+        message += await _already_notified_note(chat_id)
         await _spawn_proactive(
             chat_id, _deliver_loop_turn(chat_id, tenant_id, worker_id, message, idle_mode, active_mode)
         )

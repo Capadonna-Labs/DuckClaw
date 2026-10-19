@@ -12,8 +12,11 @@ if [[ ! -f "${SERVER}" ]]; then
   exit 1
 fi
 
-if [[ ! -e "${STANDALONE}/public" && -d "${ADMIN}/public" ]]; then
-  ln -s "${ADMIN}/public" "${STANDALONE}/public"
+# Copy, never symlink: `next build` wipes .next and follows a public symlink, emptying the real
+# apps/duckclaw-admin/public (sw.js, manifest and icons then 404 and the PWA cannot update).
+if [[ -d "${ADMIN}/public" ]]; then
+  rm -rf "${STANDALONE}/public"
+  cp -r "${ADMIN}/public" "${STANDALONE}/public"
 fi
 
 if [[ ! -e "${STANDALONE}/.next/static" && -d "${ADMIN}/.next/static" ]]; then

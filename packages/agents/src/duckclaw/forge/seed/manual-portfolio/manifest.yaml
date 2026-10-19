@@ -1,0 +1,31 @@
+# Portafolio manual — para brókers sin API (p. ej. apps locales que no permiten acceso de terceros).
+# El usuario registra sus posiciones (texto, extracto PDF o captura) y el agente las valora con
+# precios de yfinance en el sandbox. No opera ni recomienda órdenes.
+# Opcional: se importa desde Admin → Agentes → plantillas; no se crea por defecto.
+name: Portafolio manual
+id: manual-portfolio
+schema_name: agent_worker
+topology: general
+read_only: false
+tool_profile: general
+description: >
+  Seguimiento de posiciones de brókers sin API: registro manual o desde extractos/capturas,
+  precios con yfinance, valor y ganancia por moneda. Solo consulta mercado; no opera.
+
+llm:
+  required: true
+  temperature: 0.1
+
+skills: []
+
+allowed_tables:
+  - agent_worker.holdings
+  - agent_worker.price_marks
+
+# Las posiciones se guardan con admin_sql (vía DB-Writer); sin esto el agente solo lee.
+tool_surface:
+  expose_privileged_mutation_tools:
+    - admin_sql
+
+cognition:
+  system_prompt: ./system_prompt.md

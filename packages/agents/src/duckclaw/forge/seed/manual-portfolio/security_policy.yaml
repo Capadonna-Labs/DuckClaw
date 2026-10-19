@@ -1,0 +1,14 @@
+# El sandbox necesita internet para bajar precios con yfinance. Ojo: allow_list todavía no se
+# aplica (la red es todo o nada: deny = sin red, allow = salida completa). El sandbox de este
+# agente no monta datos ni recibe secretos; solo /workspace/output efímero.
+network:
+  default: allow
+  allow_list: []
+filesystem:
+  readonly_mounts: []
+  ephemeral_volumes:
+    - /workspace/output
+secrets:
+  in_memory_only: true
+  allowed_secrets: []
+max_execution_time_seconds: 120

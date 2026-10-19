@@ -516,6 +516,15 @@ def _refresh_connector_oauth(
         fresh = ""
     if not fresh:
         # ponytail: stale/revoked refresh must not leak dead bearer (401 loop).
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "OAuth refresh rejected connector=%s preset=%s tenant=%s: reconnect it in Admin → MCP "
+            "(Google every ~7 days = OAuth app still in 'Testing')",
+            connector_id,
+            preset_id,
+            tenant_id,
+        )
         return ""
     _REFRESHED_OAUTH[(tenant_id, connector_id)] = (fresh, new_refresh, time.time())
     try:

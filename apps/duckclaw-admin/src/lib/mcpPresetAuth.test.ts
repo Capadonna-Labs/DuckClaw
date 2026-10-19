@@ -4,6 +4,8 @@ import {
   existingPresetIdsFromConnectors,
   groupMcpPresetsForSelect,
   presetAdminLabel,
+  presetAuthHint,
+  presetAuthKindLabel,
   presetSelectGroupId,
 } from '@/lib/mcpPresetAuth';
 
@@ -118,5 +120,17 @@ describe('mcpPresetAuth selector helpers', () => {
       'github',
       'notion',
     ]);
+  });
+});
+
+describe('per-user keys from Integraciones', () => {
+  it('labels presets with integration_env instead of "Sin credenciales"', () => {
+    const alpaca = preset({
+      preset_id: 'alpaca',
+      metadata: { integration_env: { ALPACA_API_KEY: 'alpaca', ALPACA_SECRET_KEY: 'alpaca_secret' } },
+    });
+    expect(presetAuthKindLabel(alpaca)).toBe('Claves en Integraciones');
+    expect(presetAuthHint(alpaca)).toContain('ALPACA_API_KEY, ALPACA_SECRET_KEY');
+    expect(presetAuthKindLabel(preset({ preset_id: 'mcp_time' }))).toBe('Sin credenciales');
   });
 });

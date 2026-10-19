@@ -575,3 +575,49 @@ presets:
       admin_label: REA · ingeniería inversa (local stdio, versión fija)
       docs_url: https://github.com/morluto/rea
       env_vars: [GHIDRA_INSTALL_DIR, JAVA_HOME]
+
+  # Alpaca (broker MCP oficial, stdio · uvx, versión fija). Cada usuario carga SUS claves en
+  # Integraciones → Cuentas de bróker; el puente las inyecta por tenant y nunca usa las del servidor.
+  # read_only de DuckClaw no filtra place_*/cancel_*/close_*: esas tools pasan por confirmación
+  # humana (metadata.confirm_tools → /approve <id> · /reject <id>).
+  alpaca:
+    profile: stdio_uvx_rw
+    display_name: Alpaca (paper)
+    launch_args: ["alpaca-mcp-server==2.4.0", "serve"]
+    launch_env:
+      ALPACA_PAPER_TRADE: "true"
+      ALPACA_TOOLSETS: account,trading,assets,stock-data,news
+    metadata:
+      manifest_skill_id: alpaca
+      admin_label: Alpaca paper (local stdio · uvx) · claves en Integraciones
+      docs_url: https://github.com/alpacahq/alpaca-mcp-server
+      install: uvx alpaca-mcp-server==2.4.0 serve
+      integration_env:
+        ALPACA_API_KEY: alpaca
+        ALPACA_SECRET_KEY: alpaca_secret
+      confirm_tools: &alpaca_confirm
+        - place_*
+        - replace_order_by_id
+        - cancel_*
+        - close_*
+        - exercise_*
+        - do_not_exercise_*
+        - update_account_config
+        - create_locate
+
+  alpaca_live:
+    profile: stdio_uvx_rw
+    display_name: Alpaca (live · dinero real)
+    launch_args: ["alpaca-mcp-server==2.4.0", "serve"]
+    launch_env:
+      ALPACA_PAPER_TRADE: "false"
+      ALPACA_TOOLSETS: account,trading,assets,stock-data,news
+    metadata:
+      manifest_skill_id: alpaca_live
+      admin_label: Alpaca LIVE (dinero real; requiere cuenta verificada en Alpaca)
+      docs_url: https://github.com/alpacahq/alpaca-mcp-server
+      install: uvx alpaca-mcp-server==2.4.0 serve
+      integration_env:
+        ALPACA_API_KEY: alpaca_live
+        ALPACA_SECRET_KEY: alpaca_live_secret
+      confirm_tools: *alpaca_confirm

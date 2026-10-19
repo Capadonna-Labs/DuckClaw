@@ -45,8 +45,15 @@ export function presetTransportLabel(preset: McpConnectorPreset): string {
   return preset.transport || '—';
 }
 
+/** Per-user keys the bridge injects from Integraciones (metadata.integration_env). */
+export function presetIntegrationEnvVars(preset: McpConnectorPreset | undefined): string[] {
+  const env = preset?.metadata?.integration_env;
+  return env && typeof env === 'object' ? Object.keys(env as Record<string, unknown>) : [];
+}
+
 export function presetAuthKindLabel(preset: McpConnectorPreset): string {
   if (presetUsesOAuthPkce(preset)) return 'OAuth PKCE';
+  if (presetIntegrationEnvVars(preset).length) return 'Claves en Integraciones';
   if (presetUsesAdbDevice(preset)) return 'ADB dispositivo';
   const kind = trimStr(preset.auth_kind || 'none').toLowerCase();
   if (kind === 'bearer') return 'Token Bearer';
@@ -226,6 +233,10 @@ export function presetAuthHint(preset: McpConnectorPreset): string {
     const vars = preset.metadata?.secret_env as string[] | undefined;
     const list = vars?.join(', ') ?? 'connection strings';
     return `Configura los secretos de plataforma: ${list}.`;
+  }
+  const integrationVars = presetIntegrationEnvVars(preset);
+  if (integrationVars.length) {
+    return `Cada usuario carga sus claves en Integraciones (${integrationVars.join(', ')}); nunca se usan las del servidor.`;
   }
   return 'No requiere credenciales adicionales.';
 }

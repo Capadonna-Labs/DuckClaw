@@ -9,10 +9,31 @@ from duckclaw.commands.sensors import _lake_ssh_status_lines
 from duckclaw.guardrails.loader import load_guardrail, load_guardrail_pipe_table
 
 
-def execute_approve_reject(db: Any, chat_id: Any, approved: bool) -> str:
-    """/approve o /reject: HITL (grafo en interrupt). Sin interrupt implementado: mensaje informativo."""
-    _ = db, chat_id, approved
-    return "No hay operación pendiente de aprobación. (El grafo no está en estado interrupt en esta versión.)"
+def execute_approve_reject(
+    db: Any, chat_id: Any, approved: bool, args: str = "", *, tenant_id: Any = None
+) -> str:
+    """/approve [id] o /reject [id]: ejecuta o descarta una acción MCP pendiente de confirmación
+    (p. ej. una orden de bróker) de este chat. Sin id, toma la última pendiente."""
+    _ = db
+    from duckclaw.forge.skills.mcp_connector_guard import take_pending
+
+    action_id = (args or "").strip().split(" ")[0]
+    try:
+        action = take_pending(chat_id=str(chat_id), tenant_id=str(tenant_id or "default"), action_id=action_id)
+    except Exception as exc:  # noqa: BLE001
+        return f"No se pudo leer la acción pendiente: {exc}"
+    if action is None:
+        return "No hay operación pendiente de aprobación en este chat (o ya venció)."
+    label = f"#{action['id']} · {action['tool']}"
+    if not approved:
+        return f"Cancelada {label}. No se ejecutó."
+    from duckclaw.forge.skills.mcp_connector_bridge import _run_async_from_sync, run_pending_action
+
+    try:
+        result = _run_async_from_sync(run_pending_action(action))
+    except Exception as exc:  # noqa: BLE001
+        return f"Aprobada {label}, pero falló al ejecutarse: {exc}"
+    return f"Aprobada y ejecutada {label}.\n{str(result)[:3000]}"
 
 
 def execute_tasks(db: Any, chat_id: Any) -> str:

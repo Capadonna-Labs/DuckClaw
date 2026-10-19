@@ -48,7 +48,7 @@ def _public_tool_name(connector_id: str, tool_name: str) -> str:
     return f"mcp__{safe_connector}__{safe_tool}"
 
 
-def _build_stdio_params(connector: dict[str, Any]) -> Any:
+def _build_stdio_params(connector: dict[str, Any], db: Any = None) -> Any:
     from mcp.client.stdio import StdioServerParameters
 
     command = str(connector.get("launch_command") or "").strip()
@@ -57,6 +57,10 @@ def _build_stdio_params(connector: dict[str, Any]) -> Any:
     args = [str(x) for x in connector.get("launch_args") or []]
     env = {str(k): str(v) for k, v in (connector.get("launch_env") or {}).items()}
     merged_env = {**dict(os.environ), **env}
+    if db is not None:
+        from duckclaw.forge.skills.mcp_connector_guard import apply_integration_env
+
+        merged_env = apply_integration_env(db, connector, merged_env)
     return StdioServerParameters(command=command, args=args, env=merged_env)
 
 
@@ -74,7 +78,7 @@ async def _list_connector_tools(db: Any, connector: dict[str, Any]) -> list[Any]
     validate_connector_egress(connector)
     transport = str(connector.get("transport") or "").strip().lower()
     if transport == "stdio":
-        params = _build_stdio_params(connector)
+        params = _build_stdio_params(connector, db)
         return await mcp_stdio_list_tools(params)
     if transport == "streamable_http":
         from duckclaw.forge.skills.mcp_http_util import mcp_http_list_tools
@@ -94,7 +98,7 @@ async def _call_connector_tool(
     validate_connector_egress(connector)
     transport = str(connector.get("transport") or "").strip().lower()
     if transport == "stdio":
-        params = _build_stdio_params(connector)
+        params = _build_stdio_params(connector, db)
         return await mcp_stdio_call_tool(params, tool_name, arguments)
     if transport == "streamable_http":
         from duckclaw.forge.skills.mcp_http_util import mcp_http_call_tool
@@ -157,9 +161,17 @@ def _wrap_connector_tool(
         public_name,
     )
 
+    from duckclaw.forge.skills.mcp_connector_guard import needs_confirmation, store_pending
+
+    confirm = needs_confirmation(connector, str(remote_name))
+
     def _sync_call(**kwargs: Any) -> str:
         validated = args_model(**kwargs)
         payload = validated.model_dump(exclude_none=True)
+        if confirm:
+            from duckclaw.forge.skills.knowledge_tool_context import get_session_chat_id
+
+            return store_pending(connector, str(remote_name), payload, chat_id=get_session_chat_id())
         raw = _run_async_from_sync(_call_connector_tool(db, connector, str(remote_name), payload))
         try:
             parsed = json.loads(raw)
@@ -172,6 +184,8 @@ def _wrap_connector_tool(
     desc = getattr(tool_spec, "description", None) or f"MCP {connector.get('display_name')}: {remote_name}"
     connector_label = str(connector.get("display_name") or connector.get("connector_id") or "connector")
     desc = f"[MCP {connector_label}] {desc}"
+    if confirm:
+        desc += " [Requiere confirmación del usuario: queda pendiente hasta /approve]"
     return StructuredTool.from_function(
         _sync_call,
         name=public_name,
@@ -233,6 +247,19 @@ def _youtube_data_rest_fallback_specs_if_ready(db: Any, connector: dict[str, Any
     if not resolve_connector_bearer_token(db, connector):
         return []
     return youtube_data_rest_fallback_tool_specs()
+
+
+async def run_pending_action(action: dict[str, Any]) -> str:
+    """Execute a call the user approved (see mcp_connector_guard.take_pending)."""
+    from duckclaw.admin_mcp_connectors import get_mcp_connector_runtime
+
+    db = _open_catalog_db()
+    connector = get_mcp_connector_runtime(
+        db, connector_id=str(action.get("connector_id") or ""), tenant_id=str(action.get("tenant_id") or "default")
+    )
+    if connector is None:
+        return json.dumps({"error": "conector no encontrado o desactivado"}, ensure_ascii=False)
+    return await _call_connector_tool(db, connector, str(action.get("tool") or ""), dict(action.get("args") or {}))
 
 
 async def connect_worker_mcp_connectors(db: Any, *, worker_uid: str, tenant_id: str = "default") -> list[Any]:

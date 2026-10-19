@@ -51,6 +51,7 @@ from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_
 # approve anything on the human's behalf.
 HUMAN_ONLY_FLY_COMMANDS = frozenset(
     {
+        "approve", "reject",  # run or drop a pending MCP action (e.g. a broker order)
         "approve_code", "approve-code", "reject_code", "reject-code",
         "loop_approve", "loop-approve", "loop_reject", "loop-reject",
         "meditate_approve", "meditate-approve", "meditate_reject", "meditate-reject",
@@ -204,9 +205,9 @@ def _dispatch_fly_command(
     if name == "health":
         return execute_health(db)
     if name == "approve":
-        return execute_approve_reject(db, chat_id, True)
+        return execute_approve_reject(db, chat_id, True, args, tenant_id=tenant_id)
     if name == "reject":
-        return execute_approve_reject(db, chat_id, False)
+        return execute_approve_reject(db, chat_id, False, args, tenant_id=tenant_id)
     if name in ("prompt", "system_prompt", "system"):
         return execute_prompt(db, chat_id, args)
     if name in ("model", "provider", "llm"):

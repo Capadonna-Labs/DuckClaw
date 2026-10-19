@@ -102,6 +102,13 @@ export function ChatBubble({
   const [swipeX, setSwipeX] = useState(0);
   const swipeStart = useRef<{ x: number; y: number; axis: 'x' | 'y' | null } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
+    // Tables/code blocks scroll sideways: a drag inside them is theirs, not a swipe.
+    for (let el = e.target as HTMLElement | null; el && el !== e.currentTarget; el = el.parentElement) {
+      if (el.scrollWidth > el.clientWidth + 1 && getComputedStyle(el).overflowX !== 'visible') {
+        swipeStart.current = null;
+        return;
+      }
+    }
     const t = e.touches[0];
     swipeStart.current = { x: t.clientX, y: t.clientY, axis: null };
   };

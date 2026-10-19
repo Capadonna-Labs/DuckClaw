@@ -32,6 +32,7 @@ import { useComposeClipboard } from '@/components/chat/useComposeClipboard';
 import { shouldShowSuggestionChips, slashMenuEntryFromCatalogSkill } from '@/components/chat/adminChatPure';
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 import { useFlyCommandSuggestions } from '@/components/chat/useFlyCommandSuggestions';
+import { useQuoteMessage } from '@/components/chat/useQuoteMessage';
 
 export type AdminChatPanelProps = {
   chatId: string;
@@ -149,7 +150,6 @@ export function AdminChatPanel({
     setVoiceResponseMode,
     retryFromMessage,
     editFromMessage,
-    quoteMessage,
     inputRef,
     cancelGeneration,
     imageAttachments,
@@ -163,6 +163,7 @@ export function AdminChatPanel({
     reloadHistory,
     setMessages,
   } = chat;
+  const quoteMessage = useQuoteMessage(messages, setInput, inputRef);
 
   // Agents can create directive skills mid-conversation (create_skill), so the
   // catalog fetched on mount goes stale — refresh each time a "/" command starts.

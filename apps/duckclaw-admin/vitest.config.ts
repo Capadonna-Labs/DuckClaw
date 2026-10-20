@@ -32,6 +32,8 @@ export default defineConfig({
       'src/components/chat/overlongMessageAttachment.test.ts',
       'src/components/chat/chatMarkdownMermaid.test.ts',
       'src/components/chat/chatMarkdown.test.ts',
+      'src/lib/messageTime.test.ts',
+      'src/lib/conversationSeen.test.ts',
       'src/lib/sseChat.test.ts',
       'src/lib/toolUsageGroup.test.ts',
       'src/lib/chatEphemeralMerge.test.ts',

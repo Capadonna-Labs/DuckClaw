@@ -1,5 +1,6 @@
 import { readSseChatStream } from '@/lib/sseChat';
 import { friendlyGatewayError } from '@/lib/adminErrors';
+import { markConversationSeen } from '@/lib/conversationSeen';
 
 import { adminFetch, coalesceAdminGet, sessionHeaders } from './http';
 
@@ -21,6 +22,10 @@ export interface AdminConversation {
   origin: string;
   vault_db_path?: string;
   messages?: { role: string; content: string }[];
+  /** List only: traffic light from the gateway (Redis activity / pending approvals). */
+  activity?: 'working' | 'awaiting_approval' | 'idle';
+  activity_task?: string;
+  activity_since?: number;
 }
 
 export type PlaygroundVaultInfo = {
@@ -79,7 +84,11 @@ export const chatApi = {
     if (tenantId) q.set('tenant_id', tenantId);
     const qs = q.toString();
     const path = `/conversations/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`;
-    return coalesceAdminGet(`GET:${path}`, () => adminFetch<AdminConversation>(path));
+    return coalesceAdminGet(`GET:${path}`, () => adminFetch<AdminConversation>(path)).then((data) => {
+      // Only an open chat fetches its conversation: that is "read" for the list's unread badge.
+      markConversationSeen(sessionId, Math.max(data.message_count || 0, data.messages?.length || 0));
+      return data;
+    });
   },
 
   patchConversation: (sessionId: string, title: string, tenantId?: string) => {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -26,6 +27,38 @@ async def admin_chat_history(
     redis_client = getattr(request.app.state, "redis", None)
     items = await redis_load_chat_history(redis_client, tenant_id, session_id)
     return {"tenant_id": tenant_id, "session_id": session_id, "messages": items}
+
+
+async def _activity_states(redis_client: Any, session_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Traffic light per conversation, from Redis only (no vault opened per row).
+
+    working: a turn is running (graphs.activity BUSY, set by the chat runner for user and
+    proactive turns). awaiting_approval: an MCP action waits for /approve. Else idle.
+    """
+    if redis_client is None or not session_ids:
+        return {}
+    try:
+        busy = await redis_client.mget([f"duckclaw:activity:{s}" for s in session_ids])
+        pending = await redis_client.mget([f"duckclaw:mcp_pending_chat:{s}" for s in session_ids])
+    except Exception:
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for sid, b, p in zip(session_ids, busy, pending):
+        state: dict[str, Any] = {"activity": "idle"}
+        if b:
+            try:
+                info = json.loads(b)
+            except (TypeError, ValueError):
+                info = {}
+            state = {
+                "activity": "working",
+                "activity_task": str(info.get("task") or "")[:120],
+                "activity_since": info.get("started_at"),
+            }
+        elif p:
+            state = {"activity": "awaiting_approval"}
+        out[sid] = state
+    return out
 
 
 @router.get("/conversations", dependencies=[Depends(require_admin_key)])
@@ -57,9 +90,10 @@ async def admin_list_conversations(
         offset=offset,
     )
     items = await asyncio.to_thread(enrich_conversations_worker_display_names, items, tenant_id=tid)
+    states = await _activity_states(redis_client, [m.session_id for m in items])
     return {
         "tenant_id": tid,
-        "conversations": [m.model_dump() for m in items],
+        "conversations": [{**m.model_dump(), **states.get(m.session_id, {})} for m in items],
         "total": total,
         "limit": limit,
         "offset": offset,

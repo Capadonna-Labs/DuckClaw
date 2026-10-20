@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatMessageTime } from './ChatBubble';
+import { formatMessageTime } from './messageTime';
 
 describe('formatMessageTime', () => {
   it('shows only the time today and adds the date otherwise; empty without a time', () => {

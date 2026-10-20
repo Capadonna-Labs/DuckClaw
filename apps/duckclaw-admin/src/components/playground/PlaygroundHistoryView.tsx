@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Bot, Pencil, Trash2 } from 'lucide-react';
 import { adminService, type AdminConversation } from '@/services/adminService';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
+import { unreadReplies } from '@/lib/conversationSeen';
 
 import {
   formatConversationTime,
@@ -12,6 +13,14 @@ import {
   uniqueConversationsBySession,
 } from './playgroundHistoryHelpers';
 import type { PlaygroundConfig } from './playgroundTypes';
+
+const ACTIVITY: Record<string, { label: string; dot: string }> = {
+  working: { label: 'Trabajando', dot: 'bg-emerald-500 animate-pulse' },
+  awaiting_approval: { label: 'Espera tu aprobación', dot: 'bg-amber-500' },
+  idle: { label: 'En reposo', dot: 'bg-gov-gray-300 dark:bg-dark-border' },
+};
+// ponytail: 15 s polling of the list; a push/SSE channel if it ever needs to be instant.
+const REFRESH_MS = 15_000;
 
 export function PlaygroundHistoryView({
   tenantId,
@@ -60,8 +69,18 @@ export function PlaygroundHistoryView({
         if (!cancelled) setLoading(false);
       });
 
+    // Silent refresh so the traffic light and the unread badges follow the agents.
+    const timer = window.setInterval(() => {
+      adminService.listConversations({ tenant_id: tenantId, limit: 80 })
+        .then((res) => {
+          if (!cancelled) setConversations(res.conversations ?? []);
+        })
+        .catch(() => undefined);
+    }, REFRESH_MS);
+
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [tenantId]);
 
@@ -153,6 +172,8 @@ export function PlaygroundHistoryView({
           <ul className="grid gap-2">
             {uniqueConversations.map((conversation) => {
               const isRenaming = renamingSessionId === conversation.session_id;
+              const unread = unreadReplies(conversation.session_id, conversation.message_count);
+              const activity = ACTIVITY[conversation.activity || 'idle'] ?? ACTIVITY.idle;
               return (
               <li key={conversation.session_id}>
                 <div className="flex items-stretch gap-2 rounded-2xl border dark:border-dark-border p-3 hover:border-gov-blue-300 hover:bg-gov-blue-50/50 dark:hover:bg-dark-bg transition-colors">
@@ -181,13 +202,29 @@ export function PlaygroundHistoryView({
                         {conversation.last_message_preview || 'Sin mensajes todavía'}
                       </p>
                     </div>
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-400 mt-2">
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-gov-gray-400 mt-2 flex flex-wrap items-center gap-x-1.5">
+                      <span
+                        className="inline-flex items-center gap-1 normal-case tracking-normal text-gov-gray-600 dark:text-dark-muted"
+                        title={conversation.activity_task || activity.label}
+                      >
+                        <span className={`inline-block h-2 w-2 rounded-full ${activity.dot}`} aria-hidden />
+                        {activity.label}
+                      </span>
+                      <span aria-hidden>·</span>
                       {historyWorkerLabel(conversation, workers)} · {conversation.message_count} mensajes
                     </p>
                   </button>
                   <div className="flex shrink-0 flex-col items-center justify-between gap-1.5 py-0.5">
-                    <span className="text-[10px] font-black uppercase tracking-wide text-gov-gray-400 whitespace-nowrap">
+                    <span className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wide text-gov-gray-400 whitespace-nowrap">
                       {formatConversationTime(conversation.updated_at)}
+                      {unread > 0 ? (
+                        <span
+                          className="min-w-[1.25rem] rounded-full bg-gov-blue-700 px-1.5 py-0.5 text-center text-[10px] font-bold normal-case text-white"
+                          aria-label={`${unread} respuestas sin leer`}
+                        >
+                          {unread > 99 ? '99+' : unread}
+                        </span>
+                      ) : null}
                     </span>
                     <button
                       type="button"

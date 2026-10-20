@@ -280,7 +280,7 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
     body = clean(text) or "Ciclo proactivo ejecutado."
     # No verdict line but the opening says nothing happened ("Tick cerrado sin novedades"): a
     # generic "DuckClaw · ciclo /loop" push woke the watch for nothing on 20-Oct.
-    if re.search(r"sin novedad", body[:200], re.IGNORECASE):
+    if re.search(r"\bsin novedad", body[:200], re.IGNORECASE):
         return None
     return "DuckClaw · ciclo /loop", body if len(body) <= 140 else body[:139] + "…"
 

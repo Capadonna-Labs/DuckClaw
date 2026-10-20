@@ -757,17 +757,14 @@ def execute_crons_schedule(
             _GOALS_CRON_WALL_KEY: dump_wall_items(items),
             _GOALS_PROACTIVE_TENANT_KEY: tid,
         }
+        # Only the clock /goals review needs the goals_wall trigger. A --prompt cron must not touch
+        # the meta: it is shared with --delta and overwriting it dropped the interval's own
+        # --prompt (an hourly "/datos_alternativos" would silently turn into /goals reviews).
         try:
-            if not mraw:
-                wall_updates[_GOALS_DELTA_META_KEY] = json.dumps({"trigger": "goals_wall"}, ensure_ascii=False)
-            else:
-                mobj = json.loads(mraw)
-                if not isinstance(mobj, dict) or str(mobj.get("trigger") or "").lower() != "goals_wall":
-                    wall_updates[_GOALS_DELTA_META_KEY] = json.dumps(
-                        {"trigger": "goals_wall"},
-                        ensure_ascii=False,
-                    )
+            mobj = json.loads(mraw) if mraw else {}
         except Exception:
+            mobj = {}
+        if not prompt and (not isinstance(mobj, dict) or str(mobj.get("trigger") or "").lower() != "goals_wall"):
             wall_updates[_GOALS_DELTA_META_KEY] = json.dumps({"trigger": "goals_wall"}, ensure_ascii=False)
         ok, persist_err = _set_chat_state_entries(db, chat_id, wall_updates, tenant_id=tid)
         if not ok:

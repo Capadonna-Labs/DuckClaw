@@ -291,3 +291,33 @@ def test_multiple_prompt_crons_per_chat(tmp_path: Path) -> None:
     with DuckClaw(db_path, read_only=False) as db:
         listing = execute_goals(db, 24, "", tenant_id="t")
     assert "cron-id: c2" in listing and "Revisa pedidos pendientes" in listing
+
+
+def test_prompt_clock_cron_keeps_the_interval_prompt(tmp_path: Path) -> None:
+    """Adding a --timestamp --prompt cron must not overwrite the --delta meta: it holds the
+    interval's own --prompt (an hourly /datos_alternativos), which used to be replaced by
+    {"trigger": "goals_wall"}."""
+    import json
+
+    import duckdb
+
+    from duckclaw import DuckClaw
+    from duckclaw.graphs.on_the_fly_commands import _GOALS_DELTA_META_KEY, execute_goals, get_chat_state
+
+    db_path = str(tmp_path / "keep.duckdb")
+    con = duckdb.connect(db_path)
+    con.execute(
+        "CREATE TABLE agent_config (key VARCHAR PRIMARY KEY, value TEXT, "
+        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)"
+    )
+    meta = {"trigger": "goals_cli", "prompt": "/datos_alternativos"}
+    con.execute(
+        "INSERT INTO agent_config (key, value) VALUES (?, ?), (?, ?)",
+        ["chat_25_worker_id", "data_analyst", f"chat_25_{_GOALS_DELTA_META_KEY}", json.dumps(meta)],
+    )
+    con.close()
+
+    with DuckClaw(db_path, read_only=False) as db:
+        execute_goals(db, 25, '--timestamp every 16:50 weekdays --prompt "/setups"', tenant_id="default")
+    with DuckClaw(db_path, read_only=True) as db:
+        assert json.loads(get_chat_state(db, 25, _GOALS_DELTA_META_KEY) or "{}") == meta

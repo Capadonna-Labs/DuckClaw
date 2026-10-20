@@ -276,6 +276,9 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
         if _NO_NEWS_RE.search(verdict):
             return None
         rest = _push_body(text[m.end():], clean) or verdict
+        if verdict.count("(") != verdict.count(")"):
+            # A chunk lost upstream ("WTI cie) pese a…"): don't put the broken line on the watch.
+            verdict = "DuckClaw · aviso"
         return verdict[:80], rest if len(rest) <= 140 else rest[:139] + "…"
     body = clean(text) or "Ciclo proactivo ejecutado."
     # No verdict line but the opening says nothing happened ("Tick cerrado sin novedades"): a

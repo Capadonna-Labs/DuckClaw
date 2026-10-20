@@ -147,6 +147,14 @@ def build_openrouter_llm(
     except ValueError:
         _mt = 8192
     _reasoning = openrouter_reasoning_param(_mt, resolved_model)
+    extra_body: dict[str, Any] = {}
+    if _reasoning:
+        extra_body["reasoning"] = _reasoning
+    # OpenRouter routes to the cheapest upstream by default, including 4-bit quantized ones;
+    # DUCKCLAW_OPENROUTER_PROVIDER_ORDER="deepseek,..." prefers those first (fallbacks still on).
+    _order = [p.strip() for p in (os.environ.get("DUCKCLAW_OPENROUTER_PROVIDER_ORDER") or "").split(",") if p.strip()]
+    if _order:
+        extra_body["provider"] = {"order": _order, "allow_fallbacks": True}
     llm = ChatOpenAI(
         model=resolved_model,
         temperature=0,
@@ -154,7 +162,7 @@ def build_openrouter_llm(
         api_key=key,
         max_tokens=_mt,
         default_headers=dict(OPENROUTER_ATTRIBUTION_HEADERS),
-        **({"extra_body": {"reasoning": _reasoning}} if _reasoning else {}),
+        **({"extra_body": extra_body} if extra_body else {}),
     )
     return ensure_openrouter_attribution_headers(llm)
 

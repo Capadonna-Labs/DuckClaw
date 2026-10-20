@@ -27,6 +27,8 @@ def test_no_news_skips_push():
 def test_no_verdict_falls_back():
     title, body = hb._loop_push_parts(_body("Reporte sin línea de veredicto."))
     assert title == "DuckClaw · ciclo /loop" and body == "Reporte sin línea de veredicto."
+    # ...unless that report itself says nothing happened.
+    assert hb._loop_push_parts(_body("worker_a 10\n\nTick cerrado sin novedades. Estado: TP/SL 6/6.")) is None
 
 
 def test_truncated_json_body():

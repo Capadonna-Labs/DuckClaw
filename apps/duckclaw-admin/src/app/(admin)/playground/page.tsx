@@ -685,7 +685,6 @@ export default function PlaygroundPage() {
       {isHistoryView ? (
         <PlaygroundHistoryView
           tenantId={effectiveTenantId}
-          workers={config?.workers}
           configLoading={configLoading}
           configError={configError}
           authHydrated={authHydrated}

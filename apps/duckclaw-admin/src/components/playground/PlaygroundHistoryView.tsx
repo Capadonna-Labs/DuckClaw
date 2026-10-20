@@ -9,10 +9,8 @@ import { unreadReplies } from '@/lib/conversationSeen';
 
 import {
   formatConversationTime,
-  historyWorkerLabel,
   uniqueConversationsBySession,
 } from './playgroundHistoryHelpers';
-import type { PlaygroundConfig } from './playgroundTypes';
 
 const ACTIVITY: Record<string, { label: string; dot: string }> = {
   working: { label: 'Trabajando', dot: 'bg-emerald-500 animate-pulse' },
@@ -24,7 +22,6 @@ const REFRESH_MS = 15_000;
 
 export function PlaygroundHistoryView({
   tenantId,
-  workers,
   configLoading = false,
   configError = null,
   authHydrated = true,
@@ -32,7 +29,6 @@ export function PlaygroundHistoryView({
   onSelectConversation,
 }: {
   tenantId?: string;
-  workers?: NonNullable<PlaygroundConfig>['workers'];
   configLoading?: boolean;
   configError?: string | null;
   authHydrated?: boolean;
@@ -210,8 +206,6 @@ export function PlaygroundHistoryView({
                         <span className={`inline-block h-2 w-2 rounded-full ${activity.dot}`} aria-hidden />
                         {activity.label}
                       </span>
-                      <span aria-hidden>·</span>
-                      {historyWorkerLabel(conversation, workers)} · {conversation.message_count} mensajes
                     </p>
                   </button>
                   <div className="flex shrink-0 flex-col items-center justify-between gap-1.5 py-0.5">

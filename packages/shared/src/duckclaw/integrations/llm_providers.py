@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import os
 import re
@@ -150,11 +151,17 @@ def build_openrouter_llm(
     extra_body: dict[str, Any] = {}
     if _reasoning:
         extra_body["reasoning"] = _reasoning
-    # OpenRouter routes to the cheapest upstream by default, including 4-bit quantized ones;
-    # DUCKCLAW_OPENROUTER_PROVIDER_ORDER="deepseek,..." prefers those first (fallbacks still on).
-    _order = [p.strip() for p in (os.environ.get("DUCKCLAW_OPENROUTER_PROVIDER_ORDER") or "").split(",") if p.strip()]
-    if _order:
-        extra_body["provider"] = {"order": _order, "allow_fallbacks": True}
+    # OpenRouter routes to the cheapest upstream by default, including 4-bit quantized ones.
+    # DUCKCLAW_OPENROUTER_PROVIDER is OpenRouter's provider-routing object as JSON, e.g.
+    # {"quantizations": ["fp8", "bf16", "fp16"]} or {"order": ["fireworks"]}.
+    _provider_raw = (os.environ.get("DUCKCLAW_OPENROUTER_PROVIDER") or "").strip()
+    if _provider_raw:
+        try:
+            _provider = json.loads(_provider_raw)
+        except ValueError:
+            _provider = None
+        if isinstance(_provider, dict) and _provider:
+            extra_body["provider"] = _provider
     llm = ChatOpenAI(
         model=resolved_model,
         temperature=0,

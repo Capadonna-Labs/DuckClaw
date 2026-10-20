@@ -20,7 +20,13 @@ _QUEUE_URL_ENV = "DUCKCLAW_WRITE_QUEUE_URL"
 
 
 def _get_redis_url() -> Optional[str]:
-    url = os.environ.get(_REDIS_URL_ENV, "").strip() or os.environ.get(_QUEUE_URL_ENV, "").strip()
+    # REDIS_URL is the deployment's standard variable; without it BUSY was never recorded
+    # (the conversation traffic light and the heartbeat's "chat busy" check saw every chat idle).
+    url = (
+        os.environ.get(_REDIS_URL_ENV, "").strip()
+        or os.environ.get(_QUEUE_URL_ENV, "").strip()
+        or os.environ.get("REDIS_URL", "").strip()
+    )
     return url or None
 
 

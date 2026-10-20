@@ -33,3 +33,13 @@ def test_activity_states_per_conversation() -> None:
     assert out["b"] == {"activity": "awaiting_approval"}
     assert out["c"] == {"activity": "idle"}
     assert asyncio.run(_activity_states(None, ["a"])) == {}
+
+
+def test_activity_uses_the_standard_redis_url(monkeypatch) -> None:
+    """Deployments only set REDIS_URL; BUSY was silently never written."""
+    from duckclaw.graphs import activity
+
+    for k in ("DUCKCLAW_REDIS_URL", "DUCKCLAW_WRITE_QUEUE_URL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/0")
+    assert activity._get_redis_url() == "redis://localhost:6379/0"

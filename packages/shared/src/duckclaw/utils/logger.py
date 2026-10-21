@@ -360,7 +360,27 @@ def _usage_dict_from_ai_message(m: Any) -> dict[str, int] | None:
     tot = int(meta.get("total_tokens") or (inp + out) or 0)
     if tot <= 0 and inp <= 0 and out <= 0:
         return None
-    return {"input_tokens": inp, "output_tokens": out, "total_tokens": tot}
+    usage = {"input_tokens": inp, "output_tokens": out, "total_tokens": tot}
+    cached = _cached_prompt_tokens(m, meta)
+    if cached is not None:
+        usage["cached_tokens"] = cached
+    return usage
+
+
+def _cached_prompt_tokens(m: Any, meta: dict) -> int | None:
+    """Prompt tokens the provider served from its cache; None when it does not report them (0 means a real miss)."""
+    for src in (meta, (getattr(m, "response_metadata", None) or {}).get("token_usage") or {}):
+        if not isinstance(src, dict):
+            continue
+        details = src.get("input_token_details") or {}
+        if isinstance(details, dict) and "cache_read" in details:
+            return int(details["cache_read"] or 0)
+        details = src.get("prompt_tokens_details") or {}
+        if isinstance(details, dict) and "cached_tokens" in details:
+            return int(details["cached_tokens"] or 0)
+        if "prompt_cache_hit_tokens" in src:  # DeepSeek's own API
+            return int(src["prompt_cache_hit_tokens"] or 0)
+    return None
 
 
 def extract_usage_from_messages(messages: Optional[list[Any]]) -> Optional[dict[str, int]]:
@@ -378,6 +398,7 @@ def extract_usage_from_messages(messages: Optional[list[Any]]) -> Optional[dict[
     total_out = 0
     total_all = 0
     found = False
+    total_cached: int | None = None
     for m in messages:
         if AIMessage is not None and isinstance(m, AIMessage):
             u = _usage_dict_from_ai_message(m)
@@ -386,8 +407,13 @@ def extract_usage_from_messages(messages: Optional[list[Any]]) -> Optional[dict[
                 total_in += u["input_tokens"]
                 total_out += u["output_tokens"]
                 total_all += u["total_tokens"]
+                if "cached_tokens" in u:
+                    total_cached = (total_cached or 0) + u["cached_tokens"]
     if not found:
         return None
     if total_all <= 0:
         total_all = total_in + total_out
-    return {"input_tokens": total_in, "output_tokens": total_out, "total_tokens": total_all}
+    usage = {"input_tokens": total_in, "output_tokens": total_out, "total_tokens": total_all}
+    if total_cached is not None:
+        usage["cached_tokens"] = total_cached
+    return usage

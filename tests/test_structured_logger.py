@@ -46,6 +46,19 @@ def test_extract_usage_from_messages_sums_all_ai_messages() -> None:
     assert got == {"input_tokens": 300, "output_tokens": 30, "total_tokens": 330}
 
 
+def test_extract_usage_reports_cached_prompt_tokens_only_when_the_provider_does() -> None:
+    from duckclaw.utils.logger import extract_usage_from_messages
+    from langchain_core.messages import AIMessage
+
+    cached = {"input_tokens": 100, "output_tokens": 10, "total_tokens": 110, "input_token_details": {"cache_read": 80}}
+    miss = {"input_tokens": 200, "output_tokens": 20, "total_tokens": 220, "input_token_details": {"cache_read": 0}}
+    got = extract_usage_from_messages([AIMessage(content="a", usage_metadata=cached), AIMessage(content="b", usage_metadata=miss)])
+    assert got == {"input_tokens": 300, "output_tokens": 30, "total_tokens": 330, "cached_tokens": 80}
+    deepseek = AIMessage(content="c", response_metadata={"token_usage": {"prompt_tokens": 50, "completion_tokens": 5, "prompt_cache_hit_tokens": 40}})
+    assert extract_usage_from_messages([deepseek])["cached_tokens"] == 40
+    assert "cached_tokens" not in extract_usage_from_messages([AIMessage(content="d", usage_metadata={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})])
+
+
 def test_log_tool_execution_sync_timing() -> None:
     from duckclaw.utils.logger import log_tool_execution_sync
 

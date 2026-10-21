@@ -210,7 +210,8 @@ async def finalize_chat_response(
     if isinstance(usage, dict) and usage:
         tok_extra = (
             f" | 🪙 Tokens: {usage.get('total_tokens', 0)} "
-            f"[P:{usage.get('input_tokens', 0)}, C:{usage.get('output_tokens', 0)}]"
+            f"[P:{usage.get('input_tokens', 0)}, C:{usage.get('output_tokens', 0)}, "
+            f"caché:{usage['cached_tokens'] if 'cached_tokens' in usage else 'n/d'}]"
         )
         try:
             from duckclaw.llm_usage_log import append_llm_usage_log

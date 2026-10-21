@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
+import { Maximize2, Minimize2 } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { HtmlDashboardUploadZone } from '@/components/reports/HtmlDashboardUploadZone';
@@ -43,6 +44,8 @@ export function HtmlDashboardReportsPanel() {
     null
   );
   const [reportReloadToken, setReportReloadToken] = useState(0);
+  // CSS overlay, not the Fullscreen API: iPhone Safari only allows that for video.
+  const [fullscreen, setFullscreen] = useState(false);
   const [reportLoadError, setReportLoadError] = useState('');
   const [reportLoading, setReportLoading] = useState(false);
   const [reportIsPlaceholder, setReportIsPlaceholder] = useState(true);
@@ -273,8 +276,23 @@ export function HtmlDashboardReportsPanel() {
     []
   );
 
+  useEffect(() => {
+    if (!fullscreen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setFullscreen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [fullscreen]);
+
   return (
-    <div className="h-full w-full overflow-hidden bg-slate-900">
+    <div
+      className={
+        fullscreen
+          ? 'fixed inset-0 z-[100] overflow-hidden bg-slate-900 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]'
+          : 'h-full w-full overflow-hidden bg-slate-900'
+      }
+    >
       {reportReady ? (
         <div className="relative h-full w-full">
           {reportLoading && reportIsPlaceholder ? (
@@ -311,6 +329,15 @@ export function HtmlDashboardReportsPanel() {
                 className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:text-white"
               >
                 Código
+              </button>
+              <button
+                type="button"
+                onClick={() => setFullscreen((v) => !v)}
+                className="rounded-md px-2 py-1.5 text-slate-300 transition hover:text-white"
+                aria-label={fullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
+                title={fullscreen ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'}
+              >
+                {fullscreen ? <Minimize2 size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
               </button>
             </div>
           ) : null}

@@ -354,6 +354,11 @@ def register_research_skill(
         local_tool = local_web_search_tool(research_config)
         if local_tool:
             tools_list.append(local_tool)
+            from duckclaw.forge.skills.local_web_search import local_read_page_tool
+
+            page_tool = local_read_page_tool(research_config)
+            if page_tool:
+                tools_list.append(page_tool)
 
         from duckclaw.forge.skills.kiwix_bridge import register_kiwix_into_research
 

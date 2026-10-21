@@ -230,6 +230,123 @@ def _normalize_include_domains(raw: Any) -> list[str]:
     return out
 
 
+class ReadWebPageInput(BaseModel):
+    url: str = Field(..., description="URL pública http(s) del artículo o página a leer.")
+
+
+_PAGE_MAX_BYTES = 2_000_000
+_SKIP_TAGS = frozenset({"script", "style", "noscript", "svg", "nav", "footer", "header", "form", "aside", "iframe"})
+
+
+def _public_http_url(url: str) -> str | None:
+    """Error text if ``url`` is not a public http(s) URL (the agent picks it: no SSRF into the host,
+    the tailnet, private ranges or cloud metadata)."""
+    import ipaddress
+    import socket
+
+    parsed = urlparse((url or "").strip())
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return "solo URLs http(s) públicas"
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except OSError as exc:
+        return f"no se pudo resolver {parsed.hostname}: {exc}"
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global or ip in ipaddress.ip_network("100.64.0.0/10"):
+            return f"dirección no pública ({ip}): bloqueada"
+    return None
+
+
+def page_text(html_text: str) -> tuple[str, str]:
+    """(title, readable text) with the stdlib parser: drops scripts, menus and footers."""
+    from html.parser import HTMLParser
+
+    class _P(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__()
+            self.skip = 0
+            self.title = ""
+            self.in_title = False
+            self.parts: list[str] = []
+
+        def handle_starttag(self, tag, attrs):  # noqa: ANN001
+            if tag in _SKIP_TAGS:
+                self.skip += 1
+            elif tag == "title":
+                self.in_title = True
+            elif tag in ("p", "br", "li", "h1", "h2", "h3", "h4", "tr", "div", "section", "article"):
+                self.parts.append("\n")
+
+        def handle_endtag(self, tag):  # noqa: ANN001
+            if tag in _SKIP_TAGS and self.skip:
+                self.skip -= 1
+            elif tag == "title":
+                self.in_title = False
+
+        def handle_data(self, data):  # noqa: ANN001
+            if self.in_title:
+                self.title += data
+            elif not self.skip:
+                self.parts.append(data)
+
+    p = _P()
+    p.feed(html_text)
+    lines = [re.sub(r"[ \t\r\f\v]+", " ", ln).strip() for ln in "".join(p.parts).split("\n")]
+    text = "\n".join(ln for ln in lines if len(ln) > 1)
+    return unescape(p.title.strip()), re.sub(r"\n{3,}", "\n\n", text)
+
+
+def read_web_page(url: str, *, max_chars: int = 12000) -> str:
+    import httpx
+
+    err = _public_http_url(url)
+    if err:
+        return f"No leída: {err}."
+    try:
+        with httpx.Client(timeout=20.0, follow_redirects=False, headers={"User-Agent": _USER_AGENT}) as client:
+            target = url
+            for _ in range(4):  # follow redirects by hand so every hop passes the public-URL check
+                resp = client.get(target)
+                if resp.is_redirect and resp.headers.get("location"):
+                    target = str(resp.next_request.url) if resp.next_request else resp.headers["location"]
+                    err = _public_http_url(target)
+                    if err:
+                        return f"No leída (redirección): {err}."
+                    continue
+                break
+            if resp.status_code >= 400:
+                return f"No leída: HTTP {resp.status_code} en {target} (¿muro de pago o bloqueo?)."
+            ctype = resp.headers.get("content-type", "")
+            if "html" not in ctype and "text" not in ctype:
+                return f"No leída: tipo de contenido {ctype or 'desconocido'} (no es una página de texto)."
+            title, text = page_text(resp.content[:_PAGE_MAX_BYTES].decode(resp.encoding or "utf-8", "replace"))
+    except Exception as exc:  # noqa: BLE001
+        return f"No leída: {exc}"
+    if len(text) < 200:
+        return f"{title}\n\n(La página casi no tiene texto legible: puede requerir JavaScript o registro.)\n{text}"
+    cut = len(text) > max_chars
+    return f"{title}\n{target}\n\n{text[:max_chars]}" + ("\n\n[… texto recortado]" if cut else "")
+
+
+def local_read_page_tool(config: dict[str, Any] | None = None) -> Any | None:
+    """StructuredTool ``read_web_page``: keyless page reader (stand-in for tavily_extract)."""
+    cfg = config or {}
+    if cfg.get("local_search_enabled") is False:
+        return None
+    from langchain_core.tools import StructuredTool
+
+    return StructuredTool.from_function(
+        lambda url: read_web_page(url),
+        name="read_web_page",
+        description=(
+            "Lee el texto de una página web pública (artículo, nota de prensa) sin API key: úsala "
+            "para abrir un resultado de web_search. No sirve para contenido tras registro o muro de pago."
+        ),
+        args_schema=ReadWebPageInput,
+    )
+
+
 def local_web_search_tool(config: dict[str, Any] | None = None) -> Any | None:
     """StructuredTool ``web_search`` (SearXNG o DuckDuckGo)."""
     cfg = config or {}

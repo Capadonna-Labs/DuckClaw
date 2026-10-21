@@ -43,7 +43,9 @@ export function middleware(request: NextRequest) {
     "connect-src 'self'",
     // Pipecat WavMediaManager: audioWorklet.addModule(blob:...)
     "worker-src 'self' blob:",
-    "frame-ancestors 'none'",
+    // The playground chat may be framed by our own pages (e.g. the chat bubble of a full-screen
+    // HTML dashboard); everything else, and every other origin, stays unframeable.
+    pathname.startsWith('/playground') ? "frame-ancestors 'self'" : "frame-ancestors 'none'",
   ].join('; ');
 
   const response = NextResponse.next();

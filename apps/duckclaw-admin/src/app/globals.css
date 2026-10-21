@@ -67,3 +67,9 @@
     background-color: #6e7681;
   }
 }
+
+/* iPhone in landscape: keep content clear of the camera/Dynamic Island (0 in portrait). */
+body {
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}

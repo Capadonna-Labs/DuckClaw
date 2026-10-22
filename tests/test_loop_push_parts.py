@@ -61,3 +61,14 @@ def test_broken_verdict_title_is_replaced():
     """A response that lost a chunk upstream ('WTI cie) pese a…') never becomes the watch title."""
     title, body = hb._loop_push_parts(_body("Veredicto: WTI cie) pese a Brent plano → XLE\n\nWTI noviembre +2,22% a 103,66 $."))
     assert title == "DuckClaw · aviso" and body.startswith("WTI noviembre")
+
+
+def test_broken_detail_line_falls_back_to_the_table_row_then_to_the_title():
+    """22-Oct: the agent's detail line lost a chunk ('...comprometidos con el de) (La Jornada, 21-oct).')."""
+    broken = 'Netanyahu dice que él y Trump están "comprometidos con el de) (La Jornada, 21-oct).'
+    table = "| hora | fuente | hecho |\n|---|---|---|\n| 21-oct | La Jornada | Netanyahu: completar el derrocamiento del régimen iraní |"
+    title, body = hb._loop_push_parts(_body(f'Veredicto: Netanyahu: "derrocar el régimen iraní" → XLE\n\n{broken}\n\n{table}'))
+    assert title.startswith("Netanyahu") and body == "21-oct · La Jornada · Netanyahu: completar el derrocamiento del régimen iraní"
+    title, body = hb._loop_push_parts(_body(f'Veredicto: Netanyahu: "derrocar el régimen iraní" → XLE\n\n{broken}'))
+    assert body == title or body == 'Netanyahu: "derrocar el régimen iraní" → XLE'  # nothing intact: the (good) title is the body
+    assert hb._loop_push_parts(_body("Veredicto: Brent +2%\n\nBrent sube 2% (Reuters, 22-oct)."))[1] == "Brent sube 2% (Reuters, 22-oct)."  # intact lines untouched

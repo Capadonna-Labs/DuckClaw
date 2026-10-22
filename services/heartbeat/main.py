@@ -240,7 +240,12 @@ _TABLE_SEP_RE = re.compile(r"^\|?[\s:|-]*-{3,}[\s:|-]*$")
 _BODY_LABEL_RE = re.compile(r"^(detalle|detail|resumen|summary)\s*:\s*", re.IGNORECASE)
 
 
-def _push_body(after: str, clean: Any) -> str:
+def _broken(s: str) -> bool:
+    """A chunk lost upstream leaves unbalanced parentheses or an odd number of double quotes."""
+    return s.count("(") != s.count(")") or s.count('"') % 2 == 1
+
+
+def _push_body(after: str, clean: Any, prose: bool = True) -> str:
     """Notification body: the first prose line after the verdict. A markdown table there used to
     become "hora fuente hecho con cifra ... -------" on the watch; when the reply goes straight
     into a table, its first data row is used instead (header and separator skipped)."""
@@ -254,7 +259,8 @@ def _push_body(after: str, clean: Any) -> str:
             continue
         if rows:
             break
-        return _BODY_LABEL_RE.sub("", clean(s), count=1)
+        if prose:
+            return _BODY_LABEL_RE.sub("", clean(s), count=1)
     data = [r for r in rows if not _TABLE_SEP_RE.match(r)]
     if len(data) < 2:
         return ""
@@ -276,7 +282,11 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
         if _NO_NEWS_RE.search(verdict):
             return None
         rest = _push_body(text[m.end():], clean) or verdict
-        if verdict.count("(") != verdict.count(")"):
+        if _broken(rest):
+            # Same loss in the detail line ("…comprometidos con el de) (La Jornada…"): the table row of facts is intact more often.
+            rest = _push_body(text[m.end():], clean, prose=False)
+            rest = rest if rest and not _broken(rest) else verdict
+        if _broken(verdict):
             # A chunk lost upstream ("WTI cie) pese a…"): don't put the broken line on the watch.
             verdict = "DuckClaw · aviso"
         return verdict[:80], rest if len(rest) <= 140 else rest[:139] + "…"

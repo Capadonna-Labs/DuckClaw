@@ -65,14 +65,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       )}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Topbar onMenuClick={() => setIsSidebarOpen(true)} hideMenu={embedded} />
+        {!embedded && <Topbar onMenuClick={() => setIsSidebarOpen(true)} />}
         <main
           id="admin-main-scroll"
           className={cn(
             'flex-1 max-lg:overscroll-none',
-            isWorkspaceRoute
-              ? 'overflow-hidden overscroll-none p-2 pt-0 lg:p-3 lg:pt-3'
-              : 'scrollbar-thin overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-10'
+            embedded
+              ? 'overflow-hidden overscroll-none p-0'
+              : isWorkspaceRoute
+                ? 'overflow-hidden overscroll-none p-2 pt-0 lg:p-3 lg:pt-3'
+                : 'scrollbar-thin overflow-y-auto p-2 sm:p-4 md:p-6 lg:p-10'
           )}
         >
           <div className={isWorkspaceRoute ? 'h-full w-full min-h-0' : 'max-w-[1600px] mx-auto'}>

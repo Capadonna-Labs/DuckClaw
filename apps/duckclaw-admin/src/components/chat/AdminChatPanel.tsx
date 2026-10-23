@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useEmbedded } from '@/lib/useEmbedded';
 import {
   Bot,
   Brain,
@@ -174,7 +175,8 @@ export function AdminChatPanel({
   }, [slashOpen]);
 
   const isCompact = variant === 'compact';
-  const showSuggestions = shouldShowSuggestionChips(suggestions, loading, input);
+  const embedded = useEmbedded(); // the dashboard's chat panel is narrow: messages and the composer only
+  const showSuggestions = !embedded && shouldShowSuggestionChips(suggestions, loading, input);
   const [, setSuggestionsOpen] = useState(true);
 
   // When Sugerencias appear, the glass composer grows — re-pin scroll so the last
@@ -612,7 +614,7 @@ export function AdminChatPanel({
             imageAttachments={imageAttachments}
             documentAttachments={documentAttachments}
             send={send}
-            suggestions={suggestions}
+            suggestions={embedded ? [] : suggestions}
             recommendedSuggestionIndex={recommendedSuggestionIndex}
             suggestionsAutoEnabled={suggestionsAutoEnabled}
             onSuggestionsAutoChange={onSuggestionsAutoChange}

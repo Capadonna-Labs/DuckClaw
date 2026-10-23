@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import { useEmbedded } from '@/lib/useEmbedded';
 import { adminService } from '@/services/adminService';
 import {
   ArrowLeft,
@@ -65,6 +66,7 @@ import type {
 
 export default function PlaygroundPage() {
   const router = useRouter();
+  const embedded = useEmbedded();
   const searchParams = useSearchParams();
   const initialWorker = searchParams.get('worker') || '';
   const initialProject = searchParams.get('project') || '';
@@ -713,7 +715,7 @@ export default function PlaygroundPage() {
             initialWorker={workerId}
             variant="full"
             showHeader={false}
-            showStudioHeader
+            showStudioHeader={!embedded}
             showWorkerLink={false}
             composeLayout="studio"
             showToolUsage={toolUsageEnabled}

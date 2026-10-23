@@ -371,16 +371,69 @@ def identical_call_envelope(tool_name: str, prior: int, previous_result: str | N
     )
 
 
+def repeated_result_count(messages: list[Any], tool_name: str) -> int:
+    """Results of this tool in the current turn that repeated an earlier result of the same tool.
+
+    Varying the arguments slips past the identical-call guard: a Gmail search alternated
+    queries for 19 rounds (7 min, 1.16M prompt tokens) while only ever getting back the same
+    two answers (0 threads, or the same list). Distinct results (reading 20 different emails)
+    never count.
+    """
+    start = 0
+    for i in range(len(messages) - 1, -1, -1):
+        if getattr(messages[i], "type", "") == "human":
+            start = i + 1
+            break
+    ids = {
+        str(tc["id"])
+        for msg in messages[start:]
+        for tc in getattr(msg, "tool_calls", None) or []
+        if tc.get("id") and (tc.get("name") or "").strip() == (tool_name or "").strip()
+    }
+    seen: set[str] = set()
+    repeated = 0
+    for msg in messages[start:]:
+        if getattr(msg, "type", "") != "tool" or str(getattr(msg, "tool_call_id", "")) not in ids:
+            continue
+        content = getattr(msg, "content", "")
+        text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
+        if '"code": "harness_' in text:  # our own block envelopes are not tool results
+            continue
+        if text in seen:
+            repeated += 1
+        seen.add(text)
+    return repeated
+
+
+def repeated_result_envelope(tool_name: str, repeated: int) -> str:
+    return tool_result_envelope(
+        ok=False,
+        error=f"«{tool_name}» ya devolvió {repeated} veces en este turno un resultado que tenías, aunque cambiaste los argumentos",
+        hint=(
+            "No se ejecutó: seguir variando la consulta no está trayendo nada nuevo. Responde al usuario "
+            "con lo que ya tienes (si una búsqueda devuelve 0, dilo: no hay resultados para ese criterio) "
+            "o usa otra herramienta."
+        ),
+        retry=False,
+        code="harness_repeated_result",
+    )
+
+
 def identical_call_block(messages: list[Any], tool_name: str, args: Any) -> str | None:
-    """Envelope when this exact call already hit the per-turn limit; ``None`` to run it."""
+    """Envelope when this exact call already hit the per-turn limit, or when the tool keeps
+    returning results already seen this turn; ``None`` to run it."""
     limit = max_identical_tool_calls()
     if not limit:
         return None
     prior = identical_prior_calls(messages, tool_name, args)
-    if prior < limit:
-        return None
-    _log.info("harness identical-call block tool=%s prior=%d", tool_name, prior)
-    return identical_call_envelope(tool_name, prior, previous_identical_result(messages, tool_name, args))
+    if prior >= limit:
+        _log.info("harness identical-call block tool=%s prior=%d", tool_name, prior)
+        return identical_call_envelope(tool_name, prior, previous_identical_result(messages, tool_name, args))
+    repeated = repeated_result_count(messages, tool_name)
+    if repeated >= limit:
+        _log.info("harness repeated-result block tool=%s repeated=%d", tool_name, repeated)
+        return repeated_result_envelope(tool_name, repeated)
+    return None
 
 
 def circuit_block_envelope(tool_name: str, fail_count: int) -> str:

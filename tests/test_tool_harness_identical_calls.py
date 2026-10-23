@@ -70,3 +70,34 @@ def test_block_carries_the_previous_result_even_after_earlier_blocks() -> None:
     ]
     second = json.loads(identical_call_block(msgs, "jev_decide", args))
     assert json.loads(second["previous_result"])["score"] == 0.72
+
+
+def test_varied_args_that_keep_returning_seen_results_are_cut_off() -> None:
+    """A Gmail search alternated queries 19 rounds (7 min, 1.16M tokens) getting back only two
+    distinct answers; the identical-args guard never fired until the end."""
+    from duckclaw.workers.tool_harness import repeated_result_count
+
+    empty, listing = '{"resultSizeEstimate": 0}', '{"threads": [{"id": "1999665e7ea7d014"}]}'
+    msgs = [HumanMessage("old"), AIMessage(content="", tool_calls=[{"name": "search_threads", "args": {"q": "x"}, "id": "o1"}]),
+            ToolMessage(content=empty, tool_call_id="o1", name="search_threads"), HumanMessage("unread this week")]
+    for i, (q, res) in enumerate([("is:unread newer_than:7d", empty), ("is:unread", listing), ("is:unread after:2026/10/15", empty),
+                                  ("in:inbox is:unread", listing)]):
+        msgs += [AIMessage(content="", tool_calls=[{"name": "search_threads", "args": {"q": q}, "id": f"s{i}"}]),
+                 ToolMessage(content=res, tool_call_id=f"s{i}", name="search_threads")]
+    assert repeated_result_count(msgs, "search_threads") == 2                 # the previous turn's result does not count
+    assert identical_call_block(msgs, "search_threads", {"q": "label:unread"}) is None   # 2 repeats: still allowed
+    msgs += [AIMessage(content="", tool_calls=[{"name": "search_threads", "args": {"q": "label:unread"}, "id": "s9"}]),
+             ToolMessage(content=empty, tool_call_id="s9", name="search_threads")]
+    env = json.loads(identical_call_block(msgs, "search_threads", {"q": "is:unread newer_than:8d"}))
+    assert env["code"] == "harness_repeated_result"
+    assert "responde al usuario" in env["hint"].lower()
+    assert identical_call_block(msgs, "get_thread", {"id": "a"}) is None      # other tools unaffected
+
+
+def test_distinct_results_of_the_same_tool_never_block() -> None:
+    """Reading 20 different emails is progress, not a loop."""
+    msgs = [HumanMessage("read them")]
+    for i in range(20):
+        msgs += [AIMessage(content="", tool_calls=[{"name": "get_thread", "args": {"id": str(i)}, "id": f"g{i}"}]),
+                 ToolMessage(content=json.dumps({"id": str(i), "body": f"mail {i}"}), tool_call_id=f"g{i}", name="get_thread")]
+    assert identical_call_block(msgs, "get_thread", {"id": "20"}) is None

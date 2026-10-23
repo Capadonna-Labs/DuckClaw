@@ -58,9 +58,16 @@ async def playground_chat(
         # explicitly: the client can't infer completion from history (the new
         # user message is only persisted with the reply, so "last user has a
         # reply" was the previous turn and ended polling after ~3 s).
-        from core.admin_chat_heartbeat import TURN_DONE_KIND, reset_admin_heartbeat_backlog
+        from core.admin_chat_heartbeat import (
+            TURN_DONE_KIND,
+            claim_admin_detached_turn,
+            is_latest_admin_detached_turn,
+            reset_admin_heartbeat_backlog,
+        )
 
-        await reset_admin_heartbeat_backlog(getattr(request.app.state, "redis", None), prepared.session_id)
+        redis_client = getattr(request.app.state, "redis", None)
+        await reset_admin_heartbeat_backlog(redis_client, prepared.session_id)
+        turn_id = await claim_admin_detached_turn(redis_client, prepared.session_id)
 
         async def _run_detached() -> None:
             try:
@@ -75,7 +82,10 @@ async def playground_chat(
             finally:
                 from duckclaw.graphs.chat_heartbeat import publish_admin_chat_heartbeat
 
-                publish_admin_chat_heartbeat(prepared.session_id, "turn done", kind=TURN_DONE_KIND)
+                # A turn sent while this one ran is queued on the chat lock and polls the same
+                # backlog: our end marker would close it before it starts.
+                if await is_latest_admin_detached_turn(redis_client, prepared.session_id, turn_id):
+                    publish_admin_chat_heartbeat(prepared.session_id, "turn done", kind=TURN_DONE_KIND)
 
         spawn_background(_run_detached())
         return {

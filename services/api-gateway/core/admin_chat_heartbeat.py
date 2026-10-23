@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -153,6 +154,38 @@ async def reset_admin_heartbeat_backlog(redis_client: Any, chat_id: str) -> None
         await redis_client.delete(admin_heartbeat_backlog_key(chat_id))
     except Exception as exc:
         _log.debug("admin heartbeat backlog reset failed chat_id=%r: %s", chat_id, exc)
+
+
+ADMIN_DETACHED_TURN_PREFIX = "duckclaw:admin-detached-turn:"
+
+
+async def claim_admin_detached_turn(redis_client: Any, chat_id: str) -> str:
+    """Mark a newly accepted detached turn as the chat's latest and return its id."""
+    turn_id = uuid.uuid4().hex
+    if redis_client is not None and (chat_id or "").strip():
+        try:
+            await redis_client.set(f"{ADMIN_DETACHED_TURN_PREFIX}{chat_id}", turn_id, ex=6 * 3600)
+        except Exception as exc:
+            _log.debug("admin detached turn claim failed chat_id=%r: %s", chat_id, exc)
+    return turn_id
+
+
+async def is_latest_admin_detached_turn(redis_client: Any, chat_id: str, turn_id: str) -> bool:
+    """False once a newer detached turn was accepted for the chat.
+
+    That newer turn waits on the chat lock while this one finishes; its client polls
+    the same backlog, so this turn's ``turn_done`` ended that poll and showed
+    "no reply" while the newer turn had not even started.
+    """
+    if redis_client is None:
+        return True
+    try:
+        current = await redis_client.get(f"{ADMIN_DETACHED_TURN_PREFIX}{chat_id}")
+    except Exception:
+        return True
+    if isinstance(current, bytes):
+        current = current.decode("utf-8", errors="replace")
+    return current in (None, turn_id)
 
 
 async def close_orphaned_admin_turns(redis_client: Any) -> int:

@@ -242,3 +242,34 @@ def test_last_turn_tokens_roundtrip() -> None:
         "usage_tokens": {"input_tokens": 900},
         "context_estimated_tokens": 1200,
     }
+
+
+def test_older_detached_turn_does_not_end_a_newer_queued_turn() -> None:
+    """Turn B sent while A runs waits on the chat lock and polls the same backlog: A's
+    turn_done ended B's poll ("no reply") before B started (Quant Team, 23-Oct)."""
+    import asyncio
+
+    from core.admin_chat_heartbeat import claim_admin_detached_turn, is_latest_admin_detached_turn
+
+    class FakeRedis:
+        def __init__(self) -> None:
+            self.kv: dict[str, str] = {}
+
+        async def set(self, key: str, value: str, ex: int | None = None) -> None:
+            self.kv[key] = value
+
+        async def get(self, key: str):
+            return self.kv.get(key)
+
+    async def run() -> None:
+        r = FakeRedis()
+        a = await claim_admin_detached_turn(r, "chat-1")
+        assert await is_latest_admin_detached_turn(r, "chat-1", a)          # alone: A marks its end
+        b = await claim_admin_detached_turn(r, "chat-1")
+        assert a != b
+        assert not await is_latest_admin_detached_turn(r, "chat-1", a)      # B accepted: A stays silent
+        assert await is_latest_admin_detached_turn(r, "chat-1", b)          # B marks its own end
+        assert await is_latest_admin_detached_turn(r, "chat-2", a)          # other chats unaffected
+        assert await is_latest_admin_detached_turn(None, "chat-1", a)       # no Redis: old behaviour
+
+    asyncio.run(run())

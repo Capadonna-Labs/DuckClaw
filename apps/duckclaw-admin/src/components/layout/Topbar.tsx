@@ -22,6 +22,8 @@ import {
 
 interface TopbarProps {
   onMenuClick?: () => void;
+  /** Embedded in the dashboard's chat panel: no side menu to open. */
+  hideMenu?: boolean;
 }
 
 async function waitForGatewayHealth(maxAttempts = 20): Promise<boolean> {
@@ -34,7 +36,7 @@ async function waitForGatewayHealth(maxAttempts = 20): Promise<boolean> {
   return false;
 }
 
-export default function Topbar({ onMenuClick }: TopbarProps) {
+export default function Topbar({ onMenuClick, hideMenu = false }: TopbarProps) {
   const { usuario } = useAuthStore();
   const { theme, toggleTheme } = useTheme();
   const { sidebarOpen, toggleSidebar, chatDrawerOpen, toggleChatDrawer } = useLayoutUiStore();
@@ -133,16 +135,18 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
       <UpdateBanner />
       <header
       role="banner"
-      className={`h-16 shrink-0 px-4 md:px-6 flex items-center justify-between backdrop-blur-xl backdrop-saturate-150 ${
+      className={`h-16 shrink-0 px-4 md:px-6 flex items-center ${hideMenu ? 'justify-end' : 'justify-between'} backdrop-blur-xl backdrop-saturate-150 ${
         isChatTab
           ? 'border-b-0 bg-white/70 dark:bg-dark-surface/70 supports-[backdrop-filter]:bg-white/55 dark:supports-[backdrop-filter]:bg-dark-surface/55'
           : 'border-b border-white/40 bg-white/80 dark:border-white/10 dark:bg-dark-surface/80 supports-[backdrop-filter]:bg-white/65 dark:supports-[backdrop-filter]:bg-dark-surface/65'
       }`}
     >
-      <TopbarLeft
-        onMenuClick={handleMenuToggle}
-        sidebarOpen={sidebarOpen}
-      />
+      {!hideMenu && (
+        <TopbarLeft
+          onMenuClick={handleMenuToggle}
+          sidebarOpen={sidebarOpen}
+        />
+      )}
       <div className="flex items-center gap-2 md:gap-4">
         <div className="flex items-center gap-2">
           <PlatformStatusStrip />

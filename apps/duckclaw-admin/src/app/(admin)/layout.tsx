@@ -8,6 +8,7 @@ import { FloatingAdminChat } from '@/components/chat/FloatingAdminChat';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { Loader2, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useEmbedded } from '@/lib/useEmbedded';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, hasHydrated, authError, setReturnTo } = useAuthStore();
@@ -15,6 +16,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(false);
   const { sidebarOpen } = useLayoutUiStore();
+  const embedded = useEmbedded();
   const isWorkspaceRoute =
     pathname === '/playground' ||
     pathname.startsWith('/sandbox') ||
@@ -45,14 +47,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="flex h-dvh max-h-dvh overflow-hidden bg-gov-gray-50 dark:bg-dark-bg relative supports-[height:100dvh]:h-dvh">
-      <div
-        className={`hidden lg:flex shrink-0 overflow-hidden transition-[width] duration-300 ease-out ${
-          sidebarOpen ? 'w-64' : 'w-0'
-        }`}
-      >
-        <Sidebar />
-      </div>
-      {isSidebarOpen && (
+      {!embedded && (
+        <div
+          className={`hidden lg:flex shrink-0 overflow-hidden transition-[width] duration-300 ease-out ${
+            sidebarOpen ? 'w-64' : 'w-0'
+          }`}
+        >
+          <Sidebar />
+        </div>
+      )}
+      {!embedded && isSidebarOpen && (
         <div className="fixed inset-0 z-50 flex lg:hidden">
           <SidebarOverlay onClose={() => setIsSidebarOpen(false)} />
           <div className="relative flex w-64 flex-col">
@@ -61,7 +65,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       )}
       <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
-        <Topbar onMenuClick={() => setIsSidebarOpen(true)} />
+        <Topbar onMenuClick={() => setIsSidebarOpen(true)} hideMenu={embedded} />
         <main
           id="admin-main-scroll"
           className={cn(

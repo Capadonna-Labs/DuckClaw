@@ -69,8 +69,11 @@ def _resolve_prompt_db(bound_db: Any, *, writable: bool = True) -> tuple[Any, bo
     return bound_db, False
 
 
-def _update_system_prompt_impl(bound_db: Any, instructions: str, mode: str = "append") -> str:
-    """Actualiza el system prompt del worker activo vía db-writer (DB-first)."""
+def _update_system_prompt_impl(bound_db: Any, instructions: str, mode: str = "append", policy_worker_id: str = "") -> str:
+    """Actualiza el system prompt del worker activo vía db-writer (DB-first).
+
+    ``policy_worker_id``: id lógico del manifiesto (p. ej. ``quant_trader``), el que el grafo carga; el id de catálogo puede llevar guion (``quant-trader``).
+    """
     from duckclaw.commands.model_setup import _set_system_prompt_policy, get_effective_system_prompt
     from duckclaw.forge.skills.goals_tool_context import get_goals_tool_db_path, get_goals_tool_worker_id
     from duckclaw.forge.skills.knowledge_tool_context import get_session_actor_email
@@ -92,14 +95,14 @@ def _update_system_prompt_impl(bound_db: Any, instructions: str, mode: str = "ap
 
     db, close_after = _resolve_prompt_db(bound_db, writable=True)
     try:
-        current = (get_effective_system_prompt(db, worker_id) or "").strip()
+        current = (get_effective_system_prompt(db, policy_worker_id or worker_id) or "").strip()
         if write_mode == "replace":
             merged = text
         else:
             stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
             block = f"\n\n---\n\n## Auto-mejora ({stamp})\n{text}"
             merged = (current + block).strip() if current else text
-        ok, err = _set_system_prompt_policy(db, worker_id, merged, actor_email=actor)
+        ok, err = _set_system_prompt_policy(db, policy_worker_id or worker_id, merged, actor_email=actor)
         if not ok:
             return json.dumps({"ok": False, "error": err or "No se pudo persistir el prompt"}, ensure_ascii=False)
         _maybe_sync_catalog_file(db_path=db_path, worker_id=worker_id, actor=actor, content=merged)
@@ -123,7 +126,7 @@ def _update_system_prompt_impl(bound_db: Any, instructions: str, mode: str = "ap
                 pass
 
 
-def _read_system_prompt_impl(bound_db: Any, include_content: bool = True) -> str:
+def _read_system_prompt_impl(bound_db: Any, include_content: bool = True, policy_worker_id: str = "") -> str:
     """Lee el system prompt efectivo del worker activo sin modificar estado."""
     from duckclaw.commands.model_setup import get_effective_system_prompt
     from duckclaw.forge.skills.goals_tool_context import get_goals_tool_worker_id
@@ -134,7 +137,7 @@ def _read_system_prompt_impl(bound_db: Any, include_content: bool = True) -> str
 
     db, close_after = _resolve_prompt_db(bound_db, writable=False)
     try:
-        content = get_effective_system_prompt(db, worker_id) or ""
+        content = get_effective_system_prompt(db, policy_worker_id or worker_id) or ""
         payload: dict[str, Any] = {
             "ok": True,
             "worker_id": worker_id,
@@ -188,14 +191,14 @@ def _maybe_sync_catalog_file(*, db_path: str, worker_id: str, actor: str, conten
         return
 
 
-def register_update_system_prompt_tools(tools_list: list[Any], db: Any = None) -> None:
+def register_update_system_prompt_tools(tools_list: list[Any], db: Any = None, policy_worker_id: str = "") -> None:
     """Register canonical update_system_prompt plus deprecated update_my_system_prompt alias."""
 
     def _read_system_prompt(include_content: bool = True) -> str:
-        return _read_system_prompt_impl(db, include_content=include_content)
+        return _read_system_prompt_impl(db, include_content=include_content, policy_worker_id=policy_worker_id)
 
     def _update_system_prompt(instructions: str, mode: str = "append") -> str:
-        return _update_system_prompt_impl(db, instructions, mode)
+        return _update_system_prompt_impl(db, instructions, mode, policy_worker_id)
 
     def _update_my_system_prompt(instructions: str, mode: str = "append") -> str:
         return _update_system_prompt(instructions, mode)

@@ -304,7 +304,8 @@ def _build_worker_tools(db: Any, spec: WorkerSpec, tenant_id: str = "default") -
     register_get_project_context_tool(tools)
     from duckclaw.forge.skills.update_worker_system_prompt_bridge import register_update_system_prompt_tools
 
-    register_update_system_prompt_tools(tools, db)
+    # The graph loads the prompt policy by the manifest id (quant_trader), not the catalog id (quant-trader): the tools must read/write that one.
+    register_update_system_prompt_tools(tools, db, str(getattr(spec, "logical_worker_id", "") or ""))
     from duckclaw.forge.skills.report_engine_bridge import register_report_engine_tools
     from duckclaw.prompt_policies.system_prompt import worker_has_report_engine_skill
 

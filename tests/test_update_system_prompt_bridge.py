@@ -220,3 +220,12 @@ def test_update_system_prompt_requires_min_length() -> None:
         raw = update_system_prompt("corto", mode="append")
     payload = json.loads(raw)
     assert payload["ok"] is False
+
+
+def test_policy_worker_id_wins_over_the_catalog_id_for_read_and_write() -> None:
+    """The graph loads the policy by the manifest id (quant_trader); the catalog id (quant-trader) must not get its own shadow policy."""
+    seen: dict = {}
+    with patch("duckclaw.forge.skills.goals_tool_context.get_goals_tool_worker_id", return_value="quant-trader"),             patch("duckclaw.forge.skills.goals_tool_context.get_goals_tool_db_path", return_value=_VAULT_PATH),             patch("duckclaw.forge.skills.knowledge_tool_context.get_session_actor_email", return_value="admin@test"),             patch("duckclaw.commands.model_setup.get_effective_system_prompt", side_effect=lambda db, wid: seen.setdefault("read", wid) and "base"),             patch("duckclaw.commands.model_setup._set_system_prompt_policy", side_effect=lambda db, wid, text, **kw: seen.update(write=wid) or (True, "")),             patch("duckclaw.forge.skills.update_worker_system_prompt_bridge._maybe_sync_catalog_file"):
+        _update_system_prompt_impl(MagicMock(_path=_VAULT_PATH), "Regla estructural de prueba para el prompt.", "append", "quant_trader")
+        _read_system_prompt_impl(MagicMock(_path=_VAULT_PATH), True, "quant_trader")
+    assert seen == {"read": "quant_trader", "write": "quant_trader"}

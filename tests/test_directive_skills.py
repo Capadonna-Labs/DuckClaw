@@ -89,7 +89,7 @@ def test_framework_directive_skills_seed_once_and_apply_to_any_tenant() -> None:
         "CREATE TABLE main.admin_skills (skill_id VARCHAR, name VARCHAR, description VARCHAR, skill_type VARCHAR, "
         "implementation_ref VARCHAR, owner_email VARCHAR, tenant_id VARCHAR, visibility VARCHAR, active BOOLEAN)"
     )
-    assert seed_framework_directive_skills(con) == 2
+    assert seed_framework_directive_skills(con) == 3
     assert seed_framework_directive_skills(con) == 0  # idempotent, never overwrites
     assert con.execute("SELECT max(length(description)) FROM main.admin_skills").fetchone()[0] <= 4096
 
@@ -124,3 +124,14 @@ def test_dedupe_by_name_keeps_first_row_case_insensitive() -> None:
 
     rows = [{"name": "debug", "description": "MIO"}, {"name": "Debug", "description": "framework"}, ("other", 1)]
     assert dedupe_by_name(rows) == [{"name": "debug", "description": "MIO"}, ("other", 1)]
+
+
+def test_security_audit_directive_credits_its_source_and_admits_it_is_guidance_only() -> None:
+    import json
+
+    from duckclaw.directive_skills import _PACK
+
+    skill = next(s for s in json.loads(_PACK.read_text(encoding="utf-8"))["skills"] if s["name"] == "auditoria_seguridad")
+    text = skill["description"]
+    assert len(text) <= 4096 and "cloudflare/security-audit-skill (MIT" in text            # attribution travels with the condensed text
+    assert "no insinúes que corriste las seis fases" in text and "confirmed" in text and "needs_validation" in text

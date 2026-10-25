@@ -1186,8 +1186,10 @@ def run_in_sandbox(
     reap_idle_sandboxes(keep=sid)
 
     # Protocolo de firewall: inyectar datos si se requiere
+    _log.info("run_in_sandbox sid=%s data_sql_chars=%d db=%s", sid, len(data_sql or ""), type(db).__name__)
     if data_sql:
         injected = data_inject(db, data_sql, sid)
+        _log.info("run_in_sandbox sid=%s data_inject -> %s", sid, (injected or "")[:200])
         if not injected or injected.startswith("Error"):
             # Never run the code against an empty /workspace/data: the agent would burn retries on a missing file.
             return ExecutionResult(

@@ -229,6 +229,26 @@ presets:
       install: uvx --from git+https://github.com/jkawamoto/mcp-youtube-transcript --with 'mcp>=1.9,<2' mcp-youtube-transcript
       note: Activa vía skill youtube_transcript en manifest del worker (bridge DuckClaw); no requiere conector OAuth.
 
+  # Official Blender Lab MCP server (stdio, v1.0.3 pinned by commit). Needs Blender 5.1+ running on the SAME host with the Blender Lab add-on enabled
+  # (the add-on listens on 127.0.0.1:9876); it does not work against a server without that desktop session. Experimental, outside Blender's roadmap.
+  # execute_blender_code* run LLM-generated Python in Blender with no guards (Blender's own warning): denied by default, remove them from the denylist
+  # in Admin only on a VM or a machine without sensitive data.
+  blender:
+    profile: stdio_uvx_rw
+    display_name: Blender (oficial · Blender Lab)
+    launch_args:
+      - "--from"
+      - "git+https://projects.blender.org/lab/blender_mcp.git@2cea8d566dde07fbac28a61d698909d69724e853#subdirectory=mcp"
+      - "blender-mcp"
+    egress_hosts: [127.0.0.1]
+    tool_denylist: [execute_blender_code, execute_blender_code_for_cli]
+    metadata:
+      admin_label: Blender (local stdio · uvx · experimental · sin ejecución de código)
+      docs_url: https://www.blender.org/lab/mcp-server/
+      repo_url: https://projects.blender.org/lab/blender_mcp
+      install: uvx --from "git+https://projects.blender.org/lab/blender_mcp.git@v1.0.3#subdirectory=mcp" blender-mcp
+      note: Requiere Blender 5.1+ abierto en este mismo equipo con el add-on de Blender Lab (repositorio https://lab.blender.org/). Es opt-in, no un conector por defecto.
+
   mcp_fetch:
     profile: stdio_npx_ro
     display_name: MCP Fetch (local stdio)

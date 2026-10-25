@@ -283,3 +283,14 @@ def test_factory_tool_builder_passes_worker_id_not_display_name(
 
     assert captured["worker_id"] == "catalog-worker-42"
     assert captured["tenant_id"] == "default"
+
+
+def test_blender_preset_is_opt_in_and_denies_code_execution_by_default() -> None:
+    payload = preset_payload("blender")
+    assert payload is not None and payload["transport"] == "stdio" and payload["launch_command"] == "uvx"
+    assert "blender_mcp.git@2cea8d566dde07fbac28a61d698909d69724e853#subdirectory=mcp" in " ".join(payload["launch_args"])   # pinned by commit
+    assert {"execute_blender_code", "execute_blender_code_for_cli"} <= set(payload["tool_denylist"])
+    assert payload["egress_hosts"] == ["127.0.0.1"]
+    from duckclaw.mcp_connector_presets import default_mcp_connector_preset_ids
+
+    assert "blender" not in default_mcp_connector_preset_ids()                                                              # a preset is offered in Admin, never created at boot

@@ -156,8 +156,8 @@ async def upload_custom_report(
         raise HTTPException(status_code=400, detail="Solo archivos .html o .htm")
 
     raw = await file.read()
-    if len(raw) > 512 * 1024:
-        raise HTTPException(status_code=400, detail="HTML excede 512KB")
+    if len(raw) > 1024 * 1024:
+        raise HTTPException(status_code=400, detail="HTML excede 1024KB")
 
     try:
         html_content = raw.decode("utf-8")

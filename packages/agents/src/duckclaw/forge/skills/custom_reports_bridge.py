@@ -12,7 +12,7 @@ from langchain_core.tools import StructuredTool
 
 from duckclaw.utils.logger import log_tool_execution_sync
 
-_MAX_HTML_BYTES = 512 * 1024
+_MAX_HTML_BYTES = 1024 * 1024
 _ALLOWED_SCRIPT_CDN = (
     "cdn.jsdelivr.net",
     "cdnjs.cloudflare.com",

@@ -89,7 +89,7 @@ export function HtmlDashboardUploadZone({ disabled, onUpload }: HtmlDashboardUpl
             {uploading ? 'Publicando HTML…' : 'Subir dashboard .html'}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Arrastra un archivo o haz clic. Máx. 512 KB. Mismo flujo que{' '}
+            Arrastra un archivo o haz clic. Máx. 1 MB. Mismo flujo que{' '}
             <code className="text-slate-600">publish_custom_report</code>.
           </p>
         </div>

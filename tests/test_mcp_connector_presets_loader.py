@@ -294,3 +294,13 @@ def test_blender_preset_is_opt_in_and_denies_code_execution_by_default() -> None
     from duckclaw.mcp_connector_presets import default_mcp_connector_preset_ids
 
     assert "blender" not in default_mcp_connector_preset_ids()                                                              # a preset is offered in Admin, never created at boot
+
+
+def test_playwright_preset_is_pinned_headless_isolated_and_not_default() -> None:
+    from duckclaw.mcp_connector_presets import default_mcp_connector_preset_ids
+
+    payload = preset_payload("playwright")
+    assert payload is not None and payload["transport"] == "stdio" and payload["launch_command"] == "npx"
+    args = payload["launch_args"]
+    assert "@playwright/mcp@0.0.83" in args and "--headless" in args and "--isolated" in args   # exact version, no window, no user profile
+    assert payload["read_only"] is False and "playwright" not in default_mcp_connector_preset_ids()

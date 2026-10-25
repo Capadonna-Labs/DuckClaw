@@ -304,3 +304,4 @@ def test_playwright_preset_is_pinned_headless_isolated_and_not_default() -> None
     args = payload["launch_args"]
     assert "@playwright/mcp@0.0.83" in args and "--headless" in args and "--isolated" in args   # exact version, no window, no user profile
     assert payload["read_only"] is False and "playwright" not in default_mcp_connector_preset_ids()
+    assert {"browser_run_code_unsafe", "browser_evaluate", "browser_file_upload"} <= set(payload["tool_denylist"])   # no arbitrary JS or local file reads

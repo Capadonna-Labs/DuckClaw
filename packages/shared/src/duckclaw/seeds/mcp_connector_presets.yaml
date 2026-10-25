@@ -271,6 +271,8 @@ presets:
     profile: stdio_npx_rw
     display_name: Playwright (navegador)
     launch_args: ["-y", "@playwright/mcp@0.0.83", "--headless", "--isolated"]
+    # JS arbitrario en la página, código de Playwright sin sandbox y lectura de archivos locales: fuera salvo decisión explícita.
+    tool_denylist: [browser_run_code_unsafe, browser_evaluate, browser_file_upload]
     metadata:
       install: npx -y @playwright/mcp@0.0.83 --headless --isolated
       admin_label: Playwright · navegador sin ventana y aislado (local stdio, versión fija)

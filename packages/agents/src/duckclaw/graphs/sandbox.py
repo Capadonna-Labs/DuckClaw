@@ -1187,7 +1187,14 @@ def run_in_sandbox(
 
     # Protocolo de firewall: inyectar datos si se requiere
     if data_sql:
-        data_inject(db, data_sql, sid)
+        injected = data_inject(db, data_sql, sid)
+        if not injected or injected.startswith("Error"):
+            # Never run the code against an empty /workspace/data: the agent would burn retries on a missing file.
+            return ExecutionResult(
+                exit_code=1,
+                stdout="",
+                stderr=f"data_sql no generó data.csv: {injected or 'la consulta no devolvió filas'}. Corrige el SQL (solo SELECT sobre tablas de tu manifiesto).",
+            )
 
     lang = (language or "python").strip().lower()
     current_code = code

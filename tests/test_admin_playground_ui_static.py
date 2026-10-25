@@ -319,7 +319,9 @@ def test_floating_chat_uses_fixed_large_panel_and_header_actions() -> None:
         encoding="utf-8"
     )
 
-    assert "w-[420px]" in floating
+    store = Path("apps/duckclaw-admin/src/store/layoutUiStore.ts").read_text(encoding="utf-8")
+    assert "export const CHAT_DRAWER_WIDTH_PX = 420;" in store                 # one shared width (was a w-[420px] literal)
+    assert "width: open ? CHAT_DRAWER_WIDTH_PX : 0" in floating
     assert "conversationManage={{" in floating
     assert "headerActions={" in floating
     assert "ChatViewTabBar" not in panel

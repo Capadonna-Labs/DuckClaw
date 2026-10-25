@@ -54,7 +54,7 @@ from duckclaw.workers.tool_harness import (
     resolve_harness_config,
     truncate_tool_result,
     harness_max_chars_for_tool,
-    harness_abort_state, identical_call_block, log_run_sandbox_without_code,
+    harness_abort_state, identical_call_block, log_run_sandbox_args, log_run_sandbox_without_code,
 )
 from langchain_core.messages import ToolMessage
 
@@ -326,6 +326,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
                 log_run_sandbox_without_code(_wl, name, args, last)
+                log_run_sandbox_args(_wl, name, args)
                 _pre = _harness_precheck(name, args)
                 if _pre is not None:
                     new_msgs.append(ToolMessage(content=_pre, tool_call_id=tid, name=name))

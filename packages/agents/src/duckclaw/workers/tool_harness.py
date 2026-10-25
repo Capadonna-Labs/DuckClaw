@@ -505,6 +505,13 @@ def log_run_sandbox_without_code(worker_label: str, tool_name: str, args: Any, l
     )
 
 
+def log_run_sandbox_args(worker_label: str, tool_name: str, args: Any) -> None:
+    """Log the argument names and the data_sql length (never values) of every run_sandbox call: shows whether the model's data_sql reached the tool."""
+    if tool_name != "run_sandbox" or not isinstance(args, dict):
+        return
+    _log.info("[%s] run_sandbox args: keys=%s data_sql_chars=%d", worker_label, sorted(args.keys()), len(str(args.get("data_sql") or "")))
+
+
 def harness_abort_state(state: dict[str, Any], messages: list[Any], worker_label: str) -> dict[str, Any]:
     """``{"_harness_abort_tool": name}`` once identical-call blocks hit the per-turn limit."""
     tool = harness_abort_tool(messages)

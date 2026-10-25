@@ -1197,6 +1197,16 @@ def run_in_sandbox(
                 stdout="",
                 stderr=f"data_sql no generó data.csv: {injected or 'la consulta no devolvió filas'}. Corrige el SQL (solo SELECT sobre tablas de tu manifiesto).",
             )
+    elif re.search(r"data\.csv|/workspace/data", code) and not any((_TMP_BASE / sid / "data").glob("*")):
+        # The model wrote code that reads the mounted CSV but sent only `code` (logged 25-Oct: keys=['code']): say so instead of running on an empty dir.
+        return ExecutionResult(
+            exit_code=1,
+            stdout="",
+            stderr=(
+                "El código lee /workspace/data pero la llamada no incluyó el argumento data_sql (solo recibí: code). "
+                "Vuelve a llamar run_sandbox con data_sql=\"SELECT ...\" como argumento propio de la herramienta, no dentro de code; el resultado se monta como /workspace/data/data.csv."
+            ),
+        )
 
     lang = (language or "python").strip().lower()
     current_code = code

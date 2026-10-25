@@ -30,10 +30,17 @@ _PLACEHOLDER_HTML = f"""<!DOCTYPE html>
 <p>Abre el asistente (arriba a la derecha) y pide un dashboard con <strong>ui_designer</strong> o el worker de reporting que tengas configurado, o sube un archivo <strong>.html</strong> desde esta pantalla.</p>
 </body></html>"""
 
+# Same policy as the admin's framed-HTML CSP (middleware.ts). Three.js scenes need: WebAssembly (Draco/KTX2 decoders), blob workers and
+# blob:/data: fetches (embedded glTF textures), blob: video textures. No 'unsafe-eval': modern three.js does not use it.
 _CSP = (
     "default-src 'self' https: data:; "
-    "script-src 'self' https: cdn.jsdelivr.net cdnjs.cloudflare.com unpkg.com cdn.tailwindcss.com 'unsafe-inline'; "
-    "style-src 'self' https: 'unsafe-inline'"
+    "script-src 'self' https: cdn.jsdelivr.net cdnjs.cloudflare.com unpkg.com cdn.tailwindcss.com 'unsafe-inline' 'wasm-unsafe-eval'; "
+    "style-src 'self' https: 'unsafe-inline'; "
+    "img-src 'self' https: data: blob:; "
+    "font-src 'self' https: data:; "
+    "media-src 'self' https: data: blob:; "
+    "worker-src 'self' blob:; "
+    "connect-src 'self' https: data: blob:"
 )
 
 

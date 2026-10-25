@@ -3,11 +3,13 @@ const isDev = process.env.NODE_ENV === 'development';
 
 const FRAMED_HTML_CSP =
   "default-src 'self' https: data:; " +
-  "script-src 'self' https: cdn.jsdelivr.net cdnjs.cloudflare.com unpkg.com cdn.tailwindcss.com 'unsafe-inline'; " +
+  "script-src 'self' https: cdn.jsdelivr.net cdnjs.cloudflare.com unpkg.com cdn.tailwindcss.com 'unsafe-inline' 'wasm-unsafe-eval'; " +
   "style-src 'self' https: 'unsafe-inline'; " +
   "img-src 'self' https: data: blob:; " +
   "font-src 'self' https: data:; " +
-  "connect-src 'self' https:; " +
+  "media-src 'self' https: data: blob:; " +
+  "worker-src 'self' blob:; " +
+  "connect-src 'self' https: data: blob:; " +
   "frame-ancestors 'self'";
 
 function isFramedHtmlRoute(pathname: string): boolean {

@@ -95,9 +95,10 @@ function buildMarkdownComponents(
     : 'bg-gov-gray-100 dark:bg-dark-sidebar text-left';
   const thBorder = isUser ? 'border-b border-white/20' : 'border-b border-gov-gray-200 dark:border-dark-border';
   const tdBorder = isUser ? 'border-b border-white/15' : 'border-b border-gov-gray-100 dark:border-dark-border';
+  // A fence without a language reaches `code` as inline code (dark text on a light chip): inside <pre> it must inherit the block's light text.
   const pre = isUser
-    ? 'scrollbar-hide my-3 overflow-x-auto rounded-xl bg-black/25 text-white p-3 text-xs leading-relaxed font-mono'
-    : 'scrollbar-hide my-3 overflow-x-auto rounded-xl bg-gov-gray-900 dark:bg-[#010409] text-gov-gray-50 p-3 text-xs leading-relaxed font-mono';
+    ? 'scrollbar-hide my-3 overflow-x-auto rounded-xl bg-black/25 text-white p-3 text-xs leading-relaxed font-mono [&_code]:!rounded-none [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!text-inherit'
+    : 'scrollbar-hide my-3 overflow-x-auto rounded-xl bg-gov-gray-900 dark:bg-[#010409] text-gov-gray-50 p-3 text-xs leading-relaxed font-mono [&_code]:!rounded-none [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!text-inherit';
   const inlineCode = isUser
     ? 'px-1.5 py-0.5 rounded-md bg-white/15 text-[0.85em] font-mono text-white'
     : 'px-1.5 py-0.5 rounded-md bg-gov-gray-200/90 dark:bg-dark-border text-[0.85em] font-mono text-gov-blue-900 dark:text-dark-cyan';

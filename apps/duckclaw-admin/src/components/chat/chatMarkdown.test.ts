@@ -20,3 +20,13 @@ describe('looksLikeMarkdown', () => {
     expect(looksLikeMarkdown('ver [docs](https://example.com)')).toBe(true);
   });
 });
+
+describe('ChatMarkdown code blocks', () => {
+  it('el code dentro de pre hereda el color del bloque (un fence sin lenguaje llega como código en línea)', async () => {
+    const { readFileSync } = await import('node:fs');
+    const src = readFileSync(new URL('./ChatMarkdown.tsx', import.meta.url), 'utf8');
+    const pre = src.split('const pre = isUser')[1].split('const inlineCode')[0];
+    expect(pre.match(/\[&_code\]:!text-inherit/g)).toHaveLength(2); // usuario y asistente
+    expect(pre.match(/\[&_code\]:!bg-transparent/g)).toHaveLength(2);
+  });
+});

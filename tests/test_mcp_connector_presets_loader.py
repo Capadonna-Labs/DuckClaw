@@ -306,3 +306,13 @@ def test_playwright_preset_is_pinned_headless_isolated_and_not_default() -> None
     assert args[args.index("--browser") + 1] == "chromium" and "--no-sandbox" not in args       # bundled Chromium; never disable the sandbox by default
     assert payload["read_only"] is False and "playwright" not in default_mcp_connector_preset_ids()
     assert {"browser_run_code_unsafe", "browser_evaluate", "browser_file_upload"} <= set(payload["tool_denylist"])   # no arbitrary JS or local file reads
+
+
+def test_huggingface_preset_is_read_only_search_and_not_default() -> None:
+    from duckclaw.mcp_connector_presets import default_mcp_connector_preset_ids
+
+    payload = preset_payload("huggingface")
+    assert payload is not None and payload["transport"] == "streamable_http" and payload["endpoint_url"] == "https://huggingface.co/mcp"
+    assert payload["read_only"] is True and payload["egress_hosts"] == ["huggingface.co"] and payload["auth_kind"] == "none"
+    assert set(payload["tool_allowlist"]) == {"model_search", "model_details", "dataset_search", "dataset_details", "paper_search", "space_search", "hf_doc_search", "hf_whoami"}
+    assert "huggingface" not in default_mcp_connector_preset_ids()

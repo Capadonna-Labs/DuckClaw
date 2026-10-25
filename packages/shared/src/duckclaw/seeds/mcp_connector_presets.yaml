@@ -263,6 +263,22 @@ presets:
     metadata:
       install: npx -y @modelcontextprotocol/server-time
 
+  # Hugging Face Hub MCP oficial (remoto, https://huggingface.co/mcp). Busca modelos, datasets, Spaces, papers y documentación; sin sesión alcanza para buscar.
+  # Solo lectura por allowlist: quedan fuera las tools dinámicas que ejecutan apps de Gradio de terceros. Los resultados son contenido de terceros (licencias propias
+  # por repositorio): citar la licencia antes de reutilizar un modelo o dataset.
+  huggingface:
+    display_name: Hugging Face (Hub)
+    transport: streamable_http
+    endpoint_url: https://huggingface.co/mcp
+    auth_kind: none
+    read_only: true
+    egress_hosts: [huggingface.co]
+    tool_allowlist: [model_search, model_details, dataset_search, dataset_details, paper_search, space_search, hf_doc_search, hf_whoami]
+    metadata:
+      admin_label: HTTP remoto · Hugging Face Hub (búsqueda, solo lectura)
+      docs_url: https://huggingface.co/docs/hub/en/hf-mcp-server
+      note: Opt-in. Solo las 8 tools de búsqueda y detalle; no concede las apps de Gradio.
+
   # Playwright MCP oficial (Microsoft, Apache-2.0). Versión FIJA a propósito (0.0.x publica a menudo): subir a mano.
   # Controla un navegador real: abre páginas, hace clic, escribe y lee el DOM, así que NO es de solo lectura. Corre sin ventana y
   # con perfil aislado (sin cookies ni sesiones del usuario). Usa el Chromium que instala Playwright (sin él busca Google Chrome del sistema):

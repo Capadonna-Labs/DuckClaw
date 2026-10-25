@@ -303,5 +303,6 @@ def test_playwright_preset_is_pinned_headless_isolated_and_not_default() -> None
     assert payload is not None and payload["transport"] == "stdio" and payload["launch_command"] == "npx"
     args = payload["launch_args"]
     assert "@playwright/mcp@0.0.83" in args and "--headless" in args and "--isolated" in args   # exact version, no window, no user profile
+    assert args[args.index("--browser") + 1] == "chromium" and "--no-sandbox" not in args       # bundled Chromium; never disable the sandbox by default
     assert payload["read_only"] is False and "playwright" not in default_mcp_connector_preset_ids()
     assert {"browser_run_code_unsafe", "browser_evaluate", "browser_file_upload"} <= set(payload["tool_denylist"])   # no arbitrary JS or local file reads

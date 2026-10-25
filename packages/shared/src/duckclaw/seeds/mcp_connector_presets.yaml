@@ -265,16 +265,17 @@ presets:
 
   # Playwright MCP oficial (Microsoft, Apache-2.0). Versión FIJA a propósito (0.0.x publica a menudo): subir a mano.
   # Controla un navegador real: abre páginas, hace clic, escribe y lee el DOM, así que NO es de solo lectura. Corre sin ventana y
-  # con perfil aislado (sin cookies ni sesiones del usuario). Necesita los navegadores en el host: npx playwright install chromium.
+  # con perfil aislado (sin cookies ni sesiones del usuario). Usa el Chromium que instala Playwright (sin él busca Google Chrome del sistema):
+  # npx playwright install chromium. Si el proceso corre como root hay que añadir --no-sandbox en ESE despliegue, no aquí.
   # Una página puede llevar instrucciones inyectadas: no concederlo a workers con herramientas de ejecución de órdenes.
   playwright:
     profile: stdio_npx_rw
     display_name: Playwright (navegador)
-    launch_args: ["-y", "@playwright/mcp@0.0.83", "--headless", "--isolated"]
+    launch_args: ["-y", "@playwright/mcp@0.0.83", "--headless", "--isolated", "--browser", "chromium"]
     # JS arbitrario en la página, código de Playwright sin sandbox y lectura de archivos locales: fuera salvo decisión explícita.
     tool_denylist: [browser_run_code_unsafe, browser_evaluate, browser_file_upload]
     metadata:
-      install: npx -y @playwright/mcp@0.0.83 --headless --isolated
+      install: npx -y @playwright/mcp@0.0.83 --headless --isolated --browser chromium
       admin_label: Playwright · navegador sin ventana y aislado (local stdio, versión fija)
       docs_url: https://github.com/microsoft/playwright-mcp
       note: Requiere Node y los navegadores de Playwright instalados en el host (npx playwright install chromium). Opt-in, no por defecto.

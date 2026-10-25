@@ -208,7 +208,7 @@ export function AdminChatSuggestionChips({
         <div
           id={panelId}
           role="list"
-          className="flex flex-wrap items-center gap-1.5 border-t border-gov-gray-100 px-3 py-2 dark:border-dark-border"
+          className="flex max-h-[40vh] flex-wrap items-center gap-1.5 overflow-y-auto border-t border-gov-gray-100 px-3 py-2 dark:border-dark-border"
         >
           {suggestions.map((s, i) => {
             const recommended = i === safeRecommended;

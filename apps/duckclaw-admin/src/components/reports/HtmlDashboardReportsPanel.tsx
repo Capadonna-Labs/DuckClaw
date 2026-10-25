@@ -1,15 +1,33 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { usePathname } from 'next/navigation';
-import { Maximize2 } from 'lucide-react';
+import { Maximize2, MessageSquare, Minimize2 } from 'lucide-react';
 import { adminService } from '@/services/adminService';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { HtmlDashboardUploadZone } from '@/components/reports/HtmlDashboardUploadZone';
 import { isHtmlReportIncomplete, isHtmlReportPlaceholder, titleFromHtmlContent, validateHtmlUploadText } from '@/lib/htmlDashboardUpload';
 import { sectionFromPath } from '@/lib/conversationStorage';
+import { CHAT_DRAWER_WIDTH_PX, useLayoutUiStore } from '@/store/layoutUiStore';
 
 type ReportViewMode = 'render' | 'code';
+
+/** Desktop with a precise pointer: expand in place. Touch devices keep the separate page (iframe overlays did not take touches/scroll). */
+const EXPAND_IN_PLACE_QUERY = '(min-width: 1024px) and (pointer: fine)';
+
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return undefined;
+    const mq = window.matchMedia(query);
+    const apply = () => setMatches(mq.matches);
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [query]);
+  return matches;
+}
 
 async function copyTextToClipboard(text: string): Promise<boolean> {
   try {
@@ -36,7 +54,12 @@ async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
-export function HtmlDashboardReportsPanel() {
+type HtmlDashboardReportsPanelProps = {
+  /** Element (e.g. the parent's tab row) where the view toolbar is portaled; inline strip if absent. */
+  toolbarSlot?: HTMLElement | null;
+};
+
+export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsPanelProps = {}) {
   const pathname = usePathname();
   const section = useMemo(() => sectionFromPath(pathname || ''), [pathname]);
   const [tenantId, setTenantId] = useState<string | undefined>();
@@ -56,6 +79,9 @@ export function HtmlDashboardReportsPanel() {
   const [editorError, setEditorError] = useState('');
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const copyResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  const canExpandInPlace = useMediaQuery(EXPAND_IN_PLACE_QUERY);
+  const { chatDrawerOpen, toggleChatDrawer } = useLayoutUiStore();
 
   const conv = useActiveConversation(tenantId, section, {
     defaultWorkerId: '',
@@ -274,10 +300,111 @@ export function HtmlDashboardReportsPanel() {
     []
   );
 
+  const handleExpand = useCallback(() => {
+    if (canExpandInPlace) {
+      setExpanded((v) => !v);
+      return;
+    }
+    // A page of its own on touch devices: the iframe overlay did not take touches/scroll.
+    if (reportIframeSrc) window.open(reportIframeSrc, '_blank', 'noopener');
+  }, [canExpandInPlace, reportIframeSrc]);
+
+  useEffect(() => {
+    if (!canExpandInPlace || !showViewToggle) setExpanded(false);
+  }, [canExpandInPlace, showViewToggle]);
+
+  // Esc leaves the expanded view, also while focus is inside the (same-origin) report iframe.
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExpanded(false);
+    };
+    const targets: Array<Window | Document> = [window];
+    try {
+      const doc = iframeRef.current?.contentWindow?.document;
+      if (doc) targets.push(doc);
+    } catch {
+      /* cross-origin iframe: only the parent listener applies */
+    }
+    targets.forEach((t) => t.addEventListener('keydown', onKey as EventListener));
+    return () => targets.forEach((t) => t.removeEventListener('keydown', onKey as EventListener));
+  }, [expanded, reportReloadToken]);
+
+  const viewToolbar = showViewToggle ? (
+    <div className="flex rounded-lg border border-slate-600/80 bg-slate-900 p-0.5">
+      <button
+        type="button"
+        onClick={() => setViewMode('render')}
+        aria-pressed={viewMode === 'render'}
+        className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+          viewMode === 'render' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'
+        }`}
+      >
+        Vista
+      </button>
+      <button
+        type="button"
+        onClick={() => setViewMode('code')}
+        aria-pressed={viewMode === 'code'}
+        className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
+          viewMode === 'code' ? 'bg-slate-700 text-white' : 'text-slate-300 hover:text-white'
+        }`}
+      >
+        Código
+      </button>
+      <button
+        type="button"
+        onClick={handleExpand}
+        disabled={!reportIframeSrc}
+        aria-pressed={canExpandInPlace ? expanded : undefined}
+        className="rounded-md px-2 py-1.5 text-slate-300 transition hover:text-white disabled:opacity-50"
+        aria-label={expanded ? 'Salir de pantalla completa' : 'Abrir en pantalla completa'}
+        title={
+          expanded
+            ? 'Salir de pantalla completa (Esc)'
+            : canExpandInPlace
+              ? 'Pantalla completa'
+              : 'Abrir en pantalla completa (pestaña nueva)'
+        }
+      >
+        {expanded ? <Minimize2 size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
+      </button>
+    </div>
+  ) : null;
+
   return (
-    <div className="h-full w-full overflow-hidden bg-slate-900">
+    <div className="flex h-full w-full flex-col overflow-hidden bg-slate-900">
+      {viewToolbar && toolbarSlot && !expanded ? createPortal(viewToolbar, toolbarSlot) : null}
+      {viewToolbar && toolbarSlot === undefined && !expanded ? (
+        <div className="flex shrink-0 justify-end border-b border-slate-800 px-3 py-1.5">{viewToolbar}</div>
+      ) : null}
       {reportReady ? (
-        <div className="relative h-full w-full">
+        <div
+          // Same node in both modes so the iframe is not remounted when expanding.
+          className={
+            expanded
+              ? 'fixed inset-y-0 left-0 z-40 flex flex-col bg-slate-900 shadow-2xl'
+              : 'relative flex min-h-0 w-full flex-1 flex-col'
+          }
+          style={expanded ? { right: chatDrawerOpen ? CHAT_DRAWER_WIDTH_PX : 0 } : undefined}
+          role={expanded ? 'dialog' : undefined}
+          aria-label={expanded ? 'Dashboard en pantalla completa' : undefined}
+        >
+          {expanded ? (
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-slate-800 bg-slate-950 px-3 py-1.5">
+              {viewToolbar}
+              <button
+                type="button"
+                onClick={toggleChatDrawer}
+                aria-pressed={chatDrawerOpen}
+                className="rounded-md border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-slate-300 transition hover:text-white"
+                aria-label={chatDrawerOpen ? 'Ocultar chat' : 'Mostrar chat'}
+                title={chatDrawerOpen ? 'Ocultar chat' : 'Mostrar chat'}
+              >
+                <MessageSquare size={14} aria-hidden />
+              </button>
+            </div>
+          ) : null}
           {reportLoading && reportIsPlaceholder ? (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-900/60 text-sm text-slate-300">
               Cargando reporte…
@@ -297,63 +424,19 @@ export function HtmlDashboardReportsPanel() {
           {showUploadZone ? (
             <HtmlDashboardUploadZone disabled={uploadPending} onUpload={handleUpload} />
           ) : null}
-          {showViewToggle && viewMode === 'render' ? (
-            <div className="absolute right-3 top-3 z-50 flex rounded-lg border border-slate-600/80 bg-slate-900/90 p-0.5 shadow-lg backdrop-blur-sm">
-              <button
-                type="button"
-                onClick={() => setViewMode('render')}
-                className="rounded-md bg-slate-700 px-3 py-1.5 text-xs font-medium text-white"
-              >
-                Vista
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewMode('code')}
-                className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:text-white"
-              >
-                Código
-              </button>
-              <button
-                type="button"
-                // A page of its own, not an overlay: the iframe overlay did not take touches/scroll.
-                onClick={() => reportIframeSrc && window.open(reportIframeSrc, '_blank', 'noopener')}
-                className="rounded-md px-2 py-1.5 text-slate-300 transition hover:text-white"
-                aria-label="Abrir en pantalla completa"
-                title="Abrir en pantalla completa (pestaña nueva)"
-              >
-                <Maximize2 size={14} aria-hidden />
-              </button>
-            </div>
-          ) : null}
           {viewMode === 'render' ? (
             <iframe
               ref={iframeRef}
               key={reportIframeSrc}
               src={reportIframeSrc || undefined}
-              className="h-full w-full bg-white"
+              className="min-h-0 w-full flex-1 bg-white"
               title="Custom Report Viewer"
               sandbox="allow-scripts allow-same-origin"
               onLoad={() => setReportLoading(false)}
             />
           ) : (
-            <div className="flex h-full flex-col bg-slate-950">
-              <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-800 bg-slate-900 px-3 py-2">
-                <div className="flex rounded-lg border border-slate-600/80 bg-slate-950 p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('render')}
-                    className="rounded-md px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:text-white"
-                  >
-                    Vista
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewMode('code')}
-                    className="rounded-md bg-slate-700 px-3 py-1.5 text-xs font-medium text-white"
-                  >
-                    Código
-                  </button>
-                </div>
+            <div className="flex min-h-0 flex-1 flex-col bg-slate-950">
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-b border-slate-800 bg-slate-900 px-3 py-2">
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <span className="text-xs font-medium text-slate-400">
                     HTML fuente · {reportHtmlSource.length.toLocaleString()} caracteres
@@ -396,7 +479,7 @@ export function HtmlDashboardReportsPanel() {
           )}
         </div>
       ) : (
-        <div className="flex h-full items-center justify-center text-sm text-slate-400">
+        <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-400">
           Cargando vault y conversación…
         </div>
       )}

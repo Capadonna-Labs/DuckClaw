@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { DocumentReportsPanel } from '@/components/reports/DocumentReportsPanel';
 import { HtmlDashboardReportsPanel } from '@/components/reports/HtmlDashboardReportsPanel';
@@ -13,6 +13,8 @@ export default function ReportsPageView() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tab = useMemo(() => parseDeliverable(searchParams.get('deliverable')), [searchParams]);
+  // Slot in the tab row where the active panel can render its own toolbar (via portal).
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
 
   const setTab = useCallback(
     (next: ReportsTab) => {
@@ -30,7 +32,7 @@ export default function ReportsPageView() {
 
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden bg-slate-950 text-slate-100">
-      <div className="flex shrink-0 items-center gap-1 border-b border-slate-800 px-4 py-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-800 px-4 py-2">
         <button
           type="button"
           onClick={() => setTab('word')}
@@ -49,9 +51,10 @@ export default function ReportsPageView() {
         >
           Dashboards HTML
         </button>
+        <div ref={setToolbarSlot} className="ml-auto flex items-center empty:hidden" />
       </div>
       <div className="min-h-0 flex-1">
-        {tab === 'word' ? <DocumentReportsPanel /> : <HtmlDashboardReportsPanel />}
+        {tab === 'word' ? <DocumentReportsPanel /> : <HtmlDashboardReportsPanel toolbarSlot={toolbarSlot} />}
       </div>
     </div>
   );

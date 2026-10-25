@@ -3,25 +3,32 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Maximize2, X } from 'lucide-react';
+import { Maximize2, Settings2, X } from 'lucide-react';
 import {
   Pm2LiveLogsControls,
   Pm2LiveLogsProvider,
   Pm2LiveLogsViewport,
 } from '@/components/admin/Pm2LiveLogsPanel';
 import { AdminChatPanel } from '@/components/chat/AdminChatPanel';
+import { ChatSettingsPanel } from '@/components/chat/ChatSettingsPanel';
 import { useActiveConversation } from '@/components/chat/useActiveConversation';
 import { useAdminChat } from '@/components/chat/useAdminChat';
 import { useFloatingChatUnread } from '@/components/chat/useFloatingChatUnread';
+import { usePlaygroundChatToggles } from '@/components/playground/usePlaygroundChatToggles';
 import { titleForAdminPath } from '@/config/adminNav';
 import { adminService } from '@/services/adminService';
 import { sectionFromPath } from '@/lib/conversationStorage';
+import {
+  defaultKnowledgeScope,
+  normalizeKnowledgeScope,
+  type KnowledgeScope,
+} from '@/lib/knowledgeScope';
 import {
   projectIdFromPathname,
   readLastProjectId,
 } from '@/lib/floatingChatProject';
 import { resolveWorkerDisplayName } from '@/lib/workerOptions';
-import { useLayoutUiStore } from '@/store/layoutUiStore';
+import { CHAT_DRAWER_WIDTH_PX, useLayoutUiStore } from '@/store/layoutUiStore';
 
 function workerFromPath(pathname: string): string {
   const match = pathname.match(/^\/templates\/([^/]+)/);
@@ -41,13 +48,26 @@ export function FloatingAdminChat() {
     pathname === '/playground' || (pathname?.startsWith('/playground/') ?? false);
   const [tenantId, setTenantId] = useState<string | undefined>();
   const [logsSplitOpen, setLogsSplitOpen] = useState(false);
-  const projectId = useMemo(() => {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toolUsageEnabled, setToolUsageEnabled] = useState(true);
+  const [projectOverride, setProjectOverride] = useState<string | null>(null);
+  const {
+    suggestionsEnabled,
+    notificationsEnabled,
+    handleSuggestionsToggle,
+    handleNotificationsToggle,
+  } = usePlaygroundChatToggles();
+  const routeProjectId = useMemo(() => {
     const fromUrl = (searchParams.get('project') || '').trim();
     if (fromUrl) return fromUrl;
     const fromPath = projectIdFromPathname(pathname);
     if (fromPath) return fromPath;
     return readLastProjectId();
   }, [pathname, searchParams]);
+  const projectId = projectOverride ?? routeProjectId;
+  const [knowledgeScope, setKnowledgeScope] = useState<KnowledgeScope>(() =>
+    defaultKnowledgeScope(projectId)
+  );
 
   const section = useMemo(() => sectionFromPath(pathname), [pathname]);
   const sectionTitle = titleForAdminPath(pathname);
@@ -61,12 +81,39 @@ export function FloatingAdminChat() {
     chatId: conv.sessionId ?? '',
     initialWorker: pathWorker,
     projectId,
+    knowledgeScope,
+    suggestionsEnabled,
+    notificationsEnabled,
     // Solo activo con drawer abierto y fuera del playground (evita poll global).
     enabled: !onPlayground && Boolean(conv.sessionId) && open,
     onConversationActivity: conv.bumpRefresh,
     onConversationNotFound: conv.recoverMissingConversation,
   });
-  const { workerId, loading, messages, historyLoading, scrollToBottom, config } = chat;
+  const { workerId, loading, messages, historyLoading, scrollToBottom, config, reloadConfig } = chat;
+
+  useEffect(() => {
+    setKnowledgeScope((prev) => normalizeKnowledgeScope(config?.knowledge_scope || prev, projectId));
+  }, [config?.knowledge_scope, projectId]);
+
+  const persistKnowledgeScope = useCallback(
+    async (nextScope: KnowledgeScope) => {
+      const normalized = normalizeKnowledgeScope(nextScope, projectId);
+      setKnowledgeScope(normalized);
+      if (!conv.sessionId) return;
+      try {
+        await adminService.setPlaygroundKnowledgeScope({
+          chat_id: conv.sessionId,
+          tenant_id: config?.effective_tenant_id,
+          knowledge_scope: normalized,
+          project_id: projectId || undefined,
+        });
+        reloadConfig();
+      } catch {
+        /* keep local selection */
+      }
+    },
+    [conv.sessionId, config?.effective_tenant_id, projectId, reloadConfig]
+  );
   const activeWorkerLabel = resolveWorkerDisplayName(config?.workers, workerId) || 'Agente';
 
   const openPanel = useCallback(() => setOpen(true), [setOpen]);
@@ -112,6 +159,19 @@ export function FloatingAdminChat() {
 
   const headerActions = (
     <div className="flex items-center justify-end gap-1 shrink-0">
+      <button
+        type="button"
+        onClick={() => setSettingsOpen((v) => !v)}
+        disabled={!conv.sessionId}
+        aria-expanded={settingsOpen}
+        className={`p-1.5 rounded-lg hover:bg-gov-gray-100 dark:hover:bg-dark-bg disabled:opacity-50 ${
+          settingsOpen ? 'bg-gov-gray-100 text-gov-blue-800 dark:bg-dark-bg' : 'text-gov-blue-700'
+        }`}
+        title={settingsOpen ? 'Ocultar settings' : 'Settings'}
+        aria-label={settingsOpen ? 'Ocultar settings' : 'Mostrar settings'}
+      >
+        <Settings2 size={16} aria-hidden />
+      </button>
       <Link
         href="/playground"
         className="p-1.5 rounded-lg text-gov-blue-700 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
@@ -151,6 +211,7 @@ export function FloatingAdminChat() {
             : `Pregunta sobre ${sectionTitle}…`
         }
         showWorkerLink={false}
+        showToolUsage={toolUsageEnabled}
         headerActions={headerActions}
         onRenameConversation={conv.renameConversation}
         conversationManage={{
@@ -164,16 +225,60 @@ export function FloatingAdminChat() {
       />
     );
 
+  const settingsSheet =
+    settingsOpen && conv.sessionId ? (
+      <div
+        className="absolute inset-0 z-20 flex flex-col border-t border-gov-gray-200 bg-white dark:border-dark-border dark:bg-dark-surface"
+        role="region"
+        aria-label="Settings del chat"
+      >
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-gov-gray-200 px-4 py-2 dark:border-dark-border">
+          <span className="text-sm font-medium text-gov-gray-900 dark:text-dark-text">Settings</span>
+          <button
+            type="button"
+            onClick={() => setSettingsOpen(false)}
+            className="p-1.5 rounded-lg text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+            aria-label="Cerrar settings"
+          >
+            <X size={16} aria-hidden />
+          </button>
+        </div>
+        <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
+          <ChatSettingsPanel
+            chatId={conv.sessionId}
+            chat={chat}
+            projectId={projectId}
+            onProjectIdChange={setProjectOverride}
+            knowledgeScope={knowledgeScope}
+            onKnowledgeScopeChange={(scope) => void persistKnowledgeScope(scope)}
+            toolUsageEnabled={toolUsageEnabled}
+            onToolUsageToggle={() => setToolUsageEnabled((v) => !v)}
+            suggestionsEnabled={suggestionsEnabled}
+            onSuggestionsToggle={handleSuggestionsToggle}
+            notificationsEnabled={notificationsEnabled}
+            onNotificationsToggle={handleNotificationsToggle}
+          />
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div
       className={`shrink-0 overflow-hidden transition-[width] duration-300 ease-out border-l dark:border-dark-border bg-white dark:bg-dark-surface ${
-        open ? 'w-[420px]' : 'w-0 border-l-0'
+        open ? '' : 'border-l-0'
       }`}
+      style={{ width: open ? CHAT_DRAWER_WIDTH_PX : 0 }}
     >
       <Pm2LiveLogsProvider autoStart={logsSplitOpen}>
-        <div className="flex h-full min-h-0 w-[420px] min-w-[420px] flex-col">
+        <div
+          className="flex h-full min-h-0 flex-col"
+          style={{ width: CHAT_DRAWER_WIDTH_PX, minWidth: CHAT_DRAWER_WIDTH_PX }}
+        >
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{chatPanel}</div>
+            <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+              {chatPanel}
+              {settingsSheet}
+            </div>
             {logsSplitOpen ? (
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-gov-gray-200 bg-white text-gov-gray-800 dark:border-dark-border dark:bg-slate-950 dark:text-slate-200">
                 <Pm2LiveLogsControls variant="studio" />

@@ -76,6 +76,7 @@ def _record_slm_eval_lesson_impl(
         trigger,
         lesson,
         float(confidence_score),
+        raise_on_error=False,  # comportamiento previo de este skill (no lanza); el fallo queda en log
     )
     return json.dumps(
         {

@@ -29,7 +29,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -1984,14 +1984,55 @@ _SANDBOX_MESSAGE_DUMP_RE = re.compile(
 )
 
 
+try:
+    from langchain_core.tools import InjectedToolArg as _InjectedToolArg
+except ImportError:  # pragma: no cover - langchain siempre presente en el gateway
+    _InjectedToolArg = None  # type: ignore[assignment,misc]
+
+# Runtime-only args: hidden from the LLM tool schema. With every field optional and
+# worker_id/chat_id visible, a model sent run_sandbox {"chat_id": "<worker name>"} (no code)
+# 40+ times in one turn (2026-10-24). tools_node injects the real values.
+if _InjectedToolArg is not None:
+    _RuntimeStr = Annotated[str, _InjectedToolArg]
+else:  # pragma: no cover
+    _RuntimeStr = str  # type: ignore[misc]
+
+RUN_SANDBOX_CODE_ALIASES = ("command", "script", "source", "program")
+
+
+def run_sandbox_missing_code_payload(received_keys: list[str] | None = None) -> str:
+    """Error JSON (exit_code 1 → cuenta como fallo en el harness) cuando no llega ``code``."""
+    keys = sorted(k for k in (received_keys or []) if k not in ("worker_id", "chat_id"))
+    got = ", ".join(keys) if keys else "ningún argumento"
+    return json.dumps(
+        {
+            "exit_code": 1,
+            "output": (
+                "Error en Sandbox: falta el parámetro obligatorio 'code' (string con el programa); "
+                f"recibí: {got}. No reintentes sin 'code'. "
+                "Llama run_sandbox con code=\"<tu script Python completo>\" (alias: command o script). "
+                "El sandbox no ve la base de datos: pasa los datos con data_sql=\"SELECT ...\" "
+                "(se monta como data.csv) o incrústalos en el código."
+            ),
+            "stdout": "",
+            "figure_base64": None,
+            "error_code": "missing_code",
+        },
+        ensure_ascii=False,
+    )
+
+
 class RunSandboxArgs(BaseModel):
-    """Args de run_sandbox. Acepta alias command/script → code (fallo frecuente del LLM)."""
+    """Args de run_sandbox. Acepta alias command/script/source/program → code (fallo frecuente del LLM).
+
+    ``code`` es obligatorio en el schema que ve el LLM; los alias se copian a ``code`` antes de validar.
+    """
 
     model_config = ConfigDict(extra="ignore")
     code: str = Field(
-        default="",
+        ...,
         description=(
-            "Código fuente Python o Bash a ejecutar (SOLO el programa). "
+            "OBLIGATORIO. Código fuente Python o Bash a ejecutar (SOLO el programa, completo). "
             "No pegues dumps de AIMessage/ToolMessage ni additional_kwargs."
         ),
     )
@@ -2012,8 +2053,11 @@ class RunSandboxArgs(BaseModel):
         default="",
         description="Sesión para reutilizar el contenedor Docker si ya existe",
     )
-    worker_id: str = Field(default="", description="Worker id (política de seguridad)")
-    chat_id: str = Field(default="", description="Chat id (inyectado por el runtime)")
+    # Aliases kept as hidden fields so LangChain's input parsing does not drop them.
+    source: _RuntimeStr = Field(default="", description="Alias oculto de code")
+    program: _RuntimeStr = Field(default="", description="Alias oculto de code")
+    worker_id: _RuntimeStr = Field(default="", description="Worker id (inyectado por el runtime)")
+    chat_id: _RuntimeStr = Field(default="", description="Chat id (inyectado por el runtime)")
 
     @model_validator(mode="before")
     @classmethod
@@ -2023,16 +2067,21 @@ class RunSandboxArgs(BaseModel):
         code = data.get("code")
         if isinstance(code, str) and code.strip():
             return data
-        for key in ("command", "script", "source", "program"):
+        for key in RUN_SANDBOX_CODE_ALIASES:
             alt = data.get(key)
             if isinstance(alt, str) and alt.strip():
                 merged = dict(data)
                 merged["code"] = alt
                 return merged
+        if "code" not in data:
+            # Sin code ni alias: deja que la tool devuelva el error claro (no ValidationError opaco).
+            merged = dict(data)
+            merged["code"] = ""
+            return merged
         return data
 
     def resolved_code(self) -> str:
-        for value in (self.code, self.command, self.script):
+        for value in (self.code, self.command, self.script, self.source, self.program):
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return ""
@@ -2052,19 +2101,12 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
     def _run_with_args(args: RunSandboxArgs) -> str:
         code = args.resolved_code()
         if not code:
-            return json.dumps(
-                {
-                    "exit_code": 1,
-                    "output": (
-                        "Error en Sandbox: falta el parámetro 'code' (string con el programa). "
-                        "También se aceptan los alias 'command' o 'script'. "
-                        "Ejemplo: code=\"print(1)\" con language=\"python\"."
-                    ),
-                    "stdout": "",
-                    "figure_base64": None,
-                },
-                ensure_ascii=False,
+            received = sorted(
+                k
+                for k in ("command", "script", "language", "data_sql", "session_id")
+                if str(getattr(args, k, "") or "").strip()
             )
+            return run_sandbox_missing_code_payload(received)
         if _SANDBOX_MESSAGE_DUMP_RE.search(code):
             return json.dumps(
                 {
@@ -2141,14 +2183,24 @@ def sandbox_tool_factory(db: Any, llm: Any) -> Any:
         return json.dumps(out, ensure_ascii=False)
 
     def _run(**kwargs: Any) -> str:
-        return _run_with_args(RunSandboxArgs.model_validate(kwargs or {}))
+        raw = dict(kwargs or {})
+        if not any(
+            isinstance(raw.get(k), str) and raw.get(k).strip() for k in ("code", *RUN_SANDBOX_CODE_ALIASES)
+        ):
+            _log.warning(
+                "run_sandbox sin code: keys=%s args_len=%d",
+                sorted(raw.keys()),
+                len(json.dumps(raw, ensure_ascii=False, default=str)),
+            )
+        return _run_with_args(RunSandboxArgs.model_validate(raw))
 
     return StructuredTool.from_function(
         _run,
         name="run_sandbox",
         description=(
             "Ejecuta código Python o Bash en un sandbox Docker aislado (sin red ni acceso al host). "
-            "Parámetro principal: code = SOLO el código fuente (string). "
+            "Parámetro OBLIGATORIO: code = SOLO el código fuente completo (string); sin code no se ejecuta nada. "
+            "El sandbox no accede a la DB: usa data_sql para montar datos como data.csv. "
             "Alias aceptados si omites code: command o script. "
             "PROHIBIDO pegar dumps de AIMessage/ToolMessage/additional_kwargs dentro de code. "
             "Para decodificar base64/quoted-printable de un correo: usa string/bytes literales en code, "

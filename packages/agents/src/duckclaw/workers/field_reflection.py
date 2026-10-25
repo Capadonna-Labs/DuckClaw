@@ -4,8 +4,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import re
+from pathlib import Path
 from typing import Any, Optional
+
+_log = logging.getLogger(__name__)
+
+# Agent tool (not an HTTP handler): always wait for the real DB-Writer status.
+_FIELD_LESSON_WRITE_TIMEOUT_SEC = 10.0
 
 def field_reflection_enabled(spec: Any) -> bool:
     """True cuando la capability DB ``field_reflection`` está activa para el worker."""
@@ -117,20 +124,16 @@ def _sql_string_literal(value: str) -> str:
     return "'" + (value or "").replace("'", "''") + "'"
 
 
-def persist_field_lesson(
-    db: Any,
+def build_field_lesson_upsert_sql(
     schema: str,
     belief_key: str,
     context_trigger: str,
     lesson_text: str,
     confidence_score: float,
-) -> None:
-    """
-    INSERT field_lesson o sube confidence_score si existe la misma belief_key.
-    Prohibido DELETE (regla de oro). No actualiza lesson_text en conflicto.
-    """
-    s = _safe_schema(schema)
-    key_esc = "".join(c if c.isalnum() or c == "_" else "_" for c in belief_key.strip())
+) -> tuple[str, str]:
+    """SQL UPSERT de una field_lesson en ``<schema>.agent_beliefs``; devuelve ``(sql, belief_key_saneada)``."""
+    s = _safe_schema(schema) or "main"
+    key_esc = "".join(c if c.isalnum() or c == "_" else "_" for c in (belief_key or "").strip())
     if not key_esc.startswith("lesson_"):
         key_esc = "lesson_" + key_esc[:48]
     conf = max(0.0, float(confidence_score))
@@ -152,18 +155,126 @@ def persist_field_lesson(
             ),
             last_updated = now()
     """
+    return sql, key_esc
+
+
+class FieldLessonWriteError(RuntimeError):
+    """La field_lesson no quedó confirmada en agent_beliefs."""
+
+
+def persist_field_lesson(
+    db: Any,
+    schema: str,
+    belief_key: str,
+    context_trigger: str,
+    lesson_text: str,
+    confidence_score: float,
+    *,
+    raise_on_error: bool = True,
+) -> bool:
+    """
+    INSERT field_lesson o sube confidence_score si existe la misma belief_key.
+    Prohibido DELETE (regla de oro). No actualiza lesson_text en conflicto.
+
+    Usa :func:`write_field_lesson` (DB-Writer si el handle es ``read_only``; directo si es RW).
+    Antes el error se tragaba en silencio y los callers respondían ``ok:true`` sin fila.
+    Ahora: se registra en log y, por defecto, lanza :class:`FieldLessonWriteError`
+    (los skills de catálogo ``record_operational_lesson.py`` lo capturan y devuelven ``ok:false``).
+    Con ``raise_on_error=False`` devuelve ``False`` sin lanzar.
+    """
+    ok, err = write_field_lesson(
+        db, schema, belief_key, context_trigger, lesson_text, confidence_score
+    )
+    if ok:
+        return True
+    _log.warning("persist_field_lesson failed schema=%s key=%s: %s", schema, belief_key, err)
+    if raise_on_error:
+        raise FieldLessonWriteError(f"La lección NO se guardó en agent_beliefs: {err}")
+    return False
+
+
+def _enqueue_field_lesson_via_writer(
+    db: Any,
+    db_path: str,
+    sql: str,
+    *,
+    timeout_sec: Optional[float] = None,
+) -> tuple[bool, str]:
+    """Encola el UPSERT en el DB-Writer singleton y espera su estado real."""
+    from duckclaw.write_commands import RawSqlCommand
+    from duckclaw.db_write_fire_and_forget import wait_write_task, write_poll_timeout_sec
+    from duckclaw.db_write_queue import enqueue_typed_command
+    from duckclaw.workers.db_runtime import infer_user_id_for_writer
+
+    poll_sec = float(timeout_sec) if timeout_sec else (write_poll_timeout_sec() or _FIELD_LESSON_WRITE_TIMEOUT_SEC)
+    released_ro = False
+    task_id = ""
+    try:
+        # Un handle RO del gateway puede impedir que el db-writer tome el lock RW.
+        susp = getattr(db, "suspend_readonly_file_handle", None)
+        resu = getattr(db, "resume_readonly_file_handle", None)
+        if callable(susp) and callable(resu):
+            susp()
+            released_ro = True
+        resolved = str(Path(db_path).expanduser().resolve())
+        uid = infer_user_id_for_writer(resolved)
+        cmd = RawSqlCommand(query=sql, params=[], tenant_id="default")
+        task_id = enqueue_typed_command(cmd, db_path=resolved, user_id=uid)
+        status = wait_write_task(task_id, timeout_sec=poll_sec)
+    except Exception as exc:
+        _log.warning("field_lesson enqueue failed path=%s: %s", db_path, exc)
+        return False, f"No se pudo encolar la escritura en el DB-Writer: {exc}"
+    finally:
+        if released_ro:
+            try:
+                db.resume_readonly_file_handle()
+            except Exception:
+                pass
+    if status is not None and getattr(status, "status", "") == "success":
+        return True, ""
+    if status is not None and getattr(status, "status", "") == "failed":
+        detail = (getattr(status, "detail", "") or "db-writer failed")[:500]
+        _log.warning("field_lesson write failed task_id=%s: %s", task_id, detail)
+        return False, f"El DB-Writer rechazó la escritura (task_id={task_id}): {detail}"
+    _log.warning("field_lesson write unconfirmed task_id=%s after %.0fs", task_id, poll_sec)
+    return False, (
+        f"Sin confirmación del DB-Writer en {poll_sec:.0f}s (task_id={task_id}); "
+        "la lección NO se puede dar por guardada — verifica con read_sql."
+    )
+
+
+def write_field_lesson(
+    db: Any,
+    schema: str,
+    belief_key: str,
+    context_trigger: str,
+    lesson_text: str,
+    confidence_score: float,
+    *,
+    timeout_sec: Optional[float] = None,
+) -> tuple[bool, str]:
+    """
+    Persiste una field_lesson y devuelve ``(ok, error)``.
+
+    - Worker ``read_only`` con archivo: UPSERT ``<schema>.agent_beliefs`` vía DB-Writer
+      (``ok`` solo si el writer confirma ``success``).
+    - Worker RW / ``:memory:``: escritura directa en el handle (comportamiento previo).
+    """
+    if db is None:
+        return False, "DB no disponible para field_lesson"
+    sql, key = build_field_lesson_upsert_sql(
+        schema, belief_key, context_trigger, lesson_text, confidence_score
+    )
+    ro = bool(getattr(db, "_read_only", False))
+    db_path = str(getattr(db, "_path", "") or "").strip()
+    if ro and db_path and db_path != ":memory:":
+        return _enqueue_field_lesson_via_writer(db, db_path, sql, timeout_sec=timeout_sec)
     try:
         db.execute(sql)
-    except TypeError:
-        try:
-            db.execute(
-                sql,
-                [key_esc, context_trigger or "", lesson_text or "", conf],
-            )
-        except Exception:
-            pass
-    except Exception:
-        pass
+        return True, ""
+    except Exception as exc:
+        _log.warning("field_lesson direct write failed schema=%s key=%s: %s", schema, key, exc)
+        return False, f"Escritura directa en {_safe_schema(schema) or 'main'}.agent_beliefs falló: {exc}"
 
 
 def fetch_field_experience_candidates(db: Any, schema: str, limit_rows: int = 200) -> list[dict[str, Any]]:

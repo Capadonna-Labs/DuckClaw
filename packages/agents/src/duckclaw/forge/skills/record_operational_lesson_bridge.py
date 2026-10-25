@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Optional
 
-from duckclaw.workers.field_reflection import lesson_belief_key, persist_field_lesson
+from duckclaw.workers.field_reflection import lesson_belief_key, write_field_lesson
+
+_log = logging.getLogger(__name__)
 
 
-def _worker_schema(db: Any) -> str:
+def _worker_schema(db: Any, schema_name: str = "") -> str:
+    """Schema del worker: ``spec.schema_name`` si llega; si no, atributo del handle; si no, ``main``."""
+    explicit = (schema_name or "").strip()
+    if explicit:
+        return explicit
     if db is None:
         return "main"
     schema = getattr(db, "schema", None) or getattr(db, "default_schema", None)
@@ -22,6 +29,7 @@ def _record_operational_lesson_impl(
     confidence_score: float = 0.9,
     *,
     db: Any = None,
+    schema_name: str = "",
 ) -> str:
     if db is None:
         return json.dumps({"ok": False, "error": "DB no disponible para field_lesson"})
@@ -36,23 +44,39 @@ def _record_operational_lesson_impl(
         trigger = ltype
     elif not trigger:
         trigger = "operational_lesson"
-    schema = _worker_schema(db)
+    schema = _worker_schema(db, schema_name)
     key = lesson_belief_key(trigger, lesson)
-    persist_field_lesson(
-        db,
-        schema,
-        key,
-        trigger,
-        lesson,
-        float(confidence_score),
-    )
+    try:
+        ok, err = write_field_lesson(
+            db,
+            schema,
+            key,
+            trigger,
+            lesson,
+            float(confidence_score),
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning("record_operational_lesson failed schema=%s key=%s: %s", schema, key, exc)
+        ok, err = False, f"Error inesperado al persistir la lección: {exc}"
+    if not ok:
+        _log.warning("record_operational_lesson not persisted schema=%s key=%s: %s", schema, key, err)
+        return json.dumps(
+            {
+                "ok": False,
+                "belief_key": key,
+                "table": f"{schema}.agent_beliefs",
+                "error": f"La lección NO se guardó: {err}",
+            },
+            ensure_ascii=False,
+        )
     return json.dumps(
         {
             "ok": True,
             "belief_key": key,
+            "table": f"{schema}.agent_beliefs",
             "lesson_type": ltype or None,
             "context_trigger": trigger,
-            "message": "Lección operativa persistida en agent_beliefs (field_lesson).",
+            "message": f"Lección operativa persistida en {schema}.agent_beliefs (field_lesson).",
         },
         ensure_ascii=False,
     )
@@ -63,6 +87,7 @@ def register_record_operational_lesson_skill(
     record_operational_lesson_config: Optional[dict] = None,
     *,
     db: Any = None,
+    schema_name: str = "",
 ) -> None:
     cfg = record_operational_lesson_config if isinstance(record_operational_lesson_config, dict) else {}
     if cfg.get("enabled") is False:
@@ -84,6 +109,7 @@ def register_record_operational_lesson_skill(
             lesson_type=lesson_type,
             confidence_score=confidence_score,
             db=db,
+            schema_name=schema_name or "",
         )
 
     existing = {str(getattr(t, "name", "") or "") for t in tools_list}
@@ -95,9 +121,10 @@ def register_record_operational_lesson_skill(
             _record,
             name="record_operational_lesson",
             description=(
-                "Persiste una lección operativa (field_lesson) en agent_beliefs. "
+                "Persiste una lección operativa (field_lesson) en <schema del worker>.agent_beliefs. "
                 "Usar tras errores reales (p. ej. lesson_type=broker_position_hallucination). "
-                "Parámetros: lesson_text, context_trigger, lesson_type, confidence_score."
+                "Parámetros: lesson_text, context_trigger, lesson_type, confidence_score. "
+                "Devuelve ok:false si la escritura no se confirmó; no afirmes que se guardó en ese caso."
             ),
         )
     )

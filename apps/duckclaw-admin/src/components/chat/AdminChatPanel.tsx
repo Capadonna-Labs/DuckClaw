@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useEmbedded } from '@/lib/useEmbedded';
 import {
   Bot,
   Brain,
@@ -63,6 +62,8 @@ export type AdminChatPanelProps = {
   composeChips?: React.ReactNode;
   /** `studio`: caja única redondeada con chips dentro (Playground). */
   composeLayout?: 'default' | 'studio';
+  /** Studio composer with a shorter input box (narrow framed chat, e.g. a dashboard's chat box). */
+  denseCompose?: boolean;
   /** Muestra u oculta el detalle de herramientas usado durante una respuesta. */
   showToolUsage?: boolean;
   /** Compatibilidad: los contenedores pueden resolver gestión de conversaciones fuera del panel base. */
@@ -95,6 +96,7 @@ export function AdminChatPanel({
   studioHeaderTrailing,
   composeChips,
   composeLayout = 'default',
+  denseCompose = false,
   showToolUsage = true,
   conversationManage,
   className = '',
@@ -175,8 +177,7 @@ export function AdminChatPanel({
   }, [slashOpen]);
 
   const isCompact = variant === 'compact';
-  const embedded = useEmbedded(); // the dashboard's chat panel is narrow: messages and the composer only
-  const showSuggestions = !embedded && shouldShowSuggestionChips(suggestions, loading, input);
+  const showSuggestions = shouldShowSuggestionChips(suggestions, loading, input);
   const [, setSuggestionsOpen] = useState(true);
 
   // When Sugerencias appear, the glass composer grows — re-pin scroll so the last
@@ -596,6 +597,7 @@ export function AdminChatPanel({
           ) : null}
           <AdminChatComposeFooter
             isStudioCompose={isStudioCompose}
+            dense={denseCompose}
             isCompact={isCompact}
             composeChips={composeChips}
             input={input}
@@ -614,7 +616,7 @@ export function AdminChatPanel({
             imageAttachments={imageAttachments}
             documentAttachments={documentAttachments}
             send={send}
-            suggestions={embedded ? [] : suggestions}
+            suggestions={suggestions}
             recommendedSuggestionIndex={recommendedSuggestionIndex}
             suggestionsAutoEnabled={suggestionsAutoEnabled}
             onSuggestionsAutoChange={onSuggestionsAutoChange}

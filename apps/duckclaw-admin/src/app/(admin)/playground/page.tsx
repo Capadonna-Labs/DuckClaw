@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useEmbedded } from '@/lib/useEmbedded';
+import { requestEmbedChatClose, shouldEscCloseEmbedChat } from '@/lib/embedChat';
 import { adminService } from '@/services/adminService';
 import {
   ArrowLeft,
@@ -517,6 +518,26 @@ export default function PlaygroundPage() {
   }, [isHistoryView]);
 
   useEffect(() => {
+    // Framed (e.g. a dashboard's chat bubble): start on the conversation; the header gear opens settings.
+    if (embedded) setPanelOpen(false);
+  }, [embedded]);
+
+  // Framed: Esc closes the settings sheet first, then asks the framing page to hide the chat.
+  useEffect(() => {
+    if (!embedded) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (panelOpen) {
+        setPanelOpen(false);
+        return;
+      }
+      if (shouldEscCloseEmbedChat(e, document)) requestEmbedChatClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [embedded, panelOpen]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     const mq = window.matchMedia('(min-width: 1024px)');
     const apply = () => {
@@ -715,14 +736,16 @@ export default function PlaygroundPage() {
             initialWorker={workerId}
             variant="full"
             showHeader={false}
-            showStudioHeader={!embedded}
+            showStudioHeader
             showWorkerLink={false}
             composeLayout="studio"
+            denseCompose={embedded}
             showToolUsage={toolUsageEnabled}
             composeChips={playgroundComposeChips}
             conversationTitle={conv.conversationTitle}
             onRenameConversation={conv.renameConversation}
             studioHeaderLeading={
+              embedded ? undefined : (
               <button
                 type="button"
                 onClick={() => setShowHistory(true)}
@@ -732,9 +755,11 @@ export default function PlaygroundPage() {
               >
                 <ArrowLeft size={16} />
               </button>
+              )
             }
             studioHeaderTrailing={
               <div className="flex items-center gap-1 lg:hidden">
+                {embedded ? null : (
                 <Link
                   href={
                     conv.sessionId
@@ -747,6 +772,7 @@ export default function PlaygroundPage() {
                 >
                   <FolderOpen size={15} />
                 </Link>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -774,6 +800,17 @@ export default function PlaygroundPage() {
                 >
                   <Settings2 size={15} aria-hidden />
                 </button>
+                {embedded ? (
+                  <button
+                    type="button"
+                    onClick={() => requestEmbedChatClose()}
+                    className="flex h-9 w-9 items-center justify-center rounded-full border border-white/50 bg-white/70 text-gov-blue-800 shadow-sm backdrop-blur-md dark:border-white/10 dark:bg-dark-surface/70 dark:text-dark-cyan"
+                    aria-label="Cerrar chat"
+                    title="Cerrar chat"
+                  >
+                    <X size={15} aria-hidden />
+                  </button>
+                ) : null}
               </div>
             }
             emptyHint={

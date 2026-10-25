@@ -114,7 +114,7 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
             "register_record_operational_lesson_skill"
         ),
         empty_config_registers=True,
-        keyword_context={"db": "db"},
+        keyword_context={"db": "db", "schema_name": "schema_name"},
     ),
     SkillToolRegistrar(
         skill_name="jev_decide",
@@ -194,6 +194,7 @@ def register_post_llm_skill_tools(
             "research_config": worker_skill_config(spec, "research"),
             "worker_id": str(getattr(spec, "worker_id", None) or ""),
             "tenant_id": str(tenant_id or "default"),
+            "schema_name": str(getattr(spec, "schema_name", None) or ""),
         },
     )
 

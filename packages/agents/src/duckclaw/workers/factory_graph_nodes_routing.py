@@ -18,6 +18,9 @@ def make_should_continue(ctx: WorkerGraphContext):
     def should_continue(state: dict) -> str:
         if int(state.get("_tool_round") or 0) >= max_rounds:
             return "end"
+        if state.get("_harness_abort_tool"):
+            # Repeated identical-call blocks: end the turn; set_reply explains the failure.
+            return "end"
         try:
             from duckclaw.forge.skills.custom_reports_bridge import (
                 _turn_already_published_custom_report,

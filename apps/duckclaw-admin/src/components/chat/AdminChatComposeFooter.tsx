@@ -25,6 +25,8 @@ type DocumentAttachments = ReturnType<typeof useChatDocumentAttachments>;
 
 export type AdminChatComposeFooterProps = {
   isStudioCompose: boolean;
+  /** Studio only: shorter input box that grows with the text (narrow framed chat). */
+  dense?: boolean;
   isCompact: boolean;
   composeChips?: ReactNode;
   suggestions?: string[];
@@ -106,6 +108,7 @@ function PendingDocumentChips({
 
 export function AdminChatComposeFooter({
   isStudioCompose,
+  dense = false,
   isCompact,
   composeChips,
   suggestions = [],
@@ -264,7 +267,9 @@ export function AdminChatComposeFooter({
                 // se desalinea al hacer scroll, sincronizar con onScroll={...}.
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] px-3.5 pt-2.5 pb-1 text-sm leading-snug"
+                  className={`pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words [overflow-wrap:anywhere] px-3.5 text-sm leading-snug ${
+                    dense ? 'pt-2 pb-0' : 'pt-2.5 pb-1'
+                  }`}
                 >
                   <span className="font-semibold text-gov-blue-700 dark:text-dark-cyan">
                     {leadingSlashCmd.cmd}
@@ -287,7 +292,9 @@ export function AdminChatComposeFooter({
                 }}
                 rows={1}
                 placeholder="Escribe un mensaje…"
-                className={`relative w-full min-h-[2.25rem] max-h-28 resize-none bg-transparent px-3.5 pt-2.5 pb-1 text-sm leading-snug placeholder:text-gov-gray-400 focus:outline-none dark:placeholder:text-dark-muted ${
+                className={`relative w-full max-h-28 resize-none bg-transparent px-3.5 text-sm leading-snug ${
+                  dense ? 'min-h-[1.75rem] pt-2 pb-0 [field-sizing:content]' : 'min-h-[2.25rem] pt-2.5 pb-1'
+                } placeholder:text-gov-gray-400 focus:outline-none dark:placeholder:text-dark-muted ${
                   leadingSlashCmd
                     ? 'text-transparent caret-gov-blue-700 dark:caret-dark-cyan'
                     : 'text-gov-gray-900 dark:text-dark-text'
@@ -295,7 +302,7 @@ export function AdminChatComposeFooter({
                 disabled={!canSend || liveVoice.isActive}
               />
             </div>
-            <div className="flex items-center justify-between gap-2 px-2 pb-2 pt-0.5">
+            <div className={`flex items-center justify-between gap-2 px-2 ${dense ? 'pb-1 pt-0' : 'pb-2 pt-0.5'}`}>
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">{composeChips}</div>
               <div className="flex shrink-0 items-center gap-0.5">
                 <MediaAttachMenu

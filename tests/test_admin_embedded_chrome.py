@@ -24,9 +24,12 @@ def test_embedded_console_has_no_side_menu_topbar_or_padding() -> None:
     assert "hideMenu" not in top                                              # the topbar is simply not rendered when embedded
 
 
-def test_embedded_chat_drops_the_studio_header_and_the_suggestions_strip() -> None:
+def test_embedded_chat_keeps_a_compact_header_with_a_close_button() -> None:
     page = _read("app", "(admin)", "playground", "page.tsx")
-    assert "const embedded = useEmbedded();" in page and "showStudioHeader={!embedded}" in page    # title, tokens and the back/folder/terminal/settings buttons
-    panel = _read("components", "chat", "AdminChatPanel.tsx")
-    assert "const showSuggestions = !embedded && shouldShowSuggestionChips(" in panel
-    assert "suggestions={embedded ? [] : suggestions}" in panel               # no "Sugerencias" bar above the composer
+    assert "const embedded = useEmbedded();" in page
+    assert "denseCompose={embedded}" in page                                  # shorter composer in the narrow framed chat
+    assert "embedded ? undefined : (" in page                                 # no "back to history" button when framed
+    assert "requestEmbedChatClose()" in page and 'aria-label="Cerrar chat"' in page   # the header's x asks the framing page to hide the chat
+    assert "if (embedded) setPanelOpen(false);" in page                       # starts on the conversation, settings closed
+    helper = _read("lib", "embedChat.ts")
+    assert "export function requestEmbedChatClose" in helper and "export function shouldEscCloseEmbedChat" in helper

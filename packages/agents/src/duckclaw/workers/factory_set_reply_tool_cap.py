@@ -25,9 +25,10 @@ def maybe_reply_for_tool_cap_exhausted(
     incoming: str,
     spec: Any,
 ) -> tuple[str | None, list[Any] | None]:
-    """Cuando ``should_continue`` corta en max_tool_rounds con tool_calls pendientes."""
+    """Cuando ``should_continue`` corta en max_tool_rounds (o por abort del harness) con tool_calls pendientes."""
     max_rounds = max(1, int(ctx.max_tool_rounds))
-    if int(state.get("_tool_round") or 0) < max_rounds:
+    abort_tool = str(state.get("_harness_abort_tool") or "").strip()
+    if int(state.get("_tool_round") or 0) < max_rounds and not abort_tool:
         return None, None
     if not msgs:
         return None, None
@@ -35,6 +36,12 @@ def maybe_reply_for_tool_cap_exhausted(
     tool_calls = getattr(last, "tool_calls", None) or []
     if not tool_calls:
         return None, None
+    if abort_tool and int(state.get("_tool_round") or 0) < max_rounds:
+        from duckclaw.workers.tool_harness import harness_abort_reply
+
+        reply = harness_abort_reply(abort_tool)
+        stripped = list(msgs[:-1]) + [AIMessage(content=reply)] if isinstance(last, AIMessage) else None
+        return reply, stripped
 
     spec_lid = _spec_logical_worker_id(spec)
     lh = _last_human_message_index(list(msgs))

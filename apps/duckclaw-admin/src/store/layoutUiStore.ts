@@ -1,6 +1,9 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
+/** Width of the right-hand chat drawer; overlays that must leave it usable offset by this. */
+export const CHAT_DRAWER_WIDTH_PX = 420;
+
 interface LayoutUiState {
   /** Menú lateral izquierdo (desktop). */
   sidebarOpen: boolean;

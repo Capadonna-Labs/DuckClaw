@@ -54,7 +54,7 @@ from duckclaw.workers.tool_harness import (
     resolve_harness_config,
     truncate_tool_result,
     harness_max_chars_for_tool,
-    identical_call_block,
+    harness_abort_state, identical_call_block, log_run_sandbox_without_code,
 )
 from langchain_core.messages import ToolMessage
 
@@ -202,6 +202,8 @@ def make_tools_node(ctx: WorkerGraphContext):
                 )
             _identical = identical_call_block(messages[:-1], tool_name, args)
             if _identical is not None:
+                _fail_counts.update(record_tool_failure(_fail_counts, tool_name))  # blocked repeat = failure
+                _harness_stats["failures"] += 1
                 return _identical
             if sandbox_toggle_bypasses_harness(tool_name, sandbox_enabled=sandbox_enabled):
                 return None
@@ -323,6 +325,7 @@ def make_tools_node(ctx: WorkerGraphContext):
                 name = (tc.get("name") or "").strip()
                 args = tc.get("args") or {}
                 tid = tc.get("id") or ""
+                log_run_sandbox_without_code(_wl, name, args, last)
                 _pre = _harness_precheck(name, args)
                 if _pre is not None:
                     new_msgs.append(ToolMessage(content=_pre, tool_call_id=tid, name=name))
@@ -340,11 +343,9 @@ def make_tools_node(ctx: WorkerGraphContext):
                             "run_browser_sandbox",
                             "execute_sandbox_script",
                         ):
-                            if not str(invoke_args.get("worker_id") or "").strip():
-                                invoke_args["worker_id"] = worker_id
+                            invoke_args["worker_id"] = worker_id  # runtime wins over model-sent ids
                             _cid_sb = str(state.get("chat_id") or state.get("session_id") or "").strip()
-                            if _cid_sb and not str(invoke_args.get("chat_id") or "").strip():
-                                invoke_args["chat_id"] = _cid_sb
+                            invoke_args["chat_id"] = _cid_sb  # "" → tool uses no chat
                             if _cid_sb and not str(invoke_args.get("session_id") or "").strip():
                                 from duckclaw.graphs.novnc_registry import sanitize_chat_to_session_id
 
@@ -565,6 +566,7 @@ def make_tools_node(ctx: WorkerGraphContext):
             "_tool_round": _tool_round,
             "_tool_fail_counts": _fail_counts,
             "_harness_blocked_tools": sorted(_blocked),
+            **harness_abort_state(state, new_msgs, _wl),
         }
         log_harness_metric(_wl, {**_harness_stats, "fail_counts": dict(_fail_counts)})
         if sandbox_b64:

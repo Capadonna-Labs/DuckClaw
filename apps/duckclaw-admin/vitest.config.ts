@@ -47,6 +47,7 @@ export default defineConfig({
       'src/components/reports/reportsPageView.test.ts',
       'src/lib/htmlDashboardUpload.test.ts',
       'src/lib/workersTooltipLabel.test.ts',
+      'src/lib/embedChat.test.ts',
     ],
   },
   resolve: {

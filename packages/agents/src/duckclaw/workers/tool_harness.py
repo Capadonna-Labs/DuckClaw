@@ -436,6 +436,85 @@ def identical_call_block(messages: list[Any], tool_name: str, args: Any) -> str 
     return None
 
 
+def max_identical_blocks_per_turn() -> int:
+    """Identical-call blocks tolerated per turn before the harness ends the turn; 0 disables."""
+    import os
+
+    raw = (os.environ.get("DUCKCLAW_MAX_IDENTICAL_BLOCKS_PER_TURN") or "2").strip()
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 2
+
+
+def identical_blocks_in_turn(messages: list[Any]) -> dict[str, int]:
+    """Identical-call block envelopes per tool since the last human message.
+
+    A blocked call is not executed, so the model can keep re-requesting it: on 2026-10-24
+    a worker re-sent run_sandbox {"chat_id": ...} (no code) 46 times after the block,
+    burning rounds until max_tool_rounds (75).
+    """
+    out: dict[str, int] = {}
+    for msg in reversed(messages):
+        if getattr(msg, "type", "") == "human":
+            break
+        if getattr(msg, "type", "") != "tool":
+            continue
+        content = getattr(msg, "content", "")
+        text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False, default=str)
+        if '"code": "harness_identical_call"' in text:
+            name = str(getattr(msg, "name", "") or "").strip()
+            out[name] = out.get(name, 0) + 1
+    return out
+
+
+def harness_abort_tool(messages: list[Any]) -> str | None:
+    """Tool name whose identical-call blocks reached the per-turn limit (turn must end)."""
+    limit = max_identical_blocks_per_turn()
+    if not limit:
+        return None
+    for name, count in identical_blocks_in_turn(messages).items():
+        if count >= limit:
+            return name or "tool"
+    return None
+
+
+def harness_abort_reply(tool_name: str) -> str:
+    return (
+        f"La herramienta «{tool_name}» falló varias veces seguidas con los mismos argumentos "
+        "(p. ej. sin el código a ejecutar), así que corté el turno para no quedar en bucle. "
+        "Vuelve a pedirlo; si se repite, reformula la solicitud."
+    )
+
+
+_SANDBOX_CODE_KEYS = ("code", "command", "script", "source", "program")
+
+
+def log_run_sandbox_without_code(worker_label: str, tool_name: str, args: Any, last_msg: Any) -> None:
+    """Log keys/length (never values) when the model calls run_sandbox without code."""
+    if tool_name != "run_sandbox" or not isinstance(args, dict):
+        return
+    if any(isinstance(args.get(k), str) and args.get(k).strip() for k in _SANDBOX_CODE_KEYS):
+        return
+    _log.warning(
+        "[%s] run_sandbox call without code: keys=%s args_len=%d invalid_tool_calls=%d",
+        worker_label,
+        sorted(args.keys()),
+        len(json.dumps(args, ensure_ascii=False, default=str)),
+        len(getattr(last_msg, "invalid_tool_calls", None) or []),
+    )
+
+
+def harness_abort_state(state: dict[str, Any], messages: list[Any], worker_label: str) -> dict[str, Any]:
+    """``{"_harness_abort_tool": name}`` once identical-call blocks hit the per-turn limit."""
+    tool = harness_abort_tool(messages)
+    if not tool:
+        return {}
+    if not state.get("_harness_abort_tool"):
+        _log.warning("[%s] harness abort: identical-call blocks limit tool=%s", worker_label, tool)
+    return {"_harness_abort_tool": tool}
+
+
 def circuit_block_envelope(tool_name: str, fail_count: int) -> str:
     return tool_result_envelope(
         ok=False,

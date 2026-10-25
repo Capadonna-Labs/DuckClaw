@@ -314,5 +314,5 @@ def test_huggingface_preset_is_read_only_search_and_not_default() -> None:
     payload = preset_payload("huggingface")
     assert payload is not None and payload["transport"] == "streamable_http" and payload["endpoint_url"] == "https://huggingface.co/mcp"
     assert payload["read_only"] is True and payload["egress_hosts"] == ["huggingface.co"] and payload["auth_kind"] == "none"
-    assert set(payload["tool_allowlist"]) == {"model_search", "model_details", "dataset_search", "dataset_details", "paper_search", "space_search", "hf_doc_search", "hf_whoami"}
+    assert set(payload["tool_allowlist"]) == {"hub_repo_search", "hub_repo_details", "hf_fs", "hf_whoami"}   # the names the server really exposes, all read-only
     assert "huggingface" not in default_mcp_connector_preset_ids()

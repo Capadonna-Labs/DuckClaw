@@ -1419,7 +1419,7 @@ class TestCommandHandlers:
             ORDER BY policy_type, policy_name
             """
         ).fetchall()
-        assert len(rows) == 5
+        assert len(rows) == 6                                     # + the threejs_reports directive
         for _ptype, _pname, metadata_raw in rows:
             metadata = json.loads(metadata_raw) if metadata_raw else {}
             assert metadata.get("seed") == "framework_policy_pack_v1"

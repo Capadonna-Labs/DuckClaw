@@ -168,7 +168,7 @@ def apply_framework_policy_pack(db: Any, *, force: bool = False) -> list[str]:
                 "version": version,
                 "status": "active",
                 "content": content,
-                "metadata": metadata,
+                "metadata": {**metadata, **(entry.get("metadata") or {})},  # per-policy extras, e.g. when_tools for tool-triggered directives
             },
         )
         key = f"{policy_type}/{policy_name}"

@@ -89,7 +89,7 @@ def test_framework_directive_skills_seed_once_and_apply_to_any_tenant() -> None:
         "CREATE TABLE main.admin_skills (skill_id VARCHAR, name VARCHAR, description VARCHAR, skill_type VARCHAR, "
         "implementation_ref VARCHAR, owner_email VARCHAR, tenant_id VARCHAR, visibility VARCHAR, active BOOLEAN)"
     )
-    assert seed_framework_directive_skills(con) == 3
+    assert seed_framework_directive_skills(con) == 4
     assert seed_framework_directive_skills(con) == 0  # idempotent, never overwrites
     assert con.execute("SELECT max(length(description)) FROM main.admin_skills").fetchone()[0] <= 4096
 
@@ -135,3 +135,15 @@ def test_security_audit_directive_credits_its_source_and_admits_it_is_guidance_o
     text = skill["description"]
     assert len(text) <= 4096 and "cloudflare/security-audit-skill (MIT" in text            # attribution travels with the condensed text
     assert "no insinúes que corriste las seis fases" in text and "confirmed" in text and "needs_validation" in text
+
+
+def test_privacy_directive_is_guide_only_and_never_handles_credentials_or_stores_data() -> None:
+    import json
+
+    from duckclaw.directive_skills import _PACK
+
+    pack = json.loads(_PACK.read_text(encoding="utf-8"))
+    text = next(s for s in pack["skills"] if s["name"] == "privacidad_datos")["description"]
+    assert len(text) <= 4096 and "unbroker" in pack["metadata"]["source"]                 # attribution travels with the pack
+    assert "NO envías nada por la persona" in text and "ni un anti-bot" in text and "No guardes datos personales" in text
+    assert "Ley 1581" in text and "RGPD" in text and "CCPA" in text and "solo cuenta como eliminado si ya no aparece" in text

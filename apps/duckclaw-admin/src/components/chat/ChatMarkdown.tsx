@@ -88,8 +88,8 @@ function buildMarkdownComponents(
     : 'border-l-4 border-gov-blue-400 dark:border-dark-cyan pl-3 my-3 text-gov-gray-600 dark:text-dark-muted italic';
   const hr = isUser ? 'my-4 border-white/25' : 'my-4 border-gov-gray-200 dark:border-dark-border';
   const tableWrap = isUser
-    ? 'scrollbar-hide my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-white/25 [-webkit-overflow-scrolling:touch]'
-    : 'scrollbar-hide my-3 max-w-full overflow-x-auto overscroll-x-contain rounded-xl border border-gov-gray-200 dark:border-dark-border [-webkit-overflow-scrolling:touch]';
+    ? 'scrollbar-thin my-3 max-h-[60vh] max-w-full overflow-auto overscroll-x-contain rounded-xl border border-white/25 [-webkit-overflow-scrolling:touch]'
+    : 'scrollbar-thin my-3 max-h-[60vh] max-w-full overflow-auto overscroll-x-contain rounded-xl border border-gov-gray-200 dark:border-dark-border [-webkit-overflow-scrolling:touch]';
   const thead = isUser
     ? 'bg-white/10 text-left'
     : 'bg-gov-gray-100 dark:bg-dark-sidebar text-left';
@@ -97,8 +97,8 @@ function buildMarkdownComponents(
   const tdBorder = isUser ? 'border-b border-white/15' : 'border-b border-gov-gray-100 dark:border-dark-border';
   // A fence without a language reaches `code` as inline code (dark text on a light chip): inside <pre> it must inherit the block's light text.
   const pre = isUser
-    ? 'scrollbar-hide my-3 overflow-x-auto rounded-xl bg-black/25 text-white p-3 text-xs leading-relaxed font-mono [&_code]:!rounded-none [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!text-inherit'
-    : 'scrollbar-hide my-3 overflow-x-auto rounded-xl bg-gov-gray-900 dark:bg-[#010409] text-gov-gray-50 p-3 text-xs leading-relaxed font-mono [&_code]:!rounded-none [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!text-inherit';
+    ? 'scrollbar-thin my-3 max-h-[60vh] overflow-auto rounded-xl bg-black/25 text-white p-3 text-xs leading-relaxed font-mono [&_code]:!rounded-none [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!text-inherit'
+    : 'scrollbar-thin my-3 max-h-[60vh] overflow-auto rounded-xl bg-gov-gray-900 dark:bg-[#010409] text-gov-gray-50 p-3 text-xs leading-relaxed font-mono [&_code]:!rounded-none [&_code]:!bg-transparent [&_code]:!p-0 [&_code]:!text-inherit';
   const inlineCode = isUser
     ? 'px-1.5 py-0.5 rounded-md bg-white/15 text-[0.85em] font-mono text-white'
     : 'px-1.5 py-0.5 rounded-md bg-gov-gray-200/90 dark:bg-dark-border text-[0.85em] font-mono text-gov-blue-900 dark:text-dark-cyan';

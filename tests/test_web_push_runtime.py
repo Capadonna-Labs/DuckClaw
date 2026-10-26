@@ -91,6 +91,37 @@ def test_playground_chat_turn_attempts_web_push_on_completion() -> None:
     # real user reference so a suggestion-pick can be recognized and annotated.
     assert "extract_playground_reply(result)" in chat_turn
     assert "incoming_message=prepared.original_user_message" in chat_turn
+    # The SSE path takes the reply from the final "done" event; without it every push said "Turno completado."
+    assert 'json.loads(chunk.removeprefix("data: ")' in chat_turn
+
+
+def _push_parts():
+    import re
+
+    src = (ROOT / "services/api-gateway/routers/admin_domains/playground/chat_turn.py").read_text(encoding="utf-8")
+    block = src[src.index("_PUSH_MD = "):src.index("async def _suggestion_selected_prefix")]
+    ns: dict = {"re": re}
+    exec(block, ns)  # noqa: S102 - the helper block of our own source
+    return ns["_playground_push_parts"]
+
+
+def test_push_title_is_the_headline_and_body_up_to_three_bullets() -> None:
+    parts = _push_parts()
+    reply = (
+        "## Resumen del portafolio\n\n"
+        "| Ticker | Peso |\n|---|---|\n| SPY | 10% |\n\n"
+        "- **SPY** pesa 10% y está dentro de banda\n- Sin órdenes de rebalanceo hoy\n- FOMC mañana: ventana sin compras\n- Cuarto punto que no cabe\n"
+    )
+    title, body = parts(reply, "quant_analyst")
+    assert title == "Resumen del portafolio"
+    assert body.splitlines() == ["• SPY pesa 10% y está dentro de banda", "• Sin órdenes de rebalanceo hoy", "• FOMC mañana: ventana sin compras"]
+    # a "Veredicto:" line wins as title, like the proactive pushes
+    title, _ = parts("Contexto largo.\nVeredicto: 2 órdenes por revisar\n- uno\n- dos", "w")
+    assert title == "2 órdenes por revisar"
+    # prose without bullets: the first sentence is the title, the next ones the bullets
+    title, body = parts("El mercado cerró mixto. SPY subió 0,4%. El VIX bajó a 15.", "w")
+    assert title == "El mercado cerró mixto." and body == "• SPY subió 0,4%.\n• El VIX bajó a 15."
+    assert parts("", "quant_analyst") == ("DuckClaw · quant_analyst", "Turno completado.")
 
 
 

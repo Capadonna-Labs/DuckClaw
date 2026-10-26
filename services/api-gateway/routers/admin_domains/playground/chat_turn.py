@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -555,11 +556,47 @@ def playground_wants_stream(body: PlaygroundChatBody, request: Request) -> bool:
     return bool(body.stream) or "text/event-stream" in accept
 
 
-def _playground_push_notification_body(reply: str) -> str:
-    text = re.sub(r"\s+", " ", (reply or "").strip())
-    if not text:
-        return "Turno completado."
-    return text if len(text) <= 140 else f"{text[:139]}…"
+_PUSH_MD = re.compile(r"[*#`_>|~]+")
+_PUSH_LINK = re.compile(r"\[([^\]]+)\]\([^)]*\)")
+_PUSH_VERDICT = re.compile(r"veredicto\s*:\s*(.+)", re.IGNORECASE)
+_PUSH_BULLET = re.compile(r"^\s*(?:[-*•]|\d+[.)])\s+(\S.*)")
+_PUSH_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _push_clean(text: str) -> str:
+    return re.sub(r"\s+", " ", _PUSH_MD.sub("", _PUSH_LINK.sub(r"\1", text))).strip()
+
+
+def _push_cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1].rsplit(" ", 1)[0].rstrip(",;:") + "…"
+
+
+def _playground_push_parts(reply: str, wid: str) -> tuple[str, str]:
+    """(title, body) of the turn-done push: the answer's headline as title (its "Veredicto:" line
+    when it has one, like the proactive pushes) and up to 3 bullets as body. Tables, code and
+    rules are skipped; an answer without bullets gets its next sentences as bullets."""
+    lines, in_code = [], False
+    for raw in (reply or "").splitlines():
+        s = raw.strip()
+        if s.startswith("```"):
+            in_code = not in_code
+        elif s and not in_code and not s.startswith("|") and not re.fullmatch(r"[-=_*\s]+", s):
+            lines.append(raw)
+    if not lines:
+        return f"DuckClaw · {wid}", "Turno completado."
+    head_i = next((i for i, ln in enumerate(lines) if _PUSH_VERDICT.search(_push_clean(ln))), 0)
+    head = _push_clean(_PUSH_BULLET.sub(r"\1", lines[head_i]))
+    verdict = _PUSH_VERDICT.search(head)
+    title_src = verdict.group(1) if verdict else head
+    first, *tail = _PUSH_SENTENCE.split(title_src, 1)
+    rest = lines[:head_i] + lines[head_i + 1:]
+    bullets = [_push_clean(m.group(1)) for ln in rest if (m := _PUSH_BULLET.match(ln))]
+    if len(bullets) < 2:
+        prose = " ".join(tail + [_push_clean(ln) for ln in rest if not _PUSH_BULLET.match(ln)])
+        bullets += [x for x in _PUSH_SENTENCE.split(prose) if x.strip()]
+    title = _push_cut(first.strip(), 80) or f"DuckClaw · {wid}"
+    bullets = [b for b in (_push_cut(x, 70) for x in bullets if x) if b and b != title][:3]
+    return title, "\n".join(f"• {b}" for b in bullets) or "Turno completado."
 
 
 async def _suggestion_selected_prefix(redis_client: Any, chat_id: str, incoming_message: str) -> str:
@@ -608,11 +645,12 @@ async def _notify_playground_turn_done(
         if not subscriptions:
             return
         prefix = await _suggestion_selected_prefix(redis_client, session_id, incoming_message)
+        title, body = _playground_push_parts(reply, wid)
         result = await asyncio.to_thread(
             send_web_push_notifications,
             subscriptions,
-            title=f"DuckClaw · {wid}",
-            body=prefix + _playground_push_notification_body(reply),
+            title=title,
+            body=prefix + body,
             url="/playground",
             tag=f"duckclaw-playground-{session_id}",
         )
@@ -636,14 +674,21 @@ async def _sse_body_with_push_notification(
     redis_client: Any = None,
     incoming_message: str = "",
 ) -> Any:
+    reply = ""
     try:
         async for chunk in body:
+            if '"type": "done"' in chunk:   # the final SSE event carries the whole reply (see sse_done)
+                try:
+                    reply = str(json.loads(chunk.removeprefix("data: ").strip()).get("response") or "")
+                except ValueError:
+                    pass
             yield chunk
     finally:
         spawn_background(
             _notify_playground_turn_done(
                 session_id,
                 wid,
+                reply,
                 redis_client=redis_client,
                 incoming_message=incoming_message,
             )

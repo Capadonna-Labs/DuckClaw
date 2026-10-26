@@ -2,16 +2,6 @@
 
 import { useEffect } from 'react';
 import { ensureWebPushSubscription } from '@/lib/webPushClient';
-import { mutationHeaders } from '@/lib/csrfClient';
-
-function reportPwaPresence(visible: boolean) {
-  void fetch('/api/admin/notifications/pwa-presence', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...mutationHeaders('POST') },
-    body: JSON.stringify({ visible }),
-    keepalive: true,
-  }).catch(() => undefined);
-}
 
 /** Opening the app = alerts seen: clear the icon badge and the delivered notifications. */
 function clearAppBadge() {
@@ -39,25 +29,15 @@ export function PwaServiceWorker() {
   }, []);
 
   useEffect(() => {
-    const visible = () => document.visibilityState === 'visible';
     const sync = () => {
-      reportPwaPresence(visible());
-      if (visible()) clearAppBadge();
+      if (document.visibilityState === 'visible') clearAppBadge();
     };
     sync();
-    const timer = window.setInterval(() => {
-      if (visible()) reportPwaPresence(true);
-    }, 15_000);
     document.addEventListener('visibilitychange', sync);
     window.addEventListener('focus', sync);
-    window.addEventListener('blur', sync);
-    window.addEventListener('pagehide', () => reportPwaPresence(false));
     return () => {
-      window.clearInterval(timer);
       document.removeEventListener('visibilitychange', sync);
       window.removeEventListener('focus', sync);
-      window.removeEventListener('blur', sync);
-      reportPwaPresence(false);
     };
   }, []);
 

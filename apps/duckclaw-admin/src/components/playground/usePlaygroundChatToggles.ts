@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react';
 import { requestNotificationPermission } from '@/lib/chatNotifications';
+import { ensureWebPushSubscription } from '@/lib/webPushClient';
 
 function readLocalFlag(key: string, defaultValue: boolean): boolean {
   if (typeof window === 'undefined') return defaultValue;
@@ -44,6 +45,7 @@ export function usePlaygroundChatToggles() {
       const next = !prev;
       writeLocalFlag('duckclaw.chat.notificationsEnabled', next);
       if (next) void requestNotificationPermission();
+      else void ensureWebPushSubscription(false); // the server stops pushing to this device
       return next;
     });
   }, []);

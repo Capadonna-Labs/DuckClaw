@@ -11,9 +11,6 @@ from routers.admin_domains.admin_common import actor_from_header, admin_audit, r
 
 router = APIRouter(prefix="/notifications", tags=["admin-notifications"])
 
-PWA_VISIBLE_KEY = "duckclaw:admin:pwa_visible"
-PWA_VISIBLE_TTL_SECONDS = 45
-
 
 class WebPushKeys(BaseModel):
     p256dh: str = Field(..., min_length=16, max_length=512)
@@ -30,6 +27,7 @@ class WebPushSubscriptionBody(BaseModel):
     subscription: WebPushSubscription
     device_label: str = "DuckClaw Admin"
     tenant_id: str = "global"
+    enabled: bool = True  # the device's "Notificaciones" switch: a push goes to this device only while it is on
 
 
 class WebPushTestBody(BaseModel):
@@ -37,19 +35,6 @@ class WebPushTestBody(BaseModel):
     body: str = "Notificaciones Web Push activas."
     url: str = "/"
     tag: str = "duckclaw-test"
-
-
-class PwaPresenceBody(BaseModel):
-    visible: bool = True
-
-
-async def pwa_visible_recently(redis_client: Any) -> bool:
-    if redis_client is None:
-        return False
-    try:
-        return bool(await redis_client.exists(PWA_VISIBLE_KEY))
-    except Exception:
-        return False
 
 
 def _subscription_key(endpoint: str) -> str:
@@ -65,6 +50,7 @@ def _enqueue_subscription(body: WebPushSubscriptionBody, *, actor: str, key: str
     payload: dict[str, Any] = {
         "subscription": body.subscription.model_dump(mode="json"),
         "device_label": body.device_label[:128],
+        "enabled": body.enabled,
     }
     command = UpsertRuntimeSettingCommand(
         tenant_id=(body.tenant_id or "global").strip() or "global",
@@ -103,21 +89,6 @@ async def upsert_web_push_subscription(
         meta={"tenant_id": body.tenant_id},
     )
     return {"ok": True, "queued": True, "key": key, "task_id": task_id}
-
-
-@router.post("/pwa-presence", dependencies=[Depends(require_admin_key)])
-async def pwa_presence(body: PwaPresenceBody, request: Request) -> dict[str, Any]:
-    redis_client = getattr(request.app.state, "redis", None)
-    if redis_client is None:
-        return {"ok": False, "visible": False}
-    try:
-        if body.visible:
-            await redis_client.set(PWA_VISIBLE_KEY, "1", ex=PWA_VISIBLE_TTL_SECONDS)
-        else:
-            await redis_client.delete(PWA_VISIBLE_KEY)
-    except Exception:
-        return {"ok": False, "visible": False}
-    return {"ok": True, "visible": body.visible}
 
 
 @router.post("/web-push/test", dependencies=[Depends(require_admin_key)])

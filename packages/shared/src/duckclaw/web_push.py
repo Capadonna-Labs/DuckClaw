@@ -56,6 +56,8 @@ def _subscription_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
         payload = raw
     else:
         return None
+    if isinstance(payload, dict) and payload.get("enabled") is False:
+        return None  # the device switched "Notificaciones" off: no push to it (rows without the field are on)
     subscription = payload.get("subscription") if isinstance(payload, dict) else None
     if not isinstance(subscription, dict):
         return None

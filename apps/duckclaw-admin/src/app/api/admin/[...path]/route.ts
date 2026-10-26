@@ -98,7 +98,6 @@ function userWriteAllowed(sub: string, method: string): boolean {
   if (sub.startsWith('productivity/')) return true;
   // Cada usuario registra la suscripción push de su propio dispositivo.
   if (sub === 'notifications/web-push/subscriptions') return true;
-  if (sub === 'notifications/pwa-presence') return true;
   return false;
 }
 

@@ -10,7 +10,19 @@ function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
   return buffer;
 }
 
-export async function ensureWebPushSubscription(): Promise<boolean> {
+const PREF_KEY = 'duckclaw.chat.notificationsEnabled';
+
+/** The "Notificaciones" switch of this device (default on). */
+export function notificationsPreference(): boolean {
+  try {
+    return window.localStorage.getItem(PREF_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+/** Registers this device's push subscription and tells the server whether the switch is on; with the switch off an existing subscription is only marked off. */
+export async function ensureWebPushSubscription(enabled: boolean = notificationsPreference()): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
   if (!('Notification' in window) || Notification.permission !== 'granted') return false;
@@ -25,6 +37,7 @@ export async function ensureWebPushSubscription(): Promise<boolean> {
 
     const registration = await navigator.serviceWorker.ready;
     const existing = await registration.pushManager.getSubscription();
+    if (!enabled && !existing) return false;
     const subscription =
       existing ??
       (await registration.pushManager.subscribe({
@@ -38,6 +51,7 @@ export async function ensureWebPushSubscription(): Promise<boolean> {
       body: JSON.stringify({
         subscription: subscription.toJSON(),
         device_label: navigator.userAgent.slice(0, 120),
+        enabled,
       }),
     });
     return res.ok;

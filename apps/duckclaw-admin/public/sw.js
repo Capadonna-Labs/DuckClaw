@@ -38,15 +38,8 @@ self.addEventListener('push', (event) => {
     data: { url: payload.url || '/login' },
   };
 
-  event.waitUntil(
-    self.clients
-      .matchAll({ type: 'window', includeUncontrolled: true })
-      .then((clients) => {
-        const visible = clients.some((client) => client.visibilityState === 'visible');
-        if (visible) return undefined;
-        return self.registration.showNotification(title, options).then(syncAppBadge);
-      })
-  );
+  // Always shown: whether to send is decided by the "Notificaciones" switch (server side), not by what is on screen.
+  event.waitUntil(self.registration.showNotification(title, options).then(syncAppBadge));
 });
 
 self.addEventListener('notificationclick', (event) => {

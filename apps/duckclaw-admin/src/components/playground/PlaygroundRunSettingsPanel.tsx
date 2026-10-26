@@ -7,7 +7,6 @@ import {
   Bell,
   ChevronDown,
   ChevronRight,
-  Cpu,
   FileText,
   MessageSquareText,
   Wrench,
@@ -201,7 +200,6 @@ export function PlaygroundRunSettingsPanel({
             </div>
             <div className="flex flex-col gap-1 shrink-0">
               <Brain size={16} className="text-gov-gray-400 dark:text-dark-muted" aria-hidden />
-              <Cpu size={16} className="text-gov-gray-400 dark:text-dark-muted" aria-hidden />
             </div>
           </div>
         </button>

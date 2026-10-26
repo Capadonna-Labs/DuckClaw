@@ -36,41 +36,34 @@ def test_admin_registers_push_subscription_after_permission() -> None:
     assert "/api/admin/notifications/web-push/subscriptions" in client
     assert "ensureWebPushSubscription" in notifications
     assert "Notification.permission === 'granted'" in service_worker
-    assert "/api/admin/notifications/pwa-presence" in service_worker
+    assert "pwa-presence" not in service_worker                     # no presence reporting: the switch decides, not what is on screen
 
 
-def test_notifications_only_show_when_pwa_not_visible() -> None:
-    service_worker = (ROOT / "apps/duckclaw-admin/public/sw.js").read_text(encoding="utf-8")
-    pwa = (ROOT / "apps/duckclaw-admin/src/components/shared/PwaServiceWorker.tsx").read_text(
-        encoding="utf-8"
-    )
-    unread = (
-        ROOT / "apps/duckclaw-admin/src/components/chat/useFloatingChatUnread.ts"
-    ).read_text(encoding="utf-8")
-    gateway_notifications = (
-        ROOT / "services/api-gateway/routers/admin_domains/notifications.py"
-    ).read_text(encoding="utf-8")
-    suggestions = (
-        ROOT / "services/api-gateway/routers/admin_domains/chat_suggestions.py"
-    ).read_text(encoding="utf-8")
-    chat_turn = (
-        ROOT / "services/api-gateway/routers/admin_domains/playground/chat_turn.py"
-    ).read_text(encoding="utf-8")
+def test_push_is_decided_by_the_notifications_switch_not_by_pwa_visibility() -> None:
+    from duckclaw.web_push import _subscription_from_row
+
+    sw = (ROOT / "apps/duckclaw-admin/public/sw.js").read_text(encoding="utf-8")
+    pwa = (ROOT / "apps/duckclaw-admin/src/components/shared/PwaServiceWorker.tsx").read_text(encoding="utf-8")
+    client = (ROOT / "apps/duckclaw-admin/src/lib/webPushClient.ts").read_text(encoding="utf-8")
+    toggles = (ROOT / "apps/duckclaw-admin/src/components/playground/usePlaygroundChatToggles.ts").read_text(encoding="utf-8")
+    gateway_notifications = (ROOT / "services/api-gateway/routers/admin_domains/notifications.py").read_text(encoding="utf-8")
+    suggestions = (ROOT / "services/api-gateway/routers/admin_domains/chat_suggestions.py").read_text(encoding="utf-8")
+    chat_turn = (ROOT / "services/api-gateway/routers/admin_domains/playground/chat_turn.py").read_text(encoding="utf-8")
     heartbeat = (ROOT / "services/heartbeat/main.py").read_text(encoding="utf-8")
+    bff = (ROOT / "apps/duckclaw-admin/src/app/api/admin/[...path]/route.ts").read_text(encoding="utf-8")
 
-    assert "matchAll({ type: 'window', includeUncontrolled: true })" in service_worker
-    assert "client.visibilityState === 'visible'" in service_worker
-    assert "client.focused" not in service_worker
-    assert "if (visible) return undefined" in service_worker
-    assert "reportPwaPresence(visible())" in pwa
-    assert 'PWA_VISIBLE_KEY = "duckclaw:admin:pwa_visible"' in gateway_notifications
-    assert "async def pwa_visible_recently" in gateway_notifications
-    # Suggestions no longer push (iOS cannot reply from a third-party watch; it doubled each alert).
-    assert "send_web_push_notifications" not in suggestions
-    assert "if await pwa_visible_recently(redis_client):" in chat_turn
-    assert 'await r.exists("duckclaw:admin:pwa_visible")' in heartbeat
-    assert "{ requireBackground: true }" in unread
-    assert "const shouldNotify = tabHidden;" in unread
+    for gone in ("pwa_visible", "pwa-presence", "pwa_presence", "reportPwaPresence"):
+        assert gone not in (gateway_notifications + chat_turn + heartbeat + bff + pwa + sw), gone
+    assert "visibilityState" not in sw and "matchAll" not in sw           # the worker no longer asks whether a window is open
+    assert "showNotification(title, options)" in sw                      # a delivered push is always shown (a silent push can get the subscription revoked)
+    assert "enabled: bool = True" in gateway_notifications and '"enabled": body.enabled' in gateway_notifications
+    assert "ensureWebPushSubscription(false)" in toggles and "enabled," in client and "if (!enabled && !existing) return false" in client
+    assert "send_web_push_notifications" not in suggestions               # suggestions never push (iOS cannot reply from a third-party watch)
+    base = {"subscription": {"endpoint": "https://push.example/abc", "keys": {"p256dh": "x" * 20, "auth": "y" * 10}}}
+    assert _subscription_from_row({"value_json": base}) is not None                       # rows saved before the switch existed stay on
+    assert _subscription_from_row({"value_json": {**base, "enabled": True}}) is not None
+    assert _subscription_from_row({"value_json": {**base, "enabled": False}}) is None     # the device switched Notificaciones off
+
 
 def test_vapid_generator_is_documented_and_available() -> None:
     script = ROOT / "scripts/generate_web_push_vapid.py"

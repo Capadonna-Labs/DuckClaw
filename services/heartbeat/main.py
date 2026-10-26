@@ -394,14 +394,6 @@ async def _send_web_push_notification(*, title: str, body: str, url: str = "/", 
     # Every outcome is logged: success and the silent skips used to leave no trace, so a
     # missing notification could not be told apart from one that was never sent.
     try:
-        if REDIS_URL:
-            r = redis.from_url(REDIS_URL)
-            try:
-                if await r.exists("duckclaw:admin:pwa_visible"):
-                    logger.info("web_push: omitida tag=%s (PWA abierta en pantalla)", tag)
-                    return
-            finally:
-                await r.aclose()
         from duckclaw.gateway_db import get_gateway_db_path
         from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
 

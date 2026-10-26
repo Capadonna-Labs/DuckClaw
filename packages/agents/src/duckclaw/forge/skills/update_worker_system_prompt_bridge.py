@@ -72,7 +72,7 @@ def _resolve_prompt_db(bound_db: Any, *, writable: bool = True) -> tuple[Any, bo
 def _update_system_prompt_impl(bound_db: Any, instructions: str, mode: str = "append", policy_worker_id: str = "") -> str:
     """Actualiza el system prompt del worker activo vía db-writer (DB-first).
 
-    ``policy_worker_id``: id lógico del manifiesto (p. ej. ``quant_trader``), el que el grafo carga; el id de catálogo puede llevar guion (``quant-trader``).
+    ``policy_worker_id``: id lógico del manifiesto (p. ej. ``my_worker``), el que el grafo carga; el id de catálogo puede llevar guion (``my-worker``).
     """
     from duckclaw.commands.model_setup import _set_system_prompt_policy, get_effective_system_prompt
     from duckclaw.forge.skills.goals_tool_context import get_goals_tool_db_path, get_goals_tool_worker_id

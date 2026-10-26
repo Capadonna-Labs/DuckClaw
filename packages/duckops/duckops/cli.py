@@ -6,7 +6,7 @@ from pathlib import Path
 
 import typer
 
-from duckops.commands import audit, bootstrap, comfyui, configure, db, deploy, doctor, down, ingress, init, knowledge, mcp, serve, smoke, smoke_tools, stack, train, up
+from duckops.commands import audit, bootstrap, comfyui, configure, db, deploy, doctor, down, ingress, init, knowledge, mcp, nomad, serve, smoke, smoke_tools, stack, train, up
 
 app = typer.Typer(
     name="duckops",
@@ -64,6 +64,7 @@ app.add_typer(
     help="Espejo local de bóveda y estado Kiwix offline.",
 )
 app.add_typer(comfyui.app, name="comfyui", help="Operaciones del runtime ComfyUI.")
+app.add_typer(nomad.app, name="nomad", help="Project N.O.M.A.D. opcional (servidor offline): up, down, status, logs, url.")
 app.add_typer(db.app, name="db", help="Mantenimiento DuckDB/admin.")
 app.add_typer(audit.app, name="audit", help="Auditoría Habeas Data (config, enmascaramiento).")
 app.add_typer(

@@ -326,3 +326,19 @@ def test_expired_lease_reclaim() -> None:
     assert redis_client.lists.get(queue) == [message]
     assert redis_client.lists.get(processing) == []
     assert message not in redis_client.zsets.get(lease_key, {})
+
+
+def test_ledger_prune_drops_old_rows_once_an_hour() -> None:
+    import duckdb
+
+    m = _import_db_writer_main()
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE main.admin_write_ledger (task_id VARCHAR, created_at TIMESTAMP)")
+    conn.execute("INSERT INTO main.admin_write_ledger VALUES ('old', now() - INTERVAL 30 DAY), ('new', now() - INTERVAL 1 DAY)")
+    m._ledger_prune(conn, "vault-a")
+    assert conn.execute("SELECT task_id FROM main.admin_write_ledger").fetchall() == [("new",)]
+    conn.execute("INSERT INTO main.admin_write_ledger VALUES ('old2', now() - INTERVAL 30 DAY)")
+    m._ledger_prune(conn, "vault-a")  # throttled: same vault within the hour
+    assert conn.execute("SELECT count(*) FROM main.admin_write_ledger").fetchone()[0] == 2
+    m._ledger_prune(conn, "vault-b")  # another vault has its own clock
+    assert conn.execute("SELECT count(*) FROM main.admin_write_ledger").fetchone()[0] == 1

@@ -160,6 +160,26 @@ def _ledger_insert_completed(
     )
 
 
+_LEDGER_RETENTION_DAYS = int(os.environ.get("DUCKCLAW_LEDGER_RETENTION_DAYS", "14"))
+_ledger_pruned_at: dict[str, float] = {}
+
+
+def _ledger_prune(conn: duckdb.DuckDBPyConnection, path: str) -> None:
+    """Idempotency and write-task detail only need recent task ids; the ledger grew to 6.7 GiB of old payloads
+    (82% of a 10 GB vault, so every write opened a huge file). At most once an hour per vault; never fails the write."""
+    now = time.monotonic()
+    if _LEDGER_RETENTION_DAYS <= 0 or now - _ledger_pruned_at.get(path, -3600.0) < 3600:
+        return
+    _ledger_pruned_at[path] = now
+    try:
+        conn.execute(
+            "DELETE FROM main.admin_write_ledger WHERE created_at < CURRENT_TIMESTAMP - to_days(CAST(? AS INTEGER))",
+            [_LEDGER_RETENTION_DAYS],
+        )
+    except Exception:
+        logger.warning("admin_write_ledger prune failed path=%s", path, exc_info=True)
+
+
 from db_writer_ops import connect_duckdb_writable as _connect_duckdb_writable
 
 
@@ -217,6 +237,7 @@ def _run_typed_command_sync(
             json.dumps(payload, default=str),
         )
         conn.execute("COMMIT")
+        _ledger_prune(conn, target_db_path)
         return "completed", format_write_task_success_detail(command_type, payload)
     except Exception:
         try:
@@ -253,6 +274,7 @@ def _run_legacy_sql_sync(
             json.dumps(payload, default=str),
         )
         conn.execute("COMMIT")
+        _ledger_prune(conn, target_db_path)
         return "completed"
     except Exception:
         try:

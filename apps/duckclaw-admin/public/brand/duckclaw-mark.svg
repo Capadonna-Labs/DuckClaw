@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%"><defs><radialGradient id="bg" cx="30%" cy="25%" r="95%"><stop offset="0" stop-color="#16213a"/><stop offset="1" stop-color="#080d18"/></radialGradient>
+    <linearGradient id="head" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fcd34d"/><stop offset="1" stop-color="#f59e0b"/></linearGradient>
+    <linearGradient id="bill" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#fb923c"/><stop offset="1" stop-color="#ea580c"/></linearGradient>
+    <mask id="cuts" maskUnits="userSpaceOnUse" x="0" y="0" width="512" height="512">
+      <rect width="512" height="512" fill="#fff"/>
+      <path d="M150 286 Q176 372 242 452 Q190 358 150 286 Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M200 286 Q226 372 292 452 Q240 358 200 286 Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/>
+      <path d="M250 286 Q276 372 342 452 Q290 358 250 286 Z" fill="#000" stroke="#000" stroke-width="3" stroke-linejoin="round"/>
+      <ellipse cx="262" cy="196" rx="16" ry="8" transform="rotate(-18 262 196)" fill="#000"/>
+    </mask></defs><g transform="translate(-26 -14)"><g mask="url(#cuts)"><path fill="url(#head)" d="M132 430 C108 344 104 272 120 214 C136 150 188 112 248 112 C306 112 344 156 346 208 L346 270 C340 304 312 338 300 368 C294 394 302 414 316 430 Z"/><path fill="url(#bill)" d="M356 206 L438 218 Q472 224 464 244 Q456 262 426 266 L356 274 Z"/></g></g></svg>

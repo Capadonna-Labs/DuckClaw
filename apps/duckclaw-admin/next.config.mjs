@@ -42,7 +42,7 @@ const nextConfig = {
   async headers() {
     return [
       {
-        source: '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js).*)',
+        source: '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|icons/|brand/).*)',
         headers: [
           { key: 'Cache-Control', value: 'no-store' },
         ],

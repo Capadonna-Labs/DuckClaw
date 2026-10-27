@@ -12,6 +12,13 @@ export const metadata: Metadata = {
   title: "DuckClaw Admin",
   description: "Consola de configuración DuckClaw — agentes, skills, DuckDB y runtime",
   manifest: '/manifest.webmanifest',
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
+    ],
+    apple: [{ url: '/icons/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
 };
 
 /** Evita el salto del chrome en iOS Safari; el teclado redimensiona el layout. */

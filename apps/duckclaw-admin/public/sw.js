@@ -32,8 +32,8 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'DuckClaw';
   const options = {
     body: payload.body || 'Nueva alerta de DuckClaw',
-    icon: '/favicon.ico',
-    badge: '/favicon.ico',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/badge-96.png',
     tag: payload.tag || 'duckclaw-alert',
     data: { url: payload.url || '/login' },
   };

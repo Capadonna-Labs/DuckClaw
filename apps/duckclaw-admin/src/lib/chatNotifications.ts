@@ -62,7 +62,7 @@ export function showChatNotification(
     const n = new Notification(payload.title, {
       body: payload.body,
       tag: payload.tag,
-      icon: '/favicon.ico',
+      icon: '/icons/icon-192.png',
     });
     n.onclick = () => {
       window.focus();

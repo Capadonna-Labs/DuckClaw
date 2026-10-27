@@ -76,6 +76,7 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.tailscale_bridge:register_tailscale_skill",
         empty_config_registers=False,
+        keyword_context={"db": "db", "tenant_id": "tenant_id"},
     ),
     SkillToolRegistrar(
         skill_name="comfyui",

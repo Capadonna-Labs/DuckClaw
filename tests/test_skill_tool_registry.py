@@ -95,7 +95,7 @@ def test_post_llm_registry_passes_declared_context(monkeypatch) -> None:
     )
     assert by_path["duckclaw.forge.skills.tailscale_bridge:register_tailscale_skill"] == (
         (),
-        {},
+        {"db": db, "tenant_id": "default"},
     )
     assert by_path["duckclaw.forge.skills.comfyui_bridge:register_comfyui_skill"] == (
         (),

@@ -73,3 +73,106 @@ def test_register_tailscale_skill_adds_tool_when_available() -> None:
     if tools:
         assert len(tools) == 1
         assert tools[0].name == "tailscale_status"
+
+
+# --- tailscale_devices: official API, read-only, key from Integraciones ---------------------------------------------------------------------------------
+
+from datetime import datetime, timezone
+
+_NOW = datetime(2026, 10, 27, 17, 0, tzinfo=timezone.utc)
+_DEVICES = [
+    {"hostname": "duckclaw-prod-eu-1", "os": "linux", "addresses": ["100.79.185.46"], "connectedToControl": True, "lastSeen": "2026-10-27T16:59:00Z", "clientVersion": "1.104.2", "expires": "2027-04-01T00:00:00Z", "authorized": True},
+    {"name": "capadonna-box-1.tailc85db0.ts.net", "os": "linux", "addresses": ["100.117.195.82"], "connectedToControl": False, "lastSeen": "2026-10-22T10:00:00Z", "updateAvailable": True, "expires": "2026-11-05T00:00:00Z"},
+    {"hostname": "a70", "os": "android", "addresses": ["100.69.96.111"], "lastSeen": "2026-03-30T00:00:00Z", "keyExpiryDisabled": True, "tags": ["tag:phone"]},
+]
+
+
+def test_summary_flags_offline_updates_and_expiring_keys_without_exposing_keys() -> None:
+    import duckclaw.forge.skills.tailscale_bridge as m
+
+    out = m.summarize_devices(_DEVICES, now=_NOW)
+    by = {r["dispositivo"]: r for r in out["dispositivos"]}
+    assert (out["total"], out["en_linea"], out["mostrados"]) == (3, 1, 3)
+    assert by["duckclaw-prod-eu-1"]["problemas"] == [] and by["duckclaw-prod-eu-1"]["en_linea"] is True
+    assert by["capadonna-box-1"]["problemas"] == ["sin conexión", "actualización disponible", "clave vence en 8 d"]   # hostname falls back to the short name
+    assert by["a70"]["en_linea"] is False and by["a70"]["problemas"] == ["sin conexión"]                              # no connectedToControl: stale lastSeen; expiry disabled = no warning
+    assert "machineKey" not in str(out) and "nodeKey" not in str(out)
+
+
+def test_summary_filters_by_name_and_by_problems() -> None:
+    import duckclaw.forge.skills.tailscale_bridge as m
+
+    assert [r["dispositivo"] for r in m.summarize_devices(_DEVICES, now=_NOW, only_problems=True)["dispositivos"]] == ["capadonna-box-1", "a70"]
+    assert [r["dispositivo"] for r in m.summarize_devices(_DEVICES, now=_NOW, name_contains="PROD")["dispositivos"]] == ["duckclaw-prod-eu-1"]
+    assert m.summarize_devices([], now=_NOW) == {"total": 0, "en_linea": 0, "mostrados": 0, "dispositivos": []}
+
+
+def _keys(monkeypatch, api_key="tskey-api-SECRET1234567890", tailnet="me@example.com"):
+    import duckclaw.integration_secrets as s
+
+    monkeypatch.setattr(s, "resolve_integration_api_key", lambda i, db=None, tenant_id="default": {"tailscale_api_key": api_key, "tailscale_tailnet": tailnet}.get(i, ""))
+
+
+def test_impl_uses_the_tenant_keys_and_never_returns_them(monkeypatch) -> None:
+    import json
+
+    import duckclaw.forge.skills.tailscale_bridge as m
+
+    _keys(monkeypatch)
+    seen = {}
+
+    def fetch(key, tailnet):
+        seen["args"] = (key, tailnet)
+        return _DEVICES
+
+    out = m._tailscale_devices_impl(object(), "t1", fetch=fetch)
+    assert seen["args"] == ("tskey-api-SECRET1234567890", "me@example.com")
+    assert json.loads(out)["total"] == 3 and "SECRET" not in out
+
+
+def test_impl_reports_missing_keys_and_http_errors_without_leaking_the_key(monkeypatch) -> None:
+    import urllib.error
+
+    import duckclaw.forge.skills.tailscale_bridge as m
+
+    _keys(monkeypatch, api_key="", tailnet="")
+    assert "faltan la API key y el nombre de la tailnet" in m._tailscale_devices_impl(object(), "t1")
+    _keys(monkeypatch)
+
+    def http_401(key, tailnet):
+        raise urllib.error.HTTPError(f"https://api.tailscale.com/x?key={key}", 401, "Unauthorized", {}, None)
+
+    msg = m._tailscale_devices_impl(object(), "t1", fetch=http_401)
+    assert "401" in msg and "inválida o venció" in msg and "SECRET" not in msg
+
+    def boom(key, tailnet):
+        raise RuntimeError(f"connection to {key} failed")
+
+    msg = m._tailscale_devices_impl(object(), "t1", fetch=boom)
+    assert "RuntimeError" in msg and "SECRET" not in msg
+
+
+def test_api_tool_is_offered_only_when_both_keys_are_stored(monkeypatch) -> None:
+    import duckclaw.forge.skills.tailscale_bridge as m
+
+    _keys(monkeypatch, api_key="", tailnet="")
+    assert m._tailscale_devices_tool({"tailscale_enabled": True}, db=object()) is None
+    _keys(monkeypatch)
+    assert m._tailscale_devices_tool({"tailscale_enabled": True}, db=None) is None            # no vault, no key lookup
+    assert m._tailscale_devices_tool({"tailscale_enabled": False}, db=object()) is None
+    tool = m._tailscale_devices_tool({"tailscale_enabled": True}, db=object(), tenant_id="t1")
+    assert tool is not None and tool.name == "tailscale_devices"
+    tools: list = []
+    m.register_tailscale_skill(tools, {"tailscale_enabled": True}, db=object(), tenant_id="t1")
+    assert "tailscale_devices" in {t.name for t in tools}
+
+
+def test_the_api_host_is_fixed_and_the_tool_is_read_only() -> None:
+    import inspect
+
+    import duckclaw.forge.skills.tailscale_bridge as m
+
+    assert m._API_BASE == "https://api.tailscale.com/api/v2"
+    src = inspect.getsource(m)
+    for verb in ('method="POST"', 'method="PUT"', 'method="DELETE"', 'method="PATCH"', "urlopen(url"):
+        assert verb not in src

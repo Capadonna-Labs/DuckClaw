@@ -1,10 +1,15 @@
-export type McpTabId = 'connectors' | 'config' | 'catalog';
+export type McpTabId = 'connectors' | 'activity' | 'config' | 'catalog';
 
 export const MCP_TABS: { id: McpTabId; label: string; hint: string }[] = [
   {
     id: 'connectors',
     label: 'Conectores',
     hint: 'Plantillas empaquetadas → instancia en DuckDB (OAuth, pruebas, grants por worker)',
+  },
+  {
+    id: 'activity',
+    label: 'Actividad',
+    hint: 'Llamadas a herramientas MCP: cuántas, cuánto tardan y cuáles fallan (sin argumentos ni resultados)',
   },
   {
     id: 'config',

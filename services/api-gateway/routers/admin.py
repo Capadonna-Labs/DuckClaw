@@ -32,6 +32,7 @@ from routers.admin_domains.worker_llm import router as worker_llm_router
 from routers.admin_domains.integration_catalog import router as integration_catalog_router
 from routers.admin_domains.kanban import router as kanban_router
 from routers.admin_domains.knowledge import router as knowledge_router
+from routers.admin_domains.mcp_activity import router as mcp_activity_router
 from routers.admin_domains.mcp_connectors import router as mcp_connectors_router
 from routers.admin_domains.notifications import router as notifications_router
 from routers.admin_domains.kanban_runtime import router as kanban_runtime_router
@@ -106,6 +107,7 @@ router.include_router(integration_catalog_router)
 router.include_router(hitl_admin_router)
 router.include_router(kanban_router)
 router.include_router(kanban_runtime_router)
+router.include_router(mcp_activity_router)
 router.include_router(mcp_connectors_router)
 router.include_router(notifications_router)
 router.include_router(knowledge_router)

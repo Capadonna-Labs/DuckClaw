@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { ExternalLink } from 'lucide-react';
 import { PageShell } from '@/components/admin/PageShell';
 import type { EmbeddedViewProps } from '@/components/admin/embeddedView';
+import { McpActivityPanel } from '@/components/mcp/McpActivityPanel';
 import { McpConfigurationPanel } from '@/components/mcp/McpConfigurationPanel';
 import { McpConnectorsPanel } from '@/components/mcp/McpConnectorsPanel';
 import { MCP_TABS, parseMcpTab, type McpTabId } from '@/components/mcp/mcpPageTabs';
@@ -159,6 +160,8 @@ export function McpUnifiedView({ embedded = false }: EmbeddedViewProps) {
       )}
 
       {tab === 'connectors' && <McpConnectorsPanel canWrite={canWrite} />}
+
+      {tab === 'activity' && <McpActivityPanel />}
 
       {tab === 'config' && (
         <McpConfigurationPanel

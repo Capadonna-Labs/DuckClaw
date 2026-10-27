@@ -174,6 +174,7 @@ def _wrap_connector_tool(
 
             return store_pending(connector, str(remote_name), payload, chat_id=get_session_chat_id())
         from duckclaw.forge.skills.mcp_call_audit import record_mcp_call
+        from duckclaw.forge.skills.mcp_secret_redaction import connector_secrets, redact_secrets
 
         started = time.monotonic()
         args_bytes = len(json.dumps(payload, default=str))
@@ -181,7 +182,11 @@ def _wrap_connector_tool(
             raw = _run_async_from_sync(_call_connector_tool(db, connector, str(remote_name), payload))
         except Exception as exc:
             record_mcp_call(db, connector, str(remote_name), status="error", started=started, args_bytes=args_bytes, error=type(exc).__name__)
+            clean = redact_secrets(str(exc), connector_secrets(db, connector))
+            if clean != str(exc):   # the upstream error echoed a credential: the model gets the scrubbed message, not the original
+                raise RuntimeError(clean) from None
             raise
+        raw = redact_secrets(raw, connector_secrets(db, connector)) if isinstance(raw, str) else raw
         error = ""
         try:
             parsed = json.loads(raw)

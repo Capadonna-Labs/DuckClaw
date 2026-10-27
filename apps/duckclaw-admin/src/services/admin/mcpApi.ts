@@ -52,7 +52,38 @@ export interface McpToolInfo {
   server: string;
 }
 
+export interface McpActivitySummaryRow {
+  connector_id: string;
+  tool_name: string;
+  calls: number;
+  errors: number;
+  avg_ms: number;
+  last_at: string;
+}
+
+export interface McpActivityCallRow {
+  created_at: string;
+  connector_id: string;
+  tool_name: string;
+  worker_id: string;
+  status: 'ok' | 'error';
+  duration_ms: number;
+  args_bytes: number;
+  result_bytes: number;
+  error: string;
+}
+
+export interface McpActivity {
+  table_ready: boolean;
+  summary: McpActivitySummaryRow[];
+  recent: McpActivityCallRow[];
+}
+
 export const mcpApi = {
+  getMcpActivity: (days = 7, connectorId = '') =>
+    adminFetch<McpActivity>(
+      `/mcp/activity?days=${days}&limit=100${connectorId ? `&connector_id=${encodeURIComponent(connectorId)}` : ''}`
+    ),
   getMcpLiveStatus: () =>
     adminFetch<{
       reachable: boolean;

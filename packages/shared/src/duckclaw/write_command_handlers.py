@@ -102,6 +102,7 @@ from duckclaw.write_handlers.raw_sql import _apply_raw_sql
 from duckclaw.write_handlers.usage_logs import (
     _apply_append_llm_usage_log,
     _apply_append_media_usage_log,
+    _apply_append_push_log,
     _apply_append_tool_call_log,
 )
 from duckclaw.write_handlers.workers import (

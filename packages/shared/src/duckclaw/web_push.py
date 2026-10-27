@@ -114,6 +114,28 @@ def fit_title(title: str, body: str, limit: int = TITLE_MAX) -> tuple[str, str]:
     return short, f"{title}\n{body}" if body else title
 
 
+def _record_push(title: str, body: str, url: str, tag: str, result: "WebPushDeliveryResult") -> None:
+    """One ``push_log`` row per push, fire-and-forget through the DB-Writer: the history is what a push filter gets judged on. Never raises."""
+    try:
+        import time
+        import uuid
+
+        from duckclaw.db_write_fire_and_forget import enqueue_write_command
+        from duckclaw.gateway_db import get_gateway_db_path
+        from duckclaw.media_usage_log import _infer_user_id_for_queue
+        from duckclaw.write_commands import AppendPushLogCommand
+
+        db_path = str(get_gateway_db_path())
+        command = AppendPushLogCommand(
+            id=f"PUSH-{int(time.time() * 1000)}-{uuid.uuid4().hex[:8]}",
+            title=title, body=body, tag=tag, url=url,
+            sent=result.sent, failed=result.failed, error=str(result.error or ""),
+        )
+        enqueue_write_command(command, db_path=db_path, user_id=_infer_user_id_for_queue(db_path))
+    except Exception:  # noqa: BLE001
+        logger.debug("web_push: push_log row not recorded", exc_info=True)
+
+
 def send_web_push_notifications(
     subscriptions: list[dict[str, Any]],
     *,
@@ -155,4 +177,6 @@ def send_web_push_notifications(
         except Exception as exc:  # noqa: BLE001
             failed += 1
             logger.warning("web_push: delivery failed: %s", exc)
-    return WebPushDeliveryResult(sent=sent, failed=failed)
+    result = WebPushDeliveryResult(sent=sent, failed=failed)
+    _record_push(title, body, url, tag, result)
+    return result

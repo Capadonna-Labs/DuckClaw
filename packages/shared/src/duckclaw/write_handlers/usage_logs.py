@@ -156,6 +156,43 @@ def _apply_append_tool_call_log(conn: Any, payload: dict) -> None:
     )
 
 
+def _apply_append_push_log(conn: Any, payload: dict) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS push_log (
+            id VARCHAR PRIMARY KEY,
+            tenant_id VARCHAR NOT NULL,
+            title VARCHAR,
+            body VARCHAR,
+            tag VARCHAR,
+            url VARCHAR,
+            sent INTEGER NOT NULL DEFAULT 0,
+            failed INTEGER NOT NULL DEFAULT 0,
+            error VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    row_id = str(payload.get("id") or "").strip()
+    if not row_id:
+        raise ValueError("id required")
+    conn.execute(
+        "INSERT INTO push_log (id, tenant_id, title, body, tag, url, sent, failed, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            row_id,
+            str(payload.get("tenant_id") or "default").strip()[:128] or "default",
+            str(payload.get("title") or "").strip()[:120],
+            str(payload.get("body") or "").strip()[:512],
+            str(payload.get("tag") or "").strip()[:120],
+            str(payload.get("url") or "").strip()[:300],
+            max(0, int(payload.get("sent") or 0)),
+            max(0, int(payload.get("failed") or 0)),
+            str(payload.get("error") or "").strip()[:160],
+        ],
+    )
+
+
 register_handler("append_llm_usage_log", _apply_append_llm_usage_log)
+register_handler("append_push_log", _apply_append_push_log)
 register_handler("append_tool_call_log", _apply_append_tool_call_log)
 register_handler("append_media_usage_log", _apply_append_media_usage_log)

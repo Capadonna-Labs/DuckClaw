@@ -379,6 +379,20 @@ class AppendToolCallLogCommand(WriteCommand):
     error: str = ""
 
 
+class AppendPushLogCommand(WriteCommand):
+    """Append one row to ``push_log``: one push notification as sent (title and body as the device shows them)."""
+
+    command_type: Literal["append_push_log"] = "append_push_log"
+    id: str
+    title: str = ""
+    body: str = ""
+    tag: str = ""
+    url: str = ""
+    sent: int = 0
+    failed: int = 0
+    error: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Admin console user commands
 # ---------------------------------------------------------------------------

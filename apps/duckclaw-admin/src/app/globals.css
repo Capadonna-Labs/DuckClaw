@@ -32,26 +32,30 @@
     display: none;
   }
 
-  .scrollbar-thin {
-    scrollbar-width: thin;
-    scrollbar-color: #b8c2d0 transparent;
-  }
+  /* WebKit (Chrome, Safari, iOS) draws the ::-webkit-scrollbar bar and keeps it on screen; the standard scrollbar-width/color would make iOS fall back to the overlay bar that hides itself. Firefox has no such pseudo-element, so only it gets the standard properties. */
+  @supports not selector(::-webkit-scrollbar) {
+    .scrollbar-thin {
+      scrollbar-width: thin;
+      scrollbar-color: #8793a6 rgba(148, 163, 184, 0.2);
+    }
 
-  .dark .scrollbar-thin {
-    scrollbar-color: #484f58 transparent;
+    .dark .scrollbar-thin {
+      scrollbar-color: #6e7681 rgba(148, 163, 184, 0.12);
+    }
   }
 
   .scrollbar-thin::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-track {
-    background: transparent;
+    background: rgba(148, 163, 184, 0.2);
+    border-radius: 9999px;
   }
 
   .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: #b8c2d0;
+    background-color: #8793a6;
     border-radius: 9999px;
   }
 
@@ -59,12 +63,16 @@
     background-color: #6b7a90;
   }
 
+  .dark .scrollbar-thin::-webkit-scrollbar-track {
+    background: rgba(148, 163, 184, 0.12);
+  }
+
   .dark .scrollbar-thin::-webkit-scrollbar-thumb {
-    background-color: #484f58;
+    background-color: #6e7681;
   }
 
   .dark .scrollbar-thin::-webkit-scrollbar-thumb:hover {
-    background-color: #6e7681;
+    background-color: #8b949e;
   }
 }
 

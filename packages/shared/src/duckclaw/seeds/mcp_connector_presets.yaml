@@ -312,8 +312,10 @@ presets:
       install: npx -y @hexsleeves/tailscale-mcp-server@1.3.4
       admin_label: Tailscale · estado de la tailnet (local stdio, solo lectura, versión fija)
       docs_url: https://github.com/HexSleeves/tailscale-mcp
-      secret_env: [TAILSCALE_API_KEY, TAILSCALE_TAILNET]
-      note: Opt-in. Requiere Node 20+, TAILSCALE_API_KEY y TAILSCALE_TAILNET. Comunidad, no oficial; get_network_status y ping_peer usan la CLI de tailscale del host.
+      integration_env:
+        TAILSCALE_API_KEY: tailscale_api_key
+        TAILSCALE_TAILNET: tailscale_tailnet
+      note: Opt-in. Requiere Node 20+ y las dos claves en Integraciones (API key y nombre de la tailnet). Comunidad, no oficial; get_network_status y ping_peer usan la CLI de tailscale del host.
 
   # Playwright MCP oficial (Microsoft, Apache-2.0). Versión FIJA a propósito (0.0.x publica a menudo): subir a mano.
   # Controla un navegador real: abre páginas, hace clic, escribe y lee el DOM, así que NO es de solo lectura. Corre sin ventana y

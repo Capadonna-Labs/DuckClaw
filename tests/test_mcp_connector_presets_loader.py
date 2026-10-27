@@ -341,3 +341,22 @@ def test_paperswithcode_preset_is_anonymous_read_only_and_not_default() -> None:
     assert len(allow) == 20 and {"list_papers", "get_paper_info", "read_paper", "get_benchmark", "list_benchmarks"} <= allow
     assert "search_papers" not in allow                                                  # named in the site's llms.txt but not served: verified by tools/list
     assert all(t.startswith(("get_", "list_", "read_")) for t in allow)                  # nothing that could write
+
+
+def test_every_integration_env_id_of_every_preset_exists_in_the_integrations_catalog() -> None:
+    """A stdio preset gets its keys from Integraciones (metadata.integration_env); an id the catalog does not list can never be filled in the UI."""
+    from duckclaw.integration_catalog import list_integration_catalog_entries
+    from duckclaw.mcp_connector_presets import list_mcp_connector_presets
+
+    known = {e.integration_id for e in list_integration_catalog_entries()}
+    for preset in list_mcp_connector_presets():
+        meta = preset.get("metadata") or {}
+        for key in ("integration_env", "integration_env_optional"):
+            for env_var, integration_id in (meta.get(key) or {}).items():
+                assert integration_id in known, f"{preset.get('preset_id')}: {env_var} -> {integration_id} is not in the integrations catalog"
+
+
+def test_tailscale_preset_takes_its_keys_from_integraciones_not_from_a_dead_field() -> None:
+    meta = preset_payload("tailscale")["metadata"]
+    assert meta["integration_env"] == {"TAILSCALE_API_KEY": "tailscale_api_key", "TAILSCALE_TAILNET": "tailscale_tailnet"}
+    assert "secret_env" not in meta                                                      # nothing reads it: the key would never reach the server

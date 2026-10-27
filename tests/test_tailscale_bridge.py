@@ -108,9 +108,24 @@ def test_summary_filters_by_name_and_by_problems() -> None:
 
 
 def _keys(monkeypatch, api_key="tskey-api-SECRET1234567890", tailnet="me@example.com"):
+    import duckclaw.forge.skills.tailscale_bridge as m
     import duckclaw.integration_secrets as s
 
+    monkeypatch.setattr(m, "_hub_db", lambda: None)                                   # never open the real hub from a unit test
     monkeypatch.setattr(s, "resolve_integration_api_key", lambda i, db=None, tenant_id="default": {"tailscale_api_key": api_key, "tailscale_tailnet": tailnet}.get(i, ""))
+
+
+def test_keys_are_found_in_the_hub_when_the_worker_vault_does_not_have_them(monkeypatch) -> None:
+    import duckclaw.forge.skills.tailscale_bridge as m
+    import duckclaw.integration_secrets as s
+
+    vault, hub = object(), object()
+    monkeypatch.setattr(m, "_hub_db", lambda: hub)
+    monkeypatch.setattr(s, "resolve_integration_api_key", lambda i, db=None, tenant_id="default": ({"tailscale_api_key": "tskey-api-K1234567890", "tailscale_tailnet": "me@example.com"}.get(i, "") if db is hub else ""))
+    assert m._integration_keys(vault, "t1") == ("tskey-api-K1234567890", "me@example.com")
+    assert m._tailscale_devices_tool({"tailscale_enabled": True}, db=vault, tenant_id="t1") is not None       # offered although the vault has nothing
+    monkeypatch.setattr(m, "_hub_db", lambda: None)
+    assert m._integration_keys(vault, "t1") == ("", "")
 
 
 def test_impl_uses_the_tenant_keys_and_never_returns_them(monkeypatch) -> None:

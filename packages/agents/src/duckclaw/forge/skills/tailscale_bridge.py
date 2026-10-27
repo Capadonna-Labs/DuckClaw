@@ -207,14 +207,37 @@ def _fetch_tailnet_devices(api_key: str, tailnet: str, *, timeout: float = 15.0)
         return list((json.loads(resp.read().decode("utf-8")) or {}).get("devices") or [])
 
 
+def _hub_db() -> Any:
+    """Read-only handle on the hub, where Integraciones keeps the tenant's keys (a worker's own vault does not have them); None if it cannot be opened."""
+    try:
+        from duckclaw import DuckClaw
+        from duckclaw.gateway_db import get_gateway_db_path
+
+        path = str(get_gateway_db_path() or "").strip()
+        return DuckClaw(path, read_only=True) if path else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _integration_keys(db: Any, tenant_id: str) -> tuple[str, str]:
+    """(API key, tailnet name) of the tenant, looked up in the db the worker gave and then in the hub; ("", "") when either is missing."""
+    from duckclaw.integration_secrets import resolve_integration_api_key
+
+    for handle in (db, _hub_db()):
+        if handle is None:
+            continue
+        api_key = resolve_integration_api_key("tailscale_api_key", db=handle, tenant_id=tenant_id)
+        tailnet = resolve_integration_api_key("tailscale_tailnet", db=handle, tenant_id=tenant_id)
+        if api_key and tailnet:
+            return api_key, tailnet
+    return "", ""
+
+
 def _tailscale_devices_impl(db: Any, tenant_id: str, name_contains: str = "", only_problems: bool = False, *, fetch: Any = None) -> str:
     """Tool body. The key comes from Integraciones for the tenant, is never returned, and an error message never carries it."""
     import urllib.error
 
-    from duckclaw.integration_secrets import resolve_integration_api_key
-
-    api_key = resolve_integration_api_key("tailscale_api_key", db=db, tenant_id=tenant_id)
-    tailnet = resolve_integration_api_key("tailscale_tailnet", db=db, tenant_id=tenant_id)
+    api_key, tailnet = _integration_keys(db, tenant_id)
     if not api_key or not tailnet:
         return "Tailscale no está configurado: faltan la API key y el nombre de la tailnet en Integraciones → Infraestructura."
     try:
@@ -229,11 +252,7 @@ def _tailscale_devices_impl(db: Any, tenant_id: str, name_contains: str = "", on
 
 def _tailscale_devices_tool(config: Optional[dict], *, db: Any = None, tenant_id: str = "default") -> Optional[Any]:
     """Read-only tool over the official API; only offered when this tenant has stored the key and the tailnet name."""
-    if db is None or (config or {}).get("tailscale_enabled") is False:
-        return None
-    from duckclaw.integration_secrets import resolve_integration_api_key
-
-    if not (resolve_integration_api_key("tailscale_api_key", db=db, tenant_id=tenant_id) and resolve_integration_api_key("tailscale_tailnet", db=db, tenant_id=tenant_id)):
+    if (config or {}).get("tailscale_enabled") is False or not all(_integration_keys(db, tenant_id)):
         return None
     from langchain_core.tools import StructuredTool
 

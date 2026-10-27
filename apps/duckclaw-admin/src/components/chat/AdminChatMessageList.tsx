@@ -2,6 +2,7 @@
 
 import { ChevronDown } from 'lucide-react';
 import { ChatBubble, ThinkingBubble } from '@/components/chat/ChatBubble';
+import { ChatScrollRail } from '@/components/chat/ChatScrollRail';
 import { ToolUsageGroup } from '@/components/chat/ToolUsageGroup';
 import type { ChatMsg } from '@/components/chat/types';
 import {
@@ -134,6 +135,14 @@ export function AdminChatMessageList({
         'pt-16 pb-[12.25rem] sm:pt-[4.5rem] sm:pb-48'
       : 'pt-16 pb-[8.5rem] sm:pt-[4.5rem] sm:pb-36'
     : '';
+  // The rail sits between the glass header and composer: the same offsets as the list's padding.
+  const studioRailClass = studioChromePad
+    ? padForLiveVoice
+      ? 'top-16 bottom-[19rem] sm:top-[4.5rem] sm:bottom-72'
+      : padForSuggestions
+      ? 'top-16 bottom-[12.25rem] sm:top-[4.5rem] sm:bottom-48'
+      : 'top-16 bottom-[8.5rem] sm:top-[4.5rem] sm:bottom-36'
+    : 'top-1 bottom-1';
 
   // Tool block of the in-flight turn: its clock runs until the turn ends, even
   // while the reply streams after it (so not just "the last display item").
@@ -152,7 +161,7 @@ export function AdminChatMessageList({
         <div
           ref={scrollRef}
           onScroll={onScroll}
-          className={`scrollbar-thin flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3 space-y-3 min-h-0 w-full ${
+          className={`scrollbar-hide flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain p-3 space-y-3 min-h-0 w-full ${
             isCompact ? '' : 'min-h-[320px]'
           } ${studioPadClass}`}
         >
@@ -237,6 +246,7 @@ export function AdminChatMessageList({
           return renderMessageBubble(messages, i, bubbleOpts);
         })}
         </div>
+        <ChatScrollRail scrollRef={scrollRef} className={studioRailClass} />
         {/* En studio el FAB vive en AdminChatPanel (z-30) para no quedar bajo el composer glass. */}
         {showScrollButton && !studioChromePad ? (
           <button

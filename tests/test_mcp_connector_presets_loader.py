@@ -328,3 +328,16 @@ def test_tailscale_preset_is_pinned_read_only_and_not_default() -> None:
     assert set(payload["tool_allowlist"]) == {"list_devices", "get_network_status", "ping_peer", "get_version", "get_tailnet_info"}
     assert {"device_action", "manage_routes", "connect_network", "disconnect_network"} <= set(payload["tool_denylist"])
     assert not set(payload["tool_allowlist"]) & set(payload["tool_denylist"])
+
+
+def test_paperswithcode_preset_is_anonymous_read_only_and_not_default() -> None:
+    from duckclaw.mcp_connector_presets import default_mcp_connector_preset_ids
+
+    payload = preset_payload("paperswithcode")
+    assert payload is not None and payload["transport"] == "streamable_http" and payload["endpoint_url"] == "https://paperswithcode.co/mcp"
+    assert payload["auth_kind"] == "none" and payload["read_only"] is True and payload["egress_hosts"] == ["paperswithcode.co"]
+    assert "paperswithcode" not in default_mcp_connector_preset_ids()
+    allow = set(payload["tool_allowlist"])
+    assert len(allow) == 20 and {"list_papers", "get_paper_info", "read_paper", "get_benchmark", "list_benchmarks"} <= allow
+    assert "search_papers" not in allow                                                  # named in the site's llms.txt but not served: verified by tools/list
+    assert all(t.startswith(("get_", "list_", "read_")) for t in allow)                  # nothing that could write

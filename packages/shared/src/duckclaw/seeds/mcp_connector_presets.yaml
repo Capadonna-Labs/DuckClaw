@@ -279,6 +279,23 @@ presets:
       docs_url: https://huggingface.co/docs/hub/en/hf-mcp-server
       note: Opt-in. Solo hub_repo_search, hub_repo_details, hf_fs y hf_whoami (lectura); no concede las apps de Gradio.
 
+  # Papers with Code (reimplementación de Hugging Face tras el retiro del sitio original; https://paperswithcode.co/mcp, Streamable HTTP, anónimo y de solo lectura).
+  # Papers, código oficial, tareas, métodos, conferencias, organizaciones y leaderboards. Las 20 tools son de consulta (tools/list del 27-oct-2026; llms.txt del sitio
+  # nombra otras, p. ej. search_papers, que no existe: se busca con list_papers). Beta sin releases: la lista puede cambiar, repetir tools/list al actualizar.
+  # El texto de los papers (read_paper) es contenido de terceros no confiable: puede traer instrucciones inyectadas; no concederlo junto a herramientas de ejecución u órdenes.
+  paperswithcode:
+    display_name: Papers with Code
+    transport: streamable_http
+    endpoint_url: https://paperswithcode.co/mcp
+    auth_kind: none
+    read_only: true
+    egress_hosts: [paperswithcode.co]
+    tool_allowlist: [get_paper_info, get_paper_evaluations, read_paper, list_papers, list_recent_papers, list_trending_papers, get_related_papers, get_paper_lineage, get_task, list_tasks, get_method, list_methods, get_conference, list_conferences, get_organization, list_organizations, get_framework, list_frameworks, get_benchmark, list_benchmarks]
+    metadata:
+      admin_label: HTTP remoto · Papers with Code (papers, código y leaderboards, solo lectura)
+      docs_url: https://github.com/huggingface/paperswithcode
+      note: Opt-in. Límite del sitio 120 solicitudes/min por IP (beta, sin garantía). Las 20 tools verificadas por tools/list; read_paper devuelve texto de terceros.
+
   # Tailscale MCP de la comunidad (HexSleeves, MIT; Tailscale no publica uno oficial). Versión FIJA a propósito: subir a mano tras revisar el changelog.
   # Solo lectura por allowlist: se conceden las 5 tools de consulta que el README documenta (list_devices, get_network_status, ping_peer, get_version, get_tailnet_info).
   # Quedan fuera device_action (autorizar/borrar/expirar), manage_routes y connect/disconnect, y también las tools de ACL/etiquetas que el README no nombra.

@@ -153,3 +153,16 @@ def test_hub_reads_wait_out_a_db_writer_lock(monkeypatch) -> None:
         assert "not a database" in str(exc)  # non-lock errors are not retried
     else:
         raise AssertionError("expected the non-lock error")
+
+
+def test_titles_over_30_characters_are_cut_and_moved_whole_to_the_body() -> None:
+    from duckclaw.web_push import fit_title
+
+    assert fit_title("Brent sube", "detalle") == ("Brent sube", "detalle")
+    t, b = fit_title("Irán ofrece flexibilidad para reabrir Ormuz si EE. UU. levanta restricciones", "Brent 114,99")
+    assert len(t) <= 30 and t.endswith("…") and " " not in t[-2:]
+    assert b == "Irán ofrece flexibilidad para reabrir Ormuz si EE. UU. levanta restricciones\nBrent 114,99"
+    t, b = fit_title("A" * 50, "")
+    assert len(t) == 30 and b == "A" * 50                          # no word boundary: hard cut
+    t, b = fit_title("ALTA · CVE-2026-109619 ya se explota (CISA)", "ALTA · CVE-2026-109619 ya se explota (CISA) plazo")
+    assert b.startswith("ALTA · CVE-2026-109619") and b.count("CVE-2026-109619") == 1   # body already opens with the title

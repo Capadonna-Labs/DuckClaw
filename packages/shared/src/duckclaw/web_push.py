@@ -97,6 +97,23 @@ def list_web_push_subscriptions(db_path: str) -> list[dict[str, Any]]:
     return out
 
 
+TITLE_MAX = 30   # what the paired smartwatch shows of a title; it mirrors the phone's notification, so the cap applies to every push
+
+
+def fit_title(title: str, body: str, limit: int = TITLE_MAX) -> tuple[str, str]:
+    """A title over ``limit`` characters is cut at a word boundary with "…" and moves, whole, to the top of the body (unless the body already opens with it)."""
+    title, body = title.strip(), body.strip()
+    if len(title) <= limit:
+        return title, body
+    cut = title[: limit - 1]
+    if " " in cut and cut.rfind(" ") >= limit // 2:
+        cut = cut[: cut.rfind(" ")]
+    short = cut.rstrip(" ,;:.·-–—") + "…"
+    if body.startswith(title):
+        return short, body
+    return short, f"{title}\n{body}" if body else title
+
+
 def send_web_push_notifications(
     subscriptions: list[dict[str, Any]],
     *,
@@ -117,6 +134,7 @@ def send_web_push_notifications(
     except Exception:  # noqa: BLE001
         return WebPushDeliveryResult(skipped=len(subscriptions), error="pywebpush_not_installed")
 
+    title, body = fit_title(title, body)
     payload = json.dumps(
         {"title": title[:120], "body": body[:512], "url": url or "/", "tag": tag[:120]},
         ensure_ascii=False,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Optional
 
@@ -172,13 +173,26 @@ def _wrap_connector_tool(
             from duckclaw.forge.skills.knowledge_tool_context import get_session_chat_id
 
             return store_pending(connector, str(remote_name), payload, chat_id=get_session_chat_id())
-        raw = _run_async_from_sync(_call_connector_tool(db, connector, str(remote_name), payload))
+        from duckclaw.forge.skills.mcp_call_audit import record_mcp_call
+
+        started = time.monotonic()
+        args_bytes = len(json.dumps(payload, default=str))
+        try:
+            raw = _run_async_from_sync(_call_connector_tool(db, connector, str(remote_name), payload))
+        except Exception as exc:
+            record_mcp_call(db, connector, str(remote_name), status="error", started=started, args_bytes=args_bytes, error=type(exc).__name__)
+            raise
+        error = ""
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, dict) and parsed.get("error"):
-                return raw
-        except json.JSONDecodeError:
+                error = str(parsed["error"])
+        except (json.JSONDecodeError, TypeError):
             pass
+        record_mcp_call(
+            db, connector, str(remote_name), status="error" if error else "ok", started=started,
+            args_bytes=args_bytes, result_bytes=len(str(raw)), error=error,
+        )
         return raw
 
     desc = getattr(tool_spec, "description", None) or f"MCP {connector.get('display_name')}: {remote_name}"

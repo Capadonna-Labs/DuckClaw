@@ -363,6 +363,22 @@ class AppendMediaUsageLogCommand(WriteCommand):
     media_url: str = ""
 
 
+class AppendToolCallLogCommand(WriteCommand):
+    """Append one row to ``tool_call_log``: one call of an external (MCP) tool. Sizes and outcome only, never the arguments or the result."""
+
+    command_type: Literal["append_tool_call_log"] = "append_tool_call_log"
+    id: str
+    session_id: str = ""
+    worker_id: str = ""
+    connector_id: str = ""
+    tool_name: str = ""
+    status: Literal["ok", "error"] = "ok"
+    duration_ms: int = 0
+    args_bytes: int = 0
+    result_bytes: int = 0
+    error: str = ""
+
+
 # ---------------------------------------------------------------------------
 # Admin console user commands
 # ---------------------------------------------------------------------------

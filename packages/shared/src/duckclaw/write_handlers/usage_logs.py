@@ -114,5 +114,48 @@ def _apply_append_media_usage_log(conn: Any, payload: dict) -> None:
     )
 
 
+def _apply_append_tool_call_log(conn: Any, payload: dict) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tool_call_log (
+            id VARCHAR PRIMARY KEY,
+            tenant_id VARCHAR NOT NULL,
+            session_id VARCHAR,
+            worker_id VARCHAR,
+            connector_id VARCHAR,
+            tool_name VARCHAR,
+            status VARCHAR NOT NULL DEFAULT 'ok',
+            duration_ms INTEGER NOT NULL DEFAULT 0,
+            args_bytes INTEGER NOT NULL DEFAULT 0,
+            result_bytes INTEGER NOT NULL DEFAULT 0,
+            error VARCHAR,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    row_id = str(payload.get("id") or "").strip()
+    if not row_id:
+        raise ValueError("id required")
+    status = "error" if str(payload.get("status") or "ok").strip() == "error" else "ok"
+    conn.execute(
+        "INSERT INTO tool_call_log (id, tenant_id, session_id, worker_id, connector_id, tool_name, status, duration_ms, args_bytes, result_bytes, error) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        [
+            row_id,
+            str(payload.get("tenant_id") or "default").strip()[:128] or "default",
+            str(payload.get("session_id") or "").strip()[:128],
+            str(payload.get("worker_id") or "").strip()[:64],
+            str(payload.get("connector_id") or "").strip()[:128],
+            str(payload.get("tool_name") or "").strip()[:128],
+            status,
+            max(0, int(payload.get("duration_ms") or 0)),
+            max(0, int(payload.get("args_bytes") or 0)),
+            max(0, int(payload.get("result_bytes") or 0)),
+            str(payload.get("error") or "").strip()[:160],
+        ],
+    )
+
+
 register_handler("append_llm_usage_log", _apply_append_llm_usage_log)
+register_handler("append_tool_call_log", _apply_append_tool_call_log)
 register_handler("append_media_usage_log", _apply_append_media_usage_log)

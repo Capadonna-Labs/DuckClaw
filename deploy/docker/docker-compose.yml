@@ -64,7 +64,7 @@ services:
       - duckclaw-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "8000:8000"
+      - "${DUCKCLAW_BIND_ADDR:-127.0.0.1}:8000:8000"
       # Login page of the broker gateway started by the interactive_brokers MCP preset.
       # Localhost only: open https://localhost:5000 on this machine to sign in.
       - "127.0.0.1:5000:5000"
@@ -177,7 +177,7 @@ services:
       GATEWAY_INTERNAL_URL: http://gateway:8000
       ENV: production
     ports:
-      - "3001:3001"
+      - "${DUCKCLAW_BIND_ADDR:-127.0.0.1}:3001:3001"
     depends_on:
       gateway:
         condition: service_healthy

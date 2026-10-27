@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import os
 import re
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -12,6 +14,54 @@ from fastapi.responses import JSONResponse
 from duckclaw.utils.logger import reset_log_context, set_log_context
 
 _gateway_log = logging.getLogger("duckclaw.gateway")
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int((os.environ.get(name) or "").strip() or default)
+    except ValueError:
+        return default
+
+
+# ponytail: one fixed window per public IP, in this process's memory (resets on restart, not shared between workers).
+# Upgrade path: a Redis INCR like core.admin_auth.check_ip_rate_limit if the gateway ever runs several workers.
+_RATE_WINDOWS: dict[str, tuple[float, int]] = {}
+
+
+def _public_client_ip(request: Request) -> str | None:
+    """The caller's IP when it is a public address; None for loopback, private networks, Tailscale (CGNAT) and unparsable hosts, which are trusted (the BFF and the tailnet)."""
+    host = request.client.host if request.client else ""
+    try:
+        return host if ipaddress.ip_address(host).is_global else None
+    except ValueError:
+        return None
+
+
+async def request_limits_middleware(request: Request, call_next):
+    """Two cheap guards for a gateway that is reachable from the internet: a body-size cap (413) and a per-IP request rate (429), both only for public callers.
+
+    ``DUCKCLAW_MAX_BODY_MB`` (default 50) and ``DUCKCLAW_RATE_LIMIT_PER_MIN`` (default 300); 0 turns each off.
+    The size check reads Content-Length, so a chunked body is not caught here (the reverse proxy or uvicorn limits it).
+    """
+    ip = _public_client_ip(request)
+    if ip is None or request.url.path == "/health":
+        return await call_next(request)
+    max_mb = _env_int("DUCKCLAW_MAX_BODY_MB", 50)
+    declared = (request.headers.get("content-length") or "").strip()
+    if max_mb > 0 and declared.isdigit() and int(declared) > max_mb * 1024 * 1024:
+        return JSONResponse(status_code=413, content={"detail": f"Cuerpo mayor a {max_mb} MB"})
+    limit = _env_int("DUCKCLAW_RATE_LIMIT_PER_MIN", 300)
+    if limit > 0:
+        now = time.monotonic()
+        start, count = _RATE_WINDOWS.get(ip, (now, 0))
+        if now - start >= 60:
+            start, count = now, 0
+            if len(_RATE_WINDOWS) > 10_000:   # bounded memory under a spread-out scan
+                _RATE_WINDOWS.clear()
+        _RATE_WINDOWS[ip] = (start, count + 1)
+        if count + 1 > limit:
+            return JSONResponse(status_code=429, content={"detail": "Demasiadas solicitudes"}, headers={"Retry-After": "60"})
+    return await call_next(request)
 
 
 async def observability_context_middleware(request: Request, call_next):
@@ -78,5 +128,6 @@ def register_gateway_middleware(app: FastAPI) -> None:
     """Monta middleware HTTP en el orden de cadena esperado por main legacy."""
     app.middleware("http")(observability_context_middleware)
     app.middleware("http")(tailscale_auth_middleware)
+    app.middleware("http")(request_limits_middleware)
     # Último registrado = primero en la cadena entrante: ver HTTP antes de auth/CORS internos.
     app.middleware("http")(telegram_http_ingress_probe_middleware)

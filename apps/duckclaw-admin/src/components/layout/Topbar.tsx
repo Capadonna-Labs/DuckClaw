@@ -4,7 +4,6 @@ import { Menu, Moon, RefreshCw, Sparkles, Sun, X } from 'lucide-react';
 import { useLayoutUiStore } from '@/store/layoutUiStore';
 import { usePathname } from 'next/navigation';
 import { useAuthStore } from '@/store/authStore';
-import { obtenerIniciales } from '@/lib/utils';
 import { useTheme } from '@/components/shared/ThemeProvider';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -173,7 +172,6 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
         <UserMenu
           displayName={usuario?.nombre || usuario?.email || 'Usuario'}
           email={usuario?.email || ''}
-          initials={usuario?.initials ?? obtenerIniciales(usuario?.nombre || usuario?.email || '')}
         />
         {!isChatTab && (
           <button
@@ -233,21 +231,16 @@ export default function Topbar({ onMenuClick }: TopbarProps) {
 function UserMenu({
   displayName,
   email,
-  initials,
 }: {
   displayName: string;
   email: string;
-  initials: string;
 }) {
   return (
-    <div className="pl-2 border-l dark:border-dark-border">
+    <div>
       <div
         className="flex items-center gap-2 rounded-xl px-2 py-1.5"
         aria-label={`Sesión: ${displayName}`}
       >
-        <span className="w-9 h-9 shrink-0 rounded-full bg-gov-blue-700 text-white flex items-center justify-center text-xs font-bold">
-          {initials}
-        </span>
         <span className="hidden lg:block min-w-0 text-left">
           <span className="block text-xs font-bold dark:text-dark-text truncate max-w-[12rem]">
             {displayName}

@@ -79,6 +79,11 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         keyword_context={"db": "db", "tenant_id": "tenant_id"},
     ),
     SkillToolRegistrar(
+        skill_name="socrata",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.socrata_bridge:register_socrata_skill",
+    ),
+    SkillToolRegistrar(
         skill_name="comfyui",
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.comfyui_bridge:register_comfyui_skill",

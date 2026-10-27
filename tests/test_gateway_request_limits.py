@@ -74,3 +74,39 @@ def test_limits_run_before_auth_in_the_gateway_chain() -> None:
     src = (_gw / "core" / "middleware.py").read_text(encoding="utf-8")
     reg = src.split("def register_gateway_middleware")[1]
     assert reg.index("tailscale_auth_middleware") < reg.index("request_limits_middleware") < reg.index("telegram_http_ingress_probe_middleware")
+
+
+def _cors_app() -> TestClient:
+    from fastapi.middleware.cors import CORSMiddleware
+
+    app = FastAPI()
+    app.add_middleware(CORSMiddleware, **middleware.cors_settings())
+
+    @app.get("/x")
+    async def x() -> dict:
+        return {"ok": True}
+
+    return TestClient(app)
+
+
+def test_cors_defaults_allow_only_local_origins_with_credentials(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_CORS_ORIGINS", raising=False)
+    c = _cors_app()
+    ok = c.get("/x", headers={"Origin": "http://localhost:3001"})
+    assert ok.headers["access-control-allow-origin"] == "http://localhost:3001" and ok.headers["access-control-allow-credentials"] == "true"
+    assert "access-control-allow-origin" not in c.get("/x", headers={"Origin": "https://evil.example"}).headers
+
+
+def test_cors_origins_come_from_the_env_list(monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_CORS_ORIGINS", " https://duckclaw.tail1234.ts.net/ , http://localhost:3001 ")
+    c = _cors_app()
+    assert c.get("/x", headers={"Origin": "https://duckclaw.tail1234.ts.net"}).headers["access-control-allow-origin"] == "https://duckclaw.tail1234.ts.net"
+    assert "access-control-allow-origin" not in c.get("/x", headers={"Origin": "http://localhost:3000"}).headers   # the list replaces the defaults
+
+
+def test_cors_wildcard_is_explicit_and_never_carries_credentials(monkeypatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_CORS_ORIGINS", "*")
+    s = middleware.cors_settings()
+    assert s["allow_origins"] == ["*"] and s["allow_credentials"] is False
+    r = _cors_app().get("/x", headers={"Origin": "https://anything.example"})
+    assert r.headers["access-control-allow-origin"] == "*" and "access-control-allow-credentials" not in r.headers

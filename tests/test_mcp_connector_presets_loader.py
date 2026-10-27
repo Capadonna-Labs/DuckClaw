@@ -316,3 +316,15 @@ def test_huggingface_preset_is_read_only_search_and_not_default() -> None:
     assert payload["read_only"] is True and payload["egress_hosts"] == ["huggingface.co"] and payload["auth_kind"] == "none"
     assert set(payload["tool_allowlist"]) == {"hub_repo_search", "hub_repo_details", "hf_fs", "hf_whoami"}   # the names the server really exposes, all read-only
     assert "huggingface" not in default_mcp_connector_preset_ids()
+
+
+def test_tailscale_preset_is_pinned_read_only_and_not_default() -> None:
+    from duckclaw.mcp_connector_presets import default_mcp_connector_preset_ids
+
+    payload = preset_payload("tailscale")
+    assert payload is not None and payload["transport"] == "stdio" and payload["launch_command"] == "npx"
+    assert payload["launch_args"] == ["-y", "@hexsleeves/tailscale-mcp-server@1.3.4"]       # exact version: a community package, bumped by hand
+    assert payload["read_only"] is True and payload["egress_hosts"] == ["api.tailscale.com"] and "tailscale" not in default_mcp_connector_preset_ids()
+    assert set(payload["tool_allowlist"]) == {"list_devices", "get_network_status", "ping_peer", "get_version", "get_tailnet_info"}
+    assert {"device_action", "manage_routes", "connect_network", "disconnect_network"} <= set(payload["tool_denylist"])
+    assert not set(payload["tool_allowlist"]) & set(payload["tool_denylist"])

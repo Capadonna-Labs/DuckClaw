@@ -279,6 +279,25 @@ presets:
       docs_url: https://huggingface.co/docs/hub/en/hf-mcp-server
       note: Opt-in. Solo hub_repo_search, hub_repo_details, hf_fs y hf_whoami (lectura); no concede las apps de Gradio.
 
+  # Tailscale MCP de la comunidad (HexSleeves, MIT; Tailscale no publica uno oficial). Versión FIJA a propósito: subir a mano tras revisar el changelog.
+  # Solo lectura por allowlist: se conceden las 5 tools de consulta que el README documenta (list_devices, get_network_status, ping_peer, get_version, get_tailnet_info).
+  # Quedan fuera device_action (autorizar/borrar/expirar), manage_routes y connect/disconnect, y también las tools de ACL/etiquetas que el README no nombra.
+  # El servidor, además, exige TAILSCALE_ALLOWED_TOOL_RISK para ejecutar tools de escritura: no se pone aquí, así que por defecto no puede mutar.
+  # Verificar los nombres con tools/list antes de conceder a un worker. La clave de API da acceso a toda la tailnet: usar una de solo lectura y con caducidad.
+  tailscale:
+    profile: stdio_npx_ro
+    display_name: Tailscale (tailnet)
+    launch_args: ["-y", "@hexsleeves/tailscale-mcp-server@1.3.4"]
+    tool_allowlist: [list_devices, get_network_status, ping_peer, get_version, get_tailnet_info]
+    tool_denylist: [device_action, manage_routes, connect_network, disconnect_network]
+    egress_hosts: [api.tailscale.com]
+    metadata:
+      install: npx -y @hexsleeves/tailscale-mcp-server@1.3.4
+      admin_label: Tailscale · estado de la tailnet (local stdio, solo lectura, versión fija)
+      docs_url: https://github.com/HexSleeves/tailscale-mcp
+      secret_env: [TAILSCALE_API_KEY, TAILSCALE_TAILNET]
+      note: Opt-in. Requiere Node 20+, TAILSCALE_API_KEY y TAILSCALE_TAILNET. Comunidad, no oficial; get_network_status y ping_peer usan la CLI de tailscale del host.
+
   # Playwright MCP oficial (Microsoft, Apache-2.0). Versión FIJA a propósito (0.0.x publica a menudo): subir a mano.
   # Controla un navegador real: abre páginas, hace clic, escribe y lee el DOM, así que NO es de solo lectura. Corre sin ventana y
   # con perfil aislado (sin cookies ni sesiones del usuario). Usa el Chromium que instala Playwright (sin él busca Google Chrome del sistema):

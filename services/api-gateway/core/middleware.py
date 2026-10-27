@@ -16,6 +16,29 @@ from duckclaw.utils.logger import reset_log_context, set_log_context
 _gateway_log = logging.getLogger("duckclaw.gateway")
 
 
+# Browsers on this machine only: the admin BFF calls the gateway server-side (no CORS), so the usual case needs no entry.
+# The desktop shell (Tauri) is the other legitimate browser origin.
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3001", "http://127.0.0.1:3001",
+    "http://localhost:8000", "http://127.0.0.1:8000", "tauri://localhost", "http://tauri.localhost", "https://tauri.localhost",
+]
+
+
+def cors_settings() -> dict:
+    """CORSMiddleware kwargs from ``DUCKCLAW_CORS_ORIGINS`` (comma-separated origins; unset = local defaults above).
+
+    An explicit ``*`` opens every origin but drops credentials: browsers refuse that pair, and Starlette would otherwise echo any Origin back with cookies allowed.
+    """
+    origins = [o.strip().rstrip("/") for o in (os.environ.get("DUCKCLAW_CORS_ORIGINS") or "").split(",") if o.strip()] or list(DEFAULT_CORS_ORIGINS)
+    wildcard = "*" in origins
+    return {
+        "allow_origins": ["*"] if wildcard else origins,
+        "allow_credentials": not wildcard,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+
+
 def _env_int(name: str, default: int) -> int:
     try:
         return int((os.environ.get(name) or "").strip() or default)

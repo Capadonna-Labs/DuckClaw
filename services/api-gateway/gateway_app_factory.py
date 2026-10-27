@@ -21,7 +21,7 @@ from core.gateway_vault import dedicated_gateway_vault_db_path
 from core.health import router as health_router
 from core.homeostasis import router as homeostasis_router
 from core.lifespan import lifespan
-from core.middleware import register_gateway_middleware
+from core.middleware import cors_settings, register_gateway_middleware
 from core.telegram_delivery import effective_telegram_bot_token
 from duckclaw.gateway_db import get_gateway_db_path
 from duckclaw.utils.logger import configure_structured_logging, get_obs_logger
@@ -75,13 +75,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSMiddleware, **cors_settings())
 
 register_gateway_middleware(app)
 

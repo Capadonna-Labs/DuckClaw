@@ -211,8 +211,15 @@ def test_openrouter_client_logs_the_upstream_provider_and_generation_id(monkeypa
     response = {"id": "gen-123", "provider": "InferenceNet", "model": "deepseek/deepseek-v4.1-flash",
                 "choices": [{"message": {"role": "assistant", "content": "Veredicto: ok"}, "finish_reason": "stop"}],
                 "usage": {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14}}
-    with caplog.at_level(logging.INFO, logger="duckclaw.integrations.llm_providers"):
-        result = llm._create_chat_result(response)
+    from duckclaw.utils.logger import get_obs_logger
+
+    obs = get_obs_logger()
+    obs.addHandler(caplog.handler)                 # the obs logger does not propagate to the root logger
+    try:
+        with caplog.at_level(logging.INFO, logger=obs.name):
+            result = llm._create_chat_result(response)
+    finally:
+        obs.removeHandler(caplog.handler)
     assert result.llm_output["provider"] == "InferenceNet" and result.llm_output["id"] == "gen-123"
     assert "openrouter_gen id=gen-123 provider=InferenceNet" in caplog.text and "finish=stop out_tokens=4" in caplog.text
     assert type(llm).__name__ == "OpenRouterChatOpenAI" and llm.model_name == "deepseek/deepseek-v4.1-flash"

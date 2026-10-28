@@ -114,8 +114,10 @@ def _openrouter_chat_class() -> Any:
                 usage = raw.get("usage") or {}
                 if isinstance(result.llm_output, dict):
                     result.llm_output["provider"] = raw.get("provider")
-                _log.info("openrouter_gen id=%s provider=%s model=%s finish=%s out_tokens=%s",
-                          raw.get("id"), raw.get("provider"), raw.get("model"), finish, usage.get("completion_tokens"))
+                from duckclaw.utils.logger import get_obs_logger   # the module logger is not INFO in the Gateway; this one reaches its log
+
+                get_obs_logger().info("[SYS] openrouter_gen id=%s provider=%s model=%s finish=%s out_tokens=%s",
+                                      raw.get("id"), raw.get("provider"), raw.get("model"), finish, usage.get("completion_tokens"))
             except Exception:  # noqa: BLE001
                 _log.debug("openrouter_gen: not logged", exc_info=True)
             return result

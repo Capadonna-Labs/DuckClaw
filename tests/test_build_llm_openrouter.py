@@ -200,3 +200,19 @@ def test_reasoning_can_be_turned_off_per_model(monkeypatch: pytest.MonkeyPatch) 
     assert openrouter_reasoning_param(16384, "deepseek/deepseek-v4-flash") == {"max_tokens": 6000}
     llm = build_openrouter_llm("deepseek/deepseek-v4.1-flash")
     assert (getattr(llm, "extra_body", None) or {}).get("reasoning") == {"enabled": False}
+
+
+def test_openrouter_client_logs_the_upstream_provider_and_generation_id(monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture) -> None:
+    """OpenRouter answers name the upstream that served the call; replies with holes in the text must be attributable to one."""
+    import logging
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-test_dummy")
+    llm = build_openrouter_llm("deepseek/deepseek-v4.1-flash")
+    response = {"id": "gen-123", "provider": "InferenceNet", "model": "deepseek/deepseek-v4.1-flash",
+                "choices": [{"message": {"role": "assistant", "content": "Veredicto: ok"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14}}
+    with caplog.at_level(logging.INFO, logger="duckclaw.integrations.llm_providers"):
+        result = llm._create_chat_result(response)
+    assert result.llm_output["provider"] == "InferenceNet" and result.llm_output["id"] == "gen-123"
+    assert "openrouter_gen id=gen-123 provider=InferenceNet" in caplog.text and "finish=stop out_tokens=4" in caplog.text
+    assert type(llm).__name__ == "OpenRouterChatOpenAI" and llm.model_name == "deepseek/deepseek-v4.1-flash"

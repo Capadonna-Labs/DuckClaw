@@ -96,6 +96,33 @@ _or_attribution_logged = False
 _log = logging.getLogger(__name__)
 
 
+def _openrouter_chat_class() -> Any:
+    """``ChatOpenAI`` that logs which upstream OpenRouter served each reply.
+
+    OpenRouter puts ``provider`` and the generation ``id`` in the response; langchain drops the provider. Replies with
+    holes in the text ("Brent cie) y XLE") could not be attributed to anyone (llm_usage_log has neither), so every
+    call leaves one ``openrouter_gen`` log line: grep it, then GET /api/v1/generation?id=<id> for the rest.
+    """
+    from langchain_openai import ChatOpenAI
+
+    class OpenRouterChatOpenAI(ChatOpenAI):
+        def _create_chat_result(self, response: Any, generation_info: Optional[dict] = None) -> Any:
+            result = super()._create_chat_result(response, generation_info)
+            try:
+                raw = response if isinstance(response, dict) else response.model_dump()
+                finish = (raw.get("choices") or [{}])[0].get("finish_reason")
+                usage = raw.get("usage") or {}
+                if isinstance(result.llm_output, dict):
+                    result.llm_output["provider"] = raw.get("provider")
+                _log.info("openrouter_gen id=%s provider=%s model=%s finish=%s out_tokens=%s",
+                          raw.get("id"), raw.get("provider"), raw.get("model"), finish, usage.get("completion_tokens"))
+            except Exception:  # noqa: BLE001
+                _log.debug("openrouter_gen: not logged", exc_info=True)
+            return result
+
+    return OpenRouterChatOpenAI
+
+
 def build_openrouter_llm(
     model: str = "",
     base_url: str = "",
@@ -121,7 +148,7 @@ def build_openrouter_llm(
             "OPENROUTER_API_KEY no configurado. Admin → Integraciones → API keys o openrouter.ai/keys"
         )
     try:
-        from langchain_openai import ChatOpenAI
+        ChatOpenAI = _openrouter_chat_class()
     except Exception as exc:
         raise RuntimeError("OpenRouter requiere langchain-openai.") from exc
 

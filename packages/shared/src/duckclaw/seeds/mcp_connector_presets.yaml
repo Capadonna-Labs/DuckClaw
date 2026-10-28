@@ -296,6 +296,23 @@ presets:
       docs_url: https://github.com/huggingface/paperswithcode
       note: Opt-in. Límite del sitio 120 solicitudes/min por IP (beta, sin garantía). Las 20 tools verificadas por tools/list; read_paper devuelve texto de terceros.
 
+  # OpenBB MCP oficial (openbb-mcp-server, del propio repo OpenBB, Apache-2.0), por stdio con uvx. Datos de mercado: yfinance (52 tools, sin clave), SEC (27),
+  # equity (30), ETF, economía y 59 indicadores técnicos; 178 tools en total, TODAS de lectura. Versiones FIJAS (verificado con tools/list el 27-oct-2026).
+  # `--tool-discovery` oculta el catálogo tras 4 tools de descubrimiento + run_pipeline: ahorra decenas de miles de tokens por llamada frente a las 178.
+  # install_skill (escribe archivos en el host) y los tools de prompts/recursos quedan fuera. Los datos «no son necesariamente exactos» (OpenBB): no usar para
+  # órdenes. openbb-yfinance es AGPL-3.0: se ejecuta como proceso aparte, no se empaqueta ni se distribuye con DuckClaw. Datos de Yahoo: uso personal.
+  openbb:
+    profile: stdio_uvx_ro
+    display_name: OpenBB (datos de mercado)
+    launch_args: ["--from", "openbb-mcp-server==2.0.1", "--with", "openbb-equity==2.0.0", "--with", "openbb-economy==2.0.0", "--with", "openbb-etf==2.0.0",
+                  "--with", "openbb-yfinance==2.0.0", "--with", "openbb-sec==2.0.0", "openbb-mcp", "--transport", "stdio", "--tool-discovery"]
+    tool_allowlist: [available_categories, available_tools, search_tools, call_tool, run_pipeline]
+    metadata:
+      install: uvx --from openbb-mcp-server==2.0.1 --with openbb-equity==2.0.0 --with openbb-economy==2.0.0 --with openbb-etf==2.0.0 --with openbb-yfinance==2.0.0 --with openbb-sec==2.0.0 openbb-mcp --transport stdio --tool-discovery
+      admin_label: OpenBB · datos de mercado (local stdio · uvx · solo lectura · versión fija)
+      docs_url: https://github.com/OpenBB-finance/OpenBB/tree/develop/openbb_platform/extensions/mcp_server
+      note: Opt-in. Primer arranque lento (descarga las dependencias de OpenBB). Sin claves usa yfinance y SEC; otros proveedores piden su clave en ~/.openbb_platform/user_settings.json.
+
   # Tailscale no publica un MCP oficial y no se usa el de la comunidad: el skill `tailscale` (forge/skills/tailscale_bridge.py) consulta la API oficial
   # (solo lectura, host fijo api.tailscale.com) con la clave de Integraciones → Infraestructura, sin código de terceros que reciba la clave.
 

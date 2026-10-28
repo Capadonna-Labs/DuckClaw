@@ -347,3 +347,16 @@ def test_every_integration_env_id_of_every_preset_exists_in_the_integrations_cat
         for key in ("integration_env", "integration_env_optional"):
             for env_var, integration_id in (meta.get(key) or {}).items():
                 assert integration_id in known, f"{preset.get('preset_id')}: {env_var} -> {integration_id} is not in the integrations catalog"
+
+
+def test_openbb_preset_is_pinned_read_only_discovery_mode_and_not_default() -> None:
+    from duckclaw.mcp_connector_presets import default_mcp_connector_preset_ids
+
+    payload = preset_payload("openbb")
+    assert payload is not None and payload["transport"] == "stdio" and payload["launch_command"] == "uvx" and payload["read_only"] is True
+    args = payload["launch_args"]
+    assert "openbb-mcp-server==2.0.1" in args and args[args.index("--transport") + 1] == "stdio"
+    assert all("==" in a for i, a in enumerate(args) if i and args[i - 1] in ("--from", "--with"))        # every package pinned
+    assert "--tool-discovery" in args                                                                    # 5 tools in the context, not 178
+    assert set(payload["tool_allowlist"]) == {"available_categories", "available_tools", "search_tools", "call_tool", "run_pipeline"}
+    assert "install_skill" not in payload["tool_allowlist"] and "openbb" not in default_mcp_connector_preset_ids()   # install_skill writes files on the host

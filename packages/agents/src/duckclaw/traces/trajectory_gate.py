@@ -13,12 +13,17 @@ Trajectories are the ``tool_transitions`` JSONL records (one per call, see ``too
     python -m duckclaw.traces.trajectory_gate golden.yaml corpus_dir_or_file.jsonl
 
 Exit code 1 and one line per violation when a trajectory leaves the DAG.
+
+``learn`` drafts the golden from a corpus you trust: ``python -m duckclaw.traces.trajectory_gate learn corpus [min_count]``. Tools and
+edges seen fewer than ``min_count`` times (default 3) are left out, so a rare path counts as a deviation; ``forbidden`` and
+``requires_before`` are judgement calls and stay yours to add.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -68,7 +73,26 @@ def check_corpus(records: Iterable[dict[str, Any]], golden: dict[str, Any]) -> l
     return [f"[{sid or '?'}] {req[:60]!r}: {v}" for (sid, req), tools in turns(records).items() for v in check_trajectory(tools, golden)]
 
 
+def learn_golden(records: Iterable[dict[str, Any]], min_count: int = 3) -> dict[str, Any]:
+    seen: Counter[str] = Counter()
+    start: Counter[str] = Counter()
+    pairs: Counter[tuple[str, str]] = Counter()
+    for tools in turns(records).values():
+        seen.update(tools)
+        start[tools[0]] += 1
+        pairs.update(zip(tools, tools[1:]))
+    edges: dict[str, list[str]] = {t: [] for t, n in seen.items() if n >= min_count}
+    for (a, b), n in sorted(pairs.items()):
+        if n >= min_count and a in edges and b in edges:
+            edges[a].append(b)
+    return {"start": sorted(t for t, n in start.items() if n >= min_count and t in edges), "edges": dict(sorted(edges.items())),
+            "forbidden": [], "requires_before": {}}
+
+
 def main(argv: list[str]) -> int:
+    if argv[:1] == ["learn"] and len(argv) in (2, 3):
+        print(yaml.safe_dump(learn_golden(read_records(argv[1]), int(argv[2]) if len(argv) == 3 else 3), sort_keys=False))
+        return 0
     if len(argv) != 2:
         print(__doc__)
         return 2

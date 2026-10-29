@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from duckclaw.traces.trajectory_gate import check_corpus, check_trajectory, load_golden, main, read_records
+from duckclaw.traces.trajectory_gate import check_corpus, check_trajectory, learn_golden, load_golden, main, read_records
 
 FIX = Path(__file__).parent / "fixtures" / "trajectories"
 
@@ -42,3 +42,12 @@ def test_cli_exit_code_blocks_a_bad_corpus(tmp_path: Path) -> None:
     bad.write_text('{"session_id":"x","context":{"request":"r"},"action":{"tool":"drop_table"}}\n', encoding="utf-8")
     assert main([str(FIX / "golden.yaml"), str(FIX)]) == 0
     assert main([str(FIX / "golden.yaml"), str(bad)]) == 1
+
+
+def test_learned_golden_accepts_its_corpus_and_rejects_rare_or_new_paths() -> None:
+    records = read_records(FIX)
+    learned = learn_golden(records, min_count=1)
+    assert check_corpus(records, learned) == []
+    strict = learn_golden(records, min_count=2)  # fixture paths seen once each are not "golden" at 2
+    assert "write_record" not in strict["edges"]
+    assert check_trajectory(["read_sql", "run_sandbox", "hallucinated_tool"], learned)

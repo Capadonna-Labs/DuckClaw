@@ -106,12 +106,30 @@ def _openrouter_chat_class() -> Any:
     from langchain_openai import ChatOpenAI
 
     class OpenRouterChatOpenAI(ChatOpenAI):
+        def _generate(self, *args: Any, **kwargs: Any) -> Any:
+            from duckclaw.turn_budget import check_turn_budget
+
+            check_turn_budget()
+            return super()._generate(*args, **kwargs)
+
+        async def _agenerate(self, *args: Any, **kwargs: Any) -> Any:
+            from duckclaw.turn_budget import check_turn_budget
+
+            check_turn_budget()
+            return await super()._agenerate(*args, **kwargs)
+
         def _create_chat_result(self, response: Any, generation_info: Optional[dict] = None) -> Any:
             result = super()._create_chat_result(response, generation_info)
             try:
                 raw = response if isinstance(response, dict) else response.model_dump()
                 finish = (raw.get("choices") or [{}])[0].get("finish_reason")
                 usage = raw.get("usage") or {}
+                from duckclaw.llm_usage_log import estimate_llm_cost_usd
+                from duckclaw.turn_budget import charge_turn_spend
+
+                cost = usage.get("cost")   # OpenRouter's own figure when it sends one; else the flat per-million estimate
+                charge_turn_spend(float(cost) if isinstance(cost, (int, float)) else
+                                  estimate_llm_cost_usd(int(usage.get("prompt_tokens") or 0), int(usage.get("completion_tokens") or 0)))
                 if isinstance(result.llm_output, dict):
                     result.llm_output["provider"] = raw.get("provider")
                 from duckclaw.utils.logger import get_obs_logger   # the module logger is not INFO in the Gateway; this one reaches its log

@@ -347,8 +347,9 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                     )
         except Exception as exc:
             from duckclaw.graphs.chat_cancel import ChatCancelledError
+            from duckclaw.turn_budget import TurnBudgetExceeded
 
-            if isinstance(exc, ChatCancelledError):
+            if isinstance(exc, (ChatCancelledError, TurnBudgetExceeded)):
                 raise
             _llm_invoke_exc = exc
             _log.warning("[%s] LLM invoke failed in agent_node: %s", _wl, exc, exc_info=True)

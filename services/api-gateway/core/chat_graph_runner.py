@@ -427,25 +427,46 @@ async def run_chat_graph(
             from duckclaw.graphs.chat_cancel import ChatCancelledError
 
             try:
-                result = await ainvoke_manager_ephemeral(
-                    graph_message,
-                    prepared.history_for_graph,
-                    session_id,
-                    tenant_id=prepared.tenant_id,
-                    user_id=prepared.vault_user_id,
-                    username=prepared.username,
-                    user_incoming=getattr(prepared.payload, "graph_user_incoming", None)
-                    or prepared.user_incoming,
-                    vault_db_path=prepared.vault_db_path,
-                    shared_db_path=prepared.shared_db_path,
-                    is_system_prompt=prepared.is_system_prompt
-                    or graph_message.strip().startswith("[SYSTEM_EVENT:"),
-                    outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
-                    entry_worker_id=(worker_id or "").strip() or None,
-                    integration_channel=(dc.channel or "").strip() or None,
-                    project_id=(getattr(prepared.payload, "project_id", None) or "").strip() or None,
-                    knowledge_scope=(getattr(prepared.payload, "knowledge_scope", None) or "").strip() or None,
-                    analytical_summary=auto_summary or None,
+                from duckclaw.turn_budget import TurnBudgetExceeded, track_turn_spend
+
+                with track_turn_spend() as turn_spend:
+                    result = await ainvoke_manager_ephemeral(
+                        graph_message,
+                        prepared.history_for_graph,
+                        session_id,
+                        tenant_id=prepared.tenant_id,
+                        user_id=prepared.vault_user_id,
+                        username=prepared.username,
+                        user_incoming=getattr(prepared.payload, "graph_user_incoming", None)
+                        or prepared.user_incoming,
+                        vault_db_path=prepared.vault_db_path,
+                        shared_db_path=prepared.shared_db_path,
+                        is_system_prompt=prepared.is_system_prompt
+                        or graph_message.strip().startswith("[SYSTEM_EVENT:"),
+                        outbound_telegram_bot_token=(dc.outbound_bot_token or "").strip() or None,
+                        entry_worker_id=(worker_id or "").strip() or None,
+                        integration_channel=(dc.channel or "").strip() or None,
+                        project_id=(getattr(prepared.payload, "project_id", None) or "").strip() or None,
+                        knowledge_scope=(getattr(prepared.payload, "knowledge_scope", None) or "").strip() or None,
+                        analytical_summary=auto_summary or None,
+                    )
+            except TurnBudgetExceeded as exc:
+                _gateway_log.warning("turn halted chat=%s spend=$%.4f: %s", format_chat_id_for_terminal(session_id), turn_spend[0], exc)
+                try:
+                    from duckclaw.graphs.activity import set_idle
+
+                    set_idle(session_id)
+                except Exception:
+                    pass
+                return (
+                    {
+                        "response": f"Turno detenido: el gasto estimado (${turn_spend[0]:.2f}) alcanzó el tope por turno. Reformula o divide la tarea.",
+                        "session_id": session_id,
+                        "worker_id": worker_id,
+                        "elapsed_ms": int((time.monotonic() - t0) * 1000),
+                        "budget_exceeded": True,
+                    },
+                    t0,
                 )
             except ChatCancelledError:
                 try:

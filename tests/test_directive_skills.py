@@ -89,7 +89,7 @@ def test_framework_directive_skills_seed_once_and_apply_to_any_tenant() -> None:
         "CREATE TABLE main.admin_skills (skill_id VARCHAR, name VARCHAR, description VARCHAR, skill_type VARCHAR, "
         "implementation_ref VARCHAR, owner_email VARCHAR, tenant_id VARCHAR, visibility VARCHAR, active BOOLEAN)"
     )
-    assert seed_framework_directive_skills(con) == 4
+    assert seed_framework_directive_skills(con) == 5
     assert seed_framework_directive_skills(con) == 0  # idempotent, never overwrites
     assert con.execute("SELECT max(length(description)) FROM main.admin_skills").fetchone()[0] <= 4096
 
@@ -147,3 +147,15 @@ def test_privacy_directive_is_guide_only_and_never_handles_credentials_or_stores
     assert len(text) <= 4096 and "unbroker" in pack["metadata"]["source"]                 # attribution travels with the pack
     assert "NO envías nada por la persona" in text and "ni un anti-bot" in text and "No guardes datos personales" in text
     assert "Ley 1581" in text and "RGPD" in text and "CCPA" in text and "solo cuenta como eliminado si ya no aparece" in text
+
+
+def test_learn_skill_points_only_at_tools_that_exist() -> None:
+    import json
+
+    from duckclaw.directive_skills import _PACK
+
+    text = next(s for s in json.loads(_PACK.read_text(encoding="utf-8"))["skills"] if s["name"] == "learn")["description"]
+    assert len(text) <= 4096
+    src = "".join(p.read_text(encoding="utf-8") for p in Path("packages/agents/src/duckclaw/forge/skills").glob("*_bridge.py"))
+    for tool in ("record_operational_lesson", "read_system_prompt", "update_system_prompt", "consult_claude"):
+        assert tool in text and (f'name="{tool}"' in src or f"def {tool}" in src), tool

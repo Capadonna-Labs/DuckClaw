@@ -66,7 +66,7 @@ def test_gateway_main_delegates_middleware_to_core_module() -> None:
     factory = APP_FACTORY.read_text(encoding="utf-8")
     middleware_owner = Path("services/api-gateway/core/middleware.py").read_text(encoding="utf-8")
 
-    assert "from core.middleware import register_gateway_middleware" in factory
+    assert "from core.middleware import cors_settings, register_gateway_middleware" in factory
     assert "register_gateway_middleware(app)" in factory
     assert "async def observability_context_middleware" not in main
     assert "def register_gateway_middleware" in middleware_owner

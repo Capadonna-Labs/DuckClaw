@@ -424,19 +424,60 @@ def apply_mlx_message_budget(
     )
 
 
+def context_budget_tokens() -> int:
+    """Cloud-provider input budget in tokens (``DUCKCLAW_CONTEXT_BUDGET_TOKENS``); 0 = off."""
+    try:
+        return max(0, int((os.environ.get("DUCKCLAW_CONTEXT_BUDGET_TOKENS") or "0").strip()))
+    except ValueError:
+        return 0
+
+
+def _env_tokens(key: str, default: int) -> int:
+    try:
+        return max(0, int((os.environ.get(key) or "").strip() or default))
+    except ValueError:
+        return default
+
+
+def apply_context_budget(messages: list[Any], *, bound_tools_n: int = 0) -> list[Any]:
+    """Pre-flight budget for cloud providers, the MLX recipe without the MLX numbers.
+
+    total - output reserve - tool schemas (bound tools x per-tool estimate; fixed cost, the only lever is granting fewer tools)
+    is what the messages may use: oldest history goes first, each tool result is capped to half of that in chars, the
+    system prompt is cut only as a last resort. One ``context_budget`` line per trim, or when schemas alone eat over half
+    the budget (what dominated the real cost: ~288 schemas = ~72k tokens per call).
+    """
+    total = context_budget_tokens()
+    if total <= 0 or not messages:
+        return messages
+    schemas = max(0, bound_tools_n) * _env_tokens("DUCKCLAW_CONTEXT_TOKENS_PER_TOOL", 250)
+    cap = max(2000, total - _env_tokens("DUCKCLAW_CONTEXT_OUTPUT_RESERVE_TOKENS", 8192) - schemas)
+    before = estimate_tokens_from_messages(messages)
+    out = trim_messages_to_estimated_cap(messages, cap=cap, tool_cap=max(2000, cap // 2), note_brand="BUDGET")
+    after = estimate_tokens_from_messages(out)
+    if after < before or schemas * 2 > total:
+        from duckclaw.utils.logger import get_obs_logger
+
+        get_obs_logger().warning(
+            "[SYS] context_budget total=%d schemas=%d (%d tools) message_cap=%d messages %d->%d tokens",
+            total, schemas, bound_tools_n, cap, before, after,
+        )
+    return out
+
+
 def apply_provider_input_budget(
     messages: list[Any],
     *,
     provider: str,
     bound_tools_n: int = 0,
 ) -> list[Any]:
-    """Provider-specific context trimming for Groq TPM and MLX VRAM limits."""
+    """Provider-specific context trimming: Groq TPM, MLX VRAM, and the opt-in token budget for everyone else."""
     provider_label = (provider or "").strip().lower()
     if provider_label == "groq":
         return apply_groq_message_budget(messages, provider=provider)
     if provider_label in ("mlx", "iotcorelabs"):
         return apply_mlx_message_budget(messages, provider=provider, bound_tools_n=bound_tools_n)
-    return messages
+    return apply_context_budget(messages, bound_tools_n=bound_tools_n)
 
 
 
@@ -467,6 +508,7 @@ def split_for_pruning(non_system: list[Any], keep_last: int) -> tuple[list[Any],
 __all__ = [
     "apply_groq_message_budget",
     "apply_mlx_message_budget",
+    "apply_context_budget",
     "apply_provider_input_budget",
     "configure_provider_budget_runtime_db_provider",
     "context_prune_globally_enabled",

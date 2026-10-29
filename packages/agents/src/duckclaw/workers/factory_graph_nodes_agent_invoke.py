@@ -189,11 +189,7 @@ def make_agent_invoke_node(ctx: WorkerGraphContext):
                 )
             ] + [m for m in _msg_list if not isinstance(m, SystemMessage)]
         _mlx_provider = (provider or "").strip().lower() in ("mlx", "iotcorelabs")
-        _bind_est = (
-            len(_tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind)
-            if _mlx_provider
-            else 0
-        )
+        _bind_est = len(_tools_for_llm_bind if sandbox_enabled else _tools_sandbox_off_bind)
         _groq_msgs = _apply_provider_input_budget(
             _msg_list,
             provider=provider,

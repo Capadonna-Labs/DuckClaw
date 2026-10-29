@@ -61,7 +61,6 @@ from langchain_core.messages import ToolMessage
 
 _log = logging.getLogger(__name__)
 
-
 def make_tools_node(ctx: WorkerGraphContext):
 
     worker_id = ctx.worker_id

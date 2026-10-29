@@ -310,7 +310,7 @@ presets:
     metadata:
       install: uvx --from openbb-mcp-server==2.0.1 --with openbb-equity==2.0.0 --with openbb-economy==2.0.0 --with openbb-etf==2.0.0 --with openbb-yfinance==2.0.0 --with openbb-sec==2.0.0 openbb-mcp --transport stdio --tool-discovery
       admin_label: OpenBB · datos de mercado (local stdio · uvx · solo lectura · versión fija)
-      docs_url: https://github.com/OpenBB-finance/OpenBB/tree/develop/openbb_platform/extensions/mcp_server
+      docs_url: https://docs.openbb.co/
       note: Opt-in. Primer arranque lento (descarga las dependencias de OpenBB). Sin claves usa yfinance y SEC; otros proveedores piden su clave en ~/.openbb_platform/user_settings.json.
 
   # Tailscale no publica un MCP oficial y no se usa el de la comunidad: el skill `tailscale` (forge/skills/tailscale_bridge.py) consulta la API oficial

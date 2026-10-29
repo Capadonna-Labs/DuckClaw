@@ -7,8 +7,7 @@ An agent can reach a right answer by hallucinating a tool or skipping the approv
     forbidden: [drop_table]                   # never, anywhere
     requires_before: {write_record: [request_approval]}   # a call is legal only if these were called earlier in the turn
 
-Trajectories are the ``tool_transitions`` JSONL records (one per call, see ``tool_transitions.py``), grouped per turn by
-(session_id, request). Run it on any corpus, e.g. in a CI job of the repo that owns the agents::
+Trajectories are the ``tool_transitions`` JSONL records (one per call, see ``tool_transitions.py``), split per turn. Run it on any corpus, e.g. in a CI job of the repo that owns the agents::
 
     python -m duckclaw.traces.trajectory_gate golden.yaml corpus_dir_or_file.jsonl
 
@@ -54,13 +53,18 @@ def check_trajectory(tools: list[str], golden: dict[str, Any]) -> list[str]:
     return out
 
 
-def turns(records: Iterable[dict[str, Any]]) -> dict[tuple[str, str], list[str]]:
-    """Tool names per turn, in call order."""
-    grouped: dict[tuple[str, str], list[str]] = {}
+def turns(records: Iterable[dict[str, Any]]) -> list[tuple[str, list[str]]]:
+    """(label, tool names in call order) per turn. A record whose ``prior_calls`` is empty opens a new turn: the same request
+    text repeats in one session (cron prompts), so (session, request) alone would glue unrelated turns together."""
+    done: list[tuple[str, list[str]]] = []
+    live: dict[tuple[str, str], list[str]] = {}
     for r in records:
         key = (str(r.get("session_id") or ""), str((r.get("context") or {}).get("request") or ""))
-        grouped.setdefault(key, []).append(str((r.get("action") or {}).get("tool") or ""))
-    return grouped
+        if key not in live or not (r.get("context") or {}).get("prior_calls"):
+            live[key] = []
+            done.append((f"[{key[0] or '?'}] {key[1][:60]!r}", live[key]))
+        live[key].append(str((r.get("action") or {}).get("tool") or ""))
+    return done
 
 
 def read_records(path: str | Path) -> list[dict[str, Any]]:
@@ -70,14 +74,14 @@ def read_records(path: str | Path) -> list[dict[str, Any]]:
 
 
 def check_corpus(records: Iterable[dict[str, Any]], golden: dict[str, Any]) -> list[str]:
-    return [f"[{sid or '?'}] {req[:60]!r}: {v}" for (sid, req), tools in turns(records).items() for v in check_trajectory(tools, golden)]
+    return [f"{label}: {v}" for label, tools in turns(records) for v in check_trajectory(tools, golden)]
 
 
 def learn_golden(records: Iterable[dict[str, Any]], min_count: int = 3) -> dict[str, Any]:
     seen: Counter[str] = Counter()
     start: Counter[str] = Counter()
     pairs: Counter[tuple[str, str]] = Counter()
-    for tools in turns(records).values():
+    for _, tools in turns(records):
         seen.update(tools)
         start[tools[0]] += 1
         pairs.update(zip(tools, tools[1:]))

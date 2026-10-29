@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from duckclaw.traces.trajectory_gate import check_corpus, check_trajectory, learn_golden, load_golden, main, read_records
+from duckclaw.traces.trajectory_gate import check_corpus, check_trajectory, learn_golden, load_golden, main, read_records, turns
 
 FIX = Path(__file__).parent / "fixtures" / "trajectories"
 
@@ -51,3 +51,8 @@ def test_learned_golden_accepts_its_corpus_and_rejects_rare_or_new_paths() -> No
     strict = learn_golden(records, min_count=2)  # fixture paths seen once each are not "golden" at 2
     assert "write_record" not in strict["edges"]
     assert check_trajectory(["read_sql", "run_sandbox", "hallucinated_tool"], learned)
+
+
+def test_a_repeated_request_in_one_session_is_two_turns() -> None:
+    assert [t for _, t in turns(read_records(FIX))].count(["read_sql", "run_sandbox"]) == 1
+    assert len(turns(read_records(FIX))) == 4

@@ -1,8 +1,9 @@
 """Worlds: self-hosted worlds (a game server, say) and their bots.
 
 DuckClaw does not host a world or start a bot: it stores what the person who runs the extension configures here and shows the status that the runner
-reports. The runner (an extension process, anywhere) reads ``GET /worlds`` and reports with ``POST /worlds/bots/status``, with the admin key or with its own
-limited ``X-Worlds-Runner-Key`` (``DUCKCLAW_WORLDS_RUNNER_KEY``), which opens only those two calls.
+reports. The runner (an extension process, anywhere) reads ``GET /worlds``, reports with ``POST /worlds/bots/status`` and may send deliberate turns to the bot's
+worker with ``POST /worlds/think`` (``worlds_think.py``), with the admin key or with its own limited ``X-Worlds-Runner-Key`` (``DUCKCLAW_WORLDS_RUNNER_KEY``), which
+opens only those three calls.
 Every mutation is a typed command through the DB-Writer queue; reads open the hub read-only, scoped to tenant + actor.
 """
 

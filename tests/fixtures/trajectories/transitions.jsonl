@@ -1,0 +1,8 @@
+{"session_id": "s1", "context": {"request": "summarize sales", "prior_calls": []}, "action": {"tool": "read_sql", "args": "{}"}, "outcome": {"status": "ok"}}
+{"session_id": "s1", "context": {"request": "summarize sales", "prior_calls": []}, "action": {"tool": "read_sql", "args": "{}"}, "outcome": {"status": "ok"}}
+{"session_id": "s1", "context": {"request": "summarize sales", "prior_calls": []}, "action": {"tool": "run_sandbox", "args": "{}"}, "outcome": {"status": "ok"}}
+{"session_id": "s2", "context": {"request": "fix a record", "prior_calls": []}, "action": {"tool": "read_sql", "args": "{}"}, "outcome": {"status": "ok"}}
+{"session_id": "s2", "context": {"request": "fix a record", "prior_calls": []}, "action": {"tool": "request_approval", "args": "{}"}, "outcome": {"status": "ok"}}
+{"session_id": "s2", "context": {"request": "fix a record", "prior_calls": []}, "action": {"tool": "write_record", "args": "{}"}, "outcome": {"status": "ok"}}
+{"session_id": "s3", "context": {"request": "delegate", "prior_calls": []}, "action": {"tool": "invoke_worker", "args": "{}"}, "outcome": {"status": "ok"}}
+{"session_id": "s3", "context": {"request": "delegate", "prior_calls": []}, "action": {"tool": "read_sql", "args": "{}"}, "outcome": {"status": "ok"}}

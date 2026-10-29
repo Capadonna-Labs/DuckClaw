@@ -1,0 +1,11 @@
+# Example golden DAG used by tests/test_trajectory_gate.py (generic tool names).
+start: [read_sql, run_sandbox, invoke_worker]
+edges:
+  read_sql: [read_sql, run_sandbox, request_approval]
+  run_sandbox: [read_sql, run_sandbox, request_approval]
+  invoke_worker: [read_sql]
+  request_approval: [write_record]
+  write_record: []
+forbidden: [drop_table]
+requires_before:
+  write_record: [request_approval]

@@ -32,6 +32,7 @@ from duckclaw.workers.factory_sandbox_notify import (
 )
 from duckclaw.workers.skill_tool_registry import read_visual_artifact_image_as_b64 as _read_visual_artifact_image_as_b64
 from duckclaw.workers.tool_output_truncation import compact_run_sandbox_tool_content_for_llm as _compact_run_sandbox_tool_content_for_llm
+from duckclaw.workers.untrusted_text import sanitize_untrusted_text
 from duckclaw.mcp_android_vision import (
     is_android_screenshot_tool,
     process_android_screenshot_tool_result,
@@ -179,7 +180,7 @@ def make_tools_node(ctx: WorkerGraphContext):
             exc: BaseException | None = None,
         ) -> str:
             nonlocal _fail_counts
-            content = normalize_tool_failure(content, exc=exc)
+            content = sanitize_untrusted_text(normalize_tool_failure(content, exc=exc), source=tool_name)
             _tool_max = harness_max_chars_for_tool(tool_name, _max_chars)
             content, was_trunc = truncate_tool_result(content, _tool_max)
             if was_trunc:

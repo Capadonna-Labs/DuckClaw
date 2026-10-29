@@ -23,6 +23,14 @@ def test_checks_catch_each_kind_of_miss() -> None:
     assert len(bad) >= 4 and any("forbidden tool place_order" in b for b in bad)
 
 
+def test_regex_forbidden_tools_and_call_any() -> None:
+    case = {"must_not_call_match": ["^(execute|place)_"], "must_call_any": ["read_sql", "get_quote"]}
+    assert check_case(case, {"tools": ["get_quote", "propose_entry"]}) == []
+    bad = check_case(case, {"tools": ["execute_new_thing", "web_search"]})
+    assert any("matches /^(execute|place)_/" in b for b in bad) and any("called none of" in b for b in bad)
+    assert check_case(case, {"tools": []}) == ["called none of ['read_sql', 'get_quote']"]
+
+
 def test_runs_are_classified_always_pass_always_fail_or_flaky() -> None:
     cases = [{"id": "a", "must_match": ["ok"]}, {"id": "b", "must_match": ["ok"]}, {"id": "c", "must_match": ["ok"]}]
     calls = {"c": 0}

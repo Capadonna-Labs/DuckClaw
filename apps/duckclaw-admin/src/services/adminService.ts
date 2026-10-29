@@ -14,6 +14,7 @@ import { skillsApi } from './admin/skillsApi';
 import { templatesApi } from './admin/templatesApi';
 import { trainApi } from './admin/trainApi';
 import { workspaceApi } from './admin/workspaceApi';
+import { worldsApi } from './admin/worldsApi';
 
 export type { TemplateSummary, TemplateDetail } from '@/types/admin';
 export type {
@@ -114,6 +115,7 @@ export const adminService = {
   ...opsApi,
   ...cronsApi,
   ...workspaceApi,
+  ...worldsApi,
   ...chatApi,
   ...trainApi,
   ...sandboxApi,

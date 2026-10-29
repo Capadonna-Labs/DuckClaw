@@ -14,8 +14,8 @@ describe('parseJsonObject', () => {
 });
 
 describe('drafts', () => {
-  const world = { id: 'w', name: 'Casa', kind: 'minecraft', host: '10.0.0.5', port: 25565, config: { edition: 'java' }, enabled: false, bots: [] } as World;
-  const bot = { id: 'b', world_id: 'w', name: 'Capadonna', worker_id: 'npc', settings: { model: 'm' }, enabled: true } as WorldBot;
+  const world = { id: 'w', name: 'Casa', kind: 'minecraft', host: '10.0.0.5', port: 25565, config: { edition: 'java' }, enabled: false, bots: [] } as unknown as World;
+  const bot = { id: 'b', world_id: 'w', name: 'Capadonna', worker_id: 'npc', settings: { model: 'm' }, enabled: true } as unknown as WorldBot;
 
   it('round-trips an existing world and bot into form text', () => {
     const d = worldDraftOf(world);

@@ -10,11 +10,11 @@ const send = (path: string, method: string, body?: Body) =>
   });
 
 export const worldsApi = {
-  list: () => adminFetch<{ worlds: World[]; stale_after_s: number }>('/worlds'),
+  listWorlds: () => adminFetch<{ worlds: World[]; stale_after_s: number }>('/worlds'),
   createWorld: (body: Body) => send('/worlds', 'POST', body),
   updateWorld: (id: string, body: Body) => send('/worlds', 'PATCH', { id, ...body }),
   deleteWorld: (id: string) => send(`/worlds?id=${encodeURIComponent(id)}`, 'DELETE'),
-  createBot: (worldId: string, body: Body) => send('/worlds/bots', 'POST', { world_id: worldId, ...body }),
-  updateBot: (id: string, body: Body) => send('/worlds/bots', 'PATCH', { id, ...body }),
-  deleteBot: (id: string) => send(`/worlds/bots?id=${encodeURIComponent(id)}`, 'DELETE'),
+  createWorldBot: (worldId: string, body: Body) => send('/worlds/bots', 'POST', { world_id: worldId, ...body }),
+  updateWorldBot: (id: string, body: Body) => send('/worlds/bots', 'PATCH', { id, ...body }),
+  deleteWorldBot: (id: string) => send(`/worlds/bots?id=${encodeURIComponent(id)}`, 'DELETE'),
 };

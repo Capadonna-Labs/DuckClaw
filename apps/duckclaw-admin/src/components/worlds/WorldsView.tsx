@@ -111,7 +111,7 @@ export default function WorldsView() {
 
   const load = useCallback(async () => {
     try {
-      setWorlds((await worldsApi.list()).worlds);
+      setWorlds((await worldsApi.listWorlds()).worlds);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudo cargar Worlds');
@@ -139,7 +139,7 @@ export default function WorldsView() {
   });
   const saveBot = (world: World, bot?: WorldBot) => (d: BotDraft) => run(() => {
     const body = { name: d.name.trim(), worker_id: d.worker_id.trim(), settings: (parseJsonObject(d.settings) as { value: Record<string, unknown> }).value, enabled: d.enabled };
-    return bot ? worldsApi.updateBot(bot.id, body) : worldsApi.createBot(world.id, body);
+    return bot ? worldsApi.updateWorldBot(bot.id, body) : worldsApi.createWorldBot(world.id, body);
   });
 
   return (
@@ -202,7 +202,7 @@ export default function WorldsView() {
                 <div className="flex items-center gap-2">
                   <StatusBadge bot={b} />
                   <button className={BTN} onClick={() => setEditingBot(b.id)}><Pencil size={14} /></button>
-                  <button className={BTN} onClick={() => { if (window.confirm(`¿Borrar el bot «${b.name}»?`)) void run(() => worldsApi.deleteBot(b.id)); }}><Trash2 size={14} /></button>
+                  <button className={BTN} onClick={() => { if (window.confirm(`¿Borrar el bot «${b.name}»?`)) void run(() => worldsApi.deleteWorldBot(b.id)); }}><Trash2 size={14} /></button>
                 </div>
               </div>
             ))}

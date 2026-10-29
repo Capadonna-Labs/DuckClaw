@@ -89,3 +89,22 @@ def test_routes_live_in_their_own_domain_module_and_the_gateway_never_writes_dir
     assert "from routers.admin_domains.worlds import router as worlds_router" in admin and "router.include_router(worlds_router)" in admin
     src = Path("services/api-gateway/routers/admin_domains/worlds.py").read_text(encoding="utf-8")
     assert "read_only=True" in src and "INSERT" not in src and "UPDATE " not in src and "DELETE FROM" not in src
+
+
+def test_a_runner_key_opens_only_the_runner_calls(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_WORLDS_RUNNER_KEY", "runner-secret")
+    R = {"X-Worlds-Runner-Key": "runner-secret", "X-Duckclaw-Actor": "admin@test.local"}
+    wid = api.post("/api/v1/admin/worlds", headers=H, json={"name": "W"}).json()["world_id"]
+    bid = api.post("/api/v1/admin/worlds/bots", headers=H, json={"world_id": wid, "name": "b"}).json()["bot_id"]
+
+    assert api.get("/api/v1/admin/worlds", headers=R).status_code == 200                                   # read its config
+    assert api.post("/api/v1/admin/worlds/bots/status", headers=R, json={"bot_id": bid, "status": "online"}).status_code == 200
+    for call in (lambda h: api.post("/api/v1/admin/worlds", headers=h, json={"name": "x"}),                 # nothing else
+                 lambda h: api.delete(f"/api/v1/admin/worlds?id={wid}", headers=h),
+                 lambda h: api.patch("/api/v1/admin/worlds/bots", headers=h, json={"id": bid, "name": "x"}),
+                 lambda h: api.get("/api/v1/admin/kanban", headers=h)):
+        assert call(R).status_code in (401, 403)
+    assert api.get("/api/v1/admin/worlds", headers={"X-Worlds-Runner-Key": "wrong", "X-Duckclaw-Actor": "admin@test.local"}).status_code == 401
+
+    monkeypatch.delenv("DUCKCLAW_WORLDS_RUNNER_KEY")                                                       # unset: the runner key stops working
+    assert api.get("/api/v1/admin/worlds", headers=R).status_code == 401

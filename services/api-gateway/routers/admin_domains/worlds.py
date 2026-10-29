@@ -1,23 +1,37 @@
 """Worlds: self-hosted worlds (a game server, say) and their bots.
 
 DuckClaw does not host a world or start a bot: it stores what the person who runs the extension configures here and shows the status that the runner
-reports. The runner (an extension process, anywhere) reads ``GET /worlds`` with the admin key and reports with ``POST /worlds/bots/status``.
+reports. The runner (an extension process, anywhere) reads ``GET /worlds`` and reports with ``POST /worlds/bots/status``, with the admin key or with its own
+limited ``X-Worlds-Runner-Key`` (``DUCKCLAW_WORLDS_RUNNER_KEY``), which opens only those two calls.
 Every mutation is a typed command through the DB-Writer queue; reads open the hub read-only, scoped to tenant + actor.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import os
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, Field
 
 from routers.admin_domains.admin_common import actor_from_header, problem, require_admin_key
 
 router = APIRouter(prefix="/worlds", tags=["admin-worlds"])
+
+
+def require_admin_or_runner_key(
+    x_admin_key: str | None = Header(None, alias="X-Admin-Key"),
+    x_runner_key: str | None = Header(None, alias="X-Worlds-Runner-Key"),
+) -> None:
+    """A runner holds a key that opens only the two calls it needs (read its config, report status), never the whole admin API.
+    ``DUCKCLAW_WORLDS_RUNNER_KEY`` unset disables it: only the admin key works."""
+    runner = (os.environ.get("DUCKCLAW_WORLDS_RUNNER_KEY") or "").strip()
+    if runner and x_runner_key and hmac.compare_digest(x_runner_key.strip().encode(), runner.encode()):
+        return
+    require_admin_key(x_admin_key)
 
 
 def _stale_after_s() -> int:
@@ -127,7 +141,7 @@ async def _existing_bot(profile: dict[str, Any], bot_id: str) -> dict[str, Any] 
     return _bot(rows[0], _stale_after_s()) if rows else None
 
 
-@router.get("", dependencies=[Depends(require_admin_key)])
+@router.get("", dependencies=[Depends(require_admin_or_runner_key)])
 async def list_worlds(actor: str = Depends(actor_from_header)) -> dict[str, Any]:
     profile = await _profile(actor)
     scope = [profile["tenant_id"], profile["email"]]
@@ -232,7 +246,7 @@ async def delete_bot(id: str = Query(..., min_length=1), actor: str = Depends(ac
     return {"ok": True, "task_id": _enqueue(DeleteWorldBotCommand(tenant_id=profile["tenant_id"], actor_email=profile["email"], bot_id=id))}
 
 
-@router.post("/bots/status", dependencies=[Depends(require_admin_key)])
+@router.post("/bots/status", dependencies=[Depends(require_admin_or_runner_key)])
 async def report_bot_status(body: StatusBody, actor: str = Depends(actor_from_header)) -> dict[str, Any]:
     """The runner's report (server to server, with the admin key and the owner's actor header). Fire-and-forget like every write."""
     from duckclaw.write_commands import ReportWorldBotStatusCommand

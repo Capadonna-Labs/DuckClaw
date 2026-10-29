@@ -6,10 +6,11 @@ Backward-compatible: raw ``admin_sql`` still works via the legacy path.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class WriteCommand(BaseModel):
@@ -499,6 +500,90 @@ class DeleteKanbanCardCommand(WriteCommand):
 
     command_type: Literal["delete_kanban_card"] = "delete_kanban_card"
     card_id: str
+
+
+# ---------------------------------------------------------------------------
+# Worlds: self-hosted worlds (a game server, say) and their bots. DuckClaw stores the configuration; the runner of the extension reads it and reports status.
+# ---------------------------------------------------------------------------
+
+_WORLD_JSON_MAX_CHARS = 16_000
+# "token" only as the last word of a key (access_token, auth-token): max_tokens / tokens_per_turn are ordinary LLM budgets, not secrets.
+_SECRET_LOOKING_KEY = re.compile(r"api[_-]?key|secret|(^|[_-])token$|passw(or)?d|credential|private[_-]?key", re.I)
+
+
+def _checked_free_form(value: dict[str, Any], what: str) -> dict[str, Any]:
+    """Free-form on purpose, but never a place for secrets: the command is kept whole in admin_write_ledger and read by the UI and the runner,
+    so a key named like a secret is refused at any depth. The runner reads its secrets from its own environment."""
+    def walk(node: Any, path: str) -> None:
+        if isinstance(node, dict):
+            for k, v in node.items():
+                if _SECRET_LOOKING_KEY.search(str(k)):
+                    raise ValueError(f"{what}: '{path}{k}' looks like a secret; keep secrets in the runner's environment, not here")
+                walk(v, f"{path}{k}.")
+        elif isinstance(node, list):
+            for item in node:
+                walk(item, path)
+
+    walk(value, "")
+    if len(json.dumps(value, ensure_ascii=False, default=str)) > _WORLD_JSON_MAX_CHARS:
+        raise ValueError(f"{what} is over {_WORLD_JSON_MAX_CHARS} characters")
+    return value
+
+
+class UpsertWorldCommand(WriteCommand):
+    """Create or update a self-hosted world. Idempotent by world_id."""
+
+    command_type: Literal["upsert_world"] = "upsert_world"
+    world_id: str = Field(default_factory=lambda: f"world_{uuid.uuid4().hex[:16]}")
+    name: str = Field(min_length=1, max_length=80)
+    kind: str = Field(default="generic", pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    host: str = Field(default="", max_length=253, pattern=r"^[A-Za-z0-9._:-]*$")
+    port: int | None = Field(default=None, ge=1, le=65535)
+    config: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+    @field_validator("config")
+    @classmethod
+    def _config_has_no_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _checked_free_form(v, "config")
+
+
+class DeleteWorldCommand(WriteCommand):
+    """Delete a world and its bots, scoped to tenant + actor."""
+
+    command_type: Literal["delete_world"] = "delete_world"
+    world_id: str
+
+
+class UpsertWorldBotCommand(WriteCommand):
+    """Create or update a bot of a world. Idempotent by bot_id."""
+
+    command_type: Literal["upsert_world_bot"] = "upsert_world_bot"
+    bot_id: str = Field(default_factory=lambda: f"bot_{uuid.uuid4().hex[:16]}")
+    world_id: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=48)
+    worker_id: str = Field(default="", max_length=128)
+    settings: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+    @field_validator("settings")
+    @classmethod
+    def _settings_have_no_secrets(cls, v: dict[str, Any]) -> dict[str, Any]:
+        return _checked_free_form(v, "settings")
+
+
+class DeleteWorldBotCommand(WriteCommand):
+    command_type: Literal["delete_world_bot"] = "delete_world_bot"
+    bot_id: str
+
+
+class ReportWorldBotStatusCommand(WriteCommand):
+    """What the runner says about a bot. The only writer of status and last_seen_at."""
+
+    command_type: Literal["report_world_bot_status"] = "report_world_bot_status"
+    bot_id: str
+    status: Literal["starting", "online", "offline", "error"]
+    detail: str = Field(default="", max_length=300)
 
 
 # ---------------------------------------------------------------------------

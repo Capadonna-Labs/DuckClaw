@@ -1618,8 +1618,54 @@ _M038_ADMIN_CONVERSATIONS_META_V2: list[str] = [
     """,
 ]
 
+# Worlds: self-hosted game/simulation worlds (a game server, say) and the bots that live in them. DuckClaw only STORES the configuration and shows the
+# status the runner reports; it never hosts a world or starts a bot. ``config_json`` / ``settings_json`` are free-form on purpose (whoever runs the extension
+# decides what its runner reads); ``status`` is written only by the runner's report, never by the UI.
+_M042_WORLDS = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_worlds (
+        world_id VARCHAR PRIMARY KEY,
+        tenant_id VARCHAR NOT NULL DEFAULT 'default',
+        actor_email VARCHAR NOT NULL,
+        name VARCHAR NOT NULL,
+        kind VARCHAR NOT NULL DEFAULT 'generic',
+        host VARCHAR NOT NULL DEFAULT '',
+        port INTEGER,
+        config_json VARCHAR NOT NULL DEFAULT '{}',
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_worlds_actor
+        ON main.admin_worlds (tenant_id, actor_email)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_world_bots (
+        bot_id VARCHAR PRIMARY KEY,
+        world_id VARCHAR NOT NULL,
+        tenant_id VARCHAR NOT NULL DEFAULT 'default',
+        actor_email VARCHAR NOT NULL,
+        name VARCHAR NOT NULL,
+        worker_id VARCHAR NOT NULL DEFAULT '',
+        settings_json VARCHAR NOT NULL DEFAULT '{}',
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        status VARCHAR NOT NULL DEFAULT 'unknown',
+        status_detail VARCHAR NOT NULL DEFAULT '',
+        last_seen_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_world_bots_world
+        ON main.admin_world_bots (tenant_id, actor_email, world_id)
+    """,
+]
+
 # Versions 39-40 were retired (vertical tables moved to their extension); existing
-# hubs keep those rows, so never reuse them — the next migration is 42.
+# hubs keep those rows, so never reuse them — the next migration is 43.
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
     (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),
@@ -1630,4 +1676,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     # (worker_versions), so v2 above was skipped and the table never existed there.
     # Idempotent: a no-op on hubs that got v2.
     (41, "productivity_artifacts_ensure", _M002_PRODUCTIVITY_ARTIFACTS),
+    (42, "worlds_v1", _M042_WORLDS),
 ]

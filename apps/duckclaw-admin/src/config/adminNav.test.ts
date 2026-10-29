@@ -31,7 +31,7 @@ assert.deepEqual(primaryLabelsFor('user'), [
   'Mis agentes',
   'Base de Conocimiento',
 ]);
-assert.deepEqual(moreLabelsFor('user'), ['Sandbox']);
+assert.deepEqual(moreLabelsFor('user'), ['Sandbox', 'Worlds']);
 assert.equal(userLabels.includes('Base de Conocimiento'), true);
 assert.equal(userLabels.includes('Productividad'), false);
 assert.equal(userLabels.includes('Plataforma'), false);
@@ -51,6 +51,7 @@ assert.deepEqual(moreLabelsFor('admin'), [
   'Plataforma',
   'Integraciones',
   'Sandbox',
+  'Worlds',
   'Train',
   'Administración',
 ]);
@@ -63,6 +64,6 @@ assert.equal(adminStructure.length, 2);
 assert.equal(adminStructure[0].type === 'group' && adminStructure[0].group.id, 'primary');
 assert.equal(adminStructure[1].type === 'group' && adminStructure[1].group.id, 'more');
 assert.equal(adminStructure[0].type === 'group' && adminStructure[0].group.collapsible, false);
-assert.equal(adminStructure[1].type === 'group' && adminStructure[1].group.items.length, 5);
+assert.equal(adminStructure[1].type === 'group' && adminStructure[1].group.items.length, 6);
 
 console.log('adminNav.test.ts: ok');

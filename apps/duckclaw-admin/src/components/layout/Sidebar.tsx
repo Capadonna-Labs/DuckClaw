@@ -28,6 +28,7 @@ import {
   Monitor,
   UserCircle,
   Box,
+  Globe,
   LogOut,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
@@ -58,6 +59,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/mcp': Cable,
   '/playground': MessageCircle,
   '/sandbox': Box,
+  '/worlds': Globe,
   '/integrations': Cable,
   '/gen/image': Image,
   '/runtime': Radio,

@@ -29,7 +29,10 @@ def _strip_mercenary_spec_for_browser_worker(
 
 
 def _should_disable_mercenary_for_admin_ui(chat_id: str | None) -> bool:
-    """Consola admin / playground: nunca mercenario stub; delegar al worker con Strix browser."""
+    """Consola admin / playground: nunca mercenario stub; delegar al worker con Strix browser.
+    Los turnos de /worlds/think (chat `world-<bot>`) son del mismo tipo: el worker ejecuta con run_sandbox, el stub solo escribe `stub_completed`."""
+    if (chat_id or "").strip().startswith("world-"):
+        return True
     try:
         from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
 

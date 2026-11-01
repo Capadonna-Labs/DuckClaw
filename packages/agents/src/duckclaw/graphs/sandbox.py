@@ -1581,6 +1581,11 @@ def _mercenary_run_blocking(directive: str, limit: int, tid: str) -> dict[str, A
         pass
 
     exchange.mkdir(parents=True, exist_ok=True)
+    # The container runs as 1000:1000 and the gateway creates this dir as root (0755): without this it cannot write result.json (MERCENARY_RESULT_MISSING).
+    try:
+        exchange.chmod(0o777)
+    except OSError:
+        pass
     policy_kw = security_policy_to_docker_kwargs(policy)
     tmpfs = {
         k: v

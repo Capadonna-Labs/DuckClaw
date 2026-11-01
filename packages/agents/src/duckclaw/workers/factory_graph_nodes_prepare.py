@@ -130,7 +130,8 @@ def sandbox_enabled_for_chat(db: Any, chat_id: Any, tenant_id: Any) -> bool:
     from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
 
     v = _sandbox_setting_raw(db, chat_id, tenant_id)
-    if not v and is_admin_ui_chat_session(str(chat_id or "default")):
+    # /worlds/think chats (`world-<bot>`) run workers like the playground does: sandbox on by default, still hidden unless the turn asks for code.
+    if not v and (is_admin_ui_chat_session(str(chat_id or "default")) or str(chat_id or "").startswith("world-")):
         return True
     return v in _SANDBOX_ON_VALUES
 

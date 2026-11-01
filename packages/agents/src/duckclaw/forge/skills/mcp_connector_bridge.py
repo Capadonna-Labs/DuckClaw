@@ -385,6 +385,8 @@ def register_worker_mcp_connector_tools(
         )
         if connector_tools:
             tools_list.extend(connector_tools)
+            from duckclaw.forge.skills.mcp_call_audit import record_tool_exposure
+            record_tool_exposure(catalog_db, worker_uid, tenant_id, [t.name for t in connector_tools])
             _log.info(
                 "MCP connectors registered %d tools for worker=%s",
                 len(connector_tools),

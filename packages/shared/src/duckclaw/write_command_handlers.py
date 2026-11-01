@@ -105,6 +105,7 @@ from duckclaw.write_handlers.usage_logs import (
     _apply_append_media_usage_log,
     _apply_append_push_log,
     _apply_append_tool_call_log,
+    _apply_upsert_tool_exposure,
 )
 from duckclaw.write_handlers.workers import (
     _apply_deactivate_catalog_skill,

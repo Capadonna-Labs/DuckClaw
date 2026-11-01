@@ -38,6 +38,7 @@ from routers.admin_domains.notifications import router as notifications_router
 from routers.admin_domains.kanban_runtime import router as kanban_runtime_router
 from routers.admin_domains.worlds import router as worlds_router
 from routers.admin_domains.worlds_think import router as worlds_think_router
+from routers.admin_domains.worlds_conversation import router as worlds_conversation_router
 from routers.admin_domains.ops import router as ops_router
 from routers.admin_domains.overview import gateway_db_query_rows as _gateway_db_query_rows
 from routers.admin_domains.overview import overview_usage_metrics as _overview_usage_metrics
@@ -111,6 +112,7 @@ router.include_router(kanban_router)
 router.include_router(kanban_runtime_router)
 router.include_router(worlds_router)
 router.include_router(worlds_think_router)
+router.include_router(worlds_conversation_router)
 router.include_router(mcp_activity_router)
 router.include_router(mcp_connectors_router)
 router.include_router(notifications_router)

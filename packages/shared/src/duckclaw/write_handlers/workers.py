@@ -210,7 +210,8 @@ def _apply_upsert_user_agent(conn: Any, payload: dict) -> None:
         "source_template_id": source_template_id,
         "description": str(payload.get("description") or "").strip(),
         "system_prompt": system_prompt.strip(),
-        "skills": skills,
+        # research registers its tools only with a non-empty config (empty_config_registers=False): the web_search flag must leave one, or the pack unlocks with nothing in it
+        "skills": [{"research": {"local_search_enabled": True}} if payload.get("web_search") and str(sk).lower() == "research" else sk for sk in skills],
         "tool_profile": tool_profile,
     }
     if payload.get("browser_sandbox"):

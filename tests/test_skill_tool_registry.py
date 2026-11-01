@@ -145,3 +145,10 @@ def test_fal_is_in_skill_tool_registry() -> None:
     fal = next(item for item in DEFAULT_SKILL_TOOL_REGISTRY if item.skill_name == "fal")
     assert fal.registrar_path.endswith("fal_bridge:register_fal_skill")
     assert fal.phase == "post_llm"
+
+
+def test_research_skill_declared_as_dict_keeps_a_non_empty_config(tmp_path):
+    from duckclaw.workers.manifest import build_spec_from_manifest
+
+    spec = build_spec_from_manifest({"id": "w", "skills": [{"research": {"local_search_enabled": True}}]}, "w", tmp_path)
+    assert spec.skill_configs["research"] == {"local_search_enabled": True}

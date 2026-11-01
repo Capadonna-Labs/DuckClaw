@@ -56,3 +56,13 @@ def test_async_tools_only_with_the_flag(monkeypatch):
     assert names() == {"invoke_worker"}
     monkeypatch.setenv("DUCKCLAW_ASYNC_WORKERS_MAX", "2")
     assert names() == {"invoke_worker", "start_worker", "worker_result", "stop_worker"}
+
+
+def test_im_reply_note_is_off_by_default(monkeypatch):
+    from duckclaw.workers.factory_graph_nodes_prepare import im_reply_note
+
+    monkeypatch.delenv("DUCKCLAW_IM_REPLY_WORD_LIMIT", raising=False)
+    assert im_reply_note("Telegram") == ""
+    monkeypatch.setenv("DUCKCLAW_IM_REPLY_WORD_LIMIT", "100")
+    assert "100 palabras" in im_reply_note("Telegram")
+    assert im_reply_note("Interfaz") == ""        # the admin playground keeps long, structured answers

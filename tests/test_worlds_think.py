@@ -102,3 +102,28 @@ def test_the_module_stays_generic_and_registered() -> None:
     assert "router.include_router(worlds_think_router)" in admin
     src = Path("services/api-gateway/routers/admin_domains/worlds_think.py").read_text(encoding="utf-8").lower()
     assert "minecraft" not in src and "insert" not in src and "update " not in src
+
+
+def test_research_runs_on_its_own_worker_with_its_own_tighter_cap(api: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DUCKCLAW_WORLD_RESEARCH_PER_MIN", "1")
+    bid = _bot(api, {"planner_worker": "planner-1", "research_worker": "research-1"})
+    r = api.post("/api/v1/admin/worlds/think", headers=H, json={"bot_id": bid, "message": "¿receta de la antorcha?", "purpose": "research"})
+    assert r.status_code == 200 and r.json()["worker_id"] == "research-1"
+    assert api.seen[-1]["worker_id"] == "research-1"                        # type: ignore[attr-defined]
+    assert api.post("/api/v1/admin/worlds/think", headers=H, json={"bot_id": bid, "message": "x", "purpose": "research"}).status_code == 429
+    again = api.post("/api/v1/admin/worlds/think", headers=H, json={"bot_id": bid, "message": "x"})                 # planning is not charged against the research cap
+    assert again.status_code == 200 and again.json()["worker_id"] == "planner-1"
+
+
+def test_research_needs_its_worker_and_the_purpose_cannot_name_one(api: TestClient) -> None:
+    bare = _bot(api, {"planner_worker": "planner-1"})
+    assert api.post("/api/v1/admin/worlds/think", headers=H, json={"bot_id": bare, "message": "x", "purpose": "research"}).status_code == 409
+    assert api.post("/api/v1/admin/worlds/think", headers=H, json={"bot_id": bare, "message": "x", "purpose": "research-1"}).status_code == 422
+
+
+def test_the_journal_purpose_uses_its_own_worker(api: TestClient) -> None:
+    bid = _bot(api, {"planner_worker": "planner-1", "journal_worker": "journal-1"})
+    r = api.post("/api/v1/admin/worlds/think", headers=H, json={"bot_id": bid, "message": "anota esto", "purpose": "journal"})
+    assert r.status_code == 200 and r.json()["worker_id"] == "journal-1"
+    bare = _bot(api, {"planner_worker": "planner-1"})
+    assert api.post("/api/v1/admin/worlds/think", headers=H, json={"bot_id": bare, "message": "x", "purpose": "journal"}).status_code == 409

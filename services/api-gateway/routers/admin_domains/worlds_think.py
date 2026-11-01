@@ -1,9 +1,10 @@
 """Worlds: a bot's slow, deliberate thinking runs on a DuckClaw worker.
 
 A runner keeps its fast reflexes local and sends here the turns that are worth a worker's skills, knowledge and memory (planning what to do next). The gateway runs
-the turn on the worker named in the bot's own settings (``planner_worker``, never one the caller picks) through the same chat path as the admin playground, as the
-bot's owner, and returns the reply. The runner key opens this call like the other two runner calls; because a turn spends model tokens, each bot is capped per minute
-(``DUCKCLAW_WORLD_THINK_PER_MIN``, default 20) and the worker's own per-turn spend cap still applies.
+the turn on the worker named in the bot's own settings (``planner_worker``, ``research_worker`` when the call's purpose is ``research``: web search and sandbox for a
+question the runner cannot answer alone, or ``journal_worker`` for ``journal``: writing the bot's logbook; never a worker the caller names) through the same chat path as the admin playground, as the bot's owner, and returns the reply. The runner key opens this call like the other two runner calls; because a turn spends model tokens, each bot is capped per minute
+(``DUCKCLAW_WORLD_THINK_PER_MIN``, default 20; research turns ``DUCKCLAW_WORLD_RESEARCH_PER_MIN``, default 4, they search the web) and the worker's own per-turn spend
+cap still applies.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import os
 import re
 import time
 from collections import defaultdict, deque
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
@@ -29,22 +31,27 @@ class ThinkBody(BaseModel):
     bot_id: str = Field(..., min_length=1)
     message: str = Field(..., min_length=1, max_length=16000)
     chat_id: str | None = Field(default=None, max_length=128)
+    purpose: Literal["plan", "research", "journal"] = "plan"     # picks WHICH of the bot's own settings names the worker; the worker id is never sent by the caller
 
 
-def _per_minute() -> int:
+_SETTING = {"plan": "planner_worker", "research": "research_worker", "journal": "journal_worker"}
+
+
+def _per_minute(purpose: str = "plan") -> int:
+    env, default = {"research": ("DUCKCLAW_WORLD_RESEARCH_PER_MIN", 4), "journal": ("DUCKCLAW_WORLD_JOURNAL_PER_MIN", 4)}.get(purpose, ("DUCKCLAW_WORLD_THINK_PER_MIN", 20))
     try:
-        return max(1, int(os.environ.get("DUCKCLAW_WORLD_THINK_PER_MIN") or "20"))
+        return max(1, int(os.environ.get(env) or default))
     except ValueError:
-        return 20
+        return default
 
 
-def _allow(bot_id: str) -> bool:
+def _allow(bot_id: str, purpose: str = "plan") -> bool:
     """Sliding one-minute window per bot, in process: the gateway is a single process and a restart only resets the counter."""
     now = time.monotonic()
-    calls = _CALLS[bot_id]
+    calls = _CALLS[bot_id if purpose == "plan" else f"{bot_id}:{purpose}"]
     while calls and now - calls[0] > 60:
         calls.popleft()
-    if len(calls) >= _per_minute():
+    if len(calls) >= _per_minute(purpose):
         return False
     calls.append(now)
     return True
@@ -61,11 +68,12 @@ async def think(body: ThinkBody, request: Request, actor: str = Depends(actor_fr
         raise problem(404, "Bot no encontrado", body.bot_id)
     if not bot["enabled"]:
         raise problem(409, "Bot deshabilitado", body.bot_id)
-    worker = str(bot["settings"].get("planner_worker") or "").strip()
+    setting = _SETTING[body.purpose]
+    worker = str(bot["settings"].get(setting) or "").strip()
     if not _WORKER_ID.match(worker):
-        raise problem(409, "planner_worker no configurado en los ajustes del bot", "")
-    if not _allow(body.bot_id):
-        raise problem(429, "Demasiados turnos por minuto para este bot", str(_per_minute()))
+        raise problem(409, f"{setting} no configurado en los ajustes del bot", "")
+    if not _allow(body.bot_id, body.purpose):
+        raise problem(429, "Demasiados turnos por minuto para este bot", str(_per_minute(body.purpose)))
 
     chat = PlaygroundChatBody(worker_id=worker, message=body.message, chat_id=(body.chat_id or f"world-{body.bot_id}")[:128], tenant_id=profile["tenant_id"])
     started = time.monotonic()

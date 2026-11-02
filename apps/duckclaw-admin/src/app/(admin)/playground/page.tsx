@@ -93,12 +93,6 @@ export default function PlaygroundPage() {
   const [logsPanelOpen, setLogsPanelOpen] = useState(false);
   const [settingsPanelMode, setSettingsPanelMode] = useState<'settings' | 'logs'>('settings');
   const [toolUsageEnabled, setToolUsageEnabled] = useState(true);
-  const {
-    suggestionsEnabled,
-    notificationsEnabled,
-    handleSuggestionsToggle,
-    handleNotificationsToggle,
-  } = usePlaygroundChatToggles();
   const [sandboxToggling, setSandboxToggling] = useState(false);
   const loadConfigRunningRef = useRef(false);
   const llmRestoreCompleteRef = useRef(false);
@@ -111,6 +105,12 @@ export default function PlaygroundPage() {
     createConversation,
     selectConversationById,
   } = conv;
+  const {
+    suggestionsEnabled,
+    notificationsEnabled,
+    handleSuggestionsToggle,
+    handleNotificationsToggle,
+  } = usePlaygroundChatToggles(conv.sessionId ?? '');
   const activeProject = useMemo(
     () => (config?.projects ?? []).find((project) => project.project_id === projectId),
     [config?.projects, projectId]

@@ -398,9 +398,9 @@ async def _send_web_push_notification(*, title: str, body: str, url: str = "/", 
         from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
 
         db_path = str(get_gateway_db_path())
-        subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path)
+        subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path, tag)
         if not subscriptions:
-            logger.warning("web_push: omitida tag=%s (sin suscripciones)", tag)
+            logger.warning("web_push: omitida tag=%s (sin suscripciones o silenciada en todos los dispositivos)", tag)
             return
         result = await asyncio.to_thread(
             send_web_push_notifications,

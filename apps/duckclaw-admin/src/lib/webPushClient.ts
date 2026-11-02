@@ -10,19 +10,41 @@ function urlBase64ToArrayBuffer(value: string): ArrayBuffer {
   return buffer;
 }
 
-const PREF_KEY = 'duckclaw.chat.notificationsEnabled';
+const MUTED_KEY = 'duckclaw.chat.notificationsMuted';
 
-/** The "Notificaciones" switch of this device (default on). */
-export function notificationsPreference(): boolean {
+/** The push tag of a chat: what the server puts on its notifications (see _notify_playground_turn_done). */
+export function chatPushTag(chatId: string): string {
+  return `duckclaw-playground-${chatId}`;
+}
+
+/** Push tags of the chats whose notifications this device muted. The switch is per chat; the device itself stays subscribed. */
+export function mutedChatTags(): string[] {
   try {
-    return window.localStorage.getItem(PREF_KEY) !== '0';
+    const raw = JSON.parse(window.localStorage.getItem(MUTED_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter((t): t is string => typeof t === 'string') : [];
   } catch {
-    return true;
+    return [];
   }
 }
 
-/** Registers this device's push subscription and tells the server whether the switch is on; with the switch off an existing subscription is only marked off. */
-export async function ensureWebPushSubscription(enabled: boolean = notificationsPreference()): Promise<boolean> {
+export function isChatMuted(chatId: string): boolean {
+  return Boolean(chatId) && mutedChatTags().includes(chatPushTag(chatId));
+}
+
+export function setChatMuted(chatId: string, muted: boolean): void {
+  if (!chatId) return;
+  const tag = chatPushTag(chatId);
+  const next = mutedChatTags().filter((t) => t !== tag);
+  if (muted) next.push(tag);
+  try {
+    window.localStorage.setItem(MUTED_KEY, JSON.stringify(next.slice(-200)));
+  } catch {
+    /* ignore quota */
+  }
+}
+
+/** Registers this device's push subscription and tells the server which chats it muted. Always enabled: muting one chat must not silence the others or the system alerts. */
+export async function ensureWebPushSubscription(mutedTags: string[] = mutedChatTags()): Promise<boolean> {
   if (typeof window === 'undefined') return false;
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return false;
   if (!('Notification' in window) || Notification.permission !== 'granted') return false;
@@ -37,7 +59,6 @@ export async function ensureWebPushSubscription(enabled: boolean = notifications
 
     const registration = await navigator.serviceWorker.ready;
     const existing = await registration.pushManager.getSubscription();
-    if (!enabled && !existing) return false;
     const subscription =
       existing ??
       (await registration.pushManager.subscribe({
@@ -51,7 +72,8 @@ export async function ensureWebPushSubscription(enabled: boolean = notifications
       body: JSON.stringify({
         subscription: subscription.toJSON(),
         device_label: navigator.userAgent.slice(0, 120),
-        enabled,
+        enabled: true,
+        muted_tags: mutedTags,
       }),
     });
     return res.ok;

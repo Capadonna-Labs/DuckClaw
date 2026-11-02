@@ -27,7 +27,8 @@ class WebPushSubscriptionBody(BaseModel):
     subscription: WebPushSubscription
     device_label: str = "DuckClaw Admin"
     tenant_id: str = "global"
-    enabled: bool = True  # the device's "Notificaciones" switch: a push goes to this device only while it is on
+    enabled: bool = True  # legacy device-wide switch; the app now always sends true and mutes per chat through muted_tags
+    muted_tags: list[str] = Field(default_factory=list, max_length=200)  # push tags (one per chat) this device does not want
 
 
 class WebPushTestBody(BaseModel):
@@ -51,6 +52,7 @@ def _enqueue_subscription(body: WebPushSubscriptionBody, *, actor: str, key: str
         "subscription": body.subscription.model_dump(mode="json"),
         "device_label": body.device_label[:128],
         "enabled": body.enabled,
+        "muted_tags": [t.strip()[:160] for t in body.muted_tags if t.strip()],
     }
     command = UpsertRuntimeSettingCommand(
         tenant_id=(body.tenant_id or "global").strip() or "global",

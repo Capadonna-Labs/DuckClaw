@@ -51,12 +51,6 @@ export function FloatingAdminChat() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolUsageEnabled, setToolUsageEnabled] = useState(true);
   const [projectOverride, setProjectOverride] = useState<string | null>(null);
-  const {
-    suggestionsEnabled,
-    notificationsEnabled,
-    handleSuggestionsToggle,
-    handleNotificationsToggle,
-  } = usePlaygroundChatToggles();
   const routeProjectId = useMemo(() => {
     const fromUrl = (searchParams.get('project') || '').trim();
     if (fromUrl) return fromUrl;
@@ -77,6 +71,12 @@ export function FloatingAdminChat() {
     enabled: !onPlayground,
   });
   const { createConversation, selectConversation } = conv;
+  const {
+    suggestionsEnabled,
+    notificationsEnabled,
+    handleSuggestionsToggle,
+    handleNotificationsToggle,
+  } = usePlaygroundChatToggles(conv.sessionId ?? '');
   const chat = useAdminChat({
     chatId: conv.sessionId ?? '',
     initialWorker: pathWorker,

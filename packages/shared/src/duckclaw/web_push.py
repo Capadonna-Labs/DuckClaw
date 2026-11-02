@@ -45,7 +45,7 @@ def _rows_from_query(raw: Any) -> list[dict[str, Any]]:
     return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
-def _subscription_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
+def _subscription_from_row(row: dict[str, Any], tag: str = "") -> dict[str, Any] | None:
     raw = row.get("value_json") or row.get("value_text") or ""
     if isinstance(raw, str):
         try:
@@ -57,7 +57,9 @@ def _subscription_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
     else:
         return None
     if isinstance(payload, dict) and payload.get("enabled") is False:
-        return None  # the device switched "Notificaciones" off: no push to it (rows without the field are on)
+        return None  # legacy device-wide switch off: no push to it (rows without the field are on)
+    if tag and isinstance(payload, dict) and tag in (payload.get("muted_tags") or []):
+        return None  # this device muted that chat's notifications; its other chats and the system alerts still arrive
     subscription = payload.get("subscription") if isinstance(payload, dict) else None
     if not isinstance(subscription, dict):
         return None
@@ -68,8 +70,8 @@ def _subscription_from_row(row: dict[str, Any]) -> dict[str, Any] | None:
     return subscription
 
 
-def list_web_push_subscriptions(db_path: str) -> list[dict[str, Any]]:
-    """Read active Web Push subscriptions from the hub DB without taking a write lock.
+def list_web_push_subscriptions(db_path: str, tag: str = "") -> list[dict[str, Any]]:
+    """Read active Web Push subscriptions from the hub DB without taking a write lock; with ``tag``, the devices that muted that tag are left out.
 
     The open waits out a DB-Writer lock (db_bridge.connect_with_lock_retry); a read that still
     fails is logged as such, not silently returned as "no subscriptions".
@@ -86,7 +88,7 @@ def list_web_push_subscriptions(db_path: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in _rows_from_query(raw):
-        subscription = _subscription_from_row(row)
+        subscription = _subscription_from_row(row, tag)
         if not subscription:
             continue
         endpoint = str(subscription.get("endpoint") or "")

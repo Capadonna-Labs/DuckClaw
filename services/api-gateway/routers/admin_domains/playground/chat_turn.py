@@ -641,7 +641,8 @@ async def _notify_playground_turn_done(
         from duckclaw.web_push import list_web_push_subscriptions, send_web_push_notifications
 
         db_path = str(get_gateway_db_path())
-        subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path)
+        push_tag = f"duckclaw-playground-{session_id}"
+        subscriptions = await asyncio.to_thread(list_web_push_subscriptions, db_path, push_tag)
         if not subscriptions:
             return
         prefix = await _suggestion_selected_prefix(redis_client, session_id, incoming_message)
@@ -652,7 +653,7 @@ async def _notify_playground_turn_done(
             title=title,
             body=prefix + body,
             url="/playground",
-            tag=f"duckclaw-playground-{session_id}",
+            tag=push_tag,
         )
         if result.error or result.failed:
             _log.warning(

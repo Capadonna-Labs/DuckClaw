@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { requestNotificationPermission } from '@/lib/chatNotifications';
-import { ensureWebPushSubscription } from '@/lib/webPushClient';
+import { ensureWebPushSubscription, isChatMuted, setChatMuted } from '@/lib/webPushClient';
 
 function readLocalFlag(key: string, defaultValue: boolean): boolean {
   if (typeof window === 'undefined') return defaultValue;
@@ -23,14 +23,15 @@ function writeLocalFlag(key: string, enabled: boolean): void {
   }
 }
 
-/** Playground toggles persisted in localStorage (suggestions + notifications). */
-export function usePlaygroundChatToggles() {
+/** Playground toggles persisted in localStorage: suggestions, and notifications, which are per chat (a muted chat does not silence the others or the system alerts). */
+export function usePlaygroundChatToggles(chatId: string) {
   const [suggestionsEnabled, setSuggestionsEnabled] = useState(() =>
     readLocalFlag('duckclaw.chat.suggestionsEnabled', true)
   );
-  const [notificationsEnabled, setNotificationsEnabled] = useState(() =>
-    readLocalFlag('duckclaw.chat.notificationsEnabled', true)
-  );
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => !isChatMuted(chatId));
+  useEffect(() => {
+    setNotificationsEnabled(!isChatMuted(chatId));
+  }, [chatId]);
 
   const handleSuggestionsToggle = useCallback(() => {
     setSuggestionsEnabled((prev) => {
@@ -43,12 +44,12 @@ export function usePlaygroundChatToggles() {
   const handleNotificationsToggle = useCallback(() => {
     setNotificationsEnabled((prev) => {
       const next = !prev;
-      writeLocalFlag('duckclaw.chat.notificationsEnabled', next);
+      setChatMuted(chatId, !next);
       if (next) void requestNotificationPermission();
-      else void ensureWebPushSubscription(false); // the server stops pushing to this device
+      void ensureWebPushSubscription(); // tells the server which chats this device muted
       return next;
     });
-  }, []);
+  }, [chatId]);
 
   return {
     suggestionsEnabled,

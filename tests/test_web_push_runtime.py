@@ -57,12 +57,17 @@ def test_push_is_decided_by_the_notifications_switch_not_by_pwa_visibility() -> 
     assert "visibilityState" not in sw and "matchAll" not in sw           # the worker no longer asks whether a window is open
     assert "showNotification(title, options)" in sw                      # a delivered push is always shown (a silent push can get the subscription revoked)
     assert "enabled: bool = True" in gateway_notifications and '"enabled": body.enabled' in gateway_notifications
-    assert "ensureWebPushSubscription(false)" in toggles and "enabled," in client and "if (!enabled && !existing) return false" in client
+    assert "setChatMuted(chatId, !next)" in toggles and "muted_tags: mutedTags" in client and "enabled: true" in client   # the switch is per chat, never the whole device
+    assert "muted_tags" in gateway_notifications and "list_web_push_subscriptions, db_path, push_tag" in chat_turn and "list_web_push_subscriptions, db_path, tag" in heartbeat
     assert "send_web_push_notifications" not in suggestions               # suggestions never push (iOS cannot reply from a third-party watch)
     base = {"subscription": {"endpoint": "https://push.example/abc", "keys": {"p256dh": "x" * 20, "auth": "y" * 10}}}
     assert _subscription_from_row({"value_json": base}) is not None                       # rows saved before the switch existed stay on
     assert _subscription_from_row({"value_json": {**base, "enabled": True}}) is not None
     assert _subscription_from_row({"value_json": {**base, "enabled": False}}) is None     # the device switched Notificaciones off
+    muted = {"value_json": {**base, "muted_tags": ["duckclaw-playground-a"]}}
+    assert _subscription_from_row(muted, "duckclaw-playground-a") is None       # that chat is muted on this device
+    assert _subscription_from_row(muted, "duckclaw-playground-b") is not None   # other chats still arrive
+    assert _subscription_from_row(muted, "heartbeat-quant") is not None         # and so do the system alerts
 
 
 def test_vapid_generator_is_documented_and_available() -> None:

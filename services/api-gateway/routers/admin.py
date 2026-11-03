@@ -28,6 +28,7 @@ from routers.admin_domains.env_config import router as env_config_router
 from routers.admin_domains.fly_commands_catalog import router as fly_commands_catalog_router
 from routers.admin_domains.gateway_resources import router as gateway_resources_router
 from routers.admin_domains.hitl_admin import router as hitl_admin_router
+from routers.admin_domains.hitl_requests import router as hitl_requests_router
 from routers.admin_domains.worker_llm import router as worker_llm_router
 from routers.admin_domains.integration_catalog import router as integration_catalog_router
 from routers.admin_domains.kanban import router as kanban_router
@@ -108,6 +109,7 @@ router.include_router(worker_llm_router)
 router.include_router(gateway_resources_router)
 router.include_router(integration_catalog_router)
 router.include_router(hitl_admin_router)
+router.include_router(hitl_requests_router)
 router.include_router(kanban_router)
 router.include_router(kanban_runtime_router)
 router.include_router(worlds_router)

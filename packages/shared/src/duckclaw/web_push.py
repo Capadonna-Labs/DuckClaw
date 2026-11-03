@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -45,6 +46,21 @@ def _rows_from_query(raw: Any) -> list[dict[str, Any]]:
     return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
 
 
+_CHAT_TAG_PREFIX = "duckclaw-playground-"
+
+
+def _tag_muted(tag: str, muted: list[Any]) -> bool:
+    """The device mutes a chat by its playground tag; every push of that chat (heartbeat goals / goals-wall / loop tags carry the same chat id) must honour it."""
+    for m in muted:
+        m = str(m)
+        if m == tag:
+            return True
+        cid = m[len(_CHAT_TAG_PREFIX):] if m.startswith(_CHAT_TAG_PREFIX) else ""
+        if cid and re.search(rf"(?:^|-){re.escape(cid)}(?:-|$)", tag):
+            return True
+    return False
+
+
 def _subscription_from_row(row: dict[str, Any], tag: str = "") -> dict[str, Any] | None:
     raw = row.get("value_json") or row.get("value_text") or ""
     if isinstance(raw, str):
@@ -58,7 +74,7 @@ def _subscription_from_row(row: dict[str, Any], tag: str = "") -> dict[str, Any]
         return None
     if isinstance(payload, dict) and payload.get("enabled") is False:
         return None  # legacy device-wide switch off: no push to it (rows without the field are on)
-    if tag and isinstance(payload, dict) and tag in (payload.get("muted_tags") or []):
+    if tag and isinstance(payload, dict) and _tag_muted(tag, payload.get("muted_tags") or []):
         return None  # this device muted that chat's notifications; its other chats and the system alerts still arrive
     subscription = payload.get("subscription") if isinstance(payload, dict) else None
     if not isinstance(subscription, dict):

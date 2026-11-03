@@ -65,3 +65,20 @@ def test_empty_until_the_first_call_is_recorded() -> None:
 def test_router_is_mounted_in_the_admin_api() -> None:
     src = (_gw / "routers" / "admin.py").read_text(encoding="utf-8")
     assert "router.include_router(mcp_activity_router)" in src
+
+
+def test_unused_tools_flags_exposed_but_never_called() -> None:
+    from duckclaw.write_handlers.usage_logs import _apply_upsert_tool_exposure
+
+    db = _seed()
+    for name in ("mcp__tailscale__list_devices", "mcp__tailscale__rotate_key"):
+        _apply_upsert_tool_exposure(db.con, {"tenant_id": "default", "worker_id": "w", "tool_names": [name]})
+    db.con.execute("UPDATE tool_exposure SET first_seen = CURRENT_TIMESTAMP - INTERVAL 30 DAY")
+    _apply_upsert_tool_exposure(db.con, {"tenant_id": "default", "worker_id": "w", "tool_names": ["mcp__hf__new_tool"]})   # exposed today: too early to judge
+    db.con.execute("UPDATE tool_call_log SET worker_id = 'w'")
+    out = mcp_activity.read_unused_tools(db, "default", days=14)
+    assert [u["tool_name"] for u in out["unused"]] == ["mcp__tailscale__rotate_key"]
+
+
+def test_unused_tools_empty_before_any_exposure() -> None:
+    assert mcp_activity.read_unused_tools(_Db(duckdb.connect(":memory:")), "default", days=14) == {"table_ready": False, "unused": []}

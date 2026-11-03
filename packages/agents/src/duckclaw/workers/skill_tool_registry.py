@@ -79,6 +79,13 @@ DEFAULT_SKILL_TOOL_REGISTRY: tuple[SkillToolRegistrar, ...] = (
         keyword_context={"db": "db", "tenant_id": "tenant_id"},
     ),
     SkillToolRegistrar(
+        skill_name="databento",
+        phase="post_llm",
+        registrar_path="duckclaw.forge.skills.databento_bridge:register_databento_skill",
+        empty_config_registers=False,
+        keyword_context={"db": "db", "tenant_id": "tenant_id"},
+    ),
+    SkillToolRegistrar(
         skill_name="socrata",
         phase="post_llm",
         registrar_path="duckclaw.forge.skills.socrata_bridge:register_socrata_skill",

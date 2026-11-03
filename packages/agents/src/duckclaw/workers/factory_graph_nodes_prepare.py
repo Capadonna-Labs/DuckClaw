@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 try:
@@ -15,6 +16,23 @@ from duckclaw.workers.factory_agent_node_helpers import _identity_fields
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.provider_input_budget import apply_provider_input_budget as _apply_provider_input_budget
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+
+_IM_LABELS = ("Telegram", "Discord")
+
+
+def im_reply_note(label: str) -> str:
+    """Instant-messaging channels get a hard reply cap when DUCKCLAW_IM_REPLY_WORD_LIMIT > 0 (default 0 = off: it changes every Telegram/Discord answer)."""
+    try:
+        limit = int(os.environ.get("DUCKCLAW_IM_REPLY_WORD_LIMIT") or "0")
+    except ValueError:
+        limit = 0
+    if limit <= 0 or label not in _IM_LABELS:
+        return ""
+    return (
+        f"Canal de mensajería instantánea: responde en máximo {limit} palabras y avisa solo cuando haga falta una decisión o aprobación. "
+        "Si el detalle es largo, resume y ofrece ampliar."
+    )
 
 
 def make_prepare_node(ctx: WorkerGraphContext):
@@ -60,6 +78,9 @@ def make_prepare_node(ctx: WorkerGraphContext):
                     " (Next.js Admin). Los comandos fly de Telegram no aplican; "
                     "usa herramientas o `/approve-code` en el chat."
                 )
+        note = im_reply_note(integration_label)
+        if note:
+            integration_prefix = (integration_prefix + "\n" + note) if integration_prefix else note
         messages: list[Any] = []
         if integration_prefix:
             messages.append(SystemMessage(content=integration_prefix))

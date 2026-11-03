@@ -114,6 +114,31 @@ def _apply_append_media_usage_log(conn: Any, payload: dict) -> None:
     )
 
 
+def _apply_upsert_tool_exposure(conn: Any, payload: dict) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tool_exposure (
+            tenant_id VARCHAR NOT NULL,
+            worker_id VARCHAR NOT NULL,
+            tool_name VARCHAR NOT NULL,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (tenant_id, worker_id, tool_name)
+        )
+        """
+    )
+    tenant = str(payload.get("tenant_id") or "default").strip()[:128] or "default"
+    worker = str(payload.get("worker_id") or "").strip()[:64]
+    if not worker:
+        raise ValueError("worker_id required")
+    for name in {str(n).strip()[:128] for n in payload.get("tool_names") or [] if str(n).strip()}:
+        conn.execute(
+            "INSERT INTO tool_exposure (tenant_id, worker_id, tool_name) VALUES (?, ?, ?) "
+            "ON CONFLICT (tenant_id, worker_id, tool_name) DO UPDATE SET last_seen = now()",
+            [tenant, worker, name],
+        )
+
+
 def _apply_append_tool_call_log(conn: Any, payload: dict) -> None:
     conn.execute(
         """
@@ -195,4 +220,5 @@ def _apply_append_push_log(conn: Any, payload: dict) -> None:
 register_handler("append_llm_usage_log", _apply_append_llm_usage_log)
 register_handler("append_push_log", _apply_append_push_log)
 register_handler("append_tool_call_log", _apply_append_tool_call_log)
+register_handler("upsert_tool_exposure", _apply_upsert_tool_exposure)
 register_handler("append_media_usage_log", _apply_append_media_usage_log)

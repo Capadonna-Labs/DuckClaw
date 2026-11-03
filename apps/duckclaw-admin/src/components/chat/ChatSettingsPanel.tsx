@@ -23,6 +23,7 @@ export type ChatSettingsPanelProps = {
   suggestionsEnabled: boolean;
   onSuggestionsToggle: () => void;
   notificationsEnabled: boolean;
+  notificationsChatTitle?: string | null;
   onNotificationsToggle: () => void;
 };
 
@@ -42,6 +43,7 @@ export function ChatSettingsPanel({
   suggestionsEnabled,
   onSuggestionsToggle,
   notificationsEnabled,
+  notificationsChatTitle,
   onNotificationsToggle,
 }: ChatSettingsPanelProps) {
   const { config, workerId, setWorkerId, vaultPath, setVaultPath, reloadConfig, loading } = chat;
@@ -115,6 +117,7 @@ export function ChatSettingsPanel({
         suggestionsEnabled={suggestionsEnabled}
         onSuggestionsToggle={onSuggestionsToggle}
         notificationsEnabled={notificationsEnabled}
+        notificationsChatTitle={notificationsChatTitle}
         notificationPermission={notificationPermission()}
         onNotificationsToggle={onNotificationsToggle}
         chatId={chatId}

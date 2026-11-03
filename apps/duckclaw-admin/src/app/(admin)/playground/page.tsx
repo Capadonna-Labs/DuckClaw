@@ -648,6 +648,7 @@ export default function PlaygroundPage() {
         suggestionsEnabled={suggestionsEnabled}
         onSuggestionsToggle={handleSuggestionsToggle}
         notificationsEnabled={notificationsEnabled}
+        notificationsChatTitle={conv.conversationTitle}
         notificationPermission={notificationPermission()}
         onNotificationsToggle={handleNotificationsToggle}
         logsControls={logsPanelOpen ? <Pm2LiveLogsControls variant="studio" /> : null}

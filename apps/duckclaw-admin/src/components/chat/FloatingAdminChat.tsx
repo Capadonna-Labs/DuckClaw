@@ -17,7 +17,7 @@ import { useFloatingChatUnread } from '@/components/chat/useFloatingChatUnread';
 import { usePlaygroundChatToggles } from '@/components/playground/usePlaygroundChatToggles';
 import { titleForAdminPath } from '@/config/adminNav';
 import { adminService } from '@/services/adminService';
-import { sectionFromPath } from '@/lib/conversationStorage';
+import { readActiveConversationId, sectionFromPath } from '@/lib/conversationStorage';
 import {
   defaultKnowledgeScope,
   normalizeKnowledgeScope,
@@ -140,6 +140,15 @@ export function FloatingAdminChat() {
     return () => cancelAnimationFrame(id);
   }, [open, conv.sessionId, historyLoading, messages.length, scrollToBottom]);
 
+  // The active conversation is shared with the Playground: when the bubble opens or the page changes, follow the stored one so the notification switch is the one of the chat shown.
+  const { sessionId: activeSessionId, selectConversationById: followConversation } = conv;
+  useEffect(() => {
+    if (!open || onPlayground || !tenantId) return;
+    const stored = readActiveConversationId(tenantId);
+    if (stored && stored !== activeSessionId) void followConversation(stored).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, pathname, tenantId]);
+
   useEffect(() => {
     if (onPlayground) return;
     adminService
@@ -256,6 +265,7 @@ export function FloatingAdminChat() {
             suggestionsEnabled={suggestionsEnabled}
             onSuggestionsToggle={handleSuggestionsToggle}
             notificationsEnabled={notificationsEnabled}
+            notificationsChatTitle={conv.conversationTitle}
             onNotificationsToggle={handleNotificationsToggle}
           />
         </div>

@@ -11,6 +11,7 @@ The transcript is plain dialogue. The planner's own turns (``/worlds/think``) st
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import os
@@ -50,8 +51,18 @@ class TranscriptBody(BaseModel):
     items: list[TranscriptItem] = Field(..., min_length=1, max_length=20)
 
 
+def _bot_vault_path(actor: str, bot: dict[str, Any]) -> str:
+    """The bot's own private vault (created once, named after the bot), as the repo-relative path the vault selector lists."""
+    from core.admin_identity import vault_user_id_for_actor
+    from duckclaw.vaults import _slug_vault_id, create_vault, list_vault_options_for_user
+
+    uid, name = vault_user_id_for_actor(actor), str(bot.get("name") or "Bot")
+    mine = [o for o in list_vault_options_for_user(uid) if o.get("scope") == "private" and (o.get("vault_id") or "") == _slug_vault_id(name)]
+    return (mine[0]["path"] if mine else "") or str(create_vault(uid, name)["db_path"])
+
+
 async def _append(request: Request, profile: dict[str, Any], bot: dict[str, Any], actor: str, items: list[dict[str, str]]) -> int:
-    from core.admin_conversations import upsert_conversation_meta
+    from core.admin_conversations import get_conversation_meta, patch_conversation_vault, upsert_conversation_meta
     from core.chat_history import normalize_history_item, redis_load_chat_history, redis_save_chat_history
 
     redis_client = getattr(request.app.state, "redis", None)
@@ -61,6 +72,9 @@ async def _append(request: Request, profile: dict[str, Any], bot: dict[str, Any]
     saved = saved + [i for i in (normalize_history_item(x) for x in items) if i]
     await redis_save_chat_history(redis_client, tenant, sid, saved)
     await upsert_conversation_meta(redis_client, tenant_id=tenant, session_id=sid, actor=actor, section="worlds", title=f"{bot.get('name') or 'Bot'} (mundo)", message_count=len(saved), **{"user_message" if items[-1]["role"] == "user" else "assistant_message": items[-1]["content"]})
+    meta = await get_conversation_meta(redis_client, tenant, sid)
+    if meta is not None and not meta.vault_db_path:
+        await patch_conversation_vault(redis_client, tenant, sid, await asyncio.to_thread(_bot_vault_path, actor, bot))
     return len(saved)
 
 

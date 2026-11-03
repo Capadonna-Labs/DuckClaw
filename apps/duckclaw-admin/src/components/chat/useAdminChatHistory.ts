@@ -405,6 +405,8 @@ export function useAdminChatHistory({
         if (convVault) {
           setVaultPathState(convVault);
           writeStoredVaultPath(chatId, convVault);
+        } else {
+          setVaultPathState(''); // a chat with no vault of its own must not inherit the one selected in the previous chat
         }
       })
       .catch((err) => {

@@ -60,7 +60,7 @@ async def _append(request: Request, profile: dict[str, Any], bot: dict[str, Any]
     saved = await redis_load_chat_history(redis_client, tenant, sid)
     saved = saved + [i for i in (normalize_history_item(x) for x in items) if i]
     await redis_save_chat_history(redis_client, tenant, sid, saved)
-    await upsert_conversation_meta(redis_client, tenant_id=tenant, session_id=sid, actor=actor, section="worlds", title=f"{bot.get('name') or 'Bot'} (mundo)", message_count=len(saved))
+    await upsert_conversation_meta(redis_client, tenant_id=tenant, session_id=sid, actor=actor, section="worlds", title=f"{bot.get('name') or 'Bot'} (mundo)", message_count=len(saved), **{"user_message" if items[-1]["role"] == "user" else "assistant_message": items[-1]["content"]})
     return len(saved)
 
 

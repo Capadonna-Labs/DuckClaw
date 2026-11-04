@@ -334,7 +334,7 @@ presets:
       note: Requiere Node y los navegadores de Playwright instalados en el host (npx playwright install chromium). Opt-in, no por defecto.
 
   # Polygon.io MCP oficial (polygon-io/mcp_polygon, MIT, experimental), por stdio con uvx. Trades, quotes (NBBO), agregados y snapshots: microestructura a nivel de tick,
-  # sin profundidad de libro (para eso, el skill databento). Solo lectura. Versión FIJA a propósito; Polygon se está renombrando a Massive (massive-com/mcp_massive):
+  # sin profundidad de libro. Solo lectura. Versión FIJA a propósito; Polygon se está renombrando a Massive (massive-com/mcp_massive):
   # verificar el sucesor al subir la versión. La clave llega por POLYGON_API_KEY desde Integraciones.
   polygon:
     profile: stdio_uvx_ro

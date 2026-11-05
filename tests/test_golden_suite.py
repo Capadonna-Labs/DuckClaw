@@ -104,3 +104,23 @@ def test_claims_need_a_tool_and_variants_become_cases(tmp_path: Path) -> None:
     got = load_cases(f)
     assert [(c["id"], c["request"]) for c in got] == [("a", "one"), ("a#v1", "two"), ("a#v2", "three")] and all(c["must_match"] == ["ok"] and "variants" not in c for c in got[1:])
 
+
+
+def test_figures_must_come_from_tool_outputs() -> None:
+    from duckclaw.evals.golden_suite import significant_numbers, unsupported_numbers
+
+    assert [v for _, v in significant_numbers("SPY 1,234.50 y 1.234,5; 2025; 2026-11-05 a las 17:50; 7 días; 3,2 %")] == [1234.5, 1234.5, 3.2]
+    out = '{"qty": 984, "avg_cost": 44.8123, "pnl_pct": 0.0321}'
+    assert unsupported_numbers("984 acciones a 44,81 (+3,21 %)", [out]) == []    # rounding and fraction->percent are fine
+    assert unsupported_numbers("984 acciones a 51,20", [out]) == ["51,20"]
+    case = {"id": "a", "numbers_from_tools": True, "request": "posición"}
+    assert check_case(case, {"reply": "Tienes 984 a 51,20", "tools": ["x"], "spans": [{"output": out}]}) == ["figures no tool returned: 51,20"]
+    assert check_case(case, {"reply": "Tienes 984 a 51,20", "tools": ["x"]}) == []   # a runner without spans: not judged
+
+
+def test_robust_matching_order_and_length() -> None:
+    assert check_case({"id": "a", "must_match": ["ningun dato"]}, {"reply": "NINGÚN   dato"}) == []
+    assert check_case({"id": "a", "max_chars": 5}, {"reply": "123456"}) == ["reply is 6 chars (max 5)"]
+    rule = {"id": "a", "must_call_before": [{"any": ["read_sql"], "before": "propose_trade_signal"}]}
+    assert check_case(rule, {"tools": ["propose_trade_signal", "read_sql"]}) == ["called propose_trade_signal before any of ['read_sql']"]
+    assert check_case(rule, {"tools": ["read_sql", "propose_trade_signal"]}) == [] and check_case(rule, {"tools": []}) == []

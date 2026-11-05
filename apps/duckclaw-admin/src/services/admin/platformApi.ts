@@ -47,6 +47,10 @@ export interface EvalCaseResult {
   unverified?: boolean;
   requirement?: string;
   category?: string;
+  difficulty?: 'easy' | 'hard';
+  source?: string;
+  keep_reason?: string;
+  reviewed?: string;
   severity?: 'high' | 'moderate' | 'low';
   priority?: '' | 'fix_now' | 'improve_later';
   review?: EvalReview;
@@ -58,6 +62,8 @@ export interface EvalSuiteSummary {
   runnable: boolean;
   running: boolean;
   requirements: { id: string; text: string; question: string; cases: string[]; failing: string[] }[];
+  by_difficulty: Record<string, [number, number]>;
+  review_due: string[];
   by_type: { type: string; passing: number; total: number; prev_passing: number | null; prev_total: number | null }[];
   latest: null | { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number; cases: Record<string, EvalCaseResult> };
   regressed: string[];

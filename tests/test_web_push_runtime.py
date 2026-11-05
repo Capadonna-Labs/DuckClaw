@@ -281,3 +281,19 @@ def test_evals_tab_priorities_and_saved_reviews(monkeypatch: pytest.MonkeyPatch)
     with pytest.raises(Exception):
         evals.ReviewBody(verdict="maybe")
 
+
+def test_evals_tab_splits_the_score_by_difficulty_and_flags_stale_reviews() -> None:
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.evals import summarize
+
+    def case(status: str, diff: str, reviewed: str | None) -> dict:
+        return {"status": status, "passes": 3, "n": 3, "type": "t", "failures": [], "difficulty": diff, **({"reviewed": reviewed} if reviewed else {})}
+
+    run = {"suite": "q", "ts": "2026-11-05T22:30:00Z", "cases": {"a": case("always_pass", "easy", "2026-11-01"), "b": case("always_pass", "easy", "2026-01-01"),
+                                                                  "c": case("always_fail", "hard", None), "d": case("always_pass", "hard", "2026-10-01")}}
+    got = summarize([{"value_json": json.dumps(run)}])[0]
+    assert got["by_difficulty"] == {"easy": [2, 2], "hard": [1, 2]} and got["review_due"] == ["b", "c"]
+

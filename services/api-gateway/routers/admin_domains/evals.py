@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import time
+from datetime import date, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -61,10 +62,34 @@ def summarize(rows: list[dict[str, Any]], runs_per_suite: int = 30) -> list[dict
                      "failing": sorted(cid for cid, c in run["cases"].items() if c.get("requirement") == r["id"] and c.get("status") != "always_pass")}
                     for r in reqs.values()]
 
+        def by_difficulty(run: dict[str, Any]) -> dict[str, list[int]]:
+            acc: dict[str, list[int]] = {}
+            for c in run["cases"].values():
+                a = acc.setdefault(str(c.get("difficulty") or "?"), [0, 0])
+                a[0] += c.get("status") == "always_pass"
+                a[1] += 1
+            return acc
+
+        def review_due(run: dict[str, Any]) -> list[str]:
+            """Cases nobody has reviewed in 90 days (or ever): the benchmark is curated, not write-once."""
+            try:
+                today = datetime.fromisoformat(str(run.get("ts") or "").replace("Z", "+00:00")).date()
+            except ValueError:
+                return []
+            due = []
+            for cid, c in run["cases"].items():
+                try:
+                    stale = (today - date.fromisoformat(str(c.get("reviewed") or ""))).days > 90
+                except ValueError:
+                    stale = True
+                if stale:
+                    due.append(cid)
+            return sorted(due)
+
         now_t, prev_t = by_type(latest), by_type(before)
         types = [{"type": t, "passing": p, "total": n, "prev_passing": prev_t[t][0] if t in prev_t else None, "prev_total": prev_t[t][1] if t in prev_t else None}
                  for t, (p, n) in sorted(now_t.items())]
-        out.append({"suite": suite, "by_type": types, "requirements": by_requirement(latest) if latest.get("requirements") or any(c.get("requirement") for c in latest["cases"].values()) else [], "latest": {"ts": latest.get("ts"), "model": latest.get("model", ""), "cases": latest["cases"], **counts(latest)}, "regressed": regressed,
+        out.append({"suite": suite, "by_type": types, "by_difficulty": by_difficulty(latest), "review_due": review_due(latest), "requirements": by_requirement(latest) if latest.get("requirements") or any(c.get("requirement") for c in latest["cases"].values()) else [], "latest": {"ts": latest.get("ts"), "model": latest.get("model", ""), "cases": latest["cases"], **counts(latest)}, "regressed": regressed,
                     "history": [{"ts": r.get("ts"), "model": r.get("model", ""), **counts(r)} for r in runs]})
     return out
 
@@ -156,7 +181,7 @@ async def get_eval_runs(limit: int = Query(200, ge=1, le=1000)) -> dict[str, Any
     except FileNotFoundError:
         suites = []
     have = {s["suite"] for s in suites}
-    suites += [{"suite": k, "latest": None, "regressed": [], "history": [], "by_type": [], "requirements": []} for k in runnable() if k not in have]   # never run yet: still offer the button
+    suites += [{"suite": k, "latest": None, "regressed": [], "history": [], "by_type": [], "by_difficulty": {}, "review_due": [], "requirements": []} for k in runnable() if k not in have]   # never run yet: still offer the button
     for s in suites:
         s["runnable"], s["running"] = s["suite"] in runnable(), is_running(s["suite"])
     return {"suites": suites}

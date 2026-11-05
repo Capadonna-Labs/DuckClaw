@@ -93,6 +93,18 @@ function SuiteCard({ s, onRun, onChanged }: { s: EvalSuiteSummary; onRun: (suite
         <b className="text-amber-600">{latest.flaky}</b> inestables ·{' '}
         <b className="text-red-600">{latest.always_fail}</b> fallan de {latest.total}
       </p>
+      {Object.keys(s.by_difficulty).length > 0 && (
+        <p className="mt-1 text-xs text-gov-gray-500 dark:text-dark-muted">
+          Fáciles <b>{(s.by_difficulty.easy ?? [0, 0]).join('/')}</b> · Difíciles <b>{(s.by_difficulty.hard ?? [0, 0]).join('/')}</b>
+          {(s.by_difficulty['?'] ?? [0, 0])[1] > 0 && <> · sin clasificar {s.by_difficulty['?'][1]}</>}. El puntaje describe esta batería, no la producción
+          {(s.by_difficulty.hard ?? [0, 0])[1] < latest.total / 5 && <b className="text-amber-600"> — hay pocos casos difíciles: un 100 % aquí engaña</b>}.
+        </p>
+      )}
+      {s.review_due.length > 0 && (
+        <p className="mt-1 text-xs text-amber-600">
+          Sin revisar en 90+ días ({s.review_due.length}): {s.review_due.join(', ')}. ¿Sigue vigente la regla de cada uno?
+        </p>
+      )}
       {s.regressed.length > 0 && (
         <p className="mt-2 rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
           Regresiones desde la corrida anterior (pasaban siempre y ya no): <b>{s.regressed.join(', ')}</b>
@@ -159,6 +171,7 @@ function SuiteCard({ s, onRun, onChanged }: { s: EvalSuiteSummary; onRun: (suite
                   <span className="mt-1 flex flex-wrap gap-1 font-sans">
                     {c.severity && <span className={`rounded px-1.5 py-0.5 ${SEVERITY_STYLE[c.severity]}`}>gravedad {SEVERITY_LABEL[c.severity]}</span>}
                     {c.category && <span className="rounded bg-gov-gray-100 px-1.5 py-0.5 text-gov-gray-600">{c.category}</span>}
+                    {c.difficulty && <span className="rounded bg-gov-gray-100 px-1.5 py-0.5 text-gov-gray-600">{c.difficulty === 'hard' ? 'difícil' : 'fácil'}</span>}
                     {c.priority === 'fix_now' && <span className="rounded bg-red-600 px-1.5 py-0.5 font-bold text-white">arreglar ya</span>}
                   </span>
                 </td>
@@ -171,6 +184,13 @@ function SuiteCard({ s, onRun, onChanged }: { s: EvalSuiteSummary; onRun: (suite
                   {c.unverified && (
                     <span className="block text-gov-gray-500" title="Un subagente corrió herramientas que el runner no ve: «no llamó X» no se puede juzgar">
                       ⚠ parcialmente verificable (ejecutó un subagente)
+                    </span>
+                  )}
+                  {(c.source || c.keep_reason) && (
+                    <span className="block text-gov-gray-500">
+                      {c.source}
+                      {c.keep_reason ? ` · se queda por: ${c.keep_reason}` : ''}
+                      {c.reviewed ? ` · revisado ${c.reviewed}` : ''}
                     </span>
                   )}
                   {c.status !== 'always_pass' && <ReviewForm key={`${id}-${c.review?.ts ?? ''}`} suite={s.suite} id={id} c={c} onSaved={onChanged} />}

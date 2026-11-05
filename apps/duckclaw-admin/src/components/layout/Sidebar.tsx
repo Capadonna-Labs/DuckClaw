@@ -29,6 +29,7 @@ import {
   UserCircle,
   Box,
   Globe,
+  FlaskConical,
   LogOut,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
@@ -54,6 +55,7 @@ const NAV_ICONS: Record<string, LucideIcon> = {
   '/templates': Bot,
   '/projects': FolderPlus,
   '/knowledge': Database,
+  '/evals': FlaskConical,
   '/policies': ClipboardList,
   '/skills': Blocks,
   '/mcp': Cable,
@@ -101,7 +103,8 @@ function groupHasActive(pathname: string, group: AdminNavGroup): boolean {
       pathname === '/overview' ||
       pathname.startsWith('/playground') ||
       pathname.startsWith('/templates') ||
-      pathname.startsWith('/knowledge')
+      pathname.startsWith('/knowledge') ||
+      pathname.startsWith('/evals')
     );
   }
   return group.items.some((item) => pathnameMatchesHub(pathname, item.href));

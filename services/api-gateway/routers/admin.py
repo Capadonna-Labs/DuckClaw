@@ -35,6 +35,7 @@ from routers.admin_domains.kanban import router as kanban_router
 from routers.admin_domains.knowledge import router as knowledge_router
 from routers.admin_domains.mcp_activity import router as mcp_activity_router
 from routers.admin_domains.mcp_connectors import router as mcp_connectors_router
+from routers.admin_domains.evals import router as evals_router
 from routers.admin_domains.notifications import router as notifications_router
 from routers.admin_domains.kanban_runtime import router as kanban_runtime_router
 from routers.admin_domains.worlds import router as worlds_router
@@ -117,6 +118,7 @@ router.include_router(worlds_think_router)
 router.include_router(worlds_conversation_router)
 router.include_router(mcp_activity_router)
 router.include_router(mcp_connectors_router)
+router.include_router(evals_router)
 router.include_router(notifications_router)
 router.include_router(knowledge_router)
 router.include_router(ops_router)

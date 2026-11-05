@@ -45,6 +45,7 @@ assert.deepEqual(primaryLabelsFor('admin'), [
   'Proyectos',
   'Agentes',
   'Base de Conocimiento',
+  'Evals',
   'Productividad',
 ]);
 assert.deepEqual(moreLabelsFor('admin'), [

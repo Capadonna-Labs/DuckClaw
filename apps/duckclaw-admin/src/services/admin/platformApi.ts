@@ -30,7 +30,23 @@ export interface PushLogEntry {
   created_at: string;
 }
 
+export interface EvalCaseResult {
+  type: string;
+  passes: number;
+  n: number;
+  status: 'always_pass' | 'flaky' | 'always_fail';
+  failures: string[];
+}
+
+export interface EvalSuiteSummary {
+  suite: string;
+  latest: { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number; cases: Record<string, EvalCaseResult> };
+  regressed: string[];
+  history: { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number }[];
+}
+
 export const platformApi = {
+  getEvalRuns: () => adminFetch<{ suites: EvalSuiteSummary[] }>('/evals/runs'),
   getPushLog: (limit = 100) => adminFetch<{ entries: PushLogEntry[] }>(`/notifications/push-log?limit=${limit}`),
   health: () => adminFetch<AdminHealth>('/health'),
   releaseWorkerGraphCache: () =>

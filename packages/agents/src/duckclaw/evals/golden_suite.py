@@ -81,6 +81,26 @@ def regressions(baseline: dict[str, Any], current: dict[str, Any]) -> list[str]:
                   if b.get("status") == "always_pass" and (now.get(cid) or {}).get("status") != "always_pass")
 
 
+def record_run(suite: str, run: dict[str, Any], *, model: str = "", db_path: str | None = None) -> str | None:
+    """Publish one run to the admin "Evals" tab: a runtime-setting row (domain ``evals``, key ``<suite>:<ts>``) written by the DB-Writer.
+
+    Returns the write task id, or None when it could not be queued (an eval job must never fail because its report did).
+    ponytail: one row per run, never pruned (a nightly suite is ~3 KB a day); prune old keys if a suite runs every few minutes.
+    """
+    try:
+        from duckclaw.db_write_queue import enqueue_typed_command
+        from duckclaw.gateway_db import get_gateway_db_path
+        from duckclaw.write_commands import UpsertRuntimeSettingCommand
+
+        payload = {"suite": suite, "ts": run.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "model": model, "cases": run.get("cases") or {}}
+        return enqueue_typed_command(
+            UpsertRuntimeSettingCommand(tenant_id="global", actor_email="system", domain="evals", key=f"{suite}:{payload['ts']}", value="", value_json=payload,
+                                        value_kind="json", secret=False, updated_by="system"),
+            db_path=str(db_path or get_gateway_db_path()), user_id="system")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="golden_suite")
     ap.add_argument("goldens")

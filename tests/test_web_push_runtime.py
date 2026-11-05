@@ -189,3 +189,25 @@ def test_push_log_is_readable_newest_first_and_filterable_by_tag() -> None:
     assert [r["title"] for r in rows] == ["nuevo", "viejo"] and rows[0]["created_at"].startswith("2026-11-05 16:10")
     assert [r["title"] for r in load_push_log(con, 10, "quant-alert")] == ["viejo"]
     assert load_push_log(con, 10, "x' OR '1'='1") == []
+
+
+def _eval_row(suite: str, ts: str, **statuses: str) -> dict:
+    import json
+
+    return {"value_json": json.dumps({"suite": suite, "ts": ts, "model": "m", "cases": {c: {"status": s, "passes": 3 if s == "always_pass" else 0, "n": 3, "type": "t", "failures": []} for c, s in statuses.items()}})}
+
+
+def test_evals_tab_summarizes_latest_run_history_and_regressions() -> None:
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.evals import summarize
+
+    rows = [_eval_row("quant", "2026-11-05T22:30:00Z", a="always_pass", b="always_fail", c="flaky"),
+            _eval_row("quant", "2026-11-04T22:30:00Z", a="always_pass", b="always_pass", c="always_pass", d="always_pass"),
+            _eval_row("other", "2026-11-05T01:00:00Z", x="always_pass"), {"value_json": "not json"}, {"value_json": '{"cases": {}}'}]
+    got = {s["suite"]: s for s in summarize(rows)}
+    q = got["quant"]
+    assert q["latest"]["ts"] == "2026-11-05T22:30:00Z" and (q["latest"]["total"], q["latest"]["always_pass"], q["latest"]["flaky"], q["latest"]["always_fail"]) == (3, 1, 1, 1)
+    assert q["regressed"] == ["b", "c", "d"] and [h["ts"][:10] for h in q["history"]] == ["2026-11-05", "2026-11-04"]
+    assert got["other"]["regressed"] == [] and len(got) == 2

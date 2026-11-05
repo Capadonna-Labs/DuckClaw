@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FlaskConical } from 'lucide-react';
 import { platformApi, type EvalSuiteSummary } from '@/services/admin/platformApi';
 import { ViewChrome } from '@/components/admin/embeddedView';
@@ -13,8 +13,25 @@ const STATUS_STYLE = {
   always_fail: 'text-red-600',
 } as const;
 
-function SuiteCard({ s }: { s: EvalSuiteSummary }) {
+function SuiteCard({ s, onRun }: { s: EvalSuiteSummary; onRun: (suite: string) => void }) {
   const { latest } = s;
+  const runButton = s.runnable && (
+    <button
+      type="button"
+      disabled={s.running}
+      onClick={() => onRun(s.suite)}
+      className="mt-3 rounded-xl border px-3 py-1.5 text-sm font-bold disabled:opacity-50 dark:border-dark-border"
+    >
+      {s.running ? 'Corriendo…' : 'Correr ahora'}
+    </button>
+  );
+  if (!latest) {
+    return (
+      <SettingsSection titulo={s.suite} descripcion="Aún sin corridas" icono={<FlaskConical size={22} />}>
+        {runButton}
+      </SettingsSection>
+    );
+  }
   const cases = Object.entries(latest.cases);
   // Failures first: that is what the page is for.
   const order = { always_fail: 0, flaky: 1, always_pass: 2 } as const;
@@ -25,7 +42,8 @@ function SuiteCard({ s }: { s: EvalSuiteSummary }) {
       descripcion={`Última corrida ${latest.ts.slice(0, 16).replace('T', ' ')} UTC${latest.model ? ` · ${latest.model}` : ''}`}
       icono={<FlaskConical size={22} />}
     >
-      <p className="text-sm">
+      {runButton}
+      <p className="mt-3 text-sm">
         <b className="text-emerald-600">{latest.always_pass}</b> pasan ·{' '}
         <b className="text-amber-600">{latest.flaky}</b> inestables ·{' '}
         <b className="text-red-600">{latest.always_fail}</b> fallan de {latest.total}
@@ -33,6 +51,22 @@ function SuiteCard({ s }: { s: EvalSuiteSummary }) {
       {s.regressed.length > 0 && (
         <p className="mt-2 rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
           Regresiones desde la corrida anterior (pasaban siempre y ya no): <b>{s.regressed.join(', ')}</b>
+        </p>
+      )}
+      {s.by_type.length > 0 && (
+        <p className="mt-3 text-xs text-gov-gray-500 dark:text-dark-muted">
+          Por tipo de fallo:{' '}
+          {s.by_type.map((t) => {
+            const now = t.passing / Math.max(t.total, 1);
+            const was = t.prev_total ? (t.prev_passing ?? 0) / t.prev_total : null;
+            const arrow = was === null || now === was ? '' : now > was ? ' ▲' : ' ▼';
+            return (
+              <span key={t.type} className={`mr-3 whitespace-nowrap ${now < (was ?? 0) ? 'font-bold text-red-600' : ''}`}>
+                {t.type || '?'} {t.passing}/{t.total}
+                {arrow}
+              </span>
+            );
+          })}
         </p>
       )}
       <div className="mt-3 flex items-end gap-1" title="Casos que pasan por corrida, de la más antigua a la más reciente">
@@ -63,7 +97,16 @@ function SuiteCard({ s }: { s: EvalSuiteSummary }) {
                 <td className={`whitespace-nowrap px-3 py-2 text-xs font-bold ${STATUS_STYLE[c.status]}`}>
                   {STATUS_LABEL[c.status]} {c.passes}/{c.n}
                 </td>
-                <td className="break-words px-3 py-2 text-xs">{c.failures.join('; ')}</td>
+                <td className="break-words px-3 py-2 text-xs">
+                  {c.failures.join('; ')}
+                  {c.sample && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-gov-gray-500">Qué hizo el agente</summary>
+                      <p className="mt-1 font-mono">Herramientas: {c.sample.tools.join(' → ') || '(ninguna)'}</p>
+                      <p className="mt-1 whitespace-pre-wrap font-mono">{c.sample.reply}</p>
+                    </details>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -77,12 +120,28 @@ export default function EvalsView() {
   const [suites, setSuites] = useState<EvalSuiteSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     platformApi
       .getEvalRuns()
       .then((r) => setSuites(r.suites ?? []))
       .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
   }, []);
+
+  useEffect(load, [load]);
+
+  // While a suite runs, poll: the new run shows up when its job records it.
+  const anyRunning = suites?.some((s) => s.running);
+  useEffect(() => {
+    if (!anyRunning) return;
+    const id = setInterval(load, 15000);
+    return () => clearInterval(id);
+  }, [anyRunning, load]);
+
+  const run = (suite: string) =>
+    platformApi
+      .runEvalSuite(suite)
+      .then(load)
+      .catch((e) => setError(e instanceof Error ? e.message : 'Error'));
 
   return (
     <ViewChrome>
@@ -99,7 +158,7 @@ export default function EvalsView() {
           Aún no hay corridas. Al terminar una batería, llama a <code>record_run(suite, run)</code> y aparecerá aquí.
         </p>
       )}
-      {suites?.map((s) => <SuiteCard key={s.suite} s={s} />)}
+      {suites?.map((s) => <SuiteCard key={s.suite} s={s} onRun={run} />)}
     </ViewChrome>
   );
 }

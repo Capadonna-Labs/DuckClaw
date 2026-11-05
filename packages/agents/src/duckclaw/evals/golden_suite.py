@@ -61,16 +61,19 @@ def check_case(case: dict[str, Any], out: dict[str, Any]) -> list[str]:
 def run_suite(cases: list[dict[str, Any]], runner: Runner, n: int = 3) -> dict[str, Any]:
     results: dict[str, Any] = {}
     for case in cases:
-        passes, failures = 0, set()
+        passes, failures, sample = 0, set(), None
         for _ in range(n):
             try:
-                found = check_case(case, runner(case))
+                out = runner(case)
+                found = check_case(case, out)
+                if found:   # what the agent actually did on the last failed attempt: the first thing to read when a case fails
+                    sample = {"tools": [str(t) for t in (out.get("tools") or [])][:30], "reply": str(out.get("reply") or "")[:600]}
             except Exception as exc:  # noqa: BLE001 - a crashing run is a failed run, not a crashed suite
                 found = [f"runner error: {exc}"]
             passes += not found
             failures.update(found)
         status = "always_pass" if passes == n else "always_fail" if passes == 0 else "flaky"
-        results[case["id"]] = {"type": case.get("type", ""), "passes": passes, "n": n, "status": status, "failures": sorted(failures)}
+        results[case["id"]] = {"type": case.get("type", ""), "passes": passes, "n": n, "status": status, "failures": sorted(failures), **({"sample": sample} if sample else {})}
     return {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "cases": results}
 
 

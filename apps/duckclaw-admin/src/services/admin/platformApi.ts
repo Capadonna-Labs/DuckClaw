@@ -36,17 +36,22 @@ export interface EvalCaseResult {
   n: number;
   status: 'always_pass' | 'flaky' | 'always_fail';
   failures: string[];
+  sample?: { tools: string[]; reply: string };
 }
 
 export interface EvalSuiteSummary {
   suite: string;
-  latest: { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number; cases: Record<string, EvalCaseResult> };
+  runnable: boolean;
+  running: boolean;
+  by_type: { type: string; passing: number; total: number; prev_passing: number | null; prev_total: number | null }[];
+  latest: null | { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number; cases: Record<string, EvalCaseResult> };
   regressed: string[];
   history: { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number }[];
 }
 
 export const platformApi = {
   getEvalRuns: () => adminFetch<{ suites: EvalSuiteSummary[] }>('/evals/runs'),
+  runEvalSuite: (suite: string) => adminFetch<{ accepted: boolean }>(`/evals/${encodeURIComponent(suite)}/run`, { method: 'POST' }),
   getPushLog: (limit = 100) => adminFetch<{ entries: PushLogEntry[] }>(`/notifications/push-log?limit=${limit}`),
   health: () => adminFetch<AdminHealth>('/health'),
   releaseWorkerGraphCache: () =>

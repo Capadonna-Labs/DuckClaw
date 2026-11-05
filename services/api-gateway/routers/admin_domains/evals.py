@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from routers.admin_domains.admin_common import require_admin_key
 
@@ -37,9 +39,50 @@ def summarize(rows: list[dict[str, Any]], runs_per_suite: int = 30) -> list[dict
         latest, before = runs[0], (runs[1] if len(runs) > 1 else None)
         regressed = sorted(cid for cid, b in ((before or {}).get("cases") or {}).items()
                            if b.get("status") == "always_pass" and (latest["cases"].get(cid) or {}).get("status") != "always_pass")
-        out.append({"suite": suite, "latest": {"ts": latest.get("ts"), "model": latest.get("model", ""), "cases": latest["cases"], **counts(latest)}, "regressed": regressed,
+        def by_type(run: dict[str, Any] | None) -> dict[str, tuple[int, int]]:
+            acc: dict[str, list[int]] = {}
+            for c in ((run or {}).get("cases") or {}).values():
+                t = acc.setdefault(str(c.get("type") or "?"), [0, 0])
+                t[0] += c.get("status") == "always_pass"
+                t[1] += 1
+            return {k: (v[0], v[1]) for k, v in acc.items()}
+
+        now_t, prev_t = by_type(latest), by_type(before)
+        types = [{"type": t, "passing": p, "total": n, "prev_passing": prev_t[t][0] if t in prev_t else None, "prev_total": prev_t[t][1] if t in prev_t else None}
+                 for t, (p, n) in sorted(now_t.items())]
+        out.append({"suite": suite, "by_type": types, "latest": {"ts": latest.get("ts"), "model": latest.get("model", ""), "cases": latest["cases"], **counts(latest)}, "regressed": regressed,
                     "history": [{"ts": r.get("ts"), "model": r.get("model", ""), **counts(r)} for r in runs]})
     return out
+
+
+# ponytail: one run at a time per suite, tracked in this process (a gateway restart forgets it; the job itself keeps going).
+_RUNNING: dict[str, subprocess.Popen] = {}
+
+
+def runnable() -> dict[str, dict[str, Any]]:
+    """Suites the tab may start: ``DUCKCLAW_EVAL_COMMANDS`` = JSON ``{"suite": {"argv": [...], "cwd": "..."}}``. Never a command from the request."""
+    try:
+        cfg = json.loads(os.environ.get("DUCKCLAW_EVAL_COMMANDS") or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return {k: v for k, v in cfg.items() if isinstance(v, dict) and isinstance(v.get("argv"), list) and v["argv"]}
+
+
+def is_running(suite: str) -> bool:
+    p = _RUNNING.get(suite)
+    return p is not None and p.poll() is None
+
+
+@router.post("/{suite}/run", dependencies=[Depends(require_admin_key)], status_code=202)
+async def run_eval_suite(suite: str) -> dict[str, Any]:
+    cmd = runnable().get(suite)
+    if cmd is None:
+        raise HTTPException(404, "suite is not runnable from the admin")
+    if is_running(suite):
+        raise HTTPException(409, "suite is already running")
+    _RUNNING[suite] = subprocess.Popen([str(a) for a in cmd["argv"]], cwd=cmd.get("cwd") or None, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, start_new_session=True)
+    return {"accepted": True, "suite": suite}
 
 
 @router.get("/runs", dependencies=[Depends(require_admin_key)])
@@ -54,6 +97,11 @@ async def get_eval_runs(limit: int = Query(200, ge=1, le=1000)) -> dict[str, Any
                     f"WHERE active = true AND domain = 'evals' ORDER BY updated_at DESC LIMIT {int(limit)}")
 
     try:
-        return {"suites": summarize(await asyncio.to_thread(_read))}
+        suites = summarize(await asyncio.to_thread(_read))
     except FileNotFoundError:
-        return {"suites": []}
+        suites = []
+    have = {s["suite"] for s in suites}
+    suites += [{"suite": k, "latest": None, "regressed": [], "history": [], "by_type": []} for k in runnable() if k not in have]   # never run yet: still offer the button
+    for s in suites:
+        s["runnable"], s["running"] = s["suite"] in runnable(), is_running(s["suite"])
+    return {"suites": suites}

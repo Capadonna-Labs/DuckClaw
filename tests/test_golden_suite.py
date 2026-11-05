@@ -46,6 +46,7 @@ def test_runs_are_classified_always_pass_always_fail_or_flaky() -> None:
     assert r["c"]["passes"] == 2
     crashed = run_suite(cases, lambda c: 1 / 0, n=2)["cases"]["a"]
     assert crashed["status"] == "always_fail" and crashed["failures"][0].startswith("runner error")
+    assert r["b"]["sample"] == {"tools": [], "reply": "nope"} and "sample" not in r["a"]   # the last failed attempt, for the Evals tab
 
 
 def test_regression_gate_only_trips_on_cases_that_always_passed() -> None:

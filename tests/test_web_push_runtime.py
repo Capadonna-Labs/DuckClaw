@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -211,3 +212,27 @@ def test_evals_tab_summarizes_latest_run_history_and_regressions() -> None:
     assert q["latest"]["ts"] == "2026-11-05T22:30:00Z" and (q["latest"]["total"], q["latest"]["always_pass"], q["latest"]["flaky"], q["latest"]["always_fail"]) == (3, 1, 1, 1)
     assert q["regressed"] == ["b", "c", "d"] and [h["ts"][:10] for h in q["history"]] == ["2026-11-05", "2026-11-04"]
     assert got["other"]["regressed"] == [] and len(got) == 2
+    assert q["by_type"] == [{"type": "t", "passing": 1, "total": 3, "prev_passing": 4, "prev_total": 4}]
+
+
+def test_evals_tab_run_now_only_runs_configured_suites_one_at_a_time(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import asyncio
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from fastapi import HTTPException
+    from routers.admin_domains import evals
+
+    monkeypatch.setenv("DUCKCLAW_EVAL_COMMANDS", json.dumps({"quant": {"argv": [sys.executable, "-c", "import time; time.sleep(5)"], "cwd": str(tmp_path)}}))
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(evals.run_eval_suite("nope"))
+    assert e.value.status_code == 404
+    try:
+        assert asyncio.run(evals.run_eval_suite("quant"))["accepted"] and evals.is_running("quant")
+        with pytest.raises(HTTPException) as e:
+            asyncio.run(evals.run_eval_suite("quant"))
+        assert e.value.status_code == 409
+    finally:
+        evals._RUNNING["quant"].kill()
+

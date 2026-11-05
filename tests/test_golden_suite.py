@@ -91,3 +91,16 @@ cases:
     r = run_suite(load_cases(f), lambda c: {"reply": "ok"}, n=1)["cases"]
     assert r["a"]["requirement"] == "r1" and "requirement" not in r["b"]
 
+
+def test_claims_need_a_tool_and_variants_become_cases(tmp_path: Path) -> None:
+    case = {"id": "a", "no_claim_without_tool": ["verificad"]}
+    assert check_case(case, {"reply": "Todo verificado en DB", "tools": []}) == ["claims /verificad/ without any tool call"]
+    assert check_case(case, {"reply": "Todo verificado en DB", "tools": ["read_sql"]}) == []
+    assert check_case(case, {"reply": "No pude verificar", "tools": []}) == []
+    f = tmp_path / "g.yaml"
+    f.write_text("""cases:
+  - {id: a, type: t, request: one, must_match: [ok], variants: [two, three]}
+""", encoding="utf-8")
+    got = load_cases(f)
+    assert [(c["id"], c["request"]) for c in got] == [("a", "one"), ("a#v1", "two"), ("a#v2", "three")] and all(c["must_match"] == ["ok"] and "variants" not in c for c in got[1:])
+

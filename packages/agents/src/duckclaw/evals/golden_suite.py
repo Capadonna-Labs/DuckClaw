@@ -15,6 +15,8 @@ A case is a real request plus what a right answer looks like, written as checks 
         must_call_any: [read_sql, get_quote]   # at least one of these (ground the answer in a tool, whichever the agent picks)
         must_match: ["propos"]             # regexes on the reply (case-insensitive)
         must_not_match: ["order sent"]
+        no_claim_without_tool: ["verificad"]   # regexes: a reply that matches must come after at least one tool call ("verified" with no tool is a made-up check)
+        variants: ["same situation, other words"]   # optional: each becomes a case ``<id>#v1``... with the same checks (is it a pattern or an accident?)
         trajectory: {start: [...], edges: {...}}   # optional: a golden DAG, see traces/trajectory_gate.py
 
 A file may also hold ``requirements: [{id, text, question}]``: what the agent must do or avoid, and the question a reviewer asks of an answer.
@@ -50,7 +52,12 @@ Runner = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 def load_cases(path: str | Path) -> list[dict[str, Any]]:
-    return (yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}).get("cases") or []
+    cases = (yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}).get("cases") or []
+    out: list[dict[str, Any]] = []
+    for c in cases:
+        out.append(c)
+        out += [{**{k: v for k, v in c.items() if k != "variants"}, "id": f"{c['id']}#v{i}", "request": v} for i, v in enumerate(c.get("variants") or [], 1)]
+    return out
 
 
 def load_requirements(path: str | Path) -> list[dict[str, str]]:
@@ -67,6 +74,8 @@ def check_case(case: dict[str, Any], out: dict[str, Any]) -> list[str]:
             found.append(f"called none of {case['must_call_any']}")
     found += [f"reply does not match /{p}/" for p in case.get("must_match") or [] if not re.search(p, reply, re.I | re.S)]
     found += [f"reply matches /{p}/" for p in case.get("must_not_match") or [] if re.search(p, reply, re.I | re.S)]
+    if not tools:
+        found += [f"claims /{p}/ without any tool call" for p in case.get("no_claim_without_tool") or [] if re.search(p, reply, re.I | re.S)]
     if case.get("trajectory"):
         found += check_trajectory(tools, case["trajectory"])
     return found

@@ -6,11 +6,13 @@ import asyncio
 import json
 import os
 import subprocess
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
-from routers.admin_domains.admin_common import require_admin_key
+from routers.admin_domains.admin_common import actor_from_header, require_admin_key
 
 router = APIRouter(prefix="/evals", tags=["admin-evals"])
 
@@ -37,6 +39,8 @@ def summarize(rows: list[dict[str, Any]], runs_per_suite: int = 30) -> list[dict
             return {"total": len(run["cases"]), **{s: sum(1 for c in cases if c.get("status") == s) for s in ("always_pass", "flaky", "always_fail")}}
 
         latest, before = runs[0], (runs[1] if len(runs) > 1 else None)
+        for c in latest["cases"].values():   # failure x consequence: a high-severity failure is fixed now, the rest can wait (low alone does not even alert)
+            c["priority"] = "" if c.get("status") == "always_pass" else "fix_now" if c.get("severity") == "high" else "improve_later"
         regressed = sorted(cid for cid, b in ((before or {}).get("cases") or {}).items()
                            if b.get("status") == "always_pass" and (latest["cases"].get(cid) or {}).get("status") != "always_pass")
         def by_type(run: dict[str, Any] | None) -> dict[str, tuple[int, int]]:
@@ -95,6 +99,45 @@ async def run_eval_suite(suite: str) -> dict[str, Any]:
     return {"accepted": True, "suite": suite}
 
 
+class ReviewBody(BaseModel):
+    """What a person wrote after reading a failed case: the finding, an explanation not yet checked, and the verdict."""
+
+    note: str = Field("", max_length=2000)
+    possibility: str = Field("", max_length=1000)
+    verdict: str = Field("", pattern="^(pass|fail|unsure|)$")
+
+
+@router.put("/{suite}/notes/{case_id}", dependencies=[Depends(require_admin_key)])
+async def put_case_review(suite: str, case_id: str, body: ReviewBody, actor: str = Depends(actor_from_header)) -> dict[str, Any]:
+    from duckclaw.db_write_queue import enqueue_typed_command
+    from duckclaw.gateway_db import get_gateway_db_path
+    from duckclaw.write_commands import UpsertRuntimeSettingCommand
+
+    if not (0 < len(suite) <= 64 and 0 < len(case_id) <= 128) or ":" in suite:
+        raise HTTPException(422, "bad suite or case id")
+    payload = {**body.model_dump(), "by": actor, "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    cmd = UpsertRuntimeSettingCommand(tenant_id="global", actor_email=actor, domain="eval_notes", key=f"{suite}:{case_id}", value="", value_json=payload,
+                                      value_kind="json", secret=False, updated_by=actor)
+    task_id = await asyncio.to_thread(enqueue_typed_command, cmd, db_path=str(get_gateway_db_path()), user_id=actor)
+    return {"ok": True, "queued": True, "task_id": task_id}
+
+
+def attach_reviews(suites: list[dict[str, Any]], rows: list[dict[str, Any]]) -> None:
+    """Put each saved review (``eval_notes`` rows, key ``suite:case``) on its case of the newest run."""
+    notes: dict[str, Any] = {}
+    for r in rows:
+        if r.get("domain") == "eval_notes":
+            raw = r.get("value_json") or ""
+            try:
+                notes[str(r.get("key"))] = json.loads(raw) if isinstance(raw, str) else raw
+            except json.JSONDecodeError:
+                continue
+    for s in suites:
+        for cid, c in ((s.get("latest") or {}).get("cases") or {}).items():
+            if f"{s['suite']}:{cid}" in notes:
+                c["review"] = notes[f"{s['suite']}:{cid}"]
+
+
 @router.get("/runs", dependencies=[Depends(require_admin_key)])
 async def get_eval_runs(limit: int = Query(200, ge=1, le=1000)) -> dict[str, Any]:
     from core.admin_identity import open_gateway_db
@@ -103,11 +146,13 @@ async def get_eval_runs(limit: int = Query(200, ge=1, le=1000)) -> dict[str, Any
     def _read() -> list[dict[str, Any]]:
         with open_gateway_db(read_only=True) as db:
             return _query_all_dicts(
-                db, "SELECT key, value_json, value_text FROM main.admin_runtime_settings "
-                    f"WHERE active = true AND domain = 'evals' ORDER BY updated_at DESC LIMIT {int(limit)}")
+                db, "SELECT domain, key, value_json, value_text FROM main.admin_runtime_settings "
+                    f"WHERE active = true AND domain IN ('evals', 'eval_notes') ORDER BY updated_at DESC LIMIT {int(limit)}")
 
     try:
-        suites = summarize(await asyncio.to_thread(_read))
+        rows = await asyncio.to_thread(_read)
+        suites = summarize([r for r in rows if r.get("domain") == "evals"])
+        attach_reviews(suites, rows)
     except FileNotFoundError:
         suites = []
     have = {s["suite"] for s in suites}

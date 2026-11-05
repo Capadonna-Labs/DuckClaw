@@ -254,3 +254,30 @@ def test_evals_tab_groups_cases_by_requirement_and_shows_gaps() -> None:
     assert got["r1"]["cases"] == ["a", "b"] and got["r1"]["failing"] == ["b"] and got["r1"]["question"] == "Q1"
     assert got["r2"]["cases"] == [] and got["undeclared"]["cases"] == ["c"]
 
+
+def test_evals_tab_priorities_and_saved_reviews(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains import evals
+
+    run = {"suite": "q", "ts": "2026-11-06T22:30:00Z", "cases": {
+        "a": {"status": "always_fail", "severity": "high", "passes": 0, "n": 3, "type": "t", "failures": []},
+        "b": {"status": "flaky", "severity": "low", "passes": 1, "n": 3, "type": "t", "failures": []},
+        "c": {"status": "always_pass", "severity": "high", "passes": 3, "n": 3, "type": "t", "failures": []}}}
+    suites = evals.summarize([{"value_json": json.dumps(run)}])
+    got = suites[0]["latest"]["cases"]
+    assert (got["a"]["priority"], got["b"]["priority"], got["c"]["priority"]) == ("fix_now", "improve_later", "")
+    evals.attach_reviews(suites, [{"domain": "eval_notes", "key": "q:a", "value_json": json.dumps({"verdict": "fail", "note": "n"})}, {"domain": "eval_notes", "key": "q:zzz", "value_json": "{}"}])
+    assert got["a"]["review"]["verdict"] == "fail" and "review" not in got["b"]
+
+    sent = {}
+    import duckclaw.db_write_queue as q
+    monkeypatch.setattr(q, "enqueue_typed_command", lambda cmd, **kw: sent.update(cmd=cmd) or "t1")
+    out = asyncio.run(evals.put_case_review("q", "a", evals.ReviewBody(note="n", possibility="p", verdict="unsure"), actor="juan"))
+    assert out["task_id"] == "t1" and sent["cmd"].domain == "eval_notes" and sent["cmd"].key == "q:a" and sent["cmd"].value_json["verdict"] == "unsure"
+    with pytest.raises(Exception):
+        evals.ReviewBody(verdict="maybe")
+

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { FlaskConical } from 'lucide-react';
-import { platformApi, type EvalSuiteSummary } from '@/services/admin/platformApi';
+import { platformApi, type EvalCaseResult, type EvalReview, type EvalSuiteSummary } from '@/services/admin/platformApi';
 import { ViewChrome } from '@/components/admin/embeddedView';
 import SettingsSection from '@/components/settings/SettingsSection';
 
@@ -13,7 +13,51 @@ const STATUS_STYLE = {
   always_fail: 'text-red-600',
 } as const;
 
-function SuiteCard({ s, onRun }: { s: EvalSuiteSummary; onRun: (suite: string) => void }) {
+const SEVERITY_LABEL = { high: 'alta', moderate: 'media', low: 'baja' } as const;
+const SEVERITY_STYLE = { high: 'bg-red-100 text-red-700', moderate: 'bg-amber-100 text-amber-700', low: 'bg-gov-gray-100 text-gov-gray-600' } as const;
+
+// What a person concluded after reading a failed case: kept between runs (the next night's run shows the same note).
+function ReviewForm({ suite, id, c, onSaved }: { suite: string; id: string; c: EvalCaseResult; onSaved: () => void }) {
+  const [r, setR] = useState<Omit<EvalReview, 'by' | 'ts'>>({ note: c.review?.note ?? '', possibility: c.review?.possibility ?? '', verdict: c.review?.verdict ?? '' });
+  const [saving, setSaving] = useState(false);
+  const save = () => {
+    setSaving(true);
+    platformApi
+      .putEvalReview(suite, id, r)
+      .then(() => setTimeout(onSaved, 1500)) // the DB-Writer applies it a moment later
+      .finally(() => setSaving(false));
+  };
+  const field = 'mt-1 w-full rounded-lg border p-2 text-xs dark:border-dark-border dark:bg-dark-bg';
+  return (
+    <details className="mt-1" open={Boolean(c.review?.verdict)}>
+      <summary className="cursor-pointer text-gov-gray-500">
+        Revisión manual{c.review?.verdict ? `: ${c.review.verdict === 'pass' ? 'caso bien, el agente falló' : c.review.verdict === 'fail' ? 'falla real' : 'no estoy seguro'}` : ''}
+      </summary>
+      <label className="mt-1 block">
+        Qué salió mal
+        <textarea className={field} rows={2} value={r.note} onChange={(e) => setR({ ...r, note: e.target.value })} />
+      </label>
+      <label className="mt-1 block">
+        Posibilidad (aún sin verificar)
+        <textarea className={field} rows={2} value={r.possibility} onChange={(e) => setR({ ...r, possibility: e.target.value })} />
+      </label>
+      <div className="mt-1 flex items-center gap-2">
+        <select className={field + ' !w-auto'} value={r.verdict} onChange={(e) => setR({ ...r, verdict: e.target.value as EvalReview['verdict'] })}>
+          <option value="">Sin veredicto</option>
+          <option value="fail">Falla real del agente</option>
+          <option value="pass">El caso estaba mal</option>
+          <option value="unsure">No estoy seguro</option>
+        </select>
+        <button type="button" disabled={saving} onClick={save} className="rounded-lg border px-2 py-1 font-bold disabled:opacity-50 dark:border-dark-border">
+          {saving ? 'Guardando…' : 'Guardar'}
+        </button>
+        {c.review?.by && <span className="text-gov-gray-500">{c.review.by} · {c.review.ts?.slice(0, 10)}</span>}
+      </div>
+    </details>
+  );
+}
+
+function SuiteCard({ s, onRun, onChanged }: { s: EvalSuiteSummary; onRun: (suite: string) => void; onChanged: () => void }) {
   const { latest } = s;
   const runButton = s.runnable && (
     <button
@@ -35,7 +79,8 @@ function SuiteCard({ s, onRun }: { s: EvalSuiteSummary; onRun: (suite: string) =
   const cases = Object.entries(latest.cases);
   // Failures first: that is what the page is for.
   const order = { always_fail: 0, flaky: 1, always_pass: 2 } as const;
-  cases.sort(([, a], [, b]) => order[a.status] - order[b.status]);
+  const prio = { fix_now: 0, improve_later: 1, '': 2 } as const;
+  cases.sort(([, a], [, b]) => prio[a.priority ?? ''] - prio[b.priority ?? ''] || order[a.status] - order[b.status]);
   return (
     <SettingsSection
       titulo={s.suite}
@@ -109,7 +154,14 @@ function SuiteCard({ s, onRun }: { s: EvalSuiteSummary; onRun: (suite: string) =
           <tbody>
             {cases.map(([id, c]) => (
               <tr key={id} className="border-t align-top dark:border-dark-border">
-                <td className="px-3 py-2 font-mono text-xs">{id}</td>
+                <td className="px-3 py-2 font-mono text-xs">
+                  {id}
+                  <span className="mt-1 flex flex-wrap gap-1 font-sans">
+                    {c.severity && <span className={`rounded px-1.5 py-0.5 ${SEVERITY_STYLE[c.severity]}`}>gravedad {SEVERITY_LABEL[c.severity]}</span>}
+                    {c.category && <span className="rounded bg-gov-gray-100 px-1.5 py-0.5 text-gov-gray-600">{c.category}</span>}
+                    {c.priority === 'fix_now' && <span className="rounded bg-red-600 px-1.5 py-0.5 font-bold text-white">arreglar ya</span>}
+                  </span>
+                </td>
                 <td className="px-3 py-2 text-xs">{c.type}</td>
                 <td className={`whitespace-nowrap px-3 py-2 text-xs font-bold ${STATUS_STYLE[c.status]}`}>
                   {STATUS_LABEL[c.status]} {c.passes}/{c.n}
@@ -121,6 +173,7 @@ function SuiteCard({ s, onRun }: { s: EvalSuiteSummary; onRun: (suite: string) =
                       ⚠ parcialmente verificable (ejecutó un subagente)
                     </span>
                   )}
+                  {c.status !== 'always_pass' && <ReviewForm key={`${id}-${c.review?.ts ?? ''}`} suite={s.suite} id={id} c={c} onSaved={onChanged} />}
                   {c.sample && (
                     <details className="mt-1">
                       <summary className="cursor-pointer text-gov-gray-500">Qué hizo el agente</summary>
@@ -192,7 +245,7 @@ export default function EvalsView() {
           Aún no hay corridas. Al terminar una batería, llama a <code>record_run(suite, run)</code> y aparecerá aquí.
         </p>
       )}
-      {suites?.map((s) => <SuiteCard key={s.suite} s={s} onRun={run} />)}
+      {suites?.map((s) => <SuiteCard key={s.suite} s={s} onRun={run} onChanged={load} />)}
     </ViewChrome>
   );
 }

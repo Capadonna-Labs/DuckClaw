@@ -30,6 +30,14 @@ export interface PushLogEntry {
   created_at: string;
 }
 
+export interface EvalReview {
+  note: string;
+  possibility: string;
+  verdict: 'pass' | 'fail' | 'unsure' | '';
+  by?: string;
+  ts?: string;
+}
+
 export interface EvalCaseResult {
   type: string;
   passes: number;
@@ -38,6 +46,10 @@ export interface EvalCaseResult {
   failures: string[];
   unverified?: boolean;
   requirement?: string;
+  category?: string;
+  severity?: 'high' | 'moderate' | 'low';
+  priority?: '' | 'fix_now' | 'improve_later';
+  review?: EvalReview;
   sample?: { tools: string[]; reply: string; spans?: { name: string; input: string; output: string }[] };
 }
 
@@ -54,6 +66,8 @@ export interface EvalSuiteSummary {
 
 export const platformApi = {
   getEvalRuns: () => adminFetch<{ suites: EvalSuiteSummary[] }>('/evals/runs'),
+  putEvalReview: (suite: string, caseId: string, body: Omit<EvalReview, 'by' | 'ts'>) =>
+    adminFetch<{ accepted?: boolean; task_id: string }>(`/evals/${encodeURIComponent(suite)}/notes/${encodeURIComponent(caseId)}`, { method: 'PUT', body: JSON.stringify(body) }),
   runEvalSuite: (suite: string) => adminFetch<{ accepted: boolean }>(`/evals/${encodeURIComponent(suite)}/run`, { method: 'POST' }),
   getPushLog: (limit = 100) => adminFetch<{ entries: PushLogEntry[] }>(`/notifications/push-log?limit=${limit}`),
   health: () => adminFetch<AdminHealth>('/health'),

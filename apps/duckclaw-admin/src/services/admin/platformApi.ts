@@ -37,6 +37,7 @@ export interface EvalCaseResult {
   status: 'always_pass' | 'flaky' | 'always_fail';
   failures: string[];
   unverified?: boolean;
+  requirement?: string;
   sample?: { tools: string[]; reply: string; spans?: { name: string; input: string; output: string }[] };
 }
 
@@ -44,6 +45,7 @@ export interface EvalSuiteSummary {
   suite: string;
   runnable: boolean;
   running: boolean;
+  requirements: { id: string; text: string; question: string; cases: string[]; failing: string[] }[];
   by_type: { type: string; passing: number; total: number; prev_passing: number | null; prev_total: number | null }[];
   latest: null | { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number; cases: Record<string, EvalCaseResult> };
   regressed: string[];

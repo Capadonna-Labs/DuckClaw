@@ -76,3 +76,18 @@ def test_a_missing_span_is_not_a_skipped_action() -> None:
     r = run_suite([case], lambda c: {"reply": "", "tools": ["place_order"], "partial": True, "spans": [{"name": "place_order", "input": '{"q": 1}', "output": "stub"}]}, n=1)["cases"]["a"]
     assert r["unverified"] and r["sample"]["spans"] == [{"name": "place_order", "input": '{"q": 1}', "output": "stub"}]
 
+
+def test_requirements_are_loaded_and_carried_into_results(tmp_path: Path) -> None:
+    from duckclaw.evals.golden_suite import load_requirements
+
+    f = tmp_path / "g.yaml"
+    f.write_text("""requirements:
+  - {id: r1, text: t, question: q}
+cases:
+  - {id: a, requirement: r1, must_match: [ok]}
+  - {id: b, must_match: [ok]}
+""", encoding="utf-8")
+    assert load_requirements(f) == [{"id": "r1", "text": "t", "question": "q"}] and load_requirements(FIX) == []
+    r = run_suite(load_cases(f), lambda c: {"reply": "ok"}, n=1)["cases"]
+    assert r["a"]["requirement"] == "r1" and "requirement" not in r["b"]
+

@@ -53,6 +53,23 @@ function SuiteCard({ s, onRun }: { s: EvalSuiteSummary; onRun: (suite: string) =
           Regresiones desde la corrida anterior (pasaban siempre y ya no): <b>{s.regressed.join(', ')}</b>
         </p>
       )}
+      {s.requirements.length > 0 && (
+        <div className="mt-3 rounded-2xl border p-3 dark:border-dark-border">
+          <p className="text-xs font-bold">Requisitos del agente</p>
+          <ul className="mt-2 space-y-2 text-xs">
+            {s.requirements.map((r) => (
+              <li key={r.id}>
+                <span className={r.cases.length === 0 ? 'font-bold text-amber-600' : r.failing.length ? 'font-bold text-red-600' : 'font-bold text-emerald-600'}>
+                  {r.cases.length === 0 ? 'sin casos' : `${r.cases.length - r.failing.length}/${r.cases.length}`}
+                </span>{' '}
+                {r.text || r.id}
+                {r.question && <span className="block text-gov-gray-500">Revisión: {r.question}</span>}
+                {r.failing.length > 0 && <span className="block text-red-600">Fallan: {r.failing.join(', ')}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {s.by_type.length > 0 && (
         <p className="mt-3 text-xs text-gov-gray-500 dark:text-dark-muted">
           Por tipo de fallo:{' '}

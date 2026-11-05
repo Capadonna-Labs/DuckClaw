@@ -212,6 +212,7 @@ def test_evals_tab_summarizes_latest_run_history_and_regressions() -> None:
     assert q["latest"]["ts"] == "2026-11-05T22:30:00Z" and (q["latest"]["total"], q["latest"]["always_pass"], q["latest"]["flaky"], q["latest"]["always_fail"]) == (3, 1, 1, 1)
     assert q["regressed"] == ["b", "c", "d"] and [h["ts"][:10] for h in q["history"]] == ["2026-11-05", "2026-11-04"]
     assert got["other"]["regressed"] == [] and len(got) == 2
+    assert q["requirements"] == []   # runs that declare none
     assert q["by_type"] == [{"type": "t", "passing": 1, "total": 3, "prev_passing": 4, "prev_total": 4}]
 
 
@@ -235,4 +236,21 @@ def test_evals_tab_run_now_only_runs_configured_suites_one_at_a_time(monkeypatch
         assert e.value.status_code == 409
     finally:
         evals._RUNNING["quant"].kill()
+
+
+def test_evals_tab_groups_cases_by_requirement_and_shows_gaps() -> None:
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.evals import summarize
+
+    run = {"suite": "q", "ts": "2026-11-06T22:30:00Z", "model": "m",
+           "requirements": [{"id": "r1", "text": "T1", "question": "Q1"}, {"id": "r2", "text": "T2", "question": "Q2"}],
+           "cases": {"a": {"status": "always_pass", "passes": 3, "n": 3, "type": "t", "failures": [], "requirement": "r1"},
+                     "b": {"status": "flaky", "passes": 2, "n": 3, "type": "t", "failures": [], "requirement": "r1"},
+                     "c": {"status": "always_pass", "passes": 3, "n": 3, "type": "t", "failures": [], "requirement": "undeclared"}}}
+    got = {r["id"]: r for r in summarize([{"value_json": json.dumps(run)}])[0]["requirements"]}
+    assert got["r1"]["cases"] == ["a", "b"] and got["r1"]["failing"] == ["b"] and got["r1"]["question"] == "Q1"
+    assert got["r2"]["cases"] == [] and got["undeclared"]["cases"] == ["c"]
 

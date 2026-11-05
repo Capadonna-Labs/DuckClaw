@@ -47,10 +47,20 @@ def summarize(rows: list[dict[str, Any]], runs_per_suite: int = 30) -> list[dict
                 t[1] += 1
             return {k: (v[0], v[1]) for k, v in acc.items()}
 
+        def by_requirement(run: dict[str, Any]) -> list[dict[str, Any]]:
+            """Each requirement the run declared with its cases (a requirement with none is a gap), plus the cases that name one it does not declare."""
+            reqs = {str(r["id"]): {"id": str(r["id"]), "text": r.get("text", ""), "question": r.get("question", "")} for r in run.get("requirements") or [] if r.get("id")}
+            for c in run["cases"].values():
+                if c.get("requirement"):
+                    reqs.setdefault(str(c["requirement"]), {"id": str(c["requirement"]), "text": "", "question": ""})
+            return [{**r, "cases": sorted(cid for cid, c in run["cases"].items() if c.get("requirement") == r["id"]),
+                     "failing": sorted(cid for cid, c in run["cases"].items() if c.get("requirement") == r["id"] and c.get("status") != "always_pass")}
+                    for r in reqs.values()]
+
         now_t, prev_t = by_type(latest), by_type(before)
         types = [{"type": t, "passing": p, "total": n, "prev_passing": prev_t[t][0] if t in prev_t else None, "prev_total": prev_t[t][1] if t in prev_t else None}
                  for t, (p, n) in sorted(now_t.items())]
-        out.append({"suite": suite, "by_type": types, "latest": {"ts": latest.get("ts"), "model": latest.get("model", ""), "cases": latest["cases"], **counts(latest)}, "regressed": regressed,
+        out.append({"suite": suite, "by_type": types, "requirements": by_requirement(latest) if latest.get("requirements") or any(c.get("requirement") for c in latest["cases"].values()) else [], "latest": {"ts": latest.get("ts"), "model": latest.get("model", ""), "cases": latest["cases"], **counts(latest)}, "regressed": regressed,
                     "history": [{"ts": r.get("ts"), "model": r.get("model", ""), **counts(r)} for r in runs]})
     return out
 
@@ -101,7 +111,7 @@ async def get_eval_runs(limit: int = Query(200, ge=1, le=1000)) -> dict[str, Any
     except FileNotFoundError:
         suites = []
     have = {s["suite"] for s in suites}
-    suites += [{"suite": k, "latest": None, "regressed": [], "history": [], "by_type": []} for k in runnable() if k not in have]   # never run yet: still offer the button
+    suites += [{"suite": k, "latest": None, "regressed": [], "history": [], "by_type": [], "requirements": []} for k in runnable() if k not in have]   # never run yet: still offer the button
     for s in suites:
         s["runnable"], s["running"] = s["suite"] in runnable(), is_running(s["suite"])
     return {"suites": suites}

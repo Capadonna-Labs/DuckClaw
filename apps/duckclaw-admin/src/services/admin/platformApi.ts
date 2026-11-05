@@ -18,7 +18,20 @@ export interface AuditEntry {
   meta?: Record<string, unknown>;
 }
 
+export interface PushLogEntry {
+  id: string;
+  title: string;
+  body: string;
+  tag: string;
+  url: string;
+  sent: number;
+  failed: number;
+  error: string;
+  created_at: string;
+}
+
 export const platformApi = {
+  getPushLog: (limit = 100) => adminFetch<{ entries: PushLogEntry[] }>(`/notifications/push-log?limit=${limit}`),
   health: () => adminFetch<AdminHealth>('/health'),
   releaseWorkerGraphCache: () =>
     adminFetch<ReleaseWorkerCacheResult>('/gateway/release-worker-cache', { method: 'POST' }),

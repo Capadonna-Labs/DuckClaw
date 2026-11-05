@@ -171,3 +171,21 @@ def test_titles_over_30_characters_are_cut_and_moved_whole_to_the_body() -> None
     assert len(t) == 30 and b == "A" * 50                          # no word boundary: hard cut
     t, b = fit_title("ALTA · CVE-2026-109619 ya se explota (CISA)", "ALTA · CVE-2026-109619 ya se explota (CISA) plazo")
     assert b.startswith("ALTA · CVE-2026-109619") and b.count("CVE-2026-109619") == 1   # body already opens with the title
+
+
+def test_push_log_is_readable_newest_first_and_filterable_by_tag() -> None:
+    """A job's push is ephemeral on the device: /notifications/push-log is where its text can be read again (05-nov profit-taking)."""
+    import sys
+
+    import duckdb
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.notifications import load_push_log
+
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE main.push_log (id VARCHAR, tenant_id VARCHAR, title VARCHAR, body VARCHAR, tag VARCHAR, url VARCHAR, sent INTEGER, failed INTEGER, error VARCHAR, created_at TIMESTAMP)")
+    con.execute("INSERT INTO main.push_log VALUES ('a','t','viejo','b','quant-alert','/',1,0,'','2026-11-05 10:00:00'), ('b','t','nuevo','b2','otra','/',1,0,'','2026-11-05 16:10:00')")
+    rows = load_push_log(con, 10)
+    assert [r["title"] for r in rows] == ["nuevo", "viejo"] and rows[0]["created_at"].startswith("2026-11-05 16:10")
+    assert [r["title"] for r in load_push_log(con, 10, "quant-alert")] == ["viejo"]
+    assert load_push_log(con, 10, "x' OR '1'='1") == []

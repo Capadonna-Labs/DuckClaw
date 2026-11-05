@@ -99,10 +99,27 @@ function SuiteCard({ s, onRun }: { s: EvalSuiteSummary; onRun: (suite: string) =
                 </td>
                 <td className="break-words px-3 py-2 text-xs">
                   {c.failures.join('; ')}
+                  {c.unverified && (
+                    <span className="block text-gov-gray-500" title="Un subagente corrió herramientas que el runner no ve: «no llamó X» no se puede juzgar">
+                      ⚠ parcialmente verificable (ejecutó un subagente)
+                    </span>
+                  )}
                   {c.sample && (
                     <details className="mt-1">
                       <summary className="cursor-pointer text-gov-gray-500">Qué hizo el agente</summary>
-                      <p className="mt-1 font-mono">Herramientas: {c.sample.tools.join(' → ') || '(ninguna)'}</p>
+                      {c.sample.spans?.length ? (
+                        <ol className="mt-1 list-decimal space-y-1 pl-4 font-mono">
+                          {c.sample.spans.map((sp, i) => (
+                            <li key={i} className="break-all">
+                              <b>{sp.name}</b> {sp.input}
+                              <br />
+                              <span className="text-gov-gray-500">→ {sp.output}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : (
+                        <p className="mt-1 font-mono">Herramientas: {c.sample.tools.join(' → ') || '(ninguna)'}</p>
+                      )}
                       <p className="mt-1 whitespace-pre-wrap font-mono">{c.sample.reply}</p>
                     </details>
                   )}

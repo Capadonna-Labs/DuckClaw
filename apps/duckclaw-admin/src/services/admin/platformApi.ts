@@ -36,7 +36,8 @@ export interface EvalCaseResult {
   n: number;
   status: 'always_pass' | 'flaky' | 'always_fail';
   failures: string[];
-  sample?: { tools: string[]; reply: string };
+  unverified?: boolean;
+  sample?: { tools: string[]; reply: string; spans?: { name: string; input: string; output: string }[] };
 }
 
 export interface EvalSuiteSummary {

@@ -46,7 +46,7 @@ def test_runs_are_classified_always_pass_always_fail_or_flaky() -> None:
     assert r["c"]["passes"] == 2
     crashed = run_suite(cases, lambda c: 1 / 0, n=2)["cases"]["a"]
     assert crashed["status"] == "always_fail" and crashed["failures"][0].startswith("runner error")
-    assert r["b"]["sample"] == {"tools": [], "reply": "nope"} and "sample" not in r["a"]   # the last failed attempt, for the Evals tab
+    assert r["b"]["sample"] == {"tools": [], "reply": "nope", "spans": []} and "sample" not in r["a"]   # the last failed attempt, for the Evals tab
 
 
 def test_regression_gate_only_trips_on_cases_that_always_passed() -> None:
@@ -66,3 +66,13 @@ def test_cli_end_to_end_with_the_example_goldens(tmp_path: Path, monkeypatch: py
     assert main([str(FIX), "--runner", "eval_runner_stub:good", "--out", str(first)]) == 0
     assert all(c["status"] == "always_pass" for c in json.loads(first.read_text())["cases"].values())
     assert main([str(FIX), "--runner", "eval_runner_stub:bad", "--out", str(second), "--baseline", str(first)]) == 1
+
+
+def test_a_missing_span_is_not_a_skipped_action() -> None:
+    case = {"id": "a", "must_call": ["read_sql"], "must_not_call": ["place_order"]}
+    assert check_case(case, {"tools": []}) == ["did not call read_sql"]
+    assert check_case(case, {"tools": [], "partial": True}) == []   # a delegate ran tools we cannot see
+    assert check_case(case, {"tools": ["place_order"], "partial": True}) == ["called forbidden tool place_order"]   # what we do see still counts
+    r = run_suite([case], lambda c: {"reply": "", "tools": ["place_order"], "partial": True, "spans": [{"name": "place_order", "input": '{"q": 1}', "output": "stub"}]}, n=1)["cases"]["a"]
+    assert r["unverified"] and r["sample"]["spans"] == [{"name": "place_order", "input": '{"q": 1}', "output": "stub"}]
+

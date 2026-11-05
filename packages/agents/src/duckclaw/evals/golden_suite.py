@@ -16,7 +16,9 @@ A case is a real request plus what a right answer looks like, written as checks 
 
 Each case runs N times (default 3: the agent varies) and ends up ``always_pass``, ``always_fail`` or ``flaky``. ``--baseline`` compares
 with a previous results file: exit 1 when a case that was ``always_pass`` is not any more. The agent is yours to provide, as
-``--runner pkg.module:function``: ``function(case) -> {"reply": str, "tools": [tool names in call order]}``. Run it against a profile
+``--runner pkg.module:function``: ``function(case) -> {"reply": str, "tools": [tool names in call order]}``,
+optionally with ``"spans": [{"name", "input", "output"}]`` (what each call got and returned, shown in the Evals tab) and ``"partial": True`` when
+the runner could not see every call (a delegate's own tools): a missing span is not a skipped action, so "did not call X" is then unverifiable, not a failure. Run it against a profile
 without destructive tools: a golden suite must never be able to place an order.
 
     python -m duckclaw.evals.golden_suite goldens.yaml --runner my_pkg.eval_runner:run --out run.json --baseline last.json
@@ -48,9 +50,10 @@ def check_case(case: dict[str, Any], out: dict[str, Any]) -> list[str]:
     reply, tools = str(out.get("reply") or ""), list(out.get("tools") or [])
     found = [f"called forbidden tool {t}" for t in case.get("must_not_call") or [] if t in tools]
     found += [f"called forbidden tool {t} (matches /{p}/)" for p in case.get("must_not_call_match") or [] for t in tools if re.search(p, t)]
-    found += [f"did not call {t}" for t in case.get("must_call") or [] if t not in tools]
-    if case.get("must_call_any") and not set(case["must_call_any"]) & set(tools):
-        found.append(f"called none of {case['must_call_any']}")
+    if not out.get("partial"):   # absent span != skipped action: with calls we could not see, "did not call" cannot be judged
+        found += [f"did not call {t}" for t in case.get("must_call") or [] if t not in tools]
+        if case.get("must_call_any") and not set(case["must_call_any"]) & set(tools):
+            found.append(f"called none of {case['must_call_any']}")
     found += [f"reply does not match /{p}/" for p in case.get("must_match") or [] if not re.search(p, reply, re.I | re.S)]
     found += [f"reply matches /{p}/" for p in case.get("must_not_match") or [] if re.search(p, reply, re.I | re.S)]
     if case.get("trajectory"):
@@ -61,19 +64,21 @@ def check_case(case: dict[str, Any], out: dict[str, Any]) -> list[str]:
 def run_suite(cases: list[dict[str, Any]], runner: Runner, n: int = 3) -> dict[str, Any]:
     results: dict[str, Any] = {}
     for case in cases:
-        passes, failures, sample = 0, set(), None
+        passes, failures, sample, blind = 0, set(), None, False
         for _ in range(n):
             try:
                 out = runner(case)
                 found = check_case(case, out)
+                blind = blind or bool(out.get("partial") and (case.get("must_call") or case.get("must_call_any")))
                 if found:   # what the agent actually did on the last failed attempt: the first thing to read when a case fails
-                    sample = {"tools": [str(t) for t in (out.get("tools") or [])][:30], "reply": str(out.get("reply") or "")[:600]}
+                    sample = {"tools": [str(t) for t in (out.get("tools") or [])][:30], "reply": str(out.get("reply") or "")[:600],
+                              "spans": [{k: str(sp.get(k) or "")[:400] for k in ("name", "input", "output")} for sp in (out.get("spans") or [])[:20]]}
             except Exception as exc:  # noqa: BLE001 - a crashing run is a failed run, not a crashed suite
                 found = [f"runner error: {exc}"]
             passes += not found
             failures.update(found)
         status = "always_pass" if passes == n else "always_fail" if passes == 0 else "flaky"
-        results[case["id"]] = {"type": case.get("type", ""), "passes": passes, "n": n, "status": status, "failures": sorted(failures), **({"sample": sample} if sample else {})}
+        results[case["id"]] = {"type": case.get("type", ""), "passes": passes, "n": n, "status": status, "failures": sorted(failures), **({"sample": sample} if sample else {}), **({"unverified": True} if blind else {})}
     return {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "cases": results}
 
 

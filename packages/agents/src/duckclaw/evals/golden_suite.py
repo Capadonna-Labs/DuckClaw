@@ -21,7 +21,7 @@ A case is a real request plus what a right answer looks like, written as checks 
         must_not_match: ["order sent"]
         no_claim_without_tool: ["verificad"]   # regexes: a reply that matches must come after at least one tool call ("verified" with no tool is a made-up check)
         numbers_from_tools: true           # every figure in the reply (3+ digits or decimals; not dates/years) is in some tool output, within 1 %
-        must_call_before: [{any: [read_sql], before: propose_trade_signal}]   # required step: act only after one of these reads
+        must_call_before: [{any: [read_sql], before: submit_proposal}]   # required step: act only after one of these reads
         max_chars: 512                     # length (a push body is cut at 512)
         variants: ["same situation, other words"]   # optional: each becomes a case ``<id>#v1``... with the same checks (is it a pattern or an accident?)
         trajectory: {start: [...], edges: {...}}   # optional: a golden DAG, see traces/trajectory_gate.py

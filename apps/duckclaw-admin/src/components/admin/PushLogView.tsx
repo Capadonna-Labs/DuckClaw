@@ -22,7 +22,7 @@ export default function PushLogView({ embedded = false }: EmbeddedViewProps) {
       {error && <p className="text-red-600 text-sm">{error}</p>}
       <SettingsSection
         titulo="Avisos enviados"
-        descripcion="Cada notificación push (chat, metas y jobs Quant) con su texto completo, por si se descartó en el teléfono"
+        descripcion="Cada notificación push (chat, metas y jobs de las extensiones) con su texto completo, por si se descartó en el teléfono"
         icono={<Bell size={22} />}
       >
         {entries.length === 0 ? (

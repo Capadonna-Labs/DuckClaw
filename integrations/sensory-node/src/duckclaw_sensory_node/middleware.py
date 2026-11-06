@@ -12,7 +12,7 @@ from starlette.responses import JSONResponse, Response
 
 _log = logging.getLogger("duckclaw.sensory.middleware")
 
-_TAILSCALE_NET = ipaddress.ip_network("192.0.2.10/10")
+_TAILSCALE_NET = ipaddress.ip_network("100.64.0.0/10")   # Tailscale's CGNAT range (RFC 6598), not a host address
 
 
 def _tailscale_only_enabled() -> bool:

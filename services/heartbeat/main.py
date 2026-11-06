@@ -11,6 +11,7 @@ ciclo largo de homeostasis).
 """
 
 import asyncio
+import calendar
 import json
 import logging
 import os
@@ -349,13 +350,49 @@ _VERDICTS_TTL_S = 48 * 3600
 _VERDICTS_KEEP = 20
 
 
-async def _remember_verdict(chat_id: Any, verdict: str) -> None:
+_REPEAT_WINDOW_S = 6 * 3600
+_REPEAT_JACCARD = 0.25
+
+
+def _verdict_key(verdict: str) -> tuple[str, frozenset[str]]:
+    """(what it points at after "→", its words without figures) of a watch verdict."""
+    head, _, target = verdict.partition("→")
+    words = re.findall(r"[^\W\d_]{3,}", head.lower())
+    return re.sub(r"\s+", "", target.lower()), frozenset(words)
+
+
+def _repeats(verdict: str, recent: list[str], now: float) -> bool:
+    """True when a verdict pushed within 6 h points at the same thing and shares a quarter of its
+    words: the same story with a moved figure ("sube a 76%" then "sube a 78,5%", 06-Nov) is not
+    news. The prompt already asks for this; this is the backstop when the model ignores it.
+    ponytail: word overlap, not semantics; a reworded repeat with other words still goes out."""
+    target, words = _verdict_key(verdict)
+    if not target or not words:
+        return False
+    for line in recent:
+        stamp, _, old = line.partition(" · ")
+        try:
+            age = now - calendar.timegm(time.strptime(f"{time.gmtime(now).tm_year} {stamp}", "%Y %d-%b %H:%M UTC"))
+        except ValueError:
+            continue
+        old_target, old_words = _verdict_key(old)
+        if 0 <= age <= _REPEAT_WINDOW_S and old_target == target and len(words & old_words) / len(words | old_words) >= _REPEAT_JACCARD:
+            return True
+    return False
+
+
+async def _remember_verdict(chat_id: Any, verdict: str) -> bool:
+    """Store a pushed verdict; False (nothing stored, don't push) when it repeats a recent one."""
     if not REDIS_URL:
-        return
+        return True
     try:
         r = redis.from_url(REDIS_URL)
         try:
             key = _VERDICTS_KEY.format(chat_id)
+            recent = [x.decode() if isinstance(x, bytes) else str(x) for x in await r.lrange(key, 0, _VERDICTS_KEEP - 1) or []]
+            if _repeats(verdict, recent, time.time()):
+                logger.info("web_push: omitida chat=%s (repite un aviso reciente): %s", chat_id, verdict)
+                return False
             await r.lpush(key, f"{time.strftime('%d-%b %H:%M UTC', time.gmtime())} · {verdict}")
             await r.ltrim(key, 0, _VERDICTS_KEEP - 1)
             await r.expire(key, _VERDICTS_TTL_S)
@@ -363,6 +400,7 @@ async def _remember_verdict(chat_id: Any, verdict: str) -> None:
             await r.aclose()
     except Exception as exc:  # noqa: BLE001
         logger.warning("watch_verdicts: no se pudo guardar chat=%s: %s", chat_id, exc)
+    return True
 
 
 async def _already_notified_note(chat_id: Any) -> str:
@@ -837,8 +875,8 @@ async def _deliver_goals_delta_turn(
         logger.info("web_push: omitida tag=duckclaw-goals-%s (veredicto sin novedades)", chat_id)
         return
     has_verdict = parts[0] != "DuckClaw · ciclo /loop"
-    if has_verdict:
-        await _remember_verdict(chat_id, parts[0])
+    if has_verdict and not await _remember_verdict(chat_id, parts[0]):
+        return
     await _send_web_push_notification(
         title=parts[0] if has_verdict else "DuckClaw",
         body=parts[1] if has_verdict else "Revisión proactiva completada.",
@@ -878,8 +916,8 @@ async def _deliver_wall_cron_turn(
         logger.info("web_push: omitida tag=%s (veredicto sin novedades)", tag)
         return
     has_verdict = parts[0] != "DuckClaw · ciclo /loop"
-    if has_verdict:
-        await _remember_verdict(chat_id, parts[0])
+    if has_verdict and not await _remember_verdict(chat_id, parts[0]):
+        return
     await _send_web_push_notification(
         title=parts[0] if has_verdict else "DuckClaw",
         body=parts[1] if has_verdict else (f"Cron completado: {prompt[:80]}" if prompt else "Recordatorio programado completado."),
@@ -1202,8 +1240,7 @@ async def _run_loop_proactive_tick_one_db(
                 parts = _loop_push_parts(result.get("body"))
                 if parts is None:
                     logger.info("web_push: omitida tag=duckclaw-loop-%s (veredicto sin novedades)", chat_id)
-                else:
-                    await _remember_verdict(chat_id, parts[0])
+                elif await _remember_verdict(chat_id, parts[0]):
                     await _send_web_push_notification(
                         title=parts[0],
                         body=parts[1],

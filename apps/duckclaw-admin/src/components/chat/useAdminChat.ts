@@ -25,6 +25,7 @@ import { mutationHeaders } from '@/lib/csrfClient';
 import { friendlyGatewayError, parseApiErrorDetail } from '@/lib/adminErrors';
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
 import { finalizeRunningToolHeartbeats } from '@/lib/toolHeartbeat';
+import { withQuote } from '@/components/chat/useQuoteMessage';
 import { useDetachedTurnResume } from './useDetachedTurnResume';
 import { useLastTurnTokens } from './useLastTurnTokens';
 
@@ -173,6 +174,9 @@ export function useAdminChat({
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [input, setInput] = useState('');
+  /** Mensaje al que se está respondiendo (deslizar a la derecha); viaja con el siguiente envío. */
+  const [quote, setQuote] = useState('');
+  useEffect(() => setQuote(''), [chatId]);
   const imageAttachments = useChatImageAttachments();
   const documentAttachments = useChatDocumentAttachments();
   const [loading, setLoading] = useState(false);
@@ -535,10 +539,11 @@ export function useAdminChat({
     }
     const userPreviewImages = userPreviewsFromPayload(payloadImages, names);
     setInput('');
+    setQuote('');
     imageAttachments.clearImages({ revoke: true });
     documentAttachments.clearDocuments();
-    await runChatTurn(text, payloadImages, userPreviewImages, payloadDocuments, docNames);
-  }, [input, loading, workerId, imageAttachments, documentAttachments, runChatTurn]);
+    await runChatTurn(withQuote(quote, text), payloadImages, userPreviewImages, payloadDocuments, docNames);
+  }, [input, quote, loading, workerId, imageAttachments, documentAttachments, runChatTurn]);
 
   /** Click en un chip de sugerencia: envía el texto directo, sin pasar por el estado `input`. */
   const sendSuggestion = useCallback(
@@ -710,6 +715,8 @@ export function useAdminChat({
     historyLoading,
     input,
     setInput,
+    quote,
+    setQuote,
     loading,
     thinking,
     thinkingIdentity,

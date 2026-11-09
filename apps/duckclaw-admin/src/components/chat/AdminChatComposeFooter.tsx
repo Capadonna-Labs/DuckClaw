@@ -20,6 +20,8 @@ import type {
   LiveVoiceStatus,
 } from '@/components/chat/usePipecatLiveVoice';
 
+import { quotePreview } from '@/components/chat/useQuoteMessage';
+
 type ImageAttachments = ReturnType<typeof useChatImageAttachments>;
 type DocumentAttachments = ReturnType<typeof useChatDocumentAttachments>;
 
@@ -39,6 +41,9 @@ export type AdminChatComposeFooterProps = {
   directiveSkills?: { cmd: string; description: string }[];
   input: string;
   setInput: (value: string) => void;
+  /** Mensaje al que se responde; se muestra como chip y viaja con el envío. */
+  quote?: string;
+  onClearQuote?: () => void;
   inputRef: RefObject<HTMLTextAreaElement>;
   canSend: boolean;
   canSubmit: boolean;
@@ -74,6 +79,27 @@ export type AdminChatComposeFooterProps = {
     endCall: () => void | Promise<void>;
   };
 };
+
+/** Chip de "respondiendo a": una línea con el inicio del mensaje y una X para quitarlo. */
+function QuoteChip({ quote, onClear }: { quote: string; onClear?: () => void }) {
+  const preview = quotePreview(quote);
+  if (!preview) return null;
+  return (
+    <div className="flex min-w-0 items-center gap-2 rounded-full border border-gov-gray-200 bg-white/80 px-3 py-1 text-xs text-gov-gray-700 dark:border-dark-border dark:bg-dark-surface/80 dark:text-dark-text">
+      <span className="min-w-0 flex-1 truncate" title={preview}>
+        {preview}
+      </span>
+      <button
+        type="button"
+        onClick={onClear}
+        className="shrink-0 rounded-full p-0.5 text-gov-gray-500 hover:bg-gov-gray-100 dark:hover:bg-dark-bg"
+        aria-label="Quitar la respuesta a este mensaje"
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
 
 function PendingDocumentChips({
   documentAttachments,
@@ -120,6 +146,8 @@ export function AdminChatComposeFooter({
   directiveSkills = [],
   input,
   setInput,
+  quote = '',
+  onClearQuote,
   inputRef,
   canSend,
   canSubmit,
@@ -230,6 +258,11 @@ export function AdminChatComposeFooter({
             </div>
           ) : null}
           <div className="rounded-2xl border border-gov-gray-200 bg-gov-gray-50/90 dark:border-dark-border dark:bg-dark-bg/70 shadow-sm focus-within:border-gov-blue-300 focus-within:ring-2 focus-within:ring-gov-blue-100 dark:focus-within:ring-gov-blue-900/40 transition-shadow">
+            {quote ? (
+              <div className="px-2.5 pt-2.5">
+                <QuoteChip quote={quote} onClear={onClearQuote} />
+              </div>
+            ) : null}
             {(imageAttachments.pendingImages.length > 0 ||
               documentAttachments.pendingDocuments.length > 0) && (
               <div className="flex flex-col gap-2 px-3 pt-2.5">
@@ -372,6 +405,11 @@ export function AdminChatComposeFooter({
             ) : null}
             {composeChips ? (
               <div className="mb-2 flex flex-wrap items-center gap-1.5">{composeChips}</div>
+            ) : null}
+            {quote ? (
+              <div className="mb-2">
+                <QuoteChip quote={quote} onClear={onClearQuote} />
+              </div>
             ) : null}
             {(imageAttachments.pendingImages.length > 0 ||
               documentAttachments.pendingDocuments.length > 0) && (

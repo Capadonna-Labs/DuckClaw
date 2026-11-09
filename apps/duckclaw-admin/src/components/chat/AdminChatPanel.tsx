@@ -131,6 +131,8 @@ export function AdminChatPanel({
     messages,
     input,
     setInput,
+    quote,
+    setQuote,
     loading,
     thinking,
     thinkingIdentity,
@@ -166,7 +168,7 @@ export function AdminChatPanel({
     reloadHistory,
     setMessages,
   } = chat;
-  const quoteMessage = useQuoteMessage(messages, setInput, inputRef);
+  const quoteMessage = useQuoteMessage(messages, setQuote, inputRef);
 
   // Agents can create directive skills mid-conversation (create_skill), so the
   // catalog fetched on mount goes stale — refresh each time a "/" command starts.
@@ -602,6 +604,8 @@ export function AdminChatPanel({
             composeChips={composeChips}
             input={input}
             setInput={setInput}
+            quote={quote}
+            onClearQuote={() => setQuote('')}
             inputRef={inputRef}
             canSend={canSend}
             canSubmit={canSubmit}

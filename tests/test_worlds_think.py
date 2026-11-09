@@ -35,7 +35,7 @@ def api(admin_client: TestClient, gateway_db: Path, monkeypatch: pytest.MonkeyPa
         seen.append({"worker_id": body.worker_id, "message": body.message, "chat_id": body.chat_id, "tenant_id": body.tenant_id, "actor": actor})
         return SimpleNamespace(wid=body.worker_id)
 
-    async def invoke(prepared, *, request):
+    async def invoke(prepared, *, request, notify=True):
         return {"response": f"<say>hola</say> from {prepared.wid}", "usage_tokens": 42}
 
     monkeypatch.setattr(worlds, "_enqueue", apply)

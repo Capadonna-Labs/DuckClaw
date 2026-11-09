@@ -39,6 +39,7 @@ export const PRIMARY_NAV_GROUP: AdminNavGroup = {
     { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },
     { href: '/knowledge', label: 'Base de Conocimiento', section: 'core', audience: 'all' },
+    { href: '/evals', label: 'Evals', section: 'core', audience: 'admin' },
     { href: '/productividad', label: 'Productividad', section: 'core', audience: 'admin' },
   ],
 };

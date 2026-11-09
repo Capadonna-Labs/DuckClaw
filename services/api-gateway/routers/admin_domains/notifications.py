@@ -4,7 +4,7 @@ import asyncio
 import hashlib
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from routers.admin_domains.admin_common import actor_from_header, admin_audit, require_admin_key
@@ -66,6 +66,33 @@ def _enqueue_subscription(body: WebPushSubscriptionBody, *, actor: str, key: str
         updated_by=actor,
     )
     return enqueue_typed_command(command, db_path=str(get_gateway_db_path()), user_id=actor)
+
+
+def load_push_log(db: Any, limit: int, tag: str = "") -> list[dict[str, Any]]:
+    """Newest first. A job's Web Push is ephemeral on the device; this is the only place its text can be read again."""
+    from duckclaw.shared_db_grants import _query_all_dicts
+
+    where = f"WHERE tag = '{tag.replace(chr(39), chr(39) * 2)}' " if tag else ""
+    rows = _query_all_dicts(
+        db,
+        "SELECT id, title, body, tag, url, sent, failed, error, CAST(created_at AS VARCHAR) AS created_at "
+        f"FROM main.push_log {where}ORDER BY created_at DESC LIMIT {int(limit)}",
+    )
+    return [{k: (str(v) if k == "created_at" else v) for k, v in row.items()} for row in rows]
+
+
+@router.get("/push-log", dependencies=[Depends(require_admin_key)])
+async def get_push_log(limit: int = Query(100, ge=1, le=500), tag: str = Query("", max_length=160)) -> dict[str, Any]:
+    from core.admin_identity import open_gateway_db
+
+    def _read() -> list[dict[str, Any]]:
+        with open_gateway_db(read_only=True) as db:
+            return load_push_log(db, limit, tag.strip())
+
+    try:
+        return {"entries": await asyncio.to_thread(_read)}
+    except FileNotFoundError:
+        return {"entries": []}
 
 
 @router.get("/web-push/public-key", dependencies=[Depends(require_admin_key)])

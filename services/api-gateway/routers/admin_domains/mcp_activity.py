@@ -47,6 +47,28 @@ def read_activity(db: Any, tenant_id: str, *, days: int, limit: int, connector_i
     return {"table_ready": True, "summary": summary, "recent": recent}
 
 
+def read_unused_tools(db: Any, tenant_id: str, *, days: int) -> dict[str, Any]:
+    """MCP tools a worker was built with that it never called in ``days``. Proposal only: nothing is removed. A tool needs ``days`` of exposure before it can be flagged."""
+    from duckclaw.forge.skills.mcp_connector_bridge import _public_tool_name
+
+    try:
+        exposed = _rows(
+            db,
+            "SELECT worker_id, tool_name FROM tool_exposure "
+            f"WHERE tenant_id = {_quote(tenant_id)} AND first_seen <= CURRENT_TIMESTAMP - INTERVAL {int(days)} DAY AND last_seen >= CURRENT_TIMESTAMP - INTERVAL {int(days)} DAY",
+        )
+        calls = _rows(
+            db,
+            "SELECT DISTINCT worker_id, connector_id, tool_name FROM tool_call_log "
+            f"WHERE tenant_id = {_quote(tenant_id)} AND created_at >= CURRENT_TIMESTAMP - INTERVAL {int(days)} DAY",
+        )
+    except Exception:  # noqa: BLE001  tables appear with the first recorded exposure/call
+        return {"table_ready": False, "unused": []}
+    used = {(c["worker_id"], _public_tool_name(str(c["connector_id"]), str(c["tool_name"]))) for c in calls}
+    unused = [e for e in exposed if (e["worker_id"], e["tool_name"]) not in used]
+    return {"table_ready": True, "days": days, "unused": unused}
+
+
 @router.get("", dependencies=[Depends(require_admin_key)])
 async def mcp_activity(
     days: int = Query(7, ge=1, le=90),
@@ -59,5 +81,19 @@ async def mcp_activity(
     def _read() -> dict[str, Any]:
         with open_gateway_db(read_only=True) as db:
             return read_activity(db, tenant_id, days=days, limit=limit, connector_id=connector_id.strip())
+
+    return await asyncio.to_thread(_read)
+
+
+@router.get("/unused", dependencies=[Depends(require_admin_key)])
+async def mcp_unused_tools(
+    days: int = Query(14, ge=1, le=90),
+    actor: str = Depends(actor_from_header),
+) -> dict[str, Any]:
+    tenant_id = str(_actor_profile(actor).get("tenant_id") or "default")
+
+    def _read() -> dict[str, Any]:
+        with open_gateway_db(read_only=True) as db:
+            return read_unused_tools(db, tenant_id, days=days)
 
     return await asyncio.to_thread(_read)

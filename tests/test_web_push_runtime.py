@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -171,3 +172,128 @@ def test_titles_over_30_characters_are_cut_and_moved_whole_to_the_body() -> None
     assert len(t) == 30 and b == "A" * 50                          # no word boundary: hard cut
     t, b = fit_title("ALTA · CVE-2026-109619 ya se explota (CISA)", "ALTA · CVE-2026-109619 ya se explota (CISA) plazo")
     assert b.startswith("ALTA · CVE-2026-109619") and b.count("CVE-2026-109619") == 1   # body already opens with the title
+
+
+def test_push_log_is_readable_newest_first_and_filterable_by_tag() -> None:
+    """A job's push is ephemeral on the device: /notifications/push-log is where its text can be read again (05-nov profit-taking)."""
+    import sys
+
+    import duckdb
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.notifications import load_push_log
+
+    con = duckdb.connect(":memory:")
+    con.execute("CREATE TABLE main.push_log (id VARCHAR, tenant_id VARCHAR, title VARCHAR, body VARCHAR, tag VARCHAR, url VARCHAR, sent INTEGER, failed INTEGER, error VARCHAR, created_at TIMESTAMP)")
+    con.execute("INSERT INTO main.push_log VALUES ('a','t','viejo','b','quant-alert','/',1,0,'','2026-11-05 10:00:00'), ('b','t','nuevo','b2','otra','/',1,0,'','2026-11-05 16:10:00')")
+    rows = load_push_log(con, 10)
+    assert [r["title"] for r in rows] == ["nuevo", "viejo"] and rows[0]["created_at"].startswith("2026-11-05 16:10")
+    assert [r["title"] for r in load_push_log(con, 10, "quant-alert")] == ["viejo"]
+    assert load_push_log(con, 10, "x' OR '1'='1") == []
+
+
+def _eval_row(suite: str, ts: str, **statuses: str) -> dict:
+    import json
+
+    return {"value_json": json.dumps({"suite": suite, "ts": ts, "model": "m", "cases": {c: {"status": s, "passes": 3 if s == "always_pass" else 0, "n": 3, "type": "t", "failures": []} for c, s in statuses.items()}})}
+
+
+def test_evals_tab_summarizes_latest_run_history_and_regressions() -> None:
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.evals import summarize
+
+    rows = [_eval_row("quant", "2026-11-05T22:30:00Z", a="always_pass", b="always_fail", c="flaky"),
+            _eval_row("quant", "2026-11-04T22:30:00Z", a="always_pass", b="always_pass", c="always_pass", d="always_pass"),
+            _eval_row("other", "2026-11-05T01:00:00Z", x="always_pass"), {"value_json": "not json"}, {"value_json": '{"cases": {}}'}]
+    got = {s["suite"]: s for s in summarize(rows)}
+    q = got["quant"]
+    assert q["latest"]["ts"] == "2026-11-05T22:30:00Z" and (q["latest"]["total"], q["latest"]["always_pass"], q["latest"]["flaky"], q["latest"]["always_fail"]) == (3, 1, 1, 1)
+    assert q["regressed"] == ["b", "c", "d"] and [h["ts"][:10] for h in q["history"]] == ["2026-11-05", "2026-11-04"]
+    assert got["other"]["regressed"] == [] and len(got) == 2
+    assert q["requirements"] == []   # runs that declare none
+    assert q["by_type"] == [{"type": "t", "passing": 1, "total": 3, "prev_passing": 4, "prev_total": 4}]
+
+
+def test_evals_tab_run_now_only_runs_configured_suites_one_at_a_time(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    import asyncio
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from fastapi import HTTPException
+    from routers.admin_domains import evals
+
+    monkeypatch.setenv("DUCKCLAW_EVAL_COMMANDS", json.dumps({"quant": {"argv": [sys.executable, "-c", "import time; time.sleep(5)"], "cwd": str(tmp_path)}}))
+    with pytest.raises(HTTPException) as e:
+        asyncio.run(evals.run_eval_suite("nope"))
+    assert e.value.status_code == 404
+    try:
+        assert asyncio.run(evals.run_eval_suite("quant"))["accepted"] and evals.is_running("quant")
+        with pytest.raises(HTTPException) as e:
+            asyncio.run(evals.run_eval_suite("quant"))
+        assert e.value.status_code == 409
+    finally:
+        evals._RUNNING["quant"].kill()
+
+
+def test_evals_tab_groups_cases_by_requirement_and_shows_gaps() -> None:
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.evals import summarize
+
+    run = {"suite": "q", "ts": "2026-11-06T22:30:00Z", "model": "m",
+           "requirements": [{"id": "r1", "text": "T1", "question": "Q1"}, {"id": "r2", "text": "T2", "question": "Q2"}],
+           "cases": {"a": {"status": "always_pass", "passes": 3, "n": 3, "type": "t", "failures": [], "requirement": "r1"},
+                     "b": {"status": "flaky", "passes": 2, "n": 3, "type": "t", "failures": [], "requirement": "r1"},
+                     "c": {"status": "always_pass", "passes": 3, "n": 3, "type": "t", "failures": [], "requirement": "undeclared"}}}
+    got = {r["id"]: r for r in summarize([{"value_json": json.dumps(run)}])[0]["requirements"]}
+    assert got["r1"]["cases"] == ["a", "b"] and got["r1"]["failing"] == ["b"] and got["r1"]["question"] == "Q1"
+    assert got["r2"]["cases"] == [] and got["undeclared"]["cases"] == ["c"]
+
+
+def test_evals_tab_priorities_and_saved_reviews(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains import evals
+
+    run = {"suite": "q", "ts": "2026-11-06T22:30:00Z", "cases": {
+        "a": {"status": "always_fail", "severity": "high", "passes": 0, "n": 3, "type": "t", "failures": []},
+        "b": {"status": "flaky", "severity": "low", "passes": 1, "n": 3, "type": "t", "failures": []},
+        "c": {"status": "always_pass", "severity": "high", "passes": 3, "n": 3, "type": "t", "failures": []}}}
+    suites = evals.summarize([{"value_json": json.dumps(run)}])
+    got = suites[0]["latest"]["cases"]
+    assert (got["a"]["priority"], got["b"]["priority"], got["c"]["priority"]) == ("fix_now", "improve_later", "")
+    evals.attach_reviews(suites, [{"domain": "eval_notes", "key": "q:a", "value_json": json.dumps({"verdict": "fail", "note": "n"})}, {"domain": "eval_notes", "key": "q:zzz", "value_json": "{}"}])
+    assert got["a"]["review"]["verdict"] == "fail" and "review" not in got["b"]
+
+    sent = {}
+    import duckclaw.db_write_queue as q
+    monkeypatch.setattr(q, "enqueue_typed_command", lambda cmd, **kw: sent.update(cmd=cmd) or "t1")
+    out = asyncio.run(evals.put_case_review("q", "a", evals.ReviewBody(note="n", possibility="p", verdict="unsure"), actor="juan"))
+    assert out["task_id"] == "t1" and sent["cmd"].domain == "eval_notes" and sent["cmd"].key == "q:a" and sent["cmd"].value_json["verdict"] == "unsure"
+    with pytest.raises(Exception):
+        evals.ReviewBody(verdict="maybe")
+
+
+def test_evals_tab_splits_the_score_by_difficulty_and_flags_stale_reviews() -> None:
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.evals import summarize
+
+    def case(status: str, diff: str, reviewed: str | None) -> dict:
+        return {"status": status, "passes": 3, "n": 3, "type": "t", "failures": [], "difficulty": diff, **({"reviewed": reviewed} if reviewed else {})}
+
+    run = {"suite": "q", "ts": "2026-11-05T22:30:00Z", "cases": {"a": case("always_pass", "easy", "2026-11-01"), "b": case("always_pass", "easy", "2026-01-01"),
+                                                                  "c": case("always_fail", "hard", None), "d": case("always_pass", "hard", "2026-10-01")}}
+    got = summarize([{"value_json": json.dumps(run)}])[0]
+    assert got["by_difficulty"] == {"easy": [2, 2], "hard": [1, 2]} and got["review_due"] == ["b", "c"]
+

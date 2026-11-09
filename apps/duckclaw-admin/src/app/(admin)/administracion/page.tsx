@@ -6,17 +6,19 @@ import { Loader2 } from 'lucide-react';
 import { AdminHubShell } from '@/components/admin/AdminHubShell';
 import AccessPageView from '@/components/admin/AccessPageView';
 import AuditPageView from '@/components/admin/AuditPageView';
+import PushLogView from '@/components/admin/PushLogView';
 import { useAuthStore } from '@/store/authStore';
 
 const TABS = [
   { id: 'acceso', label: 'Acceso', hint: 'Usuarios web y permisos DuckDB compartido' },
   { id: 'auditoria', label: 'Auditoría', hint: 'Registro de acciones admin' },
+  { id: 'avisos', label: 'Avisos', hint: 'Notificaciones push enviadas, con su texto completo' },
 ] as const;
 
 type AdministracionTab = (typeof TABS)[number]['id'];
 
 function parseTab(raw: string | null): AdministracionTab {
-  if (raw === 'acceso' || raw === 'auditoria') return raw;
+  if (raw === 'acceso' || raw === 'auditoria' || raw === 'avisos') return raw;
   if (raw === 'cuenta') return 'acceso';
   return 'acceso';
 }
@@ -56,6 +58,7 @@ function AdministracionHubContent() {
     >
       {tab === 'acceso' && <AccessPageView embedded />}
       {tab === 'auditoria' && <AuditPageView embedded />}
+      {tab === 'avisos' && <PushLogView embedded />}
     </AdminHubShell>
   );
 }

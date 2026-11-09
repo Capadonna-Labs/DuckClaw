@@ -733,6 +733,7 @@ async def invoke_playground_chat_sync(
     prepared: PlaygroundPreparedChat,
     *,
     request: Request,
+    notify: bool = True,   # False for background turns nobody is waiting on (a world's planner): no push
 ) -> Any:
     redis_client = getattr(request.app.state, "redis", None)
     delivery_context = GatewayDeliveryContext.trusted_admin_console()
@@ -747,15 +748,16 @@ async def invoke_playground_chat_sync(
         )
     except Exception as exc:
         raise problem(500, "Error en playground chat", str(exc)) from exc
-    spawn_background(
-        _notify_playground_turn_done(
-            prepared.session_id,
-            prepared.wid,
-            extract_playground_reply(result),
-            redis_client=redis_client,
-            incoming_message=prepared.original_user_message or "",
+    if notify:
+        spawn_background(
+            _notify_playground_turn_done(
+                prepared.session_id,
+                prepared.wid,
+                extract_playground_reply(result),
+                redis_client=redis_client,
+                incoming_message=prepared.original_user_message or "",
+            )
         )
-    )
     return result
 
 

@@ -78,7 +78,7 @@ async def think(body: ThinkBody, request: Request, actor: str = Depends(actor_fr
     chat = PlaygroundChatBody(worker_id=worker, message=body.message, chat_id=(body.chat_id or f"world-{body.bot_id}")[:128], tenant_id=profile["tenant_id"])
     started = time.monotonic()
     prepared = await chat_turn.prepare_playground_chat_turn(chat, actor=actor, request=request)
-    result = await chat_turn.invoke_playground_chat_sync(prepared, request=request)
+    result = await chat_turn.invoke_playground_chat_sync(prepared, request=request, notify=False)
     payload = chat_turn.format_playground_chat_payload(prepared, result)
     return {"ok": True, "worker_id": worker, "response": payload.get("response", ""), "usage_tokens": payload.get("usage_tokens"),
             "ms": int((time.monotonic() - started) * 1000)}

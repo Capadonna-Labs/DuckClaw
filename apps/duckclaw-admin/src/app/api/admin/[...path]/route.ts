@@ -206,6 +206,10 @@ async function proxy(req: NextRequest, segments: string[]) {
   if (segments[0] === 'ops' && role !== 'admin') {
     return NextResponse.json({ detail: 'Operaciones solo para rol admin' }, { status: 403 });
   }
+  // The push log holds every tenant's alert text (push_log is not tenant-scoped, like the Avisos tab that reads it).
+  if (sub === 'notifications/push-log' && role !== 'admin') {
+    return NextResponse.json({ detail: 'Avisos solo para rol admin' }, { status: 403 });
+  }
   if (role === 'user' && WRITE_METHODS.has(req.method) && !userWriteAllowed(sub, req.method)) {
     return NextResponse.json({ detail: 'Operación reservada para admin' }, { status: 403 });
   }

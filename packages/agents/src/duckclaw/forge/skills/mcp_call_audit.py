@@ -57,3 +57,20 @@ def record_mcp_call(
         enqueue_write_command(command, db_path=resolved, user_id=_infer_user_id_for_queue(resolved))
     except Exception:  # noqa: BLE001
         _log.debug("mcp_call_audit: row not recorded", exc_info=True)
+
+
+def record_tool_exposure(db: Any, worker_id: str, tenant_id: str, tool_names: list[str]) -> None:
+    """Enqueue one ``upsert_tool_exposure``: the MCP tools this worker's graph was just built with (feeds the unused-tools report). Never raises."""
+    try:
+        raw_path = str(getattr(db, "_path", "") or "").strip()
+        if not raw_path or raw_path == ":memory:" or not tool_names:
+            return
+        from duckclaw.db_write_fire_and_forget import enqueue_write_command
+        from duckclaw.media_usage_log import _infer_user_id_for_queue
+        from duckclaw.write_commands import UpsertToolExposureCommand
+
+        resolved = str(Path(raw_path).expanduser().resolve())
+        command = UpsertToolExposureCommand(tenant_id=tenant_id or "default", worker_id=worker_id, tool_names=tool_names)
+        enqueue_write_command(command, db_path=resolved, user_id=_infer_user_id_for_queue(resolved))
+    except Exception:  # noqa: BLE001
+        _log.debug("mcp_call_audit: exposure not recorded", exc_info=True)

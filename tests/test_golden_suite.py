@@ -46,6 +46,7 @@ def test_runs_are_classified_always_pass_always_fail_or_flaky() -> None:
     assert r["c"]["passes"] == 2
     crashed = run_suite(cases, lambda c: 1 / 0, n=2)["cases"]["a"]
     assert crashed["status"] == "always_fail" and crashed["failures"][0].startswith("runner error")
+    assert r["b"]["sample"] == {"tools": [], "reply": "nope", "spans": []} and "sample" not in r["a"]   # the last failed attempt, for the Evals tab
 
 
 def test_regression_gate_only_trips_on_cases_that_always_passed() -> None:
@@ -65,3 +66,61 @@ def test_cli_end_to_end_with_the_example_goldens(tmp_path: Path, monkeypatch: py
     assert main([str(FIX), "--runner", "eval_runner_stub:good", "--out", str(first)]) == 0
     assert all(c["status"] == "always_pass" for c in json.loads(first.read_text())["cases"].values())
     assert main([str(FIX), "--runner", "eval_runner_stub:bad", "--out", str(second), "--baseline", str(first)]) == 1
+
+
+def test_a_missing_span_is_not_a_skipped_action() -> None:
+    case = {"id": "a", "must_call": ["read_sql"], "must_not_call": ["place_order"]}
+    assert check_case(case, {"tools": []}) == ["did not call read_sql"]
+    assert check_case(case, {"tools": [], "partial": True}) == []   # a delegate ran tools we cannot see
+    assert check_case(case, {"tools": ["place_order"], "partial": True}) == ["called forbidden tool place_order"]   # what we do see still counts
+    r = run_suite([case], lambda c: {"reply": "", "tools": ["place_order"], "partial": True, "spans": [{"name": "place_order", "input": '{"q": 1}', "output": "stub"}]}, n=1)["cases"]["a"]
+    assert r["unverified"] and r["sample"]["spans"] == [{"name": "place_order", "input": '{"q": 1}', "output": "stub"}]
+
+
+def test_requirements_are_loaded_and_carried_into_results(tmp_path: Path) -> None:
+    from duckclaw.evals.golden_suite import load_requirements
+
+    f = tmp_path / "g.yaml"
+    f.write_text("""requirements:
+  - {id: r1, text: t, question: q}
+cases:
+  - {id: a, requirement: r1, must_match: [ok]}
+  - {id: b, must_match: [ok]}
+""", encoding="utf-8")
+    assert load_requirements(f) == [{"id": "r1", "text": "t", "question": "q"}] and load_requirements(FIX) == []
+    r = run_suite(load_cases(f), lambda c: {"reply": "ok"}, n=1)["cases"]
+    assert r["a"]["requirement"] == "r1" and "requirement" not in r["b"]
+
+
+def test_claims_need_a_tool_and_variants_become_cases(tmp_path: Path) -> None:
+    case = {"id": "a", "no_claim_without_tool": ["verificad"]}
+    assert check_case(case, {"reply": "Todo verificado en DB", "tools": []}) == ["claims /verificad/ without any tool call"]
+    assert check_case(case, {"reply": "Todo verificado en DB", "tools": ["read_sql"]}) == []
+    assert check_case(case, {"reply": "No pude verificar", "tools": []}) == []
+    f = tmp_path / "g.yaml"
+    f.write_text("""cases:
+  - {id: a, type: t, request: one, must_match: [ok], variants: [two, three]}
+""", encoding="utf-8")
+    got = load_cases(f)
+    assert [(c["id"], c["request"]) for c in got] == [("a", "one"), ("a#v1", "two"), ("a#v2", "three")] and all(c["must_match"] == ["ok"] and "variants" not in c for c in got[1:])
+
+
+
+def test_figures_must_come_from_tool_outputs() -> None:
+    from duckclaw.evals.golden_suite import significant_numbers, unsupported_numbers
+
+    assert [v for _, v in significant_numbers("SPY 1,234.50 y 1.234,5; 2025; 2026-11-05 a las 17:50; 7 días; 3,2 %")] == [1234.5, 1234.5, 3.2]
+    out = '{"qty": 984, "avg_cost": 44.8123, "pnl_pct": 0.0321}'
+    assert unsupported_numbers("984 acciones a 44,81 (+3,21 %)", [out]) == []    # rounding and fraction->percent are fine
+    assert unsupported_numbers("984 acciones a 51,20", [out]) == ["51,20"]
+    case = {"id": "a", "numbers_from_tools": True, "request": "posición"}
+    assert check_case(case, {"reply": "Tienes 984 a 51,20", "tools": ["x"], "spans": [{"output": out}]}) == ["figures no tool returned: 51,20"]
+    assert check_case(case, {"reply": "Tienes 984 a 51,20", "tools": ["x"]}) == []   # a runner without spans: not judged
+
+
+def test_robust_matching_order_and_length() -> None:
+    assert check_case({"id": "a", "must_match": ["ningun dato"]}, {"reply": "NINGÚN   dato"}) == []
+    assert check_case({"id": "a", "max_chars": 5}, {"reply": "123456"}) == ["reply is 6 chars (max 5)"]
+    rule = {"id": "a", "must_call_before": [{"any": ["read_sql"], "before": "propose_trade_signal"}]}
+    assert check_case(rule, {"tools": ["propose_trade_signal", "read_sql"]}) == ["called propose_trade_signal before any of ['read_sql']"]
+    assert check_case(rule, {"tools": ["read_sql", "propose_trade_signal"]}) == [] and check_case(rule, {"tools": []}) == []

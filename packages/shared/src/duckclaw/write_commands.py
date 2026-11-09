@@ -380,6 +380,14 @@ class AppendToolCallLogCommand(WriteCommand):
     error: str = ""
 
 
+class UpsertToolExposureCommand(WriteCommand):
+    """Upsert ``tool_exposure``: the external (MCP) tools a worker's graph was built with. Names only; ``last_seen`` moves forward on every build."""
+
+    command_type: Literal["upsert_tool_exposure"] = "upsert_tool_exposure"
+    worker_id: str
+    tool_names: list[str]
+
+
 class AppendPushLogCommand(WriteCommand):
     """Append one row to ``push_log``: one push notification as sent (title and body as the device shows them)."""
 

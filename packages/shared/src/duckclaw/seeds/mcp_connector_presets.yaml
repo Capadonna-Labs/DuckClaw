@@ -333,6 +333,22 @@ presets:
       docs_url: https://github.com/microsoft/playwright-mcp
       note: Requiere Node y los navegadores de Playwright instalados en el host (npx playwright install chromium). Opt-in, no por defecto.
 
+  # Polygon.io MCP oficial (polygon-io/mcp_polygon, MIT, experimental), por stdio con uvx. Trades, quotes (NBBO), agregados y snapshots: microestructura a nivel de tick,
+  # sin profundidad de libro. Solo lectura. Versión FIJA a propósito; Polygon se está renombrando a Massive (massive-com/mcp_massive):
+  # verificar el sucesor al subir la versión. La clave llega por POLYGON_API_KEY desde Integraciones.
+  polygon:
+    profile: stdio_uvx_ro
+    display_name: Polygon.io (datos de mercado)
+    launch_args: ["--from", "git+https://github.com/polygon-io/mcp_polygon@v0.4.0", "mcp_polygon"]
+    egress_hosts: [api.polygon.io]
+    metadata:
+      install: uvx --from git+https://github.com/polygon-io/mcp_polygon@v0.4.0 mcp_polygon
+      admin_label: Polygon.io · trades, quotes y agregados (local stdio · uvx · solo lectura · versión fija)
+      docs_url: https://github.com/polygon-io/mcp_polygon
+      integration_env:
+        POLYGON_API_KEY: polygon_api_key
+      note: Opt-in. Requiere la clave polygon_api_key (Integraciones → Datos de mercado). Verificar con tools/list antes de conceder; el plan de Polygon limita qué endpoints responden.
+
   # Spotify playback MCP (stdio). Auth = host ~/.spotify-mcp/config.json + `npx … auth`.
   # Package: @0xbarandiaran/spotify-mcp-server (npm; Feb 2026 API). Not @marcelmarais/… (404).
   spotify:

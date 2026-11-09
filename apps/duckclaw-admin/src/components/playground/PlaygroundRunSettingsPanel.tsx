@@ -59,6 +59,8 @@ export type PlaygroundRunSettingsPanelProps = {
   suggestionsEnabled: boolean;
   onSuggestionsToggle: () => void;
   notificationsEnabled: boolean;
+  /** Title of the conversation the switch belongs to: notifications are per conversation, the label says which. */
+  notificationsChatTitle?: string | null;
   notificationPermission?: NotificationPermission | 'unsupported';
   onNotificationsToggle: () => void;
   logsControls?: React.ReactNode;
@@ -97,6 +99,7 @@ export function PlaygroundRunSettingsPanel({
   suggestionsEnabled,
   onSuggestionsToggle,
   notificationsEnabled,
+  notificationsChatTitle,
   notificationPermission = 'default',
   onNotificationsToggle,
   logsControls,
@@ -310,9 +313,9 @@ export function PlaygroundRunSettingsPanel({
             hint={
               notificationsEnabled
                 ? notificationPermission === 'granted'
-                  ? 'Avisos activos al terminar turnos'
+                  ? `Avisos activos de «${notificationsChatTitle || 'esta conversación'}»`
                   : 'Activas — iOS pedirá permiso cuando haga falta'
-                : 'Apagadas para DuckClaw'
+                : `Apagadas solo para «${notificationsChatTitle || 'esta conversación'}»`
             }
             checked={notificationsEnabled}
             onChange={onNotificationsToggle}

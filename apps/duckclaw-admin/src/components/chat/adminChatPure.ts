@@ -515,3 +515,9 @@ export function applyLastTurnTokenDisplay(
   }
   setContextEstimatedTokens(null);
 }
+
+/** Marks the newest message as a failed audio play when it is the assistant's. */
+export function withLastAssistantAudioError(messages: ChatMsg[], reason: ChatMsg['audioPlayError']): ChatMsg[] {
+  const last = messages[messages.length - 1];
+  return last?.role === 'assistant' ? [...messages.slice(0, -1), { ...last, audioPlayError: reason }] : [...messages];
+}

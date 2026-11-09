@@ -35,13 +35,13 @@ import {
   revokeMessageImagePreviews,
   stripThinkingStatusHeartbeats,
   suggestionsExchangeKey,
+  withLastAssistantAudioError,
   workerStorageKey,
 } from './adminChatPure';
 import { runAdminChatTurn } from './runAdminChatTurn';
 import { useAdminChatHistory } from './useAdminChatHistory';
 import type { UsageTokenBreakdown } from '@/lib/formatTokenCount';
 import type { ContextTokenBreakdown } from '@/lib/contextTokenBreakdown';
-
 
 export {
   hasToolHeartbeatInCurrentTurn,
@@ -687,14 +687,7 @@ export function useAdminChat({
             source: 'voice-note',
           });
           if (!playResult.ok) {
-            setMessages((m) => {
-              const next = [...m];
-              const last = next[next.length - 1];
-              if (last?.role === 'assistant') {
-                next[next.length - 1] = { ...last, audioPlayError: playResult.reason };
-              }
-              return next;
-            });
+            setMessages((m) => withLastAssistantAudioError(m, playResult.reason));
           }
         }
         onConversationActivity?.();

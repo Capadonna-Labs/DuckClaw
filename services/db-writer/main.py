@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -434,7 +435,8 @@ async def execute_write(redis_client: redis.Redis, message: str) -> None:
     task_id = "unknown"
     try:
         payload = json.loads(message)
-        task_id = str(payload.get("task_id") or "unknown")
+        # No task_id: mint one. A shared placeholder would hit the ledger as "already completed" from the second message on.
+        task_id = str(payload.get("task_id") or uuid.uuid4())
 
         # Try typed command first
         if await _handle_typed_command(redis_client, task_id, payload):

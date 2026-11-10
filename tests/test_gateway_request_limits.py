@@ -110,3 +110,29 @@ def test_cors_wildcard_is_explicit_and_never_carries_credentials(monkeypatch) ->
     assert s["allow_origins"] == ["*"] and s["allow_credentials"] is False
     r = _cors_app().get("/x", headers={"Origin": "https://anything.example"})
     assert r.headers["access-control-allow-origin"] == "*" and "access-control-allow-credentials" not in r.headers
+
+
+def test_without_auth_key_only_non_public_callers_reach_unauthenticated_routes(monkeypatch) -> None:
+    monkeypatch.delenv("DUCKCLAW_TAILSCALE_AUTH_KEY", raising=False)
+
+    def client(host: str) -> TestClient:
+        app = FastAPI()
+        app.middleware("http")(middleware.tailscale_auth_middleware)
+
+        @app.get("/health")
+        @app.post("/api/v1/db/read")
+        @app.post("/api/v1/admin/x")
+        async def ok() -> dict:
+            return {"ok": True}
+
+        return TestClient(app, client=(host, 50000))
+
+    public = client("8.8.8.8")
+    assert public.post("/api/v1/db/read").status_code == 401
+    assert public.get("/health").status_code == 200
+    assert public.post("/api/v1/admin/x").status_code == 200   # the admin router checks X-Admin-Key itself
+    for host in ("127.0.0.1", "172.18.0.3", "100.79.185.46"):
+        assert client(host).post("/api/v1/db/read").status_code == 200
+    monkeypatch.setenv("DUCKCLAW_TAILSCALE_AUTH_KEY", "k")
+    assert client("127.0.0.1").post("/api/v1/db/read").status_code == 401
+    assert client("8.8.8.8").post("/api/v1/db/read", headers={"X-Tailscale-Auth-Key": "k"}).status_code == 200

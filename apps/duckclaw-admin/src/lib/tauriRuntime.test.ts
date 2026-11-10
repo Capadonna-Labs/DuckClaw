@@ -23,7 +23,7 @@ describe('tauriRuntime', () => {
   it('isTauriDesktop detects Tauri internals independently of build flags', () => {
     process.env.NEXT_PUBLIC_DUCKCLAW_DESKTOP = '0';
     expect(isTauriDesktop()).toBe(false);
-    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} } as Window);
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
     expect(isTauriDesktop()).toBe(true);
   });
 });

@@ -59,7 +59,8 @@ async def system_health():
     tailscale = "unknown"
     if shutil.which("tailscale"):
         try:
-            r = subprocess.run(
+            r = await asyncio.to_thread(
+                subprocess.run,
                 ["tailscale", "status", "--json"],
                 capture_output=True,
                 text=True,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import logging
 import os
@@ -105,8 +106,6 @@ async def observability_context_middleware(request: Request, call_next):
 
 async def tailscale_auth_middleware(request: Request, call_next):
     auth_key = os.environ.get("DUCKCLAW_TAILSCALE_AUTH_KEY", "").strip()
-    if not auth_key:
-        return await call_next(request)
     path = request.url.path.rstrip("/") or "/"
     if path in ("/", "/health"):
         return await call_next(request)
@@ -122,10 +121,17 @@ async def tailscale_auth_middleware(request: Request, call_next):
     # Playground u otras herramientas internas: BFF puede enviar X-Admin-Key en rutas /agent/*.
     admin_expected = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
     admin_header = (request.headers.get("X-Admin-Key") or "").strip()
-    if admin_expected and admin_header == admin_expected and path.startswith("/api/v1/agent/"):
+    if admin_expected and hmac.compare_digest(admin_header.encode(), admin_expected.encode()) and path.startswith("/api/v1/agent/"):
         return await call_next(request)
+    if not auth_key:
+        # No key configured: local, private-network and tailnet callers pass (dev, Docker, the BFF); a public address does not,
+        # because the routes below (/db/read, /db/write, /agent/chat) have no auth of their own.
+        # ponytail: behind a reverse proxy every caller looks local; set the key there.
+        if _public_client_ip(request) is None:
+            return await call_next(request)
+        return JSONResponse(status_code=401, content={"detail": "DUCKCLAW_TAILSCALE_AUTH_KEY no configurada: acceso solo desde red local o tailnet"})
     header_key = request.headers.get("X-Tailscale-Auth-Key", "").strip()
-    if header_key != auth_key:
+    if not hmac.compare_digest(header_key.encode(), auth_key.encode()):
         return JSONResponse(
             status_code=401,
             content={"detail": "X-Tailscale-Auth-Key inválida o faltante"},

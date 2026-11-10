@@ -10,6 +10,7 @@ from typing import Any, Callable
 from langchain_core.runnables import RunnableConfig
 
 from duckclaw.forge.rag.context_blocks import preserve_context_blocks_for_worker
+from duckclaw.graphs.state import ManagerAgentState
 from duckclaw.graphs.subagent_run_id import acquire_subagent_slot, release_subagent_slot
 from duckclaw.manager import manager_worker_cache as _worker_cache_mod
 from duckclaw.manager.fast_plans import _manager_visual_generation_intent
@@ -81,18 +82,14 @@ def build_invoke_worker_node(
         history = state.get("history") or []
         available = list(state.get("available_templates") or list_workers(troot, db=db, tenant_id=tenant_id))
         assigned = (state.get("assigned_worker_id") or "").strip() or None
-        _all_iw = list_workers(troot, db=db, tenant_id=tenant_id)
-        if assigned and assigned not in available and _is_entry_route_system_event(incoming):
-            _entry_iw = (state.get("entry_worker_id") or "").strip()
-            _c_iw = _resolve_template_id(_all_iw, assigned) or (
-                _resolve_template_id(_all_iw, _entry_iw) if _entry_iw else None
-            )
-            if _c_iw and _c_iw in _all_iw:
-                assigned = _c_iw
-                if _c_iw not in available:
-                    available = list(available) + [_c_iw]
-        if assigned not in available:
-            assigned = available[0] if available else None
+        assigned, available = resolve_invoke_assigned_worker(
+            state,
+            assigned=assigned,
+            available=available,
+            incoming=incoming,
+            all_workers=list_workers(troot, db=db, tenant_id=tenant_id),
+            resolve_template_id=_resolve_template_id,
+        )
         if assigned:
             try:
                 from duckclaw.vaults import resolve_template_vault_path

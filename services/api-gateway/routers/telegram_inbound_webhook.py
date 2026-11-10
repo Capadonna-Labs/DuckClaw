@@ -37,6 +37,7 @@ from core.context_injection_delta import (
 from core.context_injection_rbac import user_may_context_inject
 from core.context_injection_vault import resolve_telegram_user_vault_db_path
 from core.context_stored_snapshot import fetch_semantic_memory_snapshot
+from core.background_tasks import spawn_background
 from core.models import ChatRequest
 from core.comfyui_inbound import ingest_comfyui_edit_inbound, should_route_comfyui_edit
 from core.vlm_ingest import (
@@ -119,6 +120,7 @@ def _context_time_anchor_block(
 from duckclaw.integrations.telegram import (
     TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER,
     TelegramBotApiAsyncClient,
+    is_valid_telegram_webhook_secret_token,
     telegram_bot_token_override,
 )
 from duckclaw.utils.telegram_markdown_v2 import llm_markdown_to_telegram_html
@@ -493,7 +495,7 @@ def schedule_telegram_context_summary_background(
         except Exception as exc:  # noqa: BLE001
             _log.warning("%s background invoke failed: %s", log_label, exc)
 
-    asyncio.create_task(_bg_summarize_task())
+    spawn_background(_bg_summarize_task())
 
 
 def _telegram_webhook_default_worker_id() -> str:
@@ -941,44 +943,6 @@ def _extract_visual_payload_with_reply(msg: dict[str, Any]) -> tuple[dict[str, s
     return pv, True
 
 
-async def _ingest_telegram_audio_enrich_text(
-    *,
-    text: str,
-    audio: dict[str, Any],
-    audio_from_parent_reply: bool,
-    token_a: str,
-) -> tuple[str, bool]:
-    """
-    Descarga audio, STT vía sensory_node, devuelve texto enriquecido.
-
-    Returns (nuevo_texto, drop_early). drop_early=True on MIME reject only.
-    """
-    mime_type = (audio.get("mime_type") or "").strip().lower()
-    if mime_type and not is_allowed_audio_mime(mime_type):
-        _log.info("telegram_inbound tag=STT_MIME_REJECTED mime=%s", mime_type[:128])
-        return text, True
-    fid = (audio.get("file_id") or "").strip()
-    if not fid or not token_a:
-        return text, False
-    try:
-        raw = await download_telegram_audio_bytes(token_a, fid)
-        enriched, _meta = await process_audio_bytes(
-            raw,
-            caption=text,
-            language_hint="es",
-            from_reply=audio_from_parent_reply,
-        )
-        return enriched, False
-    except SensoryUnavailable as exc:
-        _log.warning("telegram_inbound STT unavailable: %s", exc)
-        audio_only = not (text or "").strip()
-        return stt_down_meta_message(audio_only=audio_only), False
-    except Exception as exc:  # noqa: BLE001
-        _log.warning("telegram_inbound STT failed: %s", exc)
-        audio_only = not (text or "").strip()
-        return stt_down_meta_message(audio_only=audio_only), False
-
-
 def build_telegram_inbound_webhook_router(
     *,
     invoke_agent_chat: Callable[..., Awaitable[Any]],
@@ -1026,6 +990,10 @@ def build_telegram_inbound_webhook_router(
             request.state, "duckclaw_telegram_path_binding", None
         )
         if path_mux is not None:
+            # The path alone is not a credential: duckops registers these webhooks with TELEGRAM_WEBHOOK_SECRET as secret_token.
+            if not is_valid_telegram_webhook_secret_token(header_secret):
+                _log.warning("telegram path multiplex: 403 — cabecera %s inválida o ausente (bot=%s)", TELEGRAM_WEBHOOK_SECRET_HTTP_HEADER, path_mux.bot_name)
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Secreto de webhook de Telegram inválido o ausente.")
             worker_id = path_mux.worker_id
             tenant_id = path_mux.tenant_id
             reply_token = path_mux.bot_token
@@ -1473,7 +1441,7 @@ def build_telegram_inbound_webhook_router(
             )
 
         if _telegram_webhook_parallel_processing_enabled():
-            asyncio.create_task(_invoke_and_reply_safe())
+            spawn_background(_invoke_and_reply_safe())
             return {"ok": "true"}
 
         await _invoke_and_reply_safe()

@@ -45,6 +45,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Lint (undefined names, unreferenced asyncio tasks in services)
+        run: |
+          uvx ruff check packages services harness_core scripts --select F821 --exclude "**/deprecated/**"
+          uvx ruff check services --select RUF006
+
       - name: Run tests (unit + smoke)
         timeout-minutes: 25
         env:

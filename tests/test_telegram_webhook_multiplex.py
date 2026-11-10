@@ -147,3 +147,15 @@ def test_multiplex_legacy_still_default_process(monkeypatch: pytest.MonkeyPatch)
         default_bot_token="orch-tok",
     )
     assert r == ("legacy_default", "platform-orchestrator", "Orchestrator", "orch-tok")
+
+
+def test_path_route_secret_check(monkeypatch):
+    """Path-multiplexed webhooks check the same secret duckops registers; an unset or Bot-API-invalid secret is never sent, so it is not required."""
+    from duckclaw.integrations.telegram import is_valid_telegram_webhook_secret_token as valid
+
+    monkeypatch.delenv("TELEGRAM_WEBHOOK_SECRET", raising=False)
+    assert valid(None)
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "abc_123")
+    assert valid("abc_123") and not valid("other") and not valid(None)
+    monkeypatch.setenv("TELEGRAM_WEBHOOK_SECRET", "a+b=")
+    assert valid(None)

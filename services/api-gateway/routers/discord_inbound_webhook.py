@@ -8,7 +8,6 @@ Variables: DISCORD_PUBLIC_KEY o DUCKCLAW_DISCORD_PUBLIC_KEY, DUCKCLAW_DISCORD_BO
 
 from __future__ import annotations
 
-import asyncio
 import json
 import logging
 import os
@@ -17,6 +16,7 @@ from typing import Any, Awaitable, Callable
 from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
+from core.background_tasks import spawn_background
 from core.discord_interactions import (
     discord_followup_edit_original_sync,
     discord_interaction_deferred_payload,
@@ -173,7 +173,7 @@ def build_discord_interactions_router(
                 content=reply or "(sin contenido)",
             )
 
-        asyncio.create_task(_run_agent())
+        spawn_background(_run_agent())
         return JSONResponse(discord_interaction_deferred_payload())
 
     return router

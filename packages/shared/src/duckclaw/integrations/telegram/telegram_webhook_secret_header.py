@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 
 # Cabecera documentada por Telegram para webhooks con secret_token en setWebhook.
@@ -31,7 +32,7 @@ def is_valid_telegram_webhook_secret_token(header_value: str | None) -> bool:
     o si el secreto no está configurado (solo para desarrollo local).
     """
     expected = telegram_webhook_secret_expected_from_env()
-    if not expected:
+    # A secret the Bot API rejects is never sent in setWebhook (duckops registers without it), so Telegram cannot echo it back.
+    if not expected or not telegram_webhook_secret_valid_for_bot_api(expected):
         return True
-    got = (header_value or "").strip()
-    return bool(got) and got == expected
+    return hmac.compare_digest((header_value or "").strip().encode(), expected.encode())

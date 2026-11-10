@@ -83,7 +83,7 @@ def _identity_fields(state: dict) -> dict:
         "vault_db_path": state.get("vault_db_path") or "",
     }
 
-def _latest_human_index_with_vlm_visual_markers(messages: list[Any]) -> Optional[int]:
+def _latest_human_index_with_vlm_visual_markers(messages: list[Any]) -> int | None:
     """Human más reciente con payload VLM (mismo marcador que el gateway al Multimodal)."""
     from langchain_core.messages import HumanMessage
 

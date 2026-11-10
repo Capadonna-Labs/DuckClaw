@@ -185,7 +185,9 @@ async def lifespan(app: FastAPI):
         from duckclaw.forge.skills.telegram_mcp_bridge import telegram_mcp_gateway_warmup_enabled
 
         if telegram_mcp_gateway_warmup_enabled():
-            asyncio.create_task(_start_telegram_mcp(), name="telegram-mcp-warm")
+            from core.background_tasks import spawn_background
+
+            spawn_background(_start_telegram_mcp())
         else:
             _log.debug("Telegram MCP: integración no configurada; omitido en arranque core")
     except Exception as exc:  # noqa: BLE001

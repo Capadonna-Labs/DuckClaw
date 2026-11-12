@@ -68,7 +68,12 @@ async def _indexer_worker() -> None:
     from duckclaw.knowledge_sync_queue import run_knowledge_indexer_cycle
 
     while True:
-        result = await asyncio.to_thread(run_knowledge_indexer_cycle, block_timeout_sec=2.0)
+        try:
+            result = await asyncio.to_thread(run_knowledge_indexer_cycle, block_timeout_sec=2.0)
+        except Exception as exc:  # Redis dropped the connection: a dead worker left the process "online" with nobody consuming the queue
+            _log.warning("knowledge worker cycle error: %s", exc)
+            await asyncio.sleep(2.0)
+            continue
         if result.get("processed"):
             _log_job_result(result)
 

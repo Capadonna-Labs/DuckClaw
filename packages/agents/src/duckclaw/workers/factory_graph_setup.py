@@ -266,17 +266,11 @@ def initialize_worker_graph_context(
         register_await_interval_skill(tools, db)
     except Exception:
         pass
-    try:
-        from duckclaw.forge.skills.summarize_chat_context_bridge import (
-            register_summarize_chat_context_skill,
-        )
+    try:  # chat-context + chat-UX tools (reactions, interim messages)
+        from duckclaw.forge.skills.react_to_message_bridge import register_react_to_message_skill
+        from duckclaw.forge.skills.summarize_chat_context_bridge import register_summarize_chat_context_skill
 
         register_summarize_chat_context_skill(tools, db)
-    except Exception:
-        pass
-    try:
-        from duckclaw.forge.skills.react_to_message_bridge import register_react_to_message_skill
-
         register_react_to_message_skill(tools, db)
     except Exception:
         pass

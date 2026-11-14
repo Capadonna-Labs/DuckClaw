@@ -3,14 +3,14 @@
 import { useCallback, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { ChatMsg } from '@/components/chat/types';
 
-const QUOTE_MAX_CHARS = 1200;
+const QUOTE_MAX_CHARS = 140;
 
-/** Texto que viaja con el mensaje: la cita como blockquote markdown, recortada, seguida del mensaje. */
+/** Texto que viaja con el mensaje: solo el comienzo de lo citado, en una línea (el agente ya tiene el historial; reenviarlo entero lo duplicaba), seguido del mensaje. */
 export function withQuote(quote: string, text: string): string {
-  const q = quote.trim();
+  const q = quotePreview(quote);
   if (!q) return text;
-  const cut = q.length > QUOTE_MAX_CHARS ? `${q.slice(0, QUOTE_MAX_CHARS)}…` : q;
-  return `${cut.split('\n').map((line) => `> ${line}`).join('\n')}\n\n${text}`;
+  const cut = q.length > QUOTE_MAX_CHARS ? `${q.slice(0, QUOTE_MAX_CHARS).trimEnd()}…` : q;
+  return `> ${cut}\n\n${text}`;
 }
 
 /** Una línea para el chip del compositor: sin markdown pesado, el resto lo recorta el CSS. */

@@ -25,6 +25,7 @@ export default defineConfig({
       'src/lib/desktopEnvFile.test.ts',
       'src/lib/manifestQuickEdit.test.ts',
       'src/lib/playgroundLastSelection.test.ts',
+      'src/components/chat/useQuoteMessage.test.ts',
       'src/lib/playgroundWorkerGate.test.ts',
       'src/components/chat/useAdminChatLoopPolling.test.ts',
       'src/components/chat/chatSuggestionsGating.test.ts',

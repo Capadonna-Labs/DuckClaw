@@ -173,3 +173,20 @@ def test_login_delay_after_failures(
     )
     assert r.status_code == 401
     assert sleeps and sleeps[0] == 5
+
+
+def _req(peer: str, xff: str | None):
+    from starlette.requests import Request
+
+    headers = [(b"x-forwarded-for", xff.encode())] if xff else []
+    return Request({"type": "http", "headers": headers, "client": (peer, 1234)})
+
+
+def test_client_ip_trusts_forwarded_only_from_private_peer(gateway_admin_client: TestClient) -> None:
+    from core.admin_auth import client_ip
+
+    assert client_ip(_req("127.0.0.1", "203.0.113.9, 10.0.0.1")) == "203.0.113.9"
+    assert client_ip(_req("100.99.72.63", "203.0.113.9")) == "203.0.113.9"
+    # a public peer cannot choose its own rate-limit key
+    assert client_ip(_req("8.8.8.8", "203.0.113.9")) == "8.8.8.8"
+    assert client_ip(_req("8.8.8.8", None)) == "8.8.8.8"

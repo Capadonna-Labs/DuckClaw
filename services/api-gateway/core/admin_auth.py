@@ -7,6 +7,7 @@ Spec: docs/architecture/GATEWAY_PROCESS_BOUNDARIES.md
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
 import secrets
@@ -21,6 +22,7 @@ CSRF_COOKIE = "csrf_token"
 SESSION_KEY_PREFIX = "sess:"
 RL_IP_PREFIX = "rl:login:ip:"
 RL_EMAIL_PREFIX = "rl:login:email:"
+LOGIN_ATTEMPTS_PER_MIN = 20   # was 100; a person mistyping stays far below it
 
 
 def session_ttl_seconds() -> int:
@@ -37,12 +39,18 @@ def cookie_domain() -> str | None:
 
 
 def client_ip(request: Request) -> str:
-    forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
-    if forwarded:
-        return forwarded
-    if request.client and request.client.host:
-        return request.client.host
-    return "unknown"
+    """Peer address; X-Forwarded-For counts only when the direct peer is loopback/private (our BFF or proxy), else a caller could mint a fresh rate-limit key per request."""
+    peer = request.client.host if request.client and request.client.host else "unknown"
+    try:
+        addr = ipaddress.ip_address(peer)
+        trusted = not addr.is_global   # loopback, RFC1918, Tailscale CGNAT
+    except ValueError:
+        trusted = False
+    if trusted:
+        forwarded = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if forwarded:
+            return forwarded
+    return peer
 
 
 def cookie_secure(request: Request | None = None) -> bool:
@@ -90,7 +98,7 @@ async def check_ip_rate_limit(redis: Any, ip: str) -> None:
     count = await redis.incr(key)
     if count == 1:
         await redis.expire(key, 60)
-    if int(count) > 100:
+    if int(count) > LOGIN_ATTEMPTS_PER_MIN:
         raise HTTPException(status_code=429, detail="Too many attempts")
 
 

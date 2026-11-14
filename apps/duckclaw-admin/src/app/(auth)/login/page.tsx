@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader2, ShieldCheck, Eye, EyeOff, Mail, Lock, AlertCircle } from 'lucide-react';
@@ -18,7 +18,6 @@ import {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const queryLoginAttempted = useRef(false);
   const { loginWithCredentials, isAuthenticated, isSubmitting, loginError, hasHydrated } =
     useAuthStore();
   const { status: bootstrapStatus, loading: bootstrapLoading, refresh: refreshBootstrap } =
@@ -96,23 +95,11 @@ function LoginForm() {
     [bootstrap.canAttemptLogin, loginWithCredentials, persistCredentialsIfAllowed, redirectIfAuthed]
   );
 
+  // Only the email is prefilled from the URL: a password in a URL lands in history, proxy logs and Referer.
   useEffect(() => {
-    if (queryLoginAttempted.current) return;
-
     const qEmail = searchParams.get('email')?.trim() ?? '';
-    const qPassword = searchParams.get('password') ?? '';
     if (qEmail) setEmail(qEmail);
-    if (qPassword) setPassword(qPassword);
-    if (!qEmail || !qPassword) return;
-    if (!bootstrap.canAttemptLogin) return;
-
-    queryLoginAttempted.current = true;
-    if (typeof window !== 'undefined') {
-      window.history.replaceState({}, '', '/login');
-    }
-
-    void submitLogin(qEmail, qPassword);
-  }, [bootstrap.canAttemptLogin, searchParams, submitLogin]);
+  }, [searchParams]);
 
   const onSubmit = (e: React.FormEvent) => {
     e.preventDefault();

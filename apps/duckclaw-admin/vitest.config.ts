@@ -24,7 +24,6 @@ export default defineConfig({
       'src/lib/tauriRuntime.test.ts',
       'src/lib/desktopEnvFile.test.ts',
       'src/lib/manifestQuickEdit.test.ts',
-      'src/lib/savedLoginCredentials.test.ts',
       'src/lib/playgroundLastSelection.test.ts',
       'src/lib/playgroundWorkerGate.test.ts',
       'src/components/chat/useAdminChatLoopPolling.test.ts',

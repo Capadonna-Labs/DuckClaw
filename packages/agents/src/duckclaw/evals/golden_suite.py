@@ -45,6 +45,7 @@ without destructive tools: a golden suite must never be able to place an order.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 import re
@@ -56,6 +57,15 @@ from typing import Any, Callable
 import yaml
 
 from duckclaw.traces.trajectory_gate import check_trajectory
+
+CURATION_ONLY = frozenset({"reviewed", "keep_reason", "source"})   # editing these does not change what the case checks
+
+
+def case_hash(case: dict[str, Any]) -> str:
+    """Short fingerprint of what a case asks and checks, so a trend can tell an edited case from an agent that changed."""
+    body = {k: v for k, v in case.items() if k not in CURATION_ONLY}
+    return hashlib.sha1(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()[:8]
+
 
 META_KEYS = ("requirement", "category", "severity", "difficulty", "source", "keep_reason", "reviewed")   # curation fields a case may carry into its result
 
@@ -173,7 +183,7 @@ def run_suite(cases: list[dict[str, Any]], runner: Runner, n: int = 3) -> dict[s
             passes += not found
             failures.update(found)
         status = "always_pass" if passes == n else "always_fail" if passes == 0 else "flaky"
-        results[case["id"]] = {"type": case.get("type", ""), **{k: case[k] for k in META_KEYS if case.get(k)}, "passes": passes, "n": n, "status": status, "failures": sorted(failures), **({"sample": sample} if sample else {}), **({"unverified": True} if blind else {})}
+        results[case["id"]] = {"type": case.get("type", ""), "hash": case_hash(case), **{k: case[k] for k in META_KEYS if case.get(k)}, "passes": passes, "n": n, "status": status, "failures": sorted(failures), **({"sample": sample} if sample else {}), **({"unverified": True} if blind else {})}
     return {"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "cases": results}
 
 

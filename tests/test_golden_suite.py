@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from duckclaw.evals.golden_suite import check_case, load_cases, main, regressions, run_suite
+from duckclaw.evals.golden_suite import case_hash, check_case, load_cases, main, regressions, run_suite
 
 FIX = Path(__file__).parent / "fixtures" / "evals" / "golden_example.yaml"
 GOOD = {"reply": "I propose ACME at 10.", "tools": ["read_sql"]}
@@ -47,6 +47,13 @@ def test_runs_are_classified_always_pass_always_fail_or_flaky() -> None:
     crashed = run_suite(cases, lambda c: 1 / 0, n=2)["cases"]["a"]
     assert crashed["status"] == "always_fail" and crashed["failures"][0].startswith("runner error")
     assert r["b"]["sample"] == {"tools": [], "reply": "nope", "spans": []} and "sample" not in r["a"]   # the last failed attempt, for the Evals tab
+
+
+def test_case_hash_changes_with_the_checks_not_with_curation() -> None:
+    base = {"id": "a", "request": "x", "must_match": ["ok"], "reviewed": "2026-01-01", "source": "s"}
+    assert case_hash(base) == case_hash({**base, "reviewed": "2026-11-14", "keep_reason": "r"})
+    assert case_hash(base) != case_hash({**base, "must_match": ["ok", "more"]})
+    assert run_suite([base], lambda c: {"reply": "ok"}, n=1)["cases"]["a"]["hash"] == case_hash(base)
 
 
 def test_regression_gate_only_trips_on_cases_that_always_passed() -> None:

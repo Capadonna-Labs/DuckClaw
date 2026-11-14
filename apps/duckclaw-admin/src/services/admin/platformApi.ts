@@ -67,6 +67,7 @@ export interface EvalSuiteSummary {
   by_type: { type: string; passing: number; total: number; prev_passing: number | null; prev_total: number | null }[];
   latest: null | { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number; cases: Record<string, EvalCaseResult> };
   regressed: string[];
+  edited?: string[];
   history: { ts: string; model: string; total: number; always_pass: number; flaky: number; always_fail: number }[];
 }
 

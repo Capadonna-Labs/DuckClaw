@@ -216,6 +216,21 @@ def test_evals_tab_summarizes_latest_run_history_and_regressions() -> None:
     assert q["by_type"] == [{"type": "t", "passing": 1, "total": 3, "prev_passing": 4, "prev_total": 4}]
 
 
+def test_evals_tab_flags_a_regression_on_an_edited_case() -> None:
+    import json
+    import sys
+
+    sys.path.insert(0, str(ROOT / "services/api-gateway"))
+    from routers.admin_domains.evals import summarize
+
+    def row(ts: str, **cases: tuple[str, str]) -> dict:
+        return {"value_json": json.dumps({"suite": "quant", "ts": ts, "model": "m", "cases": {c: {"status": s, "hash": h, "passes": 0, "n": 3, "type": "t", "failures": []} for c, (s, h) in cases.items()}})}
+
+    q = summarize([row("2026-11-15T22:30:00Z", a=("always_fail", "h2"), b=("always_fail", "same")),
+                   row("2026-11-14T22:30:00Z", a=("always_pass", "h1"), b=("always_pass", "same"))])[0]
+    assert q["regressed"] == ["a", "b"] and q["edited"] == ["a"]   # only the case whose definition changed is marked
+
+
 def test_evals_tab_run_now_only_runs_configured_suites_one_at_a_time(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     import asyncio
     import json

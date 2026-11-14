@@ -90,6 +90,7 @@ def summarize(rows: list[dict[str, Any]], runs_per_suite: int = 30) -> list[dict
         types = [{"type": t, "passing": p, "total": n, "prev_passing": prev_t[t][0] if t in prev_t else None, "prev_total": prev_t[t][1] if t in prev_t else None}
                  for t, (p, n) in sorted(now_t.items())]
         out.append({"suite": suite, "by_type": types, "by_difficulty": by_difficulty(latest), "review_due": review_due(latest), "requirements": by_requirement(latest) if latest.get("requirements") or any(c.get("requirement") for c in latest["cases"].values()) else [], "latest": {"ts": latest.get("ts"), "model": latest.get("model", ""), "cases": latest["cases"], **counts(latest)}, "regressed": regressed,
+                    "edited": sorted(cid for cid in regressed if (b := ((before or {}).get("cases") or {}).get(cid, {}).get("hash")) and b != (latest["cases"].get(cid) or {}).get("hash")),   # the case itself changed since the run before: read the regression with that in mind
                     "history": [{"ts": r.get("ts"), "model": r.get("model", ""), **counts(r)} for r in runs]})
     return out
 

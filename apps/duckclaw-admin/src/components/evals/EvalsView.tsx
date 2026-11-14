@@ -107,7 +107,7 @@ function SuiteCard({ s, onRun, onChanged }: { s: EvalSuiteSummary; onRun: (suite
       )}
       {s.regressed.length > 0 && (
         <p className="mt-2 rounded-xl bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
-          Regresiones desde la corrida anterior (pasaban siempre y ya no): <b>{s.regressed.join(', ')}</b>
+          Regresiones desde la corrida anterior (pasaban siempre y ya no): <b>{s.regressed.map((id) => (s.edited?.includes(id) ? `${id} (caso editado)` : id)).join(', ')}</b>
         </p>
       )}
       {s.requirements.length > 0 && (

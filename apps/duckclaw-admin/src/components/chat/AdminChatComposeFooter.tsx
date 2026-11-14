@@ -318,7 +318,7 @@ export function AdminChatComposeFooter({
                 onChange={(e) => setInput(e.target.value)}
                 onPaste={onTextareaPaste}
                 onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.shiftKey) {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                     e.preventDefault();
                     void send();
                   }
@@ -479,7 +479,7 @@ export function AdminChatComposeFooter({
                   onChange={(e) => setInput(e.target.value)}
                   onPaste={onTextareaPaste}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault();
                       void send();
                     }

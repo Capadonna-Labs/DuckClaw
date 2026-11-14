@@ -275,6 +275,24 @@ export function collectEphemeralMessages(messages: ChatMsg[]): ChatMsg[] {
  * Siempre antes del assistant del turno — nunca al final si ya hay respuesta
  * (si no, Tool Usage queda flotando entre el último mensaje y el composer).
  */
+/** The agent's mid-turn message goes just before the answer still being written (or at the end), after any earlier interim ones. */
+export function withInterimMessage(messages: ChatMsg[], text: string): ChatMsg[] {
+  const t = text.trim();
+  if (!t) return messages;
+  const streamingAt = messages.findLastIndex((x) => x.role === 'assistant' && x.streaming);
+  const at = streamingAt >= 0 ? streamingAt : messages.length;
+  return [...messages.slice(0, at), { role: 'assistant', text: t, ts: new Date().toISOString() }, ...messages.slice(at)];
+}
+
+/** The agent's emoji on the user's latest message (one per actor; the user's own reaction is kept). */
+export function withAgentReaction(messages: ChatMsg[], emoji: string): ChatMsg[] {
+  const at = messages.findLastIndex((x) => x.role === 'user');
+  const e = emoji.trim();
+  if (at < 0 || !e) return messages;
+  const rest = (messages[at].reactions ?? []).filter((r) => r.by !== 'agent');
+  return messages.map((x, i) => (i === at ? { ...x, reactions: [...rest, { emoji: e, by: 'agent' as const }] } : x));
+}
+
 export function findHeartbeatInsertIndex(messages: ChatMsg[]): number {
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i]?.role === 'assistant' && messages[i]?.streaming) {

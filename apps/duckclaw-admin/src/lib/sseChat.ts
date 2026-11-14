@@ -21,7 +21,7 @@ export type SseChatEvent =
   | {
       type: 'heartbeat';
       text: string;
-      kind?: 'plan' | 'tool' | 'status' | 'visual';
+      kind?: 'plan' | 'tool' | 'status' | 'visual' | 'message' | 'reaction';
       worker_id?: string;
       swarm_slot?: number;
       artifact_id?: string;
@@ -103,7 +103,9 @@ function parseDataLine(data: string): SseChatEvent | null {
         kindRaw === 'plan' ||
         kindRaw === 'tool' ||
         kindRaw === 'status' ||
-        kindRaw === 'visual'
+        kindRaw === 'visual' ||
+        kindRaw === 'message' ||
+        kindRaw === 'reaction'
           ? kindRaw
           : 'status';
       const swarmSlotRaw = j.swarm_slot;

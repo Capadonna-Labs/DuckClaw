@@ -102,6 +102,25 @@ def annotate_history_for_model(history: list[dict[str, Any]], reactions: dict[st
     return out
 
 
+async def pop_pending_interim_messages(redis: Any, tenant_id: str, session_id: str) -> list[dict[str, Any]]:
+    """History items for the interim messages the agent sent this turn (``send_interim_message``), oldest first; clears the queue.
+    ponytail: if a turn ends without persisting (empty reply) they wait in Redis until their 10 min TTL; a stable turn id would end that."""
+    if redis is None:
+        return []
+    try:
+        from duckclaw.forge.skills.react_to_message_bridge import pending_interim_key
+
+        key = pending_interim_key(tenant_id, session_id)
+        raw = await redis.lrange(key, 0, -1)
+        if not raw:
+            return []
+        await redis.delete(key)
+    except Exception:
+        return []
+    items = (normalize_history_item({"role": "assistant", "content": r.decode() if isinstance(r, bytes) else r}) for r in raw)
+    return [i for i in items if i]
+
+
 async def apply_pending_agent_reaction(redis: Any, tenant_id: str, session_id: str, user_text: str) -> None:
     """Applies the emoji the agent queued with ``react_to_message`` this turn to the user's message, then clears it. Never raises."""
     if redis is None:

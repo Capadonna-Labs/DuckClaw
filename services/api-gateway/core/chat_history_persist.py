@@ -41,10 +41,11 @@ async def persist_chat_history(
         assistant_item = normalize_history_item({"role": "assistant", "content": reply_plain_for_storage})
         if not user_item or not assistant_item:
             return
-        saved_items = history_for_model + [user_item, assistant_item]
-        await redis_save_chat_history(redis_client, tenant_id, session_id, saved_items)
-        from core.chat_reactions import apply_pending_agent_reaction
+        from core.chat_reactions import apply_pending_agent_reaction, pop_pending_interim_messages
 
+        interim = await pop_pending_interim_messages(redis_client, tenant_id, session_id)  # sent mid-turn, before the final answer
+        saved_items = history_for_model + [user_item, *interim, assistant_item]
+        await redis_save_chat_history(redis_client, tenant_id, session_id, saved_items)
         await apply_pending_agent_reaction(redis_client, tenant_id, session_id, user_for_history)
         await upsert_conversation_meta(
             redis_client,

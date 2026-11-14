@@ -22,6 +22,7 @@ packs:
         - await_interval
         - summarize_chat_context
         - react_to_message
+        - send_interim_message
         - invoke_worker
         - get_project_context
         - read_sql

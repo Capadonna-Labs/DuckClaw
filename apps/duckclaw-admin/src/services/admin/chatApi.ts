@@ -379,7 +379,7 @@ export const chatApi = {
       events: {
         text: string;
         /** turn_done: last event of a detached turn (gateway end marker). */
-        kind?: 'plan' | 'tool' | 'status' | 'visual' | 'turn_done';
+        kind?: 'plan' | 'tool' | 'status' | 'visual' | 'message' | 'reaction' | 'turn_done';
         worker_id?: string;
         swarm_slot?: number;
         artifact_id?: string;
@@ -440,7 +440,7 @@ export const chatApi = {
       }) => void;
       onHeartbeat?: (payload: {
         text: string;
-        kind?: 'plan' | 'tool' | 'status' | 'visual';
+        kind?: 'plan' | 'tool' | 'status' | 'visual' | 'message' | 'reaction';
         worker_id?: string;
         swarm_slot?: number;
         artifact_id?: string;

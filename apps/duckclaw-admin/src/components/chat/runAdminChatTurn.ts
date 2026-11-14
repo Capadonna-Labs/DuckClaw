@@ -38,6 +38,8 @@ import {
   collectEphemeralMessages,
   coalesceTrailingToolHeartbeats,
   findHeartbeatInsertIndex,
+  withAgentReaction,
+  withInterimMessage,
   hasToolHeartbeatInCurrentTurn,
   isLoopProgressHeartbeat,
   mergeHistoryWithEphemeral,
@@ -318,7 +320,7 @@ const attachArtifactToStreamingAssistant = (
 
 const appendHeartbeat = (payload: {
   text: string;
-  kind?: 'plan' | 'tool' | 'status' | 'visual' | 'loop_tick';
+  kind?: 'plan' | 'tool' | 'status' | 'visual' | 'loop_tick' | 'message' | 'reaction';
   worker_id?: string;
   swarm_slot?: number;
   artifact_id?: string;
@@ -335,6 +337,11 @@ const appendHeartbeat = (payload: {
   started_at_ms?: number;
 }) => {
   const kind = payload.kind ?? 'status';
+  if (kind === 'message' || kind === 'reaction') {
+    // Agent talking mid-turn: a short message before the final answer, or an emoji on the user's message.
+    setMessages((m) => (kind === 'message' ? withInterimMessage(m, payload.text) : withAgentReaction(m, payload.text)));
+    return;
+  }
   if (
     kind === 'visual' &&
     (payload.sandbox_run_id?.trim() || (payload.artifact_ids?.length ?? 0) > 0)

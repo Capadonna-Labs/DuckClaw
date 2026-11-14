@@ -73,3 +73,28 @@ def test_agent_reaction_queued_by_the_tool_lands_on_the_users_message() -> None:
     r.get, r.delete = get, delete
     asyncio.run(cr.apply_pending_agent_reaction(r, "t", "s", "Hazlo"))
     assert asyncio.run(cr.load_reactions(r, "t", "s"))[cr.msg_key("user", "Hazlo")] == [{"emoji": "🫡", "by": "agent"}] and not r.kv   # applied once, then cleared
+
+
+def test_interim_messages_are_validated_and_stored_before_the_final_answer() -> None:
+    import json
+
+    from duckclaw.forge.skills.react_to_message_bridge import pending_interim_key, send_interim_message_impl
+
+    assert json.loads(send_interim_message_impl("   "))["error"] == "empty_text"
+    assert json.loads(send_interim_message_impl("x" * 400))["error"] == "too_long"
+    assert json.loads(send_interim_message_impl("Reviso eso"))["error"] == "chat_unavailable"   # no chat context in a unit test
+
+    class R:
+        def __init__(self) -> None:
+            self.l = ["Reviso eso y te cuento", "  Ya casi  "]
+
+        async def lrange(self, k, a, b):
+            return list(self.l) if k == pending_interim_key("t", "s") else []
+
+        async def delete(self, k):
+            self.l = []
+
+    r = R()
+    got = asyncio.run(cr.pop_pending_interim_messages(r, "t", "s"))
+    assert [g["content"] for g in got] == ["Reviso eso y te cuento", "Ya casi"] and all(g["role"] == "assistant" for g in got)
+    assert asyncio.run(cr.pop_pending_interim_messages(r, "t", "s")) == [] and asyncio.run(cr.pop_pending_interim_messages(None, "t", "s")) == []

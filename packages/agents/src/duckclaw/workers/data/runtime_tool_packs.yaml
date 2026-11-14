@@ -21,6 +21,7 @@ packs:
         - get_current_time
         - await_interval
         - summarize_chat_context
+        - react_to_message
         - invoke_worker
         - get_project_context
         - read_sql

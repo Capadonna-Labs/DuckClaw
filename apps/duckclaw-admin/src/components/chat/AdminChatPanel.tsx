@@ -33,6 +33,7 @@ import { shouldShowSuggestionChips, slashMenuEntryFromCatalogSkill } from '@/com
 import { useSkillsCatalog } from '@/components/skills/useSkillsCatalog';
 import { useFlyCommandSuggestions } from '@/components/chat/useFlyCommandSuggestions';
 import { useQuoteMessage } from '@/components/chat/useQuoteMessage';
+import { useReactToMessage } from '@/components/chat/useReactToMessage';
 
 export type AdminChatPanelProps = {
   chatId: string;
@@ -169,6 +170,7 @@ export function AdminChatPanel({
     setMessages,
   } = chat;
   const quoteMessage = useQuoteMessage(messages, setQuote, inputRef);
+  const reactToMessage = useReactToMessage(messages, setMessages, chatId, config?.effective_tenant_id);
 
   // Agents can create directive skills mid-conversation (create_skill), so the
   // catalog fetched on mount goes stale — refresh each time a "/" command starts.
@@ -572,6 +574,7 @@ export function AdminChatPanel({
         retryFromMessage={retryFromMessage}
         editFromMessage={editFromMessage}
         quoteMessage={quoteMessage}
+        reactToMessage={reactToMessage}
       />
 
 

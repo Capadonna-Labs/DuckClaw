@@ -1,4 +1,4 @@
-import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
+import type { ChatImagePreview, ChatMsg, ChatReaction } from '@/components/chat/types';
 import {
   artifactPreviewApiPath,
   parseArtifactIdFromPath,
@@ -96,7 +96,7 @@ export function preserveImagePreviewsFromPrevious(
 }
 
 export function historyToChatMessages(
-  raw: { role: string; content: string; ts?: string }[] | undefined,
+  raw: { role: string; content: string; ts?: string; reactions?: ChatReaction[] }[] | undefined,
   tenantId = 'default'
 ): ChatMsg[] {
   if (!raw?.length) return [];
@@ -110,7 +110,14 @@ export function historyToChatMessages(
     if (!role || !text) continue;
     const imagePreviews =
       role === 'assistant' ? artifactPreviewFromMessage(text, tid) : undefined;
-    out.push({ role, text, ...(m.ts ? { ts: m.ts } : {}), ...(imagePreviews ? { imagePreviews } : {}) });
+    out.push({
+      role,
+      text,
+      storedText: rawText,
+      ...(m.ts ? { ts: m.ts } : {}),
+      ...(m.reactions?.length ? { reactions: m.reactions } : {}),
+      ...(imagePreviews ? { imagePreviews } : {}),
+    });
   }
   return out;
 }

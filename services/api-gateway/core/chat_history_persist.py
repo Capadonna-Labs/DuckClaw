@@ -43,6 +43,9 @@ async def persist_chat_history(
             return
         saved_items = history_for_model + [user_item, assistant_item]
         await redis_save_chat_history(redis_client, tenant_id, session_id, saved_items)
+        from core.chat_reactions import apply_pending_agent_reaction
+
+        await apply_pending_agent_reaction(redis_client, tenant_id, session_id, user_for_history)
         await upsert_conversation_meta(
             redis_client,
             tenant_id=tenant_id,

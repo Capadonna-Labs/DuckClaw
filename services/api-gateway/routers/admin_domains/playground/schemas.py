@@ -224,3 +224,11 @@ class AdminConversationCreateBody(BaseModel):
 
 class AdminConversationPatchBody(BaseModel):
     title: str
+
+
+class AdminReactionBody(BaseModel):
+    """The user's emoji on one message (``role`` + ``text`` identify it); ``emoji`` null removes the reaction."""
+
+    role: str
+    text: str
+    emoji: str | None = None

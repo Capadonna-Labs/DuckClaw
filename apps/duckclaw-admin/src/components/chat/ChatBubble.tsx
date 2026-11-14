@@ -1,7 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, Copy, Mic, Pencil, Reply, RotateCcw, Volume2 } from 'lucide-react';
+import { Check, Copy, Mic, Pencil, Reply, RotateCcw, SmilePlus, Volume2 } from 'lucide-react';
+import { ReactionChips, ReactionPicker } from '@/components/chat/MessageReactions';
 import { ArtifactImageLightbox } from '@/components/chat/ArtifactImageLightbox';
 import { ChatMarkdown, looksLikeMarkdown } from '@/components/chat/ChatMarkdown';
 import { playTtsAudio, primeAudioPlayback } from '@/lib/playTtsAudio';
@@ -36,8 +37,11 @@ export function ChatBubble({
   identityLabel = '',
   activeWorkerId = '',
   onQuote,
+  onReact,
 }: {
   message: ChatMsg;
+  /** Reacciona con un emoji (el mismo otra vez lo quita). */
+  onReact?: (emoji: string) => void;
   /** Deslizar a la derecha: cita el mensaje en el input. */
   onQuote?: () => void;
   /** Reenvía el mensaje de usuario asociado a este turno. */
@@ -89,6 +93,14 @@ export function ChatBubble({
   }, [m.streaming]);
   const timeLabel = formatMessageTime(m.ts || liveTs);
   const canQuote = Boolean(onQuote) && canCopy;
+  const canReact = Boolean(onReact) && canCopy;
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const closePicker = useCallback(() => setPickerOpen(false), []);
+  const holdTimer = useRef<number | null>(null);
+  const clearHold = () => {
+    if (holdTimer.current != null) window.clearTimeout(holdTimer.current);
+    holdTimer.current = null;
+  };
   const [swipeX, setSwipeX] = useState(0);
   const swipeStart = useRef<{ x: number; y: number; axis: 'x' | 'y' | null } | null>(null);
   const onTouchStart = (e: React.TouchEvent) => {
@@ -101,6 +113,8 @@ export function ChatBubble({
     }
     const t = e.touches[0];
     swipeStart.current = { x: t.clientX, y: t.clientY, axis: null };
+    clearHold();
+    if (canReact) holdTimer.current = window.setTimeout(() => setPickerOpen(true), 450);   // long-press opens the emoji bar
   };
   const onTouchMove = (e: React.TouchEvent) => {
     const start = swipeStart.current;
@@ -110,6 +124,7 @@ export function ChatBubble({
     const dy = t.clientY - start.y;
     if (!start.axis && (Math.abs(dx) > 8 || Math.abs(dy) > 8)) {
       start.axis = Math.abs(dx) > Math.abs(dy) * 1.2 ? 'x' : 'y';
+      clearHold();   // it is a swipe or a scroll, not a long-press
     }
     if (start.axis !== 'x') return;
     const min = timeLabel ? -SWIPE_MAX_PX : 0;
@@ -117,6 +132,7 @@ export function ChatBubble({
     setSwipeX(Math.max(min, Math.min(max, dx)));
   };
   const onTouchEnd = () => {
+    clearHold();
     if (swipeX >= SWIPE_QUOTE_PX && canQuote) onQuote?.();
     swipeStart.current = null;
     setSwipeX(0);
@@ -194,7 +210,7 @@ export function ChatBubble({
 
   return (
     <div
-      className="relative w-full overflow-x-clip [touch-action:pan-y]"
+      className="relative w-full overflow-x-clip [touch-action:pan-y] [-webkit-touch-callout:none]"
       onTouchStart={onTouchStart}
       onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
@@ -274,6 +290,21 @@ export function ChatBubble({
               title="Reintentar"
             >
               <RotateCcw size={14} aria-hidden />
+            </button>
+          )}
+          {canReact && (
+            <button
+              type="button"
+              onClick={() => setPickerOpen((v) => !v)}
+              className={`p-1 rounded-md ${
+                isUser
+                  ? 'text-white/80 hover:bg-white/15'
+                  : 'text-gov-gray-400 hover:bg-gov-gray-200/80 dark:hover:bg-dark-border'
+              }`}
+              aria-label="Reaccionar"
+              title="Reaccionar"
+            >
+              <SmilePlus size={14} aria-hidden />
             </button>
           )}
           {canCopy && (
@@ -427,6 +458,15 @@ export function ChatBubble({
         </>
       )}
     </div>
+    {pickerOpen && canReact ? (
+      <ReactionPicker
+        current={m.reactions?.find((r) => r.by === 'user')?.emoji}
+        onPick={(e) => onReact?.(e)}
+        onClose={closePicker}
+        alignRight={isUser}
+      />
+    ) : null}
+    <ReactionChips reactions={m.reactions} onToggle={onReact} alignRight={isUser} />
     </div>
   );
 }

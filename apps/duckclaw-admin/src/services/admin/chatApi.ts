@@ -91,6 +91,14 @@ export const chatApi = {
     });
   },
 
+  reactToMessage: (sessionId: string, body: { role: string; text: string; emoji: string | null }, tenantId?: string) => {
+    const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+    return adminFetch<{ ok: boolean; emoji: string | null }>(`/conversations/${encodeURIComponent(sessionId)}/reactions${q}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    });
+  },
+
   patchConversation: (sessionId: string, title: string, tenantId?: string) => {
     const q = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
     return adminFetch<AdminConversation>(`/conversations/${encodeURIComponent(sessionId)}${q}`, {

@@ -146,6 +146,18 @@ def _trim_history_for_live_voice(prepared: Any) -> Any:
     return replace(prepared, history_for_graph=trim_history_to_budget(prepared.history_for_graph, target_tokens=target))
 
 
+async def _with_reactions(prepared: Any, redis_client: Any) -> Any:
+    """The user's emoji reactions reach the agent as a note on the message they reacted to (this turn's graph input only; stored history is untouched)."""
+    from dataclasses import replace
+
+    from core.chat_reactions import annotate_history_for_model, load_reactions
+
+    if not prepared.history_for_graph or prepared.is_system_prompt:
+        return prepared
+    reactions = await load_reactions(redis_client, prepared.tenant_id, prepared.session_id)
+    return replace(prepared, history_for_graph=annotate_history_for_model(prepared.history_for_graph, reactions)) if reactions else prepared
+
+
 async def _auto_compact_history_if_needed(
     prepared: PreparedChatInvoke,
     *,
@@ -387,6 +399,7 @@ async def run_chat_graph(
             prepared, redis_client=redis_client
         )
         prepared = _trim_history_for_live_voice(prepared)
+        prepared = await _with_reactions(prepared, redis_client)
 
         t0 = time.monotonic()
         admin_pg_vault_prev = os.environ.get("DUCKCLAW_ADMIN_PLAYGROUND_VAULT")

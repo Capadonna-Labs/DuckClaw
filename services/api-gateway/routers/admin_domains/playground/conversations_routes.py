@@ -12,7 +12,7 @@ from fastapi import Depends, Query, Request
 
 from routers.admin_domains.admin_common import actor_from_header, problem, require_admin_key
 from routers.admin_domains.playground.router import router
-from routers.admin_domains.playground.schemas import AdminConversationCreateBody, AdminConversationPatchBody
+from routers.admin_domains.playground.schemas import AdminConversationCreateBody, AdminConversationPatchBody, AdminReactionBody
 from routers.admin_domains.playground.tenant_resolution import gateway_effective_tenant_id
 
 
@@ -169,6 +169,9 @@ async def admin_get_conversation(
     resolved_tid, meta, messages = await resolve_conversation_view(redis_client, tid, sid)
     if meta is None and not messages:
         raise problem(404, "Conversación no encontrada", sid)
+    from core.chat_reactions import attach_reactions, load_reactions
+
+    attach_reactions(messages, await load_reactions(redis_client, tid, sid))
     out: dict[str, Any] = {
         "tenant_id": resolved_tid,
         "session_id": sid,
@@ -177,6 +180,27 @@ async def admin_get_conversation(
     if meta is not None:
         out.update(meta.model_dump())
     return out
+
+
+@router.put("/conversations/{session_id}/reactions", dependencies=[Depends(require_admin_key)])
+async def admin_react_to_message(
+    request: Request,
+    session_id: str,
+    body: AdminReactionBody,
+    tenant_id: str = Query("default"),
+) -> dict[str, Any]:
+    """The user reacts to a message with an emoji (null removes it). The agent reads it on its next turn."""
+    from core.chat_reactions import set_reaction, valid_emoji
+
+    tid = gateway_effective_tenant_id((tenant_id or "default").strip() or "default")
+    sid = (session_id or "").strip()
+    emoji = None if body.emoji is None else valid_emoji(body.emoji)
+    if not sid or (body.emoji is not None and emoji is None):
+        raise problem(400, "session_id y un emoji válido requeridos", sid)
+    redis_client = getattr(request.app.state, "redis", None)
+    if not await set_reaction(redis_client, tid, sid, body.role, body.text, "user", emoji):
+        raise problem(400, "No se pudo guardar la reacción", sid)
+    return {"ok": True, "emoji": emoji}
 
 
 @router.patch("/conversations/{session_id}", dependencies=[Depends(require_admin_key)])

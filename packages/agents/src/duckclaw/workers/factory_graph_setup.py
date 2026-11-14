@@ -275,6 +275,12 @@ def initialize_worker_graph_context(
     except Exception:
         pass
     try:
+        from duckclaw.forge.skills.react_to_message_bridge import register_react_to_message_skill
+
+        register_react_to_message_skill(tools, db)
+    except Exception:
+        pass
+    try:
         from duckclaw.forge.skills.infra_freshness_bridge import (
             register_infra_freshness_skill,
         )

@@ -8,9 +8,15 @@ export type ChatImagePreview = {
 
 export type ToolHeartbeatPhase = 'start' | 'running' | 'done' | 'error';
 
+/** An emoji on a message: from the user or from the agent (one of each per message). */
+export type ChatReaction = { emoji: string; by: 'user' | 'agent' };
+
 export type ChatMsg = {
   role: 'user' | 'assistant' | 'error' | 'heartbeat';
   text: string;
+  /** The message as the gateway stored it (what a reaction is keyed on; `text` may be stripped for display). */
+  storedText?: string;
+  reactions?: ChatReaction[];
   /** When it was sent (UTC ISO, from the gateway history; set locally for live turns). */
   ts?: string;
   streaming?: boolean;

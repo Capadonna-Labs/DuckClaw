@@ -28,6 +28,12 @@ describe('agent messages in the middle of a turn', () => {
     { role: 'assistant' as const, text: '', streaming: true },
   ];
 
+  it('puts the acknowledgement above the tool box and later messages where the work has got to', () => {
+    const withTools = [turn[0], { role: 'heartbeat' as const, text: 'read_sql' }, turn[1]];
+    const out = withInterimMessage(withInterimMessage(withTools, 'Reviso eso'), 'Hallazgo parcial');
+    expect(out.map((m) => m.text)).toEqual(['Analiza X', 'Reviso eso', 'read_sql', 'Hallazgo parcial', '']);
+  });
+
   it('puts interim messages before the answer being written, in order', () => {
     const out = withInterimMessage(withInterimMessage(turn, 'Reviso eso'), ' Ya casi ');
     expect(out.map((m) => m.text)).toEqual(['Analiza X', 'Reviso eso', 'Ya casi', '']);

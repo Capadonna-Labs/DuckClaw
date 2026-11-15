@@ -280,7 +280,12 @@ export function withInterimMessage(messages: ChatMsg[], text: string): ChatMsg[]
   const t = text.trim();
   if (!t) return messages;
   const streamingAt = messages.findLastIndex((x) => x.role === 'assistant' && x.streaming);
-  const at = streamingAt >= 0 ? streamingAt : messages.length;
+  const userAt = messages.findLastIndex((x) => x.role === 'user');
+  const end = streamingAt >= 0 ? streamingAt : messages.length;
+  // The turn's first one (the acknowledgement) sits right under the user's message, above the tool box;
+  // later ones (partial findings) go where the work has got to, just before the answer.
+  const firstOfTurn = !messages.slice(userAt + 1, end).some((x) => x.role === 'assistant');
+  const at = firstOfTurn && userAt >= 0 ? userAt + 1 : end;
   return [...messages.slice(0, at), { role: 'assistant', text: t, ts: new Date().toISOString() }, ...messages.slice(at)];
 }
 

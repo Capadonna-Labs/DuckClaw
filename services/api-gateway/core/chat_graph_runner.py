@@ -560,6 +560,10 @@ async def run_chat_graph(
                     clear_admin_chat_turn_user_index(session_id)
                 except Exception:
                     pass
+            try:  # the turn index can repeat once the history window is trimmed: free this turn's auto-ack mark
+                await redis_client.delete(f"duckclaw:chat_auto_ack:{session_id}:{turn_user_index}")
+            except Exception:
+                pass
             if admin_pg_vault_prev is None:
                 os.environ.pop("DUCKCLAW_ADMIN_PLAYGROUND_VAULT", None)
             else:

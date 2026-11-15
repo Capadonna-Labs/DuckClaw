@@ -107,6 +107,61 @@ def send_interim_message_impl(text: str) -> str:
     return json.dumps({"status": "ok", "sent": t, "hint": "Enviado. Sigue con el trabajo; no lo repitas en la respuesta final."}, ensure_ascii=False)
 
 
+AUTO_ACK_PHRASES = (
+    "Reviso eso y te cuento.",
+    "Dame un momento, lo miro.",
+    "Voy con eso.",
+    "Entendido, lo reviso ahora.",
+    "Déjame mirarlo con calma.",
+    "Lo estoy revisando.",
+)
+_NOT_WORK = frozenset({"pensando", "escribiendo respuesta", "tool", "react_to_message", "send_interim_message", "get_current_time"})
+
+
+def auto_ack_first_tool(chat_id: str, tool_name: str, turn_index: int | None, tenant_id: str | None = None) -> bool:
+    """The chat, not the model, acknowledges a turn that starts real work (15-nov: the model ignored the directive):
+    on the first tool of the turn it puts 👀 on the user's message and sends one generic line, like Grok. Once per turn,
+    web chat only. True when it fired. Never raises.
+    ponytail: phrase picked by hash of chat+turn (stable on retries); an LLM-written ack would cost a call and latency."""
+    import hashlib
+
+    from duckclaw.graphs.chat_heartbeat import is_admin_ui_chat_session
+
+    name = (tool_name or "").strip().lower()
+    if not chat_id or turn_index is None or name in _NOT_WORK or not is_admin_ui_chat_session(chat_id):
+        return False
+    try:
+        import redis
+
+        from duckclaw.forge.skills.goals_tool_context import get_goals_tool_tenant_id
+        from duckclaw.forge.skills.summarize_chat_context_bridge import _redis_url, _resolve_history_session_id
+
+        url = _redis_url()
+        if not url:
+            return False
+        tenant = (tenant_id or get_goals_tool_tenant_id() or "default").strip() or "default"
+        session = _resolve_history_session_id(chat_id)
+        client = redis.from_url(url, decode_responses=True, socket_timeout=2)
+        try:
+            if not client.set(f"duckclaw:chat_auto_ack:{chat_id}:{turn_index}", "1", nx=True, ex=6 * 3600):
+                return False
+            phrase = AUTO_ACK_PHRASES[int(hashlib.sha1(f"{chat_id}:{turn_index}".encode()).hexdigest(), 16) % len(AUTO_ACK_PHRASES)]
+            client.set(pending_reaction_key(tenant, session), "👀", ex=PENDING_TTL_SEC, nx=True)   # the agent's own reaction wins
+            client.rpush(pending_interim_key(tenant, session), phrase)
+            client.expire(pending_interim_key(tenant, session), PENDING_TTL_SEC)
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+    except Exception as exc:
+        _log.debug("auto ack skipped: %s", exc)
+        return False
+    _publish_live(chat_id, "👀", "reaction")
+    _publish_live(chat_id, phrase, "message")
+    return True
+
+
 def register_react_to_message_skill(tools_list: List[Any], db: Any = None) -> None:
     def react_to_message(emoji: str) -> str:
         """Reacciona con un emoji al mensaje del usuario de este turno."""

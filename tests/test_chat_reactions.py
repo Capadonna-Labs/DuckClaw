@@ -98,3 +98,44 @@ def test_interim_messages_are_validated_and_stored_before_the_final_answer() -> 
     got = asyncio.run(cr.pop_pending_interim_messages(r, "t", "s"))
     assert [g["content"] for g in got] == ["Reviso eso y te cuento", "Ya casi"] and all(g["role"] == "assistant" for g in got)
     assert asyncio.run(cr.pop_pending_interim_messages(r, "t", "s")) == [] and asyncio.run(cr.pop_pending_interim_messages(None, "t", "s")) == []
+
+
+def test_auto_ack_fires_once_per_turn_on_the_first_real_tool(monkeypatch) -> None:
+    from duckclaw.forge.skills import react_to_message_bridge as b
+
+    store: dict = {}
+    sent: list = []
+
+    class R:
+        def set(self, k, v, nx=False, ex=None):
+            if nx and k in store:
+                return None
+            store[k] = v
+            return True
+
+        def rpush(self, k, v):
+            store.setdefault(k, []).append(v)
+
+        def expire(self, k, t):
+            return True
+
+        def close(self):
+            pass
+
+    import redis
+
+    monkeypatch.setattr(redis, "from_url", lambda *a, **k: R())
+    monkeypatch.setattr("duckclaw.forge.skills.summarize_chat_context_bridge._redis_url", lambda: "redis://x")
+    monkeypatch.setattr("duckclaw.forge.skills.summarize_chat_context_bridge._resolve_history_session_id", lambda c: "s")
+    monkeypatch.setattr("duckclaw.graphs.chat_heartbeat.is_admin_ui_chat_session", lambda c: c.startswith("admin-"))
+    monkeypatch.setattr(b, "_publish_live", lambda chat, text, kind: sent.append((kind, text)))
+
+    assert not b.auto_ack_first_tool("admin-1", "Pensando", 3, "t")          # the model thinking is not work
+    assert not b.auto_ack_first_tool("tg-1", "read_sql", 3, "t")             # web chat only
+    assert not b.auto_ack_first_tool("admin-1", "read_sql", None, "t")       # no turn id, no ack
+    assert b.auto_ack_first_tool("admin-1", "read_sql", 3, "t")
+    assert not b.auto_ack_first_tool("admin-1", "run_sandbox", 3, "t")       # once per turn
+    assert b.auto_ack_first_tool("admin-1", "read_sql", 4, "t")              # next turn acks again
+    assert [k for k, _ in sent] == ["reaction", "message", "reaction", "message"] and sent[0][1] == "👀"
+    assert sent[1][1] in b.AUTO_ACK_PHRASES and store[b.pending_reaction_key("t", "s")] == "👀"
+    assert len(store[b.pending_interim_key("t", "s")]) == 2               # stored so the history keeps them in order

@@ -377,6 +377,17 @@ def publish_admin_tool_event(
         ph,
         duration_suffix,
     )
+    if ph == "start":
+        try:
+            from duckclaw.forge.skills.react_to_message_bridge import auto_ack_first_tool
+
+            turn = _ADMIN_TURN_USER_INDEX.get()
+            if turn is None:
+                with _ADMIN_TURN_USER_INDEX_LOCK:
+                    turn = _ADMIN_TURN_USER_INDEX_BY_CHAT.get(str(chat_id or "").strip())
+            auto_ack_first_tool(chat_id, name, turn)
+        except Exception as exc:
+            _log.debug("auto ack failed: %s", exc)
     text = f"🔄 Usando: {name}"
     publish_admin_chat_heartbeat(
         chat_id,

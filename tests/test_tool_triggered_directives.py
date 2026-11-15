@@ -63,3 +63,13 @@ def test_reactions_directive_ships_in_the_pack_for_every_worker_that_has_the_too
     entry = next(p for p in load_framework_policy_pack()["policies"] if p["policy_name"] == "chat_reactions")
     assert entry["policy_type"] == "directive" and entry["metadata"]["when_tools"] == ["react_to_message"]
     assert "HITL" in entry["content"] and len(entry["content"]) < 2000
+
+
+def test_directives_are_chosen_after_every_tool_is_registered() -> None:
+    # 15-nov: the check ran before react_to_message was registered, so chat_reactions never reached any worker.
+    from pathlib import Path
+
+    src = (Path(__file__).resolve().parents[1] / "packages/agents/src/duckclaw/workers/factory_graph_setup.py").read_text(encoding="utf-8")
+    at = src.index("append_tool_triggered_directives(policy_db")
+    for reg in ("register_react_to_message_skill(tools", "register_infra_freshness_skill(tools", "tools.append(sandbox_tool_factory"):
+        assert src.index(reg) < at, reg

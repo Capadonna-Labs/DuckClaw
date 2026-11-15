@@ -220,8 +220,6 @@ def initialize_worker_graph_context(
     _register_post_llm_skill_tools(tools, spec, db=db, llm=llm, tenant_id=tenant_id)
     tools_by_name = {t.name: t for t in tools}
 
-    system_prompt = append_android_mcp_directive_if_tools(policy_db, system_prompt, tools)
-    system_prompt = append_tool_triggered_directives(policy_db, system_prompt, tools)
 
     try:
         from duckclaw.extensions.skills import invoke_extension_worker_skill_hooks
@@ -332,6 +330,8 @@ def initialize_worker_graph_context(
 
     has_homeostasis = bool(getattr(spec, "homeostasis_config", None))
     _task_block = _TASK_AWARENESS_PROMPT.strip()
+    system_prompt = append_android_mcp_directive_if_tools(policy_db, system_prompt, tools)  # after every tool is registered:
+    system_prompt = append_tool_triggered_directives(policy_db, system_prompt, tools)      # directives key off bound tool names
     _system_prompt_only = (system_prompt or "").strip()
     _task_block_resolved = _task_block
     effective_prompt = _system_prompt_only + "\n\n" + _task_block_resolved

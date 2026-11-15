@@ -28,22 +28,28 @@ export function groupMessagesForDisplay(messages: ChatMsg[]): ChatDisplayItem[] 
     if (m?.role === 'user') {
       out.push({ kind: 'message', index: i });
       i += 1;
-      // Recolectar tools del turno; emitir el grupo en el primer tool.
+      // Collect the turn's tools into one group, shown where the first tool was, but below any interim
+      // assistant message there (the acknowledgement arrives after the first "Pensando" row; after a
+      // reload it is an assistant message that is not the turn's last one).
       const turnTools: number[] = [];
-      let firstToolOutIdx = -1;
+      const rest: number[] = [];
+      let groupAt = -1;
       while (i < messages.length && messages[i]?.role !== 'user') {
         if (isToolHeartbeatMessage(messages[i])) {
-          if (firstToolOutIdx < 0) {
-            firstToolOutIdx = out.length;
-            out.push({ kind: 'toolGroup', indices: turnTools });
-          }
+          if (groupAt < 0) groupAt = rest.length;
           turnTools.push(i);
-          i += 1;
-          continue;
-        }
-        out.push({ kind: 'message', index: i });
+        } else rest.push(i);
         i += 1;
       }
+      const answerPos = rest.findLastIndex((idx) => messages[idx]?.role === 'assistant');
+      const isInterim = (k: number) =>
+        messages[rest[k]]?.role === 'assistant' && (messages[rest[k]]?.interim || k < answerPos);
+      while (groupAt >= 0 && groupAt < rest.length && isInterim(groupAt)) groupAt += 1;
+      rest.forEach((idx, k) => {
+        if (k === groupAt) out.push({ kind: 'toolGroup', indices: turnTools });
+        out.push({ kind: 'message', index: idx });
+      });
+      if (groupAt === rest.length) out.push({ kind: 'toolGroup', indices: turnTools });
       continue;
     }
     if (isToolHeartbeatMessage(m)) {

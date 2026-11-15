@@ -48,6 +48,23 @@ describe('toolUsageGroup', () => {
     ]);
   });
 
+  it('keeps the acknowledgement above the tool box, live and after a reload', () => {
+    const ack: ChatMsg = { role: 'assistant', text: 'Reviso eso', interim: true };
+    // live: "Pensando" arrives before the acknowledgement
+    expect(groupMessagesForDisplay([user, tool('Pensando'), ack, tool('read_sql')])).toEqual([
+      { kind: 'message', index: 0 },
+      { kind: 'message', index: 2 },
+      { kind: 'toolGroup', indices: [1, 3] },
+    ]);
+    // reload: the acknowledgement is a plain assistant message before the answer
+    expect(groupMessagesForDisplay([user, tool('a'), { role: 'assistant', text: 'Reviso eso' }, assistant])).toEqual([
+      { kind: 'message', index: 0 },
+      { kind: 'message', index: 2 },
+      { kind: 'toolGroup', indices: [1] },
+      { kind: 'message', index: 3 },
+    ]);
+  });
+
   it('splits groups when plan interrupts tools', () => {
     expect(
       groupMessagesForDisplay([user, tool('a'), tool('b'), plan, tool('c'), assistant])

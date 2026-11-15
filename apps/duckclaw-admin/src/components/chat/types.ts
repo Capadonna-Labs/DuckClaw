@@ -17,6 +17,8 @@ export type ChatMsg = {
   /** The message as the gateway stored it (what a reaction is keyed on; `text` may be stripped for display). */
   storedText?: string;
   reactions?: ChatReaction[];
+  /** Sent mid-turn (acknowledgement or partial finding), not the turn's answer. */
+  interim?: boolean;
   /** When it was sent (UTC ISO, from the gateway history; set locally for live turns). */
   ts?: string;
   streaming?: boolean;

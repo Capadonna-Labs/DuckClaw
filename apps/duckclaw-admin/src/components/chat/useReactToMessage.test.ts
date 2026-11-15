@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { groupReactions, nextUserReaction, withUserReaction } from '@/components/chat/useReactToMessage';
-import { withAgentReaction, withInterimMessage } from '@/components/chat/adminChatPure';
+import { findHeartbeatInsertIndex, withAgentReaction, withInterimMessage } from '@/components/chat/adminChatPure';
 
 describe('message reactions', () => {
   it('tapping the emoji already chosen removes it, another one replaces it', () => {
@@ -27,6 +27,11 @@ describe('agent messages in the middle of a turn', () => {
     { role: 'user' as const, text: 'Analiza X' },
     { role: 'assistant' as const, text: '', streaming: true },
   ];
+
+  it('on the iPhone (no streaming bubble) tool rows still go below the acknowledgement', () => {
+    const acked = withInterimMessage([turn[0]], 'Reviso eso');
+    expect(findHeartbeatInsertIndex(acked)).toBe(2);
+  });
 
   it('puts the acknowledgement above the tool box and later messages where the work has got to', () => {
     const withTools = [turn[0], { role: 'heartbeat' as const, text: 'read_sql' }, turn[1]];

@@ -286,7 +286,7 @@ export function withInterimMessage(messages: ChatMsg[], text: string): ChatMsg[]
   // later ones (partial findings) go where the work has got to, just before the answer.
   const firstOfTurn = !messages.slice(userAt + 1, end).some((x) => x.role === 'assistant');
   const at = firstOfTurn && userAt >= 0 ? userAt + 1 : end;
-  return [...messages.slice(0, at), { role: 'assistant', text: t, ts: new Date().toISOString() }, ...messages.slice(at)];
+  return [...messages.slice(0, at), { role: 'assistant', text: t, ts: new Date().toISOString(), interim: true }, ...messages.slice(at)];
 }
 
 /** The agent's emoji on the user's latest message (one per actor; the user's own reaction is kept). */
@@ -313,7 +313,8 @@ export function findHeartbeatInsertIndex(messages: ChatMsg[]): number {
   }
   if (lastUser >= 0) {
     for (let i = lastUser + 1; i < messages.length; i++) {
-      if (messages[i]?.role === 'assistant') return i;
+      // Interim messages (the acknowledgement) are not the answer: tool rows go below them.
+      if (messages[i]?.role === 'assistant' && !messages[i]?.interim) return i;
     }
   }
   return messages.length;

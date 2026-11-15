@@ -20,6 +20,13 @@ describe('chatEphemeralMerge', () => {
     expect(countUsersBefore(msgs, 4)).toBe(2);
   });
 
+  it("keeps the turn's acknowledgement above its tool box after a reload", () => {
+    const server = [user('a'), assistant('Reviso eso'), assistant('Respuesta'), user('b'), assistant('B')];
+    expect(
+      interleaveEphemeralIntoHistory(server, [tool('read_sql', 1)]).map((m) => m.toolName ?? m.text)
+    ).toEqual(['a', 'Reviso eso', 'read_sql', 'Respuesta', 'b', 'B']);
+  });
+
   it('interleaves tools before matching assistant turn', () => {
     const server = [user('a'), assistant('A'), user('b'), assistant('B')];
     const ephemeral = [tool('read_sql', 1), tool('web_search', 1), tool('tavily', 2)];

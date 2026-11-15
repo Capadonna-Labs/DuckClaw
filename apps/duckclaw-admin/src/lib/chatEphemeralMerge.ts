@@ -150,9 +150,28 @@ function spliceToolsForTurn(out: ChatMsg[], turn: number, tools: ChatMsg[]): voi
     out.splice(insertAt, 0, ...tools);
     return;
   }
-  let insertAt = userIdx + 1;
-  while (insertAt < out.length && out[insertAt]?.role === 'heartbeat') {
-    insertAt += 1;
+  // Interim messages of the turn (the acknowledgement) stay above the tool box: tools go just before the
+  // turn's last assistant message (the answer), or after the user message when there is none yet.
+  let nextUser = out.length;
+  for (let i = userIdx + 1; i < out.length; i++) {
+    if (out[i]?.role === 'user') {
+      nextUser = i;
+      break;
+    }
+  }
+  let lastAssistant = -1;
+  for (let i = nextUser - 1; i > userIdx; i--) {
+    if (out[i]?.role === 'assistant') {
+      lastAssistant = i;
+      break;
+    }
+  }
+  let insertAt = lastAssistant;
+  if (insertAt < 0) {
+    insertAt = userIdx + 1;
+    while (insertAt < out.length && out[insertAt]?.role === 'heartbeat') {
+      insertAt += 1;
+    }
   }
   out.splice(insertAt, 0, ...tools);
 }
@@ -191,11 +210,17 @@ export function interleaveEphemeralIntoHistory(
     }
   }
 
+  // Tools go before the turn's LAST assistant message (the answer): interim messages such as the
+  // acknowledgement stay above the tool box, as they appeared live.
+  const lastAssistantOfTurn = new Set<number>();
+  for (let i = 0; i < server.length; i++) {
+    if (server[i]?.role === 'assistant' && server[i + 1]?.role !== 'assistant') lastAssistantOfTurn.add(i);
+  }
   const out: ChatMsg[] = [];
   let userCount = 0;
-  for (const m of server) {
+  for (const [i, m] of server.entries()) {
     if (m.role === 'user') userCount += 1;
-    if (m.role === 'assistant') {
+    if (m.role === 'assistant' && lastAssistantOfTurn.has(i)) {
       out.push(...(buckets.get(userCount) ?? []));
       buckets.delete(userCount);
     }

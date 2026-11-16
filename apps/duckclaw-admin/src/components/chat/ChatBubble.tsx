@@ -151,7 +151,7 @@ export function ChatBubble({
         ? 'Herramienta'
         : m.heartbeatKind === 'visual'
           ? 'Imagen'
-          : 'Progreso';
+          : '';
 
   const copyText = useCallback(async () => {
     if (!displayText?.trim()) return;
@@ -329,8 +329,7 @@ export function ChatBubble({
           <span className="normal-case text-gov-blue-800 dark:text-dark-cyan">
             {identityPrefix}
           </span>
-          {' · '}
-          {heartbeatLabel}
+          {heartbeatLabel ? ` · ${heartbeatLabel}` : null}
         </p>
       )}
       {m.imagePreviews && m.imagePreviews.length > 0 && (

@@ -51,7 +51,7 @@ export default function ReportsPageView() {
         >
           Dashboards
         </button>
-        <div ref={setToolbarSlot} className="ml-auto flex items-center empty:hidden" />
+        <div ref={setToolbarSlot} className="ml-auto flex max-w-full items-center empty:hidden" />
       </div>
       <div className="min-h-0 flex-1">
         {tab === 'word' ? <DocumentReportsPanel /> : <HtmlDashboardReportsPanel toolbarSlot={toolbarSlot} />}

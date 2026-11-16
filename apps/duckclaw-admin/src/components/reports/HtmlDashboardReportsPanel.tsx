@@ -385,13 +385,14 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     ) : null;
 
   const picker =
-    reportList.length > 0 ? (
+    vaultPath ? (
       <select
         value={reportId}
         onChange={(e) => pick(pickedVault, e.target.value)}
         aria-label="Elegir dashboard"
         className="max-w-[14rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
       >
+        {reportList.length === 0 && !(!pickedVault && chatReportId) ? <option value="">Sin dashboards</option> : null}
         {!pickedVault && !reportList.some((r) => r.report_id === chatReportId) && chatReportId ? (
           <option value={chatReportId}>Chat actual</option>
         ) : null}
@@ -404,7 +405,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     ) : null;
 
   const viewToolbar = showViewToggle || picker || vaultPicker ? (
-    <div className="flex items-center gap-2">
+    <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
     {vaultPicker}
     {picker}
     {showViewToggle ? (
@@ -559,7 +560,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-slate-400">
-          Cargando vault y conversación…
+          {pickedVault && reportList.length === 0 ? 'Este vault no tiene dashboards.' : 'Cargando vault y conversación…'}
         </div>
       )}
     </div>

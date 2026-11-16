@@ -183,7 +183,9 @@ def format_search_results(
     if error:
         return f"Error búsqueda local ({backend or local_search_backend()}): {error}"
     if not results:
-        return "No se encontraron resultados."
+        # A query that packs several topics returns nothing from the keyless backend; one topic per query does.
+        return ("No se encontraron resultados. Usa una consulta corta de UN solo tema (3-6 palabras, mejor en inglés "
+                "para noticias globales), sin listar varios temas; para varios temas, haz varias búsquedas.")
     label = backend or local_search_backend()
     parts = [f"## Fuentes ({label})\n"]
     for i, r in enumerate(results, 1):

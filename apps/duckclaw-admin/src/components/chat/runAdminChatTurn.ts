@@ -3,6 +3,7 @@
  * Separado de useAdminChat para SoC — el hook solo inyecta estado/refs.
  */
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import { writeAutoSeconds } from '@/lib/suggestionsAutoSeconds';
 
 import { adminService } from '@/services/adminService';
 import { friendlyGatewayError } from '@/lib/adminErrors';
@@ -989,6 +990,7 @@ try {
         if (typeof r.suggestions_auto_enabled === 'boolean') {
           setSuggestionsAutoEnabled?.(r.suggestions_auto_enabled);
         }
+        if (typeof r.suggestions_auto_seconds === 'number') writeAutoSeconds(r.suggestions_auto_seconds);
         if (suggestionsExchangeKeyRef) {
           suggestionsExchangeKeyRef.current = next.length > 0
             ? suggestionsExchangeKey(chatId, text, assistantForSuggestions)

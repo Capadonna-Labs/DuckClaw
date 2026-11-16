@@ -2,9 +2,9 @@
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
+import { useAutoSeconds } from '@/lib/suggestionsAutoSeconds';
 
 export const SUGGESTIONS_AUTO_STORAGE_KEY = 'duckclaw.chat.suggestionsAuto';
-export const SUGGESTIONS_AUTO_COUNTDOWN_SEC = 15;
 
 type AdminChatSuggestionChipsProps = {
   suggestions: string[];
@@ -58,6 +58,7 @@ export function AdminChatSuggestionChips({
   const [open, setOpen] = useState(defaultOpen);
   const [autoEnabled, setAutoEnabled] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
+  const autoSeconds = useAutoSeconds();
   const cancelledRef = useRef(false);
   const tickRef = useRef<number | null>(null);
   const onPickRef = useRef(onPick);
@@ -110,7 +111,7 @@ export function AdminChatSuggestionChips({
     setCountdown(null);
     if (!autoEnabled || busy || suggestions.length === 0) return;
 
-    let remaining = SUGGESTIONS_AUTO_COUNTDOWN_SEC;
+    let remaining = autoSeconds;
     setCountdown(remaining);
     tickRef.current = window.setInterval(() => {
       remaining -= 1;
@@ -130,7 +131,7 @@ export function AdminChatSuggestionChips({
     return () => {
       clearTick();
     };
-  }, [autoEnabled, busy, signature, safeRecommended, suggestions]);
+  }, [autoEnabled, autoSeconds, busy, signature, safeRecommended, suggestions]);
 
   if (suggestions.length === 0) return null;
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { writeAutoSeconds } from '@/lib/suggestionsAutoSeconds';
 import { adminService } from '@/services/adminService';
 import type { ChatImagePreview, ChatMsg } from '@/components/chat/types';
 import {
@@ -316,6 +317,7 @@ export function useAdminChat({
         if (typeof r.suggestions_auto_enabled === 'boolean') {
           setSuggestionsAutoEnabled(r.suggestions_auto_enabled);
         }
+        if (typeof r.suggestions_auto_seconds === 'number') writeAutoSeconds(r.suggestions_auto_seconds);
         // Only lock the exchange after a successful apply, so an empty answer can refetch.
         suggestionsExchangeKeyRef.current = next.length > 0 ? key : '';
       })
@@ -571,6 +573,23 @@ export function useAdminChat({
     [chatId, config?.effective_tenant_id, vaultPath]
   );
 
+  /** Settings field: countdown seconds, saved per chat on the server (other devices get it with the next suggestions). */
+  const onSuggestionsAutoSecondsChange = useCallback(
+    (seconds: number) => {
+      const n = writeAutoSeconds(seconds);
+      if (!chatId) return;
+      void adminService
+        .setChatSuggestionsAuto({
+          chat_id: chatId,
+          tenant_id: config?.effective_tenant_id,
+          seconds: n,
+          vault_db_path: vaultPath || undefined,
+        })
+        .catch(() => undefined);
+    },
+    [chatId, config?.effective_tenant_id, vaultPath]
+  );
+
   const retryFromMessage = useCallback(
     async (messageIndex: number) => {
       if (loading || !workerId) return;
@@ -725,6 +744,7 @@ export function useAdminChat({
     recommendedSuggestionIndex,
     suggestionsAutoEnabled,
     onSuggestionsAutoChange,
+    onSuggestionsAutoSecondsChange,
     sendVoiceNote,
     voiceResponseMode,
     voiceResponseAvailable,

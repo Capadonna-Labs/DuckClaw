@@ -19,6 +19,7 @@ import {
   modelLabelForOption,
 } from '@/lib/llmModelPresets';
 import { adminService } from '@/services/adminService';
+import { AUTO_SECONDS_MAX, AUTO_SECONDS_MIN, clampAutoSeconds, useAutoSeconds } from '@/lib/suggestionsAutoSeconds';
 
 type PlaygroundConfig = {
   llm?: { provider?: string; model?: string };
@@ -58,6 +59,8 @@ export type PlaygroundRunSettingsPanelProps = {
   onToolUsageToggle: () => void;
   suggestionsEnabled: boolean;
   onSuggestionsToggle: () => void;
+  /** Saves the Auto countdown seconds for this chat (server-side, synced). */
+  onSuggestionsAutoSecondsChange?: (seconds: number) => void;
   notificationsEnabled: boolean;
   /** Title of the conversation the switch belongs to: notifications are per conversation, the label says which. */
   notificationsChatTitle?: string | null;
@@ -98,6 +101,7 @@ export function PlaygroundRunSettingsPanel({
   onToolUsageToggle,
   suggestionsEnabled,
   onSuggestionsToggle,
+  onSuggestionsAutoSecondsChange,
   notificationsEnabled,
   notificationsChatTitle,
   notificationPermission = 'default',
@@ -332,6 +336,9 @@ export function PlaygroundRunSettingsPanel({
             onChange={onSuggestionsToggle}
             icon={<MessageSquareText size={14} aria-hidden />}
           />
+          {suggestionsEnabled && onSuggestionsAutoSecondsChange ? (
+            <SuggestionsAutoSecondsField onChange={onSuggestionsAutoSecondsChange} />
+          ) : null}
         </StudioCollapsible>
 
         {invalidWorkers.length > 0 && (
@@ -484,3 +491,37 @@ function StudioToggleRow({
 
 /** @deprecated Alias interno — tests y imports legacy. */
 export const RunSettingsCard = PlaygroundRunSettingsPanel;
+
+/** Seconds Auto waits before sending the recommended chip. Saved on blur/Enter, not per keystroke. */
+function SuggestionsAutoSecondsField({ onChange }: { onChange: (seconds: number) => void }) {
+  const secs = useAutoSeconds();
+  const [draft, setDraft] = useState(String(secs));
+  useEffect(() => setDraft(String(secs)), [secs]);
+  const commit = () => {
+    const n = clampAutoSeconds(draft);
+    setDraft(String(n));
+    if (n !== secs) onChange(n);
+  };
+  return (
+    <label className="flex items-center justify-between gap-3 py-2 pl-7 pr-1 text-[12px] text-gov-gray-600 dark:text-dark-muted">
+      <span>Auto envía la sugerencia recomendada tras</span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        <input
+          type="number"
+          inputMode="numeric"
+          min={AUTO_SECONDS_MIN}
+          max={AUTO_SECONDS_MAX}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+          className="w-16 rounded-lg border border-gov-gray-200 bg-white px-2 py-1 text-right text-[13px] font-semibold tabular-nums text-gov-gray-900 dark:border-dark-border dark:bg-dark-bg dark:text-dark-text"
+          aria-label="Segundos antes de enviar la sugerencia en modo Auto"
+        />
+        <span>s</span>
+      </span>
+    </label>
+  );
+}

@@ -647,6 +647,7 @@ export default function PlaygroundPage() {
         onToolUsageToggle={() => setToolUsageEnabled((enabled) => !enabled)}
         suggestionsEnabled={suggestionsEnabled}
         onSuggestionsToggle={handleSuggestionsToggle}
+        onSuggestionsAutoSecondsChange={chat.onSuggestionsAutoSecondsChange}
         notificationsEnabled={notificationsEnabled}
         notificationsChatTitle={conv.conversationTitle}
         notificationPermission={notificationPermission()}

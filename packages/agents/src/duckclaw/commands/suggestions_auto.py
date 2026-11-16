@@ -25,6 +25,29 @@ def suggestions_auto_enabled(db: Any, chat_id: Any) -> bool | None:
     return None
 
 
+SUGGESTIONS_AUTO_SECONDS_KEY = "suggestions_auto_seconds"
+AUTO_SECONDS_DEFAULT, AUTO_SECONDS_MIN, AUTO_SECONDS_MAX = 15, 3, 300
+
+
+def clamp_auto_seconds(value: Any) -> int:
+    try:
+        n = int(float(value))
+    except (TypeError, ValueError):
+        return AUTO_SECONDS_DEFAULT
+    return max(AUTO_SECONDS_MIN, min(AUTO_SECONDS_MAX, n))
+
+
+def suggestions_auto_seconds(db: Any, chat_id: Any) -> int | None:
+    """Countdown before Auto sends the recommended chip; None = unset (UI default)."""
+    raw = (get_chat_state(db, chat_id, SUGGESTIONS_AUTO_SECONDS_KEY) or "").strip()
+    return clamp_auto_seconds(raw) if raw else None
+
+
+def set_suggestions_auto_seconds(db: Any, chat_id: Any, seconds: Any, *, tenant_id: str = "default") -> tuple[bool, str]:
+    tid = str(tenant_id or "default").strip() or "default"
+    return set_chat_state_via_typed_command(db, chat_id, SUGGESTIONS_AUTO_SECONDS_KEY, str(clamp_auto_seconds(seconds)), tenant_id=tid)
+
+
 def set_suggestions_auto_enabled(
     db: Any,
     chat_id: Any,

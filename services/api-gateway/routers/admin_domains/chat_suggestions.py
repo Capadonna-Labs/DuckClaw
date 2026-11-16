@@ -34,7 +34,8 @@ class ChatSuggestionsBody(BaseModel):
 class ChatSuggestionsAutoBody(BaseModel):
     chat_id: str = Field(..., max_length=128)
     tenant_id: str = Field(default="default", max_length=64)
-    enabled: bool = False
+    enabled: bool | None = None   # None = leave as is (a seconds-only change)
+    seconds: int | None = Field(default=None, ge=1, le=3600)
     vault_db_path: str = Field(default="", max_length=1024)
 
 
@@ -85,16 +86,17 @@ def _resolve_state_db_path(vault_db_path: str = "") -> str:
     return gw if gw and os.path.isfile(gw) else ""
 
 
-def _read_suggestions_auto(chat_id: str, vault_db_path: str = "") -> bool | None:
+def _read_suggestions_auto(chat_id: str, vault_db_path: str = "") -> tuple[bool | None, int | None]:
+    """(Auto on/off, countdown seconds) for this chat; None = unset."""
     from duckclaw import DuckClaw
-    from duckclaw.commands.suggestions_auto import suggestions_auto_enabled
+    from duckclaw.commands.suggestions_auto import suggestions_auto_enabled, suggestions_auto_seconds
 
     path = _resolve_state_db_path(vault_db_path)
     if not path:
-        return None
+        return None, None
     db = DuckClaw(path, read_only=True)
     try:
-        return suggestions_auto_enabled(db, chat_id)
+        return suggestions_auto_enabled(db, chat_id), suggestions_auto_seconds(db, chat_id)
     finally:
         try:
             db.close()
@@ -108,13 +110,14 @@ async def post_chat_suggestions(body: ChatSuggestionsBody, request: Request) -> 
     from duckclaw.commands.chat_suggestions import generate_followup_suggestions
     from duckclaw.gateway_db import get_gateway_db_path
 
-    auto = _read_suggestions_auto(body.chat_id, body.vault_db_path)
+    auto, auto_secs = _read_suggestions_auto(body.chat_id, body.vault_db_path)
     gw = (get_gateway_db_path() or "").strip()
     if not gw or not os.path.isfile(gw):
         return {
             "suggestions": [],
             "recommended_index": 0,
             "suggestions_auto_enabled": auto,
+            "suggestions_auto_seconds": auto_secs,
         }
 
     def _load_suggestions():
@@ -156,6 +159,7 @@ async def post_chat_suggestions(body: ChatSuggestionsBody, request: Request) -> 
         "suggestions": suggestions,
         "recommended_index": recommended_index,
         "suggestions_auto_enabled": auto,
+        "suggestions_auto_seconds": auto_secs,
     }
 
 
@@ -163,32 +167,35 @@ async def post_chat_suggestions(body: ChatSuggestionsBody, request: Request) -> 
 async def post_chat_suggestions_auto(body: ChatSuggestionsAutoBody) -> dict[str, Any]:
     """UI toggle: persist Auto preference for this chat (clears agent suppress when enabling)."""
     from duckclaw import DuckClaw
-    from duckclaw.commands.suggestions_auto import set_suggestions_auto_enabled
+    from duckclaw.commands.suggestions_auto import (
+        clamp_auto_seconds,
+        set_suggestions_auto_enabled,
+        set_suggestions_auto_seconds,
+    )
 
     path = _resolve_state_db_path(body.vault_db_path)
     if not path:
         return {"ok": False, "error": "vault_unavailable", "suggestions_auto_enabled": None}
     # read_only → typed DB-Writer enqueue (same as loop tools).
     db = DuckClaw(path, read_only=True)
+    ok, err = True, ""
     try:
-        ok, err = set_suggestions_auto_enabled(
-            db,
-            body.chat_id,
-            bool(body.enabled),
-            tenant_id=body.tenant_id,
-        )
+        if body.enabled is not None:
+            ok, err = set_suggestions_auto_enabled(db, body.chat_id, bool(body.enabled), tenant_id=body.tenant_id)
+        if ok and body.seconds is not None:
+            ok, err = set_suggestions_auto_seconds(db, body.chat_id, body.seconds, tenant_id=body.tenant_id)
     finally:
         try:
             db.close()
         except Exception:
             pass
     if not ok:
-        return {
-            "ok": False,
-            "error": err or "persist_failed",
-            "suggestions_auto_enabled": None,
-        }
-    return {"ok": True, "suggestions_auto_enabled": bool(body.enabled)}
+        return {"ok": False, "error": err or "persist_failed", "suggestions_auto_enabled": None}
+    return {
+        "ok": True,
+        "suggestions_auto_enabled": body.enabled,
+        "suggestions_auto_seconds": clamp_auto_seconds(body.seconds) if body.seconds is not None else None,
+    }
 
 
 @router.post("/chat/suggestions/select", dependencies=[Depends(require_admin_key)])

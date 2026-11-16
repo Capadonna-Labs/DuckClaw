@@ -221,6 +221,7 @@ export const chatApi = {
       suggestions: string[];
       recommended_index?: number;
       suggestions_auto_enabled?: boolean | null;
+      suggestions_auto_seconds?: number | null;
     }>('/chat/suggestions', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -229,13 +230,15 @@ export const chatApi = {
   setChatSuggestionsAuto: (body: {
     chat_id: string;
     tenant_id?: string;
-    enabled: boolean;
+    enabled?: boolean;
+    seconds?: number;
     vault_db_path?: string;
   }) =>
     adminFetch<{
       ok: boolean;
       error?: string;
       suggestions_auto_enabled?: boolean | null;
+      suggestions_auto_seconds?: number | null;
     }>('/chat/suggestions/auto', {
       method: 'POST',
       body: JSON.stringify(body),

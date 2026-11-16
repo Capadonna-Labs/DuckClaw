@@ -116,6 +116,7 @@ export function ChatSettingsPanel({
         onToolUsageToggle={onToolUsageToggle}
         suggestionsEnabled={suggestionsEnabled}
         onSuggestionsToggle={onSuggestionsToggle}
+        onSuggestionsAutoSecondsChange={chat.onSuggestionsAutoSecondsChange}
         notificationsEnabled={notificationsEnabled}
         notificationsChatTitle={notificationsChatTitle}
         notificationPermission={notificationPermission()}

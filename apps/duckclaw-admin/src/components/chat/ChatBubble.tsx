@@ -82,6 +82,12 @@ export function ChatBubble({
     !m.streaming && !isHeartbeat && hasCopyableText && (isAssistant || isUser);
   const showActions =
     canCopy || (canRetry && Boolean(onRetry)) || (canEdit && Boolean(onEdit));
+  // Room the first line leaves for the action bar: each button is ~26px (+ bar padding).
+  const actionCount =
+    Number(canEdit && Boolean(onEdit)) +
+    Number(canRetry && Boolean(onRetry)) +
+    Number(Boolean(onReact) && canCopy) +
+    Number(canCopy);
   const actionsAlwaysVisible = canCopy && (isAssistant || isError);
   const [copied, setCopied] = useState(false);
   // Live replies have no server time until the history reloads: stamp when streaming ends.
@@ -235,7 +241,6 @@ export function ChatBubble({
     ) : null}
     <div
       title={timeLabel || undefined}
-      style={swipeX ? { transform: `translateX(${swipeX}px)` } : undefined}
       className={`${swipeStart.current?.axis === 'x' ? '' : 'transition-transform duration-200'} group relative max-w-[90%] max-sm:max-w-full max-sm:w-full min-w-0 rounded-2xl px-4 py-3 text-sm overflow-hidden ${
         isUser
           ? 'ml-auto bg-gov-blue-700 text-white'
@@ -246,7 +251,11 @@ export function ChatBubble({
               : isInterrupted
                 ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 text-amber-900 dark:text-amber-200'
                 : 'bg-gov-gray-50 dark:bg-dark-bg border dark:border-dark-border'
-      } ${showActions ? '[&_.chat-markdown>:first-child]:pr-12' : ''}`}
+      } ${showActions ? '[&_.chat-markdown>:first-child]:pr-[var(--chat-actions-w)]' : ''}`}
+      style={{
+        ...(swipeX ? { transform: `translateX(${swipeX}px)` } : {}),
+        ...(showActions ? { ['--chat-actions-w' as string]: `${actionCount * 26 + 12}px` } : {}),
+      }}
     >
       {showActions && (
         <div

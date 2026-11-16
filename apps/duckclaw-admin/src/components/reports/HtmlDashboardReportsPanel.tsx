@@ -88,10 +88,14 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
   });
   const [pickedId, setPickedId] = useState('');
   const [reportList, setReportList] = useState<{ report_id: string; title: string }[]>([]);
+  const [pickedVault, setPickedVault] = useState('');
   const chatReportId = conv.sessionId ?? '';
-  const reportId = pickedId || chatReportId;
+  // Another vault opens its newest dashboard: this chat's id would not exist there.
+  const reportId = pickedId || (pickedVault ? reportList[0]?.report_id ?? '' : chatReportId);
 
-  const vaultPath = (config?.vault?.effective_path || '').trim();
+  const chatVaultPath = (config?.vault?.effective_path || '').trim();
+  const vaultPath = pickedVault || chatVaultPath;
+  const vaultOptions = config?.vault_options ?? [];
 
   useEffect(() => {
     if (!vaultPath) return;
@@ -341,6 +345,28 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     return () => targets.forEach((t) => t.removeEventListener('keydown', onKey as EventListener));
   }, [expanded, reportReloadToken]);
 
+  const vaultPicker =
+    vaultOptions.length > 1 ? (
+      <select
+        value={vaultPath}
+        onChange={(e) => {
+          setPickedVault(e.target.value === chatVaultPath ? '' : e.target.value);
+          setPickedId('');
+        }}
+        aria-label="Elegir vault"
+        className="max-w-[10rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
+      >
+        {!vaultOptions.some((v) => v.path === chatVaultPath) && chatVaultPath ? (
+          <option value={chatVaultPath}>Vault del chat</option>
+        ) : null}
+        {vaultOptions.map((v) => (
+          <option key={v.path} value={v.path}>
+            {v.label || v.vault_id || v.path.split('/').pop()}
+          </option>
+        ))}
+      </select>
+    ) : null;
+
   const picker =
     reportList.length > 0 ? (
       <select
@@ -349,7 +375,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
         aria-label="Elegir dashboard"
         className="max-w-[14rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
       >
-        {!reportList.some((r) => r.report_id === chatReportId) && chatReportId ? (
+        {!pickedVault && !reportList.some((r) => r.report_id === chatReportId) && chatReportId ? (
           <option value={chatReportId}>Chat actual</option>
         ) : null}
         {reportList.map((r) => (
@@ -360,8 +386,9 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
       </select>
     ) : null;
 
-  const viewToolbar = showViewToggle || picker ? (
+  const viewToolbar = showViewToggle || picker || vaultPicker ? (
     <div className="flex items-center gap-2">
+    {vaultPicker}
     {picker}
     {showViewToggle ? (
     <div className="flex rounded-lg border border-slate-600/80 bg-slate-900 p-0.5">

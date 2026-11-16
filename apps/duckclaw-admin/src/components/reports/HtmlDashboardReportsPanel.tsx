@@ -59,6 +59,8 @@ type HtmlDashboardReportsPanelProps = {
   toolbarSlot?: HTMLElement | null;
 };
 
+const PICK_KEY = 'duckclaw.dashboards.pick';
+
 export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsPanelProps = {}) {
   const pathname = usePathname();
   const section = useMemo(() => sectionFromPath(pathname || ''), [pathname]);
@@ -86,9 +88,25 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
   const conv = useActiveConversation(tenantId, section, {
     defaultWorkerId: '',
   });
-  const [pickedId, setPickedId] = useState('');
   const [reportList, setReportList] = useState<{ report_id: string; title: string }[]>([]);
-  const [pickedVault, setPickedVault] = useState('');
+  // Last dashboard picked here survives reloads and chat switches (per browser).
+  const [picked, setPicked] = useState<{ vault: string; id: string }>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(PICK_KEY) || '') || { vault: '', id: '' };
+    } catch {
+      return { vault: '', id: '' };
+    }
+  });
+  const pick = useCallback((vault: string, id: string) => {
+    setPicked({ vault, id });
+    try {
+      localStorage.setItem(PICK_KEY, JSON.stringify({ vault, id }));
+    } catch {
+      /* private mode */
+    }
+  }, []);
+  const pickedVault = picked.vault;
+  const pickedId = reportList.length && !reportList.some((r) => r.report_id === picked.id) ? '' : picked.id;
   const chatReportId = conv.sessionId ?? '';
   // Another vault opens its newest dashboard: this chat's id would not exist there.
   const reportId = pickedId || (pickedVault ? reportList[0]?.report_id ?? '' : chatReportId);
@@ -346,12 +364,11 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
   }, [expanded, reportReloadToken]);
 
   const vaultPicker =
-    vaultOptions.length > 1 ? (
+    vaultOptions.length > 0 || chatVaultPath ? (
       <select
         value={vaultPath}
         onChange={(e) => {
-          setPickedVault(e.target.value === chatVaultPath ? '' : e.target.value);
-          setPickedId('');
+          pick(e.target.value === chatVaultPath ? '' : e.target.value, '');
         }}
         aria-label="Elegir vault"
         className="max-w-[10rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
@@ -371,7 +388,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     reportList.length > 0 ? (
       <select
         value={reportId}
-        onChange={(e) => setPickedId(e.target.value === chatReportId ? '' : e.target.value)}
+        onChange={(e) => pick(pickedVault, e.target.value)}
         aria-label="Elegir dashboard"
         className="max-w-[14rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
       >

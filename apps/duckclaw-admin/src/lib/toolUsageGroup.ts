@@ -28,28 +28,45 @@ export function groupMessagesForDisplay(messages: ChatMsg[]): ChatDisplayItem[] 
     if (m?.role === 'user') {
       out.push({ kind: 'message', index: i });
       i += 1;
-      // Collect the turn's tools into one group, shown where the first tool was, but below any interim
-      // assistant message there (the acknowledgement arrives after the first "Pensando" row; after a
-      // reload it is an assistant message that is not the turn's last one).
-      const turnTools: number[] = [];
-      const rest: number[] = [];
+      // One tool box per stretch of work: each assistant message after the acknowledgement closes the box
+      // above it, so a turn reads ack · tools · message · tools · answer. The box sits where its first tool
+      // was, but never above the turn's acknowledgement (its first assistant message, which arrives after
+      // the first "Pensando" row live, and after a reload is an assistant message that is not the last).
+      const end = messages.findIndex((x, k) => k >= i && x?.role === 'user');
+      const turnEnd = end < 0 ? messages.length : end;
+      let lastAssistant = -1;
+      for (let k = i; k < turnEnd; k++) if (messages[k]?.role === 'assistant') lastAssistant = k;
+      let firstAssistant = -1;
+      let tools: number[] = [];
+      let rest: number[] = [];
       let groupAt = -1;
-      while (i < messages.length && messages[i]?.role !== 'user') {
-        if (isToolHeartbeatMessage(messages[i])) {
+      const flush = () => {
+        if (groupAt >= 0 && rest[groupAt] === firstAssistant) groupAt += 1;
+        rest.forEach((idx, k) => {
+          if (k === groupAt) out.push({ kind: 'toolGroup', indices: tools });
+          out.push({ kind: 'message', index: idx });
+        });
+        if (tools.length && groupAt === rest.length) out.push({ kind: 'toolGroup', indices: tools });
+        tools = [];
+        rest = [];
+        groupAt = -1;
+      };
+      for (; i < turnEnd; i++) {
+        const cur = messages[i];
+        if (isToolHeartbeatMessage(cur)) {
           if (groupAt < 0) groupAt = rest.length;
-          turnTools.push(i);
-        } else rest.push(i);
-        i += 1;
+          tools.push(i);
+          continue;
+        }
+        rest.push(i);
+        if (cur?.role !== 'assistant') continue;
+        if (firstAssistant < 0 && (cur.interim || i < lastAssistant)) {
+          firstAssistant = i;   // the acknowledgement: tools before it go below it, in the same box
+          continue;
+        }
+        flush();
       }
-      const answerPos = rest.findLastIndex((idx) => messages[idx]?.role === 'assistant');
-      const isInterim = (k: number) =>
-        messages[rest[k]]?.role === 'assistant' && (messages[rest[k]]?.interim || k < answerPos);
-      while (groupAt >= 0 && groupAt < rest.length && isInterim(groupAt)) groupAt += 1;
-      rest.forEach((idx, k) => {
-        if (k === groupAt) out.push({ kind: 'toolGroup', indices: turnTools });
-        out.push({ kind: 'message', index: idx });
-      });
-      if (groupAt === rest.length) out.push({ kind: 'toolGroup', indices: turnTools });
+      flush();
       continue;
     }
     if (isToolHeartbeatMessage(m)) {
@@ -112,8 +129,10 @@ export function toolGroupTotalElapsedMs(messages: ChatMsg[], indices: number[]):
 /** Clave estable por turno: no cambia al añadir tools al mismo grupo. */
 export function toolGroupStableKey(messages: ChatMsg[], indices: number[]): string {
   const start = indices[0] ?? 0;
+  let stretch = 0;   // assistant messages before the box in its turn (the ack does not start a new one)
   for (let j = start - 1; j >= 0; j--) {
-    if (messages[j]?.role === 'user') return `tool-group-turn-${j}`;
+    if (messages[j]?.role === 'assistant') stretch += 1;
+    if (messages[j]?.role === 'user') return stretch > 1 ? `tool-group-turn-${j}-${stretch}` : `tool-group-turn-${j}`;
   }
   const oldest = messages[indices[indices.length - 1] ?? start];
   const id = oldest?.toolInvocationId ?? oldest?.toolStartedAt ?? start;

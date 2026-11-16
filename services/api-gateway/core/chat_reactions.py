@@ -10,6 +10,7 @@ ponytail: two identical messages (say two "ok") share their reactions; a stable 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from typing import Any
 
@@ -117,7 +118,15 @@ async def pop_pending_interim_messages(redis: Any, tenant_id: str, session_id: s
         await redis.delete(key)
     except Exception:
         return []
-    items = (normalize_history_item({"role": "assistant", "content": r.decode() if isinstance(r, bytes) else r}) for r in raw)
+    items = []
+    for r in raw:
+        s = r.decode() if isinstance(r, bytes) else r
+        try:
+            e = json.loads(s)   # {"text", "ts"}; a bare string is the pre-ts format
+        except ValueError:
+            e = None
+        e = e if isinstance(e, dict) else {"text": s}
+        items.append(normalize_history_item({"role": "assistant", "content": e.get("text"), "ts": e.get("ts")}))
     return [i for i in items if i]
 
 

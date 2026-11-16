@@ -218,11 +218,27 @@ export function interleaveEphemeralIntoHistory(
   }
   const out: ChatMsg[] = [];
   let userCount = 0;
+  let assistantsInTurn = 0;
   for (const [i, m] of server.entries()) {
-    if (m.role === 'user') userCount += 1;
-    if (m.role === 'assistant' && lastAssistantOfTurn.has(i)) {
-      out.push(...(buckets.get(userCount) ?? []));
-      buckets.delete(userCount);
+    if (m.role === 'user') {
+      userCount += 1;
+      assistantsInTurn = 0;
+    }
+    if (m.role === 'assistant') {
+      assistantsInTurn += 1;
+      if (lastAssistantOfTurn.has(i)) {
+        out.push(...(buckets.get(userCount) ?? []));
+        buckets.delete(userCount);
+      } else if (assistantsInTurn > 1) {
+        // A later interim message: the tools that started before it go above it, so the turn reads
+        // ack · tools · message · tools · answer as it did live (the ack stays first).
+        const sentAt = Date.parse(m.ts || '');
+        const pending = buckets.get(userCount) ?? [];
+        if (Number.isFinite(sentAt) && pending.length) {
+          out.push(...pending.filter((e) => (e.toolStartedAt ?? Infinity) < sentAt));
+          buckets.set(userCount, pending.filter((e) => !((e.toolStartedAt ?? Infinity) < sentAt)));
+        }
+      }
     }
     out.push(m);
   }

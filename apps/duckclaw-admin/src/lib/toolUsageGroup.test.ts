@@ -65,6 +65,22 @@ describe('toolUsageGroup', () => {
     ]);
   });
 
+  it('a message sent between tools splits the box: ack · tools · message · tools · answer', () => {
+    const ack: ChatMsg = { role: 'assistant', text: 'Reviso eso', interim: true };
+    const mid: ChatMsg = { role: 'assistant', text: 'Primer hallazgo', interim: true };
+    const msgs = [user, tool('Pensando'), ack, tool('a'), mid, tool('b'), assistant];
+    const got = groupMessagesForDisplay(msgs);
+    expect(got).toEqual([
+      { kind: 'message', index: 0 },
+      { kind: 'message', index: 2 },
+      { kind: 'toolGroup', indices: [1, 3] },
+      { kind: 'message', index: 4 },
+      { kind: 'toolGroup', indices: [5] },
+      { kind: 'message', index: 6 },
+    ]);
+    expect(toolGroupStableKey(msgs, [1, 3])).not.toBe(toolGroupStableKey(msgs, [5]));
+  });
+
   it('splits groups when plan interrupts tools', () => {
     expect(
       groupMessagesForDisplay([user, tool('a'), tool('b'), plan, tool('c'), assistant])

@@ -19,8 +19,15 @@ from langchain_core.tools import StructuredTool
 
 _log = logging.getLogger(__name__)
 PENDING_TTL_SEC = 600
-INTERIM_MAX_PER_TURN = 3
+INTERIM_MAX_PER_TURN = 4   # the automatic acknowledgement takes one; the agent gets 3
 INTERIM_MAX_CHARS = 280
+
+
+def interim_entry(text: str) -> str:
+    """Queued form of an interim message: its text and when it was sent, so the history keeps it between the right tools."""
+    from datetime import datetime, timezone
+
+    return json.dumps({"text": text, "ts": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False)
 
 
 def pending_interim_key(tenant_id: str, session_id: str) -> str:
@@ -93,7 +100,7 @@ def send_interim_message_impl(text: str) -> str:
         try:
             if client.llen(key) >= INTERIM_MAX_PER_TURN:
                 return json.dumps({"status": "error", "error": "limit", "hint": f"Ya enviaste {INTERIM_MAX_PER_TURN} mensajes intermedios en este turno; sigue trabajando y da la respuesta final."}, ensure_ascii=False)
-            client.rpush(key, t)
+            client.rpush(key, interim_entry(t))
             client.expire(key, PENDING_TTL_SEC)
         finally:
             try:
@@ -147,7 +154,7 @@ def auto_ack_first_tool(chat_id: str, tool_name: str, turn_index: int | None, te
                 return False
             phrase = AUTO_ACK_PHRASES[int(hashlib.sha1(f"{chat_id}:{turn_index}".encode()).hexdigest(), 16) % len(AUTO_ACK_PHRASES)]
             client.set(pending_reaction_key(tenant, session), "👀", ex=PENDING_TTL_SEC, nx=True)   # the agent's own reaction wins
-            client.rpush(pending_interim_key(tenant, session), phrase)
+            client.rpush(pending_interim_key(tenant, session), interim_entry(phrase))
             client.expire(pending_interim_key(tenant, session), PENDING_TTL_SEC)
         finally:
             try:
@@ -177,8 +184,8 @@ def register_react_to_message_skill(tools_list: List[Any], db: Any = None) -> No
             name="send_interim_message",
             description=(
                 "Envía YA un mensaje corto al usuario (máx. 280 caracteres, máx. 3 por turno) y sigues trabajando; luego da la respuesta final. "
-                "Úsalo al empezar un trabajo largo (varias herramientas o análisis), con una frase breve y variada, p. ej. «Reviso eso y te cuento», "
-                "o para avisar un hallazgo parcial. No es la respuesta: no pongas aquí resultados completos ni lo repitas al final. "
+                "Sale como un mensaje aparte entre tus tandas de herramientas: úsalo entre etapas para un hallazgo parcial o para decir qué revisas ahora "
+                "(el acuse inicial ya lo pone el chat). No es la respuesta: no pongas aquí resultados completos ni lo repitas al final. "
                 "Solo en el chat web."
             ),
         )

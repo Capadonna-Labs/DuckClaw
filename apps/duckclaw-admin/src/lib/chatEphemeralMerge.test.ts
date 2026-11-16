@@ -27,6 +27,15 @@ describe('chatEphemeralMerge', () => {
     ).toEqual(['a', 'Reviso eso', 'read_sql', 'Respuesta', 'b', 'B']);
   });
 
+  it('after a reload, tools that started before a mid-turn message stay above it', () => {
+    const server = [user('a'), assistant('Reviso eso'), { ...assistant('Hallazgo'), ts: new Date(2000).toISOString() }, assistant('Respuesta')];
+    const early = { ...tool('read_sql', 1), toolStartedAt: 1000 };
+    const late = { ...tool('web_search', 1), toolStartedAt: 3000 };
+    expect(
+      interleaveEphemeralIntoHistory(server, [early, late]).map((m) => m.toolName ?? m.text)
+    ).toEqual(['a', 'Reviso eso', 'read_sql', 'Hallazgo', 'web_search', 'Respuesta']);
+  });
+
   it('interleaves tools before matching assistant turn', () => {
     const server = [user('a'), assistant('A'), user('b'), assistant('B')];
     const ephemeral = [tool('read_sql', 1), tool('web_search', 1), tool('tavily', 2)];

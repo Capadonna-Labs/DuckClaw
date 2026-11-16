@@ -208,8 +208,9 @@ def register_update_system_prompt_tools(tools_list: list[Any], db: Any = None, p
             func=_read_system_prompt,
             name="read_system_prompt",
             description=(
-                "Lee el system prompt efectivo del worker activo antes de hacer reemplazos seguros. "
-                "No modifica estado. Usa include_content=false para solo metadata."
+                "Solo para editar tu propio prompt: léelo justo antes de update_system_prompt. "
+                "No lo uses para recordar tus reglas ni durante un análisis: ya están en tu contexto. "
+                "include_content=false devuelve solo el tamaño."
             ),
             args_schema=ReadSystemPromptInput,
         )

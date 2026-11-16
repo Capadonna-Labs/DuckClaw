@@ -47,10 +47,10 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const VIEW_TABS: { id: PanelView; label: string; hint: string }[] = [
-  { id: 'lista', label: 'Bandeja', hint: 'Todo lo generado' },
-  { id: 'vault', label: 'Vault', hint: 'Explorar OUTPUT' },
-  { id: 'entregables', label: 'Entregables', hint: 'Word y dashboards' },
+const VIEW_TABS: { id: PanelView; label: string }[] = [
+  { id: 'lista', label: 'Bandeja' },
+  { id: 'vault', label: 'Vault' },
+  { id: 'entregables', label: 'Entregables' },
 ];
 
 export function ProductivityArtifactsPanel() {
@@ -164,14 +164,6 @@ export function ProductivityArtifactsPanel() {
               )}
             >
               <span className="block text-sm font-black">{t.label}</span>
-              <span
-                className={cn(
-                  'mt-0.5 block text-[11px] font-normal',
-                  selected ? 'text-blue-100' : 'text-gov-gray-500 dark:text-dark-muted'
-                )}
-              >
-                {t.hint}
-              </span>
             </button>
           );
         })}

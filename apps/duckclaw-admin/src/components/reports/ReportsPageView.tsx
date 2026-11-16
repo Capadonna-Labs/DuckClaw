@@ -40,7 +40,7 @@ export default function ReportsPageView() {
             tab === 'word' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          Informes Word
+          Informes
         </button>
         <button
           type="button"
@@ -49,7 +49,7 @@ export default function ReportsPageView() {
             tab === 'html' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          Dashboards HTML
+          Dashboards
         </button>
         <div ref={setToolbarSlot} className="ml-auto flex items-center empty:hidden" />
       </div>

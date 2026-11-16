@@ -427,7 +427,7 @@ export function DocumentReportsPanel() {
     <div className="flex h-full w-full overflow-hidden">
       <aside className="flex w-72 shrink-0 flex-col border-r border-slate-800 bg-slate-950">
         <div className="border-b border-slate-800 p-4">
-          <h2 className="text-sm font-semibold text-slate-100">Informes Word</h2>
+          <h2 className="text-sm font-semibold text-slate-100">Informes</h2>
           <p className="mt-1 text-xs text-slate-500">
             Plantilla → nombre → secciones en Chat → Word final.
           </p>

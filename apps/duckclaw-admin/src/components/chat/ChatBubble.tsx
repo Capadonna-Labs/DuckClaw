@@ -408,6 +408,8 @@ export function ChatBubble({
             </div>
           ) : (
             <span className="block whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+              {/* plain text has no .chat-markdown first child: a float keeps the buttons off line 1 only */}
+              {showActions ? <span aria-hidden className="float-right h-5 w-[var(--chat-actions-w)]" /> : null}
               {isUser && m.voiceNote ? (
                 <span className="inline-flex items-center gap-1 mr-1 opacity-90" title="Nota de voz">
                   <Mic size={14} aria-hidden />

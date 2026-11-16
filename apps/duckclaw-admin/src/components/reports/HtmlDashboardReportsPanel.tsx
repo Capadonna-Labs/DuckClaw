@@ -88,7 +88,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
   const conv = useActiveConversation(tenantId, section, {
     defaultWorkerId: '',
   });
-  const [reportList, setReportList] = useState<{ report_id: string; title: string }[]>([]);
+  const [allReports, setAllReports] = useState<Record<string, { report_id: string; title: string }[]>>({});
   // Last dashboard picked here survives reloads and chat switches (per browser).
   const [picked, setPicked] = useState<{ vault: string; id: string }>(() => {
     try {
@@ -106,6 +106,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     }
   }, []);
   const pickedVault = picked.vault;
+  const reportList = allReports[pickedVault || (config?.vault?.effective_path || '').trim()] ?? [];
   const pickedId = reportList.length && !reportList.some((r) => r.report_id === picked.id) ? '' : picked.id;
   const chatReportId = conv.sessionId ?? '';
   // Another vault opens its newest dashboard: this chat's id would not exist there.
@@ -113,15 +114,34 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
 
   const chatVaultPath = (config?.vault?.effective_path || '').trim();
   const vaultPath = pickedVault || chatVaultPath;
-  const vaultOptions = config?.vault_options ?? [];
+  // Every vault the chat can see; the chat's own path is skipped when an option names the same file.
+  const vaults = useMemo(() => {
+    const base = (p: string) => p.split('/').pop() || p;
+    const opts = (config?.vault_options ?? []).map((v) => ({ path: v.path, label: v.label || v.vault_id || base(v.path) }));
+    if (chatVaultPath && !opts.some((v) => v.path === chatVaultPath || base(v.path) === base(chatVaultPath))) {
+      opts.unshift({ path: chatVaultPath, label: base(chatVaultPath) });
+    }
+    return opts;
+  }, [config?.vault_options, chatVaultPath]);
+  const vaultKey = vaults.map((v) => v.path).join('|');
 
   useEffect(() => {
-    if (!vaultPath) return;
-    fetch(`/api/admin/reports?vault=${encodeURIComponent(vaultPath)}`, { credentials: 'include', cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : { reports: [] }))
-      .then((d) => setReportList(Array.isArray(d?.reports) ? d.reports : []))
-      .catch(() => setReportList([]));
-  }, [vaultPath, reportReloadToken]);
+    let cancelled = false;
+    Promise.all(
+      vaults.map((v) =>
+        fetch(`/api/admin/reports?vault=${encodeURIComponent(v.path)}`, { credentials: 'include', cache: 'no-store' })
+          .then((r) => (r.ok ? r.json() : { reports: [] }))
+          .then((d) => [v.path, Array.isArray(d?.reports) ? d.reports : []] as const)
+          .catch(() => [v.path, []] as const)
+      )
+    ).then((pairs) => {
+      if (!cancelled) setAllReports(Object.fromEntries(pairs));
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vaultKey, reportReloadToken]);
 
   const reportIframeSrc = useMemo(() => {
     if (!reportId || !vaultPath) return '';
@@ -363,50 +383,42 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     return () => targets.forEach((t) => t.removeEventListener('keydown', onKey as EventListener));
   }, [expanded, reportReloadToken]);
 
-  const vaultPicker =
-    vaultOptions.length > 0 || chatVaultPath ? (
-      <select
-        value={vaultPath}
-        onChange={(e) => {
-          pick(e.target.value === chatVaultPath ? '' : e.target.value, '');
-        }}
-        aria-label="Elegir vault"
-        className="max-w-[10rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
-      >
-        {!vaultOptions.some((v) => v.path === chatVaultPath) && chatVaultPath ? (
-          <option value={chatVaultPath}>Vault del chat</option>
-        ) : null}
-        {vaultOptions.map((v) => (
-          <option key={v.path} value={v.path}>
-            {v.label || v.vault_id || v.path.split('/').pop()}
-          </option>
-        ))}
-      </select>
-    ) : null;
-
   const picker =
-    vaultPath ? (
+    vaults.length > 0 ? (
       <select
-        value={reportId}
-        onChange={(e) => pick(pickedVault, e.target.value)}
+        value={JSON.stringify([vaultPath, reportId])}
+        onChange={(e) => {
+          const [v, id] = JSON.parse(e.target.value) as [string, string];
+          pick(v === chatVaultPath && id === chatReportId ? '' : v, id);
+        }}
         aria-label="Elegir dashboard"
-        className="max-w-[14rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
+        className="max-w-[16rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
       >
-        {reportList.length === 0 && !(!pickedVault && chatReportId) ? <option value="">Sin dashboards</option> : null}
-        {!pickedVault && !reportList.some((r) => r.report_id === chatReportId) && chatReportId ? (
-          <option value={chatReportId}>Chat actual</option>
-        ) : null}
-        {reportList.map((r) => (
-          <option key={r.report_id} value={r.report_id}>
-            {r.report_id === chatReportId ? `${r.title} (chat actual)` : r.title}
-          </option>
-        ))}
+        {!reportId ? <option value={JSON.stringify([vaultPath, reportId])}>Sin dashboards</option> : null}
+        {vaults.map((v) => {
+          const list = allReports[v.path] ?? [];
+          const showChat = v.path === chatVaultPath && chatReportId && !list.some((r) => r.report_id === chatReportId);
+          return (
+            <optgroup key={v.path} label={v.label}>
+              {showChat ? <option value={JSON.stringify([v.path, chatReportId])}>Chat actual</option> : null}
+              {list.length === 0 && !showChat ? (
+                <option disabled value="">
+                  (sin dashboards)
+                </option>
+              ) : null}
+              {list.map((r) => (
+                <option key={r.report_id} value={JSON.stringify([v.path, r.report_id])}>
+                  {r.report_id === chatReportId ? `${r.title} (chat actual)` : r.title}
+                </option>
+              ))}
+            </optgroup>
+          );
+        })}
       </select>
     ) : null;
 
-  const viewToolbar = showViewToggle || picker || vaultPicker ? (
+  const viewToolbar = showViewToggle || picker ? (
     <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
-    {vaultPicker}
     {picker}
     {showViewToggle ? (
     <div className="flex rounded-lg border border-slate-600/80 bg-slate-900 p-0.5">

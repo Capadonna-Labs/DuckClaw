@@ -192,6 +192,11 @@ def resolve_active_pack_ids(
                 continue
             if intent_mentions_token(intent, connector_id):
                 active.add(pack_id)
+        if not loop_system_event:
+            from duckclaw.workers.tool_pack_router import route_packs
+
+            known = ({p.pack_id for p in catalog.packs} | connector_pack_ids) - disabled
+            active |= route_packs(cfg.raw, intent_text or "", known)
 
     unlocked = unlocked_packs_from_messages(messages) - disabled
     if not loop_system_event:

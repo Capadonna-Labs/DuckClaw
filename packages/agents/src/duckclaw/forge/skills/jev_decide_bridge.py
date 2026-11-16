@@ -99,6 +99,7 @@ def jev_decide_impl(
     db: Any | None = None,
     tenant_id: str = "default",
     urlopen: Any = None,
+    timeout: float = 60,
 ) -> str:
     """Call OpenRouter Decisions API; return compact JSON for the chat LLM."""
     parsed_state = _parse_state(state)
@@ -176,7 +177,7 @@ def jev_decide_impl(
     )
     opener = urlopen or urllib.request.urlopen
     try:
-        with opener(req, timeout=60) as resp:
+        with opener(req, timeout=timeout) as resp:
             raw_body = resp.read().decode("utf-8", errors="replace")
             status = getattr(resp, "status", None) or resp.getcode()
     except urllib.error.HTTPError as exc:

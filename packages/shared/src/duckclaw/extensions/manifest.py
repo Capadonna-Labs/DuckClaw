@@ -34,7 +34,7 @@ class FlyExtensionManifest:
     # requirements.txt files (relative to the manifest) installed after every uv sync.
     python_requirements: tuple[str, ...] = ()
     read_only_commands: tuple[str, ...] = ()
-    # Approval commands a system turn (cron, heartbeat, /loop) must never run.
+    # Approval commands a system turn (cron, heartbeat, /aware) must never run.
     human_only_commands: tuple[str, ...] = ()
     help_entries: tuple[tuple[str, str], ...] = ()
     state_delta_handlers: tuple[StateDeltaHandlerEntry, ...] = ()

@@ -11,7 +11,7 @@ adaptadores que **no** pueden moverse a ``commands`` sin ciclos
 
 - ``_team_access_acl_db_provider`` → ``graph_server.get_db`` para ACL whitelist.
 - ``_GraphHeartbeatAdapter`` → ``chat_heartbeat`` (Redis/SSE + persistencia DB).
-- ``_GraphLoopTickHeartbeatPublisher`` → heartbeat admin UI en ticks /loop.
+- ``_GraphLoopTickHeartbeatPublisher`` → heartbeat admin UI en ticks /aware.
 - ``configure_heartbeat_runtime_db_provider`` / ``configure_provider_budget_runtime_db_provider``
   → wiring de ``get_db`` hacia runtime settings (best-effort al importar).
 - ``_sandbox_session_cleanup`` → ``graphs.sandbox.cleanup_sandbox_session_for_chat``.

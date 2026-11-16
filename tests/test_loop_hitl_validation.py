@@ -1,4 +1,4 @@
-"""HITL validation for /loop homeostasis."""
+"""HITL validation for /aware homeostasis."""
 
 from __future__ import annotations
 
@@ -123,7 +123,7 @@ def test_fly_meditate_approve_success() -> None:
     created = create_pending_validation(db, "c6", tenant_id="t1", snapshot={})
     vid = created["validation_id"]
     out = execute_loop_approve(db, "c6", vid, tenant_id="t1")
-    assert "homeostasis confirmada" in out.lower() or "modo `/loop` detenido" in out.lower()
+    assert "homeostasis confirmada" in out.lower() or "modo `/aware` detenido" in out.lower()
     assert vid in out
     assert get_chat_state(db, "c6", "loop_active") == "0"
     assert get_chat_state(db, "c6", "loop_delta_seconds") == "0"
@@ -133,7 +133,7 @@ def test_build_meditate_system_event_includes_hitl_step(mock_manifest: None) -> 
     db = _FakeDb()
     msg = build_meditate_self_system_event_message(db, "1", "default", scheduled=False)
     assert "request_homeostasis_validation" in msg
-    assert "/loop-approve" in msg
+    assert "/aware-approve" in msg
 
 
 def test_build_meditate_system_event_pending_prefix(mock_manifest: None) -> None:
@@ -149,4 +149,4 @@ def test_build_meditate_system_event_pending_prefix(mock_manifest: None) -> None
     msg = build_meditate_self_system_event_message(db, "7", "default", scheduled=True)
     assert "HITL pendiente" in msg
     assert vid in msg
-    assert "/loop-approve" in msg
+    assert "/aware-approve" in msg

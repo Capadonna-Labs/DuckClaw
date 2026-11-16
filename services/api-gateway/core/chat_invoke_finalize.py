@@ -51,7 +51,7 @@ def _is_loop_footer_turn(
     fly_cmd: str,
     cmd_name: str,
 ) -> bool:
-    """True si el turno es /loop o ciclo auto-mejora (SYSTEM_EVENT), no solo fly /command."""
+    """True si el turno es /aware o ciclo auto-mejora (SYSTEM_EVENT), no solo fly /command."""
     try:
         from duckclaw.commands.loop import is_loop_status_fly_text
 
@@ -59,7 +59,7 @@ def _is_loop_footer_turn(
             return False
     except Exception:
         pass
-    if cmd_name in ("loop", "meditate"):
+    if cmd_name in ("aware", "meditate"):
         return True
     try:
         from duckclaw.commands.loop import LOOP_SYSTEM_USER_LABEL
@@ -71,7 +71,7 @@ def _is_loop_footer_turn(
         c = chunk or ""
         if label and label in c:
             return True
-        if "Modo /loop activo" in c:
+        if "Modo /aware activo" in c:
             return True
     low = (message or "").lower()
     if "[system_event:" in low and any(
@@ -83,15 +83,15 @@ def _is_loop_footer_turn(
 
 
 def _reply_already_has_loop_schedule_footer(text: str) -> bool:
-    """Evita duplicar pie de próximo ciclo; no bloquea fly ack con 'Modo /loop --delta'."""
+    """Evita duplicar pie de próximo ciclo; no bloquea fly ack con 'Modo /aware --delta'."""
     t = text or ""
     markers = (
         "⏭️ **Próximo ciclo",
-        "⏭️ **Modo /loop:** inactivo",
-        "⏭️ **Modo /loop activo** — esperando",
-        "⏭️ **Modo /loop activo** — ciclo en curso",
-        "⏭️ **Modo /loop --delta:**",
-        "Próximo ciclo /loop --delta",
+        "⏭️ **Modo /aware:** inactivo",
+        "⏭️ **Modo /aware activo** — esperando",
+        "⏭️ **Modo /aware activo** — ciclo en curso",
+        "⏭️ **Modo /aware --delta:**",
+        "Próximo ciclo /aware --delta",
         "Próximo ciclo auto-mejora",
         "silencio ~",
     )

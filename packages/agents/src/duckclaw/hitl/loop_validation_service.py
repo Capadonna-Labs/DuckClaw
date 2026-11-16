@@ -1,4 +1,4 @@
-"""HITL validation for /loop homeostasis (chat_state pending, no DuckDB table)."""
+"""HITL validation for /aware homeostasis (chat_state pending, no DuckDB table)."""
 
 from __future__ import annotations
 
@@ -188,6 +188,6 @@ def format_hitl_user_prompt(validation_id: str, goals_summary: str) -> str:
         f"**Validación HITL homeostasis** — ¿Confirmas que las metas están cumplidas?\n\n"
         f"{summary}\n\n"
         f"validation_id: `{validation_id}`\n"
-        f"- `/loop-approve {validation_id}` — confirmar homeostasis\n"
-        f"- `/loop-reject {validation_id} <razón>` — rechazar"
+        f"- `/aware-approve {validation_id}` — confirmar homeostasis\n"
+        f"- `/aware-reject {validation_id} <razón>` — rechazar"
     )

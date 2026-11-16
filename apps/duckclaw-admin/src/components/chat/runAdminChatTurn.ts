@@ -779,14 +779,16 @@ try {
           authoritativeResponse.includes('Ciclo loop iniciado') ||
           authoritativeResponse.includes('Ciclo meditate iniciado') ||
           authoritativeResponse.includes('Modo /loop activo') ||
-          authoritativeResponse.includes('Modo /meditate activo')
+          authoritativeResponse.includes('Modo /aware activo') ||
+          authoritativeResponse.includes('Modo /meditate activo') ||
+          /^Loop c\d+ creado/.test(authoritativeResponse)
         ) {
           loopFollowUp = true;
           setLoopSchedulePolling(true);
         }
         const respLower = authoritativeResponse.toLowerCase();
         if (
-          respLower.includes('modo /loop') &&
+          (respLower.includes('modo /loop') || respLower.includes('modo /aware')) &&
           (respLower.includes('inactivo') || respLower.includes('detenido'))
         ) {
           setLoopSchedulePolling(false);

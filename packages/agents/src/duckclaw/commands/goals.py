@@ -491,7 +491,7 @@ def _format_homeostasis_manifest_listing(
                 )
     infra = manifest.infra
     lines.append("")
-    lines.append("Umbrales infra (contraste /loop):")
+    lines.append("Umbrales infra (contraste /aware):")
     lines.append(f"- error_rate_pct ≤ {infra.error_rate_pct}")
     lines.append(f"- stale_tasks_count ≤ {infra.stale_tasks_count}")
     lines.append(f"- memory_fragmentation_index ≤ {infra.memory_fragmentation_index}")
@@ -508,7 +508,7 @@ def execute_homeostasis_goals(
     tenant_id: Any = None,
     vault_user_id: Any = None,
 ) -> str:
-    """/goals — CRUD del manifiesto homeostasis (metas + umbrales infra) contrastado por /loop."""
+    """/goals — CRUD del manifiesto homeostasis (metas + umbrales infra) contrastado por /aware."""
     from harness_core.goal_priority import assign_sequential_priorities, next_goal_priority
     from harness_core.states.loop_state import DomainGoal, HomeostasisManifest
     from harness_core.targets import load_homeostasis_manifest, resolve_homeostasis_tenant_id, set_infra_field

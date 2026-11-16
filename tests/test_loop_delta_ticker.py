@@ -90,7 +90,7 @@ def test_build_meditate_self_system_event_message(mock_manifest: None) -> None:
     assert "evaluate_homeostasis" in msg
     assert "assess_crons_alignment" in msg
     assert "request_homeostasis_validation" in msg
-    assert "programado /loop" in msg
+    assert "programado /aware" in msg
 
 
 def test_execute_meditate_delta_off() -> None:
@@ -145,7 +145,7 @@ def test_execute_meditate_delta_with_read_only_handle_queues_typed_commands(
 
         def execute(self, sql: str) -> None:
             self.direct_writes.append(sql)
-            raise AssertionError(f"read-only /loop must not execute SQL directly: {sql}")
+            raise AssertionError(f"read-only /aware must not execute SQL directly: {sql}")
 
         def query(self, sql: str):
             if _chat_key("5", "worker_id") in sql:
@@ -204,7 +204,7 @@ def test_format_meditate_next_tick_footer_disabled() -> None:
     db = _FakeDb()
     footer = format_meditate_next_tick_footer(db, "7")
     assert "inactivo" in footer.lower()
-    assert "`/loop on`" in footer
+    assert "`/aware on`" in footer
 
 
 def test_format_meditate_next_tick_footer_idle_mode() -> None:
@@ -221,7 +221,7 @@ def test_format_meditate_next_tick_footer_idle_mode() -> None:
 def test_loop_delta_apply_refreshes_stale_last_activity_anchor(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Reconfiguring /loop --delta must re-anchor to now, not reuse stale loop_last_activity."""
+    """Reconfiguring /aware --delta must re-anchor to now, not reuse stale loop_last_activity."""
     from datetime import datetime
     from zoneinfo import ZoneInfo
 
@@ -268,7 +268,7 @@ def test_format_meditate_next_tick_footer_scheduled_no_anchor() -> None:
 
 
 def test_format_meditate_next_tick_footer_active_idle_in_cycle_shows_clock() -> None:
-    """Active /loop --delta while agent runs: footer still shows next-delta clock."""
+    """Active /aware --delta while agent runs: footer still shows next-delta clock."""
     from duckclaw.commands.loop import format_meditate_next_tick_footer
 
     db = _FakeDb()
@@ -295,7 +295,7 @@ def test_format_meditate_next_tick_footer_active_idle_overdue() -> None:
     set_chat_state(db, "11", "loop_last_activity_epoch", "1700000000")
     footer = format_meditate_next_tick_footer(db, "11", now=1700001000.0)
     assert "timeout vencido" in footer.lower()
-    assert "/loop --now" in footer
+    assert "/aware --now" in footer
 
 
 def test_format_meditate_next_tick_footer_active_mode() -> None:
@@ -387,7 +387,7 @@ def test_loop_bare_triggers_self(mock_manifest: None, monkeypatch: pytest.Monkey
         "duckclaw.commands.loop.post_meditate_self_tick_sync",
         lambda **_k: {"ok": True, "status_code": 200},
     )
-    msg = handle_command(db, "42", "/loop", tenant_id="default")
+    msg = handle_command(db, "42", "/aware", tenant_id="default")
     assert msg is not None
     assert "iniciado" in msg.lower()
 
@@ -399,15 +399,15 @@ def test_loop_on_off_routed_by_fly(mock_manifest: None, monkeypatch: pytest.Monk
         "duckclaw.commands.loop.post_meditate_self_tick_sync",
         lambda **_k: {"ok": True, "status_code": 200},
     )
-    on_msg = handle_command(db, "42", "/loop on", tenant_id="default")
+    on_msg = handle_command(db, "42", "/aware on", tenant_id="default")
     assert on_msg is not None
     assert "activo" in on_msg.lower()
     assert get_chat_state(db, "42", "loop_active") == "1"
-    off_msg = handle_command(db, "42", "/loop off", tenant_id="default")
+    off_msg = handle_command(db, "42", "/aware off", tenant_id="default")
     assert off_msg is not None
     assert "detenido" in off_msg.lower() or "desactivado" in off_msg.lower()
     assert get_chat_state(db, "42", "loop_active") == "0"
-    self_msg = handle_command(db, "42", "/loop --self", tenant_id="default")
+    self_msg = handle_command(db, "42", "/aware --self", tenant_id="default")
     assert self_msg is not None
     assert "iniciado" in self_msg.lower()
 
@@ -428,10 +428,10 @@ def test_is_loop_footer_turn_fly_command() -> None:
     mod = _load_chat_invoke_finalize()
 
     assert mod._is_loop_footer_turn(
-        user_incoming="/loop",
+        user_incoming="/aware",
         message="",
-        fly_cmd="/loop",
-        cmd_name="loop",
+        fly_cmd="/aware",
+        cmd_name="aware",
     )
 
 

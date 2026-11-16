@@ -1,4 +1,4 @@
-"""Tests for /loop --status (alignment + next-delta footer, no summarize)."""
+"""Tests for /aware --status (alignment + next-delta footer, no summarize)."""
 
 from __future__ import annotations
 
@@ -36,10 +36,10 @@ def test_parse_loop_args_status() -> None:
 
 
 def test_is_loop_status_fly_text() -> None:
-    assert is_loop_status_fly_text("/loop --status")
-    assert is_loop_status_fly_text("", "/loop --status")
-    assert not is_loop_status_fly_text("/loop on --delta 15m")
-    assert not is_loop_status_fly_text("/loop on")
+    assert is_loop_status_fly_text("/aware --status")
+    assert is_loop_status_fly_text("", "/aware --status")
+    assert not is_loop_status_fly_text("/aware on --delta 15m")
+    assert not is_loop_status_fly_text("/aware on")
     assert not is_loop_status_fly_text("/goals")
 
 
@@ -108,10 +108,10 @@ def test_execute_loop_status_with_meta_includes_footer_no_summarize(
     )
     db = _FakeDb()
     reply, meta = execute_loop_status_with_meta(db, "chat-1", "--status", tenant_id="default")
-    assert "✅ Estado /loop" in reply
+    assert "✅ Estado /aware" in reply
     assert "## Alineación con /goals" in reply
     assert "## Resumen del hilo" not in reply
-    assert "Próximo ciclo" in reply or "Modo /loop" in reply or "inactivo" in reply.lower()
+    assert "Próximo ciclo" in reply or "Modo /aware" in reply or "inactivo" in reply.lower()
     assert meta == {}
 
 
@@ -129,11 +129,11 @@ def test_fly_dispatch_loop_status_does_not_start_cycle() -> None:
     db = MagicMock()
     with patch(
         "duckclaw.commands.fly_dispatch.execute_loop_status",
-        return_value="✅ Estado /loop",
+        return_value="✅ Estado /aware",
     ) as mock_status:
         with patch("duckclaw.commands.fly_dispatch.execute_loop_immediate") as mock_immediate:
-            out = _dispatch_fly_command(db, "chat-1", "loop", "--status", tenant_id="t1")
-    assert out == "✅ Estado /loop"
+            out = _dispatch_fly_command(db, "chat-1", "aware", "--status", tenant_id="t1")
+    assert out == "✅ Estado /aware"
     mock_status.assert_called_once()
     mock_immediate.assert_not_called()
 

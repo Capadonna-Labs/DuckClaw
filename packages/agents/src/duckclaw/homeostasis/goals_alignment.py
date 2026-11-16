@@ -135,7 +135,7 @@ def manifest_monitor_goal_keys(goals: list[dict[str, Any]] | list[Any]) -> list[
 
 def hitl_declarable_for_goals(goals: list[dict[str, Any]]) -> tuple[bool, str]:
     """
-    False si el manifiesto incluye metas monitor: no se declaran «cumplidas» con /loop-approve.
+    False si el manifiesto incluye metas monitor: no se declaran «cumplidas» con /aware-approve.
     """
     keys = manifest_monitor_goal_keys(goals)
     if not keys:
@@ -431,7 +431,7 @@ def assess_goals_alignment(
 
 
 def format_alignment_report_markdown(report: AlignmentReport) -> str:
-    """Bloque legible para /loop --status y reportes fly."""
+    """Bloque legible para /aware --status y reportes fly."""
     lines = ["## Alineación con /goals", ""]
     if report.goals_count <= 0:
         lines.append("Sin metas en manifiesto — define objetivos con `/goals`.")

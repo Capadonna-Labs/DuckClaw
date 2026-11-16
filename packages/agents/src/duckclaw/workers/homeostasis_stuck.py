@@ -1,4 +1,4 @@
-"""Detect identical evaluate_homeostasis results across /loop ticks and escalate.
+"""Detect identical evaluate_homeostasis results across /aware ticks and escalate.
 
 When the platform forces evaluate_homeostasis every tick and the sensor returns
 metrics_aligned=false + hitl_required=false forever, prompt-only instructions
@@ -46,7 +46,7 @@ def _canonicalize_deviations(deviations: Any) -> Any:
     """Collapse noisy numeric jitter so stuck streaks survive small metric noise.
 
     ponytail: fingerprint keys + coarse buckets, not raw floats — otherwise a
-    0.01 metric tick resets the streak and /loop burns another evaluate forever.
+    0.01 metric tick resets the streak and /aware burns another evaluate forever.
     """
     if isinstance(deviations, list):
         out: list[Any] = []
@@ -237,7 +237,7 @@ def build_stuck_nudge_message(*, streak: int, corrective_tools: list[str], escal
 
 
 def build_loop_homeostasis_detente_message(payload: dict[str, Any]) -> str:
-    """Post-evaluate DETENTE for /loop ticks — stops read_sql/Android thrash before 900s."""
+    """Post-evaluate DETENTE for /aware ticks — stops read_sql/Android thrash before 900s."""
     aligned = (
         payload.get("metrics_aligned") is True
         or payload.get("homeostasis_achieved") is True
@@ -257,7 +257,7 @@ def build_loop_homeostasis_detente_message(payload: dict[str, Any]) -> str:
         "REPORTA desviaciones en prosa corta (máx ~15 líneas) y DETENTE. "
         "Prohibido en este tick: cascadas de read_sql (no inventes columnas), "
         "Android MCP, tools de consulta del dominio, ni re-llamar evaluate_homeostasis. "
-        "Correcciones de host/infra van al próximo ciclo /loop o las pide el usuario; "
+        "Correcciones de host/infra van al próximo ciclo /aware o las pide el usuario; "
         "no reinicies servicios del host desde sandbox por un Permission denied."
     )
 
@@ -268,7 +268,7 @@ def loop_post_evaluate_hitl_only_tools(
     *,
     loop_system_event: bool,
 ) -> tuple[list[Any], bool]:
-    """If /loop already ran evaluate_homeostasis, keep only unused HITL close tools.
+    """If /aware already ran evaluate_homeostasis, keep only unused HITL close tools.
 
     Returns (filtered_tools, applied). Callers re-bind LLM when applied is True.
     """

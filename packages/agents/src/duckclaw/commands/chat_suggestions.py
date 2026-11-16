@@ -22,7 +22,7 @@ _SYSTEM_PROMPT = (
     "Obligatorio: cada sugerencia debe referirse SOLO a temas, decisiones o datos "
     "mencionados en la respuesta más reciente del asistente (no a turnos anteriores). "
     "Usa el mismo idioma de la respuesta del asistente (si el «usuario» es un "
-    "[SYSTEM_EVENT] / ciclo /loop, ignora ese texto para el idioma y alinea al reporte). "
+    "[SYSTEM_EVENT] / ciclo /aware, ignora ese texto para el idioma y alinea al reporte). "
     "\n"
     "PRIORIDAD 1 — si el asistente hace una pregunta directa al usuario "
     "(¿Quieres…?, ¿Debo…?, ¿Lo documento…?, ¿Confirmas…?, ¿Procedo…?, etc.): "

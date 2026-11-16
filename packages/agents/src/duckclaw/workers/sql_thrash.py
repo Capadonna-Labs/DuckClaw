@@ -101,7 +101,7 @@ def apply_auto_bind_tool_guards(
     llm_messages: list[Any],
     groq_messages: list[Any] | None = None,
 ) -> tuple[list[Any], bool, list[Any], list[Any] | None, bool]:
-    """Post-pack auto-bind filters: /loop HITL-only + SQL thrash DETENTE.
+    """Post-pack auto-bind filters: /aware HITL-only + SQL thrash DETENTE.
 
     Returns (tools, need_rebind, llm_messages, groq_messages, sql_thrash_applied).
     """

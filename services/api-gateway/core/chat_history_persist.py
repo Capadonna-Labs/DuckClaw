@@ -98,7 +98,7 @@ async def persist_chat_history(
 
 
 async def _touch_loop_activity_if_configured(prepared: PreparedChatInvoke, session_id: str) -> None:
-    """Ancla /loop --delta al último mensaje persistido."""
+    """Ancla /aware --delta al último mensaje persistido."""
     vpath = (prepared.vault_db_path or "").strip()
     if not vpath or not session_id:
         return

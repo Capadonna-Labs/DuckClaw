@@ -293,10 +293,10 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
         return verdict[:80], rest if len(rest) <= 140 else rest[:139] + "…"
     body = clean(text) or "Ciclo proactivo ejecutado."
     # No verdict line but the opening says nothing happened ("Tick cerrado sin novedades"): a
-    # generic "DuckClaw · ciclo /loop" push woke the watch for nothing on 20-Oct.
+    # generic "DuckClaw · ciclo /aware" push woke the watch for nothing on 20-Oct.
     if re.search(r"\bsin novedad", body[:200], re.IGNORECASE):
         return None
-    return "DuckClaw · ciclo /loop", body if len(body) <= 140 else body[:139] + "…"
+    return "DuckClaw · ciclo /aware", body if len(body) <= 140 else body[:139] + "…"
 
 
 # One proactive turn per chat at a time, run as a background task: a long turn neither blocks
@@ -537,7 +537,7 @@ async def _evaluate_homeostasis() -> List[Dict[str, Any]]:
 
 
 def _attach_scanned_vault(payload: Dict[str, Any], db_path: str) -> None:
-    """Run the turn on the vault the chat state was read from (like /loop ticks).
+    """Run the turn on the vault the chat state was read from (like /aware ticks).
 
     Without it the gateway resolves a per-chat-id vault (private/<chat>/default) and the
     worker sees an empty DB. The hub is never passed: it is not a worker vault.
@@ -874,7 +874,7 @@ async def _deliver_goals_delta_turn(
     if parts is None:
         logger.info("web_push: omitida tag=duckclaw-goals-%s (veredicto sin novedades)", chat_id)
         return
-    has_verdict = parts[0] != "DuckClaw · ciclo /loop"
+    has_verdict = parts[0] != "DuckClaw · ciclo /aware"
     if has_verdict and not await _remember_verdict(chat_id, parts[0]):
         return
     await _send_web_push_notification(
@@ -915,7 +915,7 @@ async def _deliver_wall_cron_turn(
     if parts is None:
         logger.info("web_push: omitida tag=%s (veredicto sin novedades)", tag)
         return
-    has_verdict = parts[0] != "DuckClaw · ciclo /loop"
+    has_verdict = parts[0] != "DuckClaw · ciclo /aware"
     if has_verdict and not await _remember_verdict(chat_id, parts[0]):
         return
     await _send_web_push_notification(
@@ -1111,7 +1111,7 @@ async def _run_loop_proactive_tick_one_db(
             if not tenant_id:
                 tenant_id = (get_chat_state(db, chat_id, "tenant_id") or "").strip()
             if not tenant_id:
-                # /loop off deja loop_tenant vacÃ­o; Integraciones guarda API keys
+                # /aware off deja loop_tenant vacÃ­o; Integraciones guarda API keys
                 # bajo admin_conversations.tenant_id (workspace), no "default".
                 try:
                     from duckclaw.shared_db_grants import _sql_lit

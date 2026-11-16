@@ -98,7 +98,7 @@ def resolve_integration_api_key(
         if db_val:
             return db_val
         # Integraciones guarda bajo tenant workspace (user-â€¦); callers con
-        # tenant=default (p. ej. /loop) no deben caer a un OPENROUTER_API_KEY
+        # tenant=default (p. ej. /aware) no deben caer a un OPENROUTER_API_KEY
         # caducado en .env si el actor tiene clave en su workspace.
         actor = (actor_email or "").strip()
         if "@" in actor:

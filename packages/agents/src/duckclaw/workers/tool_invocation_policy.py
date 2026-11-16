@@ -287,7 +287,7 @@ def _update_system_prompt_intent(text: str) -> bool:
 
 
 def _is_loop_or_proactive_system_event(text: str) -> bool:
-    """True for /loop or proactive-review SYSTEM_EVENT ticks (not ordinary chat)."""
+    """True for /aware or proactive-review SYSTEM_EVENT ticks (not ordinary chat)."""
     raw = (text or "").strip()
     if not raw.lower().startswith("[system_event:"):
         return False
@@ -300,7 +300,7 @@ def _is_loop_or_proactive_system_event(text: str) -> bool:
     except Exception:
         return (
             "Ciclo de auto-mejora" in raw
-            or "/loop" in raw
+            or "/aware" in raw
             or "Revisión periódica de /crons" in raw
             or "Revisión periódica de /goals" in raw
         )
@@ -316,7 +316,7 @@ def decide_loop_homeostasis_tool_invocation(
     homeostasis_streak: int = 0,
 ) -> ToolInvocationDecision:
     """
-    Force ``evaluate_homeostasis`` as the first tool on /loop SYSTEM_EVENT ticks.
+    Force ``evaluate_homeostasis`` as the first tool on /aware SYSTEM_EVENT ticks.
 
     Prompt text alone is not enough: db-first / orchestration often steal hop 1
     with ``read_sql``, and the agent then reports false "0 desviaciones" from

@@ -1,4 +1,4 @@
-"""`/meditate` fly aliases must match `/loop` state keys."""
+"""`/meditate` fly aliases must match `/aware` state keys."""
 from __future__ import annotations
 
 from unittest.mock import MagicMock
@@ -45,7 +45,7 @@ def test_loop_and_meditate_on_set_same_active_key(monkeypatch) -> None:
         lambda db, cid, secs, **kw: f"ok {secs}",
     )
 
-    r_loop = _dispatch_fly_command(db, "chat-1", "loop", "on 1h", tenant_id="t1")
+    r_loop = _dispatch_fly_command(db, "chat-1", "aware", "on 1h", tenant_id="t1")
     assert "ok" in r_loop.lower() or "14400" in r_loop or "3600" in r_loop
 
     store.clear()

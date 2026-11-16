@@ -207,7 +207,7 @@ def resolve_active_pack_ids(
     if MCP_UMBRELLA_PACK_ID in active and MCP_UMBRELLA_PACK_ID not in disabled:
         active |= connector_pack_ids
 
-    # /loop ticks: drop ALL MCP / integrations noise (even if unlocked this turn).
+    # /aware ticks: drop ALL MCP / integrations noise (even if unlocked this turn).
     # Unlocked Android on a loop tick burned 14m+ and still missed the invoke wall.
     if loop_system_event:
         drop = {

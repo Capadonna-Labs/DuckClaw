@@ -36,7 +36,7 @@ def _preview_text(text: str) -> str:
 
 
 def _is_system_turn_title(text: str) -> bool:
-    """True si el texto es turno sistema /loop, no un título de hilo."""
+    """True si el texto es turno sistema /aware, no un título de hilo."""
     t = " ".join((text or "").split())
     if not t:
         return False

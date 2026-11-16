@@ -159,7 +159,7 @@ def _list_skills_impl(db: Any, tenant_id: str = "default", name: str = "") -> st
         return json.dumps({"ok": False, "error": "No se pudo resolver la ruta del hub."}, ensure_ascii=False)
     tid = (tenant_id or "default").replace("'", "''")
     esc_actor = actor.replace("'", "''")
-    # Scheduled turns (crons, /loop) have no interactive actor ("system"): like the /name
+    # Scheduled turns (crons, /aware) have no interactive actor ("system"): like the /name
     # expansion of those turns (expand_directive_skill with actor_email=None) the tenant is
     # the boundary. Filtering by owner hid every private skill, so a directive could not
     # open another one it names (e.g. /team_digest) and the agent concluded it was gone.

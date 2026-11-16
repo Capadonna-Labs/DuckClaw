@@ -355,7 +355,7 @@ async def run_chat_graph(
         except Exception:
             pass
 
-        # Modo /loop on: turnos agent↔user — wrap user reply when awaiting.
+        # Modo /aware on: turnos agent↔user — wrap user reply when awaiting.
         graph_message = message
         if not prepared.is_system_prompt and not fly_message.startswith("/"):
             vpath = (prepared.vault_db_path or "").strip()

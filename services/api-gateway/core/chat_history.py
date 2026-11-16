@@ -155,7 +155,7 @@ def compute_turn_user_index(history_for_model: list[dict[str, Any]] | None) -> i
 
     ``prior_users + 1`` se desalinea cuando el historial ya está en el techo:
     al guardar user+assistant se cae el par más viejo y el user nuevo sigue
-    siendo el último del (no ``prior+1``). System turns (/loop, crons) también
+    siendo el último del (no ``prior+1``). System turns (/aware, crons) también
     persisten su etiqueta como user (``[Ciclo loop]``), así que proyectan igual.
     """
     prior = [item for item in (history_for_model or []) if isinstance(item, dict)]

@@ -148,7 +148,7 @@ def apply_terminal_force_tool_overrides(
     chat_id: str | None = None,
     messages: list[Any] | None = None,
 ) -> tuple[str | None, bool, bool, bool, bool, bool, bool]:
-    """Email then /loop homeostasis overrides (clear competing force_* flags).
+    """Email then /aware homeostasis overrides (clear competing force_* flags).
 
     Email/Gmail wins over db-first / orch read_sql noise on EVERY hop.
     Hop 1: force Gmail search. Hop 2+: still clear read_sql — otherwise
@@ -184,7 +184,7 @@ def apply_terminal_force_tool_overrides(
     gmail_search_tool = (
         find_gmail_mcp_search_tool(tools_by_name) if email_intent else None
     )
-    # On /loop ticks, never force Gmail — domain sensors first.
+    # On /aware ticks, never force Gmail — domain sensors first.
     if _is_loop_or_proactive_system_event(incoming):
         gmail_search_tool = None
     if (
@@ -220,7 +220,7 @@ def apply_terminal_force_tool_overrides(
         force_reddit = False
         force_visual = False
 
-    # Root: after evaluate_homeostasis on a /loop tick, never re-force SQL/noise.
+    # Root: after evaluate_homeostasis on a /aware tick, never re-force SQL/noise.
     # Otherwise db-first / is_table_content keeps forcing read_sql until the 1800s
     # wall timeout and the UI surfaces Binder Error as the "answer".
     called = {str(n) for n in called_tools_since_last_human}

@@ -1,4 +1,4 @@
-"""agent_config keys for /loop (formerly /meditate) with legacy dual-read."""
+"""agent_config keys for /aware (formerly /meditate) with legacy dual-read."""
 
 from __future__ import annotations
 

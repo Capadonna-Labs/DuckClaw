@@ -1,4 +1,4 @@
-"""Tools para programar auto-mejora cognitiva /loop."""
+"""Tools para programar auto-mejora cognitiva /aware."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
 
         def configure_loop_homeostasis(interval: str, mode: str = "clock") -> str:
             """
-            Activa o desactiva la programación /loop de este chat/worker.
+            Activa o desactiva la programación /aware de este chat/worker.
             interval: 'off' para desactivar; '10min', '4h', '1h', etc. para activar.
             mode: 'clock' (reloj Heartbeat) o 'idle' (silencio desde último mensaje).
             """
@@ -234,7 +234,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 err = created.get("error") or ""
                 msg = created.get("message") or (
                     "Ya hay validación HITL pendiente. "
-                    f"Usa /loop-approve {existing_id} o /loop-reject."
+                    f"Usa /aware-approve {existing_id} o /aware-reject."
                     if err == "pending_validation_exists"
                     else f"No se pudo crear validación HITL: {err}"
                 )
@@ -261,7 +261,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                     "escalate_stuck": bool(escalate_stuck),
                     "note": (
                         "homeostasis_achieved en evaluate_homeostasis solo indica métricas "
-                        "alineadas; no declares homeostasis hasta /loop-approve."
+                        "alineadas; no declares homeostasis hasta /aware-approve."
                         if not escalate_stuck
                         else "Escalación por sensor stuck; el usuario debe decidir o aprobar pausa."
                     ),
@@ -310,7 +310,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
 
         def pause_chat_autonomy() -> str:
             """
-            Apaga AUTO de sugerencias y /loop en este chat.
+            Apaga AUTO de sugerencias y /aware en este chat.
             Usar al cerrar un tema, despedir al usuario, o cuando no conviene continuar solo.
             """
             cid = get_goals_tool_chat_id()
@@ -353,7 +353,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 configure_loop_homeostasis,
                 name="configure_loop_homeostasis",
                 description=(
-                    "Programa auto-mejora /loop (evalúa /goals periódicamente). "
+                    "Programa auto-mejora /aware (evalúa /goals periódicamente). "
                     "interval='off' o '10min'/'4h'. mode='clock' (reloj) o 'idle' (silencio desde último mensaje). "
                     "Al cerrar un tema o despedir, usa interval='off' (o pause_chat_autonomy). "
                     "Revisión ligera al usuario: /crons --delta."
@@ -388,11 +388,11 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 request_homeostasis_validation,
                 name="request_homeostasis_validation",
                 description=(
-                    "Paso HITL final de /loop solo para metas **task** (sin metas monitor en manifiesto). "
+                    "Paso HITL final de /aware solo para metas **task** (sin metas monitor en manifiesto). "
                     "Metas monitor (métricas continuas como latencia o error_rate) se revisan cada ciclo y **nunca** se declaran cumplidas. "
                     "Solo si no hay desviaciones, o escalate_stuck=true cuando evaluate_homeostasis "
                     "quedó stuck (misma lectura misaligned repetida). Detente tras llamar; "
-                    "homeostasis solo tras /loop-approve."
+                    "homeostasis solo tras /aware-approve."
                 ),
             )
         )
@@ -411,7 +411,7 @@ def register_loop_skill(tools_list: List[Any], db: Any) -> None:
                 pause_chat_autonomy,
                 name="pause_chat_autonomy",
                 description=(
-                    "Apaga /loop y Auto de sugerencias en este chat. "
+                    "Apaga /aware y Auto de sugerencias en este chat. "
                     "Usar cuando el turno es cierre/despedida o no conviene continuar solo."
                 ),
             )

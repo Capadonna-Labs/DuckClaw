@@ -46,6 +46,7 @@ _CORE_READ_ONLY_SAFE_FLY_COMMANDS = frozenset(
         "network",
         "prompt",
         "loop",
+        "aware",
         "loop-approve",
         "loop_approve",
         "loop-reject",
@@ -86,7 +87,7 @@ def _fly_command_requires_write_access(message: str) -> bool:
     name, _args = parse_command(message)
     if not name:
         return False
-    # /loop on|off|--delta used to open the vault RW; its chat-state writes go through
+    # /aware on|off|--delta used to open the vault RW; its chat-state writes go through
     # persist_loop_chat_state, which enqueues typed commands on a read-only handle.
     return name.replace("_", "-") in LEGACY_RW_FLY_COMMANDS
 

@@ -94,7 +94,7 @@ def _lookup_catalog_worker(
                 )
                 return cat, db
 
-    # Seeded/imported workers may live under another hub tenant while /loop
+    # Seeded/imported workers may live under another hub tenant while /aware
     # carries the vault user-* tenant. Manifest load is not an ACL check.
     cat = get_active_worker_by_worker_id(catalog_db, worker_id=worker_id)
     if cat:

@@ -162,7 +162,7 @@ def get_manifest_goals_for_chat(
     *,
     tenant_id: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Goals from homeostasis manifest (single source for /crons scheduler and /loop)."""
+    """Goals from homeostasis manifest (single source for /crons scheduler and /aware)."""
     tid = resolve_homeostasis_tenant_id(db, chat_id, tenant_id)
     return manifest_goals_as_dicts(load_homeostasis_manifest(db, tid, chat_id=chat_id))
 

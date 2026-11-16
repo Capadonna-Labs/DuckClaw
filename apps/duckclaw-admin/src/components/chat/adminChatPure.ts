@@ -10,7 +10,8 @@ import {
 /** Comandos fly genéricos (no vertical) reconocidos por cualquier worker — una sola fuente
  * de verdad para el ack-check de abajo y para el menú "/" del composer. */
 export const GENERIC_FLY_SLASH_COMMANDS: { cmd: string; description: string }[] = [
-  { cmd: '/loop', description: 'Dispara un ciclo de auto-mejora (homeostasis)' },
+  { cmd: '/loop', description: 'Repite un prompt o skill cada N tiempo (/loop 30m /mi_skill)' },
+  { cmd: '/aware', description: 'Ciclo de auto-revisión contra /goals (homeostasis)' },
   { cmd: '/meditate', description: 'Ciclo de reflexión/meditación del worker' },
   { cmd: '/summarize', description: 'Resume el contexto del chat' },
   { cmd: '/sandbox', description: 'Ejecuta código en el sandbox' },
@@ -448,7 +449,9 @@ export function conversationIndicatesLoopScheduling(messages: ChatMsg[]): boolea
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== 'assistant') continue;
-    const t = (m.text || '').toLowerCase();
+    // The self-review cycle is /aware now; old messages still say /loop.
+    const t = (m.text || '').toLowerCase().replaceAll('/aware', '/loop');
+    if (/^loop c\d+ creado/.test(t)) return true;   // a repeating /loop also posts turns in the background
     if (t.includes('modo /loop:** inactivo') || t.includes('modo /loop: inactivo')) {
       return false;
     }

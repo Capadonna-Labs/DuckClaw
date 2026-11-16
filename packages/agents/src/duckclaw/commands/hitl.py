@@ -81,11 +81,11 @@ def execute_code_approve(db: Any, chat_id: Any, args: str) -> str:
 
 
 def execute_loop_approve(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
-    """/loop-approve [uuid]: confirma homeostasis tras validación HITL."""
+    """/aware-approve [uuid]: confirma homeostasis tras validación HITL."""
     parts = (args or "").strip().split()
     validation_id = (parts[0] if parts else "").strip().lower() or None
     if validation_id and not _UUID_RE.match(validation_id):
-        return "Uso: /loop-approve [validation_id_UUID]"
+        return "Uso: /aware-approve [validation_id_UUID]"
     tid = str(tenant_id or get_chat_state(db, chat_id, "tenant_id") or "default").strip() or "default"
     result = approve_validation(db, chat_id, validation_id, tenant_id=tid)
     if not result.get("ok"):
@@ -106,13 +106,13 @@ def execute_loop_approve(db: Any, chat_id: Any, args: str, *, tenant_id: Any = N
         pass
     vid = result.get("validation_id") or ""
     return (
-        f"✅ Homeostasis confirmada — modo `/loop` detenido. validation_id={vid}. "
+        f"✅ Homeostasis confirmada — modo `/aware` detenido. validation_id={vid}. "
         "Metas /goals confirmadas en equilibrio."
     )
 
 
 def execute_loop_reject(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
-    """/loop-reject [uuid] [razón]: rechaza declaración de homeostasis."""
+    """/aware-reject [uuid] [razón]: rechaza declaración de homeostasis."""
     parts = (args or "").strip().split(maxsplit=1)
     validation_id = None
     rationale = ""

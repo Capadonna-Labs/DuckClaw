@@ -43,7 +43,7 @@ class HomeostasisTarget(BaseModel):
 
 
 class DomainGoal(BaseModel):
-    """Domain goal contrasted by /loop alongside infra metrics."""
+    """Domain goal contrasted by /aware alongside infra metrics."""
 
     belief_key: str
     target_value: float
@@ -62,7 +62,7 @@ class DomainGoal(BaseModel):
 
 
 class HomeostasisManifest(BaseModel):
-    """Single source of truth: infra thresholds + domain goals for /loop contrast."""
+    """Single source of truth: infra thresholds + domain goals for /aware contrast."""
 
     infra: HomeostasisTarget = Field(default_factory=HomeostasisTarget)
     goals: list[DomainGoal] = Field(default_factory=list)

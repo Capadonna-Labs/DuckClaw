@@ -1,4 +1,4 @@
-"""Cognitive /loop scheduling: auto-mejora LLM vs manifiesto /goals (formerly /meditate)."""
+"""Cognitive /aware scheduling: auto-mejora LLM vs manifiesto /goals (formerly /meditate)."""
 
 from __future__ import annotations
 
@@ -59,13 +59,13 @@ WATCH_VERDICT_RULE = (
     "el detalle en una frase (máx. 140 caracteres, dato y fuente): es el texto de la notificación; "
     "tablas y lo demás van después."
 )
-# Legacy /loop on 4h (Heartbeat reloj). /loop on sin args = turnos agent↔user.
+# Legacy /aware on 4h (Heartbeat reloj). /aware on sin args = turnos agent↔user.
 LOOP_DEFAULT_INTERVAL_SECONDS = 15 * 60
 LOOP_SYSTEM_USER_LABEL = "[Ciclo loop]"
 
 
 def is_loop_status_fly_text(*texts: str) -> bool:
-    """True si el turno es solo ``/loop --status`` (no ancla inactividad ni turno)."""
+    """True si el turno es solo ``/aware --status`` (no ancla inactividad ni turno)."""
     from duckclaw.graphs.on_the_fly_commands import parse_command
 
     for raw in texts:
@@ -74,7 +74,7 @@ def is_loop_status_fly_text(*texts: str) -> bool:
             continue
         line = chunk.split("\n", 1)[0].strip()
         name, args = parse_command(line)
-        if name not in ("loop", "meditate"):
+        if name not in ("aware", "meditate"):
             continue
         if _parse_loop_args(args or "").get("action") == "status":
             return True
@@ -158,7 +158,7 @@ def _goal_title_for_event(goal: dict[str, Any], fallback_key: str = "") -> str:
 
 
 def is_loop_active_mode(db: Any, chat_id: Any) -> bool:
-    """True si /loop on (modo conversación por turnos) está activo."""
+    """True si /aware on (modo conversación por turnos) está activo."""
     migrate_loop_chat_state_keys(db, chat_id)
     return (get_loop_chat_state(db, chat_id, LOOP_ACTIVE_KEY) or "").strip() == "1"
 
@@ -169,7 +169,7 @@ def is_loop_awaiting_user(db: Any, chat_id: Any) -> bool:
 
 
 def is_loop_delta_idle_mode(db: Any, chat_id: Any) -> bool:
-    """True si /loop --delta (inactividad desde último mensaje) está activo."""
+    """True si /aware --delta (inactividad desde último mensaje) está activo."""
     migrate_loop_chat_state_keys(db, chat_id)
     return (get_loop_chat_state(db, chat_id, LOOP_DELTA_IDLE_KEY) or "").strip() == "1"
 
@@ -193,7 +193,7 @@ def touch_loop_last_activity(
     tenant_id: str = "default",
     ts: float | None = None,
 ) -> None:
-    """Ancla inactividad /loop --delta al último mensaje visible."""
+    """Ancla inactividad /aware --delta al último mensaje visible."""
     tid = str(tenant_id or "default").strip() or "default"
     epoch = time.time() if ts is None else float(ts)
     _persist_loop_chat_state(
@@ -293,11 +293,11 @@ def build_loop_active_user_continuation(
     summary = "; ".join(titles[:12]) if titles else "(sin metas; usa /goals)"
     body = (user_text or "").strip()
     return (
-        f"[SYSTEM_EVENT: Modo /loop activo (turno usuario→agente). Metas (/goals): {summary}. "
+        f"[SYSTEM_EVENT: Modo /aware activo (turno usuario→agente). Metas (/goals): {summary}. "
         "Contrasta con evaluate_homeostasis / assess_crons_alignment. "
-        "Responde en el chat; si alineado → request_homeostasis_validation y pide /loop-approve. "
+        "Responde en el chat; si alineado → request_homeostasis_validation y pide /aware-approve. "
         "Si no, planifica y pregunta. ESPERA la siguiente respuesta del usuario — no solapes turnos. "
-        "Modo sigue hasta /loop-approve u /loop off.]\n\n"
+        "Modo sigue hasta /aware-approve u /aware off.]\n\n"
         f"{body}"
     )
 
@@ -328,11 +328,11 @@ def build_loop_self_system_event_message(
         else is_loop_active_mode(db, chat_id)
     )
     if active:
-        trigger = "modo conversación activa /loop on"
+        trigger = "modo conversación activa /aware on"
     elif scheduled:
-        trigger = "programado /loop"
+        trigger = "programado /aware"
     else:
-        trigger = "/loop"
+        trigger = "/aware"
     hitl_prefix = ""
     try:
         from duckclaw.hitl.loop_validation_service import get_pending_validation
@@ -342,7 +342,7 @@ def build_loop_self_system_event_message(
             vid = str(pending.get("validation_id") or "")
             hitl_prefix = (
                 f"Validación HITL pendiente (validation_id={vid}). "
-                f"Prioriza recordar /loop-approve {vid} o /loop-reject. "
+                f"Prioriza recordar /aware-approve {vid} o /aware-reject. "
             )
     except Exception:
         pass
@@ -351,7 +351,7 @@ def build_loop_self_system_event_message(
         wait_note = (
             " Tras tu respuesta, DETENTE y ESPERA el mensaje del usuario "
             "(turnos discretos agent↔user; no solapes ni ticks de reloj). "
-            "El modo sigue hasta /loop-approve u /loop off."
+            "El modo sigue hasta /aware-approve u /aware off."
         )
     priority_note = ""
     if len(goals) > 1:
@@ -368,7 +368,7 @@ def build_loop_self_system_event_message(
         "Reporta desviaciones en el chat. "
         "2) Si métricas alineadas (sin desviaciones) y hay metas de tipo task, llama "
         "request_homeostasis_validation y DETENTE — pregunta confirmación HITL; no declares "
-        "homeostasis hasta /loop-approve. Si todas las metas son monitor, no hay nada que validar: "
+        "homeostasis hasta /aware-approve. Si todas las metas son monitor, no hay nada que validar: "
         "reporta y termina el tick sin preguntar. "
         "Las metas monitor sin sensor numérico ('sin dato', p. ej. revisiones de fuentes externas) "
         "se atienden en CADA tick, haya o no desviaciones: hazlas antes de detenerte. "
@@ -611,7 +611,7 @@ def clear_loop_schedule(db: Any, chat_id: Any, *, tenant_id: str = "default") ->
 
 
 def clear_loop_delta_only(db: Any, chat_id: Any, *, tenant_id: str = "default") -> None:
-    """Quita solo /loop --delta; conserva modo activo por turnos si estaba on."""
+    """Quita solo /aware --delta; conserva modo activo por turnos si estaba on."""
     tid = str(tenant_id or "default").strip() or "default"
     for k, v in (
         (LOOP_DELTA_SECONDS_KEY, "0"),
@@ -651,7 +651,7 @@ _GOALS_INTERVAL_OFF_REMOTE_SUFFIXES: dict[str, str] = {
 
 
 def clear_loop_schedule_all_dbs(db: Any, chat_id: Any, *, tenant_id: str = "default") -> None:
-    """Apaga /loop y revisión /crons --delta en fly_db y en todas las bóvedas del ticker."""
+    """Apaga /aware y revisión /crons --delta en fly_db y en todas las bóvedas del ticker."""
     from duckclaw.commands.crons import _enqueue_agent_config_entries_remote
     from duckclaw.gateway_db import iter_goals_ticker_duckdb_paths
 
@@ -736,20 +736,20 @@ def format_loop_next_tick_footer(db: Any, chat_id: Any, *, now: float | None = N
                     if overdue and remaining == 0:
                         overdue_min = max(1, int((ts - next_epoch) // 60))
                         return (
-                            f"\n\n⏭️ **Modo /loop activo** — timeout vencido hace ~{overdue_min} min "
+                            f"\n\n⏭️ **Modo /aware activo** — timeout vencido hace ~{overdue_min} min "
                             f"(debía ~{clock} COT). Heartbeat reintentará el ciclo; "
-                            f"`/loop --now` fuerza ya. `/loop off` para detener."
+                            f"`/aware --now` fuerza ya. `/aware off` para detener."
                         )
                     if status.get("awaiting_user"):
                         return (
-                            f"\n\n⏭️ **Modo /loop activo** — esperando tu respuesta; "
+                            f"\n\n⏭️ **Modo /aware activo** — esperando tu respuesta; "
                             f"si no respondes, próximo ciclo ~{clock} COT "
                             f"(silencio ~{remain_h} · timeout {human_interval}). "
-                            "`/loop off` para detener."
+                            "`/aware off` para detener."
                         )
                     return (
-                        f"\n\n⏭️ **Modo /loop activo** — ciclo en curso; próximo ciclo ~{clock} COT "
-                        f"(silencio ~{remain_h} · timeout {human_interval}). `/loop off` para detener."
+                        f"\n\n⏭️ **Modo /aware activo** — ciclo en curso; próximo ciclo ~{clock} COT "
+                        f"(silencio ~{remain_h} · timeout {human_interval}). `/aware off` para detener."
                     )
                 except (TypeError, ValueError, OverflowError, OSError):
                     pass
@@ -757,28 +757,28 @@ def format_loop_next_tick_footer(db: Any, chat_id: Any, *, now: float | None = N
                 next_epoch = ts + secs
                 clock = datetime.fromtimestamp(next_epoch, tz=tz).strftime("%H:%M")
                 return (
-                    f"\n\n⏭️ **Modo /loop activo** — próximo ciclo ~{clock} COT "
-                    f"(en ~{human_interval} · timeout {human_interval}). `/loop off` para detener."
+                    f"\n\n⏭️ **Modo /aware activo** — próximo ciclo ~{clock} COT "
+                    f"(en ~{human_interval} · timeout {human_interval}). `/aware off` para detener."
                 )
             except (TypeError, ValueError, OverflowError, OSError):
                 pass
             return (
-                f"\n\n⏭️ **Modo /loop activo** — timeout {human_interval} desde último mensaje. "
-                "`/loop off` para detener."
+                f"\n\n⏭️ **Modo /aware activo** — timeout {human_interval} desde último mensaje. "
+                "`/aware off` para detener."
             )
         if status.get("awaiting_user"):
             return (
-                "\n\n⏭️ **Modo /loop activo** — esperando tu respuesta "
-                "(turnos agent↔user). `/loop off` para detener."
+                "\n\n⏭️ **Modo /aware activo** — esperando tu respuesta "
+                "(turnos agent↔user). `/aware off` para detener."
             )
         return (
-            "\n\n⏭️ **Modo /loop activo** — ciclo en curso; tras responder el agente "
-            "espera tu mensaje. `/loop off` para detener."
+            "\n\n⏭️ **Modo /aware activo** — ciclo en curso; tras responder el agente "
+            "espera tu mensaje. `/aware off` para detener."
         )
     if not status.get("enabled"):
         return (
-            "\n\n⏭️ **Modo /loop:** inactivo. "
-            "Activa con `/loop on` (conversación por turnos hasta approve u off)."
+            "\n\n⏭️ **Modo /aware:** inactivo. "
+            "Activa con `/aware on` (conversación por turnos hasta approve u off)."
         )
     if idle_mode and secs > 0:
         last_act = get_loop_last_activity_epoch(db, chat_id)
@@ -795,13 +795,13 @@ def format_loop_next_tick_footer(db: Any, chat_id: Any, *, now: float | None = N
                     format_goals_delta_interval_human(remaining) if remaining > 0 else "< 1 min"
                 )
                 return (
-                    f"\n\n⏭️ **Próximo ciclo /loop --delta:** ~{clock} COT "
+                    f"\n\n⏭️ **Próximo ciclo /aware --delta:** ~{clock} COT "
                     f"(silencio ~{remain_h} desde último mensaje · intervalo {human_interval})."
                 )
             except (TypeError, ValueError, OverflowError, OSError):
                 pass
         return (
-            f"\n\n⏭️ **Modo /loop --delta:** próximo ciclo tras ~{human_interval} "
+            f"\n\n⏭️ **Modo /aware --delta:** próximo ciclo tras ~{human_interval} "
             "de silencio desde el último mensaje."
         )
     last_raw = status.get("last_fire_epoch")
@@ -878,7 +878,7 @@ def apply_loop_idle_schedule(
     worker_id: str,
     interval_seconds: int,
 ) -> dict[str, Any]:
-    """Activa /loop --delta: ticks tras silencio desde último mensaje."""
+    """Activa /aware --delta: ticks tras silencio desde último mensaje."""
     tid = str(tenant_id or "default").strip() or "default"
     wid = (worker_id or "").strip()
     if int(interval_seconds) <= 0:
@@ -1032,14 +1032,14 @@ def invoke_loop_cycle_for_chat(
 def _format_loop_usage(db: Any, chat_id: Any) -> str:
     status = get_loop_schedule_status(db, chat_id)
     lines = [
-        "**Uso /loop (auto-mejora cognitiva):**",
-        "  `/loop` — ciclo inmediato (one-shot)",
-        "  `/loop on` — modo conversación activa (turnos agent↔user hasta approve u off)",
-        "  `/loop on --delta 20min` — turnos + timeout si no respondes tras silencio",
-        "  `/loop on 4h|20min` — legacy: ticks por reloj (Heartbeat)",
-        "  `/loop --delta 4h|off` — auto-ciclo tras silencio desde último mensaje",
-        "  `/loop --status` — alineación /goals + próximo ciclo /loop",
-        "  `/loop off` — detiene modo activo / programación",
+        "**Uso /aware (auto-mejora cognitiva):**",
+        "  `/aware` — ciclo inmediato (one-shot)",
+        "  `/aware on` — modo conversación activa (turnos agent↔user hasta approve u off)",
+        "  `/aware on --delta 20min` — turnos + timeout si no respondes tras silencio",
+        "  `/aware on 4h|20min` — legacy: ticks por reloj (Heartbeat)",
+        "  `/aware --delta 4h|off` — auto-ciclo tras silencio desde último mensaje",
+        "  `/aware --status` — alineación /goals + próximo ciclo /aware",
+        "  `/aware off` — detiene modo activo / programación",
         "Metas en `/goals`.",
     ]
     if status.get("active_mode"):
@@ -1059,7 +1059,7 @@ def _format_loop_usage(db: Any, chat_id: Any) -> str:
         wid = status.get("worker_id") or "?"
         if status.get("delta_idle_mode"):
             lines.append(
-                f"Estado actual: **/loop --delta** tras silencio ~{human} (worker `{wid}`)."
+                f"Estado actual: **/aware --delta** tras silencio ~{human} (worker `{wid}`)."
             )
         else:
             lines.append(f"Estado actual: **programado por reloj** cada ~{human} (worker `{wid}`).")
@@ -1069,7 +1069,7 @@ def _format_loop_usage(db: Any, chat_id: Any) -> str:
 
 
 def _parse_loop_args(raw: str) -> dict[str, Any]:
-    """Parsea `/loop on`, `on 4h`, `on --delta 20min`, `--delta 4h`, `--status`, `off`."""
+    """Parsea `/aware on`, `on 4h`, `on --delta 20min`, `--delta 4h`, `--status`, `off`."""
     toks = (raw or "").strip().split()
     idle_dur_frag: str | None = None
     idle_off = False
@@ -1099,8 +1099,8 @@ def _parse_loop_args(raw: str) -> dict[str, Any]:
     if status_requested:
         if filtered or idle_dur_frag or idle_off:
             return {
-                "error": "`/loop --status` no se combina con on/off/--delta. "
-                "Usa solo `/loop --status`."
+                "error": "`/aware --status` no se combina con on/off/--delta. "
+                "Usa solo `/aware --status`."
             }
         return {"action": "status"}
 
@@ -1140,14 +1140,14 @@ def execute_loop_immediate(
     vault_user_id: Any = None,
     entry_worker_id: str | None = None,
 ) -> str:
-    """Bare `/loop`, `--self`, `--now`: dispara auto-mejora cognitiva ahora."""
+    """Bare `/aware`, `--self`, `--now`: dispara auto-mejora cognitiva ahora."""
     _ = vault_user_id
     tid = str(tenant_id or "default").strip() or "default"
     worker_id = _resolve_loop_worker_id(
         db, chat_id, tenant_id=tid, entry_worker_id=entry_worker_id
     )
     if not worker_id or worker_id.lower() == "manager":
-        return "Asigna un worker al chat (/workers) antes de /loop."
+        return "Asigna un worker al chat (/workers) antes de /aware."
     message = build_loop_self_system_event_message(db, chat_id, tid, scheduled=False)
     vault_path = str(getattr(db, "_path", "") or "").strip() or None
     result = dispatch_loop_self_tick(
@@ -1174,7 +1174,7 @@ def execute_loop_immediate(
             interval_line = f"Repetición programada cada ~{interval_human}."
         else:
             interval_line = (
-                f"Sin modo activo. Activa con `/loop on` "
+                f"Sin modo activo. Activa con `/aware on` "
                 f"(turnos agent↔user; default intervalo legacy ~{interval_human})."
             )
     return (
@@ -1194,7 +1194,7 @@ def execute_loop_status_with_meta(
     worker_id: str | None = None,
     entry_worker_id: str | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """``/loop --status``: alineación /goals + pie con próximo ciclo (sin /summarize)."""
+    """``/aware --status``: alineación /goals + pie con próximo ciclo (sin /summarize)."""
     _ = (history, vault_db_path)
     from duckclaw.homeostasis.goals_alignment import (
         assess_goals_alignment,
@@ -1204,8 +1204,8 @@ def execute_loop_status_with_meta(
     arg = (args or "").strip().lower()
     if arg in ("help", "-h", "--help"):
         return (
-            "Uso: `/loop --status`\n"
-            "Muestra alineación con /goals y el pie con el próximo ciclo /loop programado.\n"
+            "Uso: `/aware --status`\n"
+            "Muestra alineación con /goals y el pie con el próximo ciclo /aware programado.\n"
             "No compacta el hilo (usa `/summarize` para eso).",
             {},
         )
@@ -1219,7 +1219,7 @@ def execute_loop_status_with_meta(
     report = assess_goals_alignment(db, chat_id, worker_id=wid, tenant_id=tid)
     align_block = format_alignment_report_markdown(report)
     footer = format_loop_next_tick_footer(db, chat_id)
-    reply = f"✅ Estado /loop\n\n{align_block}{footer}"
+    reply = f"✅ Estado /aware\n\n{align_block}{footer}"
     return reply, {}
 
 
@@ -1254,7 +1254,7 @@ def _execute_loop_enable(
     secs: int,
     *,
     tenant_id: str,
-    cancel_hint: str = "/loop off",
+    cancel_hint: str = "/aware off",
     entry_worker_id: str | None = None,
 ) -> str:
     """Legacy: programación por reloj Heartbeat."""
@@ -1262,7 +1262,7 @@ def _execute_loop_enable(
         db, chat_id, tenant_id=tenant_id, entry_worker_id=entry_worker_id
     )
     if not worker_id or worker_id.lower() == "manager":
-        return "Asigna un worker al chat (/workers) antes de programar /loop."
+        return "Asigna un worker al chat (/workers) antes de programar /aware."
     # Clock mode: clear turn-based flags first via schedule apply path.
     _persist_loop_chat_state(db, chat_id, LOOP_ACTIVE_KEY, "0", tenant_id=tenant_id)
     _persist_loop_chat_state(db, chat_id, LOOP_AWAITING_USER_KEY, "0", tenant_id=tenant_id)
@@ -1290,12 +1290,12 @@ def _execute_loop_active_on(
     entry_worker_id: str | None = None,
     idle_interval_seconds: int = 0,
 ) -> str:
-    """/loop on [--delta dur]: modo conversación por turnos + ciclo inmediato."""
+    """/aware on [--delta dur]: modo conversación por turnos + ciclo inmediato."""
     worker_id = _resolve_loop_worker_id(
         db, chat_id, tenant_id=tenant_id, entry_worker_id=entry_worker_id
     )
     if not worker_id or worker_id.lower() == "manager":
-        return "Asigna un worker al chat (/workers) antes de /loop on."
+        return "Asigna un worker al chat (/workers) antes de /aware on."
     applied = enable_loop_active_mode(
         db,
         chat_id,
@@ -1321,7 +1321,7 @@ def _execute_loop_active_on(
         detail = result.get("error") or result.get("body") or result.get("status_code")
         return (
             f"Modo activo guardado, pero falló el primer ciclo: {detail}. "
-            "Reintenta `/loop` o `/loop off`."
+            "Reintenta `/aware` o `/aware off`."
         )
     _publish_loop_tick_heartbeat(
         chat_id,
@@ -1338,10 +1338,10 @@ def _execute_loop_active_on(
             "se dispara tras silencio desde el último mensaje."
         )
     return (
-        f"Modo **/loop** activo (turnos agent↔user) para worker `{worker_id}` "
+        f"Modo **/aware** activo (turnos agent↔user) para worker `{worker_id}` "
         f"(tenant `{tenant_id}`). Primer ciclo iniciado — el agente reportará en el chat "
-        f"y esperará tu respuesta.{timeout_line} Se detiene con `/loop-approve` (homeostasis) o "
-        "`/loop off`."
+        f"y esperará tu respuesta.{timeout_line} Se detiene con `/aware-approve` (homeostasis) o "
+        "`/aware off`."
     ) + (
         format_loop_next_tick_footer(db, chat_id)
         if idle_secs > 0
@@ -1357,12 +1357,12 @@ def _execute_loop_delta_idle_on(
     tenant_id: str,
     entry_worker_id: str | None = None,
 ) -> str:
-    """/loop --delta dur: auto-ciclo tras silencio desde último mensaje."""
+    """/aware --delta dur: auto-ciclo tras silencio desde último mensaje."""
     worker_id = _resolve_loop_worker_id(
         db, chat_id, tenant_id=tenant_id, entry_worker_id=entry_worker_id
     )
     if not worker_id or worker_id.lower() == "manager":
-        return "Asigna un worker al chat (/workers) antes de /loop --delta."
+        return "Asigna un worker al chat (/workers) antes de /aware --delta."
     applied = apply_loop_idle_schedule(
         db,
         chat_id,
@@ -1371,15 +1371,15 @@ def _execute_loop_delta_idle_on(
         interval_seconds=secs,
     )
     if applied.get("status") == "error":
-        return f"No se pudo programar /loop --delta: {applied.get('error')}"
+        return f"No se pudo programar /aware --delta: {applied.get('error')}"
     human = str(applied.get("interval_human") or format_goals_delta_interval_human(secs))
     body = (
-        f"Modo **/loop --delta** ~{human} para worker `{worker_id}` (tenant `{tenant_id}`). "
+        f"Modo **/aware --delta** ~{human} para worker `{worker_id}` (tenant `{tenant_id}`). "
         f"Próximo ciclo tras ~{human} de silencio desde el último mensaje (usuario o agente). "
-        "Metas en /goals. `/loop --delta off` o `/loop off` para cancelar."
+        "Metas en /goals. `/aware --delta off` o `/aware off` para cancelar."
     )
     footer = format_loop_next_tick_footer(db, chat_id)
-    if footer and "Próximo ciclo /loop --delta" not in body:
+    if footer and "Próximo ciclo /aware --delta" not in body:
         body += footer
     return body
 
@@ -1393,11 +1393,11 @@ def execute_loop(
     vault_user_id: Any = None,
     entry_worker_id: str | None = None,
 ) -> str:
-    """/loop on | on 4h | on --delta | --delta | off."""
+    """/aware on | on 4h | on --delta | --delta | off."""
     _ = vault_user_id
     tid = str(tenant_id or "default").strip() or "default"
-    # "/loop reject <id>" used to fall through to "start a cycle" (2026-10-13): route the
-    # spaced forms to /loop-reject and /loop-approve.
+    # "/aware reject <id>" used to fall through to "start a cycle" (2026-10-13): route the
+    # spaced forms to /aware-reject and /aware-approve.
     head, _, rest = (args or "").strip().partition(" ")
     if head.lower() in ("reject", "approve"):
         from duckclaw.commands.hitl import execute_loop_approve, execute_loop_reject
@@ -1414,14 +1414,14 @@ def execute_loop(
     if action == "off":
         clear_loop_schedule_all_dbs(db, chat_id, tenant_id=tid)
         return (
-            "Modo /loop detenido (/loop off). "
+            "Modo /aware detenido (/aware off). "
             "Revisión proactiva /crons --delta desactivada en todas las bóvedas del chat."
         )
     if action == "delta_off":
         clear_loop_delta_only(db, chat_id, tenant_id=tid)
         if is_loop_active_mode(db, chat_id):
-            return "Timeout /loop --delta desactivado. Modo activo por turnos sigue (`/loop off` para detener)."
-        return "Modo /loop --delta desactivado."
+            return "Timeout /aware --delta desactivado. Modo activo por turnos sigue (`/aware off` para detener)."
+        return "Modo /aware --delta desactivado."
     if action == "status":
         return execute_loop_status(
             db,
@@ -1441,7 +1441,7 @@ def execute_loop(
             return err
         if secs == 0:
             clear_loop_delta_only(db, chat_id, tenant_id=tid)
-            return "Timeout /loop --delta desactivado."
+            return "Timeout /aware --delta desactivado."
         return _execute_loop_active_on(
             db,
             chat_id,
@@ -1456,13 +1456,13 @@ def execute_loop(
             return err
         if secs == 0:
             clear_loop_schedule(db, chat_id, tenant_id=tid)
-            return "Modo /loop detenido (/loop off)."
+            return "Modo /aware detenido (/aware off)."
         return _execute_loop_enable(
             db,
             chat_id,
             int(secs),
             tenant_id=tid,
-            cancel_hint="/loop off",
+            cancel_hint="/aware off",
             entry_worker_id=entry_worker_id,
         )
     if action == "delta":
@@ -1472,7 +1472,7 @@ def execute_loop(
             return err
         if secs == 0:
             clear_loop_delta_only(db, chat_id, tenant_id=tid)
-            return "Modo /loop --delta desactivado."
+            return "Modo /aware --delta desactivado."
         return _execute_loop_delta_idle_on(
             db,
             chat_id,

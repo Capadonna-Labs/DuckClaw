@@ -38,10 +38,10 @@ packs:
       prefixes: []
     activation_signals: []
 
-  # Always-on: /loop SYSTEM_EVENT exige estas tools sin unlock previo.
+  # Always-on: /aware SYSTEM_EVENT exige estas tools sin unlock previo.
   - id: homeostasis
     always: true
-    description: "Alineación /goals + HITL /loop (auto-mejora cognitiva)."
+    description: "Alineación /goals + HITL /aware (auto-mejora cognitiva)."
     members:
       exact:
         - assess_crons_alignment
@@ -55,7 +55,7 @@ packs:
         - pause_chat_autonomy
       prefixes: []
     activation_signals:
-      - /loop
+      - /aware
       - homeostasis
       - assess_crons_alignment
       - request_homeostasis_validation
@@ -67,7 +67,7 @@ packs:
 
   # Opt-in por manifest (skills: infra_freshness); registrado solo para workers que
   # lo declaran, así que always:true aquí no infla el resto — evita fricción de unlock
-  # dentro de un tick /loop.
+  # dentro de un tick /aware.
   - id: infra_freshness
     always: true
     description: "Salud de infraestructura genérica: cron PM2 registrado, antigüedad de una tabla."

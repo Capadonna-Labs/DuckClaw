@@ -230,6 +230,13 @@ def wall_schedule_should_fire(
     ``poll_s`` se reserva para ventanas futuras; v1 usa igualación por minuto.
     """
     _ = poll_s
+    if str(spec.get("kind") or "").strip().lower() == "interval":
+        # /loop: every N seconds since the last run (first run on the next poll).
+        try:
+            every = max(60, int(spec.get("every_s") or 0))
+        except (TypeError, ValueError):
+            return False
+        return now_epoch - float(last_fire_epoch or 0) >= every
     tz_name = str(spec.get("tz") or default_cron_wall_tz())
     zi = _zone(tz_name)
     now_l = datetime.fromtimestamp(now_epoch, tz=zi)
@@ -292,6 +299,10 @@ def format_cron_wall_human(spec: dict[str, Any]) -> str:
     try:
         tz = str(spec.get("tz") or default_cron_wall_tz())
         kind = str(spec.get("kind") or "")
+        if kind == "interval":
+            s = int(spec["every_s"])
+            human = f"{s // 3600} h" if s % 3600 == 0 else f"{s // 60} min"
+            return f"/loop cada {human}"
         if kind == "once":
             return (
                 f"Horario de reloj (una vez): "

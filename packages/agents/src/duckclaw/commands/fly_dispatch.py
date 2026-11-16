@@ -46,7 +46,7 @@ from duckclaw.extensions.fly import dispatch_extension_fly_command, extension_fl
 from duckclaw.utils.logger import format_chat_log_identity, get_obs_logger, log_fly, structured_log_context
 
 
-# Human-in-the-loop approvals. A system turn (cron, heartbeat, /loop) can carry a prompt that
+# Human-in-the-loop approvals. A system turn (cron, heartbeat, /aware) can carry a prompt that
 # starts with "/", and an agent may be able to write those prompts: such a turn must never
 # approve anything on the human's behalf.
 HUMAN_ONLY_FLY_COMMANDS = frozenset(
@@ -233,6 +233,16 @@ def _dispatch_fly_command(
             vault_user_id=vault_user_id,
         )
     if name == "loop":
+        # /loop <intervalo> <prompt|/skill> repeats a prompt; the old self-review cycle is /aware.
+        from duckclaw.commands.repeat_loop import execute_repeat_loop, is_aware_syntax
+
+        if is_aware_syntax(args):
+            return (
+                "El ciclo de auto-revisión ahora se llama /aware (mismas opciones: "
+                f"/aware {(args or '').strip()}). /loop repite un prompt: /loop 30m /mi_skill."
+            )
+        return execute_repeat_loop(db, chat_id, args, tenant_id=tenant_id)
+    if name == "aware":
         args_norm = (args or "").strip().lower()
         first = args_norm.split()[0] if args_norm else ""
         loop_kwargs = dict(
@@ -250,13 +260,13 @@ def _dispatch_fly_command(
             )
         if first in ("--self", "--now") or not args_norm:
             return execute_loop_immediate(db, chat_id, **loop_kwargs)
-        # "/loop reject|approve <id>" fell to the catch-all below and started a cycle.
+        # "/aware reject|approve <id>" fell to the catch-all below and started a cycle.
         if first in ("on", "off", "reject", "approve") or first == "--delta":
             return execute_loop(db, chat_id, args, **loop_kwargs)
         return execute_loop_immediate(db, chat_id, **loop_kwargs)
     if name == "meditate":
         return _dispatch_fly_command(
-            db, chat_id, "loop", args,
+            db, chat_id, "aware", args,
             requester_id=requester_id, tenant_id=tenant_id,
             vault_user_id=vault_user_id, username=username,
             entry_worker_id=entry_worker_id,

@@ -242,7 +242,7 @@ export function ChatBubble({
           : isError
             ? 'bg-red-50 text-red-800 border border-red-200 whitespace-pre-wrap dark:bg-red-950/30 dark:text-red-300 dark:border-red-900'
             : isHeartbeat
-              ? 'mx-auto w-full max-w-full bg-sky-50 text-sky-950 border border-sky-200/80 dark:bg-sky-950/25 dark:text-sky-100 dark:border-sky-800/60'
+              ? 'bg-gov-gray-50 dark:bg-dark-bg border dark:border-dark-border'
               : isInterrupted
                 ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 text-amber-900 dark:text-amber-200'
                 : 'bg-gov-gray-50 dark:bg-dark-bg border dark:border-dark-border'
@@ -325,8 +325,8 @@ export function ChatBubble({
         </div>
       )}
       {isHeartbeat && (
-        <p className="text-[10px] font-bold uppercase tracking-wider text-sky-700/90 dark:text-sky-300/90 mb-1">
-          <span className="normal-case text-sky-800 dark:text-sky-200">
+        <p className="text-[10px] font-bold uppercase tracking-wider text-gov-gray-500 dark:text-dark-muted mb-1">
+          <span className="normal-case text-gov-blue-800 dark:text-dark-cyan">
             {identityPrefix}
           </span>
           {' · '}
@@ -383,7 +383,9 @@ export function ChatBubble({
       <ArtifactImageLightbox image={lightboxImage} onClose={() => setLightboxImage(null)} />
       {isUser || isError || isInterrupted || isHeartbeat ? (
         displayText?.trim() ? (
-          isUser && looksLikeMarkdown(displayText) ? (
+          isHeartbeat ? (
+            <ChatMarkdown content={displayText} onImageOpen={openMarkdownImage} />
+          ) : isUser && looksLikeMarkdown(displayText) ? (
             <div className="min-w-0">
               {m.voiceNote ? (
                 <span className="inline-flex items-center gap-1 mb-1 opacity-90" title="Nota de voz">

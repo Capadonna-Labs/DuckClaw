@@ -81,3 +81,19 @@ body {
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
 }
+
+/* Entregables (Word + dashboards HTML) is styled dark with slate utilities; in light mode remap them here
+   instead of rewriting every class. ponytail: token-level remap, move the panels to dark: variants if they grow. */
+html:not(.dark) .reports-themed { background: #f8fafc; color: #0f172a; }
+html:not(.dark) .reports-themed :is(.bg-slate-950, .bg-slate-900, [class~="bg-slate-950/80"], [class~="bg-slate-950/60"]) { background-color: #fff; }
+html:not(.dark) .reports-themed :is([class~="bg-slate-900/40"], [class~="bg-slate-900/50"], [class~="bg-slate-900/60"]) { background-color: #f1f5f9; }
+html:not(.dark) .reports-themed :is(.bg-slate-800, .bg-slate-700) { background-color: #e2e8f0; }
+html:not(.dark) .reports-themed :is(.bg-slate-800, .bg-slate-700).text-white { color: #0f172a; }
+html:not(.dark) .reports-themed :is(.border-slate-800, .border-slate-700, .border-slate-600, [class~="border-slate-600/80"], .divide-slate-800 > *) { border-color: #e2e8f0; }
+html:not(.dark) .reports-themed :is(.text-slate-100, .text-slate-200) { color: #0f172a; }
+html:not(.dark) .reports-themed .text-slate-300 { color: #334155; }
+html:not(.dark) .reports-themed .text-slate-400 { color: #475569; }
+html:not(.dark) .reports-themed :is(.text-sky-400, .text-emerald-300, .text-emerald-400) { filter: brightness(0.6); }
+html:not(.dark) .reports-themed :is(.text-amber-200, .text-amber-300, .text-red-200, .text-red-300, .text-emerald-200) { filter: brightness(0.45); }
+html:not(.dark) .reports-themed :is(.hover\:bg-slate-900, .hover\:bg-slate-800, .hover\:bg-slate-700):hover { background-color: #f1f5f9; }
+html:not(.dark) .reports-themed :is(.hover\:text-white, .hover\:text-slate-200, .hover\:text-slate-100):hover:not(.bg-sky-600, .bg-emerald-800) { color: #0f172a; }

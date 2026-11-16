@@ -31,7 +31,7 @@ export default function ReportsPageView() {
   );
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden bg-slate-950 text-slate-100">
+    <div className="flex h-[calc(100vh-4rem)] flex-col overflow-hidden bg-slate-950 text-slate-100 reports-themed">
       <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-slate-800 px-4 py-2">
         <button
           type="button"

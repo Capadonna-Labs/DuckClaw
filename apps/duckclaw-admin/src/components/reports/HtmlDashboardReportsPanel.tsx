@@ -86,9 +86,20 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
   const conv = useActiveConversation(tenantId, section, {
     defaultWorkerId: '',
   });
-  const reportId = conv.sessionId ?? '';
+  const [pickedId, setPickedId] = useState('');
+  const [reportList, setReportList] = useState<{ report_id: string; title: string }[]>([]);
+  const chatReportId = conv.sessionId ?? '';
+  const reportId = pickedId || chatReportId;
 
   const vaultPath = (config?.vault?.effective_path || '').trim();
+
+  useEffect(() => {
+    if (!vaultPath) return;
+    fetch(`/api/admin/reports?vault=${encodeURIComponent(vaultPath)}`, { credentials: 'include', cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : { reports: [] }))
+      .then((d) => setReportList(Array.isArray(d?.reports) ? d.reports : []))
+      .catch(() => setReportList([]));
+  }, [vaultPath, reportReloadToken]);
 
   const reportIframeSrc = useMemo(() => {
     if (!reportId || !vaultPath) return '';
@@ -145,7 +156,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
 
   useEffect(() => {
     let cancelled = false;
-    const chatId = (reportId || '').trim();
+    const chatId = (chatReportId || '').trim();
     adminService
       .getPlaygroundConfig(chatId ? { chat_id: chatId, tenant_id: tenantId } : tenantId ? { tenant_id: tenantId } : undefined)
       .then((c) => {
@@ -157,7 +168,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     return () => {
       cancelled = true;
     };
-  }, [reportId, tenantId, section]);
+  }, [chatReportId, tenantId, section]);
 
   useEffect(() => {
     if (!conv.sessionId && config && !conv.bootstrapping) {
@@ -330,7 +341,29 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     return () => targets.forEach((t) => t.removeEventListener('keydown', onKey as EventListener));
   }, [expanded, reportReloadToken]);
 
-  const viewToolbar = showViewToggle ? (
+  const picker =
+    reportList.length > 0 ? (
+      <select
+        value={reportId}
+        onChange={(e) => setPickedId(e.target.value === chatReportId ? '' : e.target.value)}
+        aria-label="Elegir dashboard"
+        className="max-w-[14rem] truncate rounded-lg border border-slate-600/80 bg-slate-900 px-2 py-1.5 text-xs text-slate-200"
+      >
+        {!reportList.some((r) => r.report_id === chatReportId) && chatReportId ? (
+          <option value={chatReportId}>Chat actual</option>
+        ) : null}
+        {reportList.map((r) => (
+          <option key={r.report_id} value={r.report_id}>
+            {r.report_id === chatReportId ? `${r.title} (chat actual)` : r.title}
+          </option>
+        ))}
+      </select>
+    ) : null;
+
+  const viewToolbar = showViewToggle || picker ? (
+    <div className="flex items-center gap-2">
+    {picker}
+    {showViewToggle ? (
     <div className="flex rounded-lg border border-slate-600/80 bg-slate-900 p-0.5">
       <button
         type="button"
@@ -369,6 +402,8 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
       >
         {expanded ? <Minimize2 size={14} aria-hidden /> : <Maximize2 size={14} aria-hidden />}
       </button>
+    </div>
+    ) : null}
     </div>
   ) : null;
 

@@ -81,6 +81,36 @@ async def llm_usage_summary(days: int = Query(7, ge=1, le=90)):
     return await asyncio.to_thread(_load_summary)
 
 
+@router.get("/reports", dependencies=[Depends(_require_admin_key)])
+async def list_reports(vault: str = Query(..., description="Ruta absoluta del vault .duckdb")):
+    """Dashboards guardados en el vault (más recientes primero), para elegir cuál abrir."""
+    vp = (vault or "").strip()
+    if not vp:
+        raise HTTPException(status_code=400, detail="vault requerido")
+    try:
+        db = _open_vault(vp, read_only=True)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="vault no encontrado") from None
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        rows = db.execute(
+            "SELECT report_id, title, CAST(updated_at AS VARCHAR) AS updated_at FROM main.custom_reports ORDER BY 3 DESC NULLS LAST"
+        )
+    except Exception:
+        rows = []  # vault without the table yet
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+    items = []
+    for r in rows or []:
+        rid, title, updated = (r.get("report_id"), r.get("title"), r.get("updated_at")) if isinstance(r, dict) else tuple(r)[:3]
+        items.append({"report_id": rid, "title": title or rid, "updated_at": updated})
+    return {"reports": items}
+
+
 @router.get("/reports/{report_id}", response_class=HTMLResponse, dependencies=[Depends(_require_admin_key)])
 async def get_rendered_report(
     report_id: str,

@@ -95,6 +95,7 @@ function userWriteAllowed(sub: string, method: string): boolean {
   // Informes Word / Report Engine — cada usuario registra plantillas e instancias propias
   if (sub.startsWith('report-templates')) return true;
   if (sub.startsWith('report-instances')) return true;
+  if (sub === 'reports') return true; // lista de dashboards del vault propio
   if (sub.startsWith('productivity/')) return true;
   // Cada usuario registra la suscripción push de su propio dispositivo.
   if (sub === 'notifications/web-push/subscriptions') return true;

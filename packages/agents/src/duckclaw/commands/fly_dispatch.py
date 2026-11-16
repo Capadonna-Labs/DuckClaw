@@ -241,7 +241,7 @@ def _dispatch_fly_command(
                 "El ciclo de auto-revisión ahora se llama /aware (mismas opciones: "
                 f"/aware {(args or '').strip()}). /loop repite un prompt: /loop 30m /mi_skill."
             )
-        return execute_repeat_loop(db, chat_id, args, tenant_id=tenant_id)
+        return execute_repeat_loop(db, chat_id, args, tenant_id=tenant_id, worker_id=entry_worker_id)
     if name == "aware":
         args_norm = (args or "").strip().lower()
         first = args_norm.split()[0] if args_norm else ""

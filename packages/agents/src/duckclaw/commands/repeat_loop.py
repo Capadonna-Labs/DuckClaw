@@ -59,7 +59,7 @@ def _listing(items: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def execute_repeat_loop(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None) -> str:
+def execute_repeat_loop(db: Any, chat_id: Any, args: str, *, tenant_id: Any = None, worker_id: Any = None) -> str:
     tid = str(tenant_id or "default").strip() or "default"
     raw = (args or "").strip()
     items = load_wall_items(get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY))
@@ -97,9 +97,11 @@ def execute_repeat_loop(db: Any, chat_id: Any, args: str, *, tenant_id: Any = No
         # Non-zero so the Heartbeat does not fall back to the chat's shared last-fire; 1.0 = run on the next poll.
         "last_fire": 1.0,
     }
-    ok, perr = _set_chat_state_entries(
-        db, chat_id, {_GOALS_CRON_WALL_KEY: dump_wall_items([*items, spec]), _GOALS_PROACTIVE_TENANT_KEY: tid}, tenant_id=tid
-    )
+    entries = {_GOALS_CRON_WALL_KEY: dump_wall_items([*items, spec]), _GOALS_PROACTIVE_TENANT_KEY: tid}
+    wid = str(worker_id or "").strip()
+    if wid and wid.lower() != "manager" and not (get_chat_state(db, chat_id, "worker_id") or "").strip():
+        entries["worker_id"] = wid   # the Heartbeat skips chats with no worker: a fresh chat would never run its loop
+    ok, perr = _set_chat_state_entries(db, chat_id, entries, tenant_id=tid)
     if not ok:
         return f"No se pudo guardar: {perr}"
     return (

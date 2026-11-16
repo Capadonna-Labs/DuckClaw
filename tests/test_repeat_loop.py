@@ -36,6 +36,14 @@ def test_two_loops_coexist_with_clock_crons(store):
     assert "c2" in listing and "c3" in listing and "/apertura" not in listing
 
 
+def test_records_worker_so_the_heartbeat_runs_it(store):
+    rl.execute_repeat_loop(None, "x", "30m /a", tenant_id="t", worker_id="quant_analyst")
+    assert store["worker_id"] == "quant_analyst"
+    store["worker_id"] = "finanz"
+    rl.execute_repeat_loop(None, "x", "30m /b", tenant_id="t", worker_id="quant_analyst")
+    assert store["worker_id"] == "finanz"   # an existing chat worker is not overwritten
+
+
 def test_off_removes_only_loops(store):
     rl.execute_repeat_loop(None, "x", "30m /a", tenant_id="t")
     rl.execute_repeat_loop(None, "x", "1h /b", tenant_id="t")

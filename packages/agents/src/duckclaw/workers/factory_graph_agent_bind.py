@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import os
+
 from duckclaw.workers.factory_graph_context import WorkerGraphContext
 from duckclaw.workers.tool_binding import tool_choice_function as _tool_choice_function
 
@@ -16,6 +19,13 @@ def build_agent_llm_bind(ctx: WorkerGraphContext) -> None:
     _tools_sandbox_off_bind = ctx.tools_sandbox_off_bind
     if llm is None:
         return
+    _wid = str(getattr(getattr(ctx, "spec", None), "worker_id", "") or "")
+    _watch = {w.strip() for w in (os.environ.get("DUCKCLAW_LOG_BOUND_TOOLS") or "").split(",") if w.strip()}
+    if _wid and (_wid in _watch or "*" in _watch):
+        # Diagnostic: the exact tool names the model is given (an agent kept saying a bound tool was missing).
+        logging.getLogger(__name__).warning(
+            "bound_tools worker=%s n=%d names=%s", _wid, len(_tools_for_llm_bind),
+            [getattr(t, "name", "") for t in _tools_for_llm_bind])
     from duckclaw.integrations.llm_providers import bind_tools_with_parallel_default as _bind_tools
 
     llm_with_tools_on = _bind_tools(llm, _tools_for_llm_bind)

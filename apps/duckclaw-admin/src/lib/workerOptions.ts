@@ -119,15 +119,17 @@ export function workerMatches(a: string, b: string): boolean {
 /** `@token` key: id or label without spaces/case, so `@Finanz` and `@finanz_bot` both match. */
 const mentionKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-/** Worker named by a leading `@mention` (id or label), or '' when the text has none or it names nobody. */
+/** First `@mention` anywhere in the text that names an agent exactly (id or label), or ''.
+ *  Must start the text or follow a space, so `mail@x.com` is not one. */
 export function resolveMentionedWorker(workers: WorkerOption[] | undefined, text: string): string {
-  const m = /^\s*@([^\s@]+)/u.exec(text || '');
-  if (!m) return '';
-  const key = mentionKey(m[1]);
-  const hit = (workers ?? []).find(
-    (w) => mentionKey(workerOptionId(w)) === key || mentionKey(workerOptionLabel(w)) === key
-  );
-  return hit ? workerOptionId(hit) : '';
+  for (const m of (text || '').matchAll(/(?:^|\s)@([^\s@]+)/gu)) {
+    const key = mentionKey(m[1]);
+    const hit = (workers ?? []).find(
+      (w) => mentionKey(workerOptionId(w)) === key || mentionKey(workerOptionLabel(w)) === key
+    );
+    if (hit) return workerOptionId(hit);
+  }
+  return '';
 }
 
 /** Open `@query` right before the caret, for the mention menu; null when the caret is not in one. */

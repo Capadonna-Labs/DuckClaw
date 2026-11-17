@@ -167,6 +167,8 @@ def build_plan_node(
                 llm,
                 (planner_system_prompt or "").strip(),
                 troot,
+                db=_plan_cfg_db,
+                tenant_id=_tid or "default",
             )
             _coord_prefix = f"[Coordinado por {coordinator_id}] "
             if not (planned_final or "").strip().startswith(_coord_prefix):

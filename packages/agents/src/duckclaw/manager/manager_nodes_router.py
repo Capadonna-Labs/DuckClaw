@@ -42,12 +42,17 @@ def build_router_node(
         delegation_pool: list[str] = []
         from duckclaw.workers.orchestrator import effective_delegation_pool, load_orchestrator_config
 
-        orch_cfg = load_orchestrator_config(_canon_entry, troot) if _canon_entry else None
+        orch_cfg = (
+            load_orchestrator_config(_canon_entry, troot, db=state_db, tenant_id=tenant_id or "default")
+            if _canon_entry else None
+        )
         if orch_cfg:
             coordinator_id = orch_cfg.coordinator_id
-            delegation_pool = effective_delegation_pool(
-                orch_cfg.orchestrates, available, troot
-            )
+            # Catalog ids differ from manifest aliases only in case/punctuation (quant_trader vs quant-trader).
+            _key = lambda s: "".join(ch for ch in str(s).lower() if ch.isalnum())  # noqa: E731
+            _by_key = {_key(w): w for w in _all_disk_r}
+            _orch_ids = tuple(_by_key.get(_key(w), w) for w in orch_cfg.orchestrates)
+            delegation_pool = effective_delegation_pool(_orch_ids, available, troot)
             if coordinator_id not in delegation_pool:
                 delegation_pool = [coordinator_id] + delegation_pool
             assigned = coordinator_id

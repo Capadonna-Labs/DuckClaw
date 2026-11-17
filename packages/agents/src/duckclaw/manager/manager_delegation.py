@@ -12,12 +12,24 @@ _PLANNER_FALLBACK = (
 )
 
 
-def _load_orchestrator_planner_prompt(coordinator_id: str, templates_root: Any) -> str:
+def _load_orchestrator_planner_prompt(
+    coordinator_id: str, templates_root: Any, *, db: Any = None, tenant_id: str = "default"
+) -> str:
     from duckclaw.workers.manifest import get_worker_dir
 
-    path = get_worker_dir(coordinator_id, templates_root) / "orchestrator_planner.md"
-    if path.is_file():
-        return path.read_text(encoding="utf-8").strip()
+    try:
+        path = get_worker_dir(coordinator_id, templates_root) / "orchestrator_planner.md"
+        if path.is_file():
+            return path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        pass
+    if db is not None:   # catalog workers keep their files in the version snapshot
+        from duckclaw.workers.orchestrator import catalog_manifest_and_files
+
+        hit = catalog_manifest_and_files(db, coordinator_id, tenant_id)
+        text = str((hit[2] if hit else {}).get("orchestrator_planner.md") or "").strip()
+        if text:
+            return text
     return _PLANNER_FALLBACK
 
 
@@ -28,12 +40,15 @@ def _resolve_orchestrator_delegate(
     llm: Any | None,
     planner_system_prompt: str,
     templates_root: Any,
+    *,
+    db: Any = None,
+    tenant_id: str = "default",
 ) -> str:
     from duckclaw.workers.orchestrator import pick_delegate_from_planner, pick_delegate_heuristic
 
     delegate: str | None = None
     if llm is not None:
-        orch_prompt = _load_orchestrator_planner_prompt(coordinator_id, templates_root)
+        orch_prompt = _load_orchestrator_planner_prompt(coordinator_id, templates_root, db=db, tenant_id=tenant_id)
         combined = (planner_system_prompt or "").strip()
         if combined:
             combined = f"{combined}\n\n{orch_prompt}"

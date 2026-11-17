@@ -24,6 +24,11 @@ def test_no_news_skips_push():
     assert hb._loop_push_parts(_body("**Veredicto:** Sin novedades relevantes")) is None
 
 
+def test_no_news_with_approval_question_still_pushes():
+    raw = _body("Veredicto: sin novedades\n\nPlan de 7 órdenes.\n\n¿Apruebas el plan para que cree las señales?")
+    assert hb._loop_push_parts(raw) == ("Decisión pendiente", "¿Apruebas el plan para que cree las señales?")
+
+
 def test_no_verdict_falls_back():
     title, body = hb._loop_push_parts(_body("Reporte sin línea de veredicto."))
     assert title == "DuckClaw · ciclo /aware" and body == "Reporte sin línea de veredicto."

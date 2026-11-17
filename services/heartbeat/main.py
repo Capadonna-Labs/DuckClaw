@@ -217,6 +217,8 @@ def _agent_chat_url_for_worker(gateway_url: str, worker_id: str) -> str:
 
 _VERDICT_RE = re.compile(r"veredicto\s*:\s*(.+)", re.IGNORECASE)
 _NO_NEWS_RE = re.compile(r"^\W*sin novedad", re.IGNORECASE)
+# A question asking the user to approve something: never silenced by a "sin novedades" verdict.
+_APPROVAL_ASK_RE = re.compile(r"¿[^?\n]*\baprueb[^?\n]*\?", re.IGNORECASE)
 
 
 def _loop_reply_text(raw_body: Any) -> str:
@@ -281,7 +283,12 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
     if m:
         verdict = clean(m.group(1).splitlines()[0])
         if _NO_NEWS_RE.search(verdict):
-            return None
+            # "sin novedades" over a reply that asks for approval (17-nov: HRP plan of 104k) hid the decision.
+            ask = _APPROVAL_ASK_RE.search(text)
+            if not ask:
+                return None
+            q = clean(ask.group(0))
+            return "Decisión pendiente", q if len(q) <= 140 else q[:139] + "…"
         rest = _push_body(text[m.end():], clean) or verdict
         if _broken(rest):
             # Same loss in the detail line ("…comprometidos con el de) (La Jornada…"): the table row of facts is intact more often.

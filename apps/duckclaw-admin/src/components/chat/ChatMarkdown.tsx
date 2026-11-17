@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { fixTableDelimiterRows } from './chatMarkdownDetection';
 import type { Components } from 'react-markdown';
 import { MermaidBlock } from '@/components/chat/MermaidBlock';
 import { isMermaidLanguage, preprocessBareMermaidBlocks } from '@/components/chat/chatMarkdownMermaid';
@@ -225,23 +226,6 @@ type ChatMarkdownProps = {
   /** Abre lightbox al tocar imágenes markdown (p. ej. newsletters / `![](...)`). */
   onImageOpen?: MarkdownImageOpenHandler;
 };
-
-const cells = (row: string) => row.trim().replace(/^\||\|$/g, '').split('|');
-const DELIM_ROW = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
-
-/** GFM drops a table whose |---| row has a different column count than its header (the model miscounts);
- *  resize that row to the header's count, keeping the alignments it gave. */
-export function fixTableDelimiterRows(text: string): string {
-  const lines = text.split('\n');
-  for (let i = 1; i < lines.length; i++) {
-    if (!DELIM_ROW.test(lines[i]) || !lines[i - 1].includes('|')) continue;
-    const n = cells(lines[i - 1]).length;
-    const d = cells(lines[i]).map((c) => c.trim());
-    if (d.length === n) continue;
-    lines[i] = `|${Array.from({ length: n }, (_, k) => d[k] ?? '---').join('|')}|`;
-  }
-  return lines.join('\n');
-}
 
 /**
  * Renderiza Markdown (GFM: tablas, listas, código, enlaces) para burbujas del chat.

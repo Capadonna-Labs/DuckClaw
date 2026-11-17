@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { looksLikeMarkdown } from './chatMarkdownDetection';
+import { fixTableDelimiterRows, looksLikeMarkdown } from './chatMarkdownDetection';
 
 describe('looksLikeMarkdown', () => {
   it('detecta encabezados y listas', () => {
@@ -28,5 +28,16 @@ describe('ChatMarkdown code blocks', () => {
     const pre = src.split('const pre = isUser')[1].split('const inlineCode')[0];
     expect(pre.match(/\[&_code\]:!text-inherit/g)).toHaveLength(2); // usuario y asistente
     expect(pre.match(/\[&_code\]:!bg-transparent/g)).toHaveLength(2);
+  });
+});
+describe('fixTableDelimiterRows', () => {
+  it('resizes a delimiter row with one column too many (MSFT reply, 16-nov)', () => {
+    const t = '| A | B | C |\n|---|---:|---:|---:|\n| 1 | 2 | 3 |';
+    expect(fixTableDelimiterRows(t).split('\n')[1]).toBe('|---|---:|---:|');
+  });
+  it('pads a short one and leaves good tables alone', () => {
+    expect(fixTableDelimiterRows('| A | B |\n|---|').split('\n')[1]).toBe('|---|---|');
+    const ok = '| A | B |\n|---|---|';
+    expect(fixTableDelimiterRows(ok)).toBe(ok);
   });
 });

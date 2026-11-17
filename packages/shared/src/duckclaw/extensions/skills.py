@@ -94,7 +94,11 @@ def get_worker_skill_hooks() -> list[Callable[..., Any]]:
     """Cached list of external worker skill registration callables."""
     global _HOOKS_CACHE
     if _HOOKS_CACHE is None:
-        _HOOKS_CACHE = _build_hooks()
+        hooks = _build_hooks()
+        # A hook that did not resolve is retried on the next build instead of being cached away.
+        if len(hooks) >= len(_hook_specs()):
+            _HOOKS_CACHE = hooks
+        return hooks
     return _HOOKS_CACHE
 
 

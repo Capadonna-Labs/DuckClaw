@@ -6,6 +6,7 @@ import importlib.util
 import logging
 import os
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Callable, Optional
@@ -13,6 +14,8 @@ from typing import Any, Callable, Optional
 _log = logging.getLogger(__name__)
 
 _MODULE_CACHE: dict[str, ModuleType] = {}
+# Reentrant: an extension module importing another extension module goes through the loader again.
+_IMPORT_LOCK = threading.RLock()
 _PACKAGE_BY_ROOT: dict[str, str] = {}
 
 
@@ -120,7 +123,22 @@ def load_extension_module(
     package_name: str | None = None,
     lib_path: str | None = None,
 ) -> Optional[ModuleType]:
-    """Import ``{lib_path}/{stem}.py`` from an extension root."""
+    """Import ``{lib_path}/{stem}.py`` from an extension root.
+
+    Serialized: the module is in sys.modules before exec_module finishes, so a concurrent graph build
+    used to get the half-initialized module (no hook attribute yet) and the skill hooks were cached
+    empty for the life of the Gateway (17-nov: trading tools gone after a restart)."""
+    with _IMPORT_LOCK:
+        return _load_extension_module(stem, root=root, package_name=package_name, lib_path=lib_path)
+
+
+def _load_extension_module(
+    stem: str,
+    *,
+    root: Path,
+    package_name: str | None = None,
+    lib_path: str | None = None,
+) -> Optional[ModuleType]:
     name = (stem or "").strip().removesuffix(".py")
     if not name:
         return None

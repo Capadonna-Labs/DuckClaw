@@ -226,6 +226,23 @@ type ChatMarkdownProps = {
   onImageOpen?: MarkdownImageOpenHandler;
 };
 
+const cells = (row: string) => row.trim().replace(/^\||\|$/g, '').split('|');
+const DELIM_ROW = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
+
+/** GFM drops a table whose |---| row has a different column count than its header (the model miscounts);
+ *  resize that row to the header's count, keeping the alignments it gave. */
+export function fixTableDelimiterRows(text: string): string {
+  const lines = text.split('\n');
+  for (let i = 1; i < lines.length; i++) {
+    if (!DELIM_ROW.test(lines[i]) || !lines[i - 1].includes('|')) continue;
+    const n = cells(lines[i - 1]).length;
+    const d = cells(lines[i]).map((c) => c.trim());
+    if (d.length === n) continue;
+    lines[i] = `|${Array.from({ length: n }, (_, k) => d[k] ?? '---').join('|')}|`;
+  }
+  return lines.join('\n');
+}
+
 /**
  * Renderiza Markdown (GFM: tablas, listas, código, enlaces) para burbujas del chat.
  * Seguro por defecto: sin HTML crudo (react-markdown).
@@ -239,7 +256,7 @@ function ChatMarkdownImpl({
   const { body: rawBody, workerNote } = splitPlaygroundWorkerSuffix(content);
   const normalized =
     variant === 'assistant' ? dedupeAssistantWorkerHeaders(rawBody) : rawBody.trim();
-  const body = preprocessBareMermaidBlocks(normalized);
+  const body = fixTableDelimiterRows(preprocessBareMermaidBlocks(normalized));
   const components = buildMarkdownComponents(variant, onImageOpen);
 
   if (!body.trim() && !workerNote) {

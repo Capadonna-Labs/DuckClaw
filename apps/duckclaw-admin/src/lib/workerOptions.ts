@@ -115,3 +115,23 @@ export function workerMatches(a: string, b: string): boolean {
   if (b.includes('->') && bHead && normalizeWorkerKey(bHead) === ka) return true;
   return false;
 }
+
+/** `@token` key: id or label without spaces/case, so `@Finanz` and `@finanz_bot` both match. */
+const mentionKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/** Worker named by a leading `@mention` (id or label), or '' when the text has none or it names nobody. */
+export function resolveMentionedWorker(workers: WorkerOption[] | undefined, text: string): string {
+  const m = /^\s*@([^\s@]+)/u.exec(text || '');
+  if (!m) return '';
+  const key = mentionKey(m[1]);
+  const hit = (workers ?? []).find(
+    (w) => mentionKey(workerOptionId(w)) === key || mentionKey(workerOptionLabel(w)) === key
+  );
+  return hit ? workerOptionId(hit) : '';
+}
+
+/** Open `@query` right before the caret, for the mention menu; null when the caret is not in one. */
+export function openMentionQuery(text: string, caret: number): string | null {
+  const m = /(?:^|\s)@([^\s@]*)$/u.exec(text.slice(0, caret));
+  return m ? m[1] : null;
+}

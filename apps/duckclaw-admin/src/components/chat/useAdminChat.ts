@@ -15,7 +15,7 @@ import {
   clearEphemeralHeartbeats,
   clearLegacyEphemeralHeartbeats,
 } from '@/lib/chatEphemeralStorage';
-import { workerMatches } from '@/lib/workerOptions';
+import { resolveMentionedWorker, workerMatches } from '@/lib/workerOptions';
 import {
   readActorDefaultVaultPath,
   readStoredVaultPath,
@@ -475,7 +475,8 @@ export function useAdminChat({
         userPreviewImages,
         documentNames,
         chatId,
-        workerId,
+        // `@agente …` sends this one turn to that worker; the chat's worker stays the same.
+        workerId: resolveMentionedWorker(config?.workers, text) || workerId,
         projectId,
         knowledgeScope,
         vaultPath,
@@ -510,6 +511,7 @@ export function useAdminChat({
       chatId,
       config?.effective_tenant_id,
       config?.telegram_user_id,
+      config?.workers,
       finalizeCancelledGeneration,
       clearLoopHistoryReload,
       onConversationActivity,

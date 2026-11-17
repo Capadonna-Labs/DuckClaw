@@ -3,7 +3,8 @@
 import type { ClipboardEvent, Dispatch, ReactNode, RefObject, SetStateAction } from 'react';
 import { FileText, Send, X } from 'lucide-react';
 import { AdminChatSuggestionChips } from '@/components/chat/AdminChatSuggestionChips';
-import { SlashCommandMenu } from '@/components/chat/SlashCommandMenu';
+import { MentionMenu, SlashCommandMenu } from '@/components/chat/SlashCommandMenu';
+import { openMentionQuery, workerOptionId, workerOptionLabel, type WorkerOption } from '@/lib/workerOptions';
 import { LiveVoiceBar } from '@/components/chat/LiveVoiceBar';
 import { MediaAttachMenu } from '@/components/chat/MediaAttachMenu';
 import {
@@ -39,6 +40,8 @@ export type AdminChatComposeFooterProps = {
   onPickSuggestion?: (text: string) => void | Promise<void>;
   /** Directive skills instalados (catálogo global) para el menú "/". */
   directiveSkills?: { cmd: string; description: string }[];
+  /** Agentes del chat para el menú "@". */
+  workers?: WorkerOption[];
   input: string;
   setInput: (value: string) => void;
   /** Mensaje al que se responde; se muestra como chip y viaja con el envío. */
@@ -144,6 +147,7 @@ export function AdminChatComposeFooter({
   onSuggestionsOpenChange,
   onPickSuggestion,
   directiveSkills = [],
+  workers = [],
   input,
   setInput,
   quote = '',
@@ -171,7 +175,21 @@ export function AdminChatComposeFooter({
   liveVoice,
 }: AdminChatComposeFooterProps) {
   const showSlashMenu = matchingSlashCommands(input, directiveSkills).length > 0;
-  const showSuggestions = !showSlashMenu && shouldShowSuggestionChips(suggestions, loading, input);
+  const caret = inputRef.current?.selectionStart ?? input.length;
+  const mentionQuery = showSlashMenu ? null : openMentionQuery(input, caret);
+  const mentionMatches =
+    mentionQuery === null
+      ? []
+      : workers
+          .map((w) => ({ id: workerOptionId(w), label: workerOptionLabel(w).replace(/\s+/g, '') }))
+          .filter((w) => w.label.toLowerCase().includes(mentionQuery.toLowerCase()) || w.id.toLowerCase().includes(mentionQuery.toLowerCase()));
+  const pickMention = (label: string) => {
+    const head = input.slice(0, caret).replace(/@[^\s@]*$/u, `@${label} `);
+    setInput(head + input.slice(caret));
+    inputRef.current?.focus();
+  };
+  const showSuggestions =
+    !showSlashMenu && mentionMatches.length === 0 && shouldShowSuggestionChips(suggestions, loading, input);
   const pickSlashCommand = (cmd: string) => {
     setInput(`${cmd} `);
     inputRef.current?.focus();
@@ -242,6 +260,11 @@ export function AdminChatComposeFooter({
           {showSlashMenu ? (
             <div className="mb-2">
               <SlashCommandMenu input={input} onPick={pickSlashCommand} extraCommands={directiveSkills} />
+            </div>
+          ) : null}
+          {mentionMatches.length > 0 ? (
+            <div className="mb-2">
+              <MentionMenu matches={mentionMatches} onPick={pickMention} />
             </div>
           ) : null}
           {showSuggestions ? (
@@ -388,6 +411,11 @@ export function AdminChatComposeFooter({
             {showSlashMenu ? (
               <div className="mb-2">
                 <SlashCommandMenu input={input} onPick={pickSlashCommand} extraCommands={directiveSkills} />
+              </div>
+            ) : null}
+            {mentionMatches.length > 0 ? (
+              <div className="mb-2">
+                <MentionMenu matches={mentionMatches} onPick={pickMention} />
               </div>
             ) : null}
             {showSuggestions ? (

@@ -637,6 +637,7 @@ export function AdminChatPanel({
             voice={voice}
             liveVoice={liveVoice}
             directiveSkills={directiveSkills}
+            workers={config?.workers}
           />
         </div>
       </div>

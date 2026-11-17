@@ -40,3 +40,32 @@ export function SlashCommandMenu({
     </div>
   );
 }
+
+/** Menú "@" de agentes: elegir uno escribe `@Nombre ` y ese turno va a ese agente. */
+export function MentionMenu({
+  matches,
+  onPick,
+}: {
+  matches: { id: string; label: string }[];
+  onPick: (label: string) => void;
+}) {
+  if (matches.length === 0) return null;
+  return (
+    <div className="max-h-[40vh] overflow-y-auto overscroll-contain rounded-xl border border-gov-gray-200 bg-white/90 shadow-sm dark:border-dark-border dark:bg-dark-surface/90">
+      <ul role="listbox" className="divide-y divide-gov-gray-100 dark:divide-dark-border">
+        {matches.map((w) => (
+          <li key={w.id}>
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => onPick(w.label)}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-semibold text-gov-blue-700 hover:bg-gov-gray-50 dark:text-dark-cyan dark:hover:bg-dark-bg"
+            >
+              @{w.label}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}

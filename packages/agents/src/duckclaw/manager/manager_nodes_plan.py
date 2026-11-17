@@ -211,7 +211,9 @@ def build_plan_node(
         else:
             out["assigned_worker_id"] = assigned
 
-        route_entry = (state.get("entry_worker_id") or "").strip()
+        # A coordinator entry already chose its delegate above; pinning the entry here undid it
+        # and every turn stayed with the coordinator, order requests included.
+        route_entry = "" if (coordinator_id and delegation_pool) else (state.get("entry_worker_id") or "").strip()
         if route_entry and _is_entry_route_system_event(incoming):
             _all_plan_disk = list_workers(troot, db=db, tenant_id=_tid)
             _canon_re = _resolve_template_id(_all_plan_disk, route_entry)

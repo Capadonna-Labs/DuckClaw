@@ -125,23 +125,29 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
   }, [config?.vault_options, chatVaultPath]);
   const vaultKey = vaults.map((v) => v.path).join('|');
 
+  // A failed fetch (phone waking up, expired session) keeps that vault's last list instead of blanking it;
+  // opening the picker fetches again.
+  const [listToken, setListToken] = useState(0);
   useEffect(() => {
     let cancelled = false;
     Promise.all(
       vaults.map((v) =>
         fetch(`/api/admin/reports?vault=${encodeURIComponent(v.path)}`, { credentials: 'include', cache: 'no-store' })
-          .then((r) => (r.ok ? r.json() : { reports: [] }))
-          .then((d) => [v.path, Array.isArray(d?.reports) ? d.reports : []] as const)
-          .catch(() => [v.path, []] as const)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => [v.path, Array.isArray(d?.reports) ? d.reports : null] as const)
+          .catch(() => [v.path, null] as const)
       )
     ).then((pairs) => {
-      if (!cancelled) setAllReports(Object.fromEntries(pairs));
+      if (cancelled) return;
+      setAllReports((prev) =>
+        Object.fromEntries(pairs.map(([p, list]) => [p, list ?? prev[p] ?? []]))
+      );
     });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [vaultKey, reportReloadToken]);
+  }, [vaultKey, reportReloadToken, listToken]);
 
   const reportIframeSrc = useMemo(() => {
     if (!reportId || !vaultPath) return '';
@@ -387,6 +393,7 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     vaults.length > 0 ? (
       <select
         value={JSON.stringify([vaultPath, reportId])}
+        onFocus={() => setListToken(Date.now())}
         onChange={(e) => {
           const [v, id] = JSON.parse(e.target.value) as [string, string];
           pick(v === chatVaultPath && id === chatReportId ? '' : v, id);

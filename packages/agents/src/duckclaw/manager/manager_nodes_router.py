@@ -48,7 +48,7 @@ def build_router_node(
         )
         if orch_cfg:
             coordinator_id = orch_cfg.coordinator_id
-            # Catalog ids differ from manifest aliases only in case/punctuation (quant_trader vs quant-trader).
+            # Catalog ids differ from manifest aliases only in case/punctuation (my_worker vs my-worker).
             _key = lambda s: "".join(ch for ch in str(s).lower() if ch.isalnum())  # noqa: E731
             _by_key = {_key(w): w for w in _all_disk_r}
             _orch_ids = tuple(_by_key.get(_key(w), w) for w in orch_cfg.orchestrates)

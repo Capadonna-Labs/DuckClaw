@@ -116,7 +116,7 @@ export function workerMatches(a: string, b: string): boolean {
   return false;
 }
 
-/** `@token` key: id or label without spaces/case, so `@Finanz` and `@finanz_bot` both match. */
+/** `@token` key: id or label without spaces/case, so `@Research` and `@research_bot` both match. */
 const mentionKey = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 /** First `@mention` anywhere in the text that names an agent exactly (id or label), or ''.

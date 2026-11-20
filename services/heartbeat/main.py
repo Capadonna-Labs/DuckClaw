@@ -319,6 +319,21 @@ def _proactive_busy(chat_id: Any) -> bool:
     return task is not None and not task.done()
 
 
+_WALL_DUE_SOON_S = 600
+
+
+def _wall_cron_due_soon(db: Any, chat_id: Any, now: float, horizon_s: int = _WALL_DUE_SOON_S) -> bool:
+    """True when a clock cron of this chat fires within ``horizon_s``: an interval turn started now
+    would still be running at that minute and the cron (FIFO behind it) would run late."""
+    items = load_wall_items(get_chat_state(db, chat_id, _GOALS_CRON_WALL_KEY) or "")
+    return any(
+        wall_schedule_should_fire(now + off, it, float(it.get("last_fire") or 0.0), 0)
+        for it in items
+        if str(it.get("kind") or "").strip().lower() != "interval" and not is_goals_review_item(it)
+        for off in range(60, horizon_s + 1, 60)
+    )
+
+
 async def _spawn_proactive(chat_id: Any, coro: Any, *, after_running: bool = False) -> None:
     """Run ``coro`` (a proactive turn + its push) without blocking the poller.
 
@@ -749,6 +764,9 @@ async def _run_goals_proactive_tick_one_db(
             except ValueError:
                 last_fire = 0.0
             if last_fire > 0 and (now - last_fire) < effective_delta:
+                continue
+            if _wall_cron_due_soon(db, chat_id, now):
+                logger.debug("goals_proactive: chat=%s con cron de reloj en <10 min; espera", chat_id)
                 continue
             notify_channel = ""
             message = ""

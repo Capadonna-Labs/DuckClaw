@@ -87,3 +87,20 @@ def test_a_moved_figure_on_the_same_story_is_not_pushed_again() -> None:
     assert not hb._repeats("Checkout error sube a 3,5% tras el deploy → api", recent, now)        # other target
     assert not hb._repeats("Proveedor de pagos anuncia mantenimiento → api/web", recent, now)       # other story
     assert not hb._repeats("Checkout error sube a 3,5% (panel) → api/web", recent, now + 7 * 3600)  # older than 6 h
+
+
+def test_quiet_hours_hold_interval_pushes_but_not_decisions(monkeypatch):
+    monkeypatch.setenv("DUCKCLAW_PUSH_QUIET_HOURS", "22-6")
+    assert [h for h in range(24) if hb._push_quiet_now(h)] == [0, 1, 2, 3, 4, 5, 22, 23]
+    monkeypatch.setattr(hb, "_push_quiet_now", lambda hour=None: True)
+    assert hb._held_by_quiet_hours(("Brent cierra $92", "detalle"), "t") is True
+    assert hb._held_by_quiet_hours(("Decisión pendiente", "¿Apruebas?"), "t") is False
+
+
+def test_quiet_hours_off_when_unset_or_malformed(monkeypatch):
+    monkeypatch.delenv("DUCKCLAW_PUSH_QUIET_HOURS", raising=False)
+    assert not any(hb._push_quiet_now(h) for h in range(24))
+    monkeypatch.setenv("DUCKCLAW_PUSH_QUIET_HOURS", "noche")
+    assert not hb._push_quiet_now(3)
+    monkeypatch.setenv("DUCKCLAW_PUSH_QUIET_HOURS", "1-5")
+    assert [h for h in range(24) if hb._push_quiet_now(h)] == [1, 2, 3, 4]

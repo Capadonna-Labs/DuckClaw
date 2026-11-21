@@ -33,6 +33,7 @@ from duckclaw.write_commands import UpsertAgentConfigEntriesCommand
 from duckclaw.homeostasis import BeliefRegistry, HomeostasisManager
 from duckclaw.gateway_db import get_gateway_db_path, iter_goals_ticker_duckdb_paths
 from duckclaw.runtime.scheduling.cron_wall_schedule import (
+    default_cron_wall_tz,
     dump_wall_items,
     is_goals_review_item,
     load_wall_items,
@@ -304,6 +305,32 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
     if re.search(r"\bsin novedad", body[:200], re.IGNORECASE):
         return None
     return "DuckClaw · ciclo /aware", body if len(body) <= 140 else body[:139] + "…"
+
+
+def _push_quiet_now(hour: int | None = None) -> bool:
+    """DUCKCLAW_PUSH_QUIET_HOURS="22-6": local hours (DUCKCLAW_CRONS_WALL_TZ) when interval and /loop
+    turns still run and stay in the chat but send no push. Clock crons and "Decisión pendiente" are
+    not held. Unset or malformed = never quiet."""
+    m = re.fullmatch(r"\s*(\d{1,2})\s*-\s*(\d{1,2})\s*", os.getenv("DUCKCLAW_PUSH_QUIET_HOURS") or "")
+    if not m:
+        return False
+    start, end = int(m.group(1)), int(m.group(2))
+    if hour is None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        try:
+            hour = datetime.now(ZoneInfo(default_cron_wall_tz())).hour
+        except Exception:  # noqa: BLE001 - a bad zone name must not drop pushes
+            return False
+    return (hour >= start or hour < end) if start > end else start <= hour < end
+
+
+def _held_by_quiet_hours(parts: tuple[str, str], tag: str) -> bool:
+    if parts[0] == "Decisión pendiente" or not _push_quiet_now():
+        return False
+    logger.info("web_push: omitida tag=%s (horas de silencio %s): %s", tag, os.getenv("DUCKCLAW_PUSH_QUIET_HOURS"), parts[0])
+    return True
 
 
 # One proactive turn per chat at a time, run as a background task: a long turn neither blocks
@@ -899,6 +926,8 @@ async def _deliver_goals_delta_turn(
     if parts is None:
         logger.info("web_push: omitida tag=duckclaw-goals-%s (veredicto sin novedades)", chat_id)
         return
+    if _held_by_quiet_hours(parts, f"duckclaw-goals-{chat_id}"):
+        return
     has_verdict = parts[0] != "DuckClaw · ciclo /aware"
     if has_verdict and not await _remember_verdict(chat_id, parts[0]):
         return
@@ -1265,6 +1294,8 @@ async def _run_loop_proactive_tick_one_db(
                 parts = _loop_push_parts(result.get("body"))
                 if parts is None:
                     logger.info("web_push: omitida tag=duckclaw-loop-%s (veredicto sin novedades)", chat_id)
+                elif _held_by_quiet_hours(parts, f"duckclaw-loop-{chat_id}"):
+                    pass
                 elif await _remember_verdict(chat_id, parts[0]):
                     await _send_web_push_notification(
                         title=parts[0],

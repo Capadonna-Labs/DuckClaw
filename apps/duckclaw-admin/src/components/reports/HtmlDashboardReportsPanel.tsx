@@ -121,8 +121,12 @@ export function HtmlDashboardReportsPanel({ toolbarSlot }: HtmlDashboardReportsP
     if (chatVaultPath && !opts.some((v) => v.path === chatVaultPath || base(v.path) === base(chatVaultPath))) {
       opts.unshift({ path: chatVaultPath, label: base(chatVaultPath) });
     }
+    // The remembered vault keeps the picker visible when the config came back without vault options.
+    if (pickedVault && !opts.some((v) => v.path === pickedVault)) {
+      opts.push({ path: pickedVault, label: base(pickedVault) });
+    }
     return opts;
-  }, [config?.vault_options, chatVaultPath]);
+  }, [config?.vault_options, chatVaultPath, pickedVault]);
   const vaultKey = vaults.map((v) => v.path).join('|');
 
   // A failed fetch (phone waking up, expired session) keeps that vault's last list instead of blanking it;

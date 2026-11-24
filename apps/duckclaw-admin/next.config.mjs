@@ -39,6 +39,11 @@ const nextConfig = {
     }
     return config;
   },
+  // Pages live in the (admin) route group, so /admin/* never exists; push notifications sent with
+  // /admin/playground opened a 404 on tap. Keep already-delivered ones working.
+  async redirects() {
+    return [{ source: '/admin/:path*', destination: '/:path*', permanent: false }];
+  },
   async headers() {
     return [
       {

@@ -934,7 +934,7 @@ async def _deliver_goals_delta_turn(
     await _send_web_push_notification(
         title=parts[0] if has_verdict else "DuckClaw",
         body=parts[1] if has_verdict else "Revisión proactiva completada.",
-        url="/admin/playground",
+        url="/playground",
         tag=f"duckclaw-goals-{chat_id}",
     )
 
@@ -975,7 +975,7 @@ async def _deliver_wall_cron_turn(
     await _send_web_push_notification(
         title=parts[0] if has_verdict else "DuckClaw",
         body=parts[1] if has_verdict else (f"Cron completado: {prompt[:80]}" if prompt else "Recordatorio programado completado."),
-        url="/admin/playground",
+        url="/playground",
         tag=tag,
     )
 
@@ -1300,7 +1300,7 @@ async def _run_loop_proactive_tick_one_db(
                     await _send_web_push_notification(
                         title=parts[0],
                         body=parts[1],
-                        url="/admin/playground",
+                        url="/playground",
                         tag=f"duckclaw-loop-{chat_id}",
                     )
                 if idle_mode:

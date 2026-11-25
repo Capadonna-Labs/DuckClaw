@@ -14,14 +14,20 @@ cambia un nombre, el tool devuelve el error crudo de la API en el texto de retor
 
 from __future__ import annotations
 
+import csv
+import io
 import json
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 import httpx
 
 _YOUTUBE_DATA_BASE = "https://www.googleapis.com/youtube/v3"
 _YOUTUBE_ANALYTICS_BASE = "https://youtubeanalytics.googleapis.com/v2/reports"
+_YOUTUBE_REPORTING_BASE = "https://youtubereporting.googleapis.com/v1"
+_REACH_REPORT_TYPE = "channel_reach_basic_a1"
+_IMPRESSIONS_COL = "video_thumbnail_impressions"
+_CTR_COL = "video_thumbnail_impressions_ctr"
 
 # Core channel/video metrics that combine validly with dimensions=video|day.
 _VIDEO_CORE_METRICS = (
@@ -221,6 +227,9 @@ async def call_youtube_analytics_rest(
                     params["maxResults"] = int(max_results)
                 resp = await client.get(_YOUTUBE_ANALYTICS_BASE, params=params)
 
+            elif name == "get_reach_report":
+                return json.dumps(await _reach_report(client, args), ensure_ascii=False)
+
             else:
                 return f"Error YouTube Analytics REST: unsupported tool {name}"
         except httpx.HTTPError as exc:
@@ -240,6 +249,56 @@ async def call_youtube_analytics_rest(
             return json.dumps(resp.json(), ensure_ascii=False)
         except Exception:
             return resp.text
+
+
+async def _reach_report(client: httpx.AsyncClient, args: dict[str, Any]) -> dict[str, Any]:
+    """Thumbnail impressions and CTR per video. The Analytics API does not expose them; the
+    Reporting API does, as daily bulk CSVs of a job that must exist first (Google fills it
+    ~48 h after creation, one file per day). Same yt-analytics.readonly scope."""
+    jobs = await client.get(f"{_YOUTUBE_REPORTING_BASE}/jobs")
+    if jobs.status_code >= 400:
+        return {"ok": False, "error": f"{jobs.status_code} {jobs.text[:300]}"}
+    job = next((j for j in (jobs.json() or {}).get("jobs") or [] if j.get("reportTypeId") == _REACH_REPORT_TYPE), None)
+    if job is None:
+        made = await client.post(f"{_YOUTUBE_REPORTING_BASE}/jobs", json={"reportTypeId": _REACH_REPORT_TYPE, "name": "duckclaw reach"})
+        if made.status_code >= 400:
+            return {"ok": False, "error": f"{made.status_code} {made.text[:300]}"}
+        return {"ok": True, "status": "job_created", "note": "Google genera el primer reporte en ~48 h; vuelve a consultar después. Sin datos de impresiones/CTR hasta entonces."}
+    start = _start_date(args, default=(date.today() - timedelta(days=28)).isoformat())
+    end = _end_date(args)
+    reports = await client.get(f"{_YOUTUBE_REPORTING_BASE}/jobs/{job['id']}/reports", params={"startTimeAtOrAfter": f"{start}T00:00:00Z"})
+    if reports.status_code >= 400:
+        return {"ok": False, "error": f"{reports.status_code} {reports.text[:300]}"}
+    files = [r for r in (reports.json() or {}).get("reports") or [] if str(r.get("startTime", ""))[:10] <= end]
+    if not files:
+        return {"ok": True, "status": "no_reports_yet", "job_created": job.get("createTime"), "note": "El job existe pero Google aún no publica reportes para ese rango (~48 h tras crearlo)."}
+    # A day can be re-published (backfill): keep the newest file per day.
+    latest: dict[str, dict[str, Any]] = {}
+    for r in files:
+        d = str(r.get("startTime", ""))[:10]
+        if d not in latest or str(r.get("createTime")) > str(latest[d].get("createTime")):
+            latest[d] = r
+    per_video: dict[str, dict[str, float]] = {}
+    for r in latest.values():
+        body = await client.get(r["downloadUrl"])
+        if body.status_code >= 400:
+            return {"ok": False, "error": f"download {body.status_code} {body.text[:200]}"}
+        reader = csv.DictReader(io.StringIO(body.text))
+        if not {_IMPRESSIONS_COL, _CTR_COL, "video_id"} <= set(reader.fieldnames or []):   # never read a renamed column as zeros
+            return {"ok": False, "error": "columnas inesperadas en el reporte de alcance", "columns": reader.fieldnames}
+        for row in reader:
+            vid = row.get("video_id") or ""
+            imp = float(row.get(_IMPRESSIONS_COL) or 0)
+            ctr = float(row.get(_CTR_COL) or 0)
+            acc = per_video.setdefault(vid, {"impressions": 0.0, "clicks": 0.0})
+            acc["impressions"] += imp
+            acc["clicks"] += imp * ctr   # CTR is a ratio per row: weight it by that row's impressions
+    rows = sorted(
+        ({"video_id": v, "impressions": int(a["impressions"]), "ctr_pct": round(100 * a["clicks"] / a["impressions"], 2) if a["impressions"] else None}
+         for v, a in per_video.items() if a["impressions"]),
+        key=lambda x: -x["impressions"],
+    )
+    return {"ok": True, "days": sorted(latest), "videos": rows[: int(args.get("max_results") or 50)]}
 
 
 def uses_youtube_analytics_rest_fallback(connector: dict[str, Any]) -> bool:
@@ -347,6 +406,23 @@ def youtube_analytics_rest_fallback_tool_specs() -> list[Any]:
                         "type": "integer",
                         "description": "Default 10, max 50",
                     },
+                },
+            },
+        ),
+        SimpleNamespace(
+            name="get_reach_report",
+            description=(
+                "Own-channel thumbnail impressions and click-through rate (CTR) per video, "
+                "from the YouTube Reporting API (the Analytics API has no impressions). Daily "
+                "bulk reports: data lags ~2 days; the first call creates the job and Google "
+                "needs ~48 h before the first report exists."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "YYYY-MM-DD, default 28 days ago"},
+                    "end_date": {"type": "string", "description": "YYYY-MM-DD, default today"},
+                    "max_results": {"type": "integer", "description": "Videos returned, default 50"},
                 },
             },
         ),

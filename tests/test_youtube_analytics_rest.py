@@ -160,5 +160,45 @@ def test_fallback_tool_specs_cover_expected_tools() -> None:
         "get_audience_retention",
         "get_channel_daily_metrics",
         "get_top_videos",
+        "get_reach_report",
         "query_analytics_report",
     }
+
+
+def test_reach_report_weights_ctr_by_impressions_and_keeps_newest_file_per_day() -> None:
+    csv_old = "date,video_id,video_thumbnail_impressions,video_thumbnail_impressions_ctr\n20261120,a,999,0.9\n"
+    csv_new = "date,video_id,video_thumbnail_impressions,video_thumbnail_impressions_ctr\n20261120,a,100,0.10\n20261120,b,50,0.02\n"
+    csv_d2 = "date,video_id,video_thumbnail_impressions,video_thumbnail_impressions_ctr\n20261121,a,300,0.02\n"
+
+    async def fake_get(self, url, params=None):
+        if url.endswith("/jobs"):
+            return _FakeResp(payload={"jobs": [{"id": "j1", "reportTypeId": "channel_reach_basic_a1"}]})
+        if url.endswith("/jobs/j1/reports"):
+            return _FakeResp(payload={"reports": [
+                {"startTime": "2026-11-20T08:00:00Z", "createTime": "2026-11-22T01:00:00Z", "downloadUrl": "old"},
+                {"startTime": "2026-11-20T08:00:00Z", "createTime": "2026-11-23T01:00:00Z", "downloadUrl": "new"},
+                {"startTime": "2026-11-21T08:00:00Z", "createTime": "2026-11-23T02:00:00Z", "downloadUrl": "d2"},
+            ]})
+        return _FakeResp(text={"old": csv_old, "new": csv_new, "d2": csv_d2}[url])
+
+    with patch("httpx.AsyncClient.get", new=fake_get):
+        out = json.loads(asyncio.run(call_youtube_analytics_rest(
+            "get_reach_report", {"start_date": "2026-11-01", "end_date": "2026-11-24"}, headers={"Authorization": "Bearer tok"})))
+    # a: 100 imp @10 % + 300 imp @2 % = 16 clicks / 400 = 4 %; the backfilled 999-impression file is ignored
+    assert out["videos"] == [{"video_id": "a", "impressions": 400, "ctr_pct": 4.0}, {"video_id": "b", "impressions": 50, "ctr_pct": 2.0}]
+
+
+def test_reach_report_creates_the_job_when_missing() -> None:
+    posted: dict = {}
+
+    async def fake_get(self, url, params=None):
+        return _FakeResp(payload={"jobs": []})
+
+    async def fake_post(self, url, json=None):
+        posted["body"] = json
+        return _FakeResp(payload={"id": "j1"})
+
+    with patch("httpx.AsyncClient.get", new=fake_get), patch("httpx.AsyncClient.post", new=fake_post):
+        out = json.loads(asyncio.run(call_youtube_analytics_rest("get_reach_report", {}, headers={"Authorization": "Bearer tok"})))
+    assert out["status"] == "job_created"
+    assert posted["body"]["reportTypeId"] == "channel_reach_basic_a1"

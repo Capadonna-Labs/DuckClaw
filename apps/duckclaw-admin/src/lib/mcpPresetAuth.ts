@@ -213,6 +213,23 @@ export function existingPresetIdsFromConnectors(
   return ids;
 }
 
+/** Connections of the same service (preset) are accounts of one MCP; custom connectors stand alone. */
+export function connectorGroupKey(connector: Pick<McpConnectorSummary, 'preset_id' | 'connector_id'>): string {
+  return trimStr(connector.preset_id) || trimStr(connector.connector_id);
+}
+
+/** The account part of a connection's name: "YouTube Analytics · Canal Cocina" → "Canal Cocina";
+ *  the preset's own connection (mcp_<preset>) is the main account. */
+export function connectorAccountLabel(
+  connector: Pick<McpConnectorSummary, 'preset_id' | 'connector_id' | 'display_name'>
+): string {
+  const name = trimStr(connector.display_name);
+  const sep = name.lastIndexOf(' · ');
+  if (sep > 0) return name.slice(sep + 3);
+  if (trimStr(connector.connector_id) === `mcp_${trimStr(connector.preset_id)}`) return 'Cuenta principal';
+  return name || trimStr(connector.connector_id);
+}
+
 export function presetAuthHint(preset: McpConnectorPreset): string {
   if (presetUsesAdbDevice(preset)) {
     return 'Conecta el teléfono vía ADB wireless (ANDROID_ADB_HOST) y arranca Android-MCP desde el drawer.';

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { connectorAccountLabel, connectorGroupKey, presetAdminLabel } from '@/lib/mcpPresetAuth';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react';
@@ -218,13 +219,30 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
 
   const filteredConnectors = useMemo(() => {
     const byQuery = filterMcpConnectors(connectors, query);
-    return filterMcpConnectorsByStatus(byQuery, {
+    const rows = filterMcpConnectorsByStatus(byQuery, {
       status: statusFilter,
       grantsByWorker,
       testResults,
       presetById,
     });
+    // Accounts of the same service stay together (stable: the first one keeps its place).
+    const firstIndex = new Map<string, number>();
+    rows.forEach((row, i) => {
+      const key = connectorGroupKey(row);
+      if (!firstIndex.has(key)) firstIndex.set(key, i);
+    });
+    return rows
+      .map((row, i) => ({ row, i }))
+      .sort((a, b) => firstIndex.get(connectorGroupKey(a.row))! - firstIndex.get(connectorGroupKey(b.row))! || a.i - b.i)
+      .map(({ row }) => row);
   }, [connectors, query, statusFilter, grantsByWorker, testResults, presetById]);
+
+  /** How many connections (accounts) each service has, over all connectors, not just this page. */
+  const accountsPerGroup = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const row of connectors) counts[connectorGroupKey(row)] = (counts[connectorGroupKey(row)] || 0) + 1;
+    return counts;
+  }, [connectors]);
 
   const statusCounts = useMemo(() => {
     const base = filterMcpConnectors(connectors, query);
@@ -554,14 +572,28 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
                   className="overflow-hidden rounded-2xl border border-gov-gray-100 bg-white shadow-sm dark:border-dark-border dark:bg-dark-surface"
                   data-mcp-connector-list="true"
                 >
-                  {paginated.items.map((connector) => {
+                  {paginated.items.map((connector, index) => {
                     const grantedWorkerLabels = workers
                       .filter((w) => (grantsByWorker[w.id] || []).includes(connector.connector_id))
                       .map((w) => w.name || w.id);
+                    const group = connectorGroupKey(connector);
+                    const accounts = accountsPerGroup[group] || 1;
+                    const startsGroup =
+                      accounts > 1 && (index === 0 || connectorGroupKey(paginated.items[index - 1]) !== group);
+                    const preset = connector.preset_id ? presetById[connector.preset_id] : undefined;
                     return (
+                      <Fragment key={connector.connector_id}>
+                        {startsGroup ? (
+                          <li
+                            className="border-b border-gov-gray-100 bg-gov-gray-50 px-4 py-2 text-xs font-bold uppercase tracking-wide text-gov-gray-600 dark:border-dark-border dark:bg-dark-bg dark:text-dark-muted"
+                            data-connector-group={group}
+                          >
+                            {preset ? presetAdminLabel(preset) : group} · {accounts} cuentas
+                          </li>
+                        ) : null}
                       <ConnectorListRow
-                        key={connector.connector_id}
                         connector={connector}
+                        accountLabel={accounts > 1 ? connectorAccountLabel(connector) : undefined}
                         preset={connector.preset_id ? presetById[connector.preset_id] : undefined}
                         canWrite={canWrite}
                         grantedWorkerLabels={grantedWorkerLabels}
@@ -570,6 +602,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
                         onOpenDetail={() => openDetail(connector.connector_id)}
                         onPrimary={(kind) => handleRowPrimary(connector.connector_id, kind)}
                       />
+                      </Fragment>
                     );
                   })}
                 </ul>

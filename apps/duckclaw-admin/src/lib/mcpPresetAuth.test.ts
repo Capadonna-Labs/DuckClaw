@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { McpConnectorPreset } from '@/services/adminService';
 import {
+  connectorAccountLabel,
+  connectorGroupKey,
   existingPresetIdsFromConnectors,
   groupMcpPresetsForSelect,
   presetAdminLabel,
@@ -138,5 +140,25 @@ describe('per-user keys from Integraciones', () => {
     });
     expect(presetAuthKindLabel(ib)).toBe('Login del bróker');
     expect(presetAuthHint(ib)).toContain('https://localhost:5000');
+  });
+});
+
+describe('connected accounts of one MCP', () => {
+  const main = { preset_id: 'google_youtube_analytics', connector_id: 'mcp_google_youtube_analytics', display_name: 'YouTube Analytics' };
+  const second = {
+    preset_id: 'google_youtube_analytics',
+    connector_id: 'mcp_google_youtube_analytics_canal_cocina',
+    display_name: 'YouTube Analytics · Canal Cocina',
+  };
+  const custom = { preset_id: '', connector_id: 'mcp_custom_x', display_name: 'Mi MCP' };
+
+  it('groups accounts by preset and leaves custom connectors alone', () => {
+    expect(connectorGroupKey(main)).toBe(connectorGroupKey(second));
+    expect(connectorGroupKey(custom)).toBe('mcp_custom_x');
+  });
+
+  it('labels each account', () => {
+    expect(connectorAccountLabel(main)).toBe('Cuenta principal');
+    expect(connectorAccountLabel(second)).toBe('Canal Cocina');
   });
 });

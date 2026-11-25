@@ -16,6 +16,8 @@ import { mcpConnectorRowHint } from '@/lib/mcpConnectorHealth';
 
 type Props = {
   connector: McpConnectorSummary;
+  /** Set when the service has several connected accounts: the row shows the account, nested under its service. */
+  accountLabel?: string;
   preset?: McpConnectorPreset;
   canWrite: boolean;
   grantedWorkerLabels: string[];
@@ -49,6 +51,7 @@ function StatusChip({
 
 export function ConnectorListRow({
   connector,
+  accountLabel,
   preset,
   canWrite,
   grantedWorkerLabels,
@@ -88,13 +91,15 @@ export function ConnectorListRow({
             onOpenDetail();
           }
         }}
-        className="group flex min-h-[3.5rem] cursor-pointer flex-wrap items-center gap-3 border-b border-gov-gray-100 px-4 py-3 last:border-b-0 hover:bg-gov-gray-50 dark:border-dark-border dark:hover:bg-dark-bg/60"
+        className={`group flex min-h-[3.5rem] cursor-pointer flex-wrap items-center gap-3 border-b border-gov-gray-100 py-3 pr-4 last:border-b-0 hover:bg-gov-gray-50 dark:border-dark-border dark:hover:bg-dark-bg/60 ${
+          accountLabel ? 'pl-8' : 'pl-4'
+        }`}
         data-connector-row={connector.connector_id}
       >
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <p className="truncate text-sm font-bold text-gov-gray-900 dark:text-dark-text">
-              {connector.display_name}
+              {accountLabel ?? connector.display_name}
             </p>
             <StatusChip tone={connector.enabled ? 'ok' : 'muted'}>
               {connector.enabled ? 'habilitado' : 'off'}

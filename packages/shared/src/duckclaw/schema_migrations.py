@@ -1664,8 +1664,38 @@ _M042_WORLDS = [
     """,
 ]
 
+# Messages between people (and the coding agents that act for them): direct messages and groups, like any messaging app.
+# Membership is by console email, across tenants: a channel is shared by its members, not owned by one workspace.
+_M043_MESSAGES = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_channels (
+        channel_id VARCHAR PRIMARY KEY,
+        kind VARCHAR NOT NULL DEFAULT 'group',
+        name VARCHAR NOT NULL DEFAULT '',
+        members_json VARCHAR NOT NULL DEFAULT '[]',
+        created_by VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_channel_messages (
+        message_id VARCHAR PRIMARY KEY,
+        channel_id VARCHAR NOT NULL,
+        author_email VARCHAR NOT NULL,
+        author_label VARCHAR NOT NULL DEFAULT '',
+        body VARCHAR NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_admin_channel_messages_channel
+        ON main.admin_channel_messages (channel_id, created_at)
+    """,
+]
+
 # Versions 39-40 were retired (vertical tables moved to their extension); existing
-# hubs keep those rows, so never reuse them — the next migration is 43.
+# hubs keep those rows, so never reuse them — the next migration is 44.
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
     (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),
@@ -1677,4 +1707,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     # Idempotent: a no-op on hubs that got v2.
     (41, "productivity_artifacts_ensure", _M002_PRODUCTIVITY_ARTIFACTS),
     (42, "worlds_v1", _M042_WORLDS),
+    (43, "messages_v1", _M043_MESSAGES),
 ]

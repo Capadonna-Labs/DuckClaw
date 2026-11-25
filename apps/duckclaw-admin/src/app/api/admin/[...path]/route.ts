@@ -92,6 +92,8 @@ function userWriteAllowed(sub: string, method: string): boolean {
   if (sub.startsWith('workspace/orchestrator/')) return true;
   if (sub.startsWith('playground/')) return true;
   if (sub.startsWith('conversations')) return true;
+  // Mensajes directos y grupos: el gateway comprueba que el actor sea miembro.
+  if (sub.startsWith('messages/')) return true;
   // Informes Word / Report Engine — cada usuario registra plantillas e instancias propias
   if (sub.startsWith('report-templates')) return true;
   if (sub.startsWith('report-instances')) return true;

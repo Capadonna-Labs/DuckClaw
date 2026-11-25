@@ -2,7 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Bot, Pencil, Trash2 } from 'lucide-react';
+import { MessagesView } from './MessagesView';
 import { adminService, type AdminConversation } from '@/services/adminService';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import { unreadReplies } from '@/lib/conversationSeen';
@@ -35,6 +37,9 @@ export function PlaygroundHistoryView({
   onRetryConfig?: () => void;
   onSelectConversation?: (id: string) => void;
 }) {
+  const searchParams = useSearchParams();
+  // A message push opens /playground?tab=mensajes&channel=<id>.
+  const [tab, setTab] = useState<'agentes' | 'mensajes'>(searchParams.get('tab') === 'mensajes' ? 'mensajes' : 'agentes');
   const [conversations, setConversations] = useState<AdminConversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -115,17 +120,33 @@ export function PlaygroundHistoryView({
           <h1 className="text-xl font-black dark:text-dark-text flex items-center gap-2">
             <Bot size={22} /> Historial
           </h1>
-          <p className="text-xs text-gov-gray-500 mt-0.5">
-            Conversaciones recientes del Playground
-          </p>
+          <div className="mt-2 flex gap-1" role="tablist">
+            {(['agentes', 'mensajes'] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                role="tab"
+                aria-selected={tab === t}
+                onClick={() => setTab(t)}
+                className={`rounded-xl px-3 py-1 text-xs font-bold ${tab === t ? 'bg-gov-blue-700 text-white' : 'border dark:border-dark-border text-gov-gray-600 dark:text-dark-muted'}`}
+              >
+                {t === 'agentes' ? 'Agentes' : 'Mensajes'}
+              </button>
+            ))}
+          </div>
         </div>
-        <Link
+        {tab === 'mensajes' ? null : <Link
           href="/playground?new=1"
           className="text-xs font-bold rounded-xl bg-gov-blue-700 text-white px-3 py-2 hover:bg-gov-blue-800"
         >
           Nueva conversación
-        </Link>
+        </Link>}
       </header>
+      {tab === 'mensajes' ? (
+        <div className="h-[calc(100%-6rem)] min-h-[60vh] p-4">
+          <MessagesView initialChannel={searchParams.get('channel') || ''} />
+        </div>
+      ) : (
       <div className="scrollbar-thin h-full min-h-0 overflow-y-auto p-4">
         {!tenantId?.trim() && !authHydrated && (
           <p className="text-sm text-gov-gray-400 text-center py-10">Cargando perfil…</p>
@@ -248,6 +269,7 @@ export function PlaygroundHistoryView({
           </ul>
         )}
       </div>
+      )}
     </section>
   );
 }

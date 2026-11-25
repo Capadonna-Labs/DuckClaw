@@ -86,8 +86,9 @@ def _subscription_from_row(row: dict[str, Any], tag: str = "") -> dict[str, Any]
     return subscription
 
 
-def list_web_push_subscriptions(db_path: str, tag: str = "") -> list[dict[str, Any]]:
-    """Read active Web Push subscriptions from the hub DB without taking a write lock; with ``tag``, the devices that muted that tag are left out.
+def list_web_push_subscriptions(db_path: str, tag: str = "", owners: list[str] | None = None) -> list[dict[str, Any]]:
+    """Read active Web Push subscriptions from the hub DB without taking a write lock; with ``tag``, the devices that muted that tag are left out;
+    with ``owners``, only the devices registered by those console emails (a message notifies its channel's members, not every device).
 
     The open waits out a DB-Writer lock (db_bridge.connect_with_lock_retry); a read that still
     fails is logged as such, not silently returned as "no subscriptions".
@@ -95,7 +96,7 @@ def list_web_push_subscriptions(db_path: str, tag: str = "") -> list[dict[str, A
     try:
         with duckclaw_open_for_read_scan(db_path) as db:
             raw = db.query(
-                "SELECT key, value_json, value_text FROM main.admin_runtime_settings "
+                "SELECT key, value_json, value_text, lower(coalesce(updated_by, '')) AS owner FROM main.admin_runtime_settings "
                 "WHERE active = true AND domain = 'web_push' AND key LIKE 'sub_%'"
             )
     except Exception as exc:  # noqa: BLE001
@@ -103,7 +104,10 @@ def list_web_push_subscriptions(db_path: str, tag: str = "") -> list[dict[str, A
         return []
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
+    wanted = {o.strip().lower() for o in owners} if owners is not None else None
     for row in _rows_from_query(raw):
+        if wanted is not None and str(row.get("owner") or "") not in wanted:
+            continue
         subscription = _subscription_from_row(row, tag)
         if not subscription:
             continue

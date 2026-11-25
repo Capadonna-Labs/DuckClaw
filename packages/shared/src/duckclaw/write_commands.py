@@ -595,6 +595,42 @@ class ReportWorldBotStatusCommand(WriteCommand):
 
 
 # ---------------------------------------------------------------------------
+# Messages: direct messages and groups between console users (and the coding agents that act for them).
+# ---------------------------------------------------------------------------
+
+_EMAIL = r"^[^@\s]{1,64}@[^@\s]{1,190}$"
+
+
+class CreateChannelCommand(WriteCommand):
+    """A direct message (exactly two members) or a group. The creator (actor_email) is always a member."""
+
+    command_type: Literal["create_channel"] = "create_channel"
+    channel_id: str = Field(default_factory=lambda: f"ch_{uuid.uuid4().hex[:16]}")
+    kind: Literal["dm", "group"] = "group"
+    name: str = Field(default="", max_length=80)
+    members: list[str] = Field(min_length=1, max_length=50)
+
+    @field_validator("members")
+    @classmethod
+    def _emails(cls, v: list[str]) -> list[str]:
+        out = sorted({m.strip().lower() for m in v if m.strip()})
+        bad = [m for m in out if not re.match(_EMAIL, m)]
+        if bad:
+            raise ValueError(f"correo inválido: {bad[0]}")
+        return out
+
+
+class PostChannelMessageCommand(WriteCommand):
+    """A message in a channel; the author is actor_email, who must be a member. author_label names an agent writing for that person."""
+
+    command_type: Literal["post_channel_message"] = "post_channel_message"
+    message_id: str = Field(default_factory=lambda: f"msg_{uuid.uuid4().hex[:16]}")
+    channel_id: str = Field(min_length=1, max_length=64)
+    author_label: str = Field(default="", max_length=60)
+    body: str = Field(min_length=1, max_length=8000)
+
+
+# ---------------------------------------------------------------------------
 # Knowledge/RAG commands
 # ---------------------------------------------------------------------------
 

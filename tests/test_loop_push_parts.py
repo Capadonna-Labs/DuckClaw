@@ -104,3 +104,14 @@ def test_quiet_hours_off_when_unset_or_malformed(monkeypatch):
     assert not hb._push_quiet_now(3)
     monkeypatch.setenv("DUCKCLAW_PUSH_QUIET_HOURS", "1-5")
     assert [h for h in range(24) if hb._push_quiet_now(h)] == [1, 2, 3, 4]
+
+
+def test_force_pattern_overrides_no_news(monkeypatch):
+    text = "Veredicto: sin novedades\n\n| 24-nov | Reuters | 2 tankers hit mines near the strait, fire on board | XLE |\n"
+    assert hb._loop_push_parts(_body(text)) is None
+    monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", r"tanker.*mine")
+    title, body = hb._loop_push_parts(_body(text))
+    assert title.startswith("Filtro: 2 tankers hit mines")
+    assert body == "2 tankers hit mines near the strait, fire on board"
+    monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", "(")
+    assert hb._loop_push_parts(_body(text)) is None

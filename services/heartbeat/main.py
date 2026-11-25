@@ -271,6 +271,26 @@ def _push_body(after: str, clean: Any, prose: bool = True) -> str:
     return clean(" · ".join(c.strip() for c in data[1].strip("|").split("|") if c.strip()))
 
 
+def _forced_push_line(text: str, clean: Any) -> str:
+    """The first line of a "sin novedades" reply that matches DUCKCLAW_PUSH_FORCE_PATTERN (a regex,
+    unset = off): events the deployment always wants on the watch, whatever the model concluded.
+    Repeats are still dropped by _remember_verdict."""
+    pattern = (os.getenv("DUCKCLAW_PUSH_FORCE_PATTERN") or "").strip()
+    if not pattern:
+        return ""
+    try:
+        rx = re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        logger.warning("DUCKCLAW_PUSH_FORCE_PATTERN inválido: %s", pattern)
+        return ""
+    for line in text.replace("\\n", "\n").splitlines():
+        if rx.search(line):
+            cells = [c.strip() for c in line.strip().strip("|").split("|") if c.strip()]
+            # Table row: date | source | fact | ... → the fact is the longest cell.
+            return clean(max(cells, key=len) if len(cells) > 1 else line)
+    return ""
+
+
 def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
     """(title, body) for the loop push, or None when the tick has nothing to report.
 
@@ -286,6 +306,10 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
         if _NO_NEWS_RE.search(verdict):
             # "sin novedades" over a reply that asks for approval (17-nov: HRP plan of 104k) hid the decision.
             ask = _APPROVAL_ASK_RE.search(text)
+            forced = _forced_push_line(text, clean)
+            if forced:
+                # The model listed it and still said "sin novedades" (Ormuz mines, 24-nov).
+                return f"Filtro: {forced}"[:80], forced if len(forced) <= 140 else forced[:139] + "…"
             if not ask:
                 return None
             q = clean(ask.group(0))

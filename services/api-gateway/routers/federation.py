@@ -43,6 +43,18 @@ def _enqueue(command: Any) -> str:
     return enqueue_admin_command(command)
 
 
+async def _claim(invite_id: str) -> bool:
+    import os
+
+    import redis.asyncio as redis
+
+    r = redis.from_url(os.environ.get("REDIS_URL") or "redis://localhost:6379/0")
+    try:
+        return bool(await r.set(f"duckclaw:invite_claim:{invite_id}", 1, nx=True, ex=8 * 86400))
+    finally:
+        await r.aclose()
+
+
 class AcceptBody(BaseModel):
     invite_id: str = Field(..., min_length=1, max_length=64)
     secret: str = Field(..., min_length=16, max_length=128)
@@ -62,6 +74,10 @@ async def accept(body: AcceptBody) -> dict[str, Any]:
     )
     if not rows:
         raise problem(403, "Invitación inválida", "el código no existe, ya se usó o venció")
+    # Atomic claim: the DB row is marked used only when the DB-Writer commits, so two quick redeems both passed the read above
+    # (the second got a token for a contact the writer then refused).
+    if not await _claim(body.invite_id):
+        raise problem(403, "Invitación inválida", "el código ya se usó")
     token = secrets.token_urlsafe(32)
     try:
         cmd = AcceptContactInviteCommand(actor_email=rows[0][0], invite_id=body.invite_id, secret_hash=sha(body.secret),

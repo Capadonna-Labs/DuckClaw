@@ -158,6 +158,6 @@ def _notify(others: list[str], channel: dict[str, Any], me: str, body: MessageBo
         subs = list_web_push_subscriptions(str(get_gateway_db_path()), tag, owners=others)
         who = body.author_label.strip() or me.split("@")[0]
         title = who if channel["kind"] == "dm" else f"{channel['name'] or 'Grupo'} · {who}"
-        send_web_push_notifications(subs, title=title, body=body.body[:300], url=f"/playground?tab=mensajes&channel={channel['id']}", tag=tag)
+        send_web_push_notifications(subs, title=title, body=body.body[:300], url=f"/playground?channel={channel['id']}", tag=tag)
     except Exception as exc:  # noqa: BLE001 - the message is stored; the push is best effort
         logging.getLogger(__name__).warning("messages: push no enviado canal=%s: %s", channel.get("id"), exc)

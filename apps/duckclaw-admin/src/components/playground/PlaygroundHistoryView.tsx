@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { Bot, Pencil, Trash2 } from 'lucide-react';
-import { MessagesView } from './MessagesView';
+import { Bot, Pencil, Trash2, User, Users } from 'lucide-react';
+import { ChannelChat, NewChannel } from './MessagesView';
+import { messagesApi, type MessageChannel } from '@/services/admin/messagesApi';
 import { adminService, type AdminConversation } from '@/services/adminService';
 import { EditableConversationTitle } from '@/components/chat/EditableConversationTitle';
 import { unreadReplies } from '@/lib/conversationSeen';
@@ -21,6 +22,8 @@ const ACTIVITY: Record<string, { label: string; dot: string }> = {
 };
 // ponytail: 15 s polling of the list; a push/SSE channel if it ever needs to be instant.
 const REFRESH_MS = 15_000;
+// Gateway timestamps come as "2026-11-25 15:11:58+00:00" or ISO: compare as dates, not strings.
+const stamp = (s: string) => Date.parse(s.replace(' ', 'T')) || 0;
 
 export function PlaygroundHistoryView({
   tenantId,
@@ -38,8 +41,10 @@ export function PlaygroundHistoryView({
   onSelectConversation?: (id: string) => void;
 }) {
   const searchParams = useSearchParams();
-  // A message push opens /playground?tab=mensajes&channel=<id>.
-  const [tab, setTab] = useState<'agentes' | 'mensajes'>(searchParams.get('tab') === 'mensajes' ? 'mensajes' : 'agentes');
+  // Direct messages and groups sit in the same list as the agent conversations (a message push opens /playground?channel=<id>).
+  const [channels, setChannels] = useState<MessageChannel[]>([]);
+  const [openChannel, setOpenChannel] = useState(searchParams.get('channel') || '');
+  const [creating, setCreating] = useState(false);
   const [conversations, setConversations] = useState<AdminConversation[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,6 +53,15 @@ export function PlaygroundHistoryView({
   const uniqueConversations = useMemo(
     () => uniqueConversationsBySession(conversations),
     [conversations]
+  );
+  // One list like a messaging app: agent conversations, direct messages and groups by last activity.
+  const items = useMemo(
+    () =>
+      [
+        ...uniqueConversations.map((c) => ({ at: c.updated_at || '', agent: c, channel: null as MessageChannel | null })),
+        ...channels.map((c) => ({ at: c.updated_at || '', agent: null as AdminConversation | null, channel: c })),
+      ].sort((a, b) => stamp(b.at) - stamp(a.at)),
+    [uniqueConversations, channels]
   );
 
   useEffect(() => {
@@ -70,13 +84,18 @@ export function PlaygroundHistoryView({
         if (!cancelled) setLoading(false);
       });
 
-    // Silent refresh so the traffic light and the unread badges follow the agents.
+    const loadChannels = () =>
+      messagesApi.channels().then((r) => { if (!cancelled) setChannels(r.channels); }).catch(() => undefined);
+    void loadChannels();
+
+    // Silent refresh so the traffic light, the unread badges and the messages follow.
     const timer = window.setInterval(() => {
       adminService.listConversations({ tenant_id: tenantId, limit: 80 })
         .then((res) => {
           if (!cancelled) setConversations(res.conversations ?? []);
         })
         .catch(() => undefined);
+      void loadChannels();
     }, REFRESH_MS);
 
     return () => {
@@ -120,31 +139,33 @@ export function PlaygroundHistoryView({
           <h1 className="text-xl font-black dark:text-dark-text flex items-center gap-2">
             <Bot size={22} /> Historial
           </h1>
-          <div className="mt-2 flex gap-1" role="tablist">
-            {(['agentes', 'mensajes'] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                role="tab"
-                aria-selected={tab === t}
-                onClick={() => setTab(t)}
-                className={`rounded-xl px-3 py-1 text-xs font-bold ${tab === t ? 'bg-gov-blue-700 text-white' : 'border dark:border-dark-border text-gov-gray-600 dark:text-dark-muted'}`}
-              >
-                {t === 'agentes' ? 'Agentes' : 'Mensajes'}
-              </button>
-            ))}
-          </div>
+          <p className="text-xs text-gov-gray-500 mt-0.5">Agentes, mensajes directos y grupos</p>
         </div>
-        {tab === 'mensajes' ? null : <Link
-          href="/playground?new=1"
-          className="text-xs font-bold rounded-xl bg-gov-blue-700 text-white px-3 py-2 hover:bg-gov-blue-800"
-        >
-          Nueva conversación
-        </Link>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => { setOpenChannel(''); setCreating(true); }}
+            className="text-xs font-bold rounded-xl border border-gov-blue-700 text-gov-blue-700 dark:text-dark-cyan px-3 py-2 hover:bg-gov-blue-50"
+          >
+            Nuevo mensaje
+          </button>
+          <Link
+            href="/playground?new=1"
+            className="text-xs font-bold rounded-xl bg-gov-blue-700 text-white px-3 py-2 hover:bg-gov-blue-800"
+          >
+            Nueva conversación
+          </Link>
+        </div>
       </header>
-      {tab === 'mensajes' ? (
-        <div className="h-[calc(100%-6rem)] min-h-[60vh] p-4">
-          <MessagesView initialChannel={searchParams.get('channel') || ''} />
+      {creating ? (
+        <NewChannel onCancel={() => setCreating(false)} onCreated={(id) => { setCreating(false); setOpenChannel(id); }} />
+      ) : openChannel ? (
+        <div className="h-[calc(100%-5rem)] min-h-[60vh]">
+          <ChannelChat
+            channelId={openChannel}
+            fallbackName={channels.find((c) => c.id === openChannel)?.name}
+            onBack={() => { setOpenChannel(''); void messagesApi.channels().then((r) => setChannels(r.channels)).catch(() => undefined); }}
+          />
         </div>
       ) : (
       <div className="scrollbar-thin h-full min-h-0 overflow-y-auto p-4">
@@ -179,15 +200,38 @@ export function PlaygroundHistoryView({
         {tenantId?.trim() && error && error !== configError && (
           <p className="text-sm text-red-600 text-center py-10">{error}</p>
         )}
-        {tenantId?.trim() && !loading && !error && !(configLoading && !configError) && uniqueConversations.length === 0 && (
+        {tenantId?.trim() && !loading && !error && !(configLoading && !configError) && items.length === 0 && (
           <div className="rounded-3xl border border-dashed dark:border-dark-border p-10 text-center">
             <p className="font-bold dark:text-dark-text">Sin conversaciones</p>
             <p className="text-sm text-gov-gray-500 mt-1">Crea una conversación para verla aquí.</p>
           </div>
         )}
-        {tenantId?.trim() && !loading && !error && !(configLoading && !configError) && uniqueConversations.length > 0 && (
+        {tenantId?.trim() && !loading && !error && !(configLoading && !configError) && items.length > 0 && (
           <ul className="grid gap-2">
-            {uniqueConversations.map((conversation) => {
+            {items.map(({ agent: conversation, channel }) => {
+              if (channel) {
+                return (
+                  <li key={channel.id}>
+                    <button
+                      type="button"
+                      onClick={() => setOpenChannel(channel.id)}
+                      className="w-full text-left rounded-2xl border dark:border-dark-border p-3 hover:border-gov-blue-300 hover:bg-gov-blue-50/50 dark:hover:bg-dark-bg transition-colors"
+                    >
+                      <span className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 font-bold text-sm dark:text-dark-text truncate">
+                          {channel.kind === 'group' ? <Users size={14} aria-label="grupo" /> : <User size={14} aria-label="mensaje directo" />}
+                          {channel.name}
+                        </span>
+                        <span className="text-[10px] font-black uppercase tracking-wide text-gov-gray-400 whitespace-nowrap">
+                          {formatConversationTime(channel.updated_at ?? '')}
+                        </span>
+                      </span>
+                      <span className="block text-xs text-gov-gray-500 mt-1 line-clamp-2">{channel.last_message_preview || 'Sin mensajes todavía'}</span>
+                    </button>
+                  </li>
+                );
+              }
+              if (!conversation) return null;
               const isRenaming = renamingSessionId === conversation.session_id;
               const unread = unreadReplies(conversation.session_id, conversation.message_count);
               const activity = ACTIVITY[conversation.activity || 'idle'] ?? ACTIVITY.idle;

@@ -28,12 +28,17 @@ import {
   isGoogleWorkspacePreset,
 } from '@/lib/mcpConnectorHealth';
 import { trimStr } from '@/lib/utils';
+import { connectorAccountLabel, connectorNameSlug } from '@/lib/mcpPresetAuth';
 
 type Props = {
   open: boolean;
   connector: McpConnectorSummary | null;
   preset?: McpConnectorPreset;
   canWrite: boolean;
+  /** Every connected account of this service, this one included. */
+  accounts?: McpConnectorSummary[];
+  onSelectAccount?: (connectorId: string) => void;
+  onAddAccount?: (name: string) => Promise<void>;
   workers: TemplateSummary[];
   busyId: string | null;
   authToken: string;
@@ -107,6 +112,9 @@ export function ConnectorDetailDrawer({
   connector,
   preset,
   canWrite,
+  accounts = [],
+  onSelectAccount,
+  onAddAccount,
   workers,
   busyId,
   authToken,
@@ -133,6 +141,7 @@ export function ConnectorDetailDrawer({
   const [grantConfirmOpen, setGrantConfirmOpen] = useState(false);
   const [revokeConfirmOpen, setRevokeConfirmOpen] = useState(false);
   const [dangerOpen, setDangerOpen] = useState(false);
+  const [newAccountName, setNewAccountName] = useState('');
 
   if (!connector) return null;
 
@@ -276,6 +285,66 @@ export function ConnectorDetailDrawer({
             </Link>
           ) : null}
         </div>
+
+        {/* Accounts of this service: each one is managed on its own (OAuth, grants, test, deactivate) */}
+        {connector.preset_id && (accounts.length > 1 || (canWrite && onAddAccount)) ? (
+          <Section title={`Cuentas conectadas (${accounts.length})`}>
+            <ul className="divide-y divide-gov-gray-100 rounded-xl border border-gov-gray-100 dark:divide-dark-border dark:border-dark-border">
+              {accounts.map((account) => {
+                const current = account.connector_id === connector.connector_id;
+                return (
+                  <li key={account.connector_id}>
+                    <button
+                      type="button"
+                      disabled={current}
+                      onClick={() => onSelectAccount?.(account.connector_id)}
+                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
+                        current
+                          ? 'font-bold text-gov-gray-900 dark:text-dark-text'
+                          : 'text-gov-blue-700 hover:bg-gov-gray-50 dark:text-dark-cyan dark:hover:bg-dark-bg'
+                      }`}
+                      data-account-row={account.connector_id}
+                    >
+                      <span className="truncate">
+                        {connectorAccountLabel(account)}
+                        {current ? ' · viendo' : ''}
+                      </span>
+                      <Chip tone={account.has_auth ? 'ok' : 'warn'}>
+                        {account.has_auth ? 'auth OK' : 'falta auth'}
+                      </Chip>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            {canWrite && onAddAccount ? (
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newAccountName}
+                  onChange={(e) => setNewAccountName(e.target.value)}
+                  placeholder="Nombre de la otra cuenta, p. ej. Canal Cocina"
+                  maxLength={60}
+                  className="min-w-0 flex-1 rounded-xl border border-gov-gray-200 bg-white px-3 py-2 text-sm dark:border-dark-border dark:bg-dark-bg"
+                />
+                <button
+                  type="button"
+                  disabled={!connectorNameSlug(newAccountName) || busyId === `add:${connector.connector_id}`}
+                  onClick={() => {
+                    void onAddAccount(newAccountName).then(() => setNewAccountName(''));
+                  }}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-gov-blue-700 px-3 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
+                >
+                  {busyId === `add:${connector.connector_id}` ? <Loader2 size={14} className="animate-spin" /> : null}
+                  Agregar cuenta
+                </button>
+              </div>
+            ) : null}
+            <p className="text-xs text-gov-gray-500 dark:text-dark-muted">
+              Cada cuenta tiene su propio login y sus propios grants. El agente ve todas las que tengan grant y elige por su nombre.
+            </p>
+          </Section>
+        ) : null}
 
         {/* 1 · Auth — only if needed */}
         {canWrite && (usesOAuth || needsBearer || usesAdbDevice) ? (

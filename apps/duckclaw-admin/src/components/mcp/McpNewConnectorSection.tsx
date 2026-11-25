@@ -10,6 +10,7 @@ import {
 } from '@/services/adminService';
 import { pollWriteTask } from '@/lib/pollWriteTask';
 import {
+  connectorNameSlug,
   existingPresetIdsFromConnectors,
   groupMcpPresetsForSelect,
   presetAdminLabel,
@@ -107,14 +108,7 @@ export function McpNewConnectorSection({
   const baseId = selected ? presetConnectorId(selected) : selectedPreset ? `mcp_${selectedPreset}` : '';
   // A second connection of the same service gets its own id, OAuth token and tools (mcp__<id>__<tool>);
   // its name goes into every tool description, so the agent can tell the connections apart.
-  const instanceSlug = instanceName
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 40);
+  const instanceSlug = connectorNameSlug(instanceName);
   const previewId = alreadyCreated ? (instanceSlug ? `${baseId}_${instanceSlug}` : '') : baseId;
   const idTaken = Boolean(previewId && existingConnectors.some((c) => c.connector_id === previewId));
   const baseName = selected ? presetAdminLabel(selected) : selectedPreset;

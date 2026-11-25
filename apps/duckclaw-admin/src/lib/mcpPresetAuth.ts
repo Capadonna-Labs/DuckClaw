@@ -213,6 +213,18 @@ export function existingPresetIdsFromConnectors(
   return ids;
 }
 
+/** "Canal Cocina" → "canal_cocina": the suffix of an extra account's connector id (mcp_<preset>_<slug>). */
+export function connectorNameSlug(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+}
+
 /** Connections of the same service (preset) are accounts of one MCP; custom connectors stand alone. */
 export function connectorGroupKey(connector: Pick<McpConnectorSummary, 'preset_id' | 'connector_id'>): string {
   return trimStr(connector.preset_id) || trimStr(connector.connector_id);

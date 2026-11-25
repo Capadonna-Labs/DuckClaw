@@ -1,7 +1,14 @@
 'use client';
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { connectorAccountLabel, connectorGroupKey, presetAdminLabel } from '@/lib/mcpPresetAuth';
+import {
+  connectorAccountLabel,
+  connectorGroupKey,
+  connectorNameSlug,
+  presetAdminLabel,
+  presetUsesOAuthPkce,
+} from '@/lib/mcpPresetAuth';
+import { trimStr } from '@/lib/utils';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react';
@@ -130,6 +137,51 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
       setError(decodeURIComponent(msg));
     }
   }, [searchParams, load]);
+
+  /** Another account of the same service: its own connector (id, OAuth token, grants, tools), then its login. */
+  const addAccount = async (base: McpConnectorSummary, name: string) => {
+    const presetId = trimStr(base.preset_id);
+    const slug = connectorNameSlug(name);
+    if (!presetId || !slug || busyId) return;
+    const connectorId = `mcp_${presetId}_${slug}`;
+    if (connectors.some((c) => c.connector_id === connectorId)) {
+      setConnectorNotices((prev) => ({ ...prev, [base.connector_id]: 'Ya existe una cuenta con ese nombre.' }));
+      return;
+    }
+    const preset = presetById[presetId];
+    setBusyId(`add:${base.connector_id}`);
+    try {
+      const created = await adminService.createMcpConnector({
+        preset_id: presetId,
+        connector_id: connectorId,
+        display_name: `${preset ? presetAdminLabel(preset) : presetId} · ${name.trim()}`,
+      });
+      if (created.task_id) {
+        const polled = await pollWriteTask(created.task_id);
+        if (polled.state === 'failed') throw new Error(polled.detail || 'La cuenta no se creó');
+      }
+      const oauthNeeded = Boolean(preset && presetUsesOAuthPkce(preset));
+      if (!oauthNeeded) {
+        await load();
+        setSelectedConnectorId(connectorId);
+        return;
+      }
+      const google = preset?.metadata?.oauth_provider === 'google_workspace' || presetId.startsWith('google_');
+      if (!google) {
+        window.location.href = `/api/admin/mcp/connectors/${encodeURIComponent(connectorId)}/oauth/redirect`;
+        return;
+      }
+      const oauth = await adminService.startMcpConnectorOAuth(connectorId, '');
+      window.location.href = oauth.authorization_url;
+    } catch (e) {
+      setConnectorNotices((prev) => ({
+        ...prev,
+        [base.connector_id]: e instanceof Error ? e.message : 'No se pudo agregar la cuenta',
+      }));
+    } finally {
+      setBusyId(null);
+    }
+  };
 
   const connectOAuth = async (connectorId: string) => {
     if (busyId) return;
@@ -628,6 +680,11 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
             selectedConnector.preset_id ? presetById[selectedConnector.preset_id] : undefined
           }
           canWrite={canWrite}
+          accounts={connectors.filter(
+            (c) => connectorGroupKey(c) === connectorGroupKey(selectedConnector)
+          )}
+          onSelectAccount={(id) => setSelectedConnectorId(id)}
+          onAddAccount={(name) => addAccount(selectedConnector, name)}
           workers={workers}
           busyId={busyId}
           authToken={authTokens[selectedConnector.connector_id] || ''}

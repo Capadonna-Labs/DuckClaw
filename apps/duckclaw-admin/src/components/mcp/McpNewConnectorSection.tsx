@@ -39,6 +39,8 @@ export function McpNewConnectorSection({
   const [presets, setPresets] = useState<McpConnectorPreset[]>([]);
   const [selectedPreset, setSelectedPreset] = useState('');
   const [bearerToken, setBearerToken] = useState('');
+  /** Name of an extra connection of a service that already has one (e.g. a second YouTube channel). */
+  const [instanceName, setInstanceName] = useState('');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -62,10 +64,9 @@ export function McpNewConnectorSection({
           return {
             value: preset.preset_id,
             label: created
-              ? `${presetAdminLabel(preset)} (ya creado)`
+              ? `${presetAdminLabel(preset)} (ya creado · agregar otra conexión)`
               : presetAdminLabel(preset),
             meta: presetAuthKindLabel(preset),
-            disabled: created,
           };
         }),
       })),
@@ -103,13 +104,30 @@ export function McpNewConnectorSection({
 
   const selected = selectedPreset ? presetById[selectedPreset] : undefined;
   const alreadyCreated = Boolean(selectedPreset && existingPresetIds.has(selectedPreset));
-  const previewId = selected ? presetConnectorId(selected) : selectedPreset ? `mcp_${selectedPreset}` : '';
-  const previewName = selected ? presetAdminLabel(selected) : selectedPreset;
+  const baseId = selected ? presetConnectorId(selected) : selectedPreset ? `mcp_${selectedPreset}` : '';
+  // A second connection of the same service gets its own id, OAuth token and tools (mcp__<id>__<tool>);
+  // its name goes into every tool description, so the agent can tell the connections apart.
+  const instanceSlug = instanceName
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 40);
+  const previewId = alreadyCreated ? (instanceSlug ? `${baseId}_${instanceSlug}` : '') : baseId;
+  const idTaken = Boolean(previewId && existingConnectors.some((c) => c.connector_id === previewId));
+  const baseName = selected ? presetAdminLabel(selected) : selectedPreset;
+  const previewName =
+    alreadyCreated && instanceName.trim() ? `${baseName} · ${instanceName.trim()}` : baseName;
+  const instanceMissing = alreadyCreated && (!instanceSlug || idTaken);
   const needsOAuth = selected ? presetUsesOAuthPkce(selected) : false;
   const needsBearer = Boolean(selected && !needsOAuth && selected.auth_kind === 'bearer');
 
   const primaryLabel = alreadyCreated
-    ? 'Ya creado'
+    ? needsOAuth
+      ? 'Agregar conexión y conectar OAuth'
+      : 'Agregar conexión'
     : needsOAuth
       ? 'Crear y conectar OAuth'
       : needsBearer
@@ -117,7 +135,11 @@ export function McpNewConnectorSection({
         : 'Crear conector';
 
   const materializeConnector = async (): Promise<string> => {
-    const result = await adminService.createMcpConnector({ preset_id: selectedPreset });
+    const result = await adminService.createMcpConnector(
+      alreadyCreated
+        ? { preset_id: selectedPreset, connector_id: previewId, display_name: previewName }
+        : { preset_id: selectedPreset }
+    );
     if (result.task_id) {
       const polled = await pollWriteTask(result.task_id);
       if (polled.state === 'failed') {
@@ -131,14 +153,12 @@ export function McpNewConnectorSection({
         );
       }
     }
-    return (
-      result.connector?.connector_id ||
-      (selected ? presetConnectorId(selected) : `mcp_${selectedPreset}`)
-    );
+    // The create response falls back to the newest row when its read races the writer: trust the id we asked for.
+    return previewId || result.connector?.connector_id || baseId;
   };
 
   const createFromPreset = async () => {
-    if (!selectedPreset || busy || alreadyCreated) return;
+    if (!selectedPreset || busy || instanceMissing) return;
     if (needsBearer && !bearerToken.trim()) {
       setError('Pega el token Bearer antes de crear el conector.');
       setConfirmOpen(false);
@@ -239,6 +259,7 @@ export function McpNewConnectorSection({
               onChange={(next) => {
                 setSelectedPreset(next);
                 setBearerToken('');
+                setInstanceName('');
                 setSuccess(null);
                 setError(null);
               }}
@@ -258,16 +279,16 @@ export function McpNewConnectorSection({
             disabled={
               !selectedPreset ||
               busy ||
-              alreadyCreated ||
+              instanceMissing ||
               (needsBearer && !bearerToken.trim())
             }
             className="inline-flex items-center gap-2 rounded-xl bg-gov-blue-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-50 dark:bg-dark-cyan dark:text-dark-bg"
           >
             {busy ? (
               <Loader2 size={16} className="animate-spin" />
-            ) : needsOAuth && !alreadyCreated ? (
+            ) : needsOAuth ? (
               <LogIn size={16} />
-            ) : needsBearer && !alreadyCreated ? (
+            ) : needsBearer ? (
               <KeyRound size={16} />
             ) : (
               <Plug size={16} />
@@ -279,7 +300,7 @@ export function McpNewConnectorSection({
         {selected ? (
           <p className="text-xs text-gov-gray-600 dark:text-dark-muted">
             {alreadyCreated
-              ? 'Este MCP ya está en la lista de abajo. Configura auth o grants allí.'
+              ? 'Ya tienes una conexión de este MCP. Para otra cuenta o canal, ponle un nombre: el agente verá las dos y elegirá por ese nombre. Después dale el grant al worker en la lista de abajo.'
               : needsOAuth
                 ? 'Al confirmar se crea el conector y se abre OAuth del proveedor.'
                 : needsBearer
@@ -288,7 +309,24 @@ export function McpNewConnectorSection({
           </p>
         ) : null}
 
-        {needsBearer && !alreadyCreated ? (
+        {alreadyCreated ? (
+          <label className="flex max-w-xl flex-col gap-1 text-xs font-bold uppercase tracking-wide text-gov-gray-500">
+            Nombre de la nueva conexión
+            <input
+              type="text"
+              value={instanceName}
+              onChange={(e) => setInstanceName(e.target.value)}
+              placeholder="p. ej. Canal History & Machine"
+              maxLength={60}
+              className="rounded-xl border border-gov-gray-200 bg-white px-3 py-2 text-sm font-normal normal-case dark:border-dark-border dark:bg-dark-bg"
+            />
+            {idTaken ? (
+              <span className="font-normal normal-case text-red-600">Ya existe una conexión con ese nombre.</span>
+            ) : null}
+          </label>
+        ) : null}
+
+        {needsBearer ? (
           <label className="flex max-w-xl flex-col gap-1 text-xs font-bold uppercase tracking-wide text-gov-gray-500">
             Token Bearer
             <input

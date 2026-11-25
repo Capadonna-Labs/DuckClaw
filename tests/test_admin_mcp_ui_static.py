@@ -72,7 +72,8 @@ def test_mcp_new_connector_selector_groups_by_product() -> None:
     assert "SearchableGroupedSelect" in section
     assert "groupMcpPresetsForSelect" in section
     assert "existingConnectors" in section
-    assert "(ya creado)" in section
+    assert "(ya creado · agregar otra conexión)" in section   # a created preset can get a second, named connection
+    assert "connector_id: previewId" in section
     assert "filterMcpPresets" in auth
     assert "max-h-72" in combobox or 'data-virtualized="true"' in combobox or "data-virtualized" in combobox
     assert "VIEWPORT_H" in combobox or "virtualizado" in combobox or "translateY" in combobox

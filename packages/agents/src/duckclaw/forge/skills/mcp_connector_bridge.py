@@ -46,7 +46,19 @@ def _public_tool_name(connector_id: str, tool_name: str) -> str:
     if safe_connector.startswith("mcp_"):
         safe_connector = safe_connector[4:]
     safe_tool = tool_name.replace("-", "_").replace(".", "_")
-    return f"mcp__{safe_connector}__{safe_tool}"
+    name = f"mcp__{safe_connector}__{safe_tool}"
+    if len(name) > _MAX_TOOL_NAME:
+        # A named second connection (mcp_google_youtube_analytics_<name>) overflows the providers'
+        # 64-char limit: shorten the connector part, kept unique by a hash of the full id.
+        import hashlib
+
+        tag = hashlib.sha1(safe_connector.encode()).hexdigest()[:6]
+        room = max(_MAX_TOOL_NAME - len(safe_tool) - len("mcp____") - len(tag) - 1, 1)
+        name = f"mcp__{safe_connector[:room]}_{tag}__{safe_tool}"[:_MAX_TOOL_NAME]
+    return name
+
+
+_MAX_TOOL_NAME = 64
 
 
 def _build_stdio_params(connector: dict[str, Any], db: Any = None) -> Any:

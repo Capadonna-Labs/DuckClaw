@@ -96,7 +96,7 @@ export function ChannelChat({ channelId, fallbackName = '', onBack }: { channelI
 }
 
 export function NewChannel({ onCancel, onCreated }: { onCancel: () => void; onCreated: (id: string) => void }) {
-  const [people, setPeople] = useState<{ email: string; name: string }[] | null>(null);
+  const [people, setPeople] = useState<{ email: string; name: string; remote?: boolean }[] | null>(null);
   const [picked, setPicked] = useState<string[]>([]);
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -136,7 +136,7 @@ export function NewChannel({ onCancel, onCreated }: { onCancel: () => void; onCr
                 checked={picked.includes(p.email)}
                 onChange={(e) => setPicked((s) => (e.target.checked ? [...s, p.email] : s.filter((x) => x !== p.email)))}
               />
-              {p.name} <span className="text-xs text-gov-gray-400">{p.email}</span>
+              {p.name} <span className="text-xs text-gov-gray-400">{p.email}{p.remote ? ' · contacto de otra instancia' : ''}</span>
             </label>
           </li>
         ))}

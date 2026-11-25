@@ -127,6 +127,11 @@ try:
 except ImportError as _admin_imp_err:
     _gateway_log.error("Admin router omitido: %s", _admin_imp_err)
 
+# Instance-to-instance contacts and their messages: authenticated by the contact token, never the admin key.
+from routers.federation import router as federation_router  # noqa: E402
+
+app.include_router(federation_router)
+
 try:
     from routers.admin_domains.mcp_connectors import oauth_callback_public
 

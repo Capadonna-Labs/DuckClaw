@@ -630,6 +630,44 @@ class PostChannelMessageCommand(WriteCommand):
     body: str = Field(min_length=1, max_length=8000)
 
 
+class CreateContactInviteCommand(WriteCommand):
+    """An invitation code for another DuckClaw instance. Only the sha256 of its secret is stored (the code is shown once)."""
+
+    command_type: Literal["create_contact_invite"] = "create_contact_invite"
+    invite_id: str = Field(default_factory=lambda: f"inv_{uuid.uuid4().hex[:16]}")
+    secret_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expires_at: str = Field(min_length=10, max_length=40)
+
+
+class AcceptContactInviteCommand(WriteCommand):
+    """Host side: the invited instance redeemed the code. Marks it used and stores the contact with the hash of its token."""
+
+    command_type: Literal["accept_contact_invite"] = "accept_contact_invite"
+    invite_id: str = Field(min_length=1, max_length=64)
+    secret_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    contact_id: str = Field(default_factory=lambda: f"ct_{uuid.uuid4().hex[:16]}")
+    remote_email: str = Field(pattern=_EMAIL)
+    remote_name: str = Field(default="", max_length=80)
+    token_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class AddGuestContactCommand(WriteCommand):
+    """Guest side: the host accepted our code; keep the token to call it. ponytail: the token is kept as text (like MCP bearer
+    tokens) and the command sits in admin_write_ledger for its retention window; encrypt at rest if contacts ever matter more."""
+
+    command_type: Literal["add_guest_contact"] = "add_guest_contact"
+    contact_id: str = Field(default_factory=lambda: f"ct_{uuid.uuid4().hex[:16]}")
+    remote_url: str = Field(pattern=r"^https?://[^\s]{3,200}$")
+    remote_email: str = Field(pattern=_EMAIL)
+    remote_name: str = Field(default="", max_length=80)
+    token: str = Field(min_length=32, max_length=128)
+
+
+class DeleteContactCommand(WriteCommand):
+    command_type: Literal["delete_contact"] = "delete_contact"
+    contact_id: str = Field(min_length=1, max_length=64)
+
+
 # ---------------------------------------------------------------------------
 # Knowledge/RAG commands
 # ---------------------------------------------------------------------------

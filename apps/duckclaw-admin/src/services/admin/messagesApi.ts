@@ -23,7 +23,7 @@ export interface ChannelMessage {
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
 export const messagesApi = {
-  people: () => adminFetch<{ people: { email: string; name: string }[] }>('/messages/people').then((r) => r.people),
+  people: () => adminFetch<{ people: { email: string; name: string; remote?: boolean }[] }>('/messages/people').then((r) => r.people),
   channels: () => adminFetch<{ channels: MessageChannel[]; me: string }>('/messages/channels'),
   createChannel: (body: { kind: 'dm' | 'group'; name?: string; members: string[] }) =>
     adminFetch<{ ok: boolean; channel_id: string; existing?: boolean }>('/messages/channels', json('POST', body)),

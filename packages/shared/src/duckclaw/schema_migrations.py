@@ -1694,8 +1694,36 @@ _M043_MESSAGES = [
     """,
 ]
 
+# Contacts across DuckClaw instances (federation). The inviter's instance hosts the shared channels ("host" contact, it keeps
+# only the sha256 of the token the other side calls it with); the invited instance keeps the token to call the host ("guest").
+_M044_CONTACTS = [
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_contact_invites (
+        invite_id VARCHAR PRIMARY KEY,
+        owner_email VARCHAR NOT NULL,
+        secret_hash VARCHAR NOT NULL,
+        expires_at TIMESTAMP NOT NULL,
+        used_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS main.admin_contacts (
+        contact_id VARCHAR PRIMARY KEY,
+        owner_email VARCHAR NOT NULL,
+        role VARCHAR NOT NULL,
+        remote_url VARCHAR NOT NULL DEFAULT '',
+        remote_email VARCHAR NOT NULL,
+        remote_name VARCHAR NOT NULL DEFAULT '',
+        token_hash VARCHAR NOT NULL DEFAULT '',
+        token VARCHAR NOT NULL DEFAULT '',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+]
+
 # Versions 39-40 were retired (vertical tables moved to their extension); existing
-# hubs keep those rows, so never reuse them — the next migration is 44.
+# hubs keep those rows, so never reuse them — the next migration is 45.
 _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (1, "baseline_v1", _M001_BASELINE),
     (2, "productivity_artifacts_v1", _M002_PRODUCTIVITY_ARTIFACTS),
@@ -1708,4 +1736,5 @@ _ALL_MIGRATIONS: list[tuple[int, str, list[str]]] = [
     (41, "productivity_artifacts_ensure", _M002_PRODUCTIVITY_ARTIFACTS),
     (42, "worlds_v1", _M042_WORLDS),
     (43, "messages_v1", _M043_MESSAGES),
+    (44, "contacts_v1", _M044_CONTACTS),
 ]

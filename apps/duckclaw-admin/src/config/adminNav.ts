@@ -35,6 +35,7 @@ export const PRIMARY_NAV_GROUP: AdminNavGroup = {
   items: [
     { href: '/overview', label: 'Inicio', section: 'core', audience: 'all' },
     { href: '/playground', label: 'Chat', section: 'core', audience: 'all' },
+    { href: '/contactos', label: 'Contactos', section: 'core', audience: 'all' },
     { href: '/projects', label: 'Proyectos', section: 'core', audience: 'all' },
     { href: '/templates', label: 'Agentes', section: 'core', audience: 'admin' },
     { href: '/templates', label: 'Mis agentes', section: 'core', audience: 'user' },

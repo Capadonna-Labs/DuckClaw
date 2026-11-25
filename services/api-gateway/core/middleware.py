@@ -118,6 +118,9 @@ async def tailscale_auth_middleware(request: Request, call_next):
     # Consola admin (BFF local): autentica con X-Admin-Key, no Tailscale en el browser.
     if path.startswith("/api/v1/admin/"):
         return await call_next(request)
+    # Another DuckClaw instance (a contact): authenticated by the invitation secret or its contact token (routers/federation.py).
+    if path.startswith("/api/v1/federation/"):
+        return await call_next(request)
     # Playground u otras herramientas internas: BFF puede enviar X-Admin-Key en rutas /agent/*.
     admin_expected = (os.environ.get("DUCKCLAW_ADMIN_API_KEY") or "").strip()
     admin_header = (request.headers.get("X-Admin-Key") or "").strip()

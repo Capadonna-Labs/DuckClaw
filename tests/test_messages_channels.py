@@ -42,3 +42,45 @@ def test_dm_needs_exactly_two(conn):
 def test_bad_email_rejected():
     with pytest.raises(ValueError):
         CreateChannelCommand(actor_email="ana@x.com", members=["not-an-email"])
+
+
+def _contacts_conn():
+    from duckclaw.schema_migrations import _M044_CONTACTS
+
+    c = duckdb.connect()
+    for ddl in _M043_MESSAGES + _M044_CONTACTS:
+        c.execute(ddl)
+    c.execute("CREATE TABLE main.admin_console_users (email VARCHAR, nombre VARCHAR)")
+    c.execute("INSERT INTO main.admin_console_users VALUES ('juan@x.com', 'Juan')")
+    return c
+
+
+def test_invite_is_single_use_and_cannot_impersonate_a_local_user():
+    from duckclaw.write_commands import AcceptContactInviteCommand, CreateContactInviteCommand
+    from duckclaw.write_handlers.messages import _apply_accept_contact_invite, _apply_create_contact_invite
+
+    c = _contacts_conn()
+    h = "a" * 64
+    inv = CreateContactInviteCommand(actor_email="juan@x.com", secret_hash=h, expires_at="2099-01-01 00:00:00")
+    _apply_create_contact_invite(c, _payload(inv))
+    with pytest.raises(ValueError):   # a contact claiming a local user's email
+        _apply_accept_contact_invite(c, _payload(AcceptContactInviteCommand(invite_id=inv.invite_id, secret_hash=h, remote_email="juan@x.com",
+                                                                            token_hash="b" * 64)))
+    ok = AcceptContactInviteCommand(invite_id=inv.invite_id, secret_hash=h, remote_email="sam@y.com", token_hash="b" * 64)
+    _apply_accept_contact_invite(c, _payload(ok))
+    assert c.execute("SELECT owner_email, role, remote_email FROM main.admin_contacts").fetchone() == ("juan@x.com", "host", "sam@y.com")
+    with pytest.raises(ValueError):   # second use
+        _apply_accept_contact_invite(c, _payload(AcceptContactInviteCommand(invite_id=inv.invite_id, secret_hash=h, remote_email="eve@y.com",
+                                                                            token_hash="c" * 64)))
+
+
+def test_expired_invite_refused():
+    from duckclaw.write_commands import AcceptContactInviteCommand, CreateContactInviteCommand
+    from duckclaw.write_handlers.messages import _apply_accept_contact_invite, _apply_create_contact_invite
+
+    c = _contacts_conn()
+    inv = CreateContactInviteCommand(actor_email="juan@x.com", secret_hash="a" * 64, expires_at="2000-01-01 00:00:00")
+    _apply_create_contact_invite(c, _payload(inv))
+    with pytest.raises(ValueError):
+        _apply_accept_contact_invite(c, _payload(AcceptContactInviteCommand(invite_id=inv.invite_id, secret_hash="a" * 64,
+                                                                            remote_email="sam@y.com", token_hash="b" * 64)))

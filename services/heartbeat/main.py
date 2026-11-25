@@ -271,17 +271,23 @@ def _push_body(after: str, clean: Any, prose: bool = True) -> str:
     return clean(" · ".join(c.strip() for c in data[1].strip("|").split("|") if c.strip()))
 
 
+def _force_rx() -> "re.Pattern[str] | None":
+    pattern = (os.getenv("DUCKCLAW_PUSH_FORCE_PATTERN") or "").strip()
+    if not pattern:
+        return None
+    try:
+        return re.compile(pattern, re.IGNORECASE)
+    except re.error:
+        logger.warning("DUCKCLAW_PUSH_FORCE_PATTERN inválido: %s", pattern)
+        return None
+
+
 def _forced_push_line(text: str, clean: Any) -> str:
     """The first line of a "sin novedades" reply that matches DUCKCLAW_PUSH_FORCE_PATTERN (a regex,
     unset = off): events the deployment always wants on the watch, whatever the model concluded.
     Repeats are still dropped by _remember_verdict."""
-    pattern = (os.getenv("DUCKCLAW_PUSH_FORCE_PATTERN") or "").strip()
-    if not pattern:
-        return ""
-    try:
-        rx = re.compile(pattern, re.IGNORECASE)
-    except re.error:
-        logger.warning("DUCKCLAW_PUSH_FORCE_PATTERN inválido: %s", pattern)
+    rx = _force_rx()
+    if rx is None:
         return ""
     for line in text.replace("\\n", "\n").splitlines():
         if rx.search(line):
@@ -352,6 +358,10 @@ def _push_quiet_now(hour: int | None = None) -> bool:
 
 def _held_by_quiet_hours(parts: tuple[str, str], tag: str) -> bool:
     if parts[0] == "Decisión pendiente" or not _push_quiet_now():
+        return False
+    rx = _force_rx()
+    if rx is not None and rx.search(f"{parts[0]} {parts[1]}"):
+        # DUCKCLAW_PUSH_FORCE_PATTERN events also wake the watch at night (Ras Tanura held 25-nov).
         return False
     logger.info("web_push: omitida tag=%s (horas de silencio %s): %s", tag, os.getenv("DUCKCLAW_PUSH_QUIET_HOURS"), parts[0])
     return True

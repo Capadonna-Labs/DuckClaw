@@ -115,3 +115,11 @@ def test_force_pattern_overrides_no_news(monkeypatch):
     assert body == "2 tankers hit mines near the strait, fire on board"
     monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", "(")
     assert hb._loop_push_parts(_body(text)) is None
+
+
+def test_force_pattern_bypasses_quiet_hours(monkeypatch):
+    monkeypatch.setenv("DUCKCLAW_PUSH_QUIET_HOURS", "0-24")
+    monkeypatch.setattr(hb, "_push_quiet_now", lambda hour=None: True)
+    assert hb._held_by_quiet_hours(("Rally en bonos", "nada"), "t")
+    monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", r"drones?.*refiner")
+    assert not hb._held_by_quiet_hours(("4 drones sobre la refinería", "x"), "t")

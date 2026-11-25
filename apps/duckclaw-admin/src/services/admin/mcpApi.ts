@@ -137,6 +137,12 @@ export const mcpApi = {
       `/mcp/connectors/${encodeURIComponent(connectorId)}/grants/${encodeURIComponent(workerId)}`,
       { method: 'DELETE' }
     ),
+  /** Rename only: the id, OAuth token and grants stay. */
+  renameMcpConnector: (connectorId: string, displayName: string) =>
+    adminFetch<{ ok: boolean; task_id: string }>(`/mcp/connectors/${encodeURIComponent(connectorId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ display_name: displayName }),
+    }),
   deactivateMcpConnector: (connectorId: string) =>
     adminFetch<{ ok: boolean; task_id: string }>(`/mcp/connectors/${encodeURIComponent(connectorId)}`, {
       method: 'DELETE',

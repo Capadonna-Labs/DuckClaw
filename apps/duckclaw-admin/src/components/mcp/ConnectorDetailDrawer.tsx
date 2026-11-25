@@ -3,16 +3,19 @@
 import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import {
+  Check,
   CheckCircle2,
   ChevronDown,
   ExternalLink,
   KeyRound,
   Loader2,
   LogIn,
+  Pencil,
   TestTube2,
   Trash2,
   UserMinus,
   UserPlus,
+  X,
 } from 'lucide-react';
 import type { TemplateSummary } from '@/types/admin';
 import type {
@@ -39,6 +42,7 @@ type Props = {
   accounts?: McpConnectorSummary[];
   onSelectAccount?: (connectorId: string) => void;
   onAddAccount?: (name: string) => Promise<void>;
+  onRenameAccount?: (account: McpConnectorSummary, name: string) => Promise<void>;
   workers: TemplateSummary[];
   busyId: string | null;
   authToken: string;
@@ -115,6 +119,7 @@ export function ConnectorDetailDrawer({
   accounts = [],
   onSelectAccount,
   onAddAccount,
+  onRenameAccount,
   workers,
   busyId,
   authToken,
@@ -142,6 +147,7 @@ export function ConnectorDetailDrawer({
   const [revokeConfirmOpen, setRevokeConfirmOpen] = useState(false);
   const [dangerOpen, setDangerOpen] = useState(false);
   const [newAccountName, setNewAccountName] = useState('');
+  const [editing, setEditing] = useState<{ id: string; name: string } | null>(null);
 
   if (!connector) return null;
 
@@ -292,13 +298,54 @@ export function ConnectorDetailDrawer({
             <ul className="divide-y divide-gov-gray-100 rounded-xl border border-gov-gray-100 dark:divide-dark-border dark:border-dark-border">
               {accounts.map((account) => {
                 const current = account.connector_id === connector.connector_id;
+                const renaming = busyId === `rename:${account.connector_id}`;
+                if (editing?.id === account.connector_id) {
+                  const save = () => {
+                    const name = editing.name;
+                    void (onRenameAccount?.(account, name) ?? Promise.resolve()).then(() => setEditing(null));
+                  };
+                  return (
+                    <li key={account.connector_id} className="flex items-center gap-2 px-3 py-2">
+                      <input
+                        autoFocus
+                        type="text"
+                        value={editing.name}
+                        maxLength={60}
+                        aria-label="Nuevo nombre de la cuenta"
+                        onChange={(e) => setEditing({ id: account.connector_id, name: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && editing.name.trim()) save();
+                          if (e.key === 'Escape') setEditing(null);
+                        }}
+                        className="min-w-0 flex-1 rounded-lg border border-gov-gray-200 bg-white px-2 py-1 text-sm dark:border-dark-border dark:bg-dark-bg"
+                      />
+                      <button
+                        type="button"
+                        aria-label="Guardar nombre"
+                        disabled={!editing.name.trim() || renaming}
+                        onClick={save}
+                        className="rounded-lg p-1.5 text-green-700 disabled:opacity-50 dark:text-green-300"
+                      >
+                        {renaming ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="Cancelar"
+                        onClick={() => setEditing(null)}
+                        className="rounded-lg p-1.5 text-gov-gray-500 dark:text-dark-muted"
+                      >
+                        <X size={16} />
+                      </button>
+                    </li>
+                  );
+                }
                 return (
-                  <li key={account.connector_id}>
+                  <li key={account.connector_id} className="flex items-center">
                     <button
                       type="button"
                       disabled={current}
                       onClick={() => onSelectAccount?.(account.connector_id)}
-                      className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
+                      className={`flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left text-sm ${
                         current
                           ? 'font-bold text-gov-gray-900 dark:text-dark-text'
                           : 'text-gov-blue-700 hover:bg-gov-gray-50 dark:text-dark-cyan dark:hover:bg-dark-bg'
@@ -313,6 +360,16 @@ export function ConnectorDetailDrawer({
                         {account.has_auth ? 'auth OK' : 'falta auth'}
                       </Chip>
                     </button>
+                    {canWrite && onRenameAccount ? (
+                      <button
+                        type="button"
+                        aria-label={`Editar el nombre de ${connectorAccountLabel(account)}`}
+                        onClick={() => setEditing({ id: account.connector_id, name: connectorAccountLabel(account) })}
+                        className="mr-2 rounded-lg p-1.5 text-gov-gray-500 hover:bg-gov-gray-50 dark:text-dark-muted dark:hover:bg-dark-bg"
+                      >
+                        <Pencil size={14} />
+                      </button>
+                    ) : null}
                   </li>
                 );
               })}

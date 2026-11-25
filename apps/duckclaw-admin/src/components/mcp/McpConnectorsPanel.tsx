@@ -183,6 +183,30 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
     }
   };
 
+  /** New account name; the service prefix stays so tool descriptions still say which MCP it is. */
+  const renameAccount = async (account: McpConnectorSummary, name: string) => {
+    const clean = name.trim();
+    if (!clean || busyId) return;
+    const preset = account.preset_id ? presetById[account.preset_id] : undefined;
+    const display = preset ? `${presetAdminLabel(preset)} · ${clean}` : clean;
+    setBusyId(`rename:${account.connector_id}`);
+    try {
+      const res = await adminService.renameMcpConnector(account.connector_id, display);
+      if (res.task_id) {
+        const polled = await pollWriteTask(res.task_id);
+        if (polled.state === 'failed') throw new Error(polled.detail || 'No se guardó el nombre');
+      }
+      await load();
+    } catch (e) {
+      setConnectorNotices((prev) => ({
+        ...prev,
+        [account.connector_id]: e instanceof Error ? e.message : 'No se pudo renombrar',
+      }));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const connectOAuth = async (connectorId: string) => {
     if (busyId) return;
     const connector = connectors.find((c) => c.connector_id === connectorId);
@@ -685,6 +709,7 @@ export function McpConnectorsPanel({ canWrite }: McpConnectorsPanelProps) {
           )}
           onSelectAccount={(id) => setSelectedConnectorId(id)}
           onAddAccount={(name) => addAccount(selectedConnector, name)}
+          onRenameAccount={(account, name) => renameAccount(account, name)}
           workers={workers}
           busyId={busyId}
           authToken={authTokens[selectedConnector.connector_id] || ''}

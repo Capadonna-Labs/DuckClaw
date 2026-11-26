@@ -728,6 +728,26 @@ presets:
         ALPACA_SECRET_KEY: alpaca_live_secret
       confirm_tools: *alpaca_confirm
 
+  # trii (bróker de Colombia/Chile/Perú, MCP oficial remoto · OAuth en el navegador, https://trii.co/mcp).
+  # Los permisos (solo lectura u órdenes) se eligen en la pantalla de OAuth de trii; cambiarlos = desconectar y reconectar.
+  # Los nombres de las tools no están publicados: confirm_tools cubre cualquier tool de órdenes por patrón, así que enviar,
+  # cancelar (y simular) pasa por /approve aunque el usuario haya dado el permiso de órdenes en trii.
+  trii:
+    display_name: trii
+    transport: streamable_http
+    endpoint_url: https://mcp.trii.ws/mcp
+    auth_kind: bearer
+    read_only: false
+    egress_hosts: [mcp.trii.ws]
+    metadata:
+      oauth_pkce: true
+      oauth_provider: mcp_dcr
+      manifest_skill_id: trii
+      admin_label: trii (HTTP remoto · OAuth) · elige "solo lectura" al conectar
+      docs_url: https://trii.co/mcp
+      # ponytail: broad until the tool names are known (also catches reading the order history); narrow it after connecting.
+      confirm_tools: ["*order*", "*orden*", "*cancel*", "*trade*", "*buy*", "*sell*", "*compra*", "*vend*", "*venta*", "*place*", "*submit*", "*send*", "*enviar*"]
+
   # Interactive Brokers (MCP comunitario interactive-brokers-mcp, MIT · stdio · npx, versión fija).
   # Trae IB Gateway + Java, reutiliza un gateway local si ya hay uno y lo deja vivo entre llamadas.
   # Login: navegador en https://localhost:5000 (por defecto) o headless si el usuario cargó usuario y

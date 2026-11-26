@@ -68,6 +68,16 @@ def test_order_tools_need_confirmation_and_reads_do_not(alpaca: dict[str, Any]) 
         assert not guard.needs_confirmation(alpaca, name), name
 
 
+def test_trii_order_tools_need_confirmation() -> None:
+    clear_mcp_connector_presets_cache()
+    trii = {"preset_id": "trii", "metadata": {}}
+    assert preset_payload("trii")["endpoint_url"] == "https://mcp.trii.ws/mcp"
+    for name in ("send_order", "cancel_order", "crear_orden", "comprar_accion", "vender", "place_trade"):
+        assert guard.needs_confirmation(trii, name), name
+    for name in ("get_balance", "get_portfolio", "get_quote", "get_account_status"):
+        assert not guard.needs_confirmation(trii, name), name
+
+
 def test_confirmed_tool_is_stored_not_run_and_approve_is_scoped(
     alpaca: dict[str, Any], fake_redis: _FakeRedis, monkeypatch: Any
 ) -> None:

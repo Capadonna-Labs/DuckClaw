@@ -107,7 +107,7 @@ def test_quiet_hours_off_when_unset_or_malformed(monkeypatch):
 
 
 def test_force_pattern_overrides_no_news(monkeypatch):
-    text = "Veredicto: sin novedades\n\n| 24-nov | Reuters | 2 tankers hit mines near the strait, fire on board | XLE |\n"
+    text = "Veredicto: sin novedades\n\n| 24-nov 07:10 | Reuters | 2 tankers hit mines near the strait, fire on board | XLE |\n"
     assert hb._loop_push_parts(_body(text)) is None
     monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", r"tanker.*mine")
     title, body = hb._loop_push_parts(_body(text))
@@ -115,6 +115,8 @@ def test_force_pattern_overrides_no_news(monkeypatch):
     assert body == "2 tankers hit mines near the strait, fire on board"
     title, body = hb._loop_push_parts(_body("Veredicto: sin novedades\n- Tanker hit a mine off Fujairah\n"))
     assert body == "Tanker hit a mine off Fujairah"
+    # A row without a time of day is an undated (often stale) headline: not forced.
+    assert hb._loop_push_parts(_body(text.replace("24-nov 07:10", "24-nov"))) is None
     monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", "(")
     assert hb._loop_push_parts(_body(text)) is None
 

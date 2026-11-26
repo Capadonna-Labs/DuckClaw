@@ -292,6 +292,10 @@ def _forced_push_line(text: str, clean: Any) -> str:
     for line in text.replace("\\n", "\n").splitlines():
         if rx.search(line):
             cells = [c.strip() for c in line.strip().strip("|").split("|") if c.strip()]
+            # A table row with no time of day is an undated headline (26-nov: a morning "crude falls Thursday"
+            # forced at 14:51 while the same reply quoted crude +1.6 %): not forced.
+            if len(cells) > 1 and not re.search(r"\b\d{1,2}:\d{2}\b", line):
+                continue
             # Table row: date | source | fact | ... → the fact is the longest cell.
             return clean(max(cells, key=len) if len(cells) > 1 else line).lstrip("-*• ").strip()
     return ""

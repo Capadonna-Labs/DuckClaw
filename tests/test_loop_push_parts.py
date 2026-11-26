@@ -111,8 +111,10 @@ def test_force_pattern_overrides_no_news(monkeypatch):
     assert hb._loop_push_parts(_body(text)) is None
     monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", r"tanker.*mine")
     title, body = hb._loop_push_parts(_body(text))
-    assert title.startswith("Filtro: 2 tankers hit mines")
+    assert title.startswith("Alerta forzada")
     assert body == "2 tankers hit mines near the strait, fire on board"
+    title, body = hb._loop_push_parts(_body("Veredicto: sin novedades\n- Tanker hit a mine off Fujairah\n"))
+    assert body == "Tanker hit a mine off Fujairah"
     monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", "(")
     assert hb._loop_push_parts(_body(text)) is None
 

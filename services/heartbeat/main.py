@@ -293,7 +293,7 @@ def _forced_push_line(text: str, clean: Any) -> str:
         if rx.search(line):
             cells = [c.strip() for c in line.strip().strip("|").split("|") if c.strip()]
             # Table row: date | source | fact | ... → the fact is the longest cell.
-            return clean(max(cells, key=len) if len(cells) > 1 else line)
+            return clean(max(cells, key=len) if len(cells) > 1 else line).lstrip("-*• ").strip()
     return ""
 
 
@@ -315,7 +315,8 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
             forced = _forced_push_line(text, clean)
             if forced:
                 # The model listed it and still said "sin novedades" (Ormuz mines, 24-nov).
-                return f"Filtro: {forced}"[:80], forced if len(forced) <= 140 else forced[:139] + "…"
+                # Title = a short label, body = the fact (25-nov: the title repeated the body and kept the "- " bullet).
+                return "Alerta forzada (el barrido dijo sin novedades)", forced if len(forced) <= 140 else forced[:139] + "…"
             if not ask:
                 return None
             q = clean(ask.group(0))

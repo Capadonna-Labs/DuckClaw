@@ -6,6 +6,7 @@ server and registers a public client. No client secret is stored in env.
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any
 from urllib.parse import urlparse
@@ -114,7 +115,17 @@ async def _resolve_dcr_client_id(
     meta, _ = await discover_dcr_oauth_metadata(endpoint_url)
     registration_endpoint = str(meta.get("registration_endpoint") or "").strip()
     if not registration_endpoint:
-        raise ValueError("OAuth metadata missing registration_endpoint")
+        # Client ID Metadata Document (trii, 26-nov): no registration; the client_id IS a public https URL serving
+        # {"client_id": <that url>, "client_name", "redirect_uris": [callback], "grant_types", "response_types",
+        # "token_endpoint_auth_method": "none"}. The authorization server fetches it, so it must be reachable from the internet.
+        cimd = (os.environ.get("DUCKCLAW_MCP_OAUTH_CLIENT_METADATA_URL") or "").strip()
+        if cimd and meta.get("client_id_metadata_document_supported"):
+            return cimd
+        raise ValueError(
+            "OAuth metadata missing registration_endpoint"
+            + (" (el servidor acepta Client ID Metadata Document: define DUCKCLAW_MCP_OAUTH_CLIENT_METADATA_URL)"
+               if meta.get("client_id_metadata_document_supported") else "")
+        )
     # ponytail: client_id va en OAuth state; oauth/start usa DB read-only (sin upsert aquí).
     return await _register_dcr_client(
         redirect_uri=redirect_uri,
@@ -179,7 +190,11 @@ def _authorization_result(
     client_id: str,
     callback: str,
 ) -> dict[str, str]:
+    from duckclaw.mcp_connector_presets import preset_payload
+
     verifier, challenge = _pkce_pair()
+    # metadata.oauth_scopes: ask only for these (trii: read scopes, so the token itself cannot place orders).
+    scopes = ((preset_payload(preset_id) or {}).get("metadata") or {}).get("oauth_scopes") or []
     state = _encode_oauth_state(
         {
             "connector_id": connector_id,
@@ -202,6 +217,7 @@ def _authorization_result(
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "resource": resource,
+            **({"scope": " ".join(scopes)} if scopes else {}),
         }
     )
     return {

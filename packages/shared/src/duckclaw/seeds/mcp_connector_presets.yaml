@@ -743,8 +743,11 @@ presets:
       oauth_pkce: true
       oauth_provider: mcp_dcr
       manifest_skill_id: trii
-      admin_label: trii (HTTP remoto · OAuth) · elige "solo lectura" al conectar
+      admin_label: trii (HTTP remoto · OAuth, solo lectura)
       docs_url: https://trii.co/mcp
+      # Sin registro dinámico: client_id = DUCKCLAW_MCP_OAUTH_CLIENT_METADATA_URL (Client ID Metadata Document).
+      # Solo scopes de lectura: el token no puede crear ni cancelar órdenes (stocks.order:create / :cancel).
+      oauth_scopes: [profile:read, balance:read, portfolio:read, profits:read, movements:read, market:read]
       # ponytail: broad until the tool names are known (also catches reading the order history); narrow it after connecting.
       confirm_tools: ["*order*", "*orden*", "*cancel*", "*trade*", "*buy*", "*sell*", "*compra*", "*vend*", "*venta*", "*place*", "*submit*", "*send*", "*enviar*"]
 

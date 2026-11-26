@@ -145,3 +145,45 @@ def test_nexlev_bearer_refresh_does_not_use_google() -> None:
 
     assert mock_refresh.call_args.kwargs["endpoint_url"] == "https://prod.dashboard.nexlev.io/api/mcp"
     assert mock_refresh.call_args.kwargs["client_id"] == "scoped-client"
+
+
+class _CimdClient(_Client):
+    """trii 26-nov: no registration_endpoint, Client ID Metadata Document instead."""
+
+    async def get(self, url: str) -> _Response:
+        self.gets.append(url)
+        if "oauth-protected-resource" in url:
+            return _Response({"authorization_servers": ["https://auth.trii.test"], "resource": "https://mcp.trii.ws/mcp"})
+        return _Response({"authorization_endpoint": "https://auth.trii.test/oauth2/authorize", "client_id_metadata_document_supported": True})
+
+    async def post(self, url: str, json: dict | None = None) -> _Response:
+        raise AssertionError("no dynamic registration for a CIMD server")
+
+
+def _start_trii(monkeypatch, url: str) -> dict[str, str]:
+    monkeypatch.setenv("DUCKCLAW_MCP_OAUTH_CLIENT_METADATA_URL", url)
+    connector = {"preset_id": "trii", "endpoint_url": "https://mcp.trii.ws/mcp"}
+
+    async def _run() -> dict[str, str]:
+        with patch("duckclaw.mcp_dcr_oauth.httpx.AsyncClient", return_value=_CimdClient()), \
+                patch("duckclaw.admin_mcp_connectors.get_mcp_connector", return_value=connector), \
+                patch("duckclaw.admin_runtime_settings.resolve_runtime_setting", return_value={"value": ""}):
+            return await start_dcr_oauth(MagicMock(), connector_id="mcp_trii", tenant_id="default", actor_email="a@example.com")
+
+    return asyncio.run(_run())
+
+
+def test_cimd_server_uses_the_metadata_url_as_client_id_and_read_scopes(monkeypatch) -> None:
+    from urllib.parse import parse_qs, urlparse
+
+    out = _start_trii(monkeypatch, "https://example.test/oauth/client.json")
+    q = parse_qs(urlparse(out["authorization_url"]).query)
+    assert q["client_id"] == ["https://example.test/oauth/client.json"]
+    assert "portfolio:read" in q["scope"][0] and "order" not in q["scope"][0]
+
+
+def test_cimd_server_without_the_url_says_what_to_set(monkeypatch) -> None:
+    import pytest
+
+    with pytest.raises(ValueError, match="DUCKCLAW_MCP_OAUTH_CLIENT_METADATA_URL"):
+        _start_trii(monkeypatch, "")

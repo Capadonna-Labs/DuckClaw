@@ -296,9 +296,16 @@ def _forced_push_line(text: str, clean: Any) -> str:
             # forced at 14:51 while the same reply quoted crude +1.6 %): not forced.
             if len(cells) > 1 and not re.search(r"\b\d{1,2}:\d{2}\b", line):
                 continue
+            if re.search(r"\bya (se )?avis", line, re.I):   # the model itself says it went out already (27-nov)
+                continue
             # Table row: date | source | fact | ... → the fact is the longest cell.
-            return clean(max(cells, key=len) if len(cells) > 1 else line).lstrip("-*• ").strip()
+            # A URL does not count toward the length: the source cell with a long link won over the fact (CNA, 27-nov).
+            fact = max(cells, key=lambda c: len(re.sub(r"https?://\S+", "", c))) if len(cells) > 1 else line
+            return clean(fact).lstrip("-*• ").strip()
     return ""
+
+
+_FORCED_TITLE = "Alerta forzada (el barrido dijo sin novedades)"
 
 
 def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
@@ -320,7 +327,7 @@ def _loop_push_parts(raw_body: Any) -> tuple[str, str] | None:
             if forced:
                 # The model listed it and still said "sin novedades" (Ormuz mines, 24-nov).
                 # Title = a short label, body = the fact (25-nov: the title repeated the body and kept the "- " bullet).
-                return "Alerta forzada (el barrido dijo sin novedades)", forced if len(forced) <= 140 else forced[:139] + "…"
+                return _FORCED_TITLE, forced if len(forced) <= 140 else forced[:139] + "…"
             if not ask:
                 return None
             q = clean(ask.group(0))
@@ -449,13 +456,14 @@ def _verdict_key(verdict: str) -> tuple[str, frozenset[str]]:
     return re.sub(r"\s+", "", target.lower()), frozenset(words)
 
 
-def _repeats(verdict: str, recent: list[str], now: float) -> bool:
+def _repeats(verdict: str, recent: list[str], now: float, *, any_target: bool = False) -> bool:
     """True when a verdict pushed within 6 h points at the same thing and shares a quarter of its
     words: the same story with a moved figure ("sube a 76%" then "sube a 78,5%", 06-Nov) is not
     news. The prompt already asks for this; this is the backstop when the model ignores it.
+    any_target: a forced fact has no "→ target", so any recent verdict with the words counts.
     ponytail: word overlap, not semantics; a reworded repeat with other words still goes out."""
     target, words = _verdict_key(verdict)
-    if not target or not words:
+    if not words or not (target or any_target):
         return False
     for line in recent:
         stamp, _, old = line.partition(" · ")
@@ -464,13 +472,18 @@ def _repeats(verdict: str, recent: list[str], now: float) -> bool:
         except ValueError:
             continue
         old_target, old_words = _verdict_key(old)
-        if 0 <= age <= _REPEAT_WINDOW_S and old_target == target and len(words & old_words) / len(words | old_words) >= _REPEAT_JACCARD:
+        if 0 <= age <= _REPEAT_WINDOW_S and (any_target or old_target == target) and len(words & old_words) / len(words | old_words) >= _REPEAT_JACCARD:
             return True
     return False
 
 
-async def _remember_verdict(chat_id: Any, verdict: str) -> bool:
-    """Store a pushed verdict; False (nothing stored, don't push) when it repeats a recent one."""
+async def _remember_verdict(chat_id: Any, verdict: str, body: str = "") -> bool:
+    """Store a pushed verdict; False (nothing stored, don't push) when it repeats a recent one.
+    A forced push is remembered and compared by its fact (body): its title is always the same label,
+    so Jazan and the Ormuz mines went out again as "Alerta forzada" hours after their own alert (27-nov)."""
+    forced = verdict == _FORCED_TITLE and bool(body)
+    if forced:
+        verdict = body
     if not REDIS_URL:
         return True
     try:
@@ -478,7 +491,7 @@ async def _remember_verdict(chat_id: Any, verdict: str) -> bool:
         try:
             key = _VERDICTS_KEY.format(chat_id)
             recent = [x.decode() if isinstance(x, bytes) else str(x) for x in await r.lrange(key, 0, _VERDICTS_KEEP - 1) or []]
-            if _repeats(verdict, recent, time.time()):
+            if _repeats(verdict, recent, time.time(), any_target=forced):
                 logger.info("web_push: omitida chat=%s (repite un aviso reciente): %s", chat_id, verdict)
                 return False
             await r.lpush(key, f"{time.strftime('%d-%b %H:%M UTC', time.gmtime())} · {verdict}")
@@ -968,7 +981,7 @@ async def _deliver_goals_delta_turn(
     if _held_by_quiet_hours(parts, f"duckclaw-goals-{chat_id}"):
         return
     has_verdict = parts[0] != "DuckClaw · ciclo /aware"
-    if has_verdict and not await _remember_verdict(chat_id, parts[0]):
+    if has_verdict and not await _remember_verdict(chat_id, *parts):
         return
     await _send_web_push_notification(
         title=parts[0] if has_verdict else "DuckClaw",
@@ -1009,7 +1022,7 @@ async def _deliver_wall_cron_turn(
         logger.info("web_push: omitida tag=%s (veredicto sin novedades)", tag)
         return
     has_verdict = parts[0] != "DuckClaw · ciclo /aware"
-    if has_verdict and not await _remember_verdict(chat_id, parts[0]):
+    if has_verdict and not await _remember_verdict(chat_id, *parts):
         return
     await _send_web_push_notification(
         title=parts[0] if has_verdict else "DuckClaw",
@@ -1335,7 +1348,7 @@ async def _run_loop_proactive_tick_one_db(
                     logger.info("web_push: omitida tag=duckclaw-loop-%s (veredicto sin novedades)", chat_id)
                 elif _held_by_quiet_hours(parts, f"duckclaw-loop-{chat_id}"):
                     pass
-                elif await _remember_verdict(chat_id, parts[0]):
+                elif await _remember_verdict(chat_id, *parts):
                     await _send_web_push_notification(
                         title=parts[0],
                         body=parts[1],

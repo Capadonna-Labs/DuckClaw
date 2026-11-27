@@ -87,6 +87,17 @@ def test_a_moved_figure_on_the_same_story_is_not_pushed_again() -> None:
     assert not hb._repeats("Checkout error sube a 3,5% tras el deploy → api", recent, now)        # other target
     assert not hb._repeats("Proveedor de pagos anuncia mantenimiento → api/web", recent, now)       # other story
     assert not hb._repeats("Checkout error sube a 3,5% (panel) → api/web", recent, now + 7 * 3600)  # older than 6 h
+    # A forced fact has no target: it repeats any recent verdict on the same story (27-nov, Jazan forced 1 h after its alert).
+    fact = "Checkout: error 3% en la región tras el deploy"
+    assert not hb._repeats(fact, recent, now)
+    assert hb._repeats(fact, recent, now, any_target=True)
+
+
+def test_forced_line_the_model_marks_as_already_sent_is_dropped(monkeypatch):
+    monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", r"tanker.*mine")
+    row = "| 26-nov 21:10 | CNA (https://www.channelnewsasia.com/business/brent-settles-higher-mine-strikes-tanker-attack-6012345) | Tanker hit a mine, Brent settles up | XLE |"
+    assert hb._loop_push_parts(_body("Veredicto: sin novedades\n\n" + row))[1] == "Tanker hit a mine, Brent settles up"
+    assert hb._loop_push_parts(_body("Veredicto: sin novedades\n- Tanker hit a mine off Khasab. Ya avisado.\n")) is None
 
 
 def test_quiet_hours_hold_interval_pushes_but_not_decisions(monkeypatch):

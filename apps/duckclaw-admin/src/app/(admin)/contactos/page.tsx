@@ -21,7 +21,7 @@ export default function ContactsPage() {
 
   const load = useCallback(() => {
     contactsApi
-      .list()
+      .listContacts()
       .then((r) => { setContacts(r.contacts); setCanInvite(r.can_invite); })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
@@ -41,12 +41,12 @@ export default function ContactsPage() {
   };
 
   const invite = () => run(async () => {
-    const r = await contactsApi.invite();
+    const r = await contactsApi.inviteContact();
     setCode(r.code);
     setExpires(r.expires_at);
   });
   const accept = () => run(async () => {
-    const r = await contactsApi.accept(paste.trim());
+    const r = await contactsApi.acceptContact(paste.trim());
     setPaste('');
     setNote(`Agregado: ${r.name}`);
     window.setTimeout(load, 1500); // the DB-Writer stores it in a moment
@@ -54,12 +54,12 @@ export default function ContactsPage() {
   const remove = (c: Contact) => {
     if (!window.confirm(`¿Quitar a ${c.name}? Ya no podrán escribirse hasta que vuelvan a invitarse.`)) return;
     void run(async () => {
-      await contactsApi.remove(c.id);
+      await contactsApi.removeContact(c.id);
       window.setTimeout(load, 1500);
     });
   };
   const message = (c: Contact) => run(async () => {
-    const r = await messagesApi.createChannel({ kind: 'dm', members: [c.email] });
+    const r = await messagesApi.createMessageChannel({ kind: 'dm', members: [c.email] });
     router.push(`/playground?channel=${encodeURIComponent(r.channel_id)}`);
   });
 

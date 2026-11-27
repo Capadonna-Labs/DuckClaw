@@ -22,13 +22,14 @@ export interface ChannelMessage {
 
 const json = (method: string, body: unknown): RequestInit => ({ method, body: JSON.stringify(body) });
 
+// Names are unique across the adminService facade, which spreads every *Api module.
 export const messagesApi = {
-  people: () => adminFetch<{ people: { email: string; name: string; remote?: boolean }[] }>('/messages/people').then((r) => r.people),
-  channels: () => adminFetch<{ channels: MessageChannel[]; me: string }>('/messages/channels'),
-  createChannel: (body: { kind: 'dm' | 'group'; name?: string; members: string[] }) =>
+  messagePeople: () => adminFetch<{ people: { email: string; name: string; remote?: boolean }[] }>('/messages/people').then((r) => r.people),
+  listMessageChannels: () => adminFetch<{ channels: MessageChannel[]; me: string }>('/messages/channels'),
+  createMessageChannel: (body: { kind: 'dm' | 'group'; name?: string; members: string[] }) =>
     adminFetch<{ ok: boolean; channel_id: string; existing?: boolean }>('/messages/channels', json('POST', body)),
-  read: (id: string) =>
+  readMessageChannel: (id: string) =>
     adminFetch<MessageChannel & { messages: ChannelMessage[] }>(`/messages/channels/${encodeURIComponent(id)}`),
-  post: (id: string, body: string) =>
+  postChannelMessage: (id: string, body: string) =>
     adminFetch<{ ok: boolean; message_id: string }>(`/messages/channels/${encodeURIComponent(id)}`, json('POST', { body })),
 };

@@ -174,7 +174,7 @@ def test_playground_selects_conversation_from_sidebar_history() -> None:
     assert "ConversationInbox" not in page
     assert "PlaygroundHistoryView" in page
     assert "export function uniqueConversationsBySession" in helpers
-    assert "uniqueConversations.map((conversation)" in history
+    assert "uniqueConversations.map(" in history  # merged with the message channels in one list (contacts, 26-nov)
     assert "const [showHistory, setShowHistory] = useState" in page
     assert "adminService.listConversations" in page or "adminService.listConversations" in history
     assert "conversation.session_id" in history

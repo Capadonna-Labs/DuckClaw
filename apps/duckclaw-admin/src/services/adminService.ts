@@ -1,9 +1,11 @@
 import { accessApi } from './admin/accessApi';
 import { chatApi } from './admin/chatApi';
+import { contactsApi } from './admin/contactsApi';
 import { cronsApi } from './admin/cronsApi';
 import { duckdbApi } from './admin/duckdbApi';
 import { knowledgeApi } from './admin/knowledgeApi';
 import { mcpApi } from './admin/mcpApi';
+import { messagesApi } from './admin/messagesApi';
 import { opsApi } from './admin/opsApi';
 import { platformApi } from './admin/platformApi';
 import { policiesApi } from './admin/policiesApi';
@@ -121,4 +123,6 @@ export const adminService = {
   ...sandboxApi,
   ...knowledgeApi,
   ...reportsApi,
+  ...contactsApi,
+  ...messagesApi,
 };

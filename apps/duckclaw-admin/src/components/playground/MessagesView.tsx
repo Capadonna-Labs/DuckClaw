@@ -21,7 +21,7 @@ export function ChannelChat({ channelId, fallbackName = '', onBack }: { channelI
     let cancelled = false;
     const load = () =>
       messagesApi
-        .read(channelId)
+        .readMessageChannel(channelId)
         .then((c) => {
           if (cancelled) return;
           setOpen(c);
@@ -45,7 +45,7 @@ export function ChannelChat({ channelId, fallbackName = '', onBack }: { channelI
     setDraft('');
     setPending((p) => [...p, { id: `p${Date.now()}`, author_email: '', author: 'Tú', agent: false, body, created_at: '', mine: true }]);
     try {
-      await messagesApi.post(channelId, body);
+      await messagesApi.postChannelMessage(channelId, body);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -103,7 +103,7 @@ export function NewChannel({ onCancel, onCreated }: { onCancel: () => void; onCr
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    messagesApi.people().then(setPeople).catch((e) => setError(e instanceof Error ? e.message : String(e)));
+    messagesApi.messagePeople().then(setPeople).catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
   const isGroup = picked.length > 1;
@@ -111,7 +111,7 @@ export function NewChannel({ onCancel, onCreated }: { onCancel: () => void; onCr
     setBusy(true);
     setError(null);
     try {
-      const r = await messagesApi.createChannel({ kind: isGroup ? 'group' : 'dm', name: isGroup ? name.trim() : '', members: picked });
+      const r = await messagesApi.createMessageChannel({ kind: isGroup ? 'group' : 'dm', name: isGroup ? name.trim() : '', members: picked });
       onCreated(r.channel_id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

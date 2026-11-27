@@ -85,7 +85,7 @@ export function PlaygroundHistoryView({
       });
 
     const loadChannels = () =>
-      messagesApi.channels().then((r) => { if (!cancelled) setChannels(r.channels); }).catch(() => undefined);
+      messagesApi.listMessageChannels().then((r) => { if (!cancelled) setChannels(r.channels); }).catch(() => undefined);
     void loadChannels();
 
     // Silent refresh so the traffic light, the unread badges and the messages follow.
@@ -164,7 +164,7 @@ export function PlaygroundHistoryView({
           <ChannelChat
             channelId={openChannel}
             fallbackName={channels.find((c) => c.id === openChannel)?.name}
-            onBack={() => { setOpenChannel(''); void messagesApi.channels().then((r) => setChannels(r.channels)).catch(() => undefined); }}
+            onBack={() => { setOpenChannel(''); void messagesApi.listMessageChannels().then((r) => setChannels(r.channels)).catch(() => undefined); }}
           />
         </div>
       ) : (

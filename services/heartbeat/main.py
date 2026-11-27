@@ -289,7 +289,12 @@ def _forced_push_line(text: str, clean: Any) -> str:
     rx = _force_rx()
     if rx is None:
         return ""
-    for line in text.replace("\\n", "\n").splitlines():
+    text = text.replace("\\n", "\n")
+    words = lambda s: set(re.findall(r"[^\W\d_]{4,}", s.lower()))
+    # Sentences where the model says something already went out ("la parada de Jazan ya se avisaron el 26-nov"):
+    # a forced row on the same story is the model's own repeat, not a missed event (27-nov, Jazan forced again).
+    sent = [words(s) for s in re.split(r"(?<=[.;\n])", text) if re.search(r"\bya (se )?avis", s, re.I)]
+    for line in text.splitlines():
         if rx.search(line):
             cells = [c.strip() for c in line.strip().strip("|").split("|") if c.strip()]
             # A table row with no time of day is an undated headline (26-nov: a morning "crude falls Thursday"
@@ -301,6 +306,8 @@ def _forced_push_line(text: str, clean: Any) -> str:
             # Table row: date | source | fact | ... → the fact is the longest cell.
             # A URL does not count toward the length: the source cell with a long link won over the fact (CNA, 27-nov).
             fact = max(cells, key=lambda c: len(re.sub(r"https?://\S+", "", c))) if len(cells) > 1 else line
+            if any(len(words(fact) & s) >= 2 for s in sent):
+                continue
             return clean(fact).lstrip("-*• ").strip()
     return ""
 

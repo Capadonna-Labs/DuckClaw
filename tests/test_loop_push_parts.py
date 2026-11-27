@@ -98,6 +98,12 @@ def test_forced_line_the_model_marks_as_already_sent_is_dropped(monkeypatch):
     row = "| 26-nov 21:10 | CNA (https://www.channelnewsasia.com/business/brent-settles-higher-mine-strikes-tanker-attack-6012345) | Tanker hit a mine, Brent settles up | XLE |"
     assert hb._loop_push_parts(_body("Veredicto: sin novedades\n\n" + row))[1] == "Tanker hit a mine, Brent settles up"
     assert hb._loop_push_parts(_body("Veredicto: sin novedades\n- Tanker hit a mine off Khasab. Ya avisado.\n")) is None
+    # 27-nov: the model said so in its closing note, not on the row.
+    note = "\n\nMotivo: el ataque a Ras Tanura y la parada de Jazan ya se avisaron el 26-nov; sin dato nuevo."
+    row = "| 27-nov 07:49 | ET | Crude −0,25%; ataque a refinería de Jazan (parada parcial) | XLE |"
+    monkeypatch.setenv("DUCKCLAW_PUSH_FORCE_PATTERN", r"ataque.*refiner")
+    assert hb._loop_push_parts(_body("Veredicto: sin novedades\n\n" + row + note)) is None
+    assert hb._loop_push_parts(_body("Veredicto: sin novedades\n\n" + row))[0].startswith("Alerta forzada")
 
 
 def test_quiet_hours_hold_interval_pushes_but_not_decisions(monkeypatch):
